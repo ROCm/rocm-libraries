@@ -224,7 +224,7 @@ def test_fp32_atom_rejects_tf32_carrier():
         b.mma("mfma_f32_16x16x4_f32", a, a, c)
 
 
-def test_parsed_mma_rejects_wrong_result_and_operands():
+def test_parsed_mma_rejects_wrong_operands():
     native = pytest.importorskip("rocke_engine")
     for bad in ("vec<i32x2>", "vec<f32x2>", "vec<tf32x4>"):
         ir = serialize(build_tf32_mma_probe(Tf32MmaProbeSpec())).replace(
@@ -238,10 +238,90 @@ def test_parsed_mma_rejects_wrong_result_and_operands():
 
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
-def test_recipe_recording_preserves_ir(m, mode):
+def test_recipe_replay_preserves_ir(m, mode, monkeypatch):
     from rocke.portable_ir.src.recording_builder import record_kernel
+    from rocke.portable_ir.src import online, recipe_bundle
 
     spec = Tf32MmaProbeSpec(m, mode)
     recorded, recipe = record_kernel(lambda: build_tf32_mma_probe(spec))
     assert serialize(recorded) == serialize(build_tf32_mma_probe(spec))
-    assert recipe
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+        replayed, _ = online.recipe_cbor_to_llvm(
+            recipe_bundle.cbor_encode(recipe), arch="gfx942"
+        )
+        assert replayed == _lower_kernel_to_llvm_python(
+            recorded, arch="gfx942", llvm_flavor=flavor
+        )
+
+
+@pytest.mark.parametrize("n", [1, 2, 4, 8, 16])
+def test_global_vector_store(n):
+    b = IRBuilder("tf32_vector_store")
+    p = b.param("p", PtrType(TF32, "global"))
+    i = b.const_i32(0)
+    v = b.global_load(p, i, TF32, align=4)
+    values = b.vec_pack([v] * n, TF32)
+    if n == 16:
+        with pytest.raises(ValueError, match="n=16 not supported for tf32"):
+            b.global_store_vN(p, i, values, n)
+        return
+    b.global_store_vN(p, i, values, n)
+    b.ret()
+    ir = serialize(b.kernel)
+    assert serialize(parse(ir)) == ir
+    native = pytest.importorskip("rocke_engine")
+    for flavor in ("llvm20", "llvm22", "llvm23"):
+        ll = _lower_kernel_to_llvm_python(b.kernel, llvm_flavor=flavor)
+        assert f"store <{n} x i32>" in ll
+        assert f"align {n * 4}" in ll
+        assert native.lower_serialized_ir(ir, flavor=flavor) == ll
+
+
+@pytest.mark.parametrize("m", [16, 32])
+@pytest.mark.parametrize("role", ["accumulator", "result"])
+@pytest.mark.parametrize("bad", ["integer", "tf32", "width"])
+def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad):
+    native = pytest.importorskip("rocke_engine")
+    kernel = build_tf32_mma_probe(Tf32MmaProbeSpec(m))
+    mma = next(op for op in kernel.body.ops if op.name == "tile.mma")
+    value = mma.operands[2] if role == "accumulator" else mma.result
+    count = 4 if m == 16 else 16
+    value.type = VectorType(
+        {"integer": I32, "tf32": TF32, "width": F32}[bad],
+        count + 1 if bad == "width" else count,
+    )
+    ir = serialize(kernel)
+    message = "XF32 MMA requires" if role == "accumulator" else "XF32 MMA result"
+    with pytest.raises(ValueError, match=message):
+        _lower_kernel_to_llvm_python(parse(ir), arch="gfx942")
+    with pytest.raises(Exception, match=message):
+        native.lower_serialized_ir(ir, arch="gfx942")
+
+
+@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+def test_numeric_harness_auto_flavor(flavor, monkeypatch, tmp_path):
+    pytest.importorskip("rocke_engine")
+    from rocke.examples.gfx942 import tf32_numerics
+    from rocke.runtime import comgr, hip_module
+
+    monkeypatch.delenv("ROCKE_LLVM_FLAVOR", raising=False)
+    monkeypatch.setattr(tf32_numerics, "_resolve_llvm_flavor", lambda: flavor)
+    monkeypatch.setattr(hip_module, "get_device_arch", lambda: "gfx942")
+    expected = _lower_kernel_to_llvm_python(
+        build_tf32_mma_probe(Tf32MmaProbeSpec()),
+        arch="gfx942",
+        llvm_flavor=flavor,
+    )
+
+    class ReachedCompiler(Exception):
+        pass
+
+    def check_compiler_input(ll, *, isa):
+        assert ll == expected
+        raise ReachedCompiler
+
+    # Exercise the actual builders/lowerers, then stop before GPU compilation.
+    monkeypatch.setattr(comgr, "build_hsaco_from_llvm_ir", check_compiler_input)
+    with pytest.raises(ReachedCompiler):
+        tf32_numerics.run(tmp_path, backend="cpp", shapes=(16,))

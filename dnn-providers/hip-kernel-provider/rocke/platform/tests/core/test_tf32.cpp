@@ -56,6 +56,51 @@ int main()
             rocke_ir_builder_free(&b);
         }
     }
+    // Mirror test_global_vector_store: native authoring must accept the same widths.
+    for(int n : {1, 2, 4, 8, 16})
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "tf32_vector_store") == ROCKE_OK);
+        auto* p = rocke_b_param(&b, "p", rocke_ptr_type(&b, rocke_tf32(), "global"), nullptr);
+        auto* index = rocke_b_const_i32(&b, 0);
+        auto* value = rocke_b_bitcast(&b, index, rocke_tf32());
+        rocke_value_t* components[16];
+        for(int i = 0; i < n; ++i)
+            components[i] = value;
+        auto* values = rocke_b_vec_pack(&b, components, n, rocke_tf32());
+        if(n == 16)
+        {
+            try
+            {
+                rocke_b_global_store_vN(&b, p, index, values, n, 0);
+                CHECK(false);
+            }
+            catch(const ckc::Error& error)
+            {
+                CHECK(error.code() == ROCKE_ERR_VALUE);
+                CHECK(std::strstr(error.what(), "n=16 not supported for tf32"));
+            }
+        }
+        else
+        {
+            rocke_b_global_store_vN(&b, p, index, values, n, 0);
+            rocke_b_ret(&b);
+            for(int f = 0; f < rocke_llvm_flavor_count(); ++f)
+            {
+                char* ll = nullptr;
+                auto flavor = rocke_llvm_flavor_from_name(rocke_llvm_flavor_at(f));
+                CHECK(rocke_lower_kernel_to_llvm(rocke_ir_builder_kernel(&b), flavor, "gfx950", &ll)
+                      == ROCKE_OK);
+                char store[64], align[32];
+                std::snprintf(store, sizeof(store), "store <%d x i32>", n);
+                std::snprintf(align, sizeof(align), "align %d", n * 4);
+                CHECK(std::strstr(ll, store));
+                CHECK(std::strstr(ll, align));
+                std::free(ll);
+            }
+        }
+        rocke_ir_builder_free(&b);
+    }
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "invalid") == ROCKE_OK);
     auto* integer = rocke_b_const_i32(&b, 1);

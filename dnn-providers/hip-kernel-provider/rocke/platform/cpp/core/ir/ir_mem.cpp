@@ -339,7 +339,8 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32"))
+    else if(rocke_i_type_is(et, "f32") || rocke_i_type_is(et, "i32")
+            || rocke_i_type_is(et, "tf32"))
     {
         elem_bytes = 4;
         if(n == 16)
@@ -359,7 +360,7 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
         (void)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, got %s",
+            "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, got %s",
             en);
         return;
     }

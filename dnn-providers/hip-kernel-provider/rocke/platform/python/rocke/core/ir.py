@@ -4230,7 +4230,7 @@ class IRBuilder:
         """Vectorised global store of N consecutive elements.
 
         Supports the full element-type catalog the LLVM lowering already
-        emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32``
+        emits: ``f16`` / ``bf16`` / ``i16`` (2-byte), ``f32`` / ``i32`` / ``tf32``
         (4-byte), ``i8`` / ``fp8e4m3`` / ``bf8e5m2`` (1-byte). Lowers to
         a single ``store <N x elem>`` and AMDGPU coalesces into one
         ``global_store_dwordxN`` transaction.
@@ -4254,7 +4254,7 @@ class IRBuilder:
             elem_bytes = 1
         else:
             raise ValueError(
-                "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, "
+                "global_store_vN supports f16/bf16/i16/f32/i32/tf32/i8/fp8e4m3/bf8e5m2, "
                 f"got {elem_name}"
             )
         self._op(

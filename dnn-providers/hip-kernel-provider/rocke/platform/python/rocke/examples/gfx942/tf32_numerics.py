@@ -5,7 +5,6 @@
 import argparse
 import ctypes
 import json
-import os
 from pathlib import Path
 import struct
 
@@ -13,7 +12,7 @@ import numpy as np
 
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, _resolve_llvm_flavor
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
     Tf32MmaProbeSpec,
@@ -143,10 +142,11 @@ def run(output_dir, backend="both", shapes=(16, 32)):
     native = None
     if "cpp" in engines:
         import rocke_engine as native  # Required: no fallback.
+    flavor = _resolve_llvm_flavor()
     summary = {
         "arch": arch,
         "numpy": np.__version__,
-        "flavor": os.getenv("ROCKE_LLVM_FLAVOR"),
+        "flavor": flavor,
         "results": [],
     }
     for m in shapes:
@@ -166,15 +166,19 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                     ll = native.lower_serialized_ir(
                         ir_native,
                         arch="gfx942",
-                        flavor=os.getenv("ROCKE_LLVM_FLAVOR", "llvm23"),
+                        flavor=flavor,
                     )
-                    assert ll == _lower_kernel_to_llvm_python(kernel, arch="gfx942"), (
+                    assert ll == _lower_kernel_to_llvm_python(
+                        kernel, arch="gfx942", llvm_flavor=flavor
+                    ), (
                         m,
                         mode,
                         "lowerer parity",
                     )
                 else:
-                    ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942")
+                    ll = _lower_kernel_to_llvm_python(
+                        kernel, arch="gfx942", llvm_flavor=flavor
+                    )
                 stem = output_dir / f"{engine}_{m}_{variant}"
                 stem.with_suffix(".ll").write_text(ll)
                 stem.with_suffix(".hip").write_text(
