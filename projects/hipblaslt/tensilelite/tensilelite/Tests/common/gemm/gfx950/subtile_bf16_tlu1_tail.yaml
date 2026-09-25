@@ -74,10 +74,12 @@ BenchmarkProblems:
   ########################################
   # Odd K, tile-aligned M/N.
   #
-  # Isolates the parity gate: M and N (128) are multiples of every MacroTile in
-  # the fork up to 128, so numLine == MT-1 there and the only thing varying is
-  # K_rem's parity.  MT160x160 and MT320x320 are the exceptions -- one workgroup
-  # covers the whole problem and numLine clamps to 127 via min(numToEnd, MT).
+  # Isolates the parity gate: at M = N = 128 every MacroTile in the fork up to
+  # 128 divides the problem, so numLine == MT-1 there and the only thing varying
+  # is K_rem's parity.  MT160x160 and MT320x320 are the exceptions at that size
+  # -- one workgroup covers the whole problem and numLine clamps to 127 via
+  # min(numToEnd, MT).  The two 320x320 sizes at the end exist to give MT320x320
+  # a tile-exact problem where numLine is its own 319.
   ########################################
   -
     - # ProblemType
@@ -154,6 +156,18 @@ BenchmarkProblems:
           # --- odd K that is also not a multiple of GlobalReadVectorWidth -----
           - Exact: [128, 128, 1, 577]   # 576 + 1; ulsgro1's 576 made odd
           - Exact: [128, 128, 1, 641]   # 640 + 1; ulsgro1's 640 made odd
+          # --- odd K on a FULL MT320x320 tile ---------------------------------
+          # At 128x128 the MT320x320 row covers the whole problem in one
+          # workgroup and ~84% of the tile is masked off, so numLine clamps to
+          # 127 and the boundary element never lands on a line the 10x10 tile
+          # layout actually owns.  These two make M and N tile-exact for it:
+          # numLine = 319, every wave holds a full 10x10 of live tiles, and the
+          # v_readlane search has to find the boundary lane in the multi-wave
+          # strip rather than in the masked region.  The smaller MacroTiles in
+          # the fork tile 320 unevenly (320/128 = 2.5), so they also pick up an
+          # M/N-remainder workgroup here for free.
+          - Exact: [320, 320, 1, 127]   # rem 63 (DU64) / 127 (DU128)
+          - Exact: [320, 320, 1, 129]   # rem  1 (DU64) /   1 (DU128)
 
   ########################################
   # Odd K crossed with M/N edges.
