@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 if(HIPBLASLT_ENABLE_YAML)
-    add_subdirectory(llvm)
+    add_subdirectory(yaml-cpp)
 else()
     add_subdirectory(msgpack)
 endif()

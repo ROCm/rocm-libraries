@@ -29,8 +29,9 @@
 #include <iostream>
 #include <numeric>
 #include <string>
+#include <unordered_set>
 
-#include <llvm/ObjectYAML/YAML.h>
+#include <yaml-cpp/yaml.h>
 
 #include "benchmark_timing.hpp"
 #include "hipblaslt_datatype2string.hpp"
@@ -280,121 +281,171 @@ public:
     std::vector<Layer>           layer;
 };
 
-LLVM_YAML_IS_FLOW_SEQUENCE_VECTOR(Layer)
-
-namespace llvm
+namespace
 {
-    namespace yaml
+    void rejectUnknownKeys(YAML::Node const&                       node,
+                           std::unordered_set<std::string> const& allowed)
     {
-        template <>
-        struct MappingTraits<LayerConfigIOGeneralSettings>
+        for(auto const& entry : node)
         {
-            static void mapping(IO& io, LayerConfigIOGeneralSettings& lc)
+            auto key = entry.first.as<std::string>();
+            if(allowed.count(key) == 0)
+                throw std::runtime_error("unknown key '" + key + "'");
+        }
+    }
+
+    template <typename T>
+    void readRequired(YAML::Node const& node, const char* key, T& value)
+    {
+        auto child = node[key];
+        if(!child.IsDefined())
+            throw std::runtime_error(std::string("missing required key '") + key + "'");
+        value = child.as<T>();
+    }
+
+    template <typename T>
+    void readOptional(YAML::Node const& node, const char* key, T& value)
+    {
+        auto child = node[key];
+        if(child.IsDefined())
+            value = child.as<T>();
+    }
+
+    LayerConfigIO readLayerConfig(std::string const& filename)
+    {
+        auto          root = YAML::LoadFile(filename);
+        LayerConfigIO result;
+        rejectUnknownKeys(root, {"GeneralSettings", "Layers"});
+        auto          general = root["GeneralSettings"];
+        if(!general.IsDefined())
+            throw std::runtime_error("missing required key 'GeneralSettings'");
+
+        readOptional(general, "PrintKernelInfo", result.gs.print_kernel_info);
+        readOptional(general, "Rotating", result.gs.rotating);
+        readOptional(general, "ColdIter", result.gs.cold_iters);
+        readOptional(general, "Iter", result.gs.iters);
+        readOptional(general, "MaxWorkspaceSize", result.gs.max_workspace_size);
+        readOptional(general, "UseGraphMode", result.gs.graph_mode);
+        readOptional(general, "UseGpuTimer", result.gs.use_gpu_timer);
+        readOptional(general, "Adaptive", result.gs.adaptive);
+        readOptional(general, "AdaptiveWarmupTime", result.gs.warmup_time);
+        readOptional(general, "AdaptiveSampleTime", result.gs.sample_time);
+        readOptional(general, "AdaptiveMeasureTime", result.gs.measure_time);
+        readOptional(general, "AdaptiveMaxMeasureTime", result.gs.max_measure_time);
+        readOptional(general, "AdaptiveNoiseThreshold", result.gs.noise_threshold);
+        readOptional(general, "AdaptiveMinIters", result.gs.min_iters);
+        readOptional(general, "AdaptiveMaxIters", result.gs.max_iters);
+        readOptional(general, "AdaptiveStabilityThreshold", result.gs.stability_threshold);
+        readOptional(general, "AdaptiveStabilityWindow", result.gs.stability_window);
+        readOptional(general, "AdaptiveStabilityInterval", result.gs.stability_interval);
+        rejectUnknownKeys(general,
+                          {"PrintKernelInfo",
+                           "Rotating",
+                           "ColdIter",
+                           "Iter",
+                           "MaxWorkspaceSize",
+                           "UseGraphMode",
+                           "UseGpuTimer",
+                           "Adaptive",
+                           "AdaptiveWarmupTime",
+                           "AdaptiveSampleTime",
+                           "AdaptiveMeasureTime",
+                           "AdaptiveMaxMeasureTime",
+                           "AdaptiveNoiseThreshold",
+                           "AdaptiveMinIters",
+                           "AdaptiveMaxIters",
+                           "AdaptiveStabilityThreshold",
+                           "AdaptiveStabilityWindow",
+                           "AdaptiveStabilityInterval"});
+
+        auto layers = root["Layers"];
+        if(!layers.IsSequence())
+            throw std::runtime_error("missing or invalid required key 'Layers'");
+
+        for(auto const& node : layers)
+        {
+            Layer       layer;
+            std::string type;
+            readRequired(node, "LayerType", type);
+            layer.type = string2LayerType(type);
+            if(layer.type == Layer::TYPE::UNKNOWN)
+                throw std::runtime_error("unknown layer type (expected GEMM or FLUSH)");
+
+            if(layer.type == Layer::TYPE::FLUSH)
             {
-                io.mapOptional("PrintKernelInfo", lc.print_kernel_info);
-                io.mapOptional("Rotating", lc.rotating);
-                io.mapOptional("ColdIter", lc.cold_iters);
-                io.mapOptional("Iter", lc.iters);
-                io.mapOptional("MaxWorkspaceSize", lc.max_workspace_size);
-                io.mapOptional("UseGraphMode", lc.graph_mode);
-                io.mapOptional("UseGpuTimer", lc.use_gpu_timer);
-                io.mapOptional("Adaptive", lc.adaptive);
-                io.mapOptional("AdaptiveWarmupTime", lc.warmup_time);
-                io.mapOptional("AdaptiveSampleTime", lc.sample_time);
-                io.mapOptional("AdaptiveMeasureTime", lc.measure_time);
-                io.mapOptional("AdaptiveMaxMeasureTime", lc.max_measure_time);
-                io.mapOptional("AdaptiveNoiseThreshold", lc.noise_threshold);
-                io.mapOptional("AdaptiveMinIters", lc.min_iters);
-                io.mapOptional("AdaptiveMaxIters", lc.max_iters);
-                io.mapOptional("AdaptiveStabilityThreshold", lc.stability_threshold);
-                io.mapOptional("AdaptiveStabilityWindow", lc.stability_window);
-                io.mapOptional("AdaptiveStabilityInterval", lc.stability_interval);
+                rejectUnknownKeys(node, {"LayerType"});
             }
-        };
-        template <>
-        struct MappingTraits<Layer>
-        {
-            static void mapping(IO& io, Layer& l)
+            else
             {
-                std::string type;
-                io.mapRequired("LayerType", type);
-                l.type = string2LayerType(type);
-                if(l.type == Layer::TYPE::UNKNOWN)
-                {
-                    std::cout << "Unknown Gemm type (GEMM/FLUSH)." << std::endl;
-                    exit(1);
-                }
-                else if(l.type == Layer::TYPE::FLUSH)
-                {
-                    return;
-                }
-                io.mapOptional("Name", l.name);
-
-                // Basic information
+                readOptional(node, "Name", layer.name);
                 std::vector<uint32_t> sizes;
-                io.mapRequired("Size", sizes);
+                readRequired(node, "Size", sizes);
                 if(sizes.size() != 3 && sizes.size() != 4)
-                {
-                    std::cout << "Size must be [m,n,k,b] or [m,n,k]" << std::endl;
-                    exit(1);
-                }
-                l.m     = sizes[0];
-                l.n     = sizes[1];
-                l.k     = sizes[2];
-                l.batch = sizes.size() == 4 ? sizes[3] : 1;
+                    throw std::runtime_error("Size must be [m,n,k,b] or [m,n,k]");
+                layer.m     = sizes[0];
+                layer.n     = sizes[1];
+                layer.k     = sizes[2];
+                layer.batch = sizes.size() == 4 ? sizes[3] : 1;
 
-                io.mapRequired("Alpha", l.alpha);
-                io.mapRequired("Beta", l.beta);
+                readRequired(node, "Alpha", layer.alpha);
+                readRequired(node, "Beta", layer.beta);
 
-                // Problem type
                 bool isTranspose = false;
-                io.mapRequired("TransposeA", isTranspose);
-                l.problem.setOpA(isTranspose ? HIPBLAS_OP_T : HIPBLAS_OP_N);
-                io.mapRequired("TransposeB", isTranspose);
-                l.problem.setOpB(isTranspose ? HIPBLAS_OP_T : HIPBLAS_OP_N);
+                readRequired(node, "TransposeA", isTranspose);
+                layer.problem.setOpA(isTranspose ? HIPBLAS_OP_T : HIPBLAS_OP_N);
+                readRequired(node, "TransposeB", isTranspose);
+                layer.problem.setOpB(isTranspose ? HIPBLAS_OP_T : HIPBLAS_OP_N);
 
                 std::string datatype;
-                io.mapRequired("DataTypeA", datatype);
-                l.problem.setTypeA(string_to_hip_datatype_assert(datatype));
-                io.mapRequired("DataTypeB", datatype);
-                l.problem.setTypeB(string_to_hip_datatype_assert(datatype));
-                io.mapRequired("DataTypeC", datatype);
-                l.problem.setTypeC(string_to_hip_datatype_assert(datatype));
-                io.mapRequired("DataTypeD", datatype);
-                l.problem.setTypeD(string_to_hip_datatype_assert(datatype));
+                readRequired(node, "DataTypeA", datatype);
+                layer.problem.setTypeA(string_to_hip_datatype_assert(datatype));
+                readRequired(node, "DataTypeB", datatype);
+                layer.problem.setTypeB(string_to_hip_datatype_assert(datatype));
+                readRequired(node, "DataTypeC", datatype);
+                layer.problem.setTypeC(string_to_hip_datatype_assert(datatype));
+                readRequired(node, "DataTypeD", datatype);
+                layer.problem.setTypeD(string_to_hip_datatype_assert(datatype));
 
                 std::string computetype;
-                io.mapRequired("ComputeType", computetype);
-                l.problem.setTypeCompute(computetype == ""
-                                             ? (HIPBLAS_COMPUTE_32F)
-                                             : string_to_hipblas_computetype_assert(computetype));
+                readRequired(node, "ComputeType", computetype);
+                layer.problem.setTypeCompute(
+                    computetype.empty() ? HIPBLAS_COMPUTE_32F
+                                        : string_to_hipblas_computetype_assert(computetype));
 
-                // Epilogue
                 std::string epilogue;
-                io.mapOptional("Epilogue", epilogue);
-                l.epilogue.setMode(string_to_epilogue_type_assert(epilogue));
-                l.is_using_bias = is_bias_enabled(l.epilogue.getMode());
-                if(l.is_using_bias)
+                readOptional(node, "Epilogue", epilogue);
+                layer.epilogue.setMode(string_to_epilogue_type_assert(epilogue));
+                layer.is_using_bias = is_bias_enabled(layer.epilogue.getMode());
+                if(layer.is_using_bias)
                 {
-                    io.mapRequired("BiasType", datatype);
-                    l.epilogue.setBiasDataType(string_to_hip_datatype_assert(datatype));
+                    readRequired(node, "BiasType", datatype);
+                    layer.epilogue.setBiasDataType(string_to_hip_datatype_assert(datatype));
                 }
+                readOptional(node, "AlgoIndex", layer.algo_index);
 
-                // Algo index
-                io.mapOptional("AlgoIndex", l.algo_index);
+                std::unordered_set<std::string> allowed{"LayerType",
+                                                        "Name",
+                                                        "Size",
+                                                        "Alpha",
+                                                        "Beta",
+                                                        "TransposeA",
+                                                        "TransposeB",
+                                                        "DataTypeA",
+                                                        "DataTypeB",
+                                                        "DataTypeC",
+                                                        "DataTypeD",
+                                                        "ComputeType",
+                                                        "Epilogue",
+                                                        "AlgoIndex"};
+                if(layer.is_using_bias)
+                    allowed.insert("BiasType");
+                rejectUnknownKeys(node, allowed);
             }
-        };
-        template <>
-        struct MappingTraits<LayerConfigIO>
-        {
-            static void mapping(IO& io, LayerConfigIO& lc)
-            {
-                io.mapRequired("GeneralSettings", lc.gs);
-                io.mapRequired("Layers", lc.layer);
-            }
-        };
+            result.layer.push_back(std::move(layer));
+        }
+        return result;
     }
-}
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -403,10 +454,17 @@ int main(int argc, char** argv)
         hipblaslt_cerr << "Usage: " << argv[0] << " yaml-config.yaml" << std::endl;
         exit(1);
     }
-    auto              inputFile = llvm::MemoryBuffer::getFile(argv[1]);
-    LayerConfigIO     rv;
-    llvm::yaml::Input yin((*inputFile)->getMemBufferRef());
-    yin >> rv;
+    LayerConfigIO rv;
+    try
+    {
+        rv = readLayerConfig(argv[1]);
+    }
+    catch(std::exception const& exception)
+    {
+        hipblaslt_cerr << "error: failed to parse " << argv[1] << ": " << exception.what()
+                       << std::endl;
+        return 1;
+    }
 
     // Build the timing config once from the parsed YAML and validate it up front, before any
     // GPU setup, so a bad config fails fast. The same object is reused for the measurement
