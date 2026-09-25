@@ -159,12 +159,16 @@ void BundleReferenceValidationHarness::TestBody()
                                     + std::string(referenceLabel(_referenceType))
                                     + "): " + _bundlePath.string();
 
-    for(const auto& mismatch : bundle::compareOutputs(wrapper,
-                                                      _bundle->outputTensorUids,
-                                                      referenceOutputs,
-                                                      goldenFor,
-                                                      toleranceFor,
-                                                      contextLine))
+    // Golden data is loaded on the host, so by default the comparison runs there
+    // whichever reference produced the output being judged; --validator can move it.
+    for(const auto& mismatch :
+        bundle::compareOutputs(wrapper,
+                               _bundle->outputTensorUids,
+                               referenceOutputs,
+                               goldenFor,
+                               toleranceFor,
+                               resolveValidationSite(_validator, ValidationSite::HOST),
+                               contextLine))
     {
         ADD_FAILURE() << mismatch.report;
     }

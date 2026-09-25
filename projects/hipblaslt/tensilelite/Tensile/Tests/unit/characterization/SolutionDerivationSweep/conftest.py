@@ -63,3 +63,22 @@ def base_states(assembler, isa_info_map):
         sol0 = (list(sols.values()) if isinstance(sols, dict) else list(sols))[0]
         out[label] = copy.deepcopy(sol0._state)
     return out
+
+
+@pytest.fixture(scope="session")
+def reject_bases(base_states, assembler, isa_info_map):
+    """Base states shared by both set-cover rejection modules."""
+    out = {
+        "gfx942_HSS": copy.deepcopy(base_states["gfx942_HSS"]),
+        "gfx942_BBS": copy.deepcopy(base_states["gfx942_BBS"]),
+    }
+    path = os.path.join(_DATA, "gfx950/StreamK_F8F8S.yaml")
+    logic = LibraryIO.parseLibraryLogicFile(
+        path, assembler, False, False, False, isa_info_map, False
+    )
+    solutions = logic.solutions
+    solution = (
+        list(solutions.values()) if isinstance(solutions, dict) else list(solutions)
+    )[0]
+    out["gfx950_SK"] = copy.deepcopy(solution._state)
+    return out
