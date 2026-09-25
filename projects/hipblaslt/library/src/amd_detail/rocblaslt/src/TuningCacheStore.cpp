@@ -21,8 +21,11 @@ namespace TensileLite
 
         if(const char* env = rocblaslt_secure_getenv_impl("HIPBLASLT_TUNING_MODE", isPrivileged))
         {
-            if(std::string(env) == "cache")
+            const std::string value(env);
+            if(value == "cache")
                 config.mode = TuningMode::Cache;
+            else if(value == "tune")
+                config.mode = TuningMode::Tune;
         }
 
         if(const char* path

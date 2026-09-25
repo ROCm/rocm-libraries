@@ -556,16 +556,17 @@ namespace
     }
 
     // A process in a secure execution context (set-user-ID and the like) must
-    // not let an inherited environment choose a file for it to read.
+    // not let an inherited environment choose a file for it to write and
+    // minutes of GPU work for it to spend.
     TEST_F(TuningStore, PrivilegedProcessIgnoresTheTuningEnvironment)
     {
-        setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+        setenv("HIPBLASLT_TUNING_MODE", "tune", 1);
         setenv("HIPBLASLT_TUNING_CACHE_PATH", "tuning.txt", 1);
 
         const auto ordinary = TuningModeConfig::fromEnvironment(false);
-        EXPECT_EQ(ordinary.mode, TuningMode::Cache);
+        EXPECT_EQ(ordinary.mode, TuningMode::Tune);
         EXPECT_EQ(ordinary.cachePath, "tuning.txt");
-        EXPECT_TRUE(ordinary.reads());
+        EXPECT_TRUE(ordinary.writes());
         EXPECT_FALSE(ordinary.suppressedForSecurity);
 
         const auto privileged = TuningModeConfig::fromEnvironment(true);
@@ -575,7 +576,8 @@ namespace
         EXPECT_TRUE(privileged.suppressedForSecurity);
     }
 
-    // An unknown mode is off, and a mode with no path reads nothing.
+    // An unknown mode is off, only tune writes, and a mode with no path does
+    // nothing.
     TEST_F(TuningStore, ModeNeedsAKnownValueAndAPath)
     {
         setenv("HIPBLASLT_TUNING_MODE", "online", 1);
@@ -583,11 +585,39 @@ namespace
         EXPECT_EQ(TuningModeConfig::fromEnvironment(false).mode, TuningMode::Off);
 
         setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+        const auto cache = TuningModeConfig::fromEnvironment(false);
+        EXPECT_TRUE(cache.reads());
+        EXPECT_FALSE(cache.writes());
+
+        setenv("HIPBLASLT_TUNING_MODE", "tune", 1);
         unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
         const auto noPath = TuningModeConfig::fromEnvironment(false);
-        EXPECT_EQ(noPath.mode, TuningMode::Cache);
+        EXPECT_EQ(noPath.mode, TuningMode::Tune);
         EXPECT_FALSE(noPath.reads());
+        EXPECT_FALSE(noPath.writes());
         EXPECT_FALSE(noPath.suppressedForSecurity);
+    }
+
+    // A shape is only tuned when none of its entries is usable, and its winner
+    // replaces them, even one that reuses a dead row's index. Legacy rows are
+    // matched separately and stay.
+    TEST_F(TuningStore, ReplaceAllInstallsTheWinnerAlone)
+    {
+        const ProblemOverride key = halfKey();
+
+        OverrideMap map;
+        loadInto(map,
+                 fileOf({tunedRow(key, tunedEntry(7, "NotARealKernelName")),
+                         tunedRow(key, tunedEntry(9, "other")),
+                         legacyRow(key, 3, "legacy")}));
+        ASSERT_EQ(map.find(key).size(), 2u);
+
+        map.replaceAll(key, tunedEntry(7, "kernel"));
+
+        const auto found = map.find(key);
+        ASSERT_EQ(found.size(), 1u);
+        EXPECT_EQ(found[0].kernelName, std::optional<std::string>("kernel"));
+        EXPECT_EQ(indexesOf(map.findLegacy(key)), std::vector<int32_t>{3});
     }
 
     // The file starts with the build stamp once, and every appended row reads

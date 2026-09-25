@@ -255,6 +255,14 @@ int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
  */
 int tuningLastLaunchedIndexForTest();
 
+/**
+ * Make later tuning attempts go wrong at one stage: 1 fails setup, 2 fails
+ * enumeration, 3 throws after the first measured candidate, 4 stops the search
+ * after the first measured candidate the way an expiring budget does; 0
+ * restores normal behaviour.
+ */
+void tuningInjectFailureForTest(int stage);
+
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);
 
 // Push the GemmPreference-supplied StreamK tile scheduling mode onto every

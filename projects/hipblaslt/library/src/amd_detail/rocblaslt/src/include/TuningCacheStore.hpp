@@ -33,6 +33,7 @@ namespace TensileLite
     {
         Off   = 0,
         Cache = 1,
+        Tune  = 2,
     };
 
     /**
@@ -45,9 +46,10 @@ namespace TensileLite
         std::string cachePath;
 
         // A process in a secure execution context ignores both variables and
-        // stays off: they choose a file for it to read, which an inherited
-        // environment must not be able to impose on it. Set when that is why
-        // the mode is off, so the caller can say so.
+        // stays off: they choose a file for it to write and minutes of GPU work
+        // for it to spend, which an inherited environment must not be able to
+        // impose on it. Set when that is why the mode is off, so the caller can
+        // say so.
         bool suppressedForSecurity = false;
 
         static TuningModeConfig fromEnvironment(bool isPrivileged);
@@ -57,6 +59,10 @@ namespace TensileLite
         bool reads() const
         {
             return mode != TuningMode::Off && !cachePath.empty();
+        }
+        bool writes() const
+        {
+            return mode == TuningMode::Tune && !cachePath.empty();
         }
     };
 
@@ -295,6 +301,11 @@ namespace TensileLite
         size_t requiredWorkspaceBytes = 0;
         double winnerTimeUs           = 0.0;
 
+        // What default selection would have launched and how fast it ran, for
+        // the info-level line that compares the two. Not written to the file.
+        int32_t baselineIndex  = -1;
+        double  baselineTimeUs = 0.0;
+
         /**
          * Two rows are the same entry only when the index and both names
          * agree. Two rows can share an index while naming different kernels,
@@ -436,6 +447,18 @@ namespace TensileLite
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
             return addTo(m_override, key, entry);
+        }
+
+        /**
+         * Drop every current-schema entry for a key and install one. A shape is
+         * only tuned when none of its entries is usable, and addIfAbsent would
+         * refuse a winner that happened to reuse a dead row's index.
+         */
+        void replaceAll(const ProblemOverride& key, const TunedEntry& entry)
+        {
+            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+            m_override.erase(key);
+            m_override.emplace(key, entry);
         }
 
         /** addIfAbsent for a legacy row, filed under the key's legacy subset. */
