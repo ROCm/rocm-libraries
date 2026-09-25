@@ -2513,9 +2513,9 @@ def lower_kernel_to_hip(
     The output is:
     1. The :data:`HIP_PROLOGUE` (typedefs + ``<hip/hip_runtime.h>``
     include + AMDGPU vector typedefs). Disable with
-    ``include_prologue=False`` when you want only the body text
-    (e.g. for embedding into a larger TU that already has these
-    typedefs).
+    ``include_prologue=False`` for embedding into a larger TU that already
+    has the shared prologue. Required per-kernel vector typedefs are still
+    emitted.
     2. The kernel's ``__global__`` signature, derived from
     :attr:`KernelDef.params`. Pointer params get ``__restrict__``;
     ``__launch_bounds__`` is taken from
@@ -2568,7 +2568,7 @@ def lower_kernel_to_hip(
     parts: List[str] = []
     if include_prologue:
         parts.append(HIP_PROLOGUE)
-        parts.extend(_extra_vector_declarations(kernel))
+    parts.extend(_extra_vector_declarations(kernel))
     parts.append(head)
     if smem_block:
         parts.append(smem_block)

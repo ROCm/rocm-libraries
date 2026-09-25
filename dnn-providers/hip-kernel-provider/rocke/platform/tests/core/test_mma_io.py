@@ -14,7 +14,7 @@ from rocke.core.arch.wmma_scale import scaled_matrix_layout
 from rocke.core.ir import F16, FP8E4M3, I8, I32, I64, IRBuilder, PtrType, VectorType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.lower_hip import HIP_PROLOGUE, lower_kernel_to_hip
 from rocke.core.storage import (
     BitPacking,
     FragmentPacking,
@@ -246,6 +246,47 @@ def test_hip_declares_only_encountered_missing_vector_widths():
     source = lower_kernel_to_hip(build_transport("f16"), arch="gfx1250")
     assert source.count("using f16x32 =") == 1
     assert "using i8x24 =" not in source
+
+
+@pytest.mark.parametrize("route", ["python", "native"])
+def test_bare_hip_keeps_required_vector_declarations(route, tmp_path):
+    source = lower_kernel_to_hip(
+        build_transport("load96_i8"), arch="gfx1250", include_prologue=False
+    )
+    if route == "native":
+        executable = os.environ.get("ROCKE_STORAGE_TEST")
+        if not executable:
+            pytest.skip("set ROCKE_STORAGE_TEST to the built native storage test")
+        actual = subprocess.run(
+            [executable, "--hip-bare", "load96_i8"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert actual == source
+        source = actual
+    assert "#include" not in source
+    assert source.count("using i8x12 =") == 1
+    if not shutil.which("hipcc"):
+        pytest.skip("hipcc not in PATH")
+    path = tmp_path / "composed.hip"
+    path.write_text(
+        HIP_PROLOGUE
+        + source
+        + source.replace("void transport(", "void transport_second(")
+    )
+    subprocess.run(
+        [
+            "hipcc",
+            "--offload-arch=gfx950",
+            "--cuda-device-only",
+            "-fsyntax-only",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 @pytest.mark.parametrize("dtype", ["fp8", "bf8"])

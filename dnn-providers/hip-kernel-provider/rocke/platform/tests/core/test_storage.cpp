@@ -30,7 +30,7 @@ static rocke_value_t* load_bits(rocke_ir_builder_t* b, int j, void* ctx)
     return rocke_b_global_load(b, (rocke_value_t*)ctx, rocke_b_const_i32(b, j), rocke_i8(), 1);
 }
 
-static int emit(const char* dtype, bool hip)
+static int emit(const char* dtype, bool hip, bool include_prologue = true)
 {
     rocke_ir_builder_t b;
     CHECK(rocke_ir_builder_init(&b, "transport") == ROCKE_OK);
@@ -127,6 +127,8 @@ static int emit(const char* dtype, bool hip)
         CHECK(rocke_strbuf_init(&text, 256) == 0);
         rocke_lower_hip_opts_t opts = {};
         opts.arch = "gfx1250";
+        opts.include_prologue = include_prologue;
+        opts.include_prologue_set = true;
         CHECK(rocke_lower_kernel_to_hip(&b, b.kernel, &opts, &text) == ROCKE_OK);
         fputs(rocke_strbuf_cstr(&text), stdout);
         rocke_strbuf_free(&text);
@@ -229,6 +231,8 @@ int main(int argc, char** argv)
         return emit(argv[2], false);
     if(argc == 3 && strcmp(argv[1], "--hip") == 0)
         return emit(argv[2], true);
+    if(argc == 3 && strcmp(argv[1], "--hip-bare") == 0)
+        return emit(argv[2], true, false);
     if(argc == 3 && strcmp(argv[1], "--parse") == 0)
     {
         rocke_ir_builder_t b;
