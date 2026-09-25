@@ -279,9 +279,7 @@ def get_check_runs(owner: str, repo: str, sha: str, token: str) -> List[Dict[str
         all_runs.extend(r for r in runs if isinstance(r, dict))
 
         total_count = data.get("total_count")
-        if not runs or (
-            isinstance(total_count, int) and len(all_runs) >= total_count
-        ):
+        if not runs or (isinstance(total_count, int) and len(all_runs) >= total_count):
             return all_runs
         page += 1
 
