@@ -246,7 +246,8 @@ set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
-if(TENSILELITE_ENABLE_CLIENT)
+if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
     set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
     hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
     execute_process(
@@ -775,6 +776,10 @@ if(HIPBLASLT_ENABLE_DEVICE OR TENSILELITE_ENABLE_CLIENT
         "${_tensilelite_src}/tensilelite/tensilelite_logic/*.yaml"
         "${_tensilelite_src}/tensilelite/ductile/config/*.yaml"
         "${_tensilelite_src}/compat/tensilelite_tensile_compat/*.py"
+    )
+    list(APPEND _tensilelite_wheel_sources
+        "${_tensilelite_src}/_tensilelite_client_binding.py"
+        "${_tensilelite_src}/tensilelite_configure_client.py"
     )
 
     set(_tensilelite_canonical_stage "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-wheel-canonical")

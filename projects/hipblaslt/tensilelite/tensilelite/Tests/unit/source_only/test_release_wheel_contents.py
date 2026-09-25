@@ -3,6 +3,8 @@
 
 import os
 from pathlib import Path
+import runpy
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -16,7 +18,39 @@ _INSTALLER = _SOURCE_ROOT / "scripts/install_release_wheels.py"
 _VALIDATOR = _SOURCE_ROOT / "scripts/check_release_wheel_contents.py"
 
 
+def _isolated_source(tmp_path):
+    return Path(
+        shutil.copytree(
+            _SOURCE_ROOT,
+            tmp_path / "source",
+            ignore=shutil.ignore_patterns(
+                ".pytest_cache",
+                ".tox",
+                "__pycache__",
+                "*.egg-info",
+                "build",
+                "build_tmp",
+                "build-adaptor",
+            ),
+        )
+    )
+
+
+def _write_minimal_wheel(path, *, name, package_root, scripts, requirements=()):
+    dist_info = path.name.removesuffix("-py3-none-any.whl") + ".dist-info"
+    metadata = [f"Name: {name}", "Version: 1.0.0+rocm7.2.4", "Requires-Python: >=3.10"]
+    metadata.extend(f"Requires-Dist: {requirement}" for requirement in requirements)
+    entry_points = ["[console_scripts]"]
+    entry_points.extend(f"{key} = {value}" for key, value in scripts.items())
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(f"{package_root}/__init__.py", "")
+        archive.writestr(f"{dist_info}/METADATA", "\n".join(metadata) + "\n")
+        archive.writestr(f"{dist_info}/WHEEL", "Tag: py3-none-any\n")
+        archive.writestr(f"{dist_info}/entry_points.txt", "\n".join(entry_points) + "\n")
+
+
 def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_path):
+    source_root = _isolated_source(tmp_path)
     rocm_root = tmp_path / "rocm"
     (rocm_root / ".info").mkdir(parents=True)
     (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
@@ -29,8 +63,8 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
     )
 
     for mode, source, pattern in (
-        ("canonical", _SOURCE_ROOT, "tensilelite-*.whl"),
-        ("compatibility", _SOURCE_ROOT / "compat", "tensilelite_tensile_compat-*.whl"),
+        ("canonical", source_root, "tensilelite-*.whl"),
+        ("compatibility", source_root / "compat", "tensilelite_tensile_compat-*.whl"),
     ):
         wheel_dir = tmp_path / mode
         wheel_dir.mkdir()
@@ -47,7 +81,7 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
                 str(wheel_dir),
                 str(source),
             ],
-            cwd=_SOURCE_ROOT,
+            cwd=source_root,
             env=environment,
             capture_output=True,
             text=True,
@@ -55,7 +89,7 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
         assert build.returncode == 0, build.stderr
         wheel = next(wheel_dir.glob(pattern))
         if mode == "canonical":
-            custom_kernel_root = _SOURCE_ROOT / "tensilelite/CustomKernels"
+            custom_kernel_root = source_root / "tensilelite/CustomKernels"
             assert any(
                 path.parent != custom_kernel_root for path in custom_kernel_root.rglob("*.s")
             ), "the release-wheel check must exercise nested custom-kernel resources"
@@ -70,7 +104,7 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
                 "--expected-version",
                 "5.0.0+rocm7.2.4",
                 "--source-root",
-                str(_SOURCE_ROOT),
+                str(source_root),
             ],
             capture_output=True,
             text=True,
@@ -129,10 +163,115 @@ def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_p
                 "--expected-version",
                 "5.0.0+rocm7.2.4",
                 "--source-root",
-                str(_SOURCE_ROOT),
+                str(source_root),
             ],
             capture_output=True,
             text=True,
         )
         assert bound_validation.returncode != 0
         assert "wheel must not contain client bindings" in bound_validation.stderr
+
+
+def test_installer_removes_stale_wheel_owned_files_only(tmp_path):
+    destination = tmp_path / "installed"
+    (destination / "tensilelite").mkdir(parents=True)
+    (destination / "tensilelite/retired.py").write_text("stale", encoding="utf-8")
+    (destination / "_tensilelite_client_binding.py").write_text("stale", encoding="utf-8")
+    (destination / "tensilelite-0.0.0.dist-info").mkdir()
+    (destination / "rocisa").mkdir()
+    (destination / "rocisa/keep.py").write_text("keep", encoding="utf-8")
+
+    wheel = tmp_path / "tensilelite-1.0.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("tensilelite/__init__.py", "current")
+        archive.writestr("tensilelite-1.0.0.dist-info/METADATA", "Name: tensilelite\n")
+
+    installer = runpy.run_path(str(_INSTALLER))
+    installer["install_wheels"]([wheel], destination)
+
+    assert not (destination / "tensilelite/retired.py").exists()
+    assert not (destination / "_tensilelite_client_binding.py").exists()
+    assert not (destination / "tensilelite-0.0.0.dist-info").exists()
+    assert (destination / "tensilelite/__init__.py").read_text(encoding="utf-8") == "current"
+    assert (destination / "rocisa/keep.py").read_text(encoding="utf-8") == "keep"
+
+
+def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
+    source_root = _isolated_source(tmp_path)
+    rocm_root = tmp_path / "rocm"
+    (rocm_root / ".info").mkdir(parents=True)
+    (rocm_root / ".info/version").write_text("7.2.4\n", encoding="utf-8")
+    environment = dict(os.environ, ROCM_PATH=str(rocm_root))
+    sdist_dir = tmp_path / "sdist"
+    wheel_dir = tmp_path / "wheel"
+    sdist_dir.mkdir()
+    wheel_dir.mkdir()
+
+    sdist = subprocess.run(
+        [sys.executable, "setup.py", "sdist", "--dist-dir", str(sdist_dir)],
+        cwd=source_root / "compat",
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert sdist.returncode == 0, sdist.stderr
+    archive = next(sdist_dir.glob("*.tar.gz"))
+
+    wheel = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--disable-pip-version-check",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            str(wheel_dir),
+            str(archive),
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    assert wheel.returncode == 0, wheel.stderr
+    assert next(wheel_dir.glob("tensilelite_tensile_compat-*.whl")).is_file()
+
+
+def test_validator_rejects_cross_package_leaks_and_missing_runtime_dependencies(tmp_path):
+    validator = runpy.run_path(str(_VALIDATOR))
+    validate = validator["validate"]
+    canonical_scripts = {
+        "tensilelite": "tensilelite.cli:main",
+        "tensilelite-configure-client": "tensilelite_configure_client:main",
+    }
+    canonical = tmp_path / "tensilelite-1.0.0+rocm7.2.4-py3-none-any.whl"
+    _write_minimal_wheel(
+        canonical,
+        name="tensilelite",
+        package_root="tensilelite",
+        scripts=canonical_scripts,
+    )
+    with zipfile.ZipFile(canonical, "a") as archive:
+        archive.writestr("tensilelite_tensile_compat/leak.py", "")
+
+    canonical_problems = validate(canonical, "canonical", tmp_path, "1.0.0+rocm7.2.4")
+    assert any("compatibility package entries" in problem for problem in canonical_problems)
+    assert any("runtime dependencies must be exactly" in problem for problem in canonical_problems)
+
+    compatibility = tmp_path / "tensilelite_tensile_compat-1.0.0+rocm7.2.4-py3-none-any.whl"
+    _write_minimal_wheel(
+        compatibility,
+        name="tensilelite-tensile-compat",
+        package_root="tensilelite_tensile_compat",
+        scripts=validator["_COMPATIBILITY_SCRIPTS"],
+        requirements=("tensilelite==1.0.0+rocm7.2.4",),
+    )
+    with zipfile.ZipFile(compatibility, "a") as archive:
+        archive.writestr("tensilelite/leak.py", "")
+
+    compatibility_problems = validate(
+        compatibility, "compatibility", tmp_path, "1.0.0+rocm7.2.4"
+    )
+    assert any("canonical package entries" in problem for problem in compatibility_problems)

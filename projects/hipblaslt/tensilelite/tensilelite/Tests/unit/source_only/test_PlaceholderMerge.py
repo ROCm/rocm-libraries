@@ -50,6 +50,7 @@ from tensilelite import SolutionLibrary
 from tensilelite.Common.Architectures import supportsChipIdPredicate
 from tensilelite.tensilelite_logic.valid_corpus_consistency import (
     find_chip_id_arch_lock_violations,
+    find_gfx1250v0_overlay_violations,
     find_sibling_device_names_violations,
 )
 
@@ -73,6 +74,17 @@ _GATE_FUNC_NAME = "supportsChipIdPredicate"
 def test_logic_yaml_sibling_device_names_consistent():
     """Same-basename YAMLs in one logic tree must declare identical DeviceNames."""
     violations = find_sibling_device_names_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")), _LOGIC_ROOT)
+    assert not violations, "\n".join(violations)
+
+
+@_needs_logic_dir
+def test_gfx1250v0_overlay_is_consistent():
+    """The overlay ships logic, every file in it declares
+    ``ScheduleName: gfx1250v0`` and keeps ``ArchitectureName: gfx1250``, and no
+    file outside it claims the ``gfx1250v0`` schedule name."""
+    violations = find_gfx1250v0_overlay_violations(
+        _LOGIC_ROOT, overlay_required=True
+    )
     assert not violations, "\n".join(violations)
 
 

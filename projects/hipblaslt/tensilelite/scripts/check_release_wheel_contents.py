@@ -33,6 +33,14 @@ _OPTIONAL_REQUIREMENTS = {
     "simplejson": "simplejson",
     "ujson": "ujson",
 }
+_CANONICAL_REQUIREMENTS = {
+    "filelock",
+    "joblib",
+    "msgpack",
+    "numpy",
+    "packaging",
+    "pyyaml",
+}
 _COMPATIBILITY_SCRIPTS = {
     "Tensile": "tensilelite_tensile_compat.commands:tensile",
     "TensileBenchmarkCluster": "tensilelite_tensile_compat.commands:benchmark_cluster",
@@ -114,6 +122,14 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
 
         requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
         if mode == "canonical":
+            leaked_compat = sorted(
+                name for name in names if name.startswith("tensilelite_tensile_compat/")
+            )
+            if leaked_compat:
+                problems.append(
+                    "canonical wheel contains compatibility package entries:\n  "
+                    + "\n  ".join(leaked_compat)
+                )
             expected_scripts = {
                 "tensilelite": "tensilelite.cli:main",
                 "tensilelite-configure-client": "tensilelite_configure_client:main",
@@ -148,6 +164,16 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
                 problems.append(
                     f"canonical wheel must not declare source-provisioned rocisa, got {rocisa}"
                 )
+            mandatory = {
+                canonicalize_name(requirement.name)
+                for requirement in requirements
+                if requirement.marker is None
+            }
+            if mandatory != _CANONICAL_REQUIREMENTS:
+                problems.append(
+                    "canonical runtime dependencies must be exactly "
+                    f"{sorted(_CANONICAL_REQUIREMENTS)}, got {sorted(mandatory)}"
+                )
             extras = set(metadata.get_all("Provides-Extra", []))
             for extra, dependency in _OPTIONAL_REQUIREMENTS.items():
                 matches = [req for req in requirements if canonicalize_name(req.name) == dependency]
@@ -156,6 +182,12 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
                 ):
                     problems.append(f"missing optional dependency {dependency} for extra {extra}")
         else:
+            leaked_canonical = sorted(name for name in names if name.startswith("tensilelite/"))
+            if leaked_canonical:
+                problems.append(
+                    "compatibility wheel contains canonical package entries:\n  "
+                    + "\n  ".join(leaked_canonical)
+                )
             if scripts != _COMPATIBILITY_SCRIPTS:
                 problems.append(f"unexpected compatibility console scripts: {scripts}")
             canonical = [
@@ -164,6 +196,10 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
             expected_pin = f"tensilelite=={expected_version}"
             if len(canonical) != 1 or str(canonical[0]) != expected_pin:
                 problems.append(f"compatibility dependency must be {expected_pin}, got {canonical}")
+            if len(requirements) != 1:
+                problems.append(
+                    f"compatibility wheel must declare only {expected_pin}, got {requirements}"
+                )
     return problems
 
 
