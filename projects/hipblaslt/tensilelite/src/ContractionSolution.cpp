@@ -2354,6 +2354,31 @@ namespace TensileLite
 
         dim3 problemNumGroupTiles = rv.numWorkGroups;
 
+        if(Debug::Instance().printWorkGroupMapping())
+        {
+            // problemNumGroupTiles is exactly what the kernel reads as
+            // NumWorkGroups0/NumWorkGroups1 (it is snapshotted before the GSU/StreamK
+            // rewrites below), so this is the grid the WGMBitSwizzle guard compares.
+            const size_t nwg0 = problemNumGroupTiles.x;
+            const size_t nwg1 = problemNumGroupTiles.y;
+            std::cout << "WGM: grid " << nwg0 << " x " << nwg1 << " tiles (MT " << sizeMapping.macroTile.x
+                      << "x" << sizeMapping.macroTile.y << "), WGM=" << sizeMapping.workGroupMapping
+                      << ", WGMXCC=" << sizeMapping.workGroupMappingXCC;
+            if(sizeMapping.wgmBitSwizzle)
+            {
+                const bool fires = (nwg0 == 128 && nwg1 == 16) || (nwg0 == 16 && nwg1 == 128);
+                std::cout << ", WGMBitSwizzle=1 -> "
+                          << (fires ? "ACTIVE (bit swizzle)"
+                                    : "INACTIVE: grid matches neither 128x16 nor 16x128, kernel "
+                                      "falls back to DefaultWGM");
+            }
+            else
+            {
+                std::cout << ", WGMBitSwizzle=0";
+            }
+            std::cout << std::endl;
+        }
+
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         if(gsu > 0)

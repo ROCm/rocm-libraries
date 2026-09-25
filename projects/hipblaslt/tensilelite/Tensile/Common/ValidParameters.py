@@ -732,6 +732,25 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
+    # When True, replace DefaultWGM with the bit-permutation swizzle
+    # (WGMBitSwizzle in WorkGroupMappingAlgos.py). This is a pure shift/mask
+    # remap (no integer division) of the workgroup id to (m_tile, n_tile) that
+    # gives each XCD 16 consecutive tiles of the long dimension and all 16 of the
+    # short one, walked as four 4-deep sub-bands so the workgroups resident on an
+    # XCD form a compact 4x8 rectangle instead of a 16x2 sliver. Two power-of-two
+    # grids are recognised, and they are mirror images of one another:
+    #   NumWorkGroups0 == 128 and NumWorkGroups1 == 16  (long dimension is M)
+    #   NumWorkGroups0 == 16  and NumWorkGroups1 == 128 (long dimension is N)
+    # The emitted code falls back to DefaultWGM at runtime for any other grid, so
+    # enabling it never miscomputes other problem sizes.
+    "WGMBitSwizzle": [False, True],
+    # When True, enable the DPP store-repack fold on the 16-bit subtile (PLSIN-weave)
+    # store path: batchB's packed dwords + blended store data reuse batchA's dead
+    # ValuC slots and the store is repacked through permlane16/DPP instead of a
+    # second cvt block. Only takes effect when UseSubtileImpl is set and the tile is
+    # eligible (MIWaveTile[0] >= 4 and it fits the VGPR budget); a no-op otherwise, so
+    # enabling it never changes ineligible kernels. False reproduces the pre-fold store.
+    "DPPStoreFold": [False, True],
     # 0: WorkGroupMapping is predicted at runtime.
     # 1: No mapping
     "WorkGroupMappingXCC": [

@@ -176,6 +176,13 @@ def plsinStoreCol128Active(kernel, weaveGroups) -> bool:
 # Component A: when Bias/ScaleAlphaVec are proven identity at runtime (null pointers),
 #   take a direct ACC->bf16 path that skips the bias/SAV LDS reads and packed FMAs.
 PLSIN_STORE_DIRECT_EPILOGUE = _plsinStoreGate("PLSIN_STORE_DIRECT_EPILOGUE")
+# DPP-fold convert-interleave: on the permlane16 fold path, split the coalesced store
+#   into Phase1(converts) / convert-gap / Phase2(assembly + coalesced stores) so the
+#   un-folded woven store's convert-into-MFMA-shadow interleave (LogicalScheduler
+#   _interleaveStoreConvertIntoGapMfmas) ALSO applies to the fold.  OFF -> the fold is
+#   emitted monolithically, byte-identical to before.  ds_bpermute tiles always emit
+#   monolithically (the bpermute consumes the converts in place, no separable gap).
+PLSIN_FOLD_CVT_INTERLEAVE = _plsinStoreGate("PLSIN_FOLD_CVT_INTERLEAVE", default=True)
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
@@ -2688,68 +2695,154 @@ class GlobalWriteBatchWriter:
               # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
               # This also handles N-group transitions.
               blockIdxM = tt0 - 1
-              skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
-                                                    labelPrefix="subtile_skip_store")
               # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
               # When only the lower block is valid, fall through to a scalar fallback.
               # Under requireFullTile (fused store) both blocks are always valid, so the
               # check + scalar fallback are dead — always emit the paired store directly.
               guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
-              if guardMSgpr is not None and not self._fusedFullTileNoGuards():
-                afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
-                                        f"after paired/fallback store tt0={tt0}")
-                fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
-                fallbackLabel = Label(fallbackLabelName,
-                                      f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
-                storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
-                                               comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
-                storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
-                                                 comment=f"only d0={tt0-1} valid -> scalar fallback"))
-                if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
-                  tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+
+              # DPP store-repack (SubtileStoreCachelineFill), BACKWARD fold: this pair
+              # (tt0-1, tt0) and the PREVIOUS pair (tt0-3, tt0-2) share the same 16 cache
+              # lines.  Fold them into two coalesced all-lanes stores, fired at the LATER
+              # pair (odd pairIdx) so BOTH pairs' per-element epilogues (bias/scale/act)
+              # are already applied — folding forward would read pre-epilogue partner data.
+              # Fires on the 18-VGPR (isSubtileFold) allocation.  The quad_perm blend
+              # ([0,0,2,2]/[1,1,3,3]) + odd-lane mask + halfLine=64 was verified correct on
+              # BOTH shuffle layouts.  For the gfx950 v_permlane16_swap path this was confirmed
+              # by roc_kernel_tracer: the per-lane voffsets are v22[L] = 512*(L&15) +
+              # {lg0:0,lg2:16,lg1:32,lg3:48}, and folding batchA (offset 0) with batchB
+              # (offset +64) under those quad_perms reproduces the un-folded two-store memory
+              # image byte-for-byte (0 mismatches over 128 writes).  Because data and address
+              # use the SAME quad_perm per lane, every write is correct-data->correct-address
+              # by construction; the fold is exact.
+              # Weave (PLSIN) is compatible: the per-pair weave bookkeeping (_weaveEmitReady +
+              # accvgpr-read pops) runs in the block above regardless of the fold branch, so
+              # both pairs' reads/MFMAs are issued before the deferred folded store; skipping
+              # the woven store's lookahead only defers gap-fill MFMAs to the next
+              # _weaveEmitReady/_weaveEmitAll (idempotent), never drops or double-issues them.
+              foldable    = (self.cvtVgprStruct.vgprStoreData >= 0)
+              pairIdx     = tt0 // 2
+              prevSba0Idx = elementIdx - 3   # tt0-3 (batchA sba=0, m-lower)
+              prevSba1Idx = elementIdx - 2   # tt0-2 (batchA sba=1)
+              def _samePair(i0, i1, ttlo):
+                return (i0 >= 0 and i1 < len(self.batchElements)
+                        and self.batchElements[i0][1] == ttlo
+                        and self.batchElements[i1][1] == ttlo + 1
+                        and self.batchElements[i0][0] == blockIdxN
+                        and self.batchElements[i1][0] == blockIdxN)
+              isFoldFirst  = foldable and (pairIdx % 2 == 0) and _samePair(elementIdx + 1, elementIdx + 2, tt0 + 1)
+              isFoldSecond = foldable and (pairIdx % 2 == 1) and _samePair(prevSba0Idx, prevSba1Idx, tt0 - 3)
+
+              if isFoldFirst:
+                # First pair of a fold: keep the OOB / N-group bookkeeping, DEFER the store.
+                skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                      labelPrefix="subtile_skip_store")
+                if skipLabel is not None:
+                  storeCodeModule.add(skipLabel)
+                self.storesIssued += 1
+
+              elif isFoldSecond:
+                # Second pair: fold prev pair (batchA, m-lower) + this pair (batchB, m-upper)
+                # into the two coalesced stores.  Gate on all-4-blocks-valid; else fall back
+                # to two unfolded paired stores.
+                lowBlockM = tt0 - 3
+                skipLabel = self._emitSubtileOobGuard(storeCodeModule, lowBlockM, blockIdxN,
+                                                      labelPrefix="subtile_skip_store")
+                aAddr = self.ss.elementAddr[prevSba0Idx]
+                aS0   = self.ss.elementSumIdx[prevSba0Idx]
+                aS1   = self.ss.elementSumIdx[prevSba1Idx]
+                bAddr = self.ss.elementAddr[partnerElementIdx]   # tt0-1
+                bS0   = self.ss.elementSumIdx[partnerElementIdx]
+                bS1   = self.ss.elementSumIdx[elementIdx]
+                if guardMSgpr is not None and not self._fusedFullTileNoGuards():
+                  afterL = Label(self.parentWriter.labels.getNameInc("subtile_after_fold"), f"after fold tt0={tt0}")
+                  fbL    = Label(self.parentWriter.labels.getNameInc("subtile_fold_fallback"), f"fold fallback tt0={tt0}")
+                  storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
+                                                 comment=f"fold: all 4 M-blocks valid? (MGuard > {tt0})"))
+                  storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment="not all valid -> unfolded fallback"))
+                  storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
+                                        bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
+                                        forceSlc=fusedA2APushPass))
+                  storeCodeModule.add(SBranch(labelName=afterL.getLabelName(), comment="skip unfolded fallback"))
+                  storeCodeModule.add(fbL)
+                  self._emitGuardedPairedNoRepack(storeCodeModule, prevSba0Idx, prevSba1Idx, prefixOffset, blockIdxN, forceSlc=fusedA2APushPass)
+                  self._emitGuardedPairedNoRepack(storeCodeModule, partnerElementIdx, elementIdx, prefixOffset, blockIdxN, forceSlc=fusedA2APushPass)
+                  storeCodeModule.add(afterL)
                 else:
-                  tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
-                storeCodeModule.add(tmpStoreCode)
-                storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
-                                            comment="skip scalar fallback"))
-                storeCodeModule.add(fallbackLabel)
-                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
-                storeCodeModule.add(tmpFallbackCode)
-                storeCodeModule.add(afterPairedLabel)
-              elif getattr(self, "_col128Active", False) and skipLabel is None and \
-                   (self._col128Pending is not None or
-                    self._col128PartnerInBatch(elementIdx, tt0, blockIdxN)):
-                # 128B-column merge: hold the first of each M-adjacent pair, then
-                # re-split both by column and issue two full-line stores. Deferring
-                # is only safe once the partner is known to be in this batch and in
-                # this N group -- a batch boundary can split an N group, so position
-                # alone does not imply a partner follows.
-                cvt = self.cvtVgprStruct
-                if self._col128Pending is None:
-                  storeCodeModule.add(self._emitCol128PairedPack(
-                    partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset,
-                    cvt.vgprBf16Temp, tt0 - 1, blockIdxM, blockIdxN))
-                  self._col128Pending = (partnerAddrCalc, tt0 - 1, blockIdxN)
-                else:
-                  p0AddrCalc, p0tt0, p0BlockN = self._col128Pending
-                  assert p0BlockN == blockIdxN and p0tt0 == tt0 - 3, \
-                    "128B-column merge paired non-adjacent stores"
-                  storeCodeModule.add(self._emitCol128PairedPack(
-                    partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset,
-                    cvt.vgprColPackB, tt0 - 1, blockIdxM, blockIdxN))
-                  self._emitCol128Addr(storeCodeModule)
-                  storeCodeModule.add(self._emitCol128MergedStores(
-                    p0AddrCalc, p0tt0, forceSlc=fusedA2APushPass))
-                  self._col128Pending = None
+                  # Fused full-tile path: register only pair P (batchB) gap B, between the two
+                  # coalesced stores.  Pair P-1 (batchA)'s gap is intentionally not registered
+                  # (weavePairA=None): ATT verification showed a pair P-1 gap -- whether placed
+                  # in-fold or deferred to its natural un-folded site -- is inert, because the
+                  # remaining terminal MFMAs are MFMA-input-latency bound, not gap-slot bound.
+                  wpB = None
+                  if self._weaveMode and _weavePairIdx is not None:
+                    wpB = _weavePairIdx      # batchB = pair P (gap B between the coalesced stores)
+                  storeCodeModule.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
+                                        bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
+                                        weavePairA=None, weavePairB=wpB, forceSlc=fusedA2APushPass))
+                if skipLabel is not None:
+                  storeCodeModule.add(skipLabel)
+                self.storesIssued += 1
+
               else:
-                if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
-                  tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                # No fold available: original guarded paired store for (tt0-1, tt0).
+                skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                      labelPrefix="subtile_skip_store")
+                if guardMSgpr is not None and not self._fusedFullTileNoGuards():
+                  afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
+                                          f"after paired/fallback store tt0={tt0}")
+                  fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
+                  fallbackLabel = Label(fallbackLabelName,
+                                        f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
+                  storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
+                                                 comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
+                  storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
+                                                   comment=f"only d0={tt0-1} valid -> scalar fallback"))
+                  if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
+                    tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                  else:
+                    tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                  storeCodeModule.add(tmpStoreCode)
+                  storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
+                                              comment="skip scalar fallback"))
+                  storeCodeModule.add(fallbackLabel)
+                  tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                  storeCodeModule.add(tmpFallbackCode)
+                  storeCodeModule.add(afterPairedLabel)
+                elif getattr(self, "_col128Active", False) and skipLabel is None and \
+                     (self._col128Pending is not None or
+                      self._col128PartnerInBatch(elementIdx, tt0, blockIdxN)):
+                  # 128B-column merge: hold the first of each M-adjacent pair, then
+                  # re-split both by column and issue two full-line stores. Deferring
+                  # is only safe once the partner is known to be in this batch and in
+                  # this N group -- a batch boundary can split an N group, so position
+                  # alone does not imply a partner follows.
+                  cvt = self.cvtVgprStruct
+                  if self._col128Pending is None:
+                    storeCodeModule.add(self._emitCol128PairedPack(
+                      partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset,
+                      cvt.vgprBf16Temp, tt0 - 1, blockIdxM, blockIdxN))
+                    self._col128Pending = (partnerAddrCalc, tt0 - 1, blockIdxN)
+                  else:
+                    p0AddrCalc, p0tt0, p0BlockN = self._col128Pending
+                    assert p0BlockN == blockIdxN and p0tt0 == tt0 - 3, \
+                      "128B-column merge paired non-adjacent stores"
+                    storeCodeModule.add(self._emitCol128PairedPack(
+                      partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset,
+                      cvt.vgprColPackB, tt0 - 1, blockIdxM, blockIdxN))
+                    self._emitCol128Addr(storeCodeModule)
+                    storeCodeModule.add(self._emitCol128MergedStores(
+                      p0AddrCalc, p0tt0, forceSlc=fusedA2APushPass))
+                    self._col128Pending = None
                 else:
-                  tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
-                storeCodeModule.add(tmpStoreCode)
-              if skipLabel is not None:
-                storeCodeModule.add(skipLabel)
-              self.storesIssued += 1
+                  if _weavePairIdx is not None and self._weaveMfmaGroups() is not None:
+                    tmpStoreCode = self._emit16bitSubtilePairedStoreWoven(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, _weavePairIdx, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                  else:
+                    tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=fusedA2APushPass)
+                  storeCodeModule.add(tmpStoreCode)
+                if skipLabel is not None:
+                  storeCodeModule.add(skipLabel)
+                self.storesIssued += 1
             else:
               # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
               blockIdxM = tt0
@@ -2899,7 +2992,7 @@ class GlobalWriteBatchWriter:
     if peelInterior:
       maxTt0 = max(e[1] for e in self.batchElements)
       maxBlockIdxN = max(e[0] for e in self.batchElements)
-      interiorCode = self._buildSubtileInteriorStores()
+      interiorCode = self._buildSubtileInteriorStores(forceSlc=fusedA2APushPass)
       boundaryLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_boundary"),
                             "not fully interior -> guarded boundary store body")
       peelEndLabel = Label(self.parentWriter.labels.getNameInc("subtile_peel_end"),
@@ -4184,7 +4277,10 @@ class GlobalWriteBatchWriter:
       return None
     pairs = capture["pairs"]
     while len(pairs) <= pairIdx:
-      pairs.append({"reads": [], "gap": None, "gapAnchor": None})
+      # Legacy single-gap slot ("gap"/"gapAnchor") is used by the un-folded woven
+      # store. The fold registers MULTIPLE gaps for one pair (a convert-gap + gap B)
+      # via the "gaps" list; the planner reads "gaps" when present, else the legacy slot.
+      pairs.append({"reads": [], "gap": None, "gapAnchor": None, "gaps": []})
     return pairs[pairIdx]
 
   def _popSubtileAccVgprReads(self, elementIdx: int) -> Module:
@@ -4288,7 +4384,7 @@ class GlobalWriteBatchWriter:
     for q in sorted(groups.keys()):
       self._weaveEmitGroup(module, q)
 
-  def _buildSubtileInteriorStores(self) -> Module:
+  def _buildSubtileInteriorStores(self, forceSlc: bool = False) -> Module:
     """Lever 1 (SubtileBf16EpilogueOpt Stage2) — guard-free/mask-free interior store body.
 
     Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
@@ -4339,7 +4435,7 @@ class GlobalWriteBatchWriter:
       nonlocal pending
       if pending is not None:
         mod.add(self._emitPairedStoreCommit(pending[0], pending[1], pending[2], pending[3], dscnt,
-                                            pending[4]))
+                                            pending[4], forceSlc=forceSlc))
         pending = None
 
     def issuePaired(pairAddrCalc, sumIdx0, sumIdx1, tt0, blockIdxN):
@@ -4347,7 +4443,7 @@ class GlobalWriteBatchWriter:
       if usePermlane16:
         mod.add(self._emit16bitSubtilePairedStore(
           pairAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0,
-          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+          blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
         return
       buf = pipeK % 2
       issueMod, globalOffset = self._emitPairedStoreIssue(packBuf[buf], addrBuf[buf],
@@ -4391,7 +4487,7 @@ class GlobalWriteBatchWriter:
           commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
-                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
       else:
         # sba=0 element: defer the SrdD row increment (as the guarded path does).
         # Under absolute addressing the cursor must not move at all: this path is
@@ -4407,7 +4503,7 @@ class GlobalWriteBatchWriter:
           commitPending(dscnt=0)
           sumIdx0 = self.ss.elementSumIdx[elementIdx]
           mod.add(self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0,
-                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True))
+                    blockIdxM=tt0, blockIdxN=blockIdxN, interior=True, forceSlc=forceSlc))
     # Drain the final pipelined group, then flush any deferred SRD increment.
     commitPending(dscnt=0)
     if pendingInc is not None:
@@ -4833,6 +4929,286 @@ class GlobalWriteBatchWriter:
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
     return module
 
+  def _emit16bitSubtilePairedStoreRepack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
+                                         partnerSumIdx0: int, partnerSumIdx1: int, partnerAddrCalc,
+                                         tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0,
+                                         weavePairA=None, weavePairB=None, forceSlc: bool = False) -> Module:
+    """DPP store-repack (SubtileStoreCachelineFill) on the Phase1/Phase2 PLSIN path.
+
+    Folds this paired store (batchA = sumIdx0/1 at addrCalc, m-rows 0-31) with the
+    partner pair (batchB = partnerSumIdx0/1 at partnerAddrCalc, m-rows 32-63) — the
+    two pairs share the same 16 cache lines — into TWO all-lanes coalesced stores
+    that each fully fill 8 128B lines (write amplification A -> 1.0), replacing the
+    four half-line paired stores.  Same store count (2) and bytes written as the two
+    un-folded pairs; only the address map changes.
+
+    batchA and batchB are packed (v_cvt_pk) and cross-lane-assembled with the SAME
+    shuffle this kernel uses for the un-folded store (v_permlane16_swap on gfx950
+    MI16, else ds_bpermute + v_permlane32_swap).  The assembled payloads then feed a
+    v_cndmask DPP blend: even lanes carry batchA (CL bytes 0-63), odd lanes carry
+    batchB pulled from the paired even-lane neighbour via quad_perm (CL bytes 64-127):
+      Store 1 (quad_perm [0,0,2,2]): even n-columns (n=0,2,..,14)
+      Store 2 (quad_perm [1,1,3,3]): odd  n-columns (n=1,3,..,15)
+
+    Cross-lane DPP under partial exec is broken on gfx950 (an exec-inactive source
+    lane returns the destination register's own value, not the requested cross-lane
+    value), so the blend MUST use v_cndmask with every DPP read under FULL exec —
+    never exec-masked DPP.
+
+    Valid only on 256-aligned full macrotiles (no partial-tile masking emitted here);
+    the caller gates it on the all-4-M-blocks-valid path.  Requires the 18-VGPR cvt
+    allocation (isSubtileFold), i.e. cvtVgprStruct.vgprStoreData >= 0.
+
+    PLSIN weave (weavePairA/B): the fold replaces the two un-folded paired stores of
+    weave pairs P-1 (batchA) and P (batchB).  Each un-folded woven store registers an
+    empty gap Module (via _weaveCapturePair) that _planCapturedTerminalMfmas later fills
+    with future pairs' terminal MFMAs whose accvgpr_read consumers sit far enough after
+    the gap anchor.  When weavePairA/B are given (weave-capture active, fused path), do
+    the same here: register a gap before store 1 (pair P-1) and between stores 1 and 2
+    (pair P), so PLSIN1's MFMA latency-hiding survives the fold.  The reads for both
+    pairs are already registered by the caller's _popSubtileAccVgprReads; only the gaps
+    were missing.  The moved MFMAs are future pairs' -> disjoint from every register live
+    here (cvt scratch + batchA's reused ValuC slots).
+    """
+    module = Module("16bitSubtilePairedStoreRepack")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    typeStr = "fp16" if isFp16 else "bf16"
+
+    ntd = self.kernel["NonTemporalD"]
+    isGlc = bool(ntd & 0x1)
+    isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
+    isNT  = bool(ntd & 0x4)
+
+    vPack        = self.cvtVgprStruct.vgprBf16Temp    # +0..3  batchA packed/assembled dwords (2-aligned, cvt)
+    vVoff        = self.cvtVgprStruct.vgprVoff        # per-store voffset (cndmask result, cvt)
+    vBlend       = self.cvtVgprStruct.vgprBlendTmp    # shared temp: odd-data / store-2 even-addr (cvt)
+    vPermAddr    = self.cvtVgprStruct.vgprPermAddr
+    vLGDelta     = self.cvtVgprStruct.vgprLaneGroupDelta
+    vAddrScratch = self.cvtVgprStruct.vgprAddrScratch
+    addrDVgpr    = addrCalc.addrDVgpr
+
+    # ValuC-slot reuse (Stage 4): batchA's accumulator slots become dead the moment
+    # packPair(vPack, batchA) consumes them -- batchA (the earlier pair) is stored ONLY by
+    # this fold, so its two sba elements' 4-slot windows [sumIdx0..sumIdx0+3] and
+    # [sumIdx1..sumIdx1+3] are never read again.  For subtile kernels the whole ValuC block is
+    # pool-RESERVED (KernelWriterAssembly skips the "add ValuC back as available" for
+    # UseSubtileImpl), so those slots are conservatively held, not genuinely live -- reuse
+    # them for the batchB pack (vPack2) and the blended store src (vSD) instead of fresh cvt
+    # scratch.  vc(sumIdx,0)'s absolute VGPR index is sumIdx (prefixOffset == startVgprValu);
+    # each element's 4 accumulators are contiguous (a valid dwordx4 window) though the two
+    # elements themselves need NOT be adjacent.  This drops the cvt fold block from 17 to 9
+    # and never grows the high-water past ValuC, which is what lets near-cap tiles host the fold.
+    assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0, \
+      f"ValuC reuse needs 2-aligned batchA element windows (sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
+    vPack2       = sumIdx0   # batchA sba0's 4 dead ValuC slots  -> batchB packed data
+    vSD          = sumIdx1   # batchA sba1's 4 dead ValuC slots  -> blended store src
+
+    permlane16 = getattr(self, "_permlane16Active", False)
+
+    # Fold convert-interleave: on the permlane16 path the cross-lane assembly can be
+    # deferred past a gap, so emit Phase1(converts) -> convert-gap -> Phase2(assembly +
+    # coalesced stores).  The planner seeds the convert-gap with a bounded quota of
+    # terminal MFMAs and LogicalScheduler._interleaveStoreConvertIntoGapMfmas spreads the
+    # 8 converts into their issue shadows.  Otherwise (ds_bpermute, or feature off)
+    # phase1Mod == phase2Mod == module, so the store is emitted monolithically in the SAME
+    # order as before -- byte-identical.  (An empty convert-gap is likewise byte-identical:
+    # phase1[converts] + <empty gap> + phase2[assembly...] flattens to the monolithic order.)
+    foldCvtInterleave = (permlane16 and weavePairB is not None and PLSIN_FOLD_CVT_INTERLEAVE)
+    if foldCvtInterleave:
+      phase1Mod = Module("16bitSubtileRepackPhase1")
+      phase2Mod = Module("16bitSubtileRepackPhase2")
+    else:
+      phase1Mod = phase2Mod = module
+
+    def vc(sumIdx, vi):
+      idx = sumIdx + vi - prefixOffset
+      return vgpr("ValuC+" + str(idx))
+
+    def packPair(dst, src0, src1, comment):
+      phase1Mod.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
+
+    partnerTt0 = tt0 + 2
+    phase1Mod.addComment1(f"DPP repack tt0={tt0}+{partnerTt0}: pack batchA -> v[{vPack}:{vPack+3}], batchB -> v[{vPack2}:{vPack2+3}]")
+    packPair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"batchA sba=0 tt0={tt0}[0:1]")
+    packPair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"batchA sba=0 tt0={tt0}[2:3]")
+    packPair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"batchA sba=1 tt0={tt0}[0:1]")
+    packPair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"batchA sba=1 tt0={tt0}[2:3]")
+    packPair(vPack2+0, vc(partnerSumIdx0, 0), vc(partnerSumIdx0, 1), f"batchB sba=0 tt0={partnerTt0}[0:1]")
+    packPair(vPack2+1, vc(partnerSumIdx0, 2), vc(partnerSumIdx0, 3), f"batchB sba=0 tt0={partnerTt0}[2:3]")
+    packPair(vPack2+2, vc(partnerSumIdx1, 0), vc(partnerSumIdx1, 1), f"batchB sba=1 tt0={partnerTt0}[0:1]")
+    packPair(vPack2+3, vc(partnerSumIdx1, 2), vc(partnerSumIdx1, 3), f"batchB sba=1 tt0={partnerTt0}[2:3]")
+
+    # Cross-lane assembly — identical to the un-folded paired store, for BOTH batches.
+    # In the convert-interleave path this lands in Phase2 (after the convert-gap), so the
+    # converts complete in the gap before the permlane reads vPack/vPack2.
+    if permlane16:
+      phase2Mod.addComment1("v_permlane16_swap_b32: assemble batchA + batchB (no ds_bpermute)")
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack+0),  src=vgpr(vPack+2),  comment="A swap dwords 0<->2"))
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack+1),  src=vgpr(vPack+3),  comment="A swap dwords 1<->3"))
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack2+0), src=vgpr(vPack2+2), comment="B swap dwords 0<->2"))
+      phase2Mod.add(VPermlane16SwapB32(dst=vgpr(vPack2+1), src=vgpr(vPack2+3), comment="B swap dwords 1<->3"))
+    else:
+      phase2Mod.addComment1("ds_bpermute + v_permlane32_swap_b32: assemble batchA + batchB")
+      for k in range(4):
+        phase2Mod.add(DSBPermuteB32(dst=vgpr(vPack+k),  src0=vgpr(vPermAddr), src1=vgpr(vPack+k),  comment=f"A perm dword {k}"))
+      for k in range(4):
+        phase2Mod.add(DSBPermuteB32(dst=vgpr(vPack2+k), src0=vgpr(vPermAddr), src1=vgpr(vPack2+k), comment=f"B perm dword {k}"))
+      phase2Mod.add(SWaitCnt(dscnt=0, comment="wait for batchA+batchB ds_bpermute (lgkmcnt=0)"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack+0),  src=vgpr(vPack+2),  comment="A swap dwords 0<->2"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack+1),  src=vgpr(vPack+3),  comment="A swap dwords 1<->3"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack2+0), src=vgpr(vPack2+2), comment="B swap dwords 0<->2"))
+      phase2Mod.add(VPermlane32SwapB32(dst=vgpr(vPack2+1), src=vgpr(vPack2+3), comment="B swap dwords 1<->3"))
+
+    # batchA per-lane store address into vAddrScratch (same compute as Phase1).
+    bpeCurr = self.parentWriter.states.bpeCexternal
+    bpeDest = self.parentWriter.states.bpeCexternalGSU1
+    addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
+    vRowDelta = vPermAddr if permlane16 else vLGDelta
+    deltaStr  = "(lane_group&1)*12rows" if permlane16 else "lane_group*8"
+    if addrScaleShift:
+      phase2Mod.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
+                                 src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
+      phase2Mod.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(vAddrScratch), src1=vgpr(vRowDelta),
+                         comment=f"adjusted D addr = scaled addrDVgpr + {deltaStr}"))
+    else:
+      phase2Mod.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vRowDelta),
+                         comment=f"adjusted D addr = addrDVgpr + {deltaStr}"))
+    # This recompute clobbers any hoisted-addr reuse; force the next store to recompute.
+    self._subtileHoistedAddrDVgpr = -1
+    self._subtileHoistedAddrBlockN = -1
+
+    globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
+    # batchB's m-base sits halfLine (=64) bytes above batchA within the same cache line.
+    halfLine = (partnerAddrCalc.globalOffset * bpeDest // bpeCurr) - globalOffset
+
+    # Odd-lane mask (0xAAAA...) for every v_cndmask blend — set once, never overwritten.
+    oddMask = self.tmpS23
+    phase2Mod.add(SMovB32(dst=sgpr(oddMask),   src=hex(0xAAAAAAAA), comment="odd-lane mask lo32"))
+    phase2Mod.add(SMovB32(dst=sgpr(oddMask+1), src=hex(0xAAAAAAAA), comment="odd-lane mask hi32"))
+
+    def emitCoalescedStore(evenPerm, oddPerm, tag):
+      # Data blend (cndmask): even <- evenPerm(batchA), odd <- oddPerm(batchB).
+      # EVERY DPP read is under FULL exec; vBlend is the odd-data temp.
+      phase2Mod.addComment1(f"{tag} data blend: even<-batchA odd<-batchB (cndmask, full-exec DPP)")
+      for k in range(4):
+        if evenPerm is None:
+          phase2Mod.add(VMovB32(dst=vgpr(vSD+k), src=vgpr(vPack+k),
+                             comment=f"{tag} d{k}: vSD<-batchA"))
+        else:
+          phase2Mod.add(VMovB32(dst=vgpr(vSD+k), src=vgpr(vPack+k),
+                             dpp=DPPModifiers(quad_perm=evenPerm),
+                             comment=f"{tag} d{k}: vSD<-batchA perm {evenPerm}"))
+        phase2Mod.add(VMovB32(dst=vgpr(vBlend), src=vgpr(vPack2+k),
+                           dpp=DPPModifiers(quad_perm=oddPerm),
+                           comment=f"{tag} d{k}: vBlend<-batchB perm {oddPerm} (full exec)"))
+        phase2Mod.add(VCndMaskB32(dst=vgpr(vSD+k), src0=vgpr(vSD+k), src1=vgpr(vBlend),
+                               src2=sgpr(oddMask, self.laneSGPRC),
+                               comment=f"{tag} d{k}: odd lanes <- batchB"))
+      # Voffset blend (cndmask): odd <- oddPerm(addr)+halfLine; even <- base addr
+      # (store 1) or evenPerm(addr) via vBlend (store 2).  All DPP reads full exec.
+      phase2Mod.addComment1(f"{tag} voffset blend (cndmask)")
+      phase2Mod.add(VMovB32(dst=vgpr(vVoff), src=vgpr(vAddrScratch),
+                         dpp=DPPModifiers(quad_perm=oddPerm),
+                         comment=f"{tag} vVoff <- addr perm {oddPerm} (full exec)"))
+      phase2Mod.add(VAddU32(dst=vgpr(vVoff), src0=vgpr(vVoff), src1=hex(halfLine),
+                         comment=f"{tag} vVoff += {halfLine}B"))
+      if evenPerm is None:
+        evenVoffSrc = vAddrScratch
+      else:
+        phase2Mod.add(VMovB32(dst=vgpr(vBlend), src=vgpr(vAddrScratch),
+                           dpp=DPPModifiers(quad_perm=evenPerm),
+                           comment=f"{tag} vBlend <- addr perm {evenPerm} (full exec)"))
+        evenVoffSrc = vBlend
+      phase2Mod.add(VCndMaskB32(dst=vgpr(vVoff), src0=vgpr(evenVoffSrc), src1=vgpr(vVoff),
+                             src2=sgpr(oddMask, self.laneSGPRC),
+                             comment=f"{tag} even<-base/perm addr, odd<-perm+half"))
+      # One all-lanes coalesced store (even -> batchA half, odd -> batchB half).
+      phase2Mod.add(BufferStoreB128(src=vgpr(vSD, 4), vaddr=vgpr(vVoff), saddr=sgpr("SrdD", 4), soffset=0,
+                 mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
+                 comment=f"{tag}: all-lanes coalesced store (8 full 128B lines)"))
+      phase2Mod.add(SNop(waitState=0, comment="WAR: latch store src before next repack store"))
+
+    # PLSIN weave gap B (role="store"): between the two coalesced stores, it hides store-1's
+    # ~460-cycle memory latency behind terminal MFMAs (the un-folded woven store has no
+    # analogue).  Registered on capture["gaps"]; _planCapturedTerminalMfmas seeds it per its
+    # role.  The convert-gap (role="cvt") is registered separately below in the interleave
+    # path.  gapAnchor = the last instruction before the gap, so the planner can measure the
+    # anchor->consumer cycle distance.
+    def _captureFoldGap(weavePair, tag, targetMod, role="store"):
+      if weavePair is None:
+        return
+      capture = self._weaveCapturePair(weavePair)
+      if capture is None:
+        return
+      flat = list(targetMod.flatitems())
+      gap = Module(f"PlsinFoldGap_pair{weavePair}_{tag}")
+      capture.setdefault("gaps", []).append(
+        {"gap": gap, "gapAnchor": flat[-1] if flat else None, "role": role})
+      targetMod.add(gap)
+
+    _captureFoldGap(weavePairA, "A", phase2Mod)
+    phase2Mod.addComment1("DPP repack store 1: even n-columns (quad_perm [0,0,2,2])")
+    emitCoalescedStore(evenPerm=None,      oddPerm=[0,0,2,2], tag=f"even-cols tt0={tt0}")
+    _captureFoldGap(weavePairB, "B", phase2Mod)
+    phase2Mod.addComment1("DPP repack store 2: odd n-columns (quad_perm [1,1,3,3])")
+    emitCoalescedStore(evenPerm=[1,1,3,3], oddPerm=[1,1,3,3], tag=f"odd-cols tt0={tt0}")
+
+    if foldCvtInterleave:
+      # Assemble Phase1(converts) -> convert-gap -> Phase2(assembly + coalesced stores)
+      # under the outer module.  The convert-gap is a top-level "PlsinGap_" module (matched
+      # by _interleaveStoreConvertIntoGapMfmas); gap B stays nested inside Phase2 with the
+      # "PlsinFoldGap_" prefix (NOT matched by the convert interleaver).  Anchor the
+      # convert-gap at the last convert so the planner measures anchor->consumer cycles.
+      module.add(phase1Mod)
+      capture = self._weaveCapturePair(weavePairB)
+      if capture is not None:
+        p1flat = list(phase1Mod.flatitems())
+        cvtGap = Module(f"PlsinGap_foldcvt_pair{weavePairB}")
+        capture.setdefault("gaps", []).append(
+          {"gap": cvtGap, "gapAnchor": p1flat[-1] if p1flat else None, "role": "cvt"})
+        module.add(cvtGap)
+      module.add(phase2Mod)
+      for sub in (phase1Mod, phase2Mod):
+        assert not any(isinstance(i, SBarrier) for i in sub.flatitems()), \
+          "DPP repack phase must be barrier-free (no s_barrier in the MFMA-interleaved store)"
+
+    assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
+      "DPP repack must be barrier-free (no s_barrier in the MFMA-interleaved store)"
+    return module
+
+  def _emitGuardedPairedNoRepack(self, storeCodeModule, sba0Idx: int, sba1Idx: int, prefixOffset: int, blockIdxN: int, forceSlc: bool = False):
+    """Non-repack guarded paired store for one (sba=0, sba=1) pair — the DPP-fold
+    fallback when not all 4 M-blocks are valid at runtime.  No N-group OOB guard here
+    (the caller already emitted it for the fold); only the both-blocks-valid check +
+    scalar fallback."""
+    tt0      = self.batchElements[sba1Idx][1]
+    addrCalc = self.ss.elementAddr[sba0Idx]
+    sIdx0    = self.ss.elementSumIdx[sba0Idx]
+    sIdx1    = self.ss.elementSumIdx[sba1Idx]
+    blockIdxM = tt0 - 1
+    guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+    if guardMSgpr is not None:
+      afterL = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"), f"after fb-paired tt0={tt0}")
+      fbL    = Label(self.parentWriter.labels.getNameInc("subtile_scalar_fallback"), f"fb scalar d0={tt0-1}")
+      storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
+                                     comment=f"fb-paired: both M-blocks valid? (MGuard > {tt0})"))
+      storeCodeModule.add(SCBranchSCC0(labelName=fbL.getLabelName(), comment=f"only d0={tt0-1} valid -> scalar"))
+      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
+      storeCodeModule.add(SBranch(labelName=afterL.getLabelName(), comment="skip scalar"))
+      storeCodeModule.add(fbL)
+      # Guard: sba=0 (M-block tt0-1) must be valid before writing the scalar orphan store.
+      # The paired guard above checked MGuard > tt0; if MGuard ≤ tt0-1 then even sba=0 is
+      # OOB and neither store should fire.  Without this guard the orphan store writes zeros
+      # to valid D addresses when the ValuC-slot reuse has clobbered the source registers.
+      storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0 - 1,
+                                     comment=f"fb-scalar: sba=0 valid? (MGuard > {tt0-1})"))
+      storeCodeModule.add(SCBranchSCC0(labelName=afterL.getLabelName(), comment=f"sba=0 OOB -> skip scalar store"))
+      storeCodeModule.add(self._emit16bitSubtileScalarStore(addrCalc, sIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
+      storeCodeModule.add(afterL)
+    else:
+      storeCodeModule.add(self._emit16bitSubtilePairedStore(addrCalc, sIdx0, sIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN, forceSlc=forceSlc))
+
   # -------------------------------------------------------------------------
   # SubtileBpermutePipelining (quest): split the paired-store transpose into an
   # ISSUE phase (pack + ds_bpermute + address) and a COMMIT phase (wait + permlane
@@ -4883,7 +5259,7 @@ class GlobalWriteBatchWriter:
     return module, globalOffset
 
   def _emitPairedStoreCommit(self, vPack: int, vAddrScratch: int, globalOffset: int, tt0: int,
-                             dscnt: int, addrCalc):
+                             dscnt: int, addrCalc, forceSlc: bool = False):
     """COMMIT half of the pipelined paired store: wait for this group's ds_bpermute
     (leaving `dscnt` younger ds ops in flight), do the 2 permlane swaps, and emit the
     dwordx4 store.  `dscnt` = number of ds_bpermute from LATER groups still in flight
@@ -4891,7 +5267,7 @@ class GlobalWriteBatchWriter:
     module = Module("pairedStoreCommit")
     ntd = self._epilogueNtd()
     isGlc = bool(ntd & 0x1)
-    isSlc = bool(ntd & 0x2)
+    isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
     isNT  = bool(ntd & 0x4)
     module.add(SWaitCnt(dscnt=dscnt, comment=f"[pipeline] wait this group's ds_bpermute; {dscnt} younger ds in flight (tt0={tt0})"))
     module.addComment1("v_permlane32_swap_b32: swap across lane-32 boundary")

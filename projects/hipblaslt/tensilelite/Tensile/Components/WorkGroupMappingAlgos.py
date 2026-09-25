@@ -390,6 +390,149 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     return module
 
+# Grid shapes the bit swizzle is derived for. The two cases describe the SAME
+# tile partition and the SAME per-XCD walk order; they differ only in which
+# tensor dimension is the long one:
+#   TALL: WorkGroup0 (M-tiles) is a 7-bit index (128), WorkGroup1 (N-tiles) 4-bit (16)
+#   WIDE: WorkGroup0 (M-tiles) is a 4-bit index (16),  WorkGroup1 (N-tiles) 7-bit (128)
+_BITSWIZZLE_TALL_WG0 = 128
+_BITSWIZZLE_TALL_WG1 = 16
+_BITSWIZZLE_WIDE_WG0 = 16
+_BITSWIZZLE_WIDE_WG1 = 128
+
+def _bitSwizzleTall(sgprM, sgprN, sgprTmp):
+    """128 M-tiles x 16 N-tiles: the long (partitioned) dimension is M, so the
+    XCD id lands in m_tile[6:4] and each XCD owns m in [16*XCD, 16*XCD+16)."""
+    module = Module("WGMBitSwizzleTall")
+    module.addComment0("m_tile = ((WG0>>3)&3) | (WG1&0xC) | ((WG0&7)<<4)")
+    module.add(SLShiftRightB32(dst=sgpr(sgprM), shiftHex=hex(3), src=sgpr("WorkGroup0"), comment="WG0>>3"))
+    module.add(SAndB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=hex(0x3), comment="& 3 -> m[1:0]"))
+    module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=hex(0xC), comment="WG1 & 0xC -> m[3:2]"))
+    module.add(SOrB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=sgpr(sgprTmp), comment="m |= WG1&0xC"))
+    module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup0"), src1=hex(0x7), comment="WG0 & 7 == XCD"))
+    module.add(SLShiftLeftB32(dst=sgpr(sgprTmp), shiftHex=hex(4), src=sgpr(sgprTmp), comment="<<4 -> m[6:4]"))
+    module.add(SOrB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=sgpr(sgprTmp), comment="m |= XCD<<4"))
+
+    module.addComment0("n_tile = ((WG0>>5)&3) | ((WG1&3)<<2)")
+    module.add(SLShiftRightB32(dst=sgpr(sgprN), shiftHex=hex(5), src=sgpr("WorkGroup0"), comment="WG0>>5"))
+    module.add(SAndB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=hex(0x3), comment="& 3 -> n[1:0]"))
+    module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr("WorkGroup1"), src1=hex(0x3), comment="WG1 & 3"))
+    module.add(SLShiftLeftB32(dst=sgpr(sgprTmp), shiftHex=hex(2), src=sgpr(sgprTmp), comment="<<2 -> n[3:2]"))
+    module.add(SOrB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=sgpr(sgprTmp), comment="n |= (WG1&3)<<2"))
+
+    module.addComment0("write swizzled tiles back: WorkGroup0=m_tile, WorkGroup1=n_tile")
+    module.add(SMovB32(dst=sgpr("WorkGroup0"), src=sgpr(sgprM), comment="WorkGroup0 = m_tile"))
+    module.add(SMovB32(dst=sgpr("WorkGroup1"), src=sgpr(sgprN), comment="WorkGroup1 = n_tile"))
+    return module
+
+def _bitSwizzleWide(sgprM, sgprN, sgprTmp):
+    """16 M-tiles x 128 N-tiles: the long (partitioned) dimension is N, so the
+    XCD id lands in n_tile[7:4] and each XCD owns n in [16*XCD, 16*XCD+16).
+
+    This is the exact mirror image of _bitSwizzleTall -- relabelling m<->n makes
+    the two per-XCD dispatch-order tables identical cell for cell. In terms of
+    the per-XCD dispatch index t (= g>>3, g being the launch id), both place the
+    partitioned dimension's low 2 bits at t[1:0], the shared dimension's 4 bits
+    at t[5:2], and the partitioned dimension's high 2 bits at t[7:6], which is
+    what gives the compact 4-deep x 8-wide resident window and walks the shared
+    dimension's tiles in strict ascending order (no m0,m8,m1,m9 interleave)."""
+    module = Module("WGMBitSwizzleWide")
+    module.addComment0("m_tile = (WG1>>1)&0xF")
+    module.add(SLShiftRightB32(dst=sgpr(sgprM), shiftHex=hex(1), src=sgpr("WorkGroup1"), comment="WG1>>1"))
+    module.add(SAndB32(dst=sgpr(sgprM), src0=sgpr(sgprM), src1=hex(0xF), comment="& 15 -> m[3:0]"))
+
+    module.addComment0("n_tile = ((WG0&7)<<4) | ((WG1>>3)&0xC) | ((WG1<<1)&2) | ((WG0>>3)&1)")
+    module.add(SAndB32(dst=sgpr(sgprN), src0=sgpr("WorkGroup0"), src1=hex(0x7), comment="WG0 & 7 == XCD"))
+    module.add(SLShiftLeftB32(dst=sgpr(sgprN), shiftHex=hex(4), src=sgpr(sgprN), comment="<<4 -> n[7:4]"))
+    module.add(SLShiftRightB32(dst=sgpr(sgprTmp), shiftHex=hex(3), src=sgpr("WorkGroup1"), comment="WG1>>3"))
+    module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=hex(0xC), comment="& 0xC -> n[3:2]"))
+    module.add(SOrB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=sgpr(sgprTmp), comment="n |= n[3:2]"))
+    module.add(SLShiftLeftB32(dst=sgpr(sgprTmp), shiftHex=hex(1), src=sgpr("WorkGroup1"), comment="WG1<<1"))
+    module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=hex(0x2), comment="& 2 -> n[1]"))
+    module.add(SOrB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=sgpr(sgprTmp), comment="n |= n[1]"))
+    module.add(SLShiftRightB32(dst=sgpr(sgprTmp), shiftHex=hex(3), src=sgpr("WorkGroup0"), comment="WG0>>3"))
+    module.add(SAndB32(dst=sgpr(sgprTmp), src0=sgpr(sgprTmp), src1=hex(0x1), comment="& 1 -> n[0]"))
+    module.add(SOrB32(dst=sgpr(sgprN), src0=sgpr(sgprN), src1=sgpr(sgprTmp), comment="n |= n[0]"))
+
+    module.addComment0("write swizzled tiles back: WorkGroup0=m_tile, WorkGroup1=n_tile")
+    module.add(SMovB32(dst=sgpr("WorkGroup0"), src=sgpr(sgprM), comment="WorkGroup0 = m_tile"))
+    module.add(SMovB32(dst=sgpr("WorkGroup1"), src=sgpr(sgprN), comment="WorkGroup1 = n_tile"))
+    return module
+
+def WGMBitSwizzle(writer, kernel, sgprWGM):
+    """
+    Bit-permutation workgroup swizzle (pure shift/mask, no division).
+
+    At kernel entry WorkGroup0 = g % NumWorkGroups0 (hardware x, fastest moving)
+    and WorkGroup1 = g // NumWorkGroups0, so the linear id is
+        g = WorkGroup1 * NumWorkGroups0 + WorkGroup0.
+    The hardware hands workgroups to XCDs round-robin, XCD = g % NUM_XCD, and
+    because both supported grids have NumWorkGroups0 divisible by 8 this is just
+    WorkGroup0 & 7 -- the swizzle routes those 3 bits to the top of the
+    partitioned dimension so each XCD ends up owning 16 consecutive tiles of it.
+
+    Two power-of-two grids are recognised, and they express the SAME mapping
+    with the roles of M and N exchanged:
+
+      128 x 16 (M=32768, N=4096 at MT256):   XCD owns 16 m-tiles x all 16 n
+        m_tile = ((WG0>>3)&3) | (WG1&0xC) | ((WG0&7)<<4)
+        n_tile = ((WG0>>5)&3) | ((WG1&3)<<2)
+
+      16 x 128 (M=4096, N=32768 at MT256):   XCD owns 16 n-tiles x all 16 m
+        m_tile = (WG1>>1)&0xF
+        n_tile = ((WG0&7)<<4) | ((WG1>>3)&0xC) | ((WG1<<1)&2) | ((WG0>>3)&1)
+
+    In both cases each XCD walks its 16x16 block as four 4-deep sub-bands swept
+    across all 16 tiles of the shared dimension, so the 32 workgroups resident on
+    an XCD (32 CUs at occupancy 1) form a 4 x 8 rectangle touching 12 distinct
+    operand panels rather than the 18 that a 16 x 2 sliver would need. The shared
+    dimension's tiles are requested in ascending order, without the interleave
+    that DefaultWGM's divide-based mapping produces on a 16-wide grid.
+
+    The result is written back into WorkGroup0 (= m_tile) and WorkGroup1
+    (= n_tile) so downstream address generation is unchanged. Any other grid
+    falls through to DefaultWGM at runtime rather than miscompute.
+    """
+    module = Module("graWGMBitSwizzle")
+    module.addComment0("Bit-permutation WGM swizzle (shift/mask, no divide)")
+
+    labelWide     = Label(label=writer.labels.getNameInc("WGMBitWide"), comment="grid != 128x16 -> try 16x128")
+    labelFallback = Label(label=writer.labels.getNameInc("WGMBitFallback"), comment="unrecognised grid -> DefaultWGM")
+    labelEnd      = Label(label=writer.labels.getNameInc("WGMBitEnd"), comment="")
+
+    # Runtime guard: only apply a swizzle for the exact power-of-two grids it was
+    # derived for; otherwise use the general DefaultWGM path.
+    if not clusterEnabled(kernel["ClusterDim"]):
+        with writer.allocTmpSgpr(3, tag="WGMBit_tmpSgpr") as tmpSgprInfo:
+            sgprM   = tmpSgprInfo.idx      # m_tile accumulator
+            sgprN   = tmpSgprInfo.idx + 1  # n_tile accumulator
+            sgprTmp = tmpSgprInfo.idx + 2  # scratch
+
+            module.addComment0("case 1: 128 M-tiles x 16 N-tiles")
+            module.add(SCmpEQU32(src0=sgpr("NumWorkGroups0"), src1=_BITSWIZZLE_TALL_WG0, comment="NumWorkGroups0 == 128 ?"))
+            module.add(SCBranchSCC0(labelName=labelWide.getLabelName(), comment="not 128 M-tiles -> try the 16x128 grid"))
+            module.add(SCmpEQU32(src0=sgpr("NumWorkGroups1"), src1=_BITSWIZZLE_TALL_WG1, comment="NumWorkGroups1 == 16 ?"))
+            module.add(SCBranchSCC0(labelName=labelFallback.getLabelName(), comment="128 M-tiles but not 16 N-tiles -> DefaultWGM"))
+            module.add(_bitSwizzleTall(sgprM, sgprN, sgprTmp))
+            module.add(SBranch(labelName=labelEnd.getLabelName(), comment="skip DefaultWGM"))
+
+            module.add(labelWide)
+            module.addComment0("case 2: 16 M-tiles x 128 N-tiles (mirror image of case 1)")
+            module.add(SCmpEQU32(src0=sgpr("NumWorkGroups0"), src1=_BITSWIZZLE_WIDE_WG0, comment="NumWorkGroups0 == 16 ?"))
+            module.add(SCBranchSCC0(labelName=labelFallback.getLabelName(), comment="fall back if not 16 M-tiles"))
+            module.add(SCmpEQU32(src0=sgpr("NumWorkGroups1"), src1=_BITSWIZZLE_WIDE_WG1, comment="NumWorkGroups1 == 128 ?"))
+            module.add(SCBranchSCC0(labelName=labelFallback.getLabelName(), comment="fall back if not 128 N-tiles"))
+            module.add(_bitSwizzleWide(sgprM, sgprN, sgprTmp))
+
+        module.add(SBranch(labelName=labelEnd.getLabelName(), comment="skip DefaultWGM"))
+
+    # Fallback path (also the ClusterDim path): general DefaultWGM.
+    module.add(labelFallback)
+    module.add(DefaultWGM(writer, kernel, sgprWGM))
+    module.add(labelEnd)
+
+    return module
+
 def chiplet_transform_chunked(writer, kernel, sgprNumXCC, sgprIndex, sgprNumWG, sgprChunkSize):
     module = Module()
 

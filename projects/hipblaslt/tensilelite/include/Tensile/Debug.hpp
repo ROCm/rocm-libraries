@@ -95,6 +95,11 @@ namespace TensileLite
         // on 0x200000 above.
         bool printNoSolutionUniformSummationOrder() const;
 
+        // Gated by TENSILE_DB bit 0x80000. Reports the launch grid in tile units and,
+        // for WGMBitSwizzle solutions, whether that grid actually triggers the swizzle
+        // or silently falls back to DefaultWGM.
+        bool printWorkGroupMapping() const;
+
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;

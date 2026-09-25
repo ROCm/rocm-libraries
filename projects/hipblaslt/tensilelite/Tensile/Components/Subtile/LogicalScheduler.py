@@ -4904,7 +4904,10 @@ class LogicalScheduler:
             if not isinstance(mod, Module):
                 return
             name = getattr(mod, "name", "") or ""
-            if name == "16bitSubtilePairedStoreWoven":
+            # The un-folded woven store AND the DPP fold (convert-interleave path) both use
+            # the Phase1(converts)/PlsinGap_/Phase2 shape; the fold just carries two batches'
+            # worth of converts (8) and a coalesced Phase2.
+            if name in ("16bitSubtilePairedStoreWoven", "16bitSubtilePairedStoreRepack"):
                 if self._rewriteOneWovenPair(mod, valuPerGap):
                     rewritten += 1
                 return
@@ -4920,11 +4923,11 @@ class LogicalScheduler:
         others = []
         for child in list(woven.items()):
             cname = getattr(child, "name", "") or ""
-            if cname == "16bitSubtilePairedStorePhase1":
+            if cname in ("16bitSubtilePairedStorePhase1", "16bitSubtileRepackPhase1"):
                 phase1 = child
             elif cname.startswith("PlsinGap_"):
                 gap = child
-            elif cname == "16bitSubtilePairedStorePhase2":
+            elif cname in ("16bitSubtilePairedStorePhase2", "16bitSubtileRepackPhase2"):
                 phase2 = child
             else:
                 others.append(child)
@@ -4981,19 +4984,34 @@ class LogicalScheduler:
 
         flat = list(storeModule.flatitems())
         position = {id(item): idx for idx, item in enumerate(flat)}
+        # DPP fold convert-gap quota: siphon at most this many terminal MFMAs into a
+        # role="cvt" gap (enough to shadow the 8 converts at TENSILE_PLSIN_CVT_PER_GAP each,
+        # ceil(8/2)=4 by default); leave the rest to the role="store" gap B so store-latency
+        # hiding is not starved.  gapBFloor keeps a minimum of qualifying MFMAs for gap B.
+        # When no role=="cvt" gap is present (every un-folded woven capture) cvtQuota stays 0
+        # and this function is behaviorally identical to before.
+        cvtQuotaEnv = int(plsinDebugEnv("TENSILE_PLSIN_FOLD_CVT_MFMAS", "4"))
+        gapBFloor = int(plsinDebugEnv("TENSILE_PLSIN_FOLD_GAPB_FLOOR", "0"))
         plans = []
         for capture in captures:
             consumers = {}
             consumedRegs = {}
             seenReadIds = set()
-            candidates = []
+            candidates = []   # (anchorPos, gap, role)
             validCapture = True
             for pair in capture.get("pairs", []):
+                # Legacy single-gap slot (un-folded woven store) -> role "store".
                 gap = pair.get("gap")
                 anchor = pair.get("gapAnchor")
                 anchorPos = position.get(id(anchor))
                 if gap is not None and anchorPos is not None:
-                    candidates.append((anchorPos, gap))
+                    candidates.append((anchorPos, gap, "store"))
+                # New multi-gap list (the DPP fold registers convert-gap + gap B here).
+                for gentry in pair.get("gaps", []):
+                    g = gentry.get("gap")
+                    gAnchorPos = position.get(id(gentry.get("gapAnchor")))
+                    if g is not None and gAnchorPos is not None:
+                        candidates.append((gAnchorPos, g, gentry.get("role", "store")))
                 for readInst, source in pair.get("reads", []):
                     ids = self._plsinRegisterIds(source)
                     readPos = position.get(id(readInst))
@@ -5012,29 +5030,63 @@ class LogicalScheduler:
                 plans.append({})
                 continue
 
-            capturePlan = {}
-            noConsumer = noSlack = 0
-            for producer in allInsts:
-                readPos = consumers.get(id(producer))
-                if (readPos is None or consumedRegs.get(id(producer)) !=
-                        writesByProducer.get(id(producer))):
-                    noConsumer += 1
-                    continue
-                safeGap = None
-                for anchorPos, gap in candidates:
+            # Split gaps by role.  cvt-gaps take a bounded quota of the earliest-qualifying
+            # producers; every other qualifying producer keeps the original last-anchored
+            # store-gap behavior.  With no cvt-gap, cvtQuota==0 -> identical to before.
+            cvtGaps = [(a, g) for (a, g, role) in candidates if role == "cvt"]
+            storeGaps = [(a, g) for (a, g, role) in candidates if role != "cvt"]
+
+            def _lastQualifyingGap(gapList, readPos):
+                chosen = None
+                for anchorPos, gap in gapList:
                     if anchorPos >= readPos:
                         continue
-                    cycles = sum(
-                        1 for item in flat[anchorPos + 1:readPos]
-                        if isinstance(item, Instruction))
+                    cycles = sum(1 for item in flat[anchorPos + 1:readPos]
+                                 if isinstance(item, Instruction))
                     if cycles >= requiredCycles:
-                        safeGap = gap
-                if safeGap is not None:
-                    capturePlan[id(producer)] = safeGap
-                else:
-                    noSlack += 1
+                        chosen = gap
+                return chosen
+
+            qualifying = [p for p in allInsts
+                          if consumers.get(id(p)) is not None
+                          and consumedRegs.get(id(p)) == writesByProducer.get(id(p))]
+            # Per-gap quota: EACH convert-gap independently receives up to cvtQuotaEnv
+            # terminal MFMAs (enough to shadow its 8 converts at TENSILE_PLSIN_CVT_PER_GAP
+            # each), so every fold's converts get interleaved -- not just the first few.
+            # cvtGlobalCap = len(qualifying) - gapBFloor reserves a minimum of qualifying
+            # MFMAs for the store gaps (gap B) so store-latency hiding is not starved.
+            cvtQuotaPerGap = cvtQuotaEnv if cvtGaps else 0
+            cvtGlobalCap = max(0, len(qualifying) - gapBFloor) if cvtGaps else 0
+            cvtCountByGap = {}
+            cvtTotal = 0
+            capturePlan = {}
+            for producer in qualifying:
+                readPos = consumers[id(producer)]
+                chosen = None
+                if cvtTotal < cvtGlobalCap:
+                    # Last-anchored qualifying convert-gap that is still under its own quota.
+                    for anchorPos, gap in cvtGaps:
+                        if anchorPos >= readPos:
+                            continue
+                        if cvtCountByGap.get(id(gap), 0) >= cvtQuotaPerGap:
+                            continue
+                        cycles = sum(1 for item in flat[anchorPos + 1:readPos]
+                                     if isinstance(item, Instruction))
+                        if cycles >= requiredCycles:
+                            chosen = gap
+                    if chosen is not None:
+                        cvtCountByGap[id(chosen)] = cvtCountByGap.get(id(chosen), 0) + 1
+                        cvtTotal += 1
+                if chosen is None:
+                    chosen = _lastQualifyingGap(storeGaps, readPos)
+                if chosen is not None:
+                    capturePlan[id(producer)] = chosen
+            # Weave-stat instrumentation (from blk-sched), mapped onto the quota algorithm:
+            # rej_noconsumer = producers without a single valid consumer; rej_noslack =
+            # qualifying producers that found no gap with enough slack.
             self._plsinWeaveStat("capture", gaps=len(candidates), placed=len(capturePlan),
-                                 rej_noconsumer=noConsumer, rej_noslack=noSlack)
+                                 rej_noconsumer=len(allInsts) - len(qualifying),
+                                 rej_noslack=len(qualifying) - len(capturePlan))
             plans.append(capturePlan)
 
         moved = {id(inst) for inst in allInsts}
