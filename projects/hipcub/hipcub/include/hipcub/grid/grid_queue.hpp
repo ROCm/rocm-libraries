@@ -30,6 +30,8 @@
 #ifndef HIPCUB_GRID_GRID_QUEUE_HPP_
 #define HIPCUB_GRID_GRID_QUEUE_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/grid/grid_queue.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

@@ -39,6 +39,20 @@ def _format_cmake_args(args):
     return " " + " ".join(_cmake_quote(arg) for arg in args)
 
 
+def _is_match_everything(pattern):
+    """True if a gtest pattern matches every test name.
+
+    `*` matches any (possibly empty) substring, so a pattern made only of `*`
+    is match-all -- `**` is just a clumsier `*`. `*.*` is also match-all in
+    practice: every gtest full name is `Suite.Test`, so the dot always matches.
+    Such a pattern under `exclude_gpu` means "exclude the whole suite", which a
+    gtest filter cannot express -- see the DISABLED handling in main().
+    """
+    if not isinstance(pattern, str) or not pattern:
+        return False
+    return set(pattern) == {"*"} or pattern == "*.*"
+
+
 def _dedupe_preserve_order(values):
     seen = set()
     result = []
@@ -434,9 +448,10 @@ def main():
         default=[],
         dest="fixtures_required",
         help=(
-            "CTest FIXTURES_REQUIRED entry applied to every generated suite. May "
-            "be repeated. Used e.g. to require a setup fixture that clears the "
-            "MIOpen kernel cache before the suite runs."
+            "CTest FIXTURES_REQUIRED entry applied to every generated suite (e.g. "
+            "a setup fixture that must run before the suite). May be repeated. "
+            "Currently applied only to the build tree; not emitted into the install "
+            "tree, since no use case requires it there yet."
         ),
     )
     parser.add_argument(
@@ -692,6 +707,8 @@ def main():
                         if env_mod_string
                         else ""
                     )
+                    # FIXTURES_REQUIRED currently applies only to the build tree; no
+                    # use case requires it in the install tree yet.
                     install_file_handle.write(
                         f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
                     )
@@ -745,6 +762,11 @@ def main():
             # This includes exact matches and hierarchical matches (e.g., gfx1150 matches gfx115X, gfx11X)
             all_applicable_patterns = []
             all_applicable_categories = set()
+            # Categories a match-everything pattern applies to. Tracked per
+            # category, not per arch: patterns from several matching keys are
+            # unioned, so a key contributing "*" for one category must not
+            # disable a category that only a narrower key labelled.
+            fully_excluded_categories = set()
 
             for gpu_key, gpu_config in exclude_gpu_config.items():
                 config_arch, os_suffix = parse_exclude_gpu_key(gpu_key)
@@ -755,24 +777,30 @@ def main():
 
                 # Check if this config applies to our target GPU architecture
                 if gpu_arch_matches(gpu_arch, config_arch):
-                    patterns = gpu_config.get("test_patterns", [])
-                    if patterns:
-                        for p in patterns:
-                            if isinstance(p, list):
-                                all_applicable_patterns.extend(p)
-                            else:
-                                all_applicable_patterns.append(p)
+                    # test_patterns may be a flat list or a list-of-lists.
+                    flat_patterns = []
+                    for p in gpu_config.get("test_patterns", []) or []:
+                        if isinstance(p, list):
+                            flat_patterns.extend(p)
+                        else:
+                            flat_patterns.append(p)
+                    all_applicable_patterns.extend(flat_patterns)
+
+                    excludes_everything = any(
+                        _is_match_everything(p) for p in flat_patterns
+                    )
 
                     # Collect applicable categories from this config
                     gpu_labels = gpu_config.get("labels", [])
                     for label in gpu_labels:
                         if label in category_data:
                             all_applicable_categories.add(label)
+                            if excludes_everything:
+                                fully_excluded_categories.add(label)
 
             if not all_applicable_patterns:
                 continue
 
-            # Remove duplicates from all_applicable_patterns while preserving order
             seen = set()
             unique_patterns = []
             for pattern in all_applicable_patterns:
@@ -783,9 +811,36 @@ def main():
             # Build GPU exclusion pattern string - format: pattern1:pattern2
             gpu_exclude_string = ":".join(unique_patterns)
 
+            # A match-everything exclusion means "this suite does not run on
+            # this arch". That intent is NOT expressible as a gtest filter: the
+            # emitted "<positive>-<excludes>:*" has a negative half matching
+            # everything, so the suite still registers, still launches the
+            # binary, and selects 0 tests. That read as a silent pass until a
+            # zero-tests-ran guard turned it into a hard failure
+            # (dnn-providers/integration-tests/src/main.cpp) -- see
+            # https://github.com/ROCm/rocm-libraries/issues/11163.
+            #
+            # Emitting the suite DISABLED expresses it directly: CTest reports
+            # "Not Run (Disabled)" and never launches the binary. Two properties
+            # of DISABLED matter here, both verified against ctest 3.28:
+            #   - `ctest --print-labels` still publishes a disabled test's
+            #     labels, so arch discovery that greps for ex_gpu_<arch>
+            #     (TheRock's test_runner.py) keeps finding this arch.
+            #   - The skip stays visible in console output and in --output-junit
+            #     (status="disabled"), rather than the suite vanishing.
+            #
+            # Note this does NOT make the selection non-empty: CTest counts only
+            # enabled tests, so a selection of nothing but disabled suites still
+            # prints "No tests were found!!!" -- exit 0 under the default
+            # --no-tests=ignore, but exit 8 under --no-tests=error. Today the
+            # gfx110X lane stays non-empty because the sibling
+            # test_categories.yaml contributes enabled suites to the same
+            # directory; neither consumer passes --no-tests=error.
+
             # Create one test for each applicable category
             for category_name in all_applicable_categories:
                 cat_data = category_data[category_name]
+                suite_disabled = category_name in fully_excluded_categories
                 positive_string = cat_data["positive_string"]
                 cat_exclude_string = cat_data["exclude_string"]
                 cat_labels = cat_data["labels"]
@@ -844,6 +899,8 @@ def main():
                     print(f'  FIXTURES_REQUIRED "{fixtures_string}"')
                 if resource_group:
                     print(f'  RESOURCE_GROUPS "1,{resource_group}:1"')
+                if suite_disabled:
+                    print("  DISABLED TRUE")
                 print(")")
                 print()
 
@@ -872,8 +929,11 @@ def main():
                             if env_mod_string
                             else ""
                         )
+                        # FIXTURES_REQUIRED currently applies only to the build tree; no
+                        # use case requires it in the install tree yet.
+                        disabled_prop = " DISABLED TRUE" if suite_disabled else ""
                         install_file_handle.write(
-                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
+                            f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop}{disabled_prop})\n\n"
                         )
                         install_file_handle.flush()
                     except OSError as e:

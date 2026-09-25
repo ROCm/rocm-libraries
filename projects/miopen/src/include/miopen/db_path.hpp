@@ -27,6 +27,7 @@
 #define GUARD_MIOPEN_DB_PATH_HPP
 
 #include <miopen/config.hpp>
+#include <miopen/db_disable.hpp>
 #include <miopen/filesystem.hpp>
 #include <string>
 
@@ -36,6 +37,8 @@ MIOPEN_INTERNALS_EXPORT fs::path GetSystemDbPath();
 MIOPEN_INTERNALS_EXPORT const fs::path& GetUserDbPath();
 MIOPEN_INTERNALS_EXPORT std::string GetUserDbSuffix();
 std::string GetSystemFindDbSuffix();
+
+/// \note IsSystemDbDisabled() and IsUserDbDisabled() are declared in db_disable.hpp.
 
 #ifdef MIOPEN_BUILD_TESTING
 namespace testing {

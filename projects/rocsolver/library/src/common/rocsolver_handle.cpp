@@ -70,18 +70,21 @@ try
             handle_data->bdsqr_mode = mode;
             return rocblas_status_success;
         }
+        break;
     case rocsolver_function_sterf:
         if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
         {
             handle_data->sterf_mode = mode;
             return rocblas_status_success;
         }
+        break;
     case rocsolver_function_steqr:
         if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
         {
             handle_data->steqr_mode = mode;
             return rocblas_status_success;
         }
+        break;
     case rocsolver_function_syev_heev:
         if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
         {
@@ -89,6 +92,15 @@ try
             handle_data->steqr_mode = mode;
             return rocblas_status_success;
         }
+        break;
+    case rocsolver_function_sytrd_hetrd:
+        if(mode == rocsolver_alg_mode_1stage || mode == rocsolver_alg_mode_2stage
+           || mode == rocsolver_alg_mode_auto)
+        {
+            handle_data->sytrd_hetrd_mode = mode;
+            return rocblas_status_success;
+        }
+        break;
     }
 
     return rocblas_status_invalid_value;
@@ -110,29 +122,34 @@ try
     ROCBLAS_CHECK(rocblas_internal_get_data_ptr(handle, handle_ptr));
     rocsolver_handle_data handle_data = (rocsolver_handle_data)handle_ptr.get();
 
-    if(handle_data == nullptr)
-    {
-        *mode = rocsolver_alg_mode_gpu;
-    }
-    else
-    {
-        if(handle_data->checksum != sizeof(rocsolver_handle_data_))
-            return rocblas_status_internal_error;
+    if(handle_data && handle_data->checksum != sizeof(rocsolver_handle_data_))
+        return rocblas_status_internal_error;
 
-        switch(func)
-        {
-        case rocsolver_function_gesvd:
-        case rocsolver_function_bdsqr: *mode = handle_data->bdsqr_mode; break;
-        case rocsolver_function_sterf: *mode = handle_data->sterf_mode; break;
-        case rocsolver_function_steqr: *mode = handle_data->steqr_mode; break;
-        case rocsolver_function_syev_heev:
-            if(handle_data->sterf_mode == handle_data->steqr_mode)
-                *mode = handle_data->sterf_mode;
-            else
-                *mode = rocsolver_alg_mode_mixed;
-            break;
-        default: return rocblas_status_invalid_value;
-        }
+    // Get mode from handle_data, or default if handle_data not yet initialized.
+    switch(func)
+    {
+    case rocsolver_function_gesvd:
+    case rocsolver_function_bdsqr:
+        *mode = handle_data ? handle_data->bdsqr_mode : rocsolver_alg_mode_gpu;
+        break;
+    case rocsolver_function_sterf:
+        *mode = handle_data ? handle_data->sterf_mode : rocsolver_alg_mode_gpu;
+        break;
+    case rocsolver_function_steqr:
+        *mode = handle_data ? handle_data->steqr_mode : rocsolver_alg_mode_gpu;
+        break;
+    case rocsolver_function_syev_heev:
+        if(!handle_data)
+            *mode = rocsolver_alg_mode_gpu;
+        else if(handle_data->sterf_mode == handle_data->steqr_mode)
+            *mode = handle_data->sterf_mode;
+        else
+            *mode = rocsolver_alg_mode_mixed;
+        break;
+    case rocsolver_function_sytrd_hetrd:
+        *mode = handle_data ? handle_data->sytrd_hetrd_mode : rocsolver_alg_mode_1stage;
+        break;
+    default: return rocblas_status_invalid_value;
     }
 
     return rocblas_status_success;

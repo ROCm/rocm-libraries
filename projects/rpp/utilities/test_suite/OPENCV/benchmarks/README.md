@@ -241,7 +241,7 @@ For example:
 **Sheet 1: System Information**
 | Parameter | Value |
 |-----------|-------|
-| RPP Version | 3.1.2 |
+| RPP Version | 3.2.0 |
 | OpenCV Version | 4.6.0 |
 | Operating System | Linux 6.17.0-22-generic |
 | CPU | AMD EPYC 7742 64-Core Processor |

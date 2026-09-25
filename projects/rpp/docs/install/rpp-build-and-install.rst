@@ -6,15 +6,33 @@
 Building and installing ROCm Performance Primitives
 **************************************************************************
 
-ROCm Performance Primitives (RPP) supports HIP and OpenCL backends running on `accelerators based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_, and supports CPU-only backends on CPUs that support PCIe™ atomics.
+ROCm Performance Primitives (RPP) supports the HIP backend running on `ROCm-supported AMD GPUs and accelerators <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_, and also supports a CPU-only backend.
 
-On OpenCL and HIP backends, RPP requires ROCm installed with the `AMDGPU installer <https://rocm.docs.amd.com/projects/install-on-linux/en/docs-6.4.1/install/install-methods/amdgpu-installer-index.html>`_ and the ``rocm`` usecase:
+Building the HIP backend requires a working ROCm installation. See :doc:`Installing RPP <./rpp-install>` for the supported installation paths.
+
+Building with TheRock
+=========================================================================
+
+RPP is built and released as part of `TheRock <https://github.com/ROCm/TheRock>`_, and building through TheRock produces the same artifacts as the released packages. Follow the `TheRock build instructions <https://github.com/ROCm/TheRock/blob/main/README.md>`_ to fetch the sources and configure the build, then build the RPP subproject:
 
 .. code:: shell
 
-    sudo amdgpu-install --usecase=rocm
+    cmake -B build -GNinja . -DTHEROCK_AMDGPU_FAMILIES=<your-gpu-family>
+    ninja -C build rpp+dist
 
-Clone the source code from the `RPP GitHub repository <https://github.com/ROCm/rpp>`_, then use the following commands to build and install RPP:
+Building standalone
+=========================================================================
+
+RPP can also be built directly from its source directory against an existing ROCm installation.
+
+Clone the source code from the `ROCm/rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ monorepo, where RPP is located under ``projects/rpp``:
+
+.. code:: shell
+
+    git clone https://github.com/ROCm/rocm-libraries.git
+    cd rocm-libraries/projects/rpp
+
+Then use the following commands to build and install RPP:
 
 .. tab-set::
 

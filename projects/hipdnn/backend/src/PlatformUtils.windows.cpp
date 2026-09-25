@@ -1,12 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifdef _WIN32
+// Must precede every include: <stdlib.h> only declares rand_s when this is already defined, and
+// any header that reaches it first silently leaves rand_s undeclared.
+// NOLINTNEXTLINE(bugprone-reserved-identifier) - name is mandated by the CRT.
+#define _CRT_RAND_S
+#endif
+
 #include "PlatformUtils.hpp"
 
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
 #include <array>
+#include <cstdlib>
+#include <cstring>
 #include <spdlog/fmt/fmt.h>
 #include <winternl.h>
 
@@ -25,8 +34,8 @@ std::filesystem::path getCurrentModuleDirectory()
        == TRUE)
     {
         std::array<char, MAX_PATH> dst{};
-        DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
-        std::string modulePathStr(dst.data());
+        const DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
+        const std::string modulePathStr(dst.data());
 
         if(len > 0 && len < MAX_PATH)
         {
@@ -140,6 +149,25 @@ std::string getSystemInfo()
         "Version: unknown, Machine: {}}}",
         computerName.data(),
         architecture);
+}
+
+std::array<uint8_t, 16> generateUuidV4()
+{
+    std::array<uint8_t, 16> bytes{};
+    for(size_t offset = 0; offset < bytes.size(); offset += sizeof(unsigned int))
+    {
+        unsigned int randomValue;
+        if(rand_s(&randomValue) != 0)
+        {
+            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                                  "Failed to generate graph UUID using rand_s.");
+        }
+        std::memcpy(bytes.data() + offset, &randomValue, sizeof(randomValue));
+    }
+
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
+    return bytes;
 }
 
 }

@@ -1,24 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Tests for rocisa's source-staleness detection (_find_stale_sources).
 
@@ -69,6 +50,33 @@ class TestFindStaleSources:
 
         stale = _find_stale_sources(so_path, [tmp_path], tmp_path / "build")
         assert str(src) in stale
+
+    def test_subsecond_edit_in_install_second_is_not_stale(self, tmp_path):
+        # cmake --install writes a whole-second mtime; a source edited in that
+        # same second keeps sub-second precision and must not read as stale.
+        fake_so = tmp_path / "_rocisa.so"
+        fake_so.write_bytes(b"")
+        whole = float(int(fake_so.stat().st_mtime))
+        os.utime(fake_so, (whole, whole))
+
+        src = tmp_path / "same_second.cpp"
+        src.write_text("// edited in the same second as the install")
+        os.utime(src, (whole + 0.75, whole + 0.75))
+
+        assert _find_stale_sources(fake_so, [tmp_path], tmp_path / "build") == []
+
+    def test_edit_after_install_second_is_still_stale(self, tmp_path):
+        # Rounding up must not swallow a genuine edit made a second later.
+        fake_so = tmp_path / "_rocisa.so"
+        fake_so.write_bytes(b"")
+        whole = float(int(fake_so.stat().st_mtime))
+        os.utime(fake_so, (whole, whole))
+
+        src = tmp_path / "later.cpp"
+        src.write_text("// edited well after the install")
+        os.utime(src, (whole + 2, whole + 2))
+
+        assert str(src) in _find_stale_sources(fake_so, [tmp_path], tmp_path / "build")
 
     def test_build_dir_files_are_excluded(self, tmp_path, so_path, so_mtime):
         build_dir = tmp_path / "build"

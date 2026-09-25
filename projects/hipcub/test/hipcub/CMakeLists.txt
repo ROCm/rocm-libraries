@@ -1,5 +1,5 @@
 # MIT License #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,23 @@ function(get_hipcub_test_target TEST_SOURCES TEST_TARGET)
   set(TEST_TARGET ${TEST_TARGET} PARENT_SCOPE)
 endfunction()
 
+function(set_build_coverage TEST_TARGET)
+  if(BUILD_CODE_COVERAGE)
+    target_compile_options(${TEST_TARGET} PRIVATE
+      -w
+      -fprofile-instr-generate
+      -fcoverage-mapping
+    )
+    target_link_options(${TEST_TARGET} PRIVATE
+      -fprofile-instr-generate
+    )
+  endif()
+endfunction()
+
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   get_hipcub_test_target(${TEST_SOURCES} TEST_TARGET)
   add_hipcub_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   # Re-propagate DLLS_COPIED from add_hipcub_test_internal's scope to our
   # caller (file scope). PARENT_SCOPE only propagates one level, so without
   # this relay the guard resets on every call and each test target gets
@@ -211,6 +225,7 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
   endif()
 
   add_hipcub_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
+  set_build_coverage(${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
   # Re-propagate DLLS_COPIED (see comment in add_hipcub_test).
   if(DEFINED DLLS_COPIED)

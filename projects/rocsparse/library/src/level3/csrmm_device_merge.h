@@ -39,8 +39,11 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t ITEMS_PER_THREAD, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_merge_compute_coords(J M,
-                                      I nnz,
+    void csrmmnn_merge_compute_coords(J        M,
+                                      I        nnz,
+                                      int64_t  batch_count,
+                                      int64_t  offsets_batch_stride_A,
+                                      uint32_t coords_per_batch,
                                       const I* __restrict__ csr_row_ptr,
                                       coordinate_t<uint32_t>* __restrict__ coord0,
                                       coordinate_t<uint32_t>* __restrict__ coord1,
@@ -52,12 +55,29 @@ namespace rocsparse
         const I diagonal0 = (bid + 0) * ITEMS_PER_THREAD;
         const I diagonal1 = rocsparse::min((I)(M + nnz), (I)((bid + 1) * ITEMS_PER_THREAD));
 
-        rocprim::counting_iterator<I> nnz_indices0(idx_base);
-        rocprim::counting_iterator<I> nnz_indices1(idx_base);
+        // Coordinates are computed independently for each batch because the row
+        // pointer data may differ between batches (offsets_batch_stride_A != 0). Each
+        // batch owns a contiguous block of coords_per_batch coordinates. Grid-stride
+        // over the batch dimension so batch counts larger than the grid-y limit work.
+        for(int64_t batch = blockIdx.y; batch < batch_count; batch += gridDim.y)
+        {
+            rocprim::counting_iterator<I> nnz_indices0(idx_base);
+            rocprim::counting_iterator<I> nnz_indices1(idx_base);
 
-        // Search across the diagonals to find coordinates to process.
-        merge_path_search(diagonal0, csr_row_ptr + 1, nnz_indices0, I(M), nnz, coord0[bid]);
-        merge_path_search(diagonal1, csr_row_ptr + 1, nnz_indices1, I(M), nnz, coord1[bid]);
+            // Search across the diagonals to find coordinates to process.
+            merge_path_search(diagonal0,
+                              load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
+                              nnz_indices0,
+                              I(M),
+                              nnz,
+                              load_pointer(coord0, batch, coords_per_batch)[bid]);
+            merge_path_search(diagonal1,
+                              load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
+                              nnz_indices1,
+                              I(M),
+                              nnz,
+                              load_pointer(coord1, batch, coords_per_batch)[bid]);
+        }
     }
 
     // Given the sparse A matrix:
@@ -180,14 +200,24 @@ namespace rocsparse
         const coordinate_t<uint32_t> start_coord = coord0[bid];
         const coordinate_t<uint32_t> end_coord   = coord1[bid];
 
-        J       start_row = start_coord.x;
-        const J end_row   = end_coord.x;
+        // Defensive clamp: keep coordinate-derived
+        // row and nnz extents in range so stale/uninitialized merge coordinates
+        // degrade to incorrect results rather than an out-of-bounds device fault.
+        // No-ops for valid coordinates.
+        J       start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+        const J end_row   = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
         const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
         const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
 
-        const I start_nz = (start_coord.y == (ptr_start_row)) ? 0 : start_coord.y;
-        const I end_nz   = (end_coord.y == (ptr_end_row)) ? 0 : end_coord.y;
+        const I start_nz
+            = (start_coord.y == (ptr_start_row))
+                  ? 0
+                  : static_cast<I>(rocsparse::min(start_coord.y, static_cast<uint32_t>(nnz)));
+        const I end_nz
+            = (end_coord.y == (ptr_end_row))
+                  ? 0
+                  : static_cast<I>(rocsparse::min(end_coord.y, static_cast<uint32_t>(nnz)));
 
         if(start_nz != 0)
         {
@@ -244,7 +274,7 @@ namespace rocsparse
                     const J colB = l + lid;
 
                     T       sum[LOOPS]{};
-                    const I end = csr_row_ptr[start_row + 1] - idx_base;
+                    const I end = csr_row_ptr[rocsparse::min(start_row + 1, M)] - idx_base;
                     for(I j = start_nz; j < end; j++)
                     {
                         const T val = conj_val(csr_val[j], conj_A);
@@ -431,14 +461,24 @@ namespace rocsparse
             const coordinate_t<uint32_t> start_coord = coord0[bid];
             const coordinate_t<uint32_t> end_coord   = coord1[bid];
 
-            J       start_row = start_coord.x;
-            const J end_row   = end_coord.x;
+            // Defensive clamp: keep coordinate-derived
+            // row and nnz extents in range so stale/uninitialized merge coordinates
+            // degrade to incorrect results rather than an out-of-bounds device fault.
+            // No-ops for valid coordinates.
+            J start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+            const J end_row = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
             const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
             const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
 
-            const I start_nz = (start_coord.y == ptr_start_row) ? 0 : start_coord.y;
-            const I end_nz   = (end_coord.y == ptr_end_row) ? 0 : end_coord.y;
+            const I start_nz
+                = (start_coord.y == ptr_start_row)
+                      ? 0
+                      : static_cast<I>(rocsparse::min(start_coord.y, static_cast<uint32_t>(nnz)));
+            const I end_nz
+                = (end_coord.y == ptr_end_row)
+                      ? 0
+                      : static_cast<I>(rocsparse::min(end_coord.y, static_cast<uint32_t>(nnz)));
 
             if(start_nz != 0)
             {
@@ -484,7 +524,7 @@ namespace rocsparse
                         const J colB = l + lid;
 
                         T       sum = static_cast<T>(0);
-                        const I end = csr_row_ptr[start_row + 1] - idx_base;
+                        const I end = csr_row_ptr[rocsparse::min(start_row + 1, M)] - idx_base;
                         for(I j = start_nz; j < end; j++)
                         {
                             const T val = conj_val(csr_val[j], conj_A);
@@ -637,14 +677,24 @@ namespace rocsparse
             const coordinate_t<uint32_t> start_coord = coord0[bid];
             const coordinate_t<uint32_t> end_coord   = coord1[bid];
 
-            J       start_row = start_coord.x;
-            const J end_row   = end_coord.x;
+            // Defensive clamp: keep coordinate-derived
+            // row and nnz extents in range so stale/uninitialized merge coordinates
+            // degrade to incorrect results rather than an out-of-bounds device fault.
+            // No-ops for valid coordinates.
+            J start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+            const J end_row = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
             const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
             const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
 
-            const I start_nz = (start_coord.y == ptr_start_row) ? 0 : start_coord.y;
-            const I end_nz   = (end_coord.y == ptr_end_row) ? 0 : end_coord.y;
+            const I start_nz
+                = (start_coord.y == ptr_start_row)
+                      ? 0
+                      : static_cast<I>(rocsparse::min(start_coord.y, static_cast<uint32_t>(nnz)));
+            const I end_nz
+                = (end_coord.y == ptr_end_row)
+                      ? 0
+                      : static_cast<I>(rocsparse::min(end_coord.y, static_cast<uint32_t>(nnz)));
 
             if(start_nz != 0)
             {
@@ -695,7 +745,7 @@ namespace rocsparse
                         if(colB < N)
                         {
                             T       sum = static_cast<T>(0);
-                            const I end = csr_row_ptr[start_row + 1] - idx_base;
+                            const I end = csr_row_ptr[rocsparse::min(start_row + 1, M)] - idx_base;
                             for(I j = start_nz; j < end; j++)
                             {
                                 const T val = conj_val(csr_val[j], conj_A);
@@ -853,14 +903,24 @@ namespace rocsparse
             const coordinate_t<uint32_t> start_coord = coord0[bid];
             const coordinate_t<uint32_t> end_coord   = coord1[bid];
 
-            J       start_row = start_coord.x;
-            const J end_row   = end_coord.x;
+            // Defensive clamp: keep coordinate-derived
+            // row and nnz extents in range so stale/uninitialized merge coordinates
+            // degrade to incorrect results rather than an out-of-bounds device fault.
+            // No-ops for valid coordinates.
+            J start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+            const J end_row = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
             const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
             const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
 
-            const I start_nz = (start_coord.y == ptr_start_row) ? 0 : start_coord.y;
-            const I end_nz   = (end_coord.y == ptr_end_row) ? 0 : end_coord.y;
+            const I start_nz
+                = (start_coord.y == ptr_start_row)
+                      ? 0
+                      : static_cast<I>(rocsparse::min(start_coord.y, static_cast<uint32_t>(nnz)));
+            const I end_nz
+                = (end_coord.y == ptr_end_row)
+                      ? 0
+                      : static_cast<I>(rocsparse::min(end_coord.y, static_cast<uint32_t>(nnz)));
 
             if(start_nz != 0)
             {
@@ -911,7 +971,7 @@ namespace rocsparse
                         if(colB < N)
                         {
                             T       sum = static_cast<T>(0);
-                            const I end = csr_row_ptr[start_row + 1] - idx_base;
+                            const I end = csr_row_ptr[rocsparse::min(start_row + 1, M)] - idx_base;
                             for(I j = start_nz; j < end; j++)
                             {
                                 const T val = conj_val(csr_val[j], conj_A);

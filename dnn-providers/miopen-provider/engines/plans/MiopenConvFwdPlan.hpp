@@ -6,9 +6,9 @@
 #include <memory>
 #include <mutex>
 
+#include "MiopenApi.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <miopen/miopen.h>
 
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
@@ -42,10 +42,20 @@ public:
     const MiopenConvDescriptor& conv() const;
 
     size_t spatialDimCount() const;
+
+    /// @brief Rank of the w/y tensors as declared in the graph, before the
+    /// provider pads a 1D convolution to 2D. Padding makes a genuine 4D tensor
+    /// and a padded 3D one indistinguishable, so rank agreement must be checked
+    /// against these.
+    size_t unpaddedWDimCount() const;
+    size_t unpaddedYDimCount() const;
+
     bool validTensors() const;
 
 private:
     size_t _spatialDimCount;
+    size_t _unpaddedWDimCount;
+    size_t _unpaddedYDimCount;
     MiopenTensor _x;
     MiopenTensor _w;
     MiopenTensor _y;

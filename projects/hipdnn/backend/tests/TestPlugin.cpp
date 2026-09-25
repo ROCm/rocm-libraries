@@ -11,10 +11,12 @@
 #include <gtest/gtest.h>
 #include <utility>
 
+#include "ScopedBackendWarningCapture.hpp"
 #include "TestPluginConstants.hpp"
 #include "plugin/PluginCore.hpp"
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 using namespace hipdnn_backend;
@@ -265,6 +267,86 @@ TEST(TestPluginManager, LoadPluginsCombinedFileAndDirectory)
     }
     EXPECT_TRUE(pluginNames.find("Plugin1") != pluginNames.end());
     EXPECT_TRUE(pluginNames.find("Plugin2") != pluginNames.end());
+}
+
+TEST(TestPluginManager, LikeNamedLibraryBesideADirectoryLoadsTheLibrary)
+{
+    const ScopedDirectory tempDir(hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
+                                  / "temp_plugin_dir_stem_shadow");
+
+    std::filesystem::copy_file(FULL_PLUGIN_PATH1, tempDir.path() / FULL_PLUGIN_PATH1.filename());
+
+    const auto shadowingDir = tempDir.path() / TEST_PLUGIN1_NAME;
+    std::filesystem::create_directory(shadowingDir);
+
+    TestPluginManager pluginManager;
+    pluginManager.loadPlugins({shadowingDir}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    const auto& plugins = pluginManager.getPlugins();
+    ASSERT_EQ(plugins.size(), 1);
+    EXPECT_EQ(plugins[0]->name(), "Plugin1");
+}
+
+TEST(TestPluginManager, DirectoryWithoutALikeNamedLibraryIsStillScanned)
+{
+    const ScopedDirectory tempDir(hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
+                                  / "temp_plugin_dir_unshadowed");
+
+    const auto pluginDir = tempDir.path() / TEST_PLUGIN1_NAME;
+    std::filesystem::create_directory(pluginDir);
+    std::filesystem::copy_file(FULL_PLUGIN_PATH2, pluginDir / FULL_PLUGIN_PATH2.filename());
+
+    TestPluginManager pluginManager;
+    pluginManager.loadPlugins({pluginDir}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    const auto& plugins = pluginManager.getPlugins();
+    ASSERT_EQ(plugins.size(), 1);
+    EXPECT_EQ(plugins[0]->name(), "Plugin2");
+}
+
+TEST(TestPluginManager, LikeNamedLibraryWinsOverTheDirectoryContents)
+{
+    const ScopedDirectory tempDir(hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
+                                  / "temp_plugin_dir_library_wins");
+
+    std::filesystem::copy_file(FULL_PLUGIN_PATH1, tempDir.path() / FULL_PLUGIN_PATH1.filename());
+
+    const auto shadowingDir = tempDir.path() / TEST_PLUGIN1_NAME;
+    std::filesystem::create_directory(shadowingDir);
+    std::filesystem::copy_file(FULL_PLUGIN_PATH2, shadowingDir / FULL_PLUGIN_PATH2.filename());
+
+    TestPluginManager pluginManager;
+    pluginManager.loadPlugins({shadowingDir}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    const auto& plugins = pluginManager.getPlugins();
+    ASSERT_EQ(plugins.size(), 1);
+    EXPECT_EQ(plugins[0]->name(), "Plugin1");
+}
+
+TEST(TestPluginManager, WarnsWhenConfiguredPathsYieldNoPlugins)
+{
+    const ScopedDirectory tempDir(hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
+                                  / "temp_plugin_dir_without_plugins");
+
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_backend::test_utilities::ScopedBackendWarningCapture capture;
+
+    TestPluginManager pluginManager;
+    pluginManager.loadPlugins({tempDir.path()}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "found no plugin libraries"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestPluginManager, NoWarningWhenNoPathsAreConfigured)
+{
+    auto recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_backend::test_utilities::ScopedBackendWarningCapture capture;
+
+    TestPluginManager pluginManager;
+    pluginManager.loadPlugins({}, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
+
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 }
 
 TEST(TestPluginManager, LastError)

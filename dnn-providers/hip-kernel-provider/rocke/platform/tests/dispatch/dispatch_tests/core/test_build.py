@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.dispatch.families.conv import ConvRequest, dispatch_conv
 from rocke.dispatch.families.moe import MoeRequest, dispatch_moe
 from rocke.dispatch.families.norm import NormRequest, dispatch_norm
 from rocke.dispatch.gemm.bf16_rcr import dispatch_gemm_bf16
@@ -26,12 +25,6 @@ from rocke.dispatch.gemm.fp16_rcr import dispatch_gemm_fp16
 
 def _gemm(dtype):
     return GemmRequest(M=256, N=256, K=256, arch="gfx950", dtype=dtype)
-
-
-def _conv():
-    return ConvRequest(
-        N=8, C=64, K=64, Hi=56, Wi=56, Y=3, X=3, pad_h=1, pad_w=1, arch="gfx950"
-    )
 
 
 def _moe(dtype="fp16"):
@@ -55,7 +48,6 @@ def _norm(kind):
 _CASES = (
     ("gemm_fp16_rcr", dispatch_gemm_fp16, _gemm("fp16")),
     ("gemm_bf16_rcr", dispatch_gemm_bf16, _gemm("bf16")),
-    ("conv_implicit_gemm", dispatch_conv, _conv()),
     ("moe_fused_mega_f16", dispatch_moe, _moe("fp16")),
     ("norm2d_rmsnorm", dispatch_norm, _norm("rmsnorm")),
     ("norm2d_layernorm", dispatch_norm, _norm("layernorm")),
@@ -101,7 +93,6 @@ class TestBuildRatchet(unittest.TestCase):
     """Every platform family requires a build; none may quietly stop."""
 
     def _registries(self):
-        from rocke.dispatch.families.conv import CONV_REGISTRY
         from rocke.dispatch.families.moe import MOE_REGISTRY
         from rocke.dispatch.families.norm import NORM_REGISTRY
         from rocke.dispatch.gemm.bf16_rcr import GEMM_BF16_REGISTRY
@@ -110,7 +101,6 @@ class TestBuildRatchet(unittest.TestCase):
         return (
             GEMM_FP16_REGISTRY,
             GEMM_BF16_REGISTRY,
-            CONV_REGISTRY,
             MOE_REGISTRY,
             NORM_REGISTRY,
         )

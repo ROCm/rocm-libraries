@@ -272,6 +272,16 @@ public:
                    : missingSymbolStatus();
     }
 
+    hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t handle,
+                                        int64_t engineId,
+                                        char* engineName,
+                                        size_t* engineNameLen) override
+    {
+        return _getEngineNameByIdExt != nullptr
+                   ? _getEngineNameByIdExt(handle, engineId, engineName, engineNameLen)
+                   : missingSymbolStatus();
+    }
+
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
     {
         return _getHeuristicPolicyCount != nullptr ? _getHeuristicPolicyCount(handle, numPolicies)
@@ -324,6 +334,19 @@ public:
     {
         return _backendGetGlobalLogLevelExt != nullptr ? _backendGetGlobalLogLevelExt(level)
                                                        : missingSymbolStatus();
+    }
+
+    hipdnnStatus_t writeEngineRankingResultsExt(hipdnnHandle_t handle,
+                                                hipdnnBackendDescriptor_t graphDescriptor,
+                                                const int64_t* engineIdsInRankOrder,
+                                                size_t engineIdCount,
+                                                hipdnnAutotuneCacheWriteOutcome_ext_t* outcome
+                                                = nullptr) override
+    {
+        return _writeEngineRankingResultsExt != nullptr
+                   ? _writeEngineRankingResultsExt(
+                         handle, graphDescriptor, engineIdsInRankOrder, engineIdCount, outcome)
+                   : missingSymbolStatus();
     }
 
 private:
@@ -390,6 +413,8 @@ private:
             "hipdnnSetHeuristicPluginPaths_ext");
         _getLoadedEnginePluginPathsExt = resolve<decltype(&hipdnnGetLoadedEnginePluginPaths_ext)>(
             "hipdnnGetLoadedEnginePluginPaths_ext");
+        _getEngineNameByIdExt
+            = resolve<decltype(&hipdnnGetEngineNameById_ext)>("hipdnnGetEngineNameById_ext");
         _getHeuristicPolicyCount = resolve<decltype(&hipdnnGetHeuristicPolicyCount_ext)>(
             "hipdnnGetHeuristicPolicyCount_ext");
         _getHeuristicPolicyInfo = resolve<decltype(&hipdnnGetHeuristicPolicyInfo_ext)>(
@@ -400,6 +425,9 @@ private:
             "hipdnnBackendSetGlobalLogLevel_ext");
         _backendGetGlobalLogLevelExt = resolve<decltype(&hipdnnBackendGetGlobalLogLevel_ext)>(
             "hipdnnBackendGetGlobalLogLevel_ext");
+        _writeEngineRankingResultsExt
+            = resolve<decltype(&hipdnnBackendWriteEngineRankingResults_ext)>(
+                "hipdnnBackendWriteEngineRankingResults_ext");
     }
 
     hipdnn_data_sdk::utilities::Version _version;
@@ -440,11 +468,13 @@ private:
     decltype(&hipdnnSetEnginePluginPaths_ext) _setEnginePluginPathsExt = nullptr;
     decltype(&hipdnnSetHeuristicPluginPaths_ext) _setHeuristicPluginPathsExt = nullptr;
     decltype(&hipdnnGetLoadedEnginePluginPaths_ext) _getLoadedEnginePluginPathsExt = nullptr;
+    decltype(&hipdnnGetEngineNameById_ext) _getEngineNameByIdExt = nullptr;
     decltype(&hipdnnGetHeuristicPolicyCount_ext) _getHeuristicPolicyCount = nullptr;
     decltype(&hipdnnGetHeuristicPolicyInfo_ext) _getHeuristicPolicyInfo = nullptr;
     decltype(&hipdnnSetUserLogCallback_ext) _setUserLogCallbackExt = nullptr;
     decltype(&hipdnnBackendSetGlobalLogLevel_ext) _backendSetGlobalLogLevelExt = nullptr;
     decltype(&hipdnnBackendGetGlobalLogLevel_ext) _backendGetGlobalLogLevelExt = nullptr;
+    decltype(&hipdnnBackendWriteEngineRankingResults_ext) _writeEngineRankingResultsExt = nullptr;
 };
 
 } // namespace hipdnn_frontend::detail

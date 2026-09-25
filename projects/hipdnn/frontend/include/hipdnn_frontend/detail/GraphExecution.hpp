@@ -14,8 +14,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -45,20 +43,13 @@ inline Error tensorLookupToVariantPack(
     return {ErrorCode::OK, ""};
 }
 
-// Resolve a backend engine ID to its human-readable name.
-// Falls back to a hex string (e.g., "0x1A2B") for unknown engines.
+/// Resolve a backend engine ID to its name from the static registry alone,
+/// falling back to the hexadecimal ID for an engine the registry does not carry.
+/// Plugin-supplied names are not visible here; those come from the backend, via
+/// hipdnnGetEngineNameById_ext.
 inline std::string resolveEngineName(int64_t engineId)
 {
-    try
-    {
-        return std::string(hipdnn_data_sdk::utilities::getEngineNameFromId(engineId));
-    }
-    catch(const std::out_of_range&)
-    {
-        std::ostringstream oss;
-        oss << "0x" << std::hex << engineId;
-        return oss.str();
-    }
+    return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
 }
 
 // Execute a graph using a specific execution plan descriptor and a

@@ -27,7 +27,7 @@ import os
 from Tensile.CustomKernels import getCustomKernelConfig, getCustomKernelContents
 from Tensile.BenchmarkProblems import getCustomKernelSolutionObj
 from Tensile.Common import assignGlobalParameters
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 from Tensile.Utilities.Toolchain import validateToolchain, ToolchainDefaults
 
 import yaml
@@ -59,7 +59,7 @@ WorkGroup: [  8, 16,  1 ]
 DepthU: 8
 VectorWidth: 4
 AssertSizeEqual: {3: 512}
-AssertSizeMultiple: {0: 128, 1: 128}""", yamlLoader
+AssertSizeMultiple: {0: 128, 1: 128}""", SafeLoader
 )
 
 # TODO when more custom kernels have been added - expand these lists

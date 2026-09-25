@@ -56,6 +56,9 @@ rocblas_status rocblas_internal_ger_launcher_64(rocblas_handle handle,
         auto    y_ptr       = adjust_ptr_batch(y, b_base, stridey);
         auto    A_ptr       = adjust_ptr_batch(A, b_base, strideA);
         int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
+        auto    alpha_ptr   = rocblas_pointer_mode_device == handle->pointer_mode
+                                  ? alpha + b_base * stride_alpha
+                                  : alpha;
 
         for(int64_t n_base = 0; n_base < n_64; n_base += c_i64_grid_X_chunk)
         {
@@ -78,7 +81,7 @@ rocblas_status rocblas_internal_ger_launcher_64(rocblas_handle handle,
                 rocblas_status status = rocblas_internal_ger_launcher<CONJ, T>(handle,
                                                                                m,
                                                                                n,
-                                                                               alpha,
+                                                                               alpha_ptr,
                                                                                stride_alpha,
                                                                                x_ptr,
                                                                                shiftx,

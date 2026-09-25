@@ -16,7 +16,9 @@ file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/default_flatc_version.txt"
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
-set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+set(HIPDNN_GTEST_VERSION "1.17.0" CACHE STRING
+    "GoogleTest version fetched when no GTest package is available"
+)
 
 option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
@@ -58,6 +60,16 @@ if(HIPDNN_ENABLE_SDPA)
     add_compile_definitions(HIPDNN_ENABLE_SDPA)
 else()
     message(STATUS "hipDNN: SDPA support disabled")
+endif()
+
+# Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors), set by
+# TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" OFF)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(STATUS "hipDNN: kernel ingestor enabled")
+    add_compile_definitions(HIPDNN_ENABLE_KERNEL_INGESTOR)
+else()
+    message(STATUS "hipDNN: kernel ingestor disabled")
 endif()
 
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
@@ -217,6 +229,7 @@ include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
 include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
+include(cmake/ResourceCompiler.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -332,6 +345,15 @@ if(HIPDNN_ENABLE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
+        # hipdnn_frontend_dynamic_load_tests is the only object here that maps
+        # DynamicBackendLibrary.hpp's resolveSymbol and its resolveBackendSymbol<>
+        # instantiations; dropping it under-reports coverage for that header.
+        # resolveSymbol's null-handle early return stays uncovered regardless --
+        # nothing reaches it while the backend loads -- and the never-run static-check
+        # translation unit's inline instantiations are COMDAT-folded onto counters the
+        # executed tests already increment.
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_dynamic_load_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object

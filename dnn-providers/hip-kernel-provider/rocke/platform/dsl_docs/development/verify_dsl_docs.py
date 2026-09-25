@@ -591,19 +591,23 @@ check("optimize_kernel CSE", t_passes)
 
 section("specs build + lower (LLVM / HIP / CK Tile)")
 
-from rocke.instances import (
-    TileSpec,
-    TraitSpec,
-    UniversalGemmSpec,
-    build_universal_gemm,
+from kernels.common.conv_implicit_gemm import (
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
+)
+from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     DirectConv16cSpec,
     DirectConv4cSpec,
     build_direct_conv_16c,
     build_direct_conv_4c,
+)
+from rocke.instances import (
+    TileSpec,
+    TraitSpec,
+    UniversalGemmSpec,
+    build_universal_gemm,
     ElementwiseSpec,
     build_elementwise,
     Reduce2DSpec,

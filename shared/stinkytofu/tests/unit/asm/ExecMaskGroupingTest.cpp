@@ -151,6 +151,8 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_HandlesNesting) {
     const std::vector<StinkyInstruction*> expectedChildren = {outerNarrow, innerNarrow, guarded,
                                                               innerReset,  guarded2,    outerReset};
     EXPECT_EQ(groupData->children, expectedChildren);
+
+    expandExecMaskedGroups(*bb);
 }
 
 TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_LeavesUnmatchedNarrowUngrouped) {
@@ -186,6 +188,8 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_MultipleSiblingSpans) {
     EXPECT_EQ(insts[1]->getUnifiedOpcode(), GFX::v_add_f32);
     EXPECT_EQ(insts[2]->getUnifiedOpcode(), GFX::EXEC_GROUP);
     EXPECT_NE(insts[0], insts[2]);
+
+    expandExecMaskedGroups(*bb);
 }
 
 // s_mov_b64 exec, -1 must be recognized as a full-mask reset even in wave32.
@@ -206,6 +210,8 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_B64ResetClosesWave32Span)
     auto* groupData = group->getModifier<ExecGroupData>();
     ASSERT_NE(groupData, nullptr);
     EXPECT_EQ(groupData->children, (std::vector<StinkyInstruction*>{narrow, guarded, b64reset}));
+
+    expandExecMaskedGroups(*bb);
 }
 
 // Any exec write that isn't a literal-(-1) reset opens a span, including non-mov
@@ -229,4 +235,6 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_NonMovExecWriteOpensSpan)
     auto* groupData = group->getModifier<ExecGroupData>();
     ASSERT_NE(groupData, nullptr);
     EXPECT_EQ(groupData->children, (std::vector<StinkyInstruction*>{orNarrow, guarded, reset}));
+
+    expandExecMaskedGroups(*bb);
 }

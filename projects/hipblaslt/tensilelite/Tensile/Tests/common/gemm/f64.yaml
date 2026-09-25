@@ -37,6 +37,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
       ForkParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]
@@ -76,6 +77,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
       ForkParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]
@@ -115,6 +117,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
       ForkParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]
@@ -154,6 +157,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
       ForkParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
         - DepthU: [8, 16]
         - GlobalSplitU: [1]
         - ScheduleIterAlg: [3]

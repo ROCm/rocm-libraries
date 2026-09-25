@@ -7,7 +7,7 @@ Run with a Python interpreter that has torch, triton, and AITER available:
 
     export AITER_PATH=<aiter-checkout>
     PYTHONPATH="python:${AITER_PATH}" python \\
-        rocke/library/builders/gfx950/attention/parity_unified_attention.py [--scenario name]
+        rocke/library/builders/gfx950/attention/prefill/parity_unified_attention.py [--scenario name]
 
 The harness:
   1. Builds the standard AITER unified-attention test inputs (paged KV, GQA).
@@ -487,6 +487,61 @@ def default_scenarios() -> List[Scenario]:
             head_size=128,
             block_size=64,
             dtype=torch.bfloat16,
+        ),
+        # fp16 sink prefill: the cohort the combo widening admits. Gate 1 (D64
+        # b32 GQA-8, multi-seq) and Gate 2 (D64 b16, single-seq).
+        Scenario(
+            name="fp16_d64_sinks_gate1",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+            use_sinks=True,
+            num_blocks=1024,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate2",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            use_sinks=True,
+            num_blocks=512,
+        ),
+        # fp16 SWA-sink correctness. The two gates differ on sliding_window:
+        # Gate 1 (`_enable_combo_2d`) does NOT exclude it, so `gate1_swa` still
+        # rides the widened combo (with its SW-specific settings); Gate 2's wpe3
+        # predicate checks `sliding_window == 0`, so `gate2_swa` falls to the
+        # untuned path. Either way the purpose is to confirm the fp16 SWA+sinks
+        # path is numerically correct. sliding_window=512 is ≥ block_size for both
+        # cohorts and is a realistic short-context window.
+        Scenario(
+            name="fp16_d64_sinks_gate1_swa",
+            seq_lens=[(640, 704), (640, 768)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=32,
+            dtype=torch.float16,
+            use_sinks=True,
+            sliding_window=512,
+            num_blocks=1024,
+        ),
+        Scenario(
+            name="fp16_d64_sinks_gate2_swa",
+            seq_lens=[(2048, 2048)],
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            dtype=torch.float16,
+            use_sinks=True,
+            sliding_window=512,
+            num_blocks=512,
         ),
     ]
 
@@ -1154,7 +1209,7 @@ def make_inputs(s: Scenario, seed: int = 0):
         0, s.num_blocks, (num_seqs, max_blocks), dtype=torch.int32, device="cuda"
     )
     sinks = (
-        torch.randn(s.num_query_heads, dtype=torch.bfloat16, device="cuda")
+        torch.randn(s.num_query_heads, dtype=s.dtype, device="cuda")
         if s.use_sinks
         else None
     )
@@ -1329,6 +1384,7 @@ def _run_rocke(
     kq_swizzle: bool = False,
     kq_pad: int = 0,
     probe_occupancy: bool = False,
+    force_wpe: Optional[int] = None,
 ):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
@@ -1368,8 +1424,9 @@ def _run_rocke(
         use_alibi=data["alibi_slopes"] is not None,
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
-        num_sms=120,
+        num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
+        waves_per_eu=force_wpe,
     )
 
     hip_stream = _bench_stream_handle()
@@ -1770,6 +1827,15 @@ def _main_impl() -> int:
         help="comma-separated list of paths to run: auto, 2d, 3d",
     )
     parser.add_argument(
+        "--force-wpe",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Pin waves_per_eu=N on UnifiedAttentionProblem for the CK auto lane, "
+        "overriding all gate logic. Use 2 vs 3 to A/B the Gate-2 occupancy hint "
+        "without modifying production selectors.",
+    )
+    parser.add_argument(
         "--set",
         choices=("default", "creative", "fmha", "all"),
         default="default",
@@ -1920,6 +1986,7 @@ def _main_impl() -> int:
                                 path="auto",
                                 warmup=args.warmup,
                                 attempts=args.attempts,
+                                force_wpe=args.force_wpe,
                             )
                         )
                         if ck_auto:

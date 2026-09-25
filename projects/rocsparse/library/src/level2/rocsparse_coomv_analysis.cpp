@@ -39,7 +39,8 @@ namespace rocsparse
                                                  const rocsparse_mat_descr,
                                                  const void*,
                                                  const void*,
-                                                 const void*);
+                                                 const void*,
+                                                 rocsparse_coomv_info*);
 
     using coomv_analysis_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
 
@@ -126,13 +127,15 @@ rocsparse_status rocsparse::coomv_analysis(rocsparse_handle          handle,
                                            rocsparse_indextype       coo_row_indextype,
                                            const void*               coo_row_ind,
                                            rocsparse_indextype       coo_col_indextype,
-                                           const void*               coo_col_ind)
+                                           const void*               coo_col_ind,
+                                           rocsparse_coomv_info*     coomv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::coomv_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::coomv_analysis_find(&f, coo_row_indextype, coo_val_datatype));
+
     RETURN_IF_ROCSPARSE_ERROR(
-        f(handle, trans, alg, m, n, nnz, descr, coo_val, coo_row_ind, coo_col_ind));
+        f(handle, trans, alg, m, n, nnz, descr, coo_val, coo_row_ind, coo_col_ind, coomv_info));
     return rocsparse_status_success;
 }

@@ -66,6 +66,10 @@ bool Softmax::IsApplicable(
         {
             return false;
         }
+        if(!problem.GetXDesc().IsPacked() || !problem.GetYDesc().IsPacked())
+        {
+            return false;
+        }
     }
     if(!problem.IsForward())
     {
@@ -87,6 +91,11 @@ bool Softmax::IsApplicable(
         {
             return false;
         }
+        if(!problem.GetYDesc().IsPacked() || !problem.GetdYDesc().IsPacked() ||
+           !problem.GetdXDesc().IsPacked())
+        {
+            return false;
+        }
     }
     return true;
 }
@@ -97,7 +106,9 @@ Softmax::GetDefaultPerformanceConfig(const ExecutionContext&,
 {
     PerformanceConfigSoftmax config;
     config.HeuristicInit(problem);
-    config.local_size = PerformanceConfigSoftmax::default_local_size;
+    config.local_size      = PerformanceConfigSoftmax::default_local_size;
+    config.vectorized      = PerformanceConfigSoftmax::default_vectorized(problem);
+    config.separate_stride = PerformanceConfigSoftmax::default_separate_stride;
     MIOPEN_LOG_I(config.ToString());
     return config;
 }
@@ -115,28 +126,42 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto lengths    = problem.GetXDesc().GetLengths();
-    auto strides    = problem.GetXDesc().GetStrides();
     auto dtype      = problem.GetXDesc().GetType();
-    auto data_dtype = miopen::GetDataType(problem.GetXDesc().GetType());
+    auto data_dtype = miopen::GetDataType(dtype);
     auto algorithm  = problem.GetAlgorithm();
     auto mode       = problem.GetMode();
 
-    auto grid_size =
-        mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[0] : lengths[0] * lengths[2] * lengths[3];
-    auto spatial_dim = mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? 1 : lengths[2] * lengths[3];
-    auto vector_size =
-        mode == MIOPEN_SOFTMAX_MODE_INSTANCE ? lengths[1] * lengths[2] * lengths[3] : lengths[1];
+    size_t grid_size, xlocalsize, ygridsize;
+    if(config.separate_stride)
+    {
+        grid_size  = problem.outer_size;
+        xlocalsize = config.local_size;
+        ygridsize  = problem.stride;
+    }
+    else
+    {
+        grid_size  = problem.outer_size * problem.stride;
+        xlocalsize = config.local_size;
+        ygridsize  = 1;
+    }
     auto num_batch =
-        vector_size < config.local_size ? nextPow2(config.local_size / vector_size) : 1;
-    auto workgroups   = num_batch == 1 ? grid_size : (grid_size + num_batch - 1) / num_batch;
-    auto batch_size   = config.local_size / num_batch;
-    auto u_batch_size = vector_size > batch_size ? nextPow2(vector_size / batch_size) : 1;
-
-    size_t xlocalsize = config.local_size;
+        problem.inner_size < xlocalsize ? nextPow2(xlocalsize / problem.inner_size) : 1;
+    auto batch_size       = xlocalsize / num_batch;
+    auto vectorized_count = dtype == miopenFloat ? 4 : 8;
+    auto u_batch_size =
+        batch_size < problem.inner_size ? nextPow2(problem.inner_size / batch_size) : 1;
+    if(config.vectorized)
+    {
+        if(num_batch > 1 && batch_size >= vectorized_count)
+        {
+            num_batch *= vectorized_count;
+            batch_size /= vectorized_count;
+        }
+        u_batch_size *= vectorized_count;
+    }
+    auto workgroups   = (grid_size + num_batch - 1) / num_batch;
     size_t xgridsize  = workgroups * xlocalsize;
     size_t ylocalsize = 1;
-    size_t ygridsize  = 1;
     size_t zlocalsize = 1;
     size_t zgridsize  = 1;
 
@@ -145,34 +170,30 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
     kernel.kernel_file = "MIOpenSoftmax.cpp";
     kernel.kernel_name = problem.IsForward() ? "SoftmaxFwd" : "SoftmaxBwd";
 
-    const auto build_params = KernelBuildParameters{
-        {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
-        {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
-        {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-        {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
-        {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
-        {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
-        {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
-        {"USE_SOFTMAX_MODE_INSTANCE", mode == MIOPEN_SOFTMAX_MODE_INSTANCE},
-        {"USE_SOFTMAX_MODE_CHANNEL", mode == MIOPEN_SOFTMAX_MODE_CHANNEL},
-        {"HEIGHT", lengths[2]},
-        {"WIDTH", lengths[3]},
-        {"N_STRIDE", strides[0]},
-        {"C_STRIDE", strides[1]},
-        {"H_STRIDE", strides[2]},
-        {"W_STRIDE", strides[3]},
-        {"LOCAL_SIZE", config.local_size},
-        {"WORKGROUPS", workgroups},
-        {"GRID_SIZE", grid_size},
-        {"SPATIAL_DIM", spatial_dim},
-        {"VECTOR_SIZE", vector_size},
-        {"NUM_BATCH", num_batch},
-        {"BATCH_SIZE", batch_size},
-        {"U_BATCH_SIZE", u_batch_size},
-        {"IS_INPUT_CONTIGUOUS", problem.IsForward() && problem.GetXDesc().IsContiguous()},
-        {"IS_OUTPUT_CONTIGUOUS", problem.GetYDesc().IsContiguous()},
-        {"IS_DINPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdXDesc().IsContiguous()},
-        {"IS_DOUTPUT_CONTIGUOUS", !problem.IsForward() && problem.GetdYDesc().IsContiguous()}};
+    const auto build_params =
+        KernelBuildParameters{{"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
+                              {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
+                              {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
+                              {"DATA_TYPE", data_dtype == "bfloat16" ? "ushort" : data_dtype},
+                              {"USE_SOFTMAX_FAST", algorithm == MIOPEN_SOFTMAX_FAST},
+                              {"USE_SOFTMAX_ACCURATE", algorithm == MIOPEN_SOFTMAX_ACCURATE},
+                              {"USE_SOFTMAX_LOG", algorithm == MIOPEN_SOFTMAX_LOG},
+                              {"USE_SOFTMAX_MODE_INSTANCE", mode == MIOPEN_SOFTMAX_MODE_INSTANCE},
+                              {"USE_SOFTMAX_MODE_CHANNEL", mode == MIOPEN_SOFTMAX_MODE_CHANNEL},
+                              {"X_OFFSET", problem.GetXOffset()},
+                              {"Y_OFFSET", problem.GetYOffset()},
+                              {"DX_OFFSET", problem.GetdXOffset()},
+                              {"DY_OFFSET", problem.GetdYOffset()},
+                              {"OUTER_SIZE", problem.outer_size},
+                              {"INNER_SIZE", problem.inner_size},
+                              {"STRIDE", problem.stride},
+                              {"ZERO_BETA", problem.GetBeta() == 0.0f},
+                              {"LOCAL_SIZE", xlocalsize},
+                              {"NUM_BATCH", num_batch},
+                              {"BATCH_SIZE", batch_size},
+                              {"U_BATCH_SIZE", u_batch_size},
+                              {"VECTORIZED", config.vectorized},
+                              {"SEPARATE_STRIDE", config.separate_stride}};
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
@@ -193,12 +214,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel_(params.x,
-                        params.forward_y,
-                        params.xdx_offset,
-                        params.y_offset,
-                        params.alpha,
-                        params.beta);
+                kernel_(params.x, params.forward_y, params.alpha, params.beta);
             };
         };
     }
@@ -209,14 +225,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::softmax::InvokeParams>();
 
-                kernel_(params.backward_y,
-                        params.dy,
-                        params.dx,
-                        params.y_offset,
-                        params.dy_offset,
-                        params.xdx_offset,
-                        params.alpha,
-                        params.beta);
+                kernel_(params.backward_y, params.dy, params.dx, params.alpha, params.beta);
             };
         };
     }
@@ -233,8 +242,10 @@ void PerformanceConfigSoftmax::HeuristicInit(const miopen::softmax::ProblemDescr
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: local_size = PerformanceConfigSoftmax::start_local_size; break;
-
+    case miopenBFloat16:
+        local_size = PerformanceConfigSoftmax::start_local_size;
+        vectorized = PerformanceConfigSoftmax::start_vectorized;
+        break;
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -256,11 +267,23 @@ bool PerformanceConfigSoftmax::SetNextValue(const miopen::softmax::ProblemDescri
     {
         HeuristicInit(problem);
     }
-    if(local_size <= 0)
+    if(local_size < start_local_size)
     {
-        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size below valid value");
     }
     local_size *= 2;
+    if(vectorized == start_vectorized && local_size > max_local_size)
+    {
+        local_size = start_local_size;
+        vectorized = !start_vectorized;
+    }
+    if(separate_stride == start_separate_stride && vectorized != start_vectorized &&
+       local_size > max_local_size)
+    {
+        local_size      = start_local_size;
+        vectorized      = start_vectorized;
+        separate_stride = !start_separate_stride;
+    }
     return local_size <= max_local_size;
 #endif
 }
@@ -281,8 +304,7 @@ bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
     {
     case miopenHalf:
     case miopenFloat:
-    case miopenBFloat16: return true;
-
+    case miopenBFloat16: return !(separate_stride && problem.stride == 1) && IsValidValue();
     case miopenDouble:
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
@@ -295,7 +317,8 @@ bool PerformanceConfigSoftmax::IsValid(const ExecutionContext&,
 
 bool PerformanceConfigSoftmax::operator==(const PerformanceConfigSoftmax& other) const
 {
-    return local_size == other.local_size;
+    return local_size == other.local_size && vectorized == other.vectorized &&
+           separate_stride == other.separate_stride;
 }
 
 } // namespace softmax

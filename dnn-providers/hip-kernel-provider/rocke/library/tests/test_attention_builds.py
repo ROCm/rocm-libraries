@@ -43,47 +43,21 @@ from kernels import (
 
 
 def _patch_resolved_arch(arch: str):
-    """Pin the resolved attention arch for a test, on every module that reads it.
+    """Pin the resolved attention arch for a test, on the module that defines it.
 
-    ``_resolve_attention_arch`` is defined in ``kernels.common.attention_unified``
-    but imported *by name* into other modules (e.g.
-    ``builders.common.attention_spec_builder``), so each holds its own binding.
-    Patching only the defining module leaves the spec builder resolving the real
-    device arch -- which silently ignores the test's requested arch on any host
-    whose GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). Patch
-    every by-name importer so the pin actually reaches the builder.
+    ``_resolve_attention_arch`` lives in ``kernels.common.attention_unified`` and
+    ``builders.common.attention_spec_builder`` reaches it through that module
+    handle, so this one patch steers the builder too. A bound import in the
+    builder would freeze the reference at import time, leaving it on the real
+    device arch and silently ignoring the test's requested arch on any host whose
+    GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). That invariant
+    is pinned by ``test_arch_binding_guard.py``; it is not re-asserted here.
     """
     from unittest import mock
 
-    import builders.common.attention_spec_builder as _asb
     import kernels.common.attention_unified as _au
 
-    targets = [_au]
-    if getattr(_asb, "_resolve_attention_arch", None) is not None:
-        targets.append(_asb)
-    return _MultiPatch(
-        [
-            mock.patch.object(m, "_resolve_attention_arch", return_value=arch)
-            for m in targets
-        ]
-    )
-
-
-class _MultiPatch:
-    """Enter/exit a list of ``mock.patch`` context managers as one."""
-
-    def __init__(self, patches):
-        self._patches = patches
-
-    def __enter__(self):
-        for p in self._patches:
-            p.start()
-        return self
-
-    def __exit__(self, *exc):
-        for p in reversed(self._patches):
-            p.stop()
-        return False
+    return mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)
 
 
 # ---------------------------------------------------------------------
@@ -121,6 +95,61 @@ def _compile_or_skip(kernel, *, arch: str):
         pytest.skip(f"comgr toolchain unavailable: {e}")
 
 
+# Two shipped attention kernels are tuned to sit at the VGPR ceiling their
+# occupancy target dictates, and the compiler holds that occupancy by spilling a
+# handful of dwords rather than dropping a resident wave -- the correct trade, not
+# a regression. Erasing the spill would mean either halving occupancy (e.g. the
+# gfx942 tiled-2d kernel wants 354 VGPR unconstrained; forcing scratch==0 drops it
+# to 1 wave/EU) or ~100 VGPR of register-pressure surgery on a perf-tuned kernel
+# -- a bad deal for the 20-40 B of scratch, which costs no *incremental* occupancy
+# once VGPR is already pegged at the ceiling. So these named kernels carry
+# per-kernel budgets; every other kernel keeps the strict defaults (0 scratch, no
+# occupancy floor). The key is the exact kernel name, so if the shipped geometry
+# changes (and with it the name) the budget evaporates and strict checking
+# returns.
+#
+# The two budget axes catch DIFFERENT regressions, and neither subsumes the other
+# -- a kernel is healthy only if both hold:
+#
+#   * ``max_scratch_bytes`` -- how much the kernel may spill. Catches spill GROWTH
+#     at fixed occupancy: a change that balloons register demand while VGPR stays
+#     pegged at the ceiling just spills more (e.g. 40 B -> 400 B) at unchanged
+#     occupancy, so an occupancy check is blind to it; the byte bound is not. Kept
+#     tight enough that a real blow-up (spill into the hundreds) still fails.
+#   * ``min_waves_per_simd`` -- the occupancy the kernel is tuned for. Catches an
+#     occupancy DROP: a change that pushes register or LDS pressure past the point
+#     where the tuned wave count still fits. The scratch bound cannot see this --
+#     spilling is exactly the mechanism that holds occupancy constant -- so it is a
+#     distinct signal. Occupancy is the static multi-limiter estimate
+#     (``benchmark.perf.occupancy.estimate_occupancy_detail``: min over VGPR / AGPR
+#     / LDS / workgroup / wave cap, no GPU). Its per-arch caps are still PROVISIONAL
+#     (gfx942 in particular models a conservative 8 waves/SIMD) pending rocprofv3
+#     calibration on real hardware, so treat it as a floor, not an exact oracle.
+_KERNEL_RESOURCE_BUDGETS = {
+    # gfx950 dense persistent prefill: the 512-thread (8-wave) workgroup pins VGPR
+    # at the 256 ceiling independent of waves_per_eu; it needs a hair more -> 20 B.
+    # Tuned for 2 waves/SIMD (512 VGPR/SIMD // 256).
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs_persist256": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
+    # gfx942 fp16 D128 tiled-2d (shipped default geometry): 2 waves/EU caps VGPR at
+    # 256; the kernel wants 354, so it spills ~40 B to hold 2-wave occupancy.
+    "rocke_uattn2d_tiled_d128_b64_h32kv8_fp16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_cfvst_ksring_rd2": {
+        "max_scratch_bytes": 64,
+        "min_waves_per_simd": 2,
+    },
+}
+
+# Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
+# longer matches any built kernel (name drift from a re-tuned selector) becomes a
+# red test rather than a silently-orphaned entry -- see
+# ``test_every_declared_budget_was_exercised``. The scratch bound already fails
+# loud on drift (its default is 0); the occupancy floor defaults to no check, so
+# without this a renamed kernel would just stop being floored.
+_SEEN_KERNEL_NAMES: set = set()
+
+
 def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     """Assert the emitted HSACO fits ``arch``'s resource budget.
 
@@ -134,7 +163,14 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     - **Register (VGPR) over-subscription** -- the compiler does NOT fail; it
       *spills to scratch* and the kernel still compiles, then runs at reduced
       occupancy with scratch traffic. A pass/fail compile check is blind to this,
-      so we assert ``scratch_bytes == 0`` as the arch-agnostic no-spill signal.
+      so we assert ``scratch_bytes`` stays within its no-spill budget (0 for all
+      but a few occupancy-bound shipped kernels; see
+      ``_KERNEL_RESOURCE_BUDGETS``).
+    - **Occupancy drop** -- a change can push register/LDS pressure past the point
+      where the kernel's tuned wave count still fits; the scratch bound cannot see
+      this (spilling holds occupancy constant), so for kernels with a declared
+      ``min_waves_per_simd`` we also assert the static multi-limiter occupancy stays
+      at or above that floor.
 
     Resource fields come from ``group_segment_fixed_size`` /
     ``private_segment_fixed_size`` in the code object, read via ``llvm-readelf``
@@ -156,6 +192,8 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
             pytest.skip(f"HSACO introspection tool unavailable: {e}")
 
     name = kernel_name or "kernel"
+    if kernel_name:
+        _SEEN_KERNEL_NAMES.add(kernel_name)
     lds = res.lds_bytes
     if lds is None:  # pragma: no cover - metadata shape drift
         pytest.skip("could not parse group_segment_fixed_size from HSACO")
@@ -163,13 +201,40 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
         f"{name} LDS {lds} B exceeds {arch} cap {cap} B (over by {lds - cap} B) "
         f"-- comgr codegen rejection at larger tiles / seq"
     )
-    # Register overflow does not fail the compile -- it spills. Any scratch use is
-    # a register-budget regression (occupancy cliff), so treat it as a failure.
+    budgets = _KERNEL_RESOURCE_BUDGETS.get(kernel_name, {})
+    # Register overflow does not fail the compile -- it spills. Scratch use above
+    # the kernel's budget (0 unless it is a known occupancy-bound kernel) is a
+    # register-budget regression, so treat it as a failure.
     scratch = res.scratch_bytes
     if scratch is not None:
-        assert scratch == 0, (
-            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}) "
-            f"-- register over-subscription; kernel compiles but loses occupancy"
+        max_scratch = budgets.get("max_scratch_bytes", 0)
+        assert scratch <= max_scratch, (
+            f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "
+            f"over its {max_scratch} B budget -- register over-subscription; kernel "
+            f"compiles but loses occupancy"
+        )
+    # Occupancy floor: for kernels tuned to a known wave count, assert the static
+    # multi-limiter occupancy has not fallen below it. Complementary to the scratch
+    # bound above -- catches an occupancy drop the byte count cannot see.
+    min_waves = budgets.get("min_waves_per_simd")
+    if min_waves is not None:
+        from rocke.benchmark.perf.occupancy import estimate_occupancy_detail
+
+        det = estimate_occupancy_detail(hsaco, arch)
+        if not det:
+            # A declared floor with no occupancy model for this arch is an author
+            # error, not an environment condition -- the readelf-unavailable case
+            # already pytest.skip'd above, so {} here means "arch not in _ARCH_CAPS"
+            # (e.g. a gfx1250 budget). Skip loudly rather than pass the floor silently.
+            pytest.skip(
+                f"no occupancy model for {arch}; cannot enforce the "
+                f"min_waves_per_simd floor for {name}"
+            )
+        occ = det["waves_per_simd"]
+        assert occ >= min_waves, (
+            f"{name} achieves {occ} waves/SIMD on {arch} "
+            f"(limiter {det.get('limited_by')}, VGPR {res.vgpr_count}), below "
+            f"its tuned floor of {min_waves} -- occupancy regression"
         )
 
 
@@ -232,6 +297,14 @@ _TILED_2D_BUDGET_GEOMETRIES = [
         "fp16_d64_gqa64x8",
         "gfx942",
         dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="fp16"),
+    ),
+    # Both D64 dtypes ride the narrowed (width-16) ring, and bf16 reaches the
+    # selector through the bf16-wide spec branch rather than the fp16 one, so the
+    # fp16 row above does not cover it.
+    (
+        "bf16_d64_gqa64x8",
+        "gfx942",
+        dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="bf16"),
     ),
     # Sliding-window D128 takes a SEPARATE non-ring geometry (the flash/ring
     # paths gate on ``sliding_window == 0``; SW picks its own tile), so LDS/reg
@@ -746,6 +819,49 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("supported", reason)
 
+    def test_gfx950_d128_ksingle_buffer_geometry_guard(self):
+        """gfx950 d128 single-seq prefill: ``_enable_k_single_buffer`` must
+        derive ``block_m <= tile_size`` from the geometry selectors, not proxy
+        it as ``block_size >= 32``.
+
+        The stale proxy assumed num_warps=2; ``_enable_softmax_mfma_interleave``
+        later widened this cohort to num_warps=4 (block_m=128), so block_size=32
+        (T=64) tripped the ``block_m <= tile_size`` validator with an uncaught
+        ValueError at spec build (no sliding window needed). block_size=64
+        survived only by coincidence (T=128 == block_m). Pin: bs32 builds with
+        K-single OFF; bs64 keeps K-single ON (golden parity case 53) -- both
+        dtypes, no SW.
+        """
+        import kernels.common.attention_unified as au
+
+        def _p(block_size, dtype):
+            return UnifiedAttentionProblem(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                block_size=block_size,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype=dtype,
+                sliding_window=0,
+            )
+
+        with _patch_resolved_arch("gfx950"):
+            for dtype in ("fp16", "bf16"):
+                # bs32 was an uncaught ValueError at spec build; must now build.
+                p32 = _p(32, dtype)
+                self.assertEqual(p32.select_path(), "2d")
+                self.assertFalse(au._enable_k_single_buffer(p32))
+                spec32 = au._tiled_spec_from_problem(p32)  # must NOT raise
+                self.assertFalse(spec32.use_k_single_buffer)
+                # bs64 still satisfies block_m <= tile_size -> K-single stays on.
+                p64 = _p(64, dtype)
+                self.assertTrue(au._enable_k_single_buffer(p64))
+                spec64 = au._tiled_spec_from_problem(p64)
+                self.assertTrue(spec64.use_k_single_buffer)
+
     def test_unified_attention_scalar_kernels_compile(self):
         p = UnifiedAttentionProblem(
             total_q=3,
@@ -1085,10 +1201,10 @@ class TestAttentionHelpers(unittest.TestCase):
         prefill kernel (``build_attention_dense``, its own builder / ABI -- NOT
         routed through the unified 2D-tiled path the matrix above covers).
 
-        Dense bakes shape in at build time and is LDS-heavy (tunable V pad via
-        ``ROCKE_DENSE_VPAD``), so it is a live over-budget risk on its own. Covers
-        both the default and persistent (grid-stride) variants. gfx950-only,
-        torch-free -- comgr targets gfx950 via its triple.
+        Dense bakes shape and ``AttentionDenseSpec.lds_v_row_pad`` in at build
+        time and is LDS-heavy, so it is a live over-budget risk on its own.
+        Covers both the default and persistent (grid-stride) variants.
+        gfx950-only, torch-free -- comgr targets gfx950 via its triple.
         """
         from dataclasses import replace
 
@@ -1113,6 +1229,623 @@ class TestAttentionHelpers(unittest.TestCase):
                 art = _compile_or_skip(k, arch="gfx950")
                 self.assertGreater(art.hsaco_bytes, 0)
                 _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+
+    def test_gfx950_dense_paged_spec_admission(self):
+        """Paged spec fields + validation: accept the fp16/bf16 D128 SW single-seq
+        cohort, reject illegal / not-yet-validated combos. Pure-Python (no GPU)."""
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            supports_attention_dense,
+        )
+
+        base = dict(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+        )
+        # Accept: fp16 D128 SW single-seq, page size divides block_n.
+        ok, why = supports_attention_dense(
+            AttentionDenseSpec(paged=True, block_size=16, num_kv_blocks=512, **base)
+        )
+        self.assertTrue(ok, why)
+        # kernel name carries the paged tag (distinct binary / cache key).
+        self.assertIn(
+            "pgd16",
+            AttentionDenseSpec(
+                paged=True, block_size=16, num_kv_blocks=512, **base
+            ).kernel_name(),
+        )
+        # num_kv_blocks is IR-live (sets the paged buffer-rsrc bound) so it MUST be part
+        # of the kernel identity -- else two cache sizes collide in the launcher cache and
+        # the larger reads later blocks as 0. Assert distinctness.
+        n512 = AttentionDenseSpec(
+            paged=True, block_size=16, num_kv_blocks=512, **base
+        ).kernel_name()
+        n1024 = AttentionDenseSpec(
+            paged=True, block_size=16, num_kv_blocks=1024, **base
+        ).kernel_name()
+        self.assertNotEqual(n512, n1024)
+        self.assertIn("nb512", n512)
+        self.assertIn("nb1024", n1024)
+        # Accept: bf16 too -- the paged mechanism is dtype-generic (both 2-byte).
+        ok_bf, why_bf = supports_attention_dense(
+            AttentionDenseSpec(
+                paged=True,
+                block_size=16,
+                num_kv_blocks=512,
+                **{**base, "dtype": "bf16"},
+            )
+        )
+        self.assertTrue(ok_bf, why_bf)
+        # Rejections (each a ValueError from __post_init__).
+        for kw in (
+            dict(block_size=0, num_kv_blocks=512),  # page size 0
+            dict(block_size=128, num_kv_blocks=512),  # not a divisor of block_n (pow2)
+            dict(
+                block_size=24, num_kv_blocks=512
+            ),  # non-power-of-two (shift/mask gate)
+            dict(block_size=4, num_kv_blocks=512),  # < ROWS_PER_WAVE (8)
+            dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
+            dict(block_size=16, num_kv_blocks=70000),  # cache > 2 GiB (i32 overflow)
+            dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
+            dict(block_size=16, num_kv_blocks=512, varlen=True),
+            dict(block_size=16, num_kv_blocks=512, persistent=True),
+            dict(
+                block_size=16, num_kv_blocks=512, sliding_window=0
+            ),  # not validated yet
+        ):
+            with self.subTest(kw=kw), self.assertRaises(ValueError):
+                AttentionDenseSpec(paged=True, **{**base, **kw})
+        # 0-cost when off: a non-paged spec is unaffected.
+        s = AttentionDenseSpec(**base)
+        self.assertFalse(s.paged)
+        self.assertNotIn("pgd", s.kernel_name())
+
+    def test_gfx950_dense_paged_builds_and_signature(self):
+        """Paged ABI: the signature carries block_tables/kv_lens/block_table_stride,
+        and the paged spec builds on host (load path still contiguous at this stage)."""
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=512,
+        )
+        names = [p["name"] for p in attention_dense_signature(spec)]
+        for req in ("block_tables", "kv_lens", "block_table_stride"):
+            self.assertIn(req, names)
+        self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
+
+    def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for the PAGED gfx950 dense prefill
+        (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
+        budget test; the block_tables indirection adds a load but must still fit."""
+        from kernels import AttentionDenseSpec, build_attention_dense
+
+        for dt in ("fp16", "bf16"):
+            spec = AttentionDenseSpec(
+                batch=1,
+                seqlen_q=8192,
+                seqlen_kv=8192,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                causal=True,
+                dtype=dt,
+                sliding_window=4096,
+                block_n=64,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=512,
+            )
+            with self.subTest(dtype=dt):
+                self.assertIn("pgd16", spec.kernel_name())
+                k = build_attention_dense(spec, arch="gfx950")
+                art = _compile_or_skip(k, arch="gfx950")
+                self.assertGreater(art.hsaco_bytes, 0)
+                _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+
+    def test_gfx950_dense_paged_launcher_rejects_kv_cache_shape_mismatch(self):
+        """The launcher must reject a paged K/V cache whose shape disagrees with
+        the spec that sizes the buffer-resource bound
+        (num_kv_blocks*block_size*num_kv_heads*head_size). A too-small cache
+        under a too-large ``num_kv_blocks`` sets an oversized hardware bound and lets
+        a block-table entry drive an OOB read. Host-only: the shape check raises
+        before any comgr compile / GPU launch, so no torch or GPU is required (only
+        ``.shape`` is read pre-launch, so lightweight stand-ins suffice)."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        wrong = (256, spec.block_size, spec.num_kv_heads, spec.head_size)  # 256 != 512
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        block_tables = SimpleNamespace(shape=(1, 512))
+        kv_lens = SimpleNamespace(shape=(1,))
+
+        # Negative (K): fewer physical blocks than the spec claims -> reject.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=SimpleNamespace(shape=wrong),
+                v=SimpleNamespace(shape=want),
+                out=out,
+                scale=1.0,
+                block_tables=block_tables,
+                kv_lens=kv_lens,
+            )
+        msg = str(ctx.exception)
+        self.assertIn("paged k cache shape", msg)
+        self.assertIn("(256,", msg)  # the offending shape is reported
+        self.assertIn("OOB", msg)
+
+        # Negative (V): the same defect on the value cache is also caught.
+        with self.assertRaises(ValueError):
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=SimpleNamespace(shape=want),
+                v=SimpleNamespace(shape=wrong),
+                out=out,
+                scale=1.0,
+                block_tables=block_tables,
+                kv_lens=kv_lens,
+            )
+
+        # Positive control: MATCHING shapes pass the shape gate and reach compile.
+        # Patch compile_kernel to a sentinel so the launcher stays host-only (no
+        # comgr, no GPU) yet proves it did NOT raise our shape ValueError. Clear the
+        # launcher cache so a prior test cannot let us skip compile. validate_paged
+        # is off here to isolate the SHAPE gate (block-table CONTENTS validation is
+        # covered by test_..._validates_block_table_bounds).
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        sentinel = RuntimeError("reached-compile")
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok_ctx:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=SimpleNamespace(shape=want),
+                    v=SimpleNamespace(shape=want),
+                    out=out,
+                    scale=1.0,
+                    block_tables=block_tables,
+                    kv_lens=kv_lens,
+                    validate_paged=False,
+                )
+            self.assertIs(ok_ctx.exception, sentinel)
+
+    def test_gfx950_dense_paged_launcher_validates_block_table_bounds(self):
+        """Gated CONTENTS check on paged block tables: an entry outside
+        [0, num_kv_blocks) reads 0 via the bounds-checked cache SRD (silent wrong
+        output), so validate_paged=True rejects it loudly, validate_paged=False
+        skips it (sync-free hot path), and only DEREFERENCED pages are checked.
+        Host-only: block_tables/kv_lens are plain Python lists (only ints + slicing
+        are read), so no torch / GPU."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=64,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=want)
+        v = SimpleNamespace(shape=want)
+        kv_lens = [256]  # == seqlen_kv (enforced) -> ceil(256/64)=4 pages deref
+        good_bt = [[0, 1, 2, 3]]  # all in [0, 512)
+        bad_bt = [[0, 1, 600, 3]]  # 600 >= num_kv_blocks at a USED page
+        sentinel = RuntimeError("reached-compile")
+
+        # Negative (validate on, default): a used entry >= num_kv_blocks -> reject
+        # loudly, before any compile / launch.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                block_tables=bad_bt,
+                kv_lens=kv_lens,
+            )
+        msg = str(ctx.exception)
+        self.assertIn("600", msg)
+        self.assertIn("num_kv_blocks=512", msg)
+
+        # Only DEREFERENCED pages are checked: a bad id in a column BEYOND n_pages
+        # (index >= ceil(256/64)=4) is never read, so it is ignored.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as beyond:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=[[0, 1, 2, 3, 600]],
+                    kv_lens=kv_lens,
+                )
+            self.assertIs(beyond.exception, sentinel)
+
+        # Gate off: the bad table is skipped entirely -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as gated:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=bad_bt,
+                    kv_lens=kv_lens,
+                    validate_paged=False,
+                )
+            self.assertIs(gated.exception, sentinel)
+
+        # Positive (validate on, valid table): passes the gate -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=kv_lens,
+                )
+            self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_paged_launcher_validates_kv_len_contract(self):
+        """Gated CONTENTS check: the kernel visits ALL compile-time seqlen_kv
+        tiles but the page-bounds mask uses the runtime kv_len, so a kv_len
+        shorter than seqlen_kv leaves uncovered tiles reading page 0 (the masked
+        block-table default) -> silently wrong output. validate_paged=True
+        enforces kv_lens[i] == seqlen_kv; validate_paged=False skips it (hot
+        path). Host-only (plain lists), no torch / GPU."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=64,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=want)
+        v = SimpleNamespace(shape=want)
+        good_bt = [[0, 1, 2, 3]]
+        sentinel = RuntimeError("reached-compile")
+
+        # Negative (validate on, default): kv_len < seqlen_kv -> reject loudly.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                block_tables=good_bt,
+                kv_lens=[128],
+            )
+        msg = str(ctx.exception)
+        self.assertIn("kv_lens[0]=128", msg)
+        self.assertIn("seqlen_kv=256", msg)
+
+        # Gate off: the contract is not checked -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as gated:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=[128],
+                    validate_paged=False,
+                )
+            self.assertIs(gated.exception, sentinel)
+
+        # Positive (kv_len == seqlen_kv): passes the gate -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=[256],
+                )
+            self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_sinks_required_when_enabled(self):
+        """spec.use_sinks=True requires sinks parameter (not None)."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                sinks=None,
+            )
+        self.assertEqual(
+            str(ctx.exception), "spec.use_sinks=True requires sinks that are not None"
+        )
+
+    def test_gfx950_dense_sinks_rejected_when_disabled(self):
+        """spec.use_sinks=False rejects sinks parameter if provided."""
+        from types import SimpleNamespace
+
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=False,
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        sinks = [0.0] * spec.num_query_heads
+
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                sinks=sinks,
+            )
+        self.assertEqual(
+            str(ctx.exception), "sinks provided but spec.use_sinks is False"
+        )
+
+    def test_gfx950_dense_sinks_passes_validation(self):
+        """spec.use_sinks=True with sinks provided passes validation and reaches compile."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=64,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+        qshape = (spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        kvshape = (spec.batch, spec.seqlen_kv, spec.num_kv_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape, dtype="bfloat16")
+        k = SimpleNamespace(shape=kvshape)
+        v = SimpleNamespace(shape=kvshape)
+        out = SimpleNamespace(shape=qshape)
+        # Mock sinks tensor with all required attributes
+        sinks = SimpleNamespace(
+            shape=(spec.num_query_heads,),
+            dtype="bfloat16",
+            is_contiguous=lambda: True,
+            is_cuda=True,
+        )
+        sentinel = RuntimeError("reached-compile")
+
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    sinks=sinks,
+                )
+            self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_sinks_rejected_with_paged(self):
+        """AttentionDenseSpec.__post_init__ rejects use_sinks with paged."""
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = dict(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        # Valid: sinks without paged
+        spec = AttentionDenseSpec(**base)
+        self.assertTrue(spec.use_sinks)
+
+        # Reject: use_sinks + paged
+        with self.assertRaises(ValueError) as ctx:
+            AttentionDenseSpec(
+                paged=True, block_size=16, num_kv_blocks=512, sliding_window=128, **base
+            )
+        self.assertEqual(
+            str(ctx.exception), "use_sinks is not yet supported with paged KV"
+        )
+
+    def test_gfx950_dense_sinks_rejected_with_varlen(self):
+        """AttentionDenseSpec.__post_init__ rejects use_sinks with varlen."""
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = dict(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            use_sinks=True,
+        )
+
+        # Valid: sinks without varlen
+        spec = AttentionDenseSpec(**base)
+        self.assertTrue(spec.use_sinks)
+
+        # Reject: use_sinks + varlen
+        with self.assertRaises(ValueError) as ctx:
+            AttentionDenseSpec(varlen=True, **base)
+        self.assertEqual(
+            str(ctx.exception), "use_sinks is not yet supported with varlen"
+        )
 
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
@@ -1319,15 +2052,17 @@ class TestAttentionHelpers(unittest.TestCase):
             )
 
     def test_gfx942_d64_decode_num_warps(self):
-        """gfx942 D64 decode picks num_warps=1; prefill keeps num_warps=4.
+        """gfx942 D64 decode picks num_warps=1.
 
         Decode (max_seqlen_q == 1) is memory-bound and wins at nw=1 (BLOCK_M=32,
-        4x the CTAs of nw=4). Prefill is compute-bound and stays at nw=4. fp8
-        decode is excluded from the nw=1 lever (dequant-bound, wants more warps),
-        so it also stays at nw=4. This branch is the production geometry change;
-        pin it so a refactor can't silently revert it. The C++ selector mirrors
-        this exactly (see attention_unified_selectors.cpp); the run_all.py
-        byte-identity gate enforces the two agree.
+        4x the CTAs of nw=4). fp8 decode is excluded from the nw=1 lever
+        (dequant-bound, wants more warps), so it stays at nw=4. bf16 full-causal
+        sink prefill is intercepted earlier by the tuned cohort (nw=2, see
+        test_gfx942_sink_prefill_tuned_cohort). This branch is the production
+        geometry change; pin it so a refactor can't silently revert it. The
+        Python selectors are authoritative for production geometry; the C++
+        selectors in attention_unified_selectors.cpp are a hand-maintained mirror
+        kept in sync for parity (not exercised by production dispatch).
         """
         import kernels.common.attention_unified as au
 
@@ -1348,11 +2083,109 @@ class TestAttentionHelpers(unittest.TestCase):
 
         with _patch_resolved_arch("gfx942"):
             self.assertEqual(au._select_2d_num_warps(_p(1)), 1)  # decode
-            self.assertEqual(au._select_2d_num_warps(_p(512)), 4)  # prefill
-            self.assertEqual(au._select_2d_num_warps(_p(2048)), 4)  # prefill
+            # prefill: intercepted by the tuned sink-prefill cohort -> nw2
+            self.assertEqual(au._select_2d_num_warps(_p(512)), 2)
+            self.assertEqual(au._select_2d_num_warps(_p(2048)), 2)
             self.assertEqual(
                 au._select_2d_num_warps(_p(1, use_fp8=True)), 4
             )  # fp8 decode excluded
+
+    def test_gfx942_sink_prefill_tuned_cohort(self):
+        """gfx942 full-causal bf16 sink prefill selects nw2/mw16/T32 + register_pv,
+        and near-miss shapes stay on the shipped nw4/mw32/no-regpv config.
+        """
+        import kernels.common.attention_unified as au
+
+        def _make_problem(**overrides):
+            base = dict(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+            )
+            base.update(overrides)
+            return UnifiedAttentionProblem(**base)
+
+        with _patch_resolved_arch("gfx942"):
+            cohort = _make_problem()
+            self.assertTrue(au._enable_gfx942_sink_prefill_tuned(cohort))
+            spec = au._tiled_spec_from_problem(cohort)
+            self.assertEqual(spec.num_warps, 2)
+            self.assertEqual(spec.block_m_per_warp, 16)
+            self.assertEqual(spec.tile_size, 2 * cohort.block_size)
+            self.assertTrue(spec.use_register_pv)
+
+            # Near-miss shapes on the 2D path must NOT hit the tuned cohort and
+            # must keep the shipped D64 config (nw4 / mw32 / no register_pv).
+            for label, p in (
+                ("swa", _make_problem(sliding_window=128)),
+                ("no_sinks", _make_problem(use_sinks=False)),
+                ("bs32", _make_problem(block_size=32)),
+            ):
+                with self.subTest(near_miss=label):
+                    self.assertFalse(au._enable_gfx942_sink_prefill_tuned(p))
+                    s = au._tiled_spec_from_problem(p)
+                    self.assertEqual(s.num_warps, 4)
+                    self.assertEqual(s.block_m_per_warp, 32)
+                    self.assertFalse(s.use_register_pv)
+
+            # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
+            # cohort gate must still exclude it.
+            self.assertFalse(
+                au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1))
+            )
+
+    def test_gfx950_sink_prefill_wpe3_cohort(self):
+        """gfx950 full-causal bf16 sink prefill selects waves_per_eu=3 (occupancy
+        hint only, output-preserving); SWA, non-sink, decode, and other shapes
+        keep the shipped waves_per_eu=2.
+        """
+        import kernels.common.attention_unified as au
+
+        def _make_problem(**overrides):
+            base = dict(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+            )
+            base.update(overrides)
+            return UnifiedAttentionProblem(**base)
+
+        with _patch_resolved_arch("gfx950"):
+            cohort = _make_problem()
+            self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort))
+            self.assertEqual(au._select_2d_waves_per_eu(cohort), 3)
+
+            # Near-miss shapes must NOT hit the wpe=3 cohort.
+            for label, p in (
+                ("swa", _make_problem(sliding_window=128)),
+                ("no_sinks", _make_problem(use_sinks=False)),
+                ("bs32", _make_problem(block_size=32)),
+            ):
+                with self.subTest(near_miss=label):
+                    self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p))
+            # Decode (q==1) routes to 3D; gate must still exclude it.
+            self.assertFalse(
+                au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1))
+            )
+            # gfx942 must not hit the gfx950 gate.
+            with _patch_resolved_arch("gfx942"):
+                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem()))
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry
@@ -1388,6 +2221,65 @@ class TestAttentionHelpers(unittest.TestCase):
                     msg=f"{arch}: D128 fp16 GQA decode should route to a "
                     f"supported 3D kernel, got: {reason}",
                 )
+
+    @staticmethod
+    def _fp8_decode_problem(fp8_fnuz=False):
+        return UnifiedAttentionProblem(
+            total_q=1,
+            num_seqs=1,
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=64,
+            block_size=16,
+            max_seqlen_q=1,
+            max_seqlen_k=2048,
+            dtype="bf16",
+            use_fp8=True,
+            fp8_fnuz=fp8_fnuz,
+        )
+
+    def test_gfx942_fp8_decode_rejects_ocp_requires_fnuz(self):
+        """G3: OCP fp8 K/V on the gfx9_mfma family (gfx942) decodes as
+        e4m3fnuz and silently mis-decodes -> the gate must reject it (loud
+        error, not a NaN kernel) unless the caller opts into fnuz via
+        ``fp8_fnuz=True``.
+        """
+        from kernels import (
+            supports_native_unified_attention,
+            supports_native_unified_attention_3d_tiled,
+        )
+
+        with _patch_resolved_arch("gfx942"):
+            for gate in (
+                supports_native_unified_attention_3d_tiled,
+                supports_native_unified_attention,
+            ):
+                ok, reason = gate(self._fp8_decode_problem())
+                self.assertFalse(ok, msg=f"{gate.__name__} should reject OCP fp8")
+                self.assertIn("fnuz", reason)
+            # Opt-in acknowledges fnuz bytes -> not rejected for the format.
+            ok_fnuz, _ = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertTrue(ok_fnuz)
+
+    def test_gfx950_fp8_decode_accepts_ocp_rejects_fnuz(self):
+        """gfx950 decodes OCP fp8 natively: the guard accepts OCP K/V but must
+        reject fnuz-declared K/V, which would silently mis-decode on an OCP arch.
+        """
+        from kernels import supports_native_unified_attention_3d_tiled
+
+        with _patch_resolved_arch("gfx950"):
+            ok, reason = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem()
+            )
+            self.assertTrue(ok, msg=f"gfx950 decodes OCP fp8: {reason}")
+
+            ok_fnuz, reason_fnuz = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertFalse(ok_fnuz, msg="gfx950 should reject fnuz-declared fp8")
+            self.assertIn("fnuz", reason_fnuz)
 
     def test_tiled_3d_spec_builder_constructs_per_arch(self):
         """Focused guard on the 3D spec builder that broke: a decode problem must
@@ -1491,6 +2383,47 @@ class TestAttentionHelpers(unittest.TestCase):
                     with _patch_resolved_arch(arch):
                         spec = au._tiled_spec_from_problem(p)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
+
+    def test_gfx950_fp16_d128_sw_routing(self):
+        """Regression for the fp16 D128 sliding-window routing fix + its
+        ``block_size == 16`` scoping.
+
+        fp16 D128 SW is admitted into the single-batch transposed-32x32 combo
+        only for ``block_size == 16``: at block_size in {32, 64} the combo also
+        enables the default-on ``_enable_d128_small_tile`` /
+        ``_enable_softmax_mfma_interleave`` levers, yielding
+        ``block_m=128 > tile_size=64`` with ``use_k_single_buffer`` -- an
+        uncaught ``ValueError`` in ``_tiled_spec_from_problem`` at launch. So
+        every block_size must build without raising, and only block_size==16
+        takes the transposed-32x32 (T=64) path; 32/64 stay on the narrow path.
+        """
+        import kernels.common.attention_unified as au
+        from kernels import supports_native_unified_attention_tiled
+
+        with _patch_resolved_arch("gfx950"):
+            for bs in (16, 32, 64):
+                with self.subTest(block_size=bs):
+                    p = _budget_problem(
+                        head_size=128,
+                        num_query_heads=32,
+                        num_kv_heads=8,
+                        dtype="fp16",
+                        seq=8192,
+                        block_size=bs,
+                        sliding_window=4096,
+                    )
+                    ok, reason = supports_native_unified_attention_tiled(p)
+                    self.assertTrue(ok, msg=reason)
+                    # Must not raise: block_size 32/64 previously hit an
+                    # uncaught ValueError building the combo spec here.
+                    spec = au._tiled_spec_from_problem(p)
+                    if bs == 16:
+                        # routed to the transposed-32x32 combo at T=64
+                        self.assertTrue(spec.use_mfma_32x32)
+                        self.assertEqual(spec.tile_size, 64)
+                    else:
+                        # block_size 32/64 stay on the narrow path
+                        self.assertFalse(spec.use_mfma_32x32)
 
     def test_tiled_3d_support_gate_rejects_unsupported(self):
         """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the
@@ -1608,6 +2541,880 @@ class TestAttentionHelpers(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# AttentionDenseSpec — waves_per_eu validation, IR identity, cache isolation
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseWavesPerEu(unittest.TestCase):
+    """Tests for the waves_per_eu fix on AttentionDenseSpec.
+
+    Three properties are verified independently so a single failure is
+    unambiguous:
+
+    1. ``__post_init__`` rejects out-of-range values (0, negative, >8).
+    2. The emitted LLVM IR carries the correct ``amdgpu-waves-per-eu``
+       attribute for each legal value — confirming the attribute reached
+       codegen correctly both before and after the cache-key fix.
+    3. Two specs differing only in ``waves_per_eu`` produce distinct emitted
+       IR, and each variant compiles cleanly (cache-isolation fix: key now
+       includes ``waves_per_eu``).
+
+    All run without a GPU; the compile test needs comgr and is skipped when the
+    toolchain is unavailable (matching the pattern in
+    ``test_gfx950_dense_prefill_compiles_and_fits_budget``).
+    """
+
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+
+    def test_waves_per_eu_validation_rejects_out_of_range(self):
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        for bad in (0, -1, 9, 100):
+            with self.subTest(waves_per_eu=bad):
+                with self.assertRaises(
+                    ValueError, msg=f"waves_per_eu={bad} should be rejected"
+                ):
+                    AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=bad)
+
+        for good in (1, 2, 8):
+            with self.subTest(waves_per_eu=good):
+                # Must not raise
+                AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=good)
+
+    def test_waves_per_eu_ir_attribute(self):
+        """Each legal waves_per_eu value appears verbatim in the lowered IR."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+        from dataclasses import replace
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+                self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
+
+    def test_waves_per_eu_cache_key_isolation(self):
+        """A codegen knob splits cache identity; a runtime-param field does not.
+
+        Both halves are asserted as an equivalence relation over whole keys, not
+        by indexing into the tuple: the key's layout is an implementation detail
+        of ``attention_dense_cache_key`` and every production caller treats it as
+        opaque. The old version asserted ``key[1].waves_per_eu``, which broke as
+        soon as the layout changed while the property it meant to protect was
+        still intact.
+
+        This test verifies identity only (no comgr needed);
+        ``test_waves_per_eu_cache_isolation_artifacts`` covers the emitted
+        artifact those distinct keys must map to.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        specs = {wpe: replace(base, waves_per_eu=wpe) for wpe in (1, 2)}
+        keys = {
+            wpe: attention_dense_cache_key(s, arch="gfx950") for wpe, s in specs.items()
+        }
+
+        # A codegen knob MUST split identity.
+        self.assertNotEqual(
+            keys[1],
+            keys[2],
+            "waves_per_eu=1 and waves_per_eu=2 produce identical cache keys; "
+            "a sweep over waves_per_eu would silently reuse the first binary",
+        )
+
+        # A declared runtime-param field MUST NOT split identity -- one compiled
+        # kernel serves every value, so a distinct key would mean a redundant
+        # rebuild and a redundant AOT instance.
+        self.assertEqual(
+            base.runtime_param_fields,
+            ("batch", "seqlen_q", "seqlen_kv"),
+            "test assumes the aligned dense spec declares all three shape "
+            "fields as runtime params",
+        )
+        for wpe, spec in specs.items():
+            with self.subTest(waves_per_eu=wpe):
+                reshaped = replace(
+                    spec,
+                    batch=spec.batch * 8,
+                    seqlen_q=spec.seqlen_q * 2,
+                    seqlen_kv=spec.seqlen_kv * 2,
+                )
+                self.assertEqual(
+                    attention_dense_cache_key(reshaped, arch="gfx950"),
+                    keys[wpe],
+                    "changing batch/seqlen_q/seqlen_kv split the cache key; the "
+                    "runtime-shape kernel serves every shape from one binary",
+                )
+                self.assertEqual(
+                    reshaped.kernel_name(),
+                    spec.kernel_name(),
+                    "symbol name carries shape on the runtime path",
+                )
+
+        # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
+        # so the split above is attributable to waves_per_eu alone.
+        self.assertEqual(
+            specs[1].kernel_name(),
+            specs[2].kernel_name(),
+            "kernel_name() differed unexpectedly — test setup error",
+        )
+
+    def test_waves_per_eu_cache_isolation_artifacts(self):
+        """Specs differing only in waves_per_eu emit distinct IR and compile.
+
+        The artifact rocke owns is the IR, so that is what the cache slots must
+        differ in. Asserting on the HSACO instead would be asserting a backend
+        decision: ``amdgpu-waves-per-eu`` is an occupancy *hint*, and the
+        allocator is free to land two hint values on the same register budget.
+        It does exactly that here -- on the ROCm 7.2 comgr that torch bundles,
+        this kernel compiles wpe 1, 2 and 8 to byte-identical code and only 4
+        differs, while on an older /opt/rocm comgr 1 and 2 happen to differ.
+        A test that passed standalone and failed under the suite only because
+        importing torch swapped the comgr underneath it was measuring the
+        toolchain, not the fix.
+
+        Requires comgr; skipped when the toolchain is unavailable.
+        """
+        import hashlib
+        from dataclasses import replace
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        ir_hashes = {}
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                kernel = build_attention_dense(
+                    replace(base, waves_per_eu=wpe), arch="gfx950"
+                )
+                ir_hashes[wpe] = hashlib.sha256(
+                    lower_kernel_to_llvm(kernel).encode()
+                ).hexdigest()
+                # Each variant must survive codegen, not just lowering.
+                _compile_or_skip(kernel, arch="gfx950")
+
+        self.assertNotEqual(
+            ir_hashes[1],
+            ir_hashes[2],
+            "waves_per_eu=1 and waves_per_eu=2 lowered to identical IR; "
+            "waves_per_eu is not reaching the emitted kernel, so the two "
+            "cache slots would hold the same artifact",
+        )
+
+
+# ---------------------------------------------------------------------
+# AttentionDenseSpec — runtime-shape cache-key/IR collision guard
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
+    """The cache key and the emitted IR must partition specs identically.
+
+    ``attention_dense_cache_key`` drops every field named by
+    ``runtime_param_fields``, so on the aligned dense path batch/seqlen_q/
+    seqlen_kv no longer split cache identity: one binary serves every shape and
+    the three values arrive as kernel arguments. That is only sound while the
+    builder actually ignores those fields at codegen. The day someone adds a
+    shape-dependent branch to ``build_attention_dense`` on the runtime path --
+    a baked trip count, a specialized epilogue for short sequences, a buffer
+    bound computed from ``batch`` -- the key stops distinguishing two configs
+    whose IR differs, and ``_DENSE_LAUNCHER_CACHE`` starts serving the
+    first-compiled binary for the wrong shape. Silently, with plausible-looking
+    numerics, because a kernel built for seqlen_kv=512 run at 8192 reads
+    garbage rather than crashing.
+
+    ``TestAttentionDenseWavesPerEu.test_waves_per_eu_cache_key_isolation``
+    covers the key half of that relation. This class covers the IR half, in
+    both directions:
+
+    - same key => same IR (the guard: shape fields must not reach codegen);
+    - different key => different IR (the control, on a baked path, so a builder
+      that ignored shape universally could not make the guard pass vacuously).
+
+    No GPU and no comgr -- the artifact rocke owns here is the IR text.
+    """
+
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+
+    # Deliberately far apart in every dimension and across the block_m/block_n
+    # tiling boundaries, so a builder that baked *any* shape-derived constant
+    # (trip counts, partial-tile predicates, buffer extents) shows a hash split.
+    _SHAPES = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192))
+
+    @staticmethod
+    def _ir_sha(spec):
+        import hashlib
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import build_attention_dense
+
+        kernel = build_attention_dense(spec, arch="gfx950")
+        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+
+    def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
+        """Shapes that collapse to one cache key must emit one kernel."""
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base spec is not on the runtime-shape path",
+        )
+
+        keys, irs = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                b, sq, sk = shape
+                spec = replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx950")
+                irs[shape] = self._ir_sha(spec)
+
+        # Precondition: this is the collision the key deliberately creates.
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"runtime-shape specs did not share one cache key: {self._SHAPES}",
+        )
+        # The property under test: the collision is safe only if the IR agrees.
+        self.assertEqual(
+            len(set(irs.values())),
+            1,
+            "specs sharing ONE cache key lowered to DIFFERENT IR "
+            + repr({s: irs[s][:12] for s in self._SHAPES})
+            + " -- a shape field reached codegen on the runtime path, so "
+            "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
+            "every other shape. Either stop baking that field, or drop it from "
+            "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
+        )
+
+    def test_baked_shape_specs_split_both_key_and_ir(self):
+        """Control: off the runtime path, each shape keeps its own key and IR.
+
+        Without this, a builder that ignored batch/seqlen_q/seqlen_kv entirely
+        -- emitting one kernel that is wrong everywhere -- would satisfy the
+        guard above. ``sliding_window`` is the cheapest way off the runtime
+        path: it is a single field (``runtime_shape`` excludes it), unlike
+        ``persistent``, which also drags in num_persistent/persist_decode.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS, sliding_window=128)
+        self.assertFalse(
+            base.runtime_shape,
+            "test setup error: sliding_window no longer leaves the runtime path",
+        )
+        self.assertEqual(base.runtime_param_fields, ())
+
+        keys, irs = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                b, sq, sk = shape
+                spec = replace(base, batch=b, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx950")
+                irs[shape] = self._ir_sha(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            len(self._SHAPES),
+            "baked-shape specs shared a cache key; shape must split identity "
+            "when it is not a runtime kernel argument",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            len(self._SHAPES),
+            "baked-shape specs lowered to identical IR; the builder is "
+            "ignoring shape on a path that bakes it, so the guard test above "
+            "would pass vacuously",
+        )
+
+
+class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
+    """The gfx942 twin of :class:`TestAttentionDenseRuntimeShapeCollision`.
+
+    Same property, same failure mode, different body -- and the gfx942 body is
+    the one with an extra way to get it wrong. Its ``kernel_name()`` appends
+    ``_b{batch}`` on top of the base name, so dropping batch from the cache key
+    without dropping it from the symbol gives two specs that share ONE cache
+    slot two DIFFERENT names -- which the ``assert art.kernel_name ==
+    spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
+    shape served from the cache. The name assertion below covers that.
+
+    The baked-shape control below uses ``persistent`` to leave the runtime path;
+    ``sliding_window`` is the other off-path spec on gfx942 now that
+    ``supports_attention_dense`` admits it.
+    """
+
+    # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
+    # that the exp2_fast policy reads compile-time config only.
+    # test_bf16_d128_default_is_on_the_runtime_path covers the bf16 D128 config
+    # that used to be excluded.
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        block_n=64,
+        causal=True,
+        dtype="fp16",
+    )
+
+    # Far apart in every dimension and across the block_m/block_n tiling
+    # boundaries -- and straddling the exp2_fast cut at 4096 -- so a baked trip
+    # count, partial-tile predicate, buffer extent, or shape-dependent policy
+    # shows a hash split.
+    _SHAPES = ((1, 512, 512), (8, 2048, 2048), (64, 4096, 8192))
+
+    @staticmethod
+    def _spec(**kw):
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+        return Gfx942AttentionDenseSpec(**kw)
+
+    @staticmethod
+    def _ir_sha(spec):
+        import hashlib
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx942.attention_dense import build_attention_dense
+
+        kernel = build_attention_dense(spec, arch="gfx942")
+        return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
+
+    def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
+        """Shapes that collapse to one cache key must emit one kernel -- and,
+        on gfx942, one symbol name."""
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        base = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base gfx942 spec is not on the runtime-shape path",
+        )
+        self.assertEqual(base.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
+
+        keys, irs, names = {}, {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                irs[shape] = self._ir_sha(spec)
+                names[shape] = spec.kernel_name()
+
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"runtime-shape gfx942 specs did not share one cache key: {self._SHAPES}",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            1,
+            "gfx942 specs sharing ONE cache key lowered to DIFFERENT IR "
+            + repr({s: irs[s][:12] for s in self._SHAPES})
+            + " -- a shape field reached codegen on the runtime path, so "
+            "_DENSE_LAUNCHER_CACHE will serve the first-compiled binary for "
+            "every other shape.",
+        )
+        # gfx942-only: the b{batch} token must drop with the rest of the shape,
+        # or run_attention_dense_torch's kernel-name assert fires on the second
+        # shape served from the shared cache slot.
+        self.assertEqual(
+            len(set(names.values())),
+            1,
+            "gfx942 specs sharing ONE cache key produced DIFFERENT kernel names "
+            + repr(sorted(set(names.values())))
+            + " -- a shape token is still in kernel_name(), so the cached "
+            "launcher's symbol will not match the second spec's name.",
+        )
+        for shape, name in names.items():
+            for tok in (f"_b{shape[0]}", f"sq{shape[1]}", f"sk{shape[2]}"):
+                self.assertNotIn(
+                    tok,
+                    name,
+                    f"runtime-shape gfx942 name still carries {tok!r}: {name}",
+                )
+
+    def test_grid_still_varies_per_shape_under_one_cache_key(self):
+        """One binary, but a fresh launch grid for every shape.
+
+        The guard above deliberately collapses these specs onto ONE cache key and
+        ONE kernel. That is only correct if the launch geometry is still recomputed
+        per shape: the body derives its query block / query head / batch work item
+        from ``block_id_{x,y,z}``, so a grid memoized alongside the launcher would
+        leave the tail of the larger shapes uncomputed and over-launch the smaller
+        ones. ``attention_dense_grid`` reads the spec, not the cache, and must
+        therefore give a DISTINCT triple for each of ``_SHAPES``.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import attention_dense_grid
+
+        base = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(
+            base.runtime_shape,
+            "test setup error: the base gfx942 spec is not on the runtime-shape path",
+        )
+
+        keys, grids = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                grids[shape] = attention_dense_grid(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            1,
+            f"test setup error: these shapes no longer share one cache key: {keys}",
+        )
+        self.assertEqual(
+            len(set(grids.values())),
+            len(self._SHAPES),
+            "gfx942 runtime-shape specs sharing ONE cache key produced a repeated "
+            "launch grid " + repr(grids) + " -- the grid stopped tracking the "
+            "problem shape, so the single binary that cache slot serves is launched "
+            "with the wrong CTA count for every shape but the first.",
+        )
+
+    def test_baked_shape_specs_split_both_key_and_ir(self):
+        """Control: off the runtime path, each shape keeps its own key and IR.
+
+        Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
+        emitting one kernel that is wrong everywhere -- would satisfy the guard
+        above vacuously. ``persistent`` and ``sliding_window`` are the two specs
+        off the runtime path on gfx942 (``runtime_shape`` excludes both); this
+        control uses ``persistent``. ``ragged``/``varlen``/``paged`` are rejected
+        by ``supports_attention_dense`` and never reach the builder.
+        """
+        from dataclasses import replace
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        # num_persistent must not exceed the work space nqb*Hq*B of the SMALLEST
+        # shape under test, or spec construction rejects it.
+        base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
+        self.assertFalse(
+            base.runtime_shape,
+            "test setup error: persistent no longer leaves the runtime path",
+        )
+        self.assertEqual(base.runtime_param_fields, ())
+
+        keys, irs = {}, {}
+        for shape in self._SHAPES:
+            with self.subTest(shape=shape):
+                bt, sq, sk = shape
+                spec = replace(base, batch=bt, seqlen_q=sq, seqlen_kv=sk)
+                keys[shape] = attention_dense_cache_key(spec, arch="gfx942")
+                irs[shape] = self._ir_sha(spec)
+
+        self.assertEqual(
+            len(set(keys.values())),
+            len(self._SHAPES),
+            "baked-shape gfx942 specs shared a cache key; shape must split "
+            "identity when it is not a runtime kernel argument",
+        )
+        self.assertEqual(
+            len(set(irs.values())),
+            len(self._SHAPES),
+            "baked-shape gfx942 specs lowered to identical IR; the builder is "
+            "ignoring shape on a path that bakes it, so the guard test above "
+            "would pass vacuously",
+        )
+
+    def test_bf16_d128_default_is_on_the_runtime_path(self):
+        """bf16 D128 at the exp2_fast tri-state default is one binary per shape.
+
+        This config was once excluded from the runtime path, because the policy
+        then cut on ``seqlen_q``: the emitted softmax was a function of the shape,
+        and since ``_tuning_name_tags`` emits no token when the resolved value
+        matches the policy, two shapes straddling the cut would have shared a cache
+        key AND a kernel name while lowering to different IR -- a stale binary that
+        the name assert in ``run_attention_dense_torch`` cannot catch.
+
+        The policy now reads compile-time config only, so the exclusion is gone.
+        Asserted in the strong direction, byte-level: the same body must lower for
+        shapes on either side of the retired 4096 boundary. If someone reintroduces
+        a shape term in :func:`_use_exp2_fast`, the sha comparison fails here rather
+        than silently reopening the collision.
+        """
+        from dataclasses import replace
+
+        bf16 = self._spec(**{**self._BASE_KWARGS, "dtype": "bf16"})
+        self.assertTrue(
+            bf16.runtime_shape,
+            "bf16 D128 lowers one body for every shape; it belongs on the "
+            "runtime path",
+        )
+        self.assertEqual(bf16.runtime_param_fields, ("batch", "seqlen_q", "seqlen_kv"))
+
+        lo = replace(bf16, seqlen_q=2048, seqlen_kv=2048)
+        hi = replace(bf16, seqlen_q=4096, seqlen_kv=4096)
+        self.assertEqual(
+            lo.resolved_use_exp2_fast(),
+            hi.resolved_use_exp2_fast(),
+            "_use_exp2_fast reads the problem shape again; a shape-dependent "
+            "policy collides two bodies in one cache slot under a single name",
+        )
+        self.assertEqual(self._ir_sha(lo), self._ir_sha(hi))
+        self.assertEqual(lo.kernel_name(), hi.kernel_name())
+
+    def test_persistent_stays_baked(self):
+        """The gating holds the excluded sub-mode baked, through the shipped
+        dispatch factory rather than a hand-built spec.
+
+        The cheap CPU counterpart of the 5 unchanged ``persist_*`` cases in the
+        gfx942 IR golden: this fails fast with a readable message if the
+        predicate is ever loosened, instead of surfacing as an opaque hash diff.
+        """
+        from dispatch.attention.gfx942 import _dense_spec
+        from dispatch.attention.common import AttentionRequest
+
+        req = AttentionRequest(
+            batch=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            nhead_q=32,
+            nhead_k=8,
+            hdim_q=128,
+            hdim_v=128,
+            arch="gfx942",
+            dtype="bf16",
+            mask_type=1,  # causal
+        )
+        spec = _dense_spec(req)
+        if not spec.persistent:
+            self.skipTest(
+                "shipped gfx942 dispatch no longer selects persistent for this "
+                "shape; the golden's persist_* cases remain the binding check"
+            )
+        self.assertFalse(spec.runtime_shape)
+        self.assertEqual(spec.runtime_param_fields, ())
+        name = spec.kernel_name()
+        for tok in (f"sq{spec.seqlen_q}", f"sk{spec.seqlen_kv}", f"_b{spec.batch}"):
+            self.assertIn(
+                tok,
+                name,
+                f"persistent gfx942 name lost the baked token {tok!r}: {name}",
+            )
+
+    def test_signature_matches_the_built_kernels_params(self):
+        """``attention_dense_signature`` is checked against the kernel it describes.
+
+        The signature mirrors the ``b.param`` order in ``build_attention_dense`` BY
+        HAND, and a skew mis-binds kernargs at launch -- corrupting results on GPU
+        only. Comparing it to a hand-written list cannot catch that, since both
+        sides are hand-written; the ground truth has to be the built
+        :class:`~rocke.core.ir.KernelDef`, whose ``params`` are the kernargs the
+        emitted body actually reads. Both arms are covered: the runtime-shape path
+        (q/k/v/o + scale + the three i32 shape args) and the baked persistent path,
+        whose body declares no shape params, so an extra kernarg there would be
+        read as garbage.
+        """
+        from rocke.core.ir import PtrType
+        from rocke.helpers.spec import ptr_type_str
+        from kernels.gfx942.attention_dense import (
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        def expected_type_str(param):
+            """The signature-side type string for a built ``Param``.
+
+            Pointers are compared field-by-field rather than by string: the
+            signature spells them ``ptr<f16, global>`` while ``PtrType.name`` is
+            ``ptr<f16,global>``, so the structured route through ``pointee`` /
+            ``space`` (re-rendered by the same ``ptr_type_str`` the signature
+            builder uses) is both exact and whitespace-agnostic.
+            """
+            if isinstance(param.type, PtrType):
+                return ptr_type_str(param.type.pointee.name, param.type.space)
+            return param.type.name
+
+        rt = self._spec(**self._BASE_KWARGS)
+        self.assertTrue(rt.runtime_shape)
+        baked = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
+        self.assertFalse(baked.runtime_shape)
+
+        for arm, spec in (("runtime-shape", rt), ("baked", baked)):
+            with self.subTest(arm=arm):
+                params = build_attention_dense(spec, arch="gfx942").params
+                sig = attention_dense_signature(spec)
+                self.assertEqual(
+                    [a["name"] for a in sig],
+                    [p.name for p in params],
+                    f"gfx942 {arm} ABI: attention_dense_signature does not match "
+                    "the b.param order the builder emits; the launcher would pack "
+                    "kernargs into the wrong slots",
+                )
+                self.assertEqual(
+                    [a["type"] for a in sig],
+                    [expected_type_str(p) for p in params],
+                    f"gfx942 {arm} ABI: attention_dense_signature disagrees with "
+                    "the built kernel on a param type",
+                )
+
+        # The runtime path's whole point: exactly three extra i32 shape kernargs,
+        # after scale.
+        self.assertEqual(
+            [a["name"] for a in attention_dense_signature(rt)][
+                len(attention_dense_signature(baked)) :
+            ],
+            ["batch", "seqlen_q", "seqlen_kv"],
+            "runtime-shape gfx942 ABI is not the baked ABI plus the three shape args",
+        )
+
+
+# ---------------------------------------------------------------------
+# AttentionDenseSpec — the shared supports() preflight
+# ---------------------------------------------------------------------
+
+
+class TestDenseSpecPreflight(unittest.TestCase):
+    """``check_dense_spec_preflight`` is the one gate both dense bodies share.
+
+    The four checks it holds (dataclass re-validation, positive extents, block_n
+    dividing the query tile, 32-bit extents) are properties of the BASE spec with
+    the same verdict for every dense body, so they live in ``kernels.common``
+    instead of being copy-pasted per arch. gfx942 has enforced all four since P0
+    and has its own coverage in ``test_attention_dense_gfx942.py``; this class
+    covers the gfx950 half, which only started enforcing them when they moved.
+
+    The 32-bit pair is load-bearing here in a way it is not on gfx942. gfx950's
+    aligned path takes batch/seqlen as runtime kernel params, so the K/V extent
+    is a device-side ``mul`` of two kernargs rather than a constant folded at
+    emission -- there is nothing in the IR to inspect -- and those fields no
+    longer split the launcher-cache key, so a guard that only ran on a cache miss
+    would be bypassed by exactly the oversized second shape it exists to catch.
+    ``test_runtime_shape_collision_does_not_smuggle_an_oversized_shape_past``
+    pins that.
+    """
+
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+
+    def _spec(self, **kw):
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        return AttentionDenseSpec(**{**self._BASE_KWARGS, **kw})
+
+    def test_rejects_non_positive_extents(self):
+        """Every dataclass validator is a divisibility test and Python's ``%`` is
+        sign-following (``-256 % 256 == 0``, ``8 % -1 == 0``), so zero and negative
+        shapes pass all of them. ``num_query_heads=0`` is the worst: ``gqa = Hq //
+        Hkv == 0`` emits ``sdiv i32 %hq, 0`` into the kernel."""
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        cases = [
+            (dict(batch=0), "batch"),
+            (dict(batch=-1), "batch"),
+            (dict(seqlen_q=-2048, seqlen_kv=-2048), "seqlen"),
+            (dict(num_query_heads=0, num_kv_heads=8), "num_query_heads"),
+            (dict(num_query_heads=8, num_kv_heads=-1), "num_kv_heads"),
+            # head_size is NOT here: the dataclass restricts it to {64, 128}, so a
+            # non-positive value never reaches supports(). The preflight still
+            # checks it -- cheap, and it keeps the loop honest if that set widens.
+        ]
+        for kw, marker in cases:
+            with self.subTest(**kw):
+                ok, why = supports_attention_dense(self._spec(**kw), arch="gfx950")
+                self.assertFalse(ok, f"{kw} must be rejected (supports said ok)")
+                self.assertIn(marker, why, why)
+
+    def test_rejects_extents_past_32_bit_addressing(self):
+        """Offsets are IRBuilder add/mul, which lower to ``add nsw`` / ``mul nsw``
+        i32 -- signed overflow is UB, not a wrap, so LLVM may poison the whole
+        address chain rather than merely read the wrong place.
+
+        Each case is picked so only ONE of the two bounds can fire, otherwise the
+        test would pass merely because K/V happens to be checked before Q/O:
+        the K/V case holds Hq=Hkv=8 to keep qo_elems at 2**30, and the Q/O case
+        keeps kv_bytes an order of magnitude under the limit.
+        """
+        from kernels.common.attention_dense_spec import INT32_LIMIT
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        kv_over = dict(
+            batch=64,
+            seqlen_q=16384,
+            seqlen_kv=16384,
+            num_query_heads=8,
+            num_kv_heads=8,
+        )
+        qo_over = dict(batch=16, seqlen_q=8192, seqlen_kv=8192, num_query_heads=128)
+        for kw, marker in ((kv_over, "K/V"), (qo_over, "Q/O")):
+            with self.subTest(marker=marker):
+                spec = self._spec(**kw)
+                # Premise: the OTHER bound must still be under, or the marker
+                # assertion proves nothing about which check fired.
+                kv_bytes = (
+                    spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
+                )
+                qo_elems = (
+                    spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
+                )
+                over, under = (
+                    (kv_bytes, qo_elems) if marker == "K/V" else (qo_elems, kv_bytes)
+                )
+                self.assertGreaterEqual(over, INT32_LIMIT, "test setup error")
+                self.assertLess(under, INT32_LIMIT, "test setup error: both over")
+
+                ok, why = supports_attention_dense(spec, arch="gfx950")
+                self.assertFalse(ok, f"{kw} must be rejected")
+                self.assertIn(marker, why, why)
+
+    def test_extents_just_under_the_32_bit_limit_are_accepted(self):
+        """Paired with the rejections above: without this, tightening the bound to
+        any smaller value would go unnoticed. 16128 = 63*256 keeps the tile
+        multiples legal; kv=2113929216 B and qo=1056964608 elements are both under
+        2**31."""
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ok, why = supports_attention_dense(
+            self._spec(
+                batch=64,
+                seqlen_q=16128,
+                seqlen_kv=16128,
+                num_query_heads=8,
+                num_kv_heads=8,
+            ),
+            arch="gfx950",
+        )
+        self.assertTrue(ok, why)
+
+    def test_runtime_shape_collision_does_not_smuggle_an_oversized_shape_past(self):
+        """The reason this guard has to live in ``supports``, not in the builder.
+
+        Two specs differing only in the runtime-param fields share one cache key
+        by construction (that is the whole point of the runtime-shape path), so a
+        bound checked at emission time is checked once, for whichever shape
+        compiled first, and never again. ``supports`` runs per launch -- ahead of
+        the ``_DENSE_LAUNCHER_CACHE`` lookup in ``run_attention_dense`` -- so it
+        still sees the real shape of the second launch.
+        """
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        small = self._spec(batch=1, num_query_heads=8, num_kv_heads=8)
+        huge = self._spec(
+            batch=64,
+            seqlen_q=16384,
+            seqlen_kv=16384,
+            num_query_heads=8,
+            num_kv_heads=8,
+        )
+        self.assertTrue(small.runtime_shape and huge.runtime_shape)
+        self.assertEqual(
+            attention_dense_cache_key(small, arch="gfx950"),
+            attention_dense_cache_key(huge, arch="gfx950"),
+            "test setup error: these two shapes no longer collide in the cache",
+        )
+        ok, _ = supports_attention_dense(small, arch="gfx950")
+        self.assertTrue(ok)
+        ok, why = supports_attention_dense(huge, arch="gfx950")
+        self.assertFalse(ok, "an oversized shape rode the cache-mate's key through")
+        self.assertIn("K/V", why, why)
+
+    def test_supports_returns_rather_than_raises_for_block_n_zero(self):
+        """``__post_init__`` evaluates ``seqlen_kv % block_n`` BEFORE it validates
+        ``block_n > 0``, so block_n=0 raises ZeroDivisionError -- which must not
+        escape a ``(bool, str)`` API. The preflight's re-validation catches both
+        that and ValueError."""
+        spec = self._spec(block_n=64)
+        object.__setattr__(spec, "block_n", 0)  # frozen dataclass; bypass the ctor
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        ok, why = supports_attention_dense(spec, arch="gfx950")
+        self.assertFalse(ok)
+        self.assertTrue(why)
+
+    def test_preflight_revalidates_the_concrete_subclass_not_the_base(self):
+        """The preflight reconstructs ``type(spec)``, so an arch's private-knob
+        validators run too. Reconstructing the BASE would silently drop them --
+        which is what a naive lift of the gfx942 version would have done, since
+        gfx942 has no private validators to lose.
+        """
+        from kernels.common.attention_dense_spec import check_dense_spec_preflight
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+        spec = Gfx950AttentionDenseSpec(**self._BASE_KWARGS)
+        object.__setattr__(spec, "waves_per_eu", 99)  # gfx950-private validator
+        ok, why = check_dense_spec_preflight(spec)
+        self.assertFalse(ok, "a gfx950-private knob violation slipped past")
+        self.assertIn("Gfx950AttentionDenseSpec", why, why)
+
+    def test_both_arches_route_through_the_shared_preflight(self):
+        """Pin the wiring, not just the behavior: a future arch (or a refactor that
+        re-inlines the checks) must not be able to skip the shared gate while the
+        per-check tests above keep passing against a private copy."""
+        from unittest import mock
+
+        from kernels.gfx942 import attention_dense as g942
+        from kernels.gfx950 import attention_dense as g950
+
+        sentinel = (False, "PREFLIGHT-SENTINEL")
+        for mod, arch, spec in (
+            (g950, "gfx950", self._spec()),
+            (g942, "gfx942", g942.Gfx942AttentionDenseSpec(**self._BASE_KWARGS)),
+        ):
+            with self.subTest(arch=arch):
+                # Premise: this spec is otherwise accepted, so a False verdict can
+                # only have come from the patched preflight.
+                ok, why = mod.supports_attention_dense(spec, arch=arch)
+                self.assertTrue(ok, why)
+                with mock.patch.object(
+                    mod, "check_dense_spec_preflight", return_value=sentinel
+                ):
+                    ok, why = mod.supports_attention_dense(spec, arch=arch)
+                self.assertFalse(ok, f"{arch} supports() ignored the shared preflight")
+                self.assertEqual(why, sentinel[1])
+
+
+# ---------------------------------------------------------------------
 # CDNA primitives — attention tiled waves-per-EU
 # ---------------------------------------------------------------------
 
@@ -1633,6 +3440,69 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
         )
         ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+
+    def test_gfx950_fp16_sinks_gate_selection(self):
+        """Gate firing and waves_per_eu for fp16+sinks on gfx950 — verified by
+        selector output, not by inference.
+
+        Gate 1 (_enable_combo_2d): fp16, D=64, block_size=32, GQA-8, sinks,
+          multi-seq prefill. Must fire -> wpe=4 from _select_2d_waves_per_eu.
+        Gate 2 (_enable_gfx950_sink_prefill_wpe3): fp16, D=64, block_size=16,
+          num_seqs<=1, full-causal, sinks. Must fire -> wpe=3.
+
+        CPU-only (no GPU, no comgr): exercises the selector logic in isolation.
+        """
+        from unittest.mock import patch
+
+        import kernels.common.attention_unified as au
+        from kernels.common.attention_unified import UnifiedAttentionProblem
+
+        gate1_problem = UnifiedAttentionProblem(
+            head_size=64,
+            block_size=32,
+            dtype="fp16",
+            num_query_heads=64,
+            num_kv_heads=8,
+            total_q=1280,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            use_sinks=True,
+            num_seqs=2,
+        )
+        gate2_problem = UnifiedAttentionProblem(
+            head_size=64,
+            block_size=16,
+            dtype="fp16",
+            num_query_heads=64,
+            num_kv_heads=8,
+            total_q=2048,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            use_sinks=True,
+            num_seqs=1,
+        )
+
+        with patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            # Gate 1: combo must fire, selecting wpe=4
+            self.assertTrue(
+                au._enable_combo_2d(gate1_problem),
+                "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
+            )
+            self.assertEqual(
+                au._select_2d_waves_per_eu(gate1_problem),
+                4,
+                "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
+            )
+            # Gate 2: wpe3 gate must fire, selecting wpe=3
+            self.assertTrue(
+                au._enable_gfx950_sink_prefill_wpe3(gate2_problem),
+                "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
+            )
+            self.assertEqual(
+                au._select_2d_waves_per_eu(gate2_problem),
+                3,
+                "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
+            )
 
 
 # ---------------------------------------------------------------------
@@ -2045,7 +3915,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # package system (editable-installed) rather than a hardcoded path, then
         # load it under a private name with a fake ``aiter`` injected.
         module_path = importlib.util.find_spec(
-            "builders.gfx950.attention.parity_unified_attention"
+            "builders.gfx950.attention.prefill.parity_unified_attention"
         ).origin
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")
@@ -2113,6 +3983,25 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         self.assertTrue(hasattr(mod, "_time_lane_ms"))
         self.assertFalse(hasattr(mod, "_time_torch_call_loop"))
         self.assertFalse(hasattr(mod, "_time_rocke_call_loop"))
+
+
+# Module-level so it collects/runs after the class-based budget tests above.
+def test_every_declared_budget_was_exercised():
+    """A budget key that matches no built kernel (name drift from a re-tuned
+    selector -- these names carry tokens like wpe2 / persist256 / ksring that get
+    re-tuned) would silently drop that kernel's occupancy floor. Turn it into a red
+    test: every ``_KERNEL_RESOURCE_BUDGETS`` key must have been handed to
+    ``_assert_resources_fit`` by some test in this run.
+
+    Skips under a partial selection (``pytest -k``) that builds none of the
+    budgeted kernels, so the check is meaningful on a full-file / CI run without
+    false-failing an unrelated targeted run."""
+    if not _SEEN_KERNEL_NAMES:
+        pytest.skip("no budgeted kernels built in this selection")
+    orphaned = set(_KERNEL_RESOURCE_BUDGETS) - _SEEN_KERNEL_NAMES
+    assert (
+        not orphaned
+    ), f"budget declared for kernels never built (name drift?): {sorted(orphaned)}"
 
 
 if __name__ == "__main__":

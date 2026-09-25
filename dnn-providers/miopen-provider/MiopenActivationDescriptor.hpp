@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "MiopenApi.hpp"
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
-#include <miopen/miopen.h>
 
 namespace miopen_plugin
 {

@@ -50,12 +50,14 @@ import numpy as np
 
 from dispatcher_common import (
     ValidationResultBase,
+    _detect_gpu_arch_via_amd_smi,
     auto_correct_trait,
     auto_correct_wave,
     get_arch_filter_data,
     validate_trait_combo,
     validate_wave_config,
     validate_warp_tile_config,
+    unified_framework_flags,
 )
 
 
@@ -1687,6 +1689,7 @@ class GroupedConvCodegenRunner:
                 "-D__HIP_PLATFORM_AMD__",
                 f"--offload-arch={c.arch}",
                 f'-DGFX_ARCH="{c.arch}"',
+                *unified_framework_flags(c.arch),
                 "-mllvm",
                 "-enable-noalias-to-md-conversion=0",
                 "-Wno-undefined-func-template",
@@ -1936,7 +1939,14 @@ def setup_multiple_grouped_conv_dispatchers(
 
 
 def detect_gpu_arch() -> str:
-    """Detect GPU architecture using rocminfo."""
+    """Detect GPU architecture, preferring amd-smi.
+
+    Tries the shared amd-smi-first ``smi_utils`` wrapper (via dispatcher_common),
+    then rocminfo, then the ``gfx942`` default.
+    """
+    arch = _detect_gpu_arch_via_amd_smi()
+    if arch:
+        return arch
     try:
         out = subprocess.check_output(
             ["rocminfo"], stderr=subprocess.DEVNULL, text=True

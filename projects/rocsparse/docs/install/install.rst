@@ -23,7 +23,7 @@ rocSPARSE is included with the ROCm Core SDK on Linux. For the most complete
 installation, we recommend that developers use the ``amdrocm-core-sdk`` meta
 package.
 
-For instructions, see :doc:`Install AMD ROCm <rocm-install-on-linux:install/quick-start>`. Use the
+For instructions, see :doc:`Install AMD ROCm <rocm:install/rocm>`. Use the
 selector panel on that page to view instructions appropriate for your system
 environment.
 
@@ -37,7 +37,7 @@ sparse math package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
 additional ROCm libraries and tools, install the ``amdrocm-sparse`` package.
 This includes both rocSPARSE and hipSPARSE.
 
-1. Complete the :doc:`ROCm installation prerequisites <rocm-install-on-linux:install/prerequisites>` to
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
 
 2. Install the ROCm sparse math package that matches your desired ROCm version,

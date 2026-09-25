@@ -70,6 +70,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -g, --debug               Debug build"
             echo "  -k, --relwithdebinfo      RelWithDebInfo build"
             echo "  -a, --architecture <arch>  GPU target(s)"
+            echo "  --asic-revision <rev>  build only one gfx1250 ASIC-revision tree, 'v0' or 'v1' (default: build both; runtime selects by asicRevision)"
             echo "  -n, --client-only         Build without Tensile"
             echo "  -j <N>                    Parallel jobs (caps both cmake and Tensile kernel generation)"
             echo "  -l, --logic <path>        Tensile logic path"
@@ -91,6 +92,7 @@ while [[ $# -gt 0 ]]; do
         -g|--debug)         INVOKE_ARGS="$INVOKE_ARGS --debug" ;;
         -k|--relwithdebinfo) INVOKE_ARGS="$INVOKE_ARGS --relwithdebinfo" ;;
         -a|--architecture)  shift; INVOKE_ARGS="$INVOKE_ARGS --architecture='$1'" ;;
+        --asic-revision) shift; INVOKE_ARGS="$INVOKE_ARGS --asic-revision='$1'" ;;
         -n|--client-only)   INVOKE_ARGS="$INVOKE_ARGS --no-tensile" ;;
         -j)                 shift; INVOKE_ARGS="$INVOKE_ARGS --jobs $1 --tensile-threads $1" ;;
         -l|--logic)         shift; INVOKE_ARGS="$INVOKE_ARGS --tensile-logic=$1" ;;

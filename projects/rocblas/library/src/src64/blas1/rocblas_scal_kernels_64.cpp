@@ -51,13 +51,13 @@ rocblas_status rocblas_internal_scal_launcher_64(rocblas_handle handle,
         {
             auto    x_ptr       = adjust_ptr_batch(x, b_base, stride_x);
             int32_t batch_count = int32_t(std::min(batch_count_64 - b_base, c_i64_grid_YZ_chunk));
+            auto    alpha_ptr   = rocblas_pointer_mode_device == handle->pointer_mode
+                                      ? alpha + b_base * stride_alpha
+                                      : alpha;
 
             for(int64_t n_base = 0; n_base < n_64; n_base += c_i64_grid_X_chunk)
             {
-                int32_t n         = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
-                auto    alpha_ptr = rocblas_pointer_mode_device == handle->pointer_mode
-                                        ? alpha + n_base * stride_alpha
-                                        : alpha;
+                int32_t n = int32_t(std::min(n_64 - n_base, c_i64_grid_X_chunk));
 
                 // 32bit API call
                 rocblas_status status
@@ -100,7 +100,7 @@ rocblas_status rocblas_internal_scal_launcher_64(rocblas_handle handle,
                                           0,
                                           handle->get_stream(),
                                           n,
-                                          alpha + n_base * stride_alpha,
+                                          alpha + b_base * stride_alpha,
                                           stride_alpha,
                                           x_ptr,
                                           shiftx,

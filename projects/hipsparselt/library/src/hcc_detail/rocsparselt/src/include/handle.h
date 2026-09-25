@@ -44,6 +44,9 @@
  *******************************************************************************/
 struct _rocsparselt_handle
 {
+    // Magic number stored in the inline struct to confirm valid initialization.
+    static constexpr uintptr_t IMPL_MAGIC = 0x48414E444C455F4FULL; // "HANDLE_O"
+
     // constructor
     _rocsparselt_handle() {}
     // destructor
@@ -54,8 +57,7 @@ struct _rocsparselt_handle
 
     // device id
     int device;
-    // device properties
-    hipDeviceProp_t properties;
+
     // device wavefront size
     int wavefront_size = 0;
     // asic revision
@@ -73,7 +75,8 @@ struct _rocsparselt_handle
     // device buffer
     size_t    buffer_size;
     void*     buffer;
-    uintptr_t is_init = 0;
+    uintptr_t is_init     = 0;  // IMPL_MAGIC when valid, 0 when destroyed
+    uintptr_t ownership   = 0;  // self-referential for original; zeroed by destroy() to invalidate copies
 
     // logging streams
     std::ofstream* log_trace_ofs = nullptr;
@@ -91,11 +94,13 @@ struct _rocsparselt_handle
  *******************************************************************************/
 struct _rocsparselt_mat_descr
 {
+    static constexpr uintptr_t MAT_MAGIC = 0x4D41544445534352ULL; // "MATDESCR"
+
     // constructor
     _rocsparselt_mat_descr(const _rocsparselt_handle* handle)
         : handle(handle)
     {
-        is_init = (uintptr_t)handle;
+        is_init = MAT_MAGIC;
     };
     _rocsparselt_mat_descr(const _rocsparselt_mat_descr& rhs)
         : handle(rhs.handle)
@@ -113,7 +118,7 @@ struct _rocsparselt_mat_descr
         , c_ld(rhs.c_ld)
         , c_n(rhs.c_n)
     {
-        is_init = (uintptr_t)handle;
+        is_init = MAT_MAGIC;
     };
 
     // destructor
@@ -129,6 +134,10 @@ struct _rocsparselt_mat_descr
 
     void clear()
     {
+        // Reset both is_init and m_type for BOTH original and copy.
+        // m_type = unknown is the extra guard in check_is_init_mat_descr; always
+        // resetting it strengthens protection against false positives from stack residuals.
+        // No heap resources → no double-free risk from clearing both.
         m_type  = rocsparselt_matrix_type_unknown;
         is_init = 0;
     }
@@ -175,11 +184,13 @@ struct _rocsparselt_mat_descr
  *******************************************************************************/
 struct _rocsparselt_matmul_descr
 {
+    static constexpr uintptr_t MATMUL_MAGIC = 0x4D554C5444455343ULL; // "MULTDESC"
+
     // constructor
     _rocsparselt_matmul_descr(const _rocsparselt_handle* handle)
         : handle(handle)
     {
-        is_init = (uintptr_t)handle;
+        is_init = MATMUL_MAGIC;
     };
 
     _rocsparselt_matmul_descr(const _rocsparselt_matmul_descr& rhs)
@@ -219,7 +230,7 @@ struct _rocsparselt_matmul_descr
         matrix_D     = rhs.matrix_D->clone();
         gate_residual_desc = rhs.gate_residual_desc ? rhs.gate_residual_desc->clone() : nullptr;
         is_reference = false;
-        is_init      = (uintptr_t)handle;
+        is_init      = MATMUL_MAGIC;
     };
 
     // destructor
@@ -235,6 +246,11 @@ struct _rocsparselt_matmul_descr
         if(gate_residual_desc != nullptr)
             delete gate_residual_desc;
         is_init = 0;
+        matrix_A           = nullptr;
+        matrix_B           = nullptr;
+        matrix_C           = nullptr;
+        matrix_D           = nullptr;
+        gate_residual_desc = nullptr;
     };
 
     friend std::ostream& operator<<(std::ostream& stream, const _rocsparselt_matmul_descr& t);
@@ -317,11 +333,21 @@ struct __attribute__((packed, aligned(8))) _rocsparselt_matmul_config
  *******************************************************************************/
 struct _rocsparselt_matmul_alg_selection
 {
-    // constructor
-    _rocsparselt_matmul_alg_selection(const _rocsparselt_handle* handle)
+    static constexpr int     MAX_CONFIGS = 100;
+    // ALG_MAGIC: validity check without pointer dereference.
+    // Protects against stack residuals even without data={} zero-initialization.
+    static constexpr uintptr_t ALG_MAGIC = 0x414C475345430AULL; // "ALGSEC\n"
+
+    // constructor: heap-allocates the shared configs array.
+    // num_configs controls capacity; caller (rocsparselt_auxiliary.cpp) passes requestConfigs.
+    _rocsparselt_matmul_alg_selection(const _rocsparselt_handle* handle,
+                                      int                        num_configs = MAX_CONFIGS)
         : handle(handle)
+        , configs(new _rocsparselt_matmul_config[num_configs]())
+        , num_configs(num_configs)
     {
-        is_init = (uintptr_t)handle;
+        is_init   = ALG_MAGIC;
+        ownership = (uintptr_t)(&ownership); // self-referential: original detection
     };
     // destructor
     ~_rocsparselt_matmul_alg_selection()
@@ -331,24 +357,38 @@ struct _rocsparselt_matmul_alg_selection
 
     void clear()
     {
-        handle = nullptr;
-        is_init = 0;
+        // is_original: ownership points to itself (self-referential = original).
+        // After byte copy, copy.ownership = &original.ownership (different address = copy).
+        //
+        // Non-pointer fields (config_id, search_iterations, alg, etc.) are independent
+        // per copy — each struct owns its own value after byte copy.
+        // configs* is SHARED: only the original frees it; copies just detach.
+        const bool is_original = (ownership == (uintptr_t)(&ownership));
+        is_init   = 0;
+        // Zero ownership: copies reading through their stored address will see 0,
+        // making *ptr != copy.ownership → copies become invalid.
+        ownership = 0;
+        handle    = nullptr;
+        if(is_original)
+            delete[] configs;
+        configs = nullptr;
     };
 
     friend std::ostream& operator<<(std::ostream&                            stream,
                                     const _rocsparselt_matmul_alg_selection& t);
 
-    const _rocsparselt_handle* handle = nullptr;
-    //
-
-    _rocsparselt_matmul_config configs[100];
+    const _rocsparselt_handle*  handle    = nullptr;
+    _rocsparselt_matmul_config* configs   = nullptr; // heap-allocated, shared on byte copy
 
     rocsparselt_matmul_alg alg;
     //data of rocsparselt_matmul_alg_attribute
+    int       num_configs       = MAX_CONFIGS; // allocated capacity of configs array
     int       config_id         = 0;
     int       config_max_id     = 0;
     int       search_iterations = 10;
-    uintptr_t is_init           = 0;
+    uintptr_t is_init           = 0; // ALG_MAGIC when valid, 0 when destroyed
+    uintptr_t ownership         = 0; // self-referential for original; address of original's
+                                     // ownership for copies → zeroed by clear() to invalidate
 };
 
 /********************************************************************************
@@ -359,11 +399,14 @@ struct _rocsparselt_matmul_alg_selection
  *******************************************************************************/
 struct _rocsparselt_matmul_plan
 {
+    static constexpr uintptr_t IMPL_MAGIC = 0x504C414E494D504CULL; // "PLANIMPL"
+
     // constructor
     _rocsparselt_matmul_plan(const _rocsparselt_handle* handle)
         : handle(handle)
     {
-        is_init = (uintptr_t)handle;
+        is_init   = IMPL_MAGIC;
+        ownership = (uintptr_t)(&ownership); // self-referential: original detection
     };
     // destructor
     ~_rocsparselt_matmul_plan()
@@ -373,9 +416,16 @@ struct _rocsparselt_matmul_plan
 
     void clear()
     {
-        delete matmul_descr;
+        // matmul_descr is a DEEP COPY owned by the plan (restored from original design).
+        // Only the original plan deletes it; byte-copied siblings just detach.
+        // alg_selection remains a non-owning reference.
+        const bool is_original = (ownership == (uintptr_t)(&ownership));
+        if(is_original && matmul_descr != nullptr && is_init == IMPL_MAGIC)
+            delete matmul_descr;
         matmul_descr  = nullptr;
         alg_selection = nullptr;
+        handle        = nullptr;
+        ownership     = 0;
         is_init       = 0;
     }
 
@@ -387,8 +437,8 @@ struct _rocsparselt_matmul_plan
     //
     _rocsparselt_matmul_alg_selection* alg_selection = nullptr;
 
-    //
-    uintptr_t is_init = 0;
+    uintptr_t is_init   = 0;
+    uintptr_t ownership = 0; // self-referential for original; used in clear() for is_original
 };
 
 bool check_is_init_handle(const _rocsparselt_handle* handle);

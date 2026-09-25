@@ -29,6 +29,7 @@
 #include <type_traits>
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 static bool test_left_eigenvectors
     = false; // Computing left eigenvectors is not supported in cuSOLVER.
@@ -907,13 +908,13 @@ void geev_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         geev_initData<false, true, T>(handle, params, n, dA, lda, hA);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_geev(API,
                        handle,
                        params,
@@ -932,9 +933,9 @@ void geev_getPerfData(const hipsolverHandle_t   handle,
                        hWork.data(),
                        hlwork,
                        dInfo.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -1131,7 +1132,7 @@ void testing_geev(Arguments& argus)
                                      &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geev_getPerfData<API, T, W>(handle,
                                         params,
                                         jobvl,

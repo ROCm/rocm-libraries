@@ -253,6 +253,28 @@ public:
     {
         return padding_mode;
     }
+
+    /**
+     * @brief Custom equality hook for resample-backward-specific attributes
+     *
+     * Compares padding, stride, window, resample mode, and padding mode —
+     * all of which define the semantics of the resample backward operation
+     * rather than tensor layout, so logical and strict equality coincide
+     * here.
+     */
+    bool logicallyEqualsImpl(const ResampleBwdAttributes& other) const
+    {
+        return pre_padding == other.pre_padding && post_padding == other.post_padding
+               && stride == other.stride && window == other.window
+               && resample_mode == other.resample_mode && padding_mode == other.padding_mode;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const ResampleBwdAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 typedef ResampleBwdAttributes Resample_bwd_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

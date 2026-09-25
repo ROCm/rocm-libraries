@@ -29,3 +29,10 @@ test_categories:
     labels:
       - "quick"
       - "pre-commit"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) meta-checks"
+    test_patterns:
+      - "hip-kernel-provider_test_name_validation"
+    labels:
+      - "ffm-full"

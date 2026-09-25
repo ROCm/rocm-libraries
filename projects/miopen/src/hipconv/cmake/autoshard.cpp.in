@@ -1,0 +1,32 @@
+// Generated from autoshard.cpp.in. Do not edit.
+
+// clang-format off
+#include "@ARG_CONFIG_TABLE@"
+// clang-format on
+#include "libautoshard.hpp"
+
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+        return 1;
+
+    const std::string target_dir = argv[1];
+    // clang-format off
+    char const* arch_name           = "@ARG_ARCH@";
+    char const* kernel_namespace    = "@ARG_NAMESPACE@";
+    char const* kernel_class        = "@ARG_KERNEL_CLASS@";
+    char const* config_table_header = "@ARG_CONFIG_TABLE@";
+    char const* kernel_header       = "@ARG_KERNEL@";
+    const int num_configs           = hipconv::@ARG_ARCH@::@ARG_NAMESPACE@::num_configs;
+    const int num_shards            = @ARG_NUM_SHARDS@;
+    // clang-format on
+
+    return make_autoshard(target_dir,
+                          arch_name,
+                          kernel_namespace,
+                          kernel_class,
+                          config_table_header,
+                          kernel_header,
+                          num_configs,
+                          num_shards);
+}

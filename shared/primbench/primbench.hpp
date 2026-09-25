@@ -22,7 +22,9 @@
 
 #ifdef _WIN32
     // Disables the min() and max() macros from windows.h
-    #define NOMINMAX
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
 
     #include <io.h>
     #include <windows.h>
@@ -56,6 +58,7 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -1952,6 +1955,13 @@ void block_stream_kernel(volatile int32_t* is_blocked,
     }
 }
 
+/// Kernel that reads the wall clock.
+static __global__
+void read_clock(long long* out)
+{
+    *out = wall_clock64();
+}
+
 #elif defined(__CUDACC__)
 
 /// Kernel that blocks the GPU stream until unblocked or timeout occurs.
@@ -2010,14 +2020,50 @@ public:
 
 #ifdef __HIP__
         // Query wall clock rate once (constant per device).
-        int device_id;
-        PRIMBENCH_CHECK(hipGetDevice(&device_id));
-        int wall_clk_rate_k_hz = 0;
-        PRIMBENCH_CHECK(
-            hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
-        m_wall_clock_rate = wall_clk_rate_k_hz;
+        m_wall_clock_rate = measure_wall_clk_rate_khz();
+
 #endif
     }
+
+    /// Empirically measures the GPU wall-clock tick rate in kHz
+    /// by sampling the on-device clock one second apart
+
+#ifdef __HIP__
+    long long measure_wall_clk_rate_khz()
+    {
+        long long* d_tick;
+        PRIMBENCH_CHECK(hipMalloc(&d_tick, sizeof(long long)));
+
+        long long h_tick_0;
+        read_clock<<<dim3(1), dim3(1)>>>(d_tick);
+        PRIMBENCH_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(hipMemcpy(&h_tick_0, d_tick, sizeof(long long), hipMemcpyDeviceToHost));
+        const auto h_curr_time_0 = std::chrono::steady_clock::now();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+        long long h_tick_1;
+        read_clock<<<dim3(1), dim3(1)>>>(d_tick);
+        PRIMBENCH_CHECK(hipDeviceSynchronize());
+        PRIMBENCH_CHECK(hipMemcpy(&h_tick_1, d_tick, sizeof(long long), hipMemcpyDeviceToHost));
+        const auto h_curr_time_1 = std::chrono::steady_clock::now();
+
+        PRIMBENCH_CHECK(hipFree(d_tick));
+
+        const double elapsed_time_s
+            = std::chrono::duration<double>(h_curr_time_1 - h_curr_time_0).count();
+
+        if(elapsed_time_s <= 0)
+        {
+            std::cerr << "Error: Elapsed time must be greater than 0.\n";
+            exit(EXIT_FAILURE);
+        }
+
+        const long long tot_ticks = h_tick_1 - h_tick_0;
+
+        return std::llround(tot_ticks / (1000 * elapsed_time_s));
+    }
+#endif
 
     /// Destructor that unregisters host memory.
     ~stream_blocker()
@@ -2542,6 +2588,11 @@ public:
             std::cerr << "Error: Can't call run() before calling set_items()\n";
             exit(EXIT_FAILURE);
         }
+        if(m_has_run)
+        {
+            std::cerr << "Error: Can't call run() twice\n";
+            exit(EXIT_FAILURE);
+        }
         m_has_run = true;
 
         std::string name            = m_meta.serialize_name();
@@ -2670,8 +2721,9 @@ private:
 
         elapsed_gpu_secs += batch_gpu_secs;
 
-        double bytes_per_batch = m_read_write_bytes * m_kernels_per_batch;
-        double bytes_per_sec   = bytes_per_batch / batch_gpu_secs;
+        double bytes_per_batch  = m_read_write_bytes * m_kernels_per_batch;
+        double bytes_per_sec    = bytes_per_batch / batch_gpu_secs;
+        m_last_bytes_per_second = bytes_per_sec;
 
         double items_per_batch = m_items * m_kernels_per_batch;
         double items_per_sec   = items_per_batch / batch_gpu_secs;
@@ -3637,6 +3689,14 @@ public:
         return m_last_bytes_per_second;
     }
 
+    /**
+     * \brief Returns a vector containing all bytes per second
+     */
+    std::vector<double> get_all_bytes_per_second()
+    {
+        return m_all_bytes_per_second;
+    }
+
 private:
     /// Parse optional arguments.
     void parse()
@@ -3941,6 +4001,7 @@ private:
                 auto state = new_state(algo, meta, specialization_index);
                 b->run(state);
                 m_last_bytes_per_second = state.get_last_bytes_per_second();
+                m_all_bytes_per_second.push_back(m_last_bytes_per_second);
             }
 
             specialization_index++;
@@ -4028,6 +4089,8 @@ private:
     detail::cli m_cli; ///< Command-line argument parser.
 
     double m_last_bytes_per_second = 0.0; /**< Last bytes per second */
+    std::vector<double>
+        m_all_bytes_per_second; /**< Vector that stores all run's bytes per second. Useful for some Kernel Tuning algorithms */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; ///< Stream blocker to serialize output.

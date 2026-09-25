@@ -411,7 +411,7 @@ namespace rocsparse
                                                rocsparse_csrildlt0_info    csrildlt0_info,
                                                rocsparse_const_spmat_descr A)
     {
-        const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
+        const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                             && handle->asic_rev < 2);
         const bool use_wf64 = (handle->wavefront_size == 64);
 

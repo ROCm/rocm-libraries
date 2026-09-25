@@ -7,9 +7,7 @@
 
 #include <rocfft/rocfft.h>
 
-#include "rocfft_c.h"
-
-int rocfft_c(void)
+int main(void)
 {
     return 0;
 }

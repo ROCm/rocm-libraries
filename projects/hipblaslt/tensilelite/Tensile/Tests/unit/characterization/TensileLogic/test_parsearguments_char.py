@@ -38,7 +38,7 @@ import sys
 
 import pytest
 
-from Tensile.TensileLogic.ParseArguments import parseArguments
+from Tensile.TensileLogic.ParseArguments import BUNDLED_KNOWN_BUGS, parseArguments
 
 pytestmark = pytest.mark.unit
 
@@ -67,6 +67,31 @@ def test_defaults_only_logicpath(monkeypatch, snapshot):
     # No check flag: parses fine (the "no checks" decision is made later in
     # _setup, not by the parser).
     assert _parse(monkeypatch, ["logic/dir"]) == snapshot
+
+
+def test_use_bundled_known_bugs(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["TensileLogic", "logic/dir", "--check-all", "--use-bundled-known-bugs"],
+    )
+    assert parseArguments().KnownBugs is BUNDLED_KNOWN_BUGS
+
+
+def test_known_bug_sources_are_mutually_exclusive(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "TensileLogic",
+            "logic/dir",
+            "--known-bugs",
+            "kb.yaml",
+            "--use-bundled-known-bugs",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        parseArguments()
 
 
 def test_mutually_exclusive_flags_exit(monkeypatch):

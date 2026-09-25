@@ -1991,3 +1991,112 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
     }
   }
 }
+
+namespace {
+
+// 22x22 = 484 tiles of 128x128, just over MIN_TILES_FOR_DYNAMIC (480), so the
+// tile-count gate in select_hybrid_mode() lets the other gates decide.
+inline origami::problem_t make_problem_above_dynamic_tile_gate() {
+  return make_problem(/*m=*/128 * 22, /*n=*/128 * 22, /*k=*/4096);
+}
+
+}  // namespace
+
+TEST_CASE("GEMM: context_t::tile_schedule records the StreamK sub-path", "[gemm][hybrid]") {
+  // gfx950 with a cotenant holding CUs away, a grid above the tile gate and low
+  // occupancy is the case the SK4 work-queue path exists for.
+  auto hardware = make_hardware(950);
+  auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1, /*occupancy=*/1);
+
+  SECTION("cotenant present on gfx950 selects the dynamic work queue") {
+    auto problem     = make_problem_above_dynamic_tile_gate();
+    problem.num_cus  = hardware.N_CU / 2;
+    origami::gemm::context_t ctx(problem, hardware, config);
+    REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::dynamic);
+  }
+
+  SECTION("no CU budget means no cotenant to rebalance against, so static") {
+    auto problem    = make_problem_above_dynamic_tile_gate();
+    problem.num_cus = 0;
+    origami::gemm::context_t ctx(problem, hardware, config);
+    REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::static_);
+  }
+
+  SECTION("grid at or below the tile gate stays static even with a cotenant") {
+    auto problem    = make_problem(128, 128, 4096);
+    problem.num_cus = hardware.N_CU / 2;
+    origami::gemm::context_t ctx(problem, hardware, config);
+    REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::static_);
+  }
+
+  SECTION("grid selection is a separate axis and does not move the sub-path") {
+    // select_hybrid_mode() never reads config.grid_selection, and hipBLASLt
+    // settles the sub-path before grid sizing consumes it: in
+    // ContractionSolution the streamK5EffectiveDynamic() result is computed
+    // first, and skDynamicGrid (which is cast straight to grid_selection_t) is
+    // only honoured on the static branch. A data-parallel grid therefore has to
+    // leave the answer alone.
+    auto problem    = make_problem_above_dynamic_tile_gate();
+    problem.num_cus = hardware.N_CU / 2;
+    origami::gemm::context_t ctx_k_split(problem, hardware, config);
+
+    auto dp_config           = config;
+    dp_config.grid_selection = origami::grid_selection_t::data_parallel;
+    origami::gemm::context_t ctx_dp(problem, hardware, dp_config);
+
+    REQUIRE(ctx_dp.tile_schedule == ctx_k_split.tile_schedule);
+    // Pinned so the comparison above cannot pass by both sides degrading.
+    REQUIRE(ctx_dp.tile_schedule == origami::hybrid_mode_t::dynamic);
+  }
+
+  SECTION("agrees with select_hybrid_mode fed problem.num_cus as sm_count_target") {
+    // Pins the source of truth: hipBLASLt's streamK5EffectiveDynamic() passes
+    // smCountTarget() both as problem.num_cus and as sm_count_target, so the
+    // context must not diverge from the heuristic it delegates to.
+    for (size_t num_cus : {size_t{0}, hardware.N_CU / 4, hardware.N_CU / 2, hardware.N_CU}) {
+      DYNAMIC_SECTION("num_cus=" << num_cus) {
+        auto problem    = make_problem_above_dynamic_tile_gate();
+        problem.num_cus = num_cus;
+        origami::gemm::context_t ctx(problem, hardware, config);
+        REQUIRE(ctx.tile_schedule
+                == origami::streamk::select_hybrid_mode(problem, hardware, config, num_cus));
+      }
+    }
+  }
+}
+
+TEST_CASE("GEMM: context_t::tile_schedule reports static on untuned architectures",
+          "[gemm][hybrid]") {
+  // select_hybrid_mode() is only fit on gfx950 and answers static_ elsewhere,
+  // which is what those kernels really launch: streamK5EffectiveDynamic() feeds
+  // that same return value straight into its effective-dynamic decision. The
+  // context reports it verbatim rather than downgrading it to none, so that when
+  // another architecture is tuned the real answer flows through unchanged.
+  for (int gpu_arch : {942, 1250}) {
+    DYNAMIC_SECTION("gfx" << gpu_arch) {
+      auto hardware   = make_hardware(gpu_arch);
+      auto config     = make_config(128, 128, 64, 32, 32, 8, false, 1, /*occupancy=*/1);
+      auto problem    = make_problem_above_dynamic_tile_gate();
+      problem.num_cus = hardware.N_CU / 2;
+
+      origami::gemm::context_t ctx(problem, hardware, config);
+      REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::static_);
+      REQUIRE(ctx.tile_schedule
+              == origami::streamk::select_hybrid_mode(
+                     problem, hardware, config, problem.num_cus));
+    }
+  }
+}
+
+TEST_CASE("GEMM: context_t::tile_schedule is none only before construction", "[gemm][hybrid]") {
+  // A constructed context always carries the heuristic's answer, so none is left
+  // to mean "no problem examined yet".
+  origami::gemm::context_t ctx;
+  REQUIRE(ctx.tile_schedule == origami::hybrid_mode_t::none);
+}
+
+TEST_CASE("GEMM: hybrid_mode_to_string", "[gemm][hybrid]") {
+  REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::static_) == "static");
+  REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::dynamic) == "dynamic");
+  REQUIRE(origami::hybrid_mode_to_string(origami::hybrid_mode_t::none) == "none");
+}

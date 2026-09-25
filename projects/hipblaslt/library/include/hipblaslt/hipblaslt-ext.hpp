@@ -108,6 +108,13 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setStreamKTileSchedulingMode(hipblasLtStreamKTileSchedulingMode_t mode);
 
         /*! \ingroup library_module
+         *  \brief Enable uniform summation order for this Gemm.
+         *
+         *  See ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
+         */
+        HIPBLASLT_EXPORT void setUniformSummationOrder(bool value);
+
+        /*! \ingroup library_module
          *  \brief This function returns the maximum workspace size that was set.
          *
          *  \retval size_t Returns the set max workspace size.
@@ -120,6 +127,12 @@ namespace hipblaslt_ext
          *  ``HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF``.
          */
         HIPBLASLT_EXPORT hipblasLtStreamKTileSchedulingMode_t getStreamKTileSchedulingMode() const;
+
+        /*! \ingroup library_module
+         *  \brief Return the uniform-summation-order request set via
+         *  ``setUniformSummationOrder``. Defaults to ``false``.
+         */
+        HIPBLASLT_EXPORT bool getUniformSummationOrder() const;
 
     private:
         friend GemmInstance;
@@ -596,6 +609,7 @@ namespace hipblaslt_ext
 
         size_t  m_workspace_bytes        = 0;
         int32_t m_streamk_tile_scheduling_mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF;
+        bool    m_uniform_summation_order = false;
     };
 
     /*! \ingroup types_module

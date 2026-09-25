@@ -72,6 +72,16 @@ def main() -> None:
         help="Target dense-search benchmark duration per GEMM (seconds)",
     )
     parser.add_argument(
+        "--custom-lib-src",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Source library directory (.yaml logic files) used to build a "
+            "reference custom library under workdir/ref_build."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         type=int,
@@ -106,6 +116,7 @@ def main() -> None:
         verbose=args.verbose,
         duration=args.duration,
         bench_freq=args.bench_freq,
+        custom_lib_src=args.custom_lib_src,
     )
 
 

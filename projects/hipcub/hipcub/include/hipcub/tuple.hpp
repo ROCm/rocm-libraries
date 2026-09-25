@@ -23,6 +23,8 @@
 
 #include "config.hpp"
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "./backend/rocprim/tuple.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

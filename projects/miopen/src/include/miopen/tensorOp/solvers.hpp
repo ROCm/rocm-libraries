@@ -48,12 +48,6 @@ struct Op1dTensorGeneric final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op2dTensorGeneric final : TensorOpSolver
@@ -65,12 +59,6 @@ struct Op2dTensorGeneric final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op2dTensorLite final : TensorOpSolver
@@ -82,12 +70,6 @@ struct Op2dTensorLite final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op2dTensorSquash final : TensorOpSolver
@@ -99,12 +81,6 @@ struct Op2dTensorSquash final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op3dTensorGeneric final : TensorOpSolver
@@ -116,12 +92,6 @@ struct Op3dTensorGeneric final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct OpTensorFwdBias final : TensorOpSolver
@@ -133,12 +103,6 @@ struct OpTensorFwdBias final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op4dTensorLite final : TensorOpSolver
@@ -150,12 +114,6 @@ struct Op4dTensorLite final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct OpTensorLeadingOnes final : TensorOpSolver
@@ -167,12 +125,6 @@ struct OpTensorLeadingOnes final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op4dTensorGeneric final : TensorOpSolver
@@ -184,12 +136,6 @@ struct Op4dTensorGeneric final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 struct Op5dTensorGeneric final : TensorOpSolver
@@ -201,12 +147,6 @@ struct Op5dTensorGeneric final : TensorOpSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    std::size_t
-    GetWorkspaceSize(const ExecutionContext& context,
-                     const miopen::tensorOp::ProblemDescription& problem) const override;
-
-    bool MayNeedWorkspace() const override { return false; }
 };
 
 } // namespace tensorOp

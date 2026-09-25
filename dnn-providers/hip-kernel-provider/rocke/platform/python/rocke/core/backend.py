@@ -1427,7 +1427,7 @@ def lower_conv_implicit_gemm(
     """Lower an :class:`ImplicitGemmConvSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.conv_implicit_gemm import build_implicit_gemm_conv
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv
         from .lower_llvm import lower_kernel_to_llvm
 
         k = build_implicit_gemm_conv(spec, arch=arch)
@@ -1466,7 +1466,7 @@ def lower_conv_direct_grouped(
     ``kind`` ("16c"|"4c") selects the channel-blocking variant."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.conv_direct_grouped import (
+        from kernels.common.conv_direct_grouped import (
             build_direct_conv_16c,
             build_direct_conv_4c,
         )
@@ -1507,7 +1507,7 @@ def lower_img2col(
     """Lower an :class:`Img2ColSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.img2col import build_img2col
+        from kernels.common.img2col import build_img2col
         from .lower_llvm import lower_kernel_to_llvm
 
         k = build_img2col(spec, arch=arch)
@@ -1544,7 +1544,7 @@ def lower_deep_fused_conv_pool(
     """Lower a :class:`DeepFusedConvPoolSpec`."""
 
     def py_fn(wi: bool) -> Tuple[str, str]:
-        from ..instances.common.deep_fused_conv_pool import (
+        from kernels.common.deep_fused_conv_pool import (
             build_deep_fused_conv_pool,
         )
         from .lower_llvm import lower_kernel_to_llvm

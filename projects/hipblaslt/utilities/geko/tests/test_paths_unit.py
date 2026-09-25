@@ -63,7 +63,10 @@ def test_resolve_errors_and_require_built(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.delenv(paths.HIPBLASLT_PATH_ENV_VAR, raising=False)
     with pytest.raises(SystemExit):
-        paths.resolve_hipblaslt_path(anchor=tmp_path / "none/x.py")
+        # anchor=None (not anchor=tmp_path/...) because on Windows CI tox sets
+        # basetemp inside the repo; the parent walk would find projects/hipblaslt/tensilelite
+        # and resolve successfully instead of raising.
+        paths.resolve_hipblaslt_path(anchor=None)
 
     not_built = tmp_path / "nb"
     not_built.mkdir()

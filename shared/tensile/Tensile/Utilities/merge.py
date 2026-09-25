@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.Utilities.ConditionalImports import yamlLoader, yamlDumper
+from Tensile.Utilities.ConditionalImports import SafeLoader, yamlDumper
 
 import yaml
 import os
@@ -136,7 +136,7 @@ def loadData(filename):
         print("Cannot open file: ", filename)
         sys.stdout.flush()
         sys.exit(-1)
-    data = yaml.load(stream, yamlLoader)
+    data = yaml.load(stream, SafeLoader)
     return data
 
 # this is for complying the behavior of legacy merge script, where incremental logic

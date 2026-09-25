@@ -863,17 +863,20 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropTypicalTransformerShape)
 // Type compatibility: various type combinations
 // ============================================================================
 
-template <typename T1, typename T2>
-struct TypePair
+template <typename T1, typename T2, typename T3>
+struct TypeTriple
 {
     using First = T1;
     using Second = T2;
+    using Third = T3;
 };
 
-using LayernormBpropTypes = ::testing::Types<TypePair<float, float>,
-                                             TypePair<half, float>,
-                                             TypePair<bfloat16, float>,
-                                             TypePair<double, double>>;
+using LayernormBpropTypes = ::testing::Types<TypeTriple<float, float, float>,
+                                             TypeTriple<half, half, float>,
+                                             TypeTriple<bfloat16, bfloat16, float>,
+                                             TypeTriple<float, half, float>,
+                                             TypeTriple<half, float, float>,
+                                             TypeTriple<double, double, double>>;
 
 template <class T>
 class CpuFpReferenceLayernormBpropTyped : public ::testing::Test
@@ -885,19 +888,20 @@ TYPED_TEST_SUITE(CpuFpReferenceLayernormBpropTyped, LayernormBpropTypes, );
 TYPED_TEST(CpuFpReferenceLayernormBpropTyped, BpropRunsWithoutError)
 {
     using DyType = typename TypeParam::First;
-    using ScaleType = typename TypeParam::Second;
+    using DxType = typename TypeParam::Second;
+    using ScaleType = typename TypeParam::Third;
 
     Tensor<DyType> dy({2, 8, 32});
-    Tensor<DyType> x({2, 8, 32});
+    Tensor<DxType> x({2, 8, 32});
     Tensor<ScaleType> scale({32});
     Tensor<DyType> mean({2, 8});
     Tensor<DyType> rstd({2, 8});
-    Tensor<DyType> dx({2, 8, 32});
+    Tensor<DxType> dx({2, 8, 32});
     Tensor<ScaleType> dscale({32});
     Tensor<ScaleType> dbias({32});
 
     dy.fillWithValue(safeTestTypeCast<DyType>(0.0));
-    x.fillWithValue(safeTestTypeCast<DyType>(1.0));
+    x.fillWithValue(safeTestTypeCast<DxType>(1.0));
     scale.fillWithValue(safeTestTypeCast<ScaleType>(1.0));
     mean.fillWithValue(safeTestTypeCast<DyType>(1.0));
     rstd.fillWithValue(safeTestTypeCast<DyType>(1.0 / std::sqrt(LAYERNORM_DEFAULT_EPSILON)));
