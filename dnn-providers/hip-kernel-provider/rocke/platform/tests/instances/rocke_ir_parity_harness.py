@@ -353,6 +353,7 @@ def build_attention_2d(
     sliding_window=0,
     has_softcap=False,
     use_alibi=False,
+    use_sinks=False,
     **kw,
 ):
     def _build():
@@ -365,7 +366,7 @@ def build_attention_2d(
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
-            use_sinks=False,
+            use_sinks=use_sinks,
             sliding_window=sliding_window,
             has_softcap=has_softcap,
             use_alibi=use_alibi,
@@ -432,15 +433,16 @@ def build_attention_reduce(
     return _build
 
 
-def build_attention_dense(arch, **over):
+def build_attention_dense(arch, *, geometry=None, **over):
     """Dense flash-attn prefill spec (library ``kernels/gfx950/attention_dense``).
 
-    ``over`` patches the shared base spec; a small Sq keeps the IR compact while
-    still exercising the full pipeline (both the default one-CTA-per-q-block grid
-    and the persistent grid-stride grid).
+    ``geometry`` selects a shared tile geometry and ``over`` patches the base spec;
+    a small Sq keeps the IR compact while still exercising the full pipeline (both
+    the default one-CTA-per-q-block grid and the persistent grid-stride grid).
     """
 
     def _build():
+        from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
         from kernels.gfx950.attention_dense import (
             Gfx950AttentionDenseSpec,
             build_attention_dense as _build_dense,
@@ -456,6 +458,8 @@ def build_attention_dense(arch, **over):
             causal=True,
             dtype="bf16",
         )
+        if geometry is not None:
+            spec.update(DENSE_TILE_GEOMETRIES[geometry])
         spec.update(over)
         return _build_dense(Gfx950AttentionDenseSpec(**spec))
 
@@ -1091,6 +1095,31 @@ def build_grouped_gemm_case(name, arch, m, n, k, e):
     return _build
 
 
+def build_mxfp8_gemm_case(dtype, matrix_path):
+    def _build():
+        from rocke.instances.gfx1250.block_scaled_gemm import (
+            BlockScaledGemmSpec,
+            build_block_scaled_gemm,
+        )
+
+        return build_block_scaled_gemm(
+            BlockScaledGemmSpec(
+                name=f"irhash_mxfp8_{dtype}_{matrix_path}",
+                M=32,
+                N=48,
+                K=256,
+                dtype_a=dtype,
+                dtype_b=dtype,
+                dtype_c="bf16",
+                scale_dtype="e8m0",
+                matrix_path=matrix_path,
+                block_k=16 if matrix_path == "wmma_scale16" else 32,
+            )
+        )
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1365,6 +1394,16 @@ def cases():
             32,
         ),
     )
+
+    # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
+    for dtype in ("fp8e4m3", "bf8e5m2"):
+        for matrix_path in ("wmma_scale", "wmma_scale16"):
+            add(
+                "gemm",
+                f"gemm/gfx1250/mxfp8/{matrix_path}/{dtype}",
+                "gfx1250",
+                build_mxfp8_gemm_case(dtype, matrix_path),
+            )
 
     # Conv: problem-shape and arch variants.
     conv1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
@@ -2342,6 +2381,57 @@ def cases():
             use_alibi=True,
         ),
     )
+    # fp16 + sinks COMBO: the transposed-32x32 combo spec `_enable_combo_2d`
+    # admits for fp16+sinks. The combo knobs are passed explicitly so the golden
+    # hashes the real combo kernel (matching emit parity idx54), not a plain 2D
+    # spec. fp16 cannot set use_fast_paged_kv_desc (bf16-only).
+    _sink_combo_kw = dict(
+        num_seqs=2,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=True,
+            **_sink_combo_kw,
+        ),
+    )
+    # bf16 + sinks COMBO twin (adds use_fast_paged_kv_desc, bf16-only).
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            use_fast_paged_kv_desc=True,
+            **_sink_combo_kw,
+        ),
+    )
     add(
         "attention",
         "attention/gfx950/3d_fp16_d128_b64",
@@ -2499,6 +2589,37 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
+        # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
+        # shifted-diagonal routes, the sink composition, and the BM128 geometry.
+        (
+            "bottom_right_sq512",
+            {"seqlen_kv": 1024, "causal_bottom_right": True},
+        ),
+        (
+            "ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+            },
+        ),
+        (
+            "bottom_right_sinks_sq512",
+            {
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "bottom_right_bm128_sq512",
+            {
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "geometry": "bm128",
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (

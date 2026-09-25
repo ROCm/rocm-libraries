@@ -5,7 +5,17 @@ if(HIPDNN_SKIP_TESTS)
     return()
 endif()
 
-hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION})
+# The version setting controls fetching, not supplied CONFIG packages.
+find_package(GTest CONFIG QUIET)
+# Every hipDNN test links GoogleMock, which a GTest package exports only when it
+# was built with BUILD_GMOCK=ON and INSTALL_GTEST=ON. A package without it is
+# unusable here, so the dependency is acquired as if none had been found.
+if(NOT GTest_FOUND OR NOT TARGET GTest::gmock)
+    hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION}
+                          REQUIRED_TARGETS GTest::gmock
+                          PROVIDES "GoogleMock (GTest::gmock)"
+    )
+endif()
 include(GoogleTest)
 include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 

@@ -12,6 +12,11 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES C CXX)
 include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 
+option(ALLOW_FETCH_DEPS
+       "Allow fetching third-party dependencies the build environment does not provide"
+       OFF
+)
+
 # Sanitizer support - inherit from parent build when BUILD_ADDRESS_SANITIZER is set
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
@@ -464,6 +469,45 @@ if(ROCM_LIBS_SUPERBUILD)
     list(APPEND _example_plugin_depends example_plugin_hipdnn-staging-install)
 endif()
 
+# The plugin configures as its own CMake project, so this project's package
+# resolution does not reach it. Forward what resolves here.
+#
+# Not the stubs under CMAKE_FIND_PACKAGE_REDIRECTS_DIR: FetchContent writes
+# those for content it made available in THIS build, naming in-tree targets the
+# plugin's separate build does not have.
+find_package(GTest CONFIG QUIET)
+set(EXAMPLE_ENGINE_PLUGIN_GTEST_CACHE_ARGS "")
+if(GTest_DIR
+   AND IS_DIRECTORY "${GTest_DIR}"
+   AND NOT "${GTest_DIR}" PATH_EQUAL "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}"
+)
+    list(APPEND EXAMPLE_ENGINE_PLUGIN_GTEST_CACHE_ARGS
+         "-DGTest_DIR:PATH=${GTest_DIR}"
+    )
+endif()
+
+# No usable package. If FetchContent already populated GoogleTest here, hand
+# over that source tree so the plugin adopts it instead of downloading a second
+# copy.
+set(_example_plugin_gtest_from_source FALSE)
+if(NOT EXAMPLE_ENGINE_PLUGIN_GTEST_CACHE_ARGS)
+    include(FetchContent)
+    FetchContent_GetProperties(GTest SOURCE_DIR _example_plugin_gtest_src)
+    if(_example_plugin_gtest_src AND IS_DIRECTORY "${_example_plugin_gtest_src}")
+        list(APPEND EXAMPLE_ENGINE_PLUGIN_GTEST_CACHE_ARGS
+             "-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST:PATH=${_example_plugin_gtest_src}"
+        )
+        set(_example_plugin_gtest_from_source TRUE)
+    endif()
+endif()
+# Only when the plugin will fetch by tag: a forwarded source tree wins over
+# GIT_TAG, so pairing them would record a version the build did not use.
+if(HIPDNN_GTEST_VERSION AND NOT _example_plugin_gtest_from_source)
+    list(APPEND EXAMPLE_ENGINE_PLUGIN_GTEST_CACHE_ARGS
+         "-DEXAMPLE_PROVIDER_GTEST_VERSION:STRING=${HIPDNN_GTEST_VERSION}"
+    )
+endif()
+
 ExternalProject_Add(example_engine_plugin
     SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/example_engine_plugin
     BUILD_ALWAYS TRUE
@@ -477,6 +521,7 @@ ExternalProject_Add(example_engine_plugin
         "-DCMAKE_RC_COMPILER:FILEPATH=${CMAKE_RC_COMPILER}"
         "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
         "-DCMAKE_MAKE_PROGRAM:FILEPATH=${CMAKE_MAKE_PROGRAM}"
+        "-DALLOW_FETCH_DEPS:BOOL=${ALLOW_FETCH_DEPS}"
         "-DEXAMPLEPROVIDER_BUILD_UNIT_TESTS:BOOL=ON"
         "-DEXAMPLEPROVIDER_BUILD_SAMPLE:BOOL=ON"
         "-DHIP_PLATFORM:STRING=${HIP_PLATFORM}"
@@ -487,9 +532,16 @@ ExternalProject_Add(example_engine_plugin
         "-DTEST_ENVIRONMENT:STRING=${TEST_ENVIRONMENT}"
         "-DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY:BOOL=${EXAMPLEPROVIDER_ENABLE_CLANG_TIDY}"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
+        ${EXAMPLE_ENGINE_PLUGIN_GTEST_CACHE_ARGS}
     CMAKE_ARGS
         # Clear any cached nlohmann_json_DIR so find_package re-resolves it.
         "-Unlohmann_json_DIR"
+        # Same for the GoogleTest hand-off: these entries are conditional, so a
+        # value that stops being forwarded must not linger in the sub-build's
+        # cache and quietly keep resolving.
+        "-UGTest_DIR"
+        "-UFETCHCONTENT_SOURCE_DIR_GOOGLETEST"
+        "-UEXAMPLE_PROVIDER_GTEST_VERSION"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
     DEPENDS ${_example_plugin_depends}
     INSTALL_COMMAND ""
