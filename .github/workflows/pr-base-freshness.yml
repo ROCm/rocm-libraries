@@ -92,17 +92,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      # SECURITY: check out the TRUSTED base commit, NEVER the PR head. This
-      # guarantees we run OUR pr_base_freshness.py — not the fork's.
+      # SECURITY: check out the TRUSTED default branch, NEVER the PR head. This
+      # guarantees we run OUR pr_base_freshness.py, not the fork's.
       #
-      # schedule and workflow_dispatch have no PR, and an empty `ref` falls
-      # through to the ref the run started from. For a dispatch that is any
-      # branch the caller picked, which would let a modified script run in this
-      # privileged job with `statuses: write`, so those events are pinned to
-      # the default branch instead.
+      # Every event is pinned to the default branch tip, which is also where
+      # pull_request_target loads this workflow file from, so the workflow and
+      # the script always come from the same commit. Do not use the PR's base
+      # SHA: a PR based on a commit older than the script has no script to run.
+      # Do not leave `ref` empty either: for workflow_dispatch it falls through
+      # to whatever branch the caller picked, which would let a modified script
+      # run in this privileged job with `statuses: write`.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
           persist-credentials: false
 

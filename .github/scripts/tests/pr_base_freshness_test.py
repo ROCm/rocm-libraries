@@ -559,5 +559,22 @@ class StableDescriptionTest(unittest.TestCase):
         )
 
 
+class WorkflowCheckoutTest(unittest.TestCase):
+    """The workflow must run this script from the default branch tip."""
+
+    WORKFLOW = Path(__file__).parents[2] / "workflows" / "pr-base-freshness.yml"
+
+    def test_checkout_ref_is_the_default_branch(self):
+        # A PR's base SHA can predate this script, and the PR head is
+        # untrusted code in a job holding `statuses: write`.
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        refs = [
+            line.split(":", 1)[1].strip()
+            for line in text.splitlines()
+            if line.strip().startswith("ref:")
+        ]
+        self.assertEqual(refs, ["${{ github.event.repository.default_branch }}"])
+
+
 if __name__ == "__main__":
     unittest.main()
