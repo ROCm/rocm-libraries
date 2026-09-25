@@ -172,6 +172,19 @@ scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
 graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
 ```
 
+For a compile-time constant (plugin API 1.0.0), call `set_value` on the tensor
+instead. It bakes the value into the graph and clears the runtime flag.
+`set_value(value, data_type=None)` supports `FLOAT`, `DOUBLE`, `HALF`,
+`BFLOAT16`, `UINT8`, `INT32`, `INT64`, and `BOOLEAN`. Without `data_type`, it
+keeps the tensor's data type, or infers `BOOLEAN`, `INT64`, or `FLOAT` from a
+Python `bool`, `int`, or `float`. It resets dims and strides to `[1]`, so the
+tensor must have one element.
+
+```python
+scale_t = graph.tensor_like(scale, "scale").set_value(0.5)  # FLOAT constant
+eps_t = hipdnn.Tensor().set_value(1e-5, hipdnn.DataType.DOUBLE)
+```
+
 Code ported from `cudnn.pygraph` needs these changes, because the method
 signatures follow the hipDNN C++ API:
 
