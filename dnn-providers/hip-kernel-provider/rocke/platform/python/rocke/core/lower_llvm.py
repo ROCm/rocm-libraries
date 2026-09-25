@@ -661,6 +661,8 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "<8 x half>, <8 x half>, <16 x float>, "
         "i32 immarg, i32 immarg, i32 immarg)"
     ),
+    "mfma.f32.16x16x8.xf32": "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8.xf32(<2 x float>, <2 x float>, <4 x float>, i32 immarg, i32 immarg, i32 immarg)",
+    "mfma.f32.32x32x4.xf32": "declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4.xf32(<2 x float>, <2 x float>, <16 x float>, i32 immarg, i32 immarg, i32 immarg)",
     "mfma.f32.16x16x4f32": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x4f32("
         "float, float, <4 x float>, "
@@ -1112,7 +1114,7 @@ def _llvm_type(t: Type) -> str:
         return "i8"
     if t.name == "i16":
         return "i16"
-    if t.name == "i32":
+    if t.name in ("i32", "tf32"):
         return "i32"
     if t.name == "i64":
         return "i64"
@@ -1801,6 +1803,7 @@ class _Lowerer:
             "f16": 2,
             "bf16": 2,
             "i32": 4,
+            "tf32": 4,
             "f32": 4,
             "i64": 8,
         }
@@ -1982,6 +1985,11 @@ class _Lowerer:
     # ----- per-op lowerings -----
 
     def lower_op(self, op: Op) -> None:
+        from .tf32 import tf32_op_error
+
+        error = tf32_op_error(op)
+        if error:
+            raise ValueError(error)
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
@@ -2956,6 +2964,7 @@ class _Lowerer:
             "f16": 2,
             "bf16": 2,
             "i32": 4,
+            "tf32": 4,
             "f32": 4,
             "i64": 8,
         }.get(value.type.name, 2)
@@ -3020,6 +3029,7 @@ class _Lowerer:
             "f16": 2,
             "bf16": 2,
             "i32": 4,
+            "tf32": 4,
             "f32": 4,
             "i64": 8,
         }.get(
@@ -3097,7 +3107,15 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # Element byte size drives the vector alignment. 16-bit
         # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes.
-        elem_bytes = {"i8": 1, "f16": 2, "bf16": 2, "i32": 4, "f32": 4, "i64": 8}.get(
+        elem_bytes = {
+            "i8": 1,
+            "f16": 2,
+            "bf16": 2,
+            "i32": 4,
+            "tf32": 4,
+            "f32": 4,
+            "i64": 8,
+        }.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
         )
@@ -3140,6 +3158,10 @@ class _Lowerer:
         self._backend.emit_wmma(self, op)
 
     def _op_tile_mma(self, op: Op) -> None:
+        from .tf32 import TF32_MMA
+
+        if op.attrs.get("op_id") in TF32_MMA and self._backend.arch.gfx != "gfx942":
+            raise ValueError("XF32 MMA requires gfx942")
         # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
@@ -3197,6 +3219,31 @@ class _Lowerer:
             f"<8 x bfloat> {self._operand(b)}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
+        )
+
+    def _op_tile_mfma_f32_16x16x8_xf32(self, op: Op) -> None:
+        self._emit_xf32(op, "mfma.f32.16x16x8.xf32", 4)
+
+    def _op_tile_mfma_f32_32x32x4_xf32(self, op: Op) -> None:
+        self._emit_xf32(op, "mfma.f32.32x32x4.xf32", 16)
+
+    def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
+        if self._backend.arch.gfx != "gfx942":
+            raise ValueError("XF32 MMA requires gfx942")
+        a, b, c = op.operands
+        self._need(intrinsic)
+        a_cast = self._fresh("mfma_a_i16")
+        b_cast = self._fresh("mfma_b_i16")
+        self._current().emit(
+            f"  {a_cast} = bitcast <2 x i32> {self._operand(a)} to <2 x float>"
+        )
+        self._current().emit(
+            f"  {b_cast} = bitcast <2 x i32> {self._operand(b)} to <2 x float>"
+        )
+        self._current().emit(
+            f"  {op.result.name} = call <{count} x float> @llvm.amdgcn.{intrinsic}("
+            f"<2 x float> {a_cast}, <2 x float> {b_cast}, "
+            f"<{count} x float> {self._operand(c)}, i32 0, i32 0, i32 0)"
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
@@ -5292,6 +5339,7 @@ class _Lowerer:
             "f16": 2,
             "bf16": 2,
             "i32": 4,
+            "tf32": 4,
             "f32": 4,
             "i64": 8,
         }.get(elem_name, 2)
@@ -6081,7 +6129,7 @@ def _format_agpr_alloc(value: object) -> str:
 
 def _llvm_type_from_name(name: str) -> str:
     """Map our IR type-name string (from op.attrs) back to LLVM IR text."""
-    if name == "i32":
+    if name in ("i32", "tf32"):
         return "i32"
     if name == "i64":
         return "i64"
@@ -6100,7 +6148,13 @@ def _llvm_type_from_name(name: str) -> str:
         inner = name[4:-1]
         elem, _, count = inner.partition("x")
         count = int(count)
-        elem_map = {"f32": "float", "f16": "half", "bf16": "bfloat", "i32": "i32"}
+        elem_map = {
+            "tf32": "i32",
+            "f32": "float",
+            "f16": "half",
+            "bf16": "bfloat",
+            "i32": "i32",
+        }
         return f"<{count} x {elem_map[elem]}>"
     raise NotImplementedError(f"no LLVM type for {name!r}")
 

@@ -19,6 +19,7 @@
  * reached from _op_tile_mma's op_id routing, which mirrors the Python CDNA
  * ISABackend.emit_mma rebuilding ``tile.<op_id>`` and re-dispatching.
  */
+#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -89,6 +90,9 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
     {
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
     }
+
+    if(rocke_tf32_mma_count(op_id) && strcmp(L->backend->gfx, "gfx942") != 0)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "XF32 MMA requires gfx942");
 
     /* f16 / bf16 / f32 dense atoms resolve from the table; the scaled / fp4 /
      * fp6 / fp8-bf8 / hero atoms keep their dedicated bodies below. */
@@ -623,6 +627,18 @@ typedef struct _mfma_spec
 } _mfma_spec_t;
 
 static const _mfma_spec_t MFMA_SPECS[] = {
+    {"mfma_f32_32x32x4_xf32",
+     "mfma.f32.32x32x4.xf32",
+     "llvm.amdgcn.mfma.f32.32x32x4.xf32",
+     "<2 x i32>",
+     "<16 x float>",
+     "<2 x float>"},
+    {"mfma_f32_16x16x8_xf32",
+     "mfma.f32.16x16x8.xf32",
+     "llvm.amdgcn.mfma.f32.16x16x8.xf32",
+     "<2 x i32>",
+     "<4 x float>",
+     "<2 x float>"},
     {"mfma_f32_16x16x16_f16",
      "mfma.f32.16x16x16f16",
      "llvm.amdgcn.mfma.f32.16x16x16f16",

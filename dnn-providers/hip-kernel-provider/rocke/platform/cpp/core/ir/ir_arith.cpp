@@ -591,6 +591,48 @@ rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v)
     return rocke_i_op1(b, ROCKE_OP_ARITH_CAST_TO_F32, operands, 1, rocke_f32(), NULL, "f32");
 }
 
+rocke_value_t* rocke_b_cvt_f32_to_tf32(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v || !rocke_type_eq(v->type, rocke_f32()))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "cvt_f32_to_tf32 expects f32 input");
+    rocke_value_t* bits = rocke_b_bitcast(b, v, rocke_i32());
+    rocke_value_t* magnitude_mask = rocke_b_const_i32(b, 2147483647);
+    rocke_value_t* mag = rocke_b_land(b, bits, magnitude_mask);
+    rocke_value_t* sign_mask = rocke_b_const_i32(b, -2147483648);
+    rocke_value_t* sign = rocke_b_land(b, bits, sign_mask);
+    rocke_value_t* exponent_mask = rocke_b_const_i32(b, 2139095040);
+    rocke_value_t* exp = rocke_b_land(b, mag, exponent_mask);
+    rocke_value_t* exponent_all_ones = rocke_b_const_i32(b, 2139095040);
+    rocke_value_t* special = rocke_b_cmp_eq(b, exp, exponent_all_ones);
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* safe = rocke_b_select(b, special, zero, mag);
+    rocke_value_t* discarded_bits = rocke_b_const_i32(b, 13);
+    rocke_value_t* shift = rocke_b_lshr(b, safe, discarded_bits);
+    rocke_value_t* low_bit = rocke_b_const_i32(b, 1);
+    rocke_value_t* odd = rocke_b_land(b, shift, low_bit);
+    rocke_value_t* rounding_bias = rocke_b_const_i32(b, 4095);
+    rocke_value_t* bias = rocke_b_add(b, odd, rounding_bias);
+    rocke_value_t* rounded = rocke_b_add(b, safe, bias);
+    rocke_value_t* precision_mask = rocke_b_const_i32(b, -8192);
+    rounded = rocke_b_land(b, rounded, precision_mask);
+    rounded = rocke_b_lor(b, rounded, sign);
+    rocke_value_t* fraction_mask = rocke_b_const_i32(b, 8388607);
+    rocke_value_t* frac = rocke_b_land(b, mag, fraction_mask);
+    rocke_value_t* zero_fraction = rocke_b_const_i32(b, 0);
+    rocke_value_t* is_nan = rocke_b_cmp_ne(b, frac, zero_fraction);
+    rocke_value_t* quiet_bit = rocke_b_const_i32(b, 4194304);
+    rocke_value_t* quiet = rocke_b_lor(b, bits, quiet_bit);
+    rocke_value_t* nan_precision_mask = rocke_b_const_i32(b, -8192);
+    quiet = rocke_b_land(b, quiet, nan_precision_mask);
+    rocke_value_t* nonfinite = rocke_b_select(b, is_nan, quiet, bits);
+    rocke_value_t* result = rocke_b_select(b, special, nonfinite, rounded);
+    result = rocke_b_bitcast(b, result, rocke_tf32());
+    return result;
+}
+
 rocke_value_t*
     rocke_b_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target)
 {

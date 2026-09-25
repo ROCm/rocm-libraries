@@ -137,3 +137,10 @@ A `tile_m=128, tile_n=128, warp_m=2, warp_n=2, warp_tile_m=32, warp_tile_n=32` G
 - Using `f16_16x16x32` or `f16_32x32x16` on gfx940/gfx942: link-time failure (intrinsic absent).
 - Using bf16 atoms without going through `mfma_16x16x16_for_dtype`: declaration mismatch (plain `bf16.16x16x16` doesn't exist; must use the `_1k` variant).
 - `4x4x4` epilogue stores not compositing `batch_idx` into the per-group offset: 16 batches collide on the same outputs.
+
+Logical `tf32` on gfx942 has two native atoms: `mfma_f32_16x16x8_xf32` and
+`mfma_f32_32x32x4_xf32`. Both use two TF32 operands per lane for each input,
+stored as two I32 words; accumulator sizes are four and sixteen FP32 values.
+The [numerical example](../../python/rocke/examples/gfx942/tf32_numerics/README.md)
+demonstrates raw input transport and explicit RNE preparation. These atoms do
+not alter ordinary FP32 selection or enable TF32 production GEMM dispatch.

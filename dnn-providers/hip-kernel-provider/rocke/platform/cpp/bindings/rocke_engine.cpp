@@ -52,6 +52,7 @@ extern "C" {
 #include "rocke/instance_mfma_gemm.h"
 #include "rocke/instance_mx_gemm.h"
 #include "rocke/instance_streamk_gemm.h"
+#include "rocke/instance_tf32_mma_probe.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -3511,6 +3512,25 @@ PYBIND11_MODULE(rocke_engine, m)
         "engine_version",
         []() { return std::string(rocke_engine_version()); },
         "Human-readable engine version of this module.");
+
+    m.def(
+        "tf32_mma_probe_serialize_ir",
+        [](int shape, const std::string& preparation) {
+            rocke_ir_builder_t b;
+            rocke_kernel_def_t* kernel = rocke_build_tf32_mma_probe(&b, shape, preparation.c_str());
+            char* text = nullptr;
+            rocke_status_t status
+                = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
+            std::string error = rocke_ir_builder_error(&b);
+            std::string result = text ? text : "";
+            free(text);
+            rocke_ir_builder_free(&b);
+            if(status != ROCKE_OK)
+                throw std::runtime_error(error);
+            return result;
+        },
+        py::arg("m") = 16,
+        py::arg("preparation") = "raw");
 
     /* ---- family-agnostic lower-from-serialized-IR ----
      * The keystone of the ROCKE_BACKEND=cpp default for Python-authored

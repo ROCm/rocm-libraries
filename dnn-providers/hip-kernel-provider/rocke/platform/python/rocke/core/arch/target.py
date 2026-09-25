@@ -330,6 +330,38 @@ def _mfma_b_16x16(builder, lane, slot):
     return k, n_in_atom
 
 
+def _mfma_a_16x16x8_xf32(builder, lane, slot):
+    c = builder.const_i32(16)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return axis, k
+
+
+def _mfma_b_16x16x8_xf32(builder, lane, slot):
+    c = builder.const_i32(16)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return k, axis
+
+
+def _mfma_a_32x32x4_xf32(builder, lane, slot):
+    c = builder.const_i32(32)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return axis, k
+
+
+def _mfma_b_32x32x4_xf32(builder, lane, slot):
+    c = builder.const_i32(32)
+    axis = builder.mod(lane, c)
+    group = builder.div(lane, c)
+    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
+    return k, axis
+
+
 def _mfma_a_16x16x4_f32(builder, lane, slot):
     """MFMA 16x16x4 fp32 A operand: each lane holds one fp32 scalar.
 
@@ -659,6 +691,12 @@ class _FragInfo:
 # layout-map functions are populated for the atoms whose lane math is verified.
 # Adding a new atom is one row here.
 _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
+    "mfma_f32_32x32x4_xf32": _FragInfo(
+        2, 2, 16, 64, _mfma_a_32x32x4_xf32, _mfma_b_32x32x4_xf32, _mfma_acc_32x32
+    ),
+    "mfma_f32_16x16x8_xf32": _FragInfo(
+        2, 2, 4, 64, _mfma_a_16x16x8_xf32, _mfma_b_16x16x8_xf32, _mfma_acc_16x16
+    ),
     # --- MFMA fp32 (wave64) -----------------------------------------------
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
     # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
