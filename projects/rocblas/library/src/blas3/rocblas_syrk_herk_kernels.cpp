@@ -115,7 +115,8 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
         rocblas_int batch_off = 0;
         while(batch_off < batch_count)
         {
-            rocblas_int chunk = std::min(batch_count - batch_off, (rocblas_int)c_i64_grid_YZ_chunk);
+            rocblas_int chunk = std::min(batch_count - batch_off,
+                                         rocblas_syrk_herk_chunk_size(n, batch_count, sizeof(T)));
 
             // Save: copy triangular region of C into workspace
             if(rocblas_fill_upper == uplo)

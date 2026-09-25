@@ -53,6 +53,51 @@ inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_
                               && n < czsyrk_gfx90a_n_higher_threshold)));
 }
 
+// Upper bound on the syrk/herk gemm-path workspace.  Capping the chunk by bytes
+// rather than by a batch count keeps the allocation bounded for every n: a cap
+// expressed in batches still permits tri(n) * sizeof(T) * cap bytes, which at
+// n=1024, batch_count=50000 is 98GB.
+//
+// The value trades peak memory against launch count, since a smaller budget
+// means more chunks.  1GB keeps the common small-n, high-batch_count shapes on
+// exactly the launch count the unchunked code used, while still bounding the
+// large-n shapes that cannot run at all today.
+constexpr size_t c_syrk_herk_workspace_max_bytes = size_t(1024) * 1024 * 1024;
+
+// Batches processed per chunk by the gemm-path launcher.
+//
+// Both rocblas_internal_syrk_herk_workspace and the launcher in
+// rocblas_syrk_herk_kernels.cpp MUST derive the chunk from this function: the
+// query sizes the buffer for one chunk, so any disagreement lets the launcher
+// write past the allocation.
+//
+// The chunk is the largest batch count whose triangle slots fit the byte budget,
+// so a problem small enough to fit entirely takes a single pass and issues the
+// same launches as the unchunked code.  When the budget does force a split, the
+// chunk is rounded down to a multiple of c_i64_grid_YZ_chunk, which is the stride
+// rocblas_internal_gemm_64 uses for its own batch loop; that keeps every full
+// chunk exactly one GEMM launch instead of a full launch plus a short remainder.
+inline rocblas_int
+    rocblas_syrk_herk_chunk_size(rocblas_int n, rocblas_int batch_count, size_t elem_size)
+{
+    const size_t per_batch = (size_t(n) * size_t(n - 1) / 2) * elem_size;
+
+    // tri(n) == 0 (n <= 1): no workspace is consumed, so one pass covers everything.
+    if(!per_batch)
+        return batch_count;
+
+    size_t chunk = c_syrk_herk_workspace_max_bytes / per_batch;
+    if(chunk < 1)
+        chunk = 1; // a single batch always has to fit
+    if(chunk > size_t(batch_count))
+        chunk = size_t(batch_count);
+
+    if(chunk < size_t(batch_count) && chunk > size_t(c_i64_grid_YZ_chunk))
+        chunk = (chunk / size_t(c_i64_grid_YZ_chunk)) * size_t(c_i64_grid_YZ_chunk);
+
+    return rocblas_int(chunk);
+}
+
 template <typename T>
 inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
                                                    rocblas_int    n,
@@ -65,22 +110,11 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
     if(rocblas_use_only_gemm<T>(handle, n, k))
         if(n > 0 && batch_count > 0)
         {
-            // The host-side launcher processes at most c_i64_grid_YZ_chunk batches
-            // per chunk, reusing the same workspace buffer for each chunk.  Only
-            // min(batch_count, c_i64_grid_YZ_chunk) triangle slots are live
-            // simultaneously, so peak allocation is proportional to the chunk size
-            // rather than the full batch count.
-            //
-            // The bound is c_i64_grid_YZ_chunk (65520), not the larger
-            // c_YZ_grid_launch_limit (65535) that the copy kernel's gridDim.z could
-            // take: rocblas_internal_gemm_64 splits its own batch loop at
-            // c_i64_grid_YZ_chunk, so a chunk of 65535 would issue a full 65520-batch
-            // GEMM followed by a 15-batch one.  Matching the constant makes every
-            // full chunk exactly one GEMM launch.
-            //
+            // Peak allocation is one chunk's worth of triangle slots, not the whole
+            // batch count, because the launcher reuses the buffer for every chunk.
             // All arithmetic uses size_t to prevent signed overflow in the product
             // tri(n) * sizeof(T) * chunk.
-            size_t chunk = size_t(std::min(batch_count, (rocblas_int)c_i64_grid_YZ_chunk));
+            size_t chunk = size_t(rocblas_syrk_herk_chunk_size(n, batch_count, sizeof(T)));
             size         = (size_t(n) * size_t(n - 1) / 2) * sizeof(T) * chunk;
         }
 

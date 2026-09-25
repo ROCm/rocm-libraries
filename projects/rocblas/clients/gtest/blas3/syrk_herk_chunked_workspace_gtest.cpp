@@ -132,18 +132,57 @@ namespace
         return (size_t(n) * size_t(n - 1)) / 2;
     }
 
-    // Batches per chunk. Must match c_i64_grid_YZ_chunk, which is library-internal
-    // and so cannot be referenced from a client test. The value is the 16-bit grid
-    // ceiling rounded down to a multiple of 16, which is also the stride
-    // rocblas_internal_gemm_64 uses for its own batch loop.
-    constexpr rocblas_int limit = ((1 << 16) - 1) & ~0xf; // 65520
+    // Mirrors of two library-internal constants, which a client test cannot
+    // reference. c_gemm_stride is the 16-bit grid ceiling rounded down to a
+    // multiple of 16, the stride rocblas_internal_gemm_64 uses for its own batch
+    // loop; c_budget is the workspace byte cap.
+    constexpr rocblas_int c_gemm_stride = ((1 << 16) - 1) & ~0xf; // 65520
+    constexpr size_t      c_budget      = size_t(1024) * 1024 * 1024;
 
-    // Expected workspace bytes under the chunked scheme.
-    // Mirrors the production formula in rocblas_syrk_herk.hpp.
+    // Port of rocblas_syrk_herk_chunk_size. Kept deliberately literal so a change
+    // to the production rule shows up here as a test failure rather than silently
+    // agreeing.
+    template <typename T>
+    static rocblas_int model_chunk(rocblas_int n, rocblas_int batch_count)
+    {
+        const size_t per_batch = tri_n(n) * sizeof(T);
+        if(!per_batch)
+            return batch_count;
+
+        size_t chunk = c_budget / per_batch;
+        if(chunk < 1)
+            chunk = 1;
+        if(chunk > size_t(batch_count))
+            chunk = size_t(batch_count);
+        if(chunk < size_t(batch_count) && chunk > size_t(c_gemm_stride))
+            chunk = (chunk / size_t(c_gemm_stride)) * size_t(c_gemm_stride);
+
+        return rocblas_int(chunk);
+    }
+
+    // Expected workspace bytes: one chunk's worth of triangle slots.
     template <typename T>
     static size_t chunked_workspace_bytes(rocblas_int n, rocblas_int batch_count)
     {
-        return tri_n(n) * sizeof(T) * size_t(std::min(batch_count, limit));
+        return tri_n(n) * sizeof(T) * size_t(model_chunk<T>(n, batch_count));
+    }
+
+    // Batches worth spot-checking: the ends, plus the batches either side of the
+    // first chunk boundary when the shape actually produces one. Checking a fixed
+    // index would silently stop straddling the boundary whenever the chunk rule
+    // changes.
+    template <typename T>
+    static std::vector<rocblas_int> chunk_probe_batches(rocblas_int n, rocblas_int batch_count)
+    {
+        std::vector<rocblas_int> probes{0, batch_count - 1};
+
+        const rocblas_int chunk = model_chunk<T>(n, batch_count);
+        if(chunk < batch_count)
+        {
+            probes.push_back(chunk - 1); // last of chunk 0
+            probes.push_back(chunk); // first of chunk 1
+        }
+        return probes;
     }
 
     // A size query does not report the raw request: handle.hpp rounds it up to
@@ -364,44 +403,50 @@ namespace
     static void run_size_queries(StridedFn strided_api, BatchedFn batched_api)
     {
         rocblas_local_handle handle;
-        const rocblas_int    n = 32, k = c_k;
+        const rocblas_int    k = c_k;
 
-        // Above the chunk limit the reported size must equal the chunked bound
-        // and be strictly below the old per-batch formula.
-        for(rocblas_int bc : {limit + 1, 65536, 131070})
+        // A size query allocates nothing, so this sweeps shapes far larger than
+        // the correctness tests can afford. n is varied as well as batch_count
+        // because the cap is a byte budget: large n reaches it at a small batch
+        // count, and small n may never reach it at all.
+        struct
+        {
+            rocblas_int n, bc;
+        } cases[] = {
+            {32, 1},
+            {32, 100},
+            {32, c_gemm_stride},
+            {32, c_gemm_stride + 1},
+            {32, 65536},
+            {32, 131070},
+            {2, 131070}, // tiny triangle: budget never binds, single chunk
+            {256, 100000}, // budget binds well below the grid stride
+            {1024, 50000}, // budget binds hard; chunk is only a few hundred
+        };
+
+        for(const auto& c : cases)
         {
             size_t reported = 0;
-            ASSERT_TRUE(
-                (query_strided_workspace<T, K>(handle, strided_api, n, k, n, n, bc, &reported)))
-                << "strided query failed at batch_count=" << bc;
+            ASSERT_TRUE((query_strided_workspace<T, K>(
+                handle, strided_api, c.n, k, c.n, c.n, c.bc, &reported)))
+                << "strided query failed at n=" << c.n << " batch_count=" << c.bc;
             if(reported)
             {
-                EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(n, bc)))
-                    << "batch_count=" << bc;
-                EXPECT_LT(reported, tri_n(n) * sizeof(T) * size_t(bc))
-                    << "workspace not capped at batch_count=" << bc;
+                EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(c.n, c.bc)))
+                    << "n=" << c.n << " batch_count=" << c.bc;
+                EXPECT_LE(reported, rounded(c_budget))
+                    << "workspace exceeds the byte budget at n=" << c.n << " batch_count=" << c.bc;
+                EXPECT_LE(reported, rounded(tri_n(c.n) * sizeof(T) * size_t(c.bc)))
+                    << "chunking must never ask for more than the unchunked size";
             }
 
             reported = 0;
-            ASSERT_TRUE(
-                (query_batched_workspace<T, K>(handle, batched_api, n, k, n, n, bc, &reported)))
-                << "batched query failed at batch_count=" << bc;
+            ASSERT_TRUE((query_batched_workspace<T, K>(
+                handle, batched_api, c.n, k, c.n, c.n, c.bc, &reported)))
+                << "batched query failed at n=" << c.n << " batch_count=" << c.bc;
             if(reported)
-                EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(n, bc)))
-                    << "batch_count=" << bc;
-        }
-
-        // At or below the limit the chunked formula degenerates to the
-        // original per-batch size, so the fix must not change these.
-        for(rocblas_int bc : {1, 100, limit})
-        {
-            size_t reported = 0;
-            ASSERT_TRUE(
-                (query_strided_workspace<T, K>(handle, strided_api, n, k, n, n, bc, &reported)))
-                << "strided query failed at batch_count=" << bc;
-            if(reported)
-                EXPECT_EQ(reported, rounded(tri_n(n) * sizeof(T) * size_t(bc)))
-                    << "batch_count=" << bc;
+                EXPECT_EQ(reported, rounded(chunked_workspace_bytes<T>(c.n, c.bc)))
+                    << "n=" << c.n << " batch_count=" << c.bc;
         }
     }
 
@@ -656,8 +701,7 @@ namespace
                             hipMemcpyDeviceToHost),
                   hipSuccess);
 
-        // Last batch of chunk 0, first and last of chunk 1.
-        for(rocblas_int b : {0, limit - 1, limit, batch_count - 1})
+        for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
             check_c_block(h_result.data() + size_t(b) * c_elems, n, k, b);
     }
 
@@ -712,7 +756,7 @@ namespace
         ASSERT_EQ(h_result.memcheck(), hipSuccess);
         ASSERT_EQ(h_result.transfer_from(dC), hipSuccess);
 
-        for(rocblas_int b : {0, limit - 1, limit, batch_count - 1})
+        for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
             check_c_block(h_result[b], n, k, b);
     }
 
@@ -776,7 +820,7 @@ namespace
             hipSuccess);
 
         const T want = make_val<T>(double(k) + 1.0, 0.0);
-        for(rocblas_int b : {0, limit - 1, limit, batch_count - 1})
+        for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
             expect_val_eq(h_result[b], want, "C[0,0]", b);
     }
 
