@@ -884,6 +884,16 @@ constexpr double spsort_coo_gbyte_count(int64_t nnz)
     return (6.0 * nnz * sizeof(I) + nnz * sizeof(I) + 2.0 * nnz * sizeof(T)) / 1e9;
 }
 
+template <typename I, typename J, typename T>
+constexpr double spsort_csr_gbyte_count(int64_t m, int64_t nnz)
+{
+    // Copy the row pointer, sort the column indices within each row while tracking the
+    // permutation, then gather the values.
+    return (3.0 * (m + 1) * sizeof(I) + 4.0 * nnz * sizeof(J) + 5.0 * nnz * sizeof(I)
+            + 2.0 * nnz * sizeof(T))
+           / 1e9;
+}
+
 /*
  * ===========================================================================
  *    utility SPARSE
