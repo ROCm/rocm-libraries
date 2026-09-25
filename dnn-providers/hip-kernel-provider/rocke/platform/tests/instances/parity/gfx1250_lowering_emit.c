@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_llvm.h"
@@ -117,6 +118,58 @@ static void build_wmma_k64_bf8_bf8(rocke_ir_builder_t* b)
     wmma_k64(b, "wmma_gfx1250_f32_16x16x64_bf8_bf8");
 }
 
+/* K=128 FP8 SCALE/SCALE16 WMMA. Matrix fragments are <16 x i32>; packed
+ * E8M0 scale operands are i32 for SCALE and i64 for SCALE16. */
+static void wmma_scaled(rocke_ir_builder_t* b, bool scale16, const char* dtype)
+{
+    const rocke_mma_scale_block_k_t block = scale16 ? ROCKE_MMA_SCALE_K16 : ROCKE_MMA_SCALE_K32;
+    const rocke_mma_scale_filter_t query = {"e8m0", "e8m0", block};
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_op_t* atom = rocke_mma_catalog_op_for_shape(
+        &target->mma, "wmma_scaled", dtype, dtype, "fp32", 16, 16, 128, &query);
+    const char* op_id = atom->op_id;
+    const rocke_type_t* scale_ty = scale16 ? rocke_i64() : rocke_i32();
+    rocke_value_t* a_ptr = frag_param(b, "A", rocke_i32(), true);
+    rocke_value_t* b_ptr = frag_param(b, "B", rocke_i32(), true);
+    rocke_value_t* c_ptr = frag_param(b, "C", rocke_f32(), false);
+    rocke_value_t* scale_ptr = frag_param(b, "scale", scale_ty, true);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* a_lo = rocke_b_global_load_vN(b, a_ptr, tid, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* eight = rocke_b_const_i32(b, 8);
+    rocke_value_t* hi_idx = rocke_b_add(b, tid, eight);
+    rocke_value_t* a_hi = rocke_b_global_load_vN(b, a_ptr, hi_idx, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* a = rocke_b_vec_concat(b, a_lo, a_hi);
+    rocke_value_t* b_lo = rocke_b_global_load_vN(b, b_ptr, tid, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* b_hi = rocke_b_global_load_vN(b, b_ptr, hi_idx, rocke_i32(), 8, /*align=*/0);
+    rocke_value_t* bb = rocke_b_vec_concat(b, b_lo, b_hi);
+    rocke_value_t* c = rocke_b_global_load_vN(b, c_ptr, tid, rocke_f32(), 8, /*align=*/0);
+    rocke_value_t* scale = rocke_b_global_load(b, scale_ptr, tid, scale_ty, /*align=*/1);
+    rocke_value_t* scales[] = {scale, scale};
+    rocke_value_t* d = rocke_b_mma(b, op_id, a, bb, c, scales, 2);
+    rocke_b_global_store(b, c_ptr, tid, d, /*align=*/1);
+    rocke_b_ret(b);
+}
+
+static void build_wmma_scale(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "fp8e4m3");
+}
+
+static void build_wmma_scale_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, false, "bf8e5m2");
+}
+
+static void build_wmma_scale16(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "fp8e4m3");
+}
+
+static void build_wmma_scale16_bf8(rocke_ir_builder_t* b)
+{
+    wmma_scaled(b, true, "bf8e5m2");
+}
+
 /* ds_read_b128_tr_b16. gfx950 has one type-agnostic opcode returning
  * <8 x i16> that the handler reinterprets; gfx1250 has per-element-type
  * opcodes (.v8f16 / .v8bf16) that land in the right type with no reinterpret. */
@@ -202,6 +255,128 @@ static void build_wait_counters(rocke_ir_builder_t* b)
     rocke_b_ret(b);
 }
 
+static void build_standalone_controls(rocke_ir_builder_t* b)
+{
+    const int shape[] = {1};
+    rocke_value_t* barrier = rocke_b_smem_alloc(b, rocke_i64(), shape, 1, "named_barrier");
+    rocke_value_t* barrier_ptr = rocke_b_smem_addr_of(b, barrier);
+    rocke_value_t* members = rocke_b_const_i32(b, 2);
+    rocke_b_s_wait_tensorcnt(b, 3);
+    rocke_b_s_barrier_signal(b, 1);
+    rocke_b_s_barrier_wait(b, 1);
+    rocke_b_s_barrier_init(b, barrier_ptr, members);
+    rocke_b_s_barrier_signal_var(b, barrier_ptr, members);
+    rocke_b_s_barrier_join(b, barrier_ptr);
+    rocke_b_s_wakeup_barrier(b, barrier_ptr);
+    rocke_b_s_barrier_leave(b, 1);
+    rocke_b_s_delay_alu(b, 0x1234);
+    rocke_b_s_wait_alu(b, 0x2345);
+    rocke_b_s_clause(b, 0x3456);
+    rocke_b_s_wait_xcnt(b, 0x4567);
+    rocke_b_ret(b);
+}
+
+static void build_async_store(rocke_ir_builder_t* b)
+{
+    const int shape[] = {4};
+    rocke_param_opts_t o;
+    memset(&o, 0, sizeof(o));
+    o.noalias = true;
+    o.noalias_set = true;
+    o.align = 16;
+    o.align_set = true;
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, rocke_i32(), "global"), &o);
+    rocke_value_t* smem = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "store_src");
+    rocke_value_t* lds_ptr = rocke_b_smem_addr_of(b, smem);
+    const int widths[] = {1, 4, 8, 16};
+    for(int i = 0; i < 4; ++i)
+        rocke_b_global_store_async_from_lds(
+            b, out, lds_ptr, widths[i], widths[i], /*cachepolicy=*/3);
+    rocke_b_ret(b);
+}
+
+static void global_tr16(rocke_ir_builder_t* b, const rocke_type_t* elem)
+{
+    rocke_param_opts_t src_o;
+    rocke_param_opts_t out_o;
+    memset(&src_o, 0, sizeof(src_o));
+    memset(&out_o, 0, sizeof(out_o));
+    src_o.noalias = true;
+    src_o.noalias_set = true;
+    src_o.readonly = true;
+    src_o.readonly_set = true;
+    src_o.align = 16;
+    src_o.align_set = true;
+    out_o.noalias = true;
+    out_o.noalias_set = true;
+    out_o.align = 16;
+    out_o.align_set = true;
+    rocke_value_t* src = rocke_b_param(b, "src", rocke_ptr_type(b, elem, "global"), &src_o);
+    rocke_value_t* out = rocke_b_param(b, "out", rocke_ptr_type(b, elem, "global"), &out_o);
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* value = rocke_b_global_load_tr16_b128(b, src, elem);
+    rocke_b_global_store(b, out, zero, value, /*align=*/1);
+    rocke_b_ret(b);
+}
+
+static void build_global_tr16_f16(rocke_ir_builder_t* b)
+{
+    global_tr16(b, rocke_f16());
+}
+
+static void build_global_tr16_bf16(rocke_ir_builder_t* b)
+{
+    global_tr16(b, rocke_bf16());
+}
+
+static void build_global_tr16_i16(rocke_ir_builder_t* b)
+{
+    global_tr16(b, rocke_i16());
+}
+
+static void build_tensor_transfers(rocke_ir_builder_t* b)
+{
+    rocke_value_t* d4 = rocke_b_zero_vec(b, rocke_i32(), 4);
+    rocke_value_t* d8 = rocke_b_zero_vec(b, rocke_i32(), 8);
+    rocke_b_tensor_load_to_lds(b, d4, d8, d4, d4, d8, 5);
+    rocke_b_tensor_store_from_lds(b, d4, d8, d4, d4, d8, 5);
+    rocke_b_s_wait_tensorcnt(b, 0);
+    rocke_b_ret(b);
+}
+
+static void build_scale_coordinates(rocke_ir_builder_t* b, rocke_mma_scale_block_k_t block)
+{
+    const auto* arch = rocke_arch_target_from_gfx("gfx1250");
+    const rocke_mma_scale_filter_t scales = {"e8m0", "e8m0", block};
+    const auto* atom = rocke_mma_catalog_op_for_shape(
+        &arch->mma, "wmma_scaled", "fp8", "fp8", "fp32", 16, 16, 128, &scales);
+    rocke_value_t* out = frag_param(b, "coords", rocke_i32(), false);
+    rocke_value_t* lane = rocke_b_thread_id_x(b);
+    const rocke_layout_map_t* maps[]
+        = {rocke_mma_op_a_scale_layout(atom, b), rocke_mma_op_b_scale_layout(atom, b)};
+    for(int source = 0; source < 2; ++source)
+    {
+        for(int slot = 0; slot < maps[source]->frag_len; ++slot)
+        {
+            rocke_value_t *x = NULL, *y = NULL;
+            rocke_layout_map_coord(maps[source], b, lane, slot, &x, &y);
+            rocke_b_global_store(b, out, lane, x, 1);
+            rocke_b_global_store(b, out, lane, y, 1);
+        }
+    }
+    rocke_b_ret(b);
+}
+
+static void build_scale_coordinates_k32(rocke_ir_builder_t* b)
+{
+    build_scale_coordinates(b, ROCKE_MMA_SCALE_K32);
+}
+
+static void build_scale_coordinates_k16(rocke_ir_builder_t* b)
+{
+    build_scale_coordinates(b, ROCKE_MMA_SCALE_K16);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 typedef struct config
@@ -220,6 +395,8 @@ static const config_t CONFIGS[] = {
     {build_wmma_k64_fp8_bf8, "gfx1250"},
     {build_wmma_k64_bf8_fp8, "gfx1250"},
     {build_wmma_k64_bf8_bf8, "gfx1250"},
+    {build_wmma_scale, "gfx1250"},
+    {build_wmma_scale16, "gfx1250"},
     {build_tr16_f16, "gfx1250"},
     {build_tr16_f16, "gfx950"},
     {build_tr16_bf16, "gfx1250"},
@@ -228,6 +405,16 @@ static const config_t CONFIGS[] = {
     {build_barrier_drains, "gfx950"},
     {build_wait_counters, "gfx1250"},
     {build_wait_counters, "gfx950"},
+    {build_standalone_controls, "gfx1250"},
+    {build_async_store, "gfx1250"},
+    {build_global_tr16_f16, "gfx1250"},
+    {build_global_tr16_bf16, "gfx1250"},
+    {build_global_tr16_i16, "gfx1250"},
+    {build_tensor_transfers, "gfx1250"},
+    {build_wmma_scale_bf8, "gfx1250"},
+    {build_wmma_scale16_bf8, "gfx1250"},
+    {build_scale_coordinates_k32, "gfx1250"},
+    {build_scale_coordinates_k16, "gfx1250"},
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

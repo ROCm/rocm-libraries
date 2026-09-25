@@ -1,0 +1,72 @@
+<svg viewBox="0 0 920 430" width="920" height="430" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13">
+  <rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+  <defs>
+    <marker id="arrowBM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <text x="140" y="36" text-anchor="middle" font-weight="600">UID-centric graph</text>
+  <text x="460" y="36" text-anchor="middle" font-weight="600">Op-schema registry</text>
+  <text x="790" y="36" text-anchor="middle" font-weight="600">Symbol table the UED publishes</text>
+
+  <!-- STAGE 1: UID-centric graph -->
+  <rect x="20" y="52" width="245" height="330" rx="8" fill="#e8f0fe" stroke="#4a72c4" stroke-width="1.5"/>
+  <text x="40" y="78" font-family="Consolas, monospace" font-size="11">Node {</text>
+  <text x="40" y="98" font-family="Consolas, monospace" font-size="11">  op = sdpa_fwd</text>
+  <text x="40" y="118" font-family="Consolas, monospace" font-size="11">  attributes(union):</text>
+  <text x="40" y="138" font-family="Consolas, monospace" font-size="11">    q_tensor_uid = 7</text>
+  <text x="40" y="158" font-family="Consolas, monospace" font-size="11">    k_tensor_uid = 8</text>
+  <text x="40" y="178" font-family="Consolas, monospace" font-size="11">    v_tensor_uid = 9</text>
+  <text x="40" y="198" font-family="Consolas, monospace" font-size="11">    o_tensor_uid = 12</text>
+  <text x="40" y="218" font-family="Consolas, monospace" font-size="11">}  // no inputs[]/outputs[]</text>
+  <text x="40" y="252" font-family="Consolas, monospace" font-size="11">tensors[uid]:</text>
+  <text x="40" y="272" font-family="Consolas, monospace" font-size="11">  7: dims[..] strides[..]</text>
+  <text x="40" y="292" font-family="Consolas, monospace" font-size="11">     data_type, virtual_</text>
+  <text x="40" y="326" font-family="Consolas, monospace" font-size="11" fill="#666">stream -&gt; getDeviceString()</text>
+  <text x="40" y="346" font-family="Consolas, monospace" font-size="11" fill="#666">  = "gfx942"  (out-of-band)</text>
+
+  <line x1="270" y1="210" x2="330" y2="210" stroke="#444" stroke-width="1.5" marker-end="url(#arrowBM)"/>
+  <text x="300" y="202" text-anchor="middle" font-weight="600" font-size="11">resolve</text>
+  <text x="300" y="224" text-anchor="middle" font-size="9" fill="#666">the UED's</text>
+  <text x="300" y="236" text-anchor="middle" font-size="9" fill="#666">pattern</text>
+
+  <!-- STAGE 2: op-schema registry -->
+  <rect x="335" y="52" width="250" height="330" rx="8" fill="#fef7e0" stroke="#c99a2e" stroke-width="1.5"/>
+  <text x="352" y="80" font-family="Consolas, monospace" font-size="11">sdpa_fwd schema:</text>
+  <text x="352" y="104" font-family="Consolas, monospace" font-size="11">  operands (required):</text>
+  <text x="352" y="124" font-family="Consolas, monospace" font-size="11">    q -&gt; q_tensor_uid</text>
+  <text x="352" y="144" font-family="Consolas, monospace" font-size="11">    k -&gt; k_tensor_uid</text>
+  <text x="352" y="164" font-family="Consolas, monospace" font-size="11">    v -&gt; v_tensor_uid</text>
+  <text x="352" y="184" font-family="Consolas, monospace" font-size="11">  results:</text>
+  <text x="352" y="204" font-family="Consolas, monospace" font-size="11">    o -&gt; o_tensor_uid</text>
+  <text x="352" y="224" font-family="Consolas, monospace" font-size="11">  operands (optional):</text>
+  <text x="352" y="244" font-family="Consolas, monospace" font-size="11">    attn_mask, page_table_*</text>
+  <text x="352" y="268" font-family="Consolas, monospace" font-size="11">  attributes:</text>
+  <text x="352" y="288" font-family="Consolas, monospace" font-size="11">    causal_mask, dropout_..</text>
+  <text x="352" y="326" font-family="Consolas, monospace" font-size="11" fill="#666">generated from the</text>
+  <text x="352" y="346" font-family="Consolas, monospace" font-size="11" fill="#666">flatbuffer op schema</text>
+
+  <line x1="590" y1="210" x2="650" y2="210" stroke="#444" stroke-width="1.5" marker-end="url(#arrowBM)"/>
+  <text x="620" y="202" text-anchor="middle" font-weight="600" font-size="11">bind</text>
+  <text x="620" y="224" text-anchor="middle" font-size="9" fill="#666">per engine,</text>
+  <text x="620" y="236" text-anchor="middle" font-size="9" fill="#666">per graph</text>
+
+  <!-- STAGE 3: bound symbol table -->
+  <rect x="655" y="52" width="245" height="330" rx="8" fill="#e6f4ea" stroke="#3f9159" stroke-width="1.5"/>
+  <text x="672" y="80" font-family="Consolas, monospace" font-size="11">$q -&gt; tensor(uid 7)</text>
+  <text x="672" y="100" font-family="Consolas, monospace" font-size="11">$k $v $o  ...</text>
+  <text x="672" y="124" font-family="Consolas, monospace" font-size="11">$q.dims[0..3]</text>
+  <text x="672" y="144" font-family="Consolas, monospace" font-size="11">$q.strides[0..3]</text>
+  <text x="672" y="164" font-family="Consolas, monospace" font-size="11">$q.rank $q.dtype</text>
+  <text x="672" y="184" font-family="Consolas, monospace" font-size="11">$q.stride_order $q.packed</text>
+  <text x="672" y="212" font-family="Consolas, monospace" font-size="11">$q.uid $q.virtual $q.value_f32</text>
+  <text x="672" y="232" font-family="Consolas, monospace" font-size="11">$q.is_runtime_pass_by_value</text>
+  <text x="672" y="252" font-family="Consolas, monospace" font-size="11">  (presence asked by operator)</text>
+  <text x="672" y="280" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.causal_mask</text>
+  <text x="672" y="300" font-family="Consolas, monospace" font-size="11">$sdpa_fwd.dropout_probability</text>
+  <text x="672" y="336" font-family="Consolas, monospace" font-size="11" fill="#666">read by the UMD's criteria,</text>
+  <text x="672" y="356" font-family="Consolas, monospace" font-size="11" fill="#666">the UHD, and the UDD's formulas</text>
+
+  <text x="460" y="416" text-anchor="middle" font-style="italic" fill="#444">The graph has no edges; the op-schema registry reconstructs them from shared UIDs, and the UED's pattern auto-binds the full symbol table.</text>
+</svg>

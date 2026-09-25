@@ -131,6 +131,14 @@ TEST_F(TestCudnnShimHandle, GetVersionReturnsClaimedRuntimeVersion)
     EXPECT_EQ(cudnnGetVersion(), static_cast<size_t>(CUDNN_VERSION));
 }
 
+TEST_F(TestCudnnShimHandle, GetCudartVersionReturnsClaimedCudaRuntimeVersion)
+{
+    // No CUDA runtime exists behind the shim; the claim only has to clear the
+    // CUDA 12 baseline upstream samples gate on (see cudnn_runtime_version.h).
+    EXPECT_EQ(cudnnGetCudartVersion(), static_cast<size_t>(CUDNN_CUDART_VERSION));
+    EXPECT_GE(cudnnGetCudartVersion(), static_cast<size_t>(12000));
+}
+
 TEST_F(TestCudnnShimHandle, FrontendVersionMacroMatchesUpstreamPin)
 {
     // RFC 0012 §4.8 / §2: pinned to cuDNN FE v1.24.0.

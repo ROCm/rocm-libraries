@@ -1,0 +1,58 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Public C entry points that are exported from the pre-wrapper libMIOpen.so
+# baseline (test/public_abi/public_symbols.baseline) but are deliberately
+# NOT part of the miopen.h public-header contract, and so are intentionally
+# absent from the flag-on wrapper (libMIOpen.so). Under MIOPEN_ENABLE_HIPDNN_WRAPPER=ON
+# they remain exported from libMIOpen_private.so under their original (un-renamed)
+# names.
+#
+# How consumers reach them under flag-on:
+#   - At runtime, through the wrapper's DT_NEEDED libMIOpen_private.
+#   - At link time, CMake consumers get -lMIOpen_private on their own link line
+#     via the wrapper's PUBLIC link interface (src/CMakeLists.txt).
+#   - Consumers that link a bare -lMIOpen without going through the exported
+#     CMake target (pkg-config, hand-written makefiles) will NOT resolve these:
+#     GNU ld has defaulted to --no-copy-dt-needed-entries since binutils 2.22,
+#     so a symbol defined only in an indirect DT_NEEDED library is an undefined
+#     reference. Those consumers need -lMIOpen_private added explicitly. This
+#     matters most for MIGraphX, the named consumer of the miopenHidden* shims.
+#
+# The flag-on wrapper symbol-set assertion (check_public_abi.py check-wrapper)
+# expects the wrapper's exported public set to equal:
+#
+#     public_symbols.baseline  −  {these symbols}
+#
+# Lines beginning with # and blank lines are ignored.
+#
+# Why each symbol is excluded:
+#   - miopenConvolutionABBackwardWeightsGetWorkSpaceSize
+#       Experimental API declared in src/include/miopen/miopen_internal.h
+#       ("Put experimental APIs here."), not in include/miopen/miopen.h.
+#       Consumed only internally.
+#   - miopenHiddenGetConvolutionFindMode
+#   - miopenHiddenSetConvolutionFindMode
+#       "Hidden C++ functions for MIGraphX" (src/convolution_api.cpp). Take a
+#       raw int findMode (pre-public, untyped interface); appear in no installed
+#       header. The typed miopen{Get,Set}ConvolutionFindMode were the ones
+#       promoted to miopen.h; these int-based variants were left as the
+#       MIGraphX back-compat shim.
+#   - miopenConvolutionForwardGetWorkSpaceSizeRange
+#   - miopenConvolutionBackwardDataGetWorkSpaceSizeRange
+#   - miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange
+#       Query-only workspace-range APIs defined with MIOPEN_EXPORT in
+#       src/convolution_api.cpp but never declared in include/miopen/miopen.h
+#       (consumers and tests forward-declare them locally). Not renamed in the
+#       private lib, so they stay exported under their original names.
+#
+# Adding a symbol here is NOT a way to silence a red check-wrapper gate. The
+# gate re-derives the criterion above mechanically: it fails if any listed
+# symbol is declared in include/miopen/miopen.h, and fails if any listed symbol
+# is not still exported un-suffixed from libMIOpen_private.so.
+miopenConvolutionABBackwardWeightsGetWorkSpaceSize
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange
+miopenConvolutionForwardGetWorkSpaceSizeRange
+miopenHiddenGetConvolutionFindMode
+miopenHiddenSetConvolutionFindMode

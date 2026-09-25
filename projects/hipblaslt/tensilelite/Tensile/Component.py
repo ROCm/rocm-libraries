@@ -237,6 +237,9 @@ class LocalRead(Component):
             inBuf  = ldsByteOffset - tP["localReadSwapByteOffset"]
             half   = 1 if inBuf >= writer.tdmSplitLdsBoundary(kernel, tP) else 0
             tok    = writer.states.memTokenLdsSplit[parity][half]
+        elif writer.states.dcpTokenGate:
+            side = writer._dcpTokenSide(tP["tensorChar"])
+            tok = getattr(writer.states, "ldsReadTokenIdx%s" % side)
         else:
             tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok
@@ -317,6 +320,11 @@ class TensorDataMover(Component):
 class GL2Prefetch(Component):
     """
     GL2 Prefetch
+    """
+
+class ClusterLoad(Component):
+    """
+    Cluster (multicast) TDM load: multicast-mask compute + descriptor attach.
     """
 
 # Importing here allows auto-registry of components in the Components directory.

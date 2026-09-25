@@ -980,7 +980,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForMix
 
     const std::vector<int64_t> stridesNCHW = {588, 196, 14, 1}; // NCHW
     const std::vector<int64_t> dimsNCHW = {1, 3, 14, 14};
-    const std::vector<int64_t> stridesNHWC = {3, 14L * 14L * 3L, 14L * 3L, 3}; // NHWC
+    const std::vector<int64_t> stridesNHWC = {3, int64_t{14} * 14 * 3, int64_t{14} * 3, 3}; // NHWC
     const std::vector<int64_t> dimsNHWC = {1, 3, 14, 14};
     const std::vector<int64_t> derivedStrides = {1, 3, 1, 1};
     const std::vector<int64_t> derivedDims = {1, 3, 1, 1};

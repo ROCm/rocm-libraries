@@ -136,7 +136,12 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I>
-    ROCSPARSE_DEVICE_ILF void csrgemm_group_reduce(int tid, I* __restrict__ data)
+    // NOTE: 'data' points into block-shared LDS and is used for a cross-thread
+    // segmented reduction (each thread reads slots written by other threads across
+    // __syncthreads()). It must NOT be __restrict__: clang lowers __restrict__ to
+    // LLVM noalias, which is interpreted to exclude other-thread writes, letting the
+    // compiler forward the pre-barrier value and drop neighbor contributions.
+    ROCSPARSE_DEVICE_ILF void csrgemm_group_reduce(int tid, I* data)
     {
         // clang-format off
     if(BLOCKSIZE > 512 && tid < 512) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 512) * GROUPS + i]; __syncthreads();
@@ -365,7 +370,10 @@ namespace rocsparse
     // Hash operation to insert key into hash table
     // Returns true if key has been added
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I>
-    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* __restrict__ table)
+    // NOTE: 'table' is a block-shared hash table. The plain load `table[hash]` below
+    // must observe atomic_cas writes from other threads, so 'table' must NOT be
+    // __restrict__ (noalias would let the compiler hoist the load out of the loop).
+    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* table)
     {
         static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
                       "HASHSIZE must be a power of two.");
@@ -406,8 +414,7 @@ namespace rocsparse
 
     // Hash operation to insert pair into hash table
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void
-        insert_pair(I key, T val, I* __restrict__ table, T* __restrict__ data, I empty)
+    ROCSPARSE_DEVICE_ILF void insert_pair(I key, T val, I* table, T* __restrict__ data, I empty)
     {
         static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
                       "HASHSIZE must be a power of two.");
@@ -696,7 +703,7 @@ namespace rocsparse
                                              const I* __restrict__ csr_row_ptr_D,
                                              const J* __restrict__ csr_col_ind_D,
                                              I* __restrict__ row_nnz,
-                                             I* __restrict__ workspace_B,
+                                             I*                   workspace_B,
                                              rocsparse_index_base idx_base_A,
                                              rocsparse_index_base idx_base_B,
                                              rocsparse_index_base idx_base_D,
@@ -1302,7 +1309,7 @@ namespace rocsparse
                                                     const I* __restrict__ csr_row_ptr_C,
                                                     J* __restrict__ csr_col_ind_C,
                                                     T* __restrict__ csr_val_C,
-                                                    I* __restrict__ workspace_B,
+                                                    I*                   workspace_B,
                                                     rocsparse_index_base idx_base_A,
                                                     rocsparse_index_base idx_base_B,
                                                     rocsparse_index_base idx_base_C,

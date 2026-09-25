@@ -123,6 +123,29 @@ bool PassBuilder::loadPlugin(const std::string& path) {
         return false;
     }
 
+    using VersionFn = const char* (*)();
+    auto* versionFn =
+        reinterpret_cast<VersionFn>(GetProcAddress(handle, "stinkytofuPluginVersion"));
+    if (!versionFn) {
+        std::cerr << "PassBuilder: plugin '" << path
+                  << "' does not export stinkytofuPluginVersion() — StinkyTofu does not "
+                     "support loading plugins without an exact version match\n";
+        FreeLibrary(handle);
+        return false;
+    }
+    // A plugin is untrusted here: it can export the hook and still hand back
+    // nullptr. versionsMatch() rejects that, but the diagnostic must describe it
+    // rather than stream it.
+    const char* pluginVersion = versionFn();
+    if (!versionsMatch(pluginVersion, getRuntimeVersion())) {
+        std::cerr << "PassBuilder: plugin '" << path << "' was built against stinkytofu "
+                  << (pluginVersion ? pluginVersion : "(no version reported)") << " but "
+                  << getRuntimeVersion()
+                  << " is loaded — StinkyTofu does not support cross-version plugin loading\n";
+        FreeLibrary(handle);
+        return false;
+    }
+
     using RegisterFn = void (*)();
     auto* registerFn = reinterpret_cast<RegisterFn>(GetProcAddress(handle, "registerPlugin"));
     if (!registerFn) {
@@ -141,6 +164,29 @@ bool PassBuilder::loadPlugin(const std::string& path) {
     void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
         std::cerr << "PassBuilder: failed to load plugin '" << path << "': " << dlerror() << '\n';
+        return false;
+    }
+
+    using VersionFn = const char* (*)();
+    auto* versionFn = reinterpret_cast<VersionFn>(dlsym(handle, "stinkytofuPluginVersion"));
+    if (!versionFn) {
+        std::cerr << "PassBuilder: plugin '" << path
+                  << "' does not export stinkytofuPluginVersion(): " << dlerror()
+                  << " — StinkyTofu does not support loading plugins without an exact "
+                     "version match\n";
+        dlclose(handle);
+        return false;
+    }
+    // A plugin is untrusted here: it can export the hook and still hand back
+    // nullptr. versionsMatch() rejects that, but the diagnostic must describe it
+    // rather than stream it.
+    const char* pluginVersion = versionFn();
+    if (!versionsMatch(pluginVersion, getRuntimeVersion())) {
+        std::cerr << "PassBuilder: plugin '" << path << "' was built against stinkytofu "
+                  << (pluginVersion ? pluginVersion : "(no version reported)") << " but "
+                  << getRuntimeVersion()
+                  << " is loaded — StinkyTofu does not support cross-version plugin loading\n";
+        dlclose(handle);
         return false;
     }
 

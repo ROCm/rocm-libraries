@@ -719,6 +719,8 @@ TEST(TestSdpaBwdRegistryLookupFp16, RegistryLookupHd128CausalBatch)
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 {
+    SKIP_IF_NO_DEVICES();
+
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
@@ -734,6 +736,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsHd96)
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFp8)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
@@ -752,6 +756,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsGfx950)
     // Cannot synthesise a different device string from the test harness, so
     // this test only meaningfully runs on a non-gfx942 device. On gfx942 it
     // is skipped (the positive case is covered by IsApplicableSdpaBwdVariations).
+    SKIP_IF_NO_DEVICES();
+
     auto deviceString = hip_kernel_provider_common::getDeviceString(_handle.getStream());
     if(deviceString == "gfx942")
     {
@@ -769,13 +775,16 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
+    SKIP_IF_NO_DEVICES();
+
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {
         GTEST_SKIP();
     }
 
-    // nhead_q = 6, nhead_k = 4 → 6 % 4 = 2.  SdpaBwdPlan would silently
-    // truncate ratio = 6/4 = 1, dropping K/V heads in dispatch.
+    // nhead_q = 6, nhead_k = 4.  GQA/MQA is now rejected outright (dK/dV head
+    // expansion is unimplemented); a fractional ratio would additionally truncate
+    // to ratio = 6/4 = 1 and silently drop K/V heads in dispatch.
     const std::vector<int64_t> qDims = {2, 6, 256, 128};
     const std::vector<int64_t> kDims = {2, 4, 256, 128};
     const std::vector<int64_t> vDims = {2, 4, 256, 128};
@@ -798,9 +807,49 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // llama-3-8b backward shape: nhead_q = 32, nhead_k = 8 (ratio 4).  The dqdkdv
+    // kernel writes nhead_q head slots into dK/dV, so passing the user's 8-head
+    // tensors overruns them by (32 - 8) * 128 * sizeof(bf16) = 6144 bytes and
+    // faults with HSA_STATUS_ERROR_MEMORY_FAULT.  Reject until dK/dV head expansion
+    // and the ratio-group reduction are implemented.
+    const std::vector<int64_t> qDims = {1, 32, 256, 128};
+    const std::vector<int64_t> kDims = {1, 8, 256, 128};
+    const std::vector<int64_t> vDims = {1, 8, 256, 128};
+    const std::vector<int64_t> oDims = {1, 32, 256, 128};
+
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        qDims,
+        hipdnn_data_sdk::utilities::generateStrides(qDims),
+        kDims,
+        hipdnn_data_sdk::utilities::generateStrides(kDims),
+        vDims,
+        hipdnn_data_sdk::utilities::generateStrides(vDims),
+        oDims,
+        hipdnn_data_sdk::utilities::generateStrides(oDims),
+        DataType::BFLOAT16);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsAsymmetricHdim)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
 
     if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
     {

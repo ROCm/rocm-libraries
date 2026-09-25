@@ -127,7 +127,6 @@ struct HandleImpl {
     }
 
     void PreInitializeBuffer() {
-        this->initHandle = new InitHandle();
         this->PreInitializeBufferCPU();
 
 #ifdef AUDIO_SUPPORT

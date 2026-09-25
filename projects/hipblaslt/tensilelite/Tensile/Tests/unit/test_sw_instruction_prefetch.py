@@ -201,6 +201,22 @@ def test_explicit_absolute_ok_on_gfx1250_non_streamk():
     assert state.get("Valid") is not False
 
 
+def test_explicit_absolute_ok_on_gfx1250_list_isa():
+    """Regression: the gfx1250 guard must tuple()-normalize ISA.
+
+    Solution YAML I/O serializes ISA as a plain list, so a round-tripped gfx1250
+    state carries ``[12, 5, 0]``. Comparing that list directly to the tuple
+    ``(12, 5, 0)`` is False-negative (``[12,5,0] != (12,5,0)`` is True), which
+    wrongly rejected valid gfx1250 Absolute-prefetch kernels loaded from YAML.
+    """
+    state = _min_state(SW_INSTRUCTION_PREFETCH_ABSOLUTE, list(GFX1250), 0)
+    try:
+        _run_piap(state)
+    except Exception:
+        pass
+    assert state.get("Valid") is not False
+
+
 @pytest.mark.parametrize(
     "swp,isa,streamk",
     [

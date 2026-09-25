@@ -174,6 +174,18 @@ Applications should use separate host-only and device-only functions instead:
 
 Avoid placing the ``hip::wthread`` construction itself in a shared ``__host__ __device__`` function.
 
+
+Multi-GPU systems are not supported
+====================================
+  
+hipThreads assumes a single GPU for the life of the process.
+
+``hip::wthread::hardware_concurrency()`` reports the current device correctly (it honors ``hipSetDevice``), but the persistent scheduler itself does not. The first ``hip::wthread`` you create binds the scheduler kernel and its stream to whichever device is current at that moment, and there is no mechanism to run a second scheduler on another device or to migrate work between GPUs.
+
+* Do not call ``hipSetDevice`` to switch devices after constructing your first ``hip::wthread``. The scheduler stays bound to the original device regardless.
+* On a multi-GPU system, select the intended device with ``hipSetDevice`` *before* creating any ``hip::wthread``, and confine all wthread-based work in that process to that one device.
+* ``HSA_CU_MASK`` and compute-partitioned (CPX/SPX) execution are also not accounted for: the scheduler sizes itself from the device's full compute-unit count regardless of any mask or partition restricting what the process can actually use.
+
 Unsupported standard library facilities
 =======================================
 

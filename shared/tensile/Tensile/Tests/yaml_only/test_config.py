@@ -29,7 +29,7 @@ import yaml
 
 from Tensile import Tensile
 from Tensile import DataType
-from Tensile.Utilities.ConditionalImports import yamlLoader
+from Tensile.Utilities.ConditionalImports import SafeLoader
 
 
 ################################################################################
@@ -102,7 +102,7 @@ def configMarks(filepath, rootDir, availableArchs):
 
     try:
         with open(filepath) as f:
-            doc = yaml.load(f, yamlLoader)
+            doc = yaml.load(f, SafeLoader)
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks

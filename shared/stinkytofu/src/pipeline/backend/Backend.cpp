@@ -22,11 +22,14 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/Backend.hpp"
 
+#include <string>
+
 #include "stinkytofu/bindings/python/Module.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 Backend::Backend(StinkyAsmModule& module) : module(module) {}
@@ -39,15 +42,15 @@ bool Backend::runOptimization() {
     auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
     if (!pipeline || !pipeline->builder) return true;
 
-    PassManager pm;
-    if (!pipeline->builder(pm, module, module.getPassBuilder())) return true;
+    ModulePassManager mpm;
+    if (!pipeline->builder(mpm, module, module.getPassBuilder())) return true;
 
-    configurePassManager(pm);
-    pm.run(module.getFunction());
+    configurePassManager(mpm);
+    mpm.run(module);
     return true;
 }
 
-void Backend::configurePassManager(PassManager& pm) {
+void Backend::configurePassManager(ModulePassManager& pm) {
     const auto& opts = module.getModuleOptions();
 
     GemmTileConfig gemmTileConfig;
@@ -58,7 +61,47 @@ void Backend::configurePassManager(PassManager& pm) {
     gemmTileConfig.NumGRA = opts.NumGRA;
     gemmTileConfig.NumGRB = opts.NumGRB;
     gemmTileConfig.NumGRM = opts.NumGRM;
+    // Assigned as-is, including 0. Production TensileLite never sets
+    // WaveGroup0/1, so this is 0 for every real hipblaslt kernel. Defaulting it
+    // to 1 here is not the fix it looks like: StinkyWaitCntInsertionPass drains
+    // the tensor counter on `numWaves == 1`, so it would start emitting
+    // s_wait_tensorcnt library-wide. GemmTileConfig's 1 default still covers
+    // the case it is for -- callers that default-construct the struct.
     gemmTileConfig.NumWaves = opts.WaveGroup0 * opts.WaveGroup1;
+
+    // Entry-point validation. This is the GEMM backend: a kernel arriving here
+    // without a tile configuration is misconfigured, not merely unusual: 0 is
+    // not a valid tile size, so it means the module options never carried the
+    // values. Fail loudly instead of letting every downstream pass silently
+    // work from defaults and schedule for a kernel shape that does not exist.
+    //
+    // Tile dimensions only -- NumWaves is not gated (see above).
+    //
+    // Deliberately NOT in PassContext::setGemmTileConfig: that is the generic
+    // config setter and has legitimate non-GEMM callers, notably
+    // StinkyIRConverter::convertToFunction, which parses arbitrary asm text and
+    // has no tile config to give.
+    // Every tile dimension, not just the first: a config carrying TileA0 but
+    // leaving TileB0 or TileM0 at 0 would pass a TileA0-only gate and schedule
+    // for a zero-width tile, which is the same silent default this check exists
+    // to stop.
+    //
+    // Scoped to OptLevel > O0, where the config is actually consumed
+    // (Gfx1250Backend: `runScheduler = optLevel != O0`). At O0 the backend has
+    // real non-GEMM callers with no tile shape to give -- rocisa pushes bare
+    // instruction modules through it, as does stinkytofu-opt on raw asm.
+    const bool tileConfigIsUsed = opts.OptLevel > 0;
+    const auto rejectUnsetTile = [tileConfigIsUsed](const char* name, uint32_t value) {
+        if (!tileConfigIsUsed || value != 0) return;
+        report_fatal_error(std::string("GemmTileConfig::") + name +
+                           " is 0 at the backend entry, so the tile configuration was never "
+                           "set. Set TileA0, TileB0 and TileM0 in the module options before "
+                           "running the backend.");
+    };
+    rejectUnsetTile("TileA0", gemmTileConfig.TileA0);
+    rejectUnsetTile("TileB0", gemmTileConfig.TileB0);
+    rejectUnsetTile("TileM0", gemmTileConfig.TileM0);
+
     pm.setGemmTileConfig(gemmTileConfig);
 
     AsmCapsConfig asmCapsConfig;
@@ -76,6 +119,7 @@ void Backend::configurePassManager(PassManager& pm) {
 
     // After the probe above, which replaces the whole struct.
     asmCapsConfig.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
+    asmCapsConfig.enableXnackReplay = opts.EnableXnackReplay;
 
     pm.setAsmCapsConfig(asmCapsConfig);
 

@@ -34,6 +34,8 @@ rocfft_execution_info_internal::rocfft_execution_info_internal(
     const rocfft_execution_info_t* user_info, const rocfft_plan_t& plan)
     : user_info(user_info)
 {
+    validate_jit_data_ptr_count(plan);
+
     if(user_info)
     {
         execWorkBuffers.resize(user_info->workBuffers.size());
@@ -165,4 +167,24 @@ hipStream_t rocfft_execution_info_internal::get_user_stream(int device) const
     if(user_info)
         return user_info->rocfft_streams[device];
     return nullptr;
+}
+
+void rocfft_execution_info_internal::validate_jit_data_ptr_count(const rocfft_plan_t& plan) const
+{
+    if(!user_info)
+        return;
+
+    // Check load cb data against input pointers
+    auto local_comm_rank = plan.desc.get_local_comm_rank();
+    if(!user_info->load_cb_data_jit.empty()
+       && user_info->load_cb_data_jit.size()
+              != plan.desc.count_pointers(
+                  plan.desc.inFields, plan.desc.inArrayType, local_comm_rank))
+        throw std::runtime_error("load JIT callback data count doesn't match input brick count");
+    // Check store cb data against output pointers
+    if(!user_info->store_cb_data_jit.empty()
+       && user_info->store_cb_data_jit.size()
+              != plan.desc.count_pointers(
+                  plan.desc.outFields, plan.desc.outArrayType, local_comm_rank))
+        throw std::runtime_error("store JIT callback data count doesn't match output brick count");
 }

@@ -1,0 +1,117 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --enable-wmma-hide-budget-prescan --print-output 2>&1
+#
+# Per-window hide-budget policy (analyzeWmmaHideBudget, run from onInitRegion).
+#
+# Barrier metadata distributes DS-load work over the WMMA windows where it must issue:
+# Before barriers use [threshold, end), After barriers use
+# [0, min(dsLoadWmmaNeeded, threshold)). Remaining non-DS work fills the first half of
+# the region. The scheduler consumes these per-window budgets cumulatively and holds the
+# next WMMA while eligible non-WMMA work remains below the assigned total.
+#
+# The gfx1250 production backend enables the policy. This standalone pass invocation
+# enables it explicitly and checks the resulting instruction order.
+
+#===----------------------------------------------------------------------===#
+# The scheduler spreads the dependent DS loads across the available WMMA windows.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @plain_wmma_deadline_fits
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+# CHECK: v32 = "st.ds_load_b32"
+# CHECK: v33 = "st.ds_load_b32"
+# CHECK: v34 = "st.ds_load_b32"
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+st.func @plain_wmma_deadline_fits() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[132:147], v[148:163], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[16:23] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[16:23]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v32 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v33 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 4, gds = false }, mod.memtoken = { tokens = [0] } }
+  v34 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8, gds = false }, mod.memtoken = { tokens = [0] } }
+  v35 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 12, gds = false }, mod.memtoken = { tokens = [0] } }
+  v36 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v37 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [0] } }
+  v38 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 24, gds = false }, mod.memtoken = { tokens = [0] } }
+  v39 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 28, gds = false }, mod.memtoken = { tokens = [0] } }
+  v40 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v41 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 36, gds = false }, mod.memtoken = { tokens = [0] } }
+  v42 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 40, gds = false }, mod.memtoken = { tokens = [0] } }
+  v43 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 44, gds = false }, mod.memtoken = { tokens = [0] } }
+  v44 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  v45 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 52, gds = false }, mod.memtoken = { tokens = [0] } }
+  v46 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 56, gds = false }, mod.memtoken = { tokens = [0] } }
+  v47 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 60, gds = false }, mod.memtoken = { tokens = [0] } }
+  v48 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v49 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 68, gds = false }, mod.memtoken = { tokens = [0] } }
+  v50 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 72, gds = false }, mod.memtoken = { tokens = [0] } }
+  v51 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 76, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:31] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[32:47], v[48:63], v[24:31]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# The same instruction-count policy applies to scale WMMA instructions.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @scale_wmma_deadline_forces_overrun
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK: v32 = "st.ds_load_b32"
+# CHECK: v33 = "st.ds_load_b32"
+# CHECK: v34 = "st.ds_load_b32"
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+st.func @scale_wmma_deadline_forces_overrun() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[132:147], v[148:163], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[16:23] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[164:179], v[180:195], v[16:23]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v32 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v33 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 4, gds = false }, mod.memtoken = { tokens = [0] } }
+  v34 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 8, gds = false }, mod.memtoken = { tokens = [0] } }
+  v35 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 12, gds = false }, mod.memtoken = { tokens = [0] } }
+  v36 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v37 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [0] } }
+  v38 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 24, gds = false }, mod.memtoken = { tokens = [0] } }
+  v39 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 28, gds = false }, mod.memtoken = { tokens = [0] } }
+  v40 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v41 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 36, gds = false }, mod.memtoken = { tokens = [0] } }
+  v42 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 40, gds = false }, mod.memtoken = { tokens = [0] } }
+  v43 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 44, gds = false }, mod.memtoken = { tokens = [0] } }
+  v44 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  v45 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 52, gds = false }, mod.memtoken = { tokens = [0] } }
+  v46 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 56, gds = false }, mod.memtoken = { tokens = [0] } }
+  v47 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 60, gds = false }, mod.memtoken = { tokens = [0] } }
+  v48 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  v49 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 68, gds = false }, mod.memtoken = { tokens = [0] } }
+  v50 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 72, gds = false }, mod.memtoken = { tokens = [0] } }
+  v51 = "st.ds_load_b32"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 76, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:31] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[32:47], v[48:63], v[24:31]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# The deadline reaches through LDS, not just registers: the tensor_load writes the
+# memory token the ds_load reads, and StinkyBuildImplicitDependencyPass materialises
+# that as an LDS pseudo-register, so the region DAG carries the edge. The tensor_load
+# and DS-load nodes count as individual budget units regardless of issueCycles.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @tensor_load_chain_reaches_wmma
+# CHECK: v_wmma_scale16_f32_16x16x128_f8f6f4
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: LDS0 = "st.tensor_load_to_lds"
+# CHECK-NEXT: v[32:35] = "st.ds_load_b128"
+# CHECK-NEXT: v[36:39] = "st.ds_load_b128"
+# CHECK-NEXT: v_wmma_scale16_f32_16x16x128_f8f6f4
+st.func @tensor_load_chain_reaches_wmma() {
+^entry:
+  v[0:7] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[100:115], v[116:131], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[12:15], s[16:23]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[24:27], s[28:35]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[32:35] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[36:39] = "st.ds_load_b128"(v200) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:31] = "st.v_wmma_scale16_f32_16x16x128_f8f6f4"(v[32:39], v[40:55], v[24:31]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP4, fmtB = MATRIX_FMT_FP4 } }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

@@ -56,6 +56,7 @@ namespace rocsparse
                     rocsparse_itilu0_alg_sync_split>::preprocess<I, J>::run(parameters...)));
             return rocsparse_status_success;
         }
+        // LCOV_EXCL_START
         case deprecated_rocsparse_itilu0_alg_sync_split_fusion:
         {
             RETURN_IF_ROCSPARSE_ERROR(
@@ -63,6 +64,7 @@ namespace rocsparse
                      preprocess<I, J>::run(parameters...)));
             return rocsparse_status_success;
         }
+            // LCOV_EXCL_STOP
         }
 
         // LCOV_EXCL_START

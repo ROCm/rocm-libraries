@@ -1429,6 +1429,12 @@ The ``gemm`` functions support the 64-bit integer interface. See the :ref:`ILP64
 
 The ``gemmBatched`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
 
+.. doxygenfunction:: hipblasSgemmGroupedBatched
+    :outline:
+.. doxygenfunction:: hipblasDgemmGroupedBatched
+
+The ``gemmGroupedBatched`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
+
 .. doxygenfunction:: hipblasHgemmStridedBatched
     :outline:
 .. doxygenfunction:: hipblasSgemmStridedBatched
@@ -1843,9 +1849,10 @@ hipblasGemmEx + Batched, StridedBatched
 ------------------------------------------
 .. doxygenfunction:: hipblasGemmEx
 .. doxygenfunction:: hipblasGemmBatchedEx
+.. doxygenfunction:: hipblasGemmGroupedBatchedEx
 .. doxygenfunction:: hipblasGemmStridedBatchedEx
 
-The ``gemmEx``, ``gemmBatchedEx``, and ``gemmStridedBatchedEx`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
+The ``gemmEx``, ``gemmBatchedEx``, ``gemmGroupedBatchedEx``, and ``gemmStridedBatchedEx`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
 
 .. _hipblas_syrkex:
 

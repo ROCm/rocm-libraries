@@ -3,7 +3,8 @@
 from types import MappingProxyType
 
 import yaml
-import os
+
+from Tensile.resources import ductile_defaults_text
 
 
 def deep_update(base: dict, override: dict) -> dict:
@@ -22,9 +23,7 @@ def update(cfg):
 
 def load(path=None):
     if not path:
-        defaults_path = os.path.join(os.path.dirname(__file__), "defaults.yaml")
-        with open(defaults_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+        return yaml.safe_load(ductile_defaults_text())
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     return update(cfg)

@@ -19,9 +19,9 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, convAttr.x_tensor_uid())))
-    , _x(miopen_utils::createTensor(tensorMap, convAttr.x_tensor_uid()))
-    , _w(miopen_utils::createTensor(tensorMap, convAttr.w_tensor_uid()))
-    , _y(miopen_utils::createTensor(tensorMap, activAttr.out_0_tensor_uid()))
+    , _x(miopen_utils::createPaddedTensor(tensorMap, convAttr.x_tensor_uid()))
+    , _w(miopen_utils::createPaddedTensor(tensorMap, convAttr.w_tensor_uid()))
+    , _y(miopen_utils::createPaddedTensor(tensorMap, activAttr.out_0_tensor_uid()))
 {
     using namespace miopen_utils;
 
@@ -48,11 +48,11 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
 
         if(biasAttr->in_0_tensor_uid() == convAttr.y_tensor_uid())
         {
-            _bias = createTensor(tensorMap, biasAttr->in_1_tensor_uid().value());
+            _bias = createPaddedTensor(tensorMap, biasAttr->in_1_tensor_uid().value());
         }
         else if(biasAttr->in_1_tensor_uid().value() == convAttr.y_tensor_uid())
         {
-            _bias = createTensor(tensorMap, biasAttr->in_0_tensor_uid());
+            _bias = createPaddedTensor(tensorMap, biasAttr->in_0_tensor_uid());
         }
         else
         {

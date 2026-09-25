@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "id": "dadc0932-9f93-503b-a856-1d49800ad7d4",
+  "name": "hkp_example:tiled_attention",
+  "graph_match": { "native": "hipkernel.pointwise.graph_match" },
+  "heuristic": "81015c65-9bc4-507a-a7bf-e70d43dc1b54",
+  "metadata": "2e4b62b0-7394-5682-a2b0-d7313b2ba59c",
+  "knobs": ["block_size"]
+}

@@ -5,9 +5,10 @@
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
+#include "engines/plans/MiopenBinaryPointwisePlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
-#include "engines/plans/MiopenReluPlanBuilder.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -49,22 +50,24 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
-             engine->addPlanBuilder(std::make_unique<MiopenReluPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenBinaryPointwisePlanBuilder>());
 
              return engine;
          }},
 
-        // MIOPEN_ENGINE_DETERMINISTIC (convolution-only)
+        // MIOPEN_ENGINE_DETERMINISTIC
         {MIOPEN_ENGINE_DETERMINISTIC_ID,
          []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
                                                             HipdnnMiopenSettings,
                                                             HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
 
-             // Only include conv plan builders - batchnorm doesn't support deterministic mode
+             // Batchnorm doesn't support deterministic mode.
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
-
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenBinaryPointwisePlanBuilder>());
              return engine;
          }}
 

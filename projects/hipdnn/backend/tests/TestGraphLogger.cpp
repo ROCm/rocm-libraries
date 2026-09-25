@@ -11,6 +11,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -118,11 +119,6 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     auto jsonFiles = getJsonFilesInDir(_tempDir);
     ASSERT_EQ(jsonFiles.size(), 1u);
 
-    // Verify filename format: graph_<16 hex chars>.json
-    auto filename = jsonFiles[0].filename().string();
-    EXPECT_EQ(filename.rfind("graph_", 0), 0u);
-    EXPECT_EQ(filename.rfind(".json"), filename.size() - 5);
-
     // Verify the file contains valid JSON with expected graph fields
     std::ifstream file(jsonFiles[0]);
     ASSERT_TRUE(file.is_open());
@@ -131,19 +127,61 @@ TEST_F(TestGraphLogger, GraphLoggedWhenEnabled)
     EXPECT_TRUE(j.contains("nodes"));
     EXPECT_TRUE(j.contains("tensors"));
     EXPECT_TRUE(j.contains("name"));
+    ASSERT_TRUE(j.contains("id"));
+
+    // The dump is named after the graph it holds.
+    EXPECT_EQ(jsonFiles[0].filename().string(), "graph_" + j["id"].get<std::string>() + ".json");
 }
 
-TEST_F(TestGraphLogger, DuplicateGraphNotLoggedTwice)
+TEST_F(TestGraphLogger, EquivalentGraphsAreLoggedSeparately)
 {
     hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
     hipdnn_backend::logging::loggerShutdown();
 
-    // Finalize the same graph twice
+    // Two independently built graphs are two graph objects with two IDs, so each is dumped.
     auto descriptor1 = createAndFinalizeGraph();
     auto descriptor2 = createAndFinalizeGraph();
 
     auto jsonFiles = getJsonFilesInDir(_tempDir);
-    EXPECT_EQ(jsonFiles.size(), 1u);
+    EXPECT_EQ(jsonFiles.size(), 2u);
+}
+
+TEST_F(TestGraphLogger, ReLoggingSameFinalizedGraphIsDeduplicated)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto descriptor = createAndFinalizeGraph();
+    const auto serialized = descriptor.getSerializedGraph();
+    logging::GraphLogger::logGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_EQ(getJsonFilesInDir(_tempDir).size(), 1u);
+}
+
+TEST_F(TestGraphLogger, GraphWithoutIdIsNotLogged)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    // The guard is the missing id, not the route that produced it: a legacy graph carrying no id
+    // reaches the logger the same way a graph serialized before finalizing does.
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    ASSERT_EQ(hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer())->id(),
+              nullptr);
+    logging::GraphLogger::logGraph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(getJsonFilesInDir(_tempDir).empty());
+}
+
+TEST_F(TestGraphLogger, MalformedGraphIsNotLogged)
+{
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", _tempDirStr.c_str());
+    hipdnn_backend::logging::loggerShutdown();
+
+    const std::array<uint8_t, 8> garbage{};
+    logging::GraphLogger::logGraph(garbage.data(), garbage.size());
+
+    EXPECT_TRUE(getJsonFilesInDir(_tempDir).empty());
 }
 
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)

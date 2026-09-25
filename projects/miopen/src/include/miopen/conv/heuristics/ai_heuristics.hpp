@@ -73,12 +73,12 @@ enum class ConvDirection
     BackwardWeights
 };
 
-// Derived 2D-convolution feature block shared by the TunaNet (ExtractTunaNetND2dFeatures) and
-// candidate-selection (EngineerCandidateSelectionInputFeatures) input encoders. Given the problem
-// dimensions (forward convention) and direction it returns the engineered tail (log-transformed
-// FLOPs/GEMM sizes, utilization and spatial/channel ratios) in a fixed order. Must match the
-// feature definitions the models were trained with. Single source of truth so the two paths cannot
-// drift. Defined in ai_heuristics.cpp.
+// Derived convolution feature block shared by the TunaNet ND and candidate-selection input
+// encoders. Given the problem dimensions (forward convention) and direction it returns the
+// engineered tail (log-transformed FLOPs/GEMM sizes, utilization and spatial/channel ratios) in a
+// fixed order. For spatial_dim == 3, depth is folded into the volume terms and log1p(D_in) is
+// appended last. Must match ConvInputPreprocessor.compute_derived_features() in MIOpenFF training.
+// Single source of truth so the encoder paths cannot drift. Defined in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t C_in,
                                                                   std::size_t C_out,
@@ -90,7 +90,21 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t K_w,
                                                                   std::size_t groups,
                                                                   std::size_t num_cu,
-                                                                  ConvDirection direction);
+                                                                  ConvDirection direction,
+                                                                  int spatial_dim   = 2,
+                                                                  std::size_t D_in  = 1,
+                                                                  std::size_t D_out = 1,
+                                                                  std::size_t K_d   = 1);
+
+// Number of features EngineeredConvFeatures() emits for the given spatial dim (18 for 2D, 19 for
+// 3D). Derived from EngineeredConvFeatures itself so the count cannot drift from the vector it
+// describes; use this instead of hardcoding the size. Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim = 2);
+
+// True if a TunaNet input feature is categorical (one-hot encoded) rather than numeric. Shared by
+// the immed_mode/2D and ND TunaNet encoders so the categorical/numeric split stays consistent in
+// one place. Defined in ai_heuristics.cpp.
+bool IsTunaNetCategoricalFeature(const std::string& name);
 
 /**
  * @brief Load JSON from file path
@@ -256,10 +270,17 @@ public:
     const std::vector<std::string>& GetFeatures() const { return features; }
 
     /**
-     * @brief Get number of input features
-     * @return Number of inputs
+     * @brief Get number of input features recorded in metadata ("num_inputs").
+     * @return Raw convolution-parameter count from training export (excludes engineered one-hots
+     *         and derived features).
      */
     size_t GetNumInputs() const { return num_inputs; }
+
+    /**
+     * @brief Total engineered TunaNet input width: categorical one-hots, metadata-listed raw
+     *        numerics, and the common::EngineeredConvFeatures block.
+     */
+    MIOPEN_INTERNALS_EXPORT size_t GetEngineeredNumInputs() const;
 
     /**
      * @brief Compute-unit count the model was trained with (from "gpu.num_cu"), used to normalize
@@ -402,12 +423,15 @@ protected:
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
 
-/// Engineered 2D input-feature vector for the TunaNetND input encoder: categorical one-hots
+/// Engineered input-feature vector for the TunaNetND input encoder: categorical one-hots
 /// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and
 /// the shared common::EngineeredConvFeatures derived block. isFwd selects the channel/spatial
-/// orientation. Exported for golden testing.
-MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
-    const conv::ProblemDescription& problem, bool isFwd, const MetadataND& metadata);
+/// orientation. spatial_dim defaults to 0 (infer from problem). Exported for golden testing.
+MIOPEN_INTERNALS_EXPORT std::vector<float>
+ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
+                         bool isFwd,
+                         const MetadataND& metadata,
+                         int spatial_dim = 0);
 
 } // namespace immed_mode
 

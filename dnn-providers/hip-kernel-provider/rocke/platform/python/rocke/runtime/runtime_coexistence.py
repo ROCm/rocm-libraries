@@ -114,6 +114,97 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     return None
 
 
+def _torch_rocm_version() -> Optional[tuple]:
+    """``(major, minor)`` of the ROCm that torch was built against, or None.
+
+    Read off ``torch.version.hip`` (e.g. ``'6.3.42134-a9a80e791'``). Only
+    consults a torch that is *already* imported -- never imports it.
+    """
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is None:
+        return None
+    hip = getattr(getattr(torch_mod, "version", None), "hip", None)
+    if not hip:
+        return None
+    nums = re.findall(r"\d+", str(hip))
+    if len(nums) < 2:
+        return None
+    return (int(nums[0]), int(nums[1]))
+
+
+_ROCM_RELEASE_DIR_RE = re.compile(r"^rocm-(\d+)\.(\d+)")
+
+
+def _rocm_version_from_libdir(libdir: str) -> Optional[tuple]:
+    """``(major, minor)`` ROCm **release** version for a ``<rocm>/lib`` path.
+
+    Matches only a ``rocm-X.Y[.Z]`` directory component, and scans the whole
+    path rather than just the parent of ``lib``. Two layouts make that
+    necessary, and each breaks a simpler rule:
+
+    - The distro default reaches a packaged install through an *unversioned*
+      symlink (``ROCM_PATH=/opt/rocm`` -> ``/opt/rocm-7.2.3``), and
+      :func:`_rocm_root_libdirs` deliberately returns the original string so
+      candidate paths stay readable in errors. So the resolved target has to be
+      considered too, else the version reads as unknown and
+      :func:`_torch_comgr_is_stale` silently disables itself.
+    - A packaged ROCm keeps its runtime under a versioned *component* subdir,
+      ``/opt/rocm-7.2.0/core-7.13/lib``. ``core-7.13`` is a component version,
+      not a release: taking the parent of ``lib`` would yield ``(7, 13)`` and
+      compare it against ``torch.version.hip``, which reports the release. A
+      torch on ROCm 7.10 would then look *older* than a 7.2 install, because
+      ``(7, 10) < (7, 13)`` -- and comgr would be demoted backwards.
+
+    Returns None when no release component is present; unknown must stay
+    unknown, since :func:`_torch_comgr_is_stale` keeps the historical
+    resolution order rather than guessing.
+    """
+    for candidate in (libdir, os.path.realpath(libdir)):
+        for part in candidate.split(os.sep):
+            m = _ROCM_RELEASE_DIR_RE.match(part)
+            if m:
+                return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _newest_rocm_root_version() -> Optional[tuple]:
+    """``(major, minor)`` of the ROCm install that would be loaded, or None.
+
+    First parseable entry in *resolution* order, not the numeric maximum across
+    all installs: the point of comparison is the lib this process would
+    actually load, and an operator's ``ROCM_PATH`` wins that race even when a
+    newer tree exists beside it.
+    """
+    for libdir in _rocm_root_libdirs():
+        version = _rocm_version_from_libdir(libdir)
+        if version is not None:
+            return version
+    return None
+
+
+def _torch_comgr_is_stale() -> bool:
+    """True when torch's bundled comgr is *older* than the newest ROCm install.
+
+    The resolution order below prefers torch's bundled lib so both halves of the
+    process share one runtime, and the surrounding comments call that lib "the
+    newest". That is an assumption, not an invariant: a venv pinned to an older
+    ROCm torch on a box with a newer system ROCm inverts it, and then the
+    bundled comgr does not know the target ISA at all -- every compile dies with
+    ``set_isa: INVALID_ARGUMENT`` for any arch newer than torch's ROCm, which is
+    a confusing failure a long way from its cause.
+
+    Only demotes when BOTH versions are positively known and torch's is strictly
+    older; anything unknown keeps the historical order. Deliberately scoped to
+    comgr by its one caller: comgr is a compile-only library, while loading a
+    second *HIP runtime* beside torch's would be a genuine hazard.
+    """
+    torch_v = _torch_rocm_version()
+    root_v = _newest_rocm_root_version()
+    if torch_v is None or root_v is None:
+        return False
+    return torch_v < root_v
+
+
 def _version_key(path: str) -> Any:
     """Sort key that orders ROCm install dirs newest-first.
 
@@ -185,7 +276,11 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
       1. ``$ROCKE_HIP_LIB`` / ``$ROCKE_COMGR_LIB`` (explicit override, full path).
       2. ``<torch>/lib/lib<stem>.so`` if torch is *already* imported -- an
          opportunistic fast-path only (see :func:`_torch_bundled_lib`); we never
-         import torch to populate it.
+         import torch to populate it. For ``amd_comgr`` this tier is skipped
+         when the bundled comgr is demonstrably older than the newest ROCm
+         install (see :func:`_torch_comgr_is_stale`), because a stale comgr
+         rejects every ISA newer than its own ROCm and would shadow a system
+         comgr that handles the target fine.
       3. A real ROCm install discovered without torch (see
          :func:`_rocm_root_libdirs`): ``$ROCM_PATH``/``$ROCM_HOME`` then globbed
          ``/opt/rocm*`` trees, newest version first, each with the bare ``.so``
@@ -200,7 +295,12 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     if override:
         paths.append(override)
     bundled = _torch_bundled_lib(stem)
-    if bundled is not None:
+    # A stale bundled comgr is demoted below the ROCm installs rather than
+    # dropped: if none of them load, it is still better than nothing.
+    _demote_bundled = (
+        bundled is not None and stem == "amd_comgr" and _torch_comgr_is_stale()
+    )
+    if bundled is not None and not _demote_bundled:
         paths.append(bundled)
     sdk = _rocm_sdk_dll(stem)
     if sdk is not None:
@@ -225,6 +325,8 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
         paths.append(os.path.join(libdir, f"lib{stem}.so"))
         for soname in sonames:
             paths.append(os.path.join(libdir, f"lib{stem}.so.{soname}"))
+    if _demote_bundled:
+        paths.append(bundled)
     paths.append(f"lib{stem}.so")
     return paths
 

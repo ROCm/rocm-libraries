@@ -23,7 +23,12 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+#include <algorithm>
 #include <cstring>
+#include <set>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include <hip/hip_runtime_api.h>
 
@@ -33,6 +38,83 @@
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
 #include "util.hpp"
+
+// The elementwise kernels walk a single index space defined by the output, so an input may only
+// carry modes that the output also carries. Carrying fewer is allowed: the input is broadcast
+// along every output mode it lacks. Three things are rejected here:
+//  - a mode that appears in an input but not in the output, which would have to be reduced away
+//    rather than broadcast;
+//  - a mode repeated within one tensor, which leaves no unambiguous way to align that tensor to
+//    the output's mode order;
+//  - a mode shared with the output but with a different extent, which would send the walk over
+//    the output's index space past the end of the input.
+static hiptensorStatus_t checkElementwiseModes(char const*                     apiFuncName,
+                                               std::vector<int32_t> const&     inModes,
+                                               std::vector<std::size_t> const& inLengths,
+                                               char const*                     inName,
+                                               std::vector<int32_t> const&     outModes,
+                                               std::vector<std::size_t> const& outLengths,
+                                               char const*                     outName)
+{
+    auto& logger = *hiptensor::Logger::instance();
+    char  msg[256];
+
+    for(auto const& [modes, name] : {std::pair{&inModes, inName}, std::pair{&outModes, outName}})
+    {
+        auto seen = std::set<int32_t>();
+        for(auto mode : *modes)
+        {
+            if(!seen.insert(mode).second)
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Elementwise operation where mode '%c' (%d) is repeated within %s is not "
+                         "supported",
+                         mode,
+                         mode,
+                         name);
+                logger.logError(apiFuncName, msg);
+                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+            }
+        }
+    }
+
+    for(std::size_t i = 0; i < inModes.size(); i++)
+    {
+        auto outMode = std::find(outModes.cbegin(), outModes.cend(), inModes[i]);
+        if(outMode == outModes.cend())
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Elementwise operation where %s carries mode '%c' (%d) that %s does not carry "
+                     "is not supported",
+                     inName,
+                     inModes[i],
+                     inModes[i],
+                     outName);
+            logger.logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
+
+        auto outExtent = outLengths[std::distance(outModes.cbegin(), outMode)];
+        if(inLengths[i] != outExtent)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Mode '%c' (%d) has extent %zu in %s but extent %zu in %s",
+                     inModes[i],
+                     inModes[i],
+                     inLengths[i],
+                     inName,
+                     outExtent,
+                     outName);
+            logger.logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+    }
+
+    return HIPTENSOR_STATUS_SUCCESS;
+}
 
 hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
 {
@@ -371,6 +453,41 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
                                              const int32_t                      modeB[],
                                              const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB, modeB);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    auto modeBV = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+
+    if(auto status = checkElementwiseModes("hiptensorCreatePermutation",
+                                           modeAV,
+                                           descA->mLengths,
+                                           "A",
+                                           modeBV,
+                                           descB->mLengths,
+                                           "B");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     (*desc)->mTag          = 0u;
@@ -385,10 +502,10 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
     (*desc)->mContractionOpId = 0;
 
     (*desc)->mDescA       = descA;
-    (*desc)->mModeA       = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    (*desc)->mModeA       = std::move(modeAV);
     (*desc)->mOpA         = opA;
     (*desc)->mDescB       = descB;
-    (*desc)->mModeB       = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+    (*desc)->mModeB       = std::move(modeBV);
     (*desc)->mOpB         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescC       = nullptr;
     (*desc)->mModeC       = {};
@@ -418,6 +535,48 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
                                                    hiptensorOperator_t                opAC,
                                                    const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC, modeC);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD, modeD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+
+    for(auto const& [inModes, inDesc, inName] :
+        {std::tuple{&modeAV, descA, "A"}, std::tuple{&modeCV, descC, "C"}})
+    {
+        if(auto status = checkElementwiseModes("hiptensorCreateElementwiseBinary",
+                                               *inModes,
+                                               inDesc->mLengths,
+                                               inName,
+                                               modeDV,
+                                               descD->mLengths,
+                                               "D");
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     *desc                  = new hiptensorOperationDescriptor();
     (*desc)->mTag          = 0u;
     (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -431,16 +590,16 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
     (*desc)->mContractionOpId = 0;
 
     (*desc)->mDescA       = descA;
-    (*desc)->mModeA       = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    (*desc)->mModeA       = std::move(modeAV);
     (*desc)->mOpA         = opA;
     (*desc)->mDescB       = nullptr;
     (*desc)->mModeB       = {};
     (*desc)->mOpB         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescC       = descC;
-    (*desc)->mModeC       = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    (*desc)->mModeC       = std::move(modeCV);
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
-    (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mModeD       = std::move(modeDV);
     (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescE       = nullptr;
     (*desc)->mModeE       = {};
@@ -468,6 +627,52 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
                                                     hiptensorOperator_t                opABC,
                                                     const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB, modeB);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC, modeC);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD, modeD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    auto modeAV = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    auto modeBV = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+    auto modeCV = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    auto modeDV = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+
+    for(auto const& [inModes, inDesc, inName] : {std::tuple{&modeAV, descA, "A"},
+                                                 std::tuple{&modeBV, descB, "B"},
+                                                 std::tuple{&modeCV, descC, "C"}})
+    {
+        if(auto status = checkElementwiseModes("hiptensorCreateElementwiseTrinary",
+                                               *inModes,
+                                               inDesc->mLengths,
+                                               inName,
+                                               modeDV,
+                                               descD->mLengths,
+                                               "D");
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     *desc                  = new hiptensorOperationDescriptor();
     (*desc)->mTag          = 0u;
     (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -481,16 +686,16 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
     (*desc)->mContractionOpId = 0;
 
     (*desc)->mDescA       = descA;
-    (*desc)->mModeA       = std::vector<int32_t>(modeA, modeA + descA->mLengths.size());
+    (*desc)->mModeA       = std::move(modeAV);
     (*desc)->mOpA         = opA;
     (*desc)->mDescB       = descB;
-    (*desc)->mModeB       = std::vector<int32_t>(modeB, modeB + descB->mLengths.size());
+    (*desc)->mModeB       = std::move(modeBV);
     (*desc)->mOpB         = opB;
     (*desc)->mDescC       = descC;
-    (*desc)->mModeC       = std::vector<int32_t>(modeC, modeC + descC->mLengths.size());
+    (*desc)->mModeC       = std::move(modeCV);
     (*desc)->mOpC         = opC;
     (*desc)->mDescD       = descD;
-    (*desc)->mModeD       = std::vector<int32_t>(modeD, modeD + descD->mLengths.size());
+    (*desc)->mModeD       = std::move(modeDV);
     (*desc)->mOpD         = HIPTENSOR_OP_IDENTITY;
     (*desc)->mDescE       = nullptr;
     (*desc)->mModeE       = {};
@@ -514,6 +719,28 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
                                            hiptensorOperator_t                opReduce,
                                            const hiptensorComputeDescriptor_t descCompute)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA, modeA);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC, modeC);
+    CheckApiModes(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD, modeD);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     *desc                  = new hiptensorOperationDescriptor();
     (*desc)->mTag          = 0u;
     (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);

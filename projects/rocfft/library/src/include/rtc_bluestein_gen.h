@@ -25,11 +25,13 @@
 #include "compute_scheme.h"
 #include "load_store_ops.h"
 #include "rocfft/rocfft.h"
+#include "rtc_generator.h"
 #include <vector>
 
 // single kernel bluestein
 struct BluesteinSingleSpecs
 {
+    KIntType                  itype;
     unsigned int              length;
     unsigned int              dim;
     std::vector<unsigned int> factors;
@@ -52,6 +54,7 @@ static const unsigned int LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL = 64;
 // multi-kernel bluestein
 struct BluesteinMultiSpecs
 {
+    KIntType                itype;
     ComputeScheme           scheme;
     rocfft_precision        precision;
     rocfft_array_type       inArrayType;

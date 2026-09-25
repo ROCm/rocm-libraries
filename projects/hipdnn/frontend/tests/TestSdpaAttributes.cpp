@@ -266,6 +266,192 @@ TEST(TestSdpaAttributes, SetEnumAttributes)
     EXPECT_EQ(attrs.implementation, AttentionImplementation::UNIFIED);
 }
 
+TEST(TestSdpaAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::SdpaAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_generate_stats(true);
+    attr1.set_alibi_mask(false);
+    attr1.set_padding_mask(false);
+    attr1.set_causal_mask(true);
+    attr1.set_causal_mask_bottom_right(false);
+    attr1.set_dropout_probability(0.1f);
+    attr1.set_attn_scale(0.125f);
+    attr1.set_diagonal_band_left_bound(5);
+    attr1.set_diagonal_band_right_bound(0);
+    attr1.set_paged_attention_max_seq_len_kv(4096);
+    attr1.set_diagonal_alignment(hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+    attr1.set_mma_core_mode(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO);
+
+    auto q1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    q1->set_uid(1).set_name("Q").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_q(q1);
+
+    auto k1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    k1->set_uid(2).set_name("K").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_k(k1);
+
+    auto v1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    v1->set_uid(3).set_name("V").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_v(v1);
+
+    auto o1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    o1->set_uid(4).set_name("O").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_o(o1);
+
+    hipdnn_frontend::graph::SdpaAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_generate_stats(true);
+    attr2.set_alibi_mask(false);
+    attr2.set_padding_mask(false);
+    attr2.set_causal_mask(true);
+    attr2.set_causal_mask_bottom_right(false);
+    attr2.set_dropout_probability(0.1f);
+    attr2.set_attn_scale(0.125f);
+    attr2.set_diagonal_band_left_bound(5);
+    attr2.set_diagonal_band_right_bound(0);
+    attr2.set_paged_attention_max_seq_len_kv(4096);
+    attr2.set_diagonal_alignment(hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
+    attr2.set_mma_core_mode(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO);
+
+    auto q2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    q2->set_uid(1).set_name("Q").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_q(q2);
+
+    auto k2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    k2->set_uid(2).set_name("K").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_k(k2);
+
+    auto v2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    v2->set_uid(3).set_name("V").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_v(v2);
+
+    auto o2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    o2->set_uid(4).set_name("O").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_o(o2);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchQ = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchQ->set_uid(99).set_name("MismatchedQ");
+    attr2.set_q(structuralMismatchQ);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_q(q2); // Revert
+
+    // generate_stats mismatch: semantic, must fail both checks
+    attr2.set_generate_stats(false);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_generate_stats(true); // Revert
+
+    // alibi_mask mismatch
+    attr2.set_alibi_mask(true);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_alibi_mask(false); // Revert
+
+    // padding_mask mismatch
+    attr2.set_padding_mask(true);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_padding_mask(false); // Revert
+
+    // causal_mask mismatch (deprecated field, still live state)
+    attr2.set_causal_mask(false);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_causal_mask(true); // Revert
+
+    // causal_mask_bottom_right mismatch (deprecated field, still live state)
+    attr2.set_causal_mask_bottom_right(true);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_causal_mask_bottom_right(false); // Revert
+
+    // dropout_probability mismatch
+    attr2.set_dropout_probability(0.2f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_dropout_probability(0.1f); // Revert
+
+    // attn_scale_value mismatch
+    attr2.set_attn_scale(0.25f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_attn_scale(0.125f); // Revert
+
+    // left_bound mismatch
+    attr2.set_diagonal_band_left_bound(10);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_diagonal_band_left_bound(5); // Revert
+
+    // right_bound mismatch
+    attr2.set_diagonal_band_right_bound(3);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_diagonal_band_right_bound(0); // Revert
+
+    // max_seq_len_kv mismatch
+    attr2.set_paged_attention_max_seq_len_kv(2048);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_paged_attention_max_seq_len_kv(4096); // Revert
+
+    // diagonal_alignment mismatch: semantic, must fail both checks
+    attr2.set_diagonal_alignment(hipdnn_frontend::DiagonalAlignment::BOTTOM_RIGHT);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_diagonal_alignment(hipdnn_frontend::DiagonalAlignment::TOP_LEFT); // Revert
+
+    // implementation mismatch: semantic, must fail both checks
+    attr2.set_implementation(hipdnn_frontend::AttentionImplementation::UNIFIED);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO); // Revert
+
+    // mma_core_mode mismatch
+    attr2.set_mma_core_mode(hipdnn_frontend::DataType::HALF);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_mma_core_mode(hipdnn_frontend::DataType::FLOAT); // Revert
+
+    // Unset-vs-unset optional fields: two attrs with the same fields left
+    // unset should still compare equal
+    hipdnn_frontend::graph::SdpaAttributes sparse1;
+    sparse1.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO);
+    hipdnn_frontend::graph::SdpaAttributes sparse2;
+    sparse2.set_implementation(hipdnn_frontend::AttentionImplementation::AUTO);
+    EXPECT_TRUE(sparse1 == sparse2);
+    EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
+
+    // Set-vs-unset should differ
+    sparse2.set_attn_scale(0.1f);
+    EXPECT_FALSE(sparse1 == sparse2);
+    EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchQ = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchQ
+        ->set_uid(555) // Diverges from attr1's q1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's q1 ("Q")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_q(logicalMatchQ);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}
+
 //==============================================================================
 // cuDNN source-compatibility setters (native surface)
 //==============================================================================

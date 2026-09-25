@@ -131,6 +131,11 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * @note The `engine_details` structure is provided by the user, while the function fills in its fields, including
  *       allocating the buffer for the serialized `EngineDetails`. After use, this memory must be freed using
  *       hipdnnEnginePluginDestroyEngineDetails().
+ *
+ * @note The optional `name` field of `EngineDetails` records the engine's name but never confers
+ *       one: `EngineDetails` exists only once a graph does, so a name carried there cannot be
+ *       validated when the plugin loads. Report the name through hipdnnEnginePluginGetEngineName
+ *       instead; filling in this field alone is reported as a plugin defect and ignored.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
@@ -364,6 +369,47 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
         const uint32_t* override_lengths,
         const int64_t* const* override_shapes,
         const int64_t* const* override_strides);
+
+/**
+ * @brief Retrieves the human-readable name of a specific engine.
+ *
+ * Introduced in engine plugin API 1.4.0 and optional: the host keys off symbol
+ * export alone, ignoring the API version the plugin reports. A plugin that does
+ * not export it, or that answers HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, has its
+ * engines named by the host instead. Any other non-success status is a defect
+ * rather than a way to decline, and costs that engine its place: the host drops
+ * it from enumeration, routing and dispatch, while the rest of the plugin loads.
+ *
+ * The host resolves a name from this entry point, then the built-in registry in
+ * EngineNames.hpp, then a hexadecimal rendering of the engine ID. Implementing
+ * this entry point is the only way a plugin can name its own engines. See
+ * "Engine names" in docs/user-guides/how-to/develop-plugins.rst.
+ *
+ * The name is a key, not just a display label: the engine ID must equal its hash,
+ * engineNameToId(name) == engine_id, using the FNV-1a definition in
+ * EngineNames.hpp. Deriving both from HIPDNN_REGISTER_ENGINE satisfies this by
+ * construction. The host verifies it at load time and drops any engine that
+ * fails, logging an error; the rest of the plugin still loads. An engine whose ID
+ * an earlier plugin already provides is likewise dropped, which together with the
+ * hash rule makes names unique across loaded plugins.
+ *
+ * @param[in] engine_id Engine ID (must come from hipdnnEnginePluginGetAllEngineIds).
+ * @param[out] name Receives a NUL-terminated string owned by the plugin. Must
+ *                  remain valid for the lifetime of the loaded library. On any
+ *                  status other than HIPDNN_PLUGIN_STATUS_SUCCESS the value is
+ *                  unspecified and the host must not read it. NULL or empty
+ *                  alongside SUCCESS leaves the engine unnamed, exactly as
+ *                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE would.
+ * @return HIPDNN_PLUGIN_STATUS_SUCCESS on success;
+ *         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if this plugin supplies no name for
+ *         engine_id — the generated default for containers that do not implement
+ *         getEngineName, and the answer to give for an engine_id the plugin does
+ *         not recognise, since it is the only penalty-free decline;
+ *         HIPDNN_PLUGIN_STATUS_BAD_PARAM if name is NULL. The host never passes
+ *         NULL, so reaching this is a defect and costs the engine its place.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetEngineName(int64_t engine_id, const char** name);
 
 /** @} */ // End of EnginePluginFunctions group
 

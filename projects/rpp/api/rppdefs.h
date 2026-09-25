@@ -66,6 +66,14 @@ typedef halfhpp Rpp16f;
 /*! \brief RPP maximum channels in audio tensor \ingroup group_rppdefs \page subpage_rppt */
 #define RPPT_MAX_AUDIO_CHANNELS (16)
 
+/*! \brief If a nested RPP call fails, return its \ref RppStatus from the enclosing function. Use
+ * when forwarding the result of a *_host_tensor or hip_exec_* helper. \ingroup group_rppdefs */
+#define RPP_RETURN_IF_ERROR(expr)                           \
+    do {                                                    \
+        RppStatus _rpp_status = (expr);                     \
+        if (_rpp_status != RPP_SUCCESS) return _rpp_status; \
+    } while (0)
+
 #if RPP_BACKEND_HIP
 #include <hip/hip_runtime.h>
 #define RPP_HOST_DEVICE __host__ __device__
@@ -506,14 +514,43 @@ typedef struct {
 /*! \brief RPPT Tensor descriptor type struct
  * \ingroup group_rppdefs
  */
-typedef struct {
-    RppSize_t numDims;
-    Rpp32u offsetInBytes;
+struct RpptDesc {
+    RppSize_t numDims = 4;
+    Rpp32u offsetInBytes = 0;
     RpptDataType dataType;
     Rpp32u n, c, h, w;
     RpptStrides strides;
     RpptLayout layout;
-} RpptDesc, *RpptDescPtr;
+
+    RpptDesc() = default;
+
+    RpptDesc(Rpp32u n, Rpp32u c, Rpp32u h, Rpp32u w, RpptDataType dataType, RpptLayout layout)
+        : dataType(dataType), n(n), c(c), h(h), w(w), layout(layout) {
+        if (layout == NCHW) {
+            strides.nStride = c * h * w;
+            strides.cStride = h * w;
+            strides.hStride = w;
+            strides.wStride = 1;
+        } else if (layout == NHWC) {
+            strides.nStride = h * w * c;
+            strides.hStride = w * c;
+            strides.wStride = c;
+            strides.cStride = 1;
+        }
+    }
+
+    RpptDesc(Rpp32u n, Rpp32u c, Rpp32u h, Rpp32u w, RpptDataType dataType, RpptLayout layout,
+             Rpp32u offsetInBytes, RpptStrides strides)
+        : offsetInBytes(offsetInBytes),
+          dataType(dataType),
+          n(n),
+          c(c),
+          h(h),
+          w(w),
+          strides(strides),
+          layout(layout) {}
+};
+typedef RpptDesc* RpptDescPtr;
 
 /*! \brief RPPT Tensor Generic descriptor type struct
  * \ingroup group_rppdefs

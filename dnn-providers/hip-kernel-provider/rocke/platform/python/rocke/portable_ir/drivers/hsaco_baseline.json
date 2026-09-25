@@ -1,0 +1,52 @@
+{
+  "_comment": "Kernels that do not reach HSACO, pinned by name so a NEW one fails CI while these known-broken ones do not. 'uncompilable' is an LLVM fatal error -- a defect in the kernel, not in portable IR. 'refused' is the Python lowerer correctly declining a wrong-arch-family kernel. Regenerate with: hsaco_parity --update-baseline",
+  "gfx942": {
+    "compared": 32,
+    "refused": [
+      "gfx1151_deep_fused_conv_pool",
+      "gfx1151_wmma_fmha_fwd",
+      "gfx1151_wmma_gemm",
+      "gfx1151_wmma_gemm_int8",
+      "gfx1151_wmma_gemm_iu8",
+      "gfx1151_wmma_gemm_iu8_dequant",
+      "gfx1201_deep_fused_conv_pool",
+      "gfx1201_wmma_fmha_fwd",
+      "gfx1201_wmma_gemm",
+      "matmul_nbits"
+    ],
+    "uncompilable": {
+      "batched_gemm": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "conv_implicit_gemm": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "conv_implicit_gemm_wgrad": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "flatmm": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "gemm_multi_abd": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "gemm_multi_d": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "gfx950_attention_tiled_2d": "CRASH signal 6: LLVM ERROR: Do not know how to expand this operator's operand!",
+      "gfx950_attention_tiled_2d_fastkv_regp": "CRASH signal 6: LLVM ERROR: Do not know how to expand this operator's operand!",
+      "grouped_gemm": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "grouped_gemm_stress": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16",
+      "mfma_gemm": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.f16",
+      "moe_fused_mega": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.16x16x32.f16",
+      "moe_fused_mega_fp8": "CRASH signal 6: Allocation failed",
+      "moe_gemm_fused": "CRASH signal 6: LLVM ERROR: Cannot select: intrinsic %llvm.amdgcn.mfma.f32.32x32x16.f16"
+    }
+  },
+  "gfx950": {
+    "compared": 45,
+    "refused": [
+      "gfx1151_deep_fused_conv_pool",
+      "gfx1151_wmma_fmha_fwd",
+      "gfx1151_wmma_gemm",
+      "gfx1151_wmma_gemm_int8",
+      "gfx1151_wmma_gemm_iu8",
+      "gfx1151_wmma_gemm_iu8_dequant",
+      "gfx1201_deep_fused_conv_pool",
+      "gfx1201_wmma_fmha_fwd",
+      "gfx1201_wmma_gemm",
+      "matmul_nbits"
+    ],
+    "uncompilable": {
+      "moe_fused_mega_fp8": "CRASH signal 6: Allocation failed"
+    }
+  }
+}

@@ -17,7 +17,7 @@
  *     .from_tile     (classmethod)    rocke_async_tile_loader_from_tile()
  *     .halves_per_chunk (property)    rocke_async_tile_loader_halves_per_chunk()
  *     .bytes_per_chunk  (property)    rocke_async_tile_loader_bytes_per_chunk()
- *     .cols_per_chunk   (property)    rocke_async_tile_loader_cols_per_chunk()
+ *     .chunks_per_row   (property)    rocke_async_tile_loader_chunks_per_row()
  *     .wave_bytes       (property)    rocke_async_tile_loader_wave_bytes()
  *     .pass_bytes       (property)    rocke_async_tile_loader_pass_bytes()
  *     .bind          (method)         rocke_async_tile_loader_bind()
@@ -102,6 +102,11 @@ typedef struct rocke_coalesced_tile_loader
     int load_vec; /* halves per thread per chunk */
     bool use_buffer_rsrc; /* Python default True */
     int oob_sentinel; /* Python default (1 << 31) - 1 */
+    /* Python `vector_axis: str = "col"`. false = "col" (load_vec run along
+     * columns, the historical default); true = "row" (run along rows, then
+     * transpose-on-store into the row-major (M/N, K) LDS tile). See the Python
+     * docstring in helpers/loads.py. */
+    bool vector_axis_row;
     /* Python `inner_dim: Optional[int] = None`. Carried for field-parity;
      * inner_dim is consumer-side documentation only (the loader body never
      * reads it). has_inner_dim distinguishes None (false) from a set value. */
@@ -117,6 +122,12 @@ typedef struct rocke_coalesced_tile_loader
  * (pass 8 to match the Python default). */
 rocke_status_t rocke_coalesced_tile_loader_choose_vec(
     int tile_rows, int tile_cols, int block_size, int max_vec, int* out_vec);
+
+/* CoalescedTileLoader.choose_vec with the Python ``vector_axis`` argument.
+ * ``vector_axis_row`` true checks ``tile_rows % vec`` (the run lies along rows);
+ * false is identical to rocke_coalesced_tile_loader_choose_vec (columns). */
+rocke_status_t rocke_coalesced_tile_loader_choose_vec_axis(
+    int tile_rows, int tile_cols, int block_size, int max_vec, bool vector_axis_row, int* out_vec);
 
 /* CoalescedTileLoader.from_tile classmethod.
  *
@@ -227,6 +238,12 @@ typedef struct rocke_async_tile_loader
     int chunks_total; /* tile_rows * tile_cols / (dwords * 2) */
     int chunks_per_pass; /* = block_size */
     int passes; /* ceil(chunks_total / block_size) */
+    /* Python `contig_cols: Optional[int] = None`, spelled here as 0 => None.
+     * Longest run of tile columns that is contiguous in global memory. When the
+     * col axis is composite -- e.g. the conv reduction index (y, x, c), where
+     * only c is stride-1 -- a chunk crossing one of those boundaries would fetch
+     * the wrong elements silently. */
+    int contig_cols;
 } rocke_async_tile_loader_t;
 
 /* Bound AsyncTileLoader (rocke.helpers.loads.AsyncTileLoaderSlot). */
@@ -244,7 +261,7 @@ typedef struct rocke_async_tile_loader_slot
  * ValueError path. max_dwords default 4 (values > 4 are clamped to 4, matching
  * Python). */
 rocke_status_t rocke_async_tile_loader_choose_dwords(
-    int tile_rows, int tile_cols, int block_size, int max_dwords, int* out);
+    int tile_rows, int tile_cols, int block_size, int max_dwords, int contig_cols, int* out);
 
 /* AsyncTileLoader.from_tile classmethod.
  *
@@ -256,12 +273,13 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
                                                  int block_size,
                                                  int wave_size,
                                                  int max_dwords,
+                                                 int contig_cols, /* 0 => None */
                                                  rocke_async_tile_loader_t* out);
 
 /* AsyncTileLoader properties (pure int arithmetic). */
 int rocke_async_tile_loader_halves_per_chunk(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_bytes_per_chunk(const rocke_async_tile_loader_t* self);
-int rocke_async_tile_loader_cols_per_chunk(const rocke_async_tile_loader_t* self);
+int rocke_async_tile_loader_chunks_per_row(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_wave_bytes(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_pass_bytes(const rocke_async_tile_loader_t* self);
 

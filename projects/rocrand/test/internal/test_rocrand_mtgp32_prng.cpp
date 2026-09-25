@@ -52,7 +52,8 @@ using mtgp32_generator_prng_tests_types = ::testing::Types<
 
 INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_generator,
                                generator_prng_tests,
-                               mtgp32_generator_prng_tests_types);
+                               mtgp32_generator_prng_tests_types,
+                               generator_prng_test_name);
 
 // Continuity cannot be implemented for MTGP32, as 'offset' is not supported for this
 // generator. Therefore, continuity tests fail.
@@ -61,7 +62,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(mtgp32_generator,
 //                                rocrand_mtgp32_generator_prng_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
-#include "test_rocrand_host_prng.hpp"
+    #include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::mtgp32_generator_host;
 using mtgp32_generator_prng_host_tests_types = ::testing::Types<
@@ -112,10 +113,11 @@ template<size_t items_per_thread, size_t block_size>
 __global__
 void rocrand_kernel(rocrand_state_mtgp32* states, unsigned int* device_output)
 {
-    constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
+    constexpr size_t     items_per_block = items_per_thread * block_size;
+    const size_t         offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
 
-    __shared__ rocrand_state_mtgp32 state;
+    __shared__
+    rocrand_state_mtgp32 state;
     for(size_t i = 0; i < items_per_thread; i++)
     {
 
@@ -213,11 +215,13 @@ void rocrand_kernel(rocrand_state_mtgp32* states1,
                     unsigned int*         device_output1,
                     unsigned int*         device_output2)
 {
-    constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
+    constexpr size_t     items_per_block = items_per_thread * block_size;
+    const size_t         offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
 
-    __shared__ rocrand_state_mtgp32 src_state;
-    __shared__ rocrand_state_mtgp32 dest_state;
+    __shared__
+    rocrand_state_mtgp32 src_state;
+    __shared__
+    rocrand_state_mtgp32 dest_state;
     for(size_t i = 0; i < items_per_thread; i++)
     {
 
@@ -366,10 +370,11 @@ template<size_t items_per_thread, size_t block_size>
 __global__
 void operator_kernel(rocrand_state_mtgp32* states, unsigned int* device_output)
 {
-    constexpr size_t items_per_block = items_per_thread * block_size;
-    const size_t offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
+    constexpr size_t     items_per_block = items_per_thread * block_size;
+    const size_t         offset = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
 
-    __shared__ rocrand_state_mtgp32 state;
+    __shared__
+    rocrand_state_mtgp32 state;
     for(size_t i = 0; i < items_per_thread; i++)
     {
 

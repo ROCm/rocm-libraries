@@ -24,8 +24,8 @@
 // ----------------------------------------------------------------------------
 // RemoveDscntPass
 //
-// Runs after StinkyWaitCntInsertionPass and only operates on basic blocks that
-// are themselves loops (a block with a back-edge to itself).
+// Runs after StinkyWaitCntInsertionPass on the region-scoped loop blocks of
+// interest ({"loopWithPrefetch", "noLoadLoopBody"}).
 //
 // For each such block it performs a linear scan of the StinkyTofu IR while
 // tracking the current cycle count. The cycle model accounts for WMMA
@@ -33,12 +33,11 @@
 // instructions can co-issue into it without advancing the global cycle
 // counter.
 //
-//   * On a ds_load (LDS read) the current cycle and the load's destination
-//     register(s) are pushed onto an in-flight FIFO.
-//   * On an s_wait_dscnt (LDS-load wait) the wait's count N is read and the
-//     oldest in-flight loads are popped until only N remain outstanding.
-//
-// The actual instruction removal is not implemented yet.
+//   * On a ds_load / ds_store the current cycle and drain-model params are
+//     pushed onto an in-flight FIFO (reads also record destination VGPRs).
+//   * On an s_wait_dscnt the wait's count N is read, the oldest entries are
+//     popped until only N remain, and the dynamic drain model may tighten the
+//     wait further or replace a redundant wait with a comment.
 // ----------------------------------------------------------------------------
 
 #include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
@@ -48,12 +47,13 @@
 #include <deque>
 #include <iostream>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
@@ -63,15 +63,21 @@
 namespace {
 using namespace stinkytofu;
 
-/// A load whose issue cycle is farther than this many cycles from the current
-/// cycle is considered old enough and is dropped from the in-flight FIFO.
-/// default value is 143, which is the expirimental result from the experiment.
-constexpr int kDsProximityThreshold = 143;
+/// Extra cycles a load must already have been back for before it counts as
+/// finished. Padding every modeled drain latency by this much keeps the
+/// estimate on the safe side: under-counting finished loads just leaves a wait
+/// as the insertion pass emitted it, while over-counting would tighten one past
+/// what the hardware has actually retired.
+constexpr int kDsProximityThreshold = 512;
 
-/// An outstanding LDS read: the cycle it was issued at and the destination
-/// register(s) it will eventually write.
+/// An outstanding LDS read: the cycle it was issued at, its modeled return
+/// latency / drain params, and the destination register(s) it will eventually
+/// write.
 struct DsLoadEntry {
     int cycle = 0;
+    int latency = 0;
+    int throughput = 0;
+    int maxDrain = 0;
     std::vector<StinkyRegister> dests;
 };
 
@@ -93,14 +99,16 @@ struct ScanState {
     // ds_load destination is seen.
     bool waitCheckActive = false;
 
-    // The keep value of the last dscnt wait that remains in IR. -1 means none yet.
+    // The keep value of the last dscnt wait that remains in IR. -1 means none
+    // yet.
     int prevKeptDscnt = -1;
 
     // Number of ds_load instructions seen since the last kept dscnt wait.
     int dsLoadsSinceLastKeptDscnt = 0;
 
-    // Number of DS ops accumulated for pre-activation dscnt tightening.
-    int numDsLoadsBeforeActivation = 0;
+    // Prefetch / pre-activation DS ops accumulated for dscnt tightening before
+    // waitCheckActive. Order matches issue order.
+    std::vector<DsLoadDrainEntry> dsLoadsBeforeActivation;
 };
 
 /// VALU co-issue profile for an in-flight WMMA/matrix instruction.
@@ -166,8 +174,21 @@ bool canCoExecAtCurrentCycle(int cycles, int activeWmmaStartCycle, int& activeWm
     return false;
 }
 
+/// Cycles the front end needs to issue `numDsLoads` LDS ops, scaled by 3.
+///
+/// Empirical model from experiment data. With A = numDsLoads and B = issue
+/// time:
+///            { A,                                A <= 16
+/// B(A) =     { 16 + (A - 16) * 7 / 3,       16 < A <= 43
+///            { 16 + 27 * 7 / 3 + (A - 43) * 4,   A > 43
+///
+/// The result is scaled by 3 so those slopes stay integral:
+/// - branch1: B*3 = 3*A
+/// - branch2: B*3 = 48 + 7*(A-16)
+/// - branch3: B*3 = 12*A - 279
 int computeDsIssueTimeTimes3(size_t numDsLoads) {
-    // conservative constant is 20, which is the expirimental result from the experiment.
+    // conservative constant is 20, which is the expirimental result from the
+    // experiment.
     const int conservativeConstant = 20;
     const int n = static_cast<int>(numDsLoads) + conservativeConstant;
     if (n <= 16) return 3 * n;
@@ -175,24 +196,10 @@ int computeDsIssueTimeTimes3(size_t numDsLoads) {
     return 12 * n - 279;
 }
 
-int computeNumDsFinished(size_t numDsLoads) {
-    // Empirical model from experiment data:
-    // Let A = numDsLoads, and B = issueTime.
-    //            { A,                           A <= 16
-    // B(A) =     { 16 + (A - 16) * 7 / 3,      16 < A <= 43
-    //            { 16 + 27 * 7 / 3 + (A - 43) * 4,   A > 43
-    //
-    // numDsFinished = floor(max(0, (B - 55) / 6.5 + 1)).
-    //
-    // Use integer arithmetic by scaling issue time as B*3:
-    // - branch1: B*3 = 3*A
-    // - branch2: B*3 = 48 + 7*(A-16)
-    // - branch3: B*3 = 12*A - 279
-    // Then map to finished-count numerator: (2*(B*3)-291)/39.
-    const int issueTimeTimes3 = computeDsIssueTimeTimes3(numDsLoads);
-    const int numerator = 2 * issueTimeTimes3 - 291;
-    if (numerator <= 0) return 0;
-    return numerator / 39;
+/// computeDsIssueTimeTimes3() in whole cycles, for callers that do not need the
+/// extra precision and would otherwise repeat the scaling.
+int computeDsIssueTime(size_t numDsLoads) {
+    return computeDsIssueTimeTimes3(numDsLoads) / 3;
 }
 
 /// If `inst` is an LDS-load wait (s_wait_dscnt / s_wait_loadcnt_dscnt), return
@@ -219,8 +226,7 @@ std::optional<int> getDsWaitCount(const StinkyInstruction& inst) {
     const auto& srcs = inst.getSrcRegs();
     if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt) {
         const int imm = srcs[0].getLiteralInt();
-        // s_wait_loadcnt_dscnt packs {loadcnt << 8 | dscnt}.
-        if (op == GFX::s_wait_loadcnt_dscnt) return imm & 0xFF;
+        if (op == GFX::s_wait_loadcnt_dscnt) return unpackDsWaitCnt(imm);
         return imm;
     }
 
@@ -239,9 +245,8 @@ void setDsWaitCount(StinkyInstruction& inst, int newVal) {
         if (srcs[i].dataType != StinkyRegister::Type::LiteralInt) continue;
         int literal = newVal;
         if (op == GFX::s_wait_loadcnt_dscnt) {
-            // Preserve the packed loadcnt high byte; only replace the dscnt byte.
-            const int loadcnt = (srcs[i].getLiteralInt() >> 8) & 0xFF;
-            literal = (loadcnt << 8) | (newVal & 0xFF);
+            // Preserve the loadcnt field; only replace the dscnt one.
+            literal = packMemDsWaitCnt(unpackMemWaitCnt(srcs[i].getLiteralInt()), newVal);
         }
         inst.setSrcReg(i, StinkyRegister(literal));
         break;
@@ -287,8 +292,9 @@ AsmDirective* createTextCommentDirective(const std::string& comment) {
     return directive;
 }
 
-int recomputePrefetchInFlightDsLoads(const BasicBlock& bb) {
-    int inFlight = 0;
+int recomputePrefetchInFlightDsLoads(const BasicBlock& bb, const HWModel& hw,
+                                     std::vector<DsLoadDrainEntry>& inFlight) {
+    inFlight.clear();
     for (const IRBase& node : bb) {
         if (node.getType() != IRBase::IRType::StinkyTofu) continue;
         const auto* inst = cast<StinkyInstruction>(&node);
@@ -296,12 +302,20 @@ int recomputePrefetchInFlightDsLoads(const BasicBlock& bb) {
         if (isBranch(*inst) || isMatrixInstruction(*inst)) break;
 
         if (isDSRead(*inst) || isDSWrite(*inst)) {
-            ++inFlight;
+            const HwInstDesc* desc = inst->getHwInstDesc();
+            inFlight.push_back(makeDsLoadDrainEntry(hw, static_cast<int>(inst->latencyCycles),
+                                                    desc ? desc->dsThroughput : 0,
+                                                    desc ? desc->dsMaxDrain : 0));
         } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
-            inFlight = std::min(inFlight, std::max(0, *keep));
+            const size_t remaining = static_cast<size_t>(std::max(0, *keep));
+            // dscnt keep=K retires the oldest loads first; keep the newest K.
+            if (inFlight.size() > remaining) {
+                inFlight.erase(inFlight.begin(),
+                               inFlight.end() - static_cast<std::ptrdiff_t>(remaining));
+            }
         }
     }
-    return inFlight;
+    return static_cast<int>(inFlight.size());
 }
 
 class RemoveDscntPass : public StinkyInstPass {
@@ -321,12 +335,19 @@ class RemoveDscntPass : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
         // This pass is scheduled inside the region-scoped pipeline for the
-        // {"loopWithPrefetch", "noLoadLoopBody"} regions, so shouldProcessBasicBlock
-        // already restricts us to the loop blocks of interest.
+        // {"loopWithPrefetch", "noLoadLoopBody"} regions, so
+        // shouldProcessBasicBlock already restricts us to the loop blocks of
+        // interest.
         //
         // The processed blocks are scanned as one continuous stream: `state` is
         // carried across block boundaries so cycle counting and the in-flight
         // ds_load FIFO persist across BBs.
+        hw_ = &passCtx.getHWModel();
+        // Passed through as-is: computeDynamicDrainLatencyForLoads() clamps it
+        // to the range the drain model is defined over.
+        numWaves_ = static_cast<int>(passCtx.getGemmTileConfig().NumWaves);
+        PASS_DEBUG(std::cerr << "[RemoveDscnt] numWaves=" << numWaves_ << "\n");
+
         ScanState state;
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
@@ -334,35 +355,112 @@ class RemoveDscntPass : public StinkyInstPass {
             scanBlock(bb, state);
             if (std::string_view(bb.getLabel()).starts_with("label_LoopBeginL")) {
                 // No need to remove the blocks after the loop begin label,
-                scanBlockHead(bb, state.cycles, state.numDsLoadsBeforeActivation);
+                scanBlockHead(bb, state.cycles, state.dsLoadsBeforeActivation);
                 return PreservedAnalyses::none();
             }
-            const int recomputedPrefetchInFlightDsLoads =
-                std::max(0, recomputePrefetchInFlightDsLoads(bb));
-            if (recomputedPrefetchInFlightDsLoads > 0) {
-                state.numDsLoadsBeforeActivation = recomputedPrefetchInFlightDsLoads;
+            std::vector<DsLoadDrainEntry> recomputedPrefetch;
+            if (recomputePrefetchInFlightDsLoads(bb, *hw_, recomputedPrefetch) > 0) {
+                state.dsLoadsBeforeActivation = std::move(recomputedPrefetch);
             }
         }
         return PreservedAnalyses::none();
     }
 
    private:
+    // Safety margin added to every modeled drain latency; see
+    // kDsProximityThreshold.
     int dsProximityThreshold_ = kDsProximityThreshold;
 
-    void scanBlockHead(BasicBlock& bb, int cycles, int& numDsLoadsBeforeActivation) {
+    // Hardware facts and occupancy for the function being scanned, captured in
+    // run().
+    const HWModel* hw_ = nullptr;
+    int numWaves_ = 0;
+
+    /// Map an in-flight FIFO entry to a drain-model entry. Writes with no return
+    /// latency fall back to the arch static figure.
+    DsLoadDrainEntry toDrainEntry(const DsLoadEntry& entry) const {
+        const int latency =
+            entry.latency > 0 ? entry.latency : (hw_ ? hw_->lds.readDrainLatency : 0);
+        return {.latency = latency, .throughput = entry.throughput, .maxDrain = entry.maxDrain};
+    }
+
+    /// How many of the pre-activation LDS reads have returned by the time the
+    /// last of them has been issued. Used when there is no scanned cycle count
+    /// to measure against: the issue-time model stands in for the clock, and a
+    /// load counts as finished when its issue time, its drain latency and the
+    /// dsProximityThreshold_ margin still fit inside the run's total issue time.
+    int computeNumDsFinished(std::span<const DsLoadDrainEntry> loads, int numWaves) const {
+        if (!hw_ || loads.empty()) return 0;
+
+        const int totalIssueTime = computeDsIssueTime(loads.size());
+
+        int drained = 0;
+        for (size_t count = 1; count <= loads.size(); ++count) {
+            const int issueTime = computeDsIssueTime(count);
+            const int landsAt = issueTime + computeDynamicDrainLatencyForLoads(
+                                                *hw_, loads.subspan(0, count), numWaves);
+            if (landsAt + dsProximityThreshold_ > totalIssueTime) break;
+            drained = static_cast<int>(count);
+        }
+        PASS_DEBUG(std::cerr << "[RemoveDscnt] computeNumDsFinished: numDsLoads=" << loads.size()
+                             << " lastLatency=" << loads.back().latency << " numWaves=" << numWaves
+                             << " totalIssueTime=" << totalIssueTime << " drained=" << drained
+                             << "\n");
+        return drained;
+    }
+
+    /// How many of the outstanding LDS reads the hardware should have retired by
+    /// `cycles`. Does not touch the FIFO.
+    ///
+    /// computeDynamicDrainLatencyForLoads() answers, for a burst of N loads, how
+    /// many cycles pass between the burst's first issue and the N-th load landing
+    /// (last-load latency, count-weighted average throughput). Both that curve and
+    /// the FIFO's issue cycles grow with N, so the loads that have come back are
+    /// the prefix whose drain latency, plus the dsProximityThreshold_ margin,
+    /// still fits in the time since each one issued.
+    int estimateDrainedDsLoads(const std::deque<DsLoadEntry>& inFlight, int cycles) const {
+        if (!hw_ || inFlight.empty()) return 0;
+
+        const DsLoadEntry& oldest = inFlight.front();
+        // The oldest load has the most time behind it, so if even it cannot have
+        // landed, nothing in the FIFO has.
+        if (cycles - oldest.cycle <= 0) return 0;
+
+        std::vector<DsLoadDrainEntry> loads;
+        loads.reserve(inFlight.size());
+        for (const DsLoadEntry& entry : inFlight) loads.push_back(toDrainEntry(entry));
+
+        int drained = 0;
+        for (size_t count = 1; count <= loads.size(); ++count) {
+            const int elapsedForCount = cycles - inFlight[count - 1].cycle;
+            const int landedCyclesAgo =
+                elapsedForCount -
+                computeDynamicDrainLatencyForLoads(
+                    *hw_, std::span<const DsLoadDrainEntry>(loads.data(), count), numWaves_);
+            if (landedCyclesAgo < dsProximityThreshold_) break;
+            drained = static_cast<int>(count);
+        }
+        return drained;
+    }
+
+    void scanBlockHead(BasicBlock& bb, int cycles,
+                       std::vector<DsLoadDrainEntry>& dsLoadsBeforeActivation) {
         // Second pass: handle dscnt before waitCheckActive becomes true.
         bool seenFirstDscntBeforeActivation = false;
         // Log carried pre-activation DS-op count at the beginning of scanBlockHead
         PASS_DEBUG({
             std::cerr << "[RemoveDscnt] scanBlockHead: numDsLoadsBeforeActivation="
-                      << numDsLoadsBeforeActivation << ", cycles=" << cycles << '\n';
+                      << dsLoadsBeforeActivation.size() << ", cycles=" << cycles;
+            if (!dsLoadsBeforeActivation.empty()) {
+                std::cerr << ", lastDsLoadLatency=" << dsLoadsBeforeActivation.back().latency;
+            }
+            std::cerr << '\n';
         });
-        if (numDsLoadsBeforeActivation == 0) return;
+        if (dsLoadsBeforeActivation.empty()) return;
 
-        int numDsFinished =
-            computeNumDsFinished(static_cast<size_t>(std::max(0, numDsLoadsBeforeActivation)));
+        const int numDsFinished = computeNumDsFinished(dsLoadsBeforeActivation, numWaves_);
         PASS_DEBUG(std::cerr << "[RemoveDscnt] pre-activation numDsFinished=" << numDsFinished
-                             << " from numDsLoads=" << numDsLoadsBeforeActivation << "\n");
+                             << " from numDsLoads=" << dsLoadsBeforeActivation.size() << "\n");
         for (auto it = bb.begin(); it != bb.end();) {
             IRBase& node = *it.getNodePtr();
             PASS_DEBUG({
@@ -391,12 +489,15 @@ class RemoveDscntPass : public StinkyInstPass {
             std::string removalComment;
 
             if (isDSRead(*inst) || isDSWrite(*inst)) {
-                numDsLoadsBeforeActivation++;
+                const HwInstDesc* desc = inst->getHwInstDesc();
+                dsLoadsBeforeActivation.push_back(makeDsLoadDrainEntry(
+                    *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
+                    desc ? desc->dsMaxDrain : 0));
             } else if (std::optional<int> keep = getDsWaitCount(*inst)) {
-                const int newVal = (numDsLoadsBeforeActivation - numDsFinished);
+                const int newVal = static_cast<int>(dsLoadsBeforeActivation.size()) - numDsFinished;
                 PASS_DEBUG(std::cerr << "[RemoveDscnt]   reduce dscnt: tighten wait " << *keep
-                                     << "->" << newVal
-                                     << " numDsLoadsBeforeActivation=" << numDsLoadsBeforeActivation
+                                     << "->" << newVal << " numDsLoadsBeforeActivation="
+                                     << dsLoadsBeforeActivation.size()
                                      << " numDsFinished=" << numDsFinished << "\n");
                 if (*keep >= newVal) {
                     std::string comment =
@@ -490,11 +591,24 @@ class RemoveDscntPass : public StinkyInstPass {
 
             // --- track in-flight LDS ops / drain on dscnt waits ---
             if (isDSRead(*inst) || isDSWrite(*inst)) {
+                const HwInstDesc* desc = inst->getHwInstDesc();
+                const DsLoadDrainEntry drain = makeDsLoadDrainEntry(
+                    *hw_, static_cast<int>(inst->latencyCycles), desc ? desc->dsThroughput : 0,
+                    desc ? desc->dsMaxDrain : 0);
                 if (isDSRead(*inst)) {
-                    inFlightDsLoads.push_back(DsLoadEntry{cycles, inst->getDestRegs()});
+                    inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
+                                                          .latency = drain.latency,
+                                                          .throughput = drain.throughput,
+                                                          .maxDrain = drain.maxDrain,
+                                                          .dests = inst->getDestRegs()});
                 } else {
-                    // DS writes contribute to dscnt accounting but have no produced VGPR dest.
-                    inFlightDsLoads.push_back(DsLoadEntry{cycles, {}});
+                    // DS writes contribute to dscnt accounting but have no produced VGPR
+                    // dest.
+                    inFlightDsLoads.push_back(DsLoadEntry{.cycle = cycles,
+                                                          .latency = drain.latency,
+                                                          .throughput = drain.throughput,
+                                                          .maxDrain = drain.maxDrain,
+                                                          .dests = {}});
                 }
                 ++dsLoadsSinceLastKeptDscnt;
             } else if (std::optional<int> keep =
@@ -510,24 +624,21 @@ class RemoveDscntPass : public StinkyInstPass {
                     inFlightDsLoads.pop_front();
                 }
 
-                // After draining to the wait count, drop loads that are already
-                // far enough from the current cycle (distance > threshold).
-                // `cycles` is monotonically non-decreasing during the scan, so the
-                // in-flight FIFO is ordered oldest->newest front->back and these
-                // old-enough loads form a contiguous prefix.
-                while (!inFlightDsLoads.empty() &&
-                       (cycles - inFlightDsLoads.front().cycle) > dsProximityThreshold_) {
-                    PASS_DEBUG(std::cerr << "[RemoveDscnt]   drop old load @cycle="
-                                         << inFlightDsLoads.front().cycle
-                                         << " dist=" << (cycles - inFlightDsLoads.front().cycle)
-                                         << " > " << dsProximityThreshold_ << "\n");
-                    inFlightDsLoads.pop_front();
-                }
+                // After draining to the wait count, estimate how many of the
+                // remaining loads the hardware has had time to return. The FIFO is
+                // deliberately left alone - only the count is taken - so a load that
+                // the model considers landed is still visible to srcOverlapsInFlight
+                // and to the next wait's own estimate.
+                const int drainedDsLoads = estimateDrainedDsLoads(inFlightDsLoads, cycles);
 
                 // If the original wait count exceeds the number of loads that are
-                // actually still in flight, tighten it to the queue size and
-                // record the change as an "X->Y" note in the instruction comment.
-                const int newVal = static_cast<int>(inFlightDsLoads.size());
+                // actually still in flight, tighten it to that number and record the
+                // change as an "X->Y" note in the instruction comment.
+                const int newVal =
+                    std::max(0, static_cast<int>(inFlightDsLoads.size()) - drainedDsLoads);
+                PASS_DEBUG(std::cerr << "[RemoveDscnt]   drained=" << drainedDsLoads << " of "
+                                     << inFlightDsLoads.size() << " inFlight -> newVal=" << newVal
+                                     << "\n");
                 const bool canRemoveByDscntHistory =
                     (prevKeptDscnt >= 0) && (*keep >= (prevKeptDscnt + dsLoadsSinceLastKeptDscnt));
                 const bool needTighten = (*keep > newVal);

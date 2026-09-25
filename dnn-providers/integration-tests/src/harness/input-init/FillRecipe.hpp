@@ -12,8 +12,6 @@ struct FillRecipe
     {
         FREE,
         FIXED,
-        STRUCTURED,
-        DERIVED,
     };
 
     static constexpr float K_DEFAULT_LO = -1.0f;
@@ -37,18 +35,6 @@ struct FillRecipe
         FillRecipe f;
         f.kind = Kind::FIXED;
         f.value = v;
-        return f;
-    }
-    static FillRecipe structured()
-    {
-        FillRecipe f;
-        f.kind = Kind::STRUCTURED;
-        return f;
-    }
-    static FillRecipe derived()
-    {
-        FillRecipe f;
-        f.kind = Kind::DERIVED;
         return f;
     }
 };

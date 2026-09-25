@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -262,26 +262,5 @@ enum struct CallbackType
     // reals and the kernel wants complex
     USER_LOAD_STORE_C2R,
 };
-
-// helpers to cast void* to the correct function pointer type
-template <typename T, CallbackType cbtype>
-static __device__ typename callback_type<T>::load get_load_cb(void* ptr)
-{
-#ifdef ROCFFT_CALLBACKS_ENABLED
-    if(cbtype != CallbackType::NONE)
-        return reinterpret_cast<typename callback_type<T>::load>(ptr);
-#endif
-    return load_cb_default<T>;
-}
-
-template <typename T, CallbackType cbtype>
-static __device__ typename callback_type<T>::store get_store_cb(void* ptr)
-{
-#ifdef ROCFFT_CALLBACKS_ENABLED
-    if(cbtype != CallbackType::NONE)
-        return reinterpret_cast<typename callback_type<T>::store>(ptr);
-#endif
-    return store_cb_default<T>;
-}
 
 #endif

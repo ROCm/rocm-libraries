@@ -33,7 +33,12 @@ def parallel_for(fn: Callable[[T], R], seq: Sequence[T], n_jobs: int = 64) -> Li
     Returns:
         List of results from applying fn to each element in seq
     """
-    return joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(fn)(el) for el in seq)
+    if not seq:
+        return []
+
+    # Avoid oversubscription and Windows spawn overhead for tiny batches.
+    max_workers = max(1, min(len(seq), n_jobs, os.cpu_count() or 1))
+    return joblib.Parallel(n_jobs=max_workers)(joblib.delayed(fn)(el) for el in seq)
 
 
 def _terminate_process_tree_windows(proc: subprocess.Popen, terminate_timeout: float) -> None:
