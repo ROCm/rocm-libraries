@@ -36,7 +36,11 @@ import compare_forwarding_runs as cmp  # noqa: E402
 
 
 def suite(*cases):
-    """Build a JUnit document from (name, status) pairs, statuses as gtest emits them."""
+    """Build a JUnit document from (name, status) pairs, statuses as gtest emits them.
+
+    "skipped" is a DISABLED_ test, which gtest never starts. "gtest_skipped" is a
+    test that started and called GTEST_SKIP(), which gtest records as run.
+    """
     body = []
     for name, status in cases:
         if status == "failed":
@@ -48,6 +52,11 @@ def suite(*cases):
         elif status == "skipped":
             body.append(
                 '<testcase name="{}" classname="Shim" status="notrun"/>'.format(name)
+            )
+        elif status == "gtest_skipped":
+            body.append(
+                '<testcase name="{}" classname="Shim" status="run" result="skipped">'
+                '<skipped message="x"/></testcase>'.format(name)
             )
         else:
             body.append('<testcase name="{}" classname="Shim"/>'.format(name))
@@ -149,6 +158,28 @@ class ComparatorTest(unittest.TestCase):
         rc, _, err = self.compare(skipped, skipped)
         self.assertEqual(rc, 1)
         self.assertIn("neither run executed a test", err)
+
+    def test_gtest_skip_counts_as_skipped(self):
+        xml = suite(("A", "passed"), ("B", "gtest_skipped"))
+        rc, out, _ = self.compare(xml, xml)
+        self.assertEqual(rc, 0)
+        self.assertIn("1 executed, 1 skipped", out)
+
+    def test_two_all_gtest_skip_runs_do_not_pass(self):
+        # What a GPU-less machine produces: every test starts, finds no device and
+        # calls GTEST_SKIP(). gtest marks these run, so only result= says otherwise.
+        skipped = suite(("A", "gtest_skipped"), ("B", "gtest_skipped"))
+        rc, _, err = self.compare(skipped, skipped)
+        self.assertEqual(rc, 1)
+        self.assertIn("neither run executed a test", err)
+
+    def test_gtest_skip_in_one_run_only_is_reported(self):
+        rc, _, err = self.compare(
+            suite(("A", "passed"), ("B", "passed")),
+            suite(("A", "passed"), ("B", "gtest_skipped")),
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("disabled=passed enabled=skipped", err)
 
     def test_one_executed_test_is_enough(self):
         xml = suite(("A", "passed"), ("B", "skipped"))

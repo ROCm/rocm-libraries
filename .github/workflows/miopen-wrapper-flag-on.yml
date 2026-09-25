@@ -37,8 +37,10 @@ jobs:
   flag-on:
     name: MIOpen wrapper flag-on checks
     runs-on: azure-linux-scale-rocm
+    # A full release build plus miopen_gtest; well past this means a hang, not a slow build.
+    timeout-minutes: 180
     container:
-      image: rocm/miopen-dev:latest
+      image: rocm/miopen-dev:multiarch_dev_20260910
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -52,8 +54,13 @@ jobs:
             projects/miopen
             shared/ctest
 
-      - name: Pull DVC files for rocm-libraries
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
         run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
           LOGNAME=github-runner dvc pull -v
 
       # MIOPEN_TEST_GFX94X names the target explicitly instead of letting the test tree probe

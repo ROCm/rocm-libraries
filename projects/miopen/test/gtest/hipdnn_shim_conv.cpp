@@ -91,29 +91,13 @@ struct OwnedSolutions
     const std::vector<miopenSolution_t>& solutions;
 };
 
-// ASSERT_* rather than EXPECT_*: on a failure here conv.handle stays null and every call below
-// would be handed a null descriptor, burying the real failure under a cascade of secondary
-// ones. A fatal failure only returns from this function, so callers wrap the call in
-// ASSERT_NO_FATAL_FAILURE to actually stop.
-void InitConvDescriptor(OwnedConvDescriptor& conv)
-{
-    ASSERT_EQ(miopenCreateConvolutionDescriptor(&conv.handle), miopenStatusSuccess);
-    ASSERT_EQ(miopenInitConvolutionNdDescriptor(conv.handle,
-                                                static_cast<int>(pads.size()),
-                                                pads.data(),
-                                                strides.data(),
-                                                dilations.data(),
-                                                miopenConvolution),
-              miopenStatusSuccess);
-}
-
 // Ask the library for the output shape rather than recomputing it here, so the shape is part
 // of what the two implementations must agree on.
 // Takes its tensors by non-const reference because the C entry point spells its descriptor
 // parameters `const miopenTensorDescriptor_t` — a const pointer to a non-const descriptor —
 // so a descriptor reached through a const tensor does not convert.
-// Fatal on failure, like InitConvDescriptor: a failed query leaves an empty output, and an
-// empty output compares equal to an empty reference.
+// Fatal on failure: a failed query leaves an empty output, and an empty output compares
+// equal to an empty reference.
 void OutputLengths(miopenConvolutionDescriptor_t conv_desc,
                    tensor<float>& x,
                    tensor<float>& w,
@@ -150,27 +134,64 @@ void CheckMatchesCpuReference(const tensor<float>& x, const tensor<float>& w, te
     EXPECT_LT(error, tolerance) << "convolution result beyond cross-implementation tolerance";
 }
 
+// The setup both paths share: the same input, weights and convolution, the output shape the
+// library reports for them, and all three tensors on the device. A fatal failure in SetUp()
+// skips the test body, and the members still clean up.
+class HipdnnShimConvFwd : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        ASSERT_EQ(miopenCreateConvolutionDescriptor(&conv.handle), miopenStatusSuccess);
+        ASSERT_EQ(miopenInitConvolutionNdDescriptor(conv.handle,
+                                                    static_cast<int>(pads.size()),
+                                                    pads.data(),
+                                                    strides.data(),
+                                                    dilations.data(),
+                                                    miopenConvolution),
+                  miopenStatusSuccess);
+        std::vector<std::size_t> out_lengths;
+        ASSERT_NO_FATAL_FAILURE(OutputLengths(conv.handle, x, w, out_lengths));
+        y = tensor<float>{out_lengths};
+
+        x_dev = handle_deref.Write(x.data);
+        w_dev = handle_deref.Write(w.data);
+        y_dev = handle_deref.Write(y.data);
+    }
+
+    void ReadBackAndCheck()
+    {
+        y.data = handle_deref.Read<float>(y_dev, y.data.size());
+        CheckMatchesCpuReference(x, w, y);
+    }
+
+    miopen::Handle& handle_deref = get_handle();
+    miopenHandle_t handle        = &handle_deref;
+    tensor<float> x              = MakeInput();
+    tensor<float> w              = MakeWeights();
+    tensor<float> y;
+    OwnedConvDescriptor conv;
+    miopen::Allocator::ManageDataPtr x_dev;
+    miopen::Allocator::ManageDataPtr w_dev;
+    miopen::Allocator::ManageDataPtr y_dev;
+};
+
+// One subclass per path, so each keeps its own suite name: the parity filter and the GPU
+// exclusion patterns select by it.
+class GPU_HipdnnShimConvFwdApi_FP32 : public HipdnnShimConvFwd
+{
+};
+
+class GPU_HipdnnShimConvSolutionApi_FP32 : public HipdnnShimConvFwd
+{
+};
+
 } // namespace
 
 // The Find/Run pair: the older of the two public convolution paths, and the one most callers
 // still use.
-TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
+TEST_F(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
 {
-    auto& handle_deref    = get_handle();
-    miopenHandle_t handle = &handle_deref;
-
-    auto x = MakeInput();
-    auto w = MakeWeights();
-    OwnedConvDescriptor conv;
-    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
-    std::vector<std::size_t> out_lengths;
-    ASSERT_NO_FATAL_FAILURE(OutputLengths(conv.handle, x, w, out_lengths));
-    tensor<float> y{out_lengths};
-
-    auto x_dev = handle_deref.Write(x.data);
-    auto w_dev = handle_deref.Write(w.data);
-    auto y_dev = handle_deref.Write(y.data);
-
     std::size_t workspace_size = 0;
     ASSERT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
                   handle, &w.desc, &x.desc, conv.handle, &y.desc, &workspace_size),
@@ -213,30 +234,13 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
                                        wspace.size()),
               miopenStatusSuccess);
 
-    y.data = handle_deref.Read<float>(y_dev, y.data.size());
-
-    CheckMatchesCpuReference(x, w, y);
+    ReadBackAndCheck();
 }
 
 // The Problem/Solution path reaches the same convolution through different public entry
 // points, so it has to be swapped over separately and is covered separately.
-TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
+TEST_F(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
 {
-    auto& handle_deref    = get_handle();
-    miopenHandle_t handle = &handle_deref;
-
-    auto x = MakeInput();
-    auto w = MakeWeights();
-    OwnedConvDescriptor conv;
-    ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
-    std::vector<std::size_t> out_lengths;
-    ASSERT_NO_FATAL_FAILURE(OutputLengths(conv.handle, x, w, out_lengths));
-    tensor<float> y{out_lengths};
-
-    auto x_dev = handle_deref.Write(x.data);
-    auto w_dev = handle_deref.Write(w.data);
-    auto y_dev = handle_deref.Write(y.data);
-
     OwnedProblem problem;
     ASSERT_EQ(miopenCreateConvProblem(&problem.handle, conv.handle, miopenProblemDirectionForward),
               miopenStatusSuccess);
@@ -277,7 +281,5 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
         miopenRunSolution(handle, solutions[0], 3, arguments.get(), wspace.ptr(), wspace.size()),
         miopenStatusSuccess);
 
-    y.data = handle_deref.Read<float>(y_dev, y.data.size());
-
-    CheckMatchesCpuReference(x, w, y);
+    ReadBackAndCheck();
 }

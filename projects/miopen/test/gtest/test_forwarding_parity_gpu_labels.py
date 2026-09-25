@@ -59,6 +59,15 @@ class GpuLabelDerivationTest(unittest.TestCase):
 
     def derive_from_path(self, yaml):
         """Return the labels the module derives from `yaml`, which need not exist."""
+        out = self.run_module(yaml)
+        out.check_returncode()
+        line = next(
+            l for l in (out.stdout + out.stderr).splitlines() if l.startswith("LABELS=")
+        )
+        return [label for label in line[len("LABELS=") :].split(";") if label]
+
+    def run_module(self, yaml):
+        """Run the module on `yaml` and return the finished process, whatever its exit code."""
         # A driver rather than running the module directly, so the module stays free of
         # anything that exists only for this test.
         driver = self.tmp_path / "driver.cmake"
@@ -66,7 +75,7 @@ class GpuLabelDerivationTest(unittest.TestCase):
             f'include("{MODULE.as_posix()}")\n'
             'message("LABELS=${MIOPEN_FORWARDING_PARITY_GPU_LABELS}")\n'
         )
-        out = subprocess.run(
+        return subprocess.run(
             [
                 "cmake",
                 f"-DMIOPEN_TEST_CATEGORIES_YAML={yaml.as_posix()}",
@@ -75,12 +84,7 @@ class GpuLabelDerivationTest(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
-            check=True,
         )
-        line = next(
-            l for l in (out.stdout + out.stderr).splitlines() if l.startswith("LABELS=")
-        )
-        return [label for label in line[len("LABELS=") :].split(";") if label]
 
     def test_plain_key_yields_its_label(self):
         self.assertEqual(
@@ -116,6 +120,28 @@ class GpuLabelDerivationTest(unittest.TestCase):
             + block("exclude_gpu_gfx950", "ex_gpu_gfx950"),
         )
         self.assertEqual(labels, ["ex_gpu_gfx950"])
+
+    def test_unquoted_label_is_derived(self):
+        """YAML allows a plain scalar, and the file must not go quiet if someone uses one."""
+        labels = self.derive(
+            "exclude_gpu:\n"
+            "  exclude_gpu_gfx950:\n"
+            "    labels:\n"
+            "      - quick\n"
+            "      - ex_gpu_gfx950\n"
+        )
+        self.assertEqual(labels, ["ex_gpu_gfx950"])
+
+    def test_yaml_with_no_labels_fails_the_configure(self):
+        """An existing file that yields nothing would drop every per-arch entry silently."""
+        yaml = self.tmp_path / "test_categories.yaml"
+        yaml.write_text(
+            "exclude_gpu:\n  exclude_gpu_gfx950:\n    labels: [quick, ex_gpu_gfx950]\n"
+        )
+        out = self.run_module(yaml)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("No ex_gpu_* labels found", out.stderr)
+        self.assertIn(yaml.as_posix(), out.stderr)
 
     def test_missing_yaml_yields_no_labels_rather_than_failing(self):
         """No test_categories.yaml is supported, so it must not fail the configure."""

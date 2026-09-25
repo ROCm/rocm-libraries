@@ -808,3 +808,92 @@ def test_a_private_library_with_no_renamed_symbols_is_an_error():
     private = private_elf(symbols=("miopenInternalThing",))
     with pytest.raises(abi.AbiError, match="not a flag-on private library"):
         abi.check_impl_superset(wrapper, private)
+
+
+# --------------------------------------------------------------------------
+# Exit codes
+#
+# Each check above returning False is only half the contract; the other half is
+# that the subcommand folds it into its exit status. Dropping one `ok &=` would
+# leave every test above passing while the gate ignored that check entirely.
+# 0 is pass, 1 is a check that failed, 2 is a check that could not run.
+# --------------------------------------------------------------------------
+
+
+def run_check_wrapper(tmp_path, monkeypatch, wrapper, private):
+    """Run `check-wrapper` through main() against stand-ins for the two libraries."""
+    baseline = tmp_path / "public_symbols.baseline"
+    baseline.write_text("miopenFoo\nmiopenBar\nmiopenExcluded\n")
+    excluded = tmp_path / "excluded_symbols.txt"
+    excluded.write_text("miopenExcluded\n")
+    libs = {"libMIOpen.so": wrapper, "libMIOpen_private.so": private}
+    monkeypatch.setattr(abi, "open_elf", lambda path, what: libs[path])
+    return abi.main(
+        [
+            "check-wrapper",
+            "libMIOpen.so",
+            "--baseline",
+            str(baseline),
+            "--excluded",
+            str(excluded),
+            "--private-lib",
+            "libMIOpen_private.so",
+        ]
+    )
+
+
+def good_wrapper(**overrides):
+    return wrapper_elf(**{"symbols": ("miopenFoo", "miopenBar"), **overrides})
+
+
+def good_private(**overrides):
+    symbols = ("miopenFoo_impl", "miopenBar_impl", "miopenExcluded")
+    return private_elf(**{"symbols": symbols, **overrides})
+
+
+def test_check_wrapper_passes_a_consistent_pair(tmp_path, monkeypatch, capsys):
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), good_private()) == 0
+    assert "wrapper public-abi symbol check: PASS" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_on_a_coversion_mismatch(tmp_path, monkeypatch, capsys):
+    private = good_private(soname="libMIOpen_private.so.2")
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 1
+    assert "wrapper public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def test_check_wrapper_fails_on_a_missing_stub(tmp_path, monkeypatch, capsys):
+    private = good_private(
+        symbols=("miopenFoo_impl", "miopenBar_impl", "miopenBaz_impl", "miopenExcluded")
+    )
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 1
+    assert "wrapper public-abi symbol check: FAIL" in capsys.readouterr().out
+
+
+def test_check_wrapper_that_cannot_run_exits_2(tmp_path, monkeypatch, capsys):
+    # A private library with no renamed symbols makes the superset check raise.
+    private = good_private(symbols=("miopenExcluded",))
+    assert run_check_wrapper(tmp_path, monkeypatch, good_wrapper(), private) == 2
+    assert "not a flag-on private library" in capsys.readouterr().err
+
+
+def test_check_installed_headers_exempts_the_private_directory_by_default(tmp_path):
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(void);\n",
+            "miopen/private/miopen_impl.h": "miopenStatus_t miopenFoo_impl(void);\n",
+        },
+    )
+    assert abi.main(["check-installed-headers", str(root)]) == 0
+
+
+def test_check_installed_headers_fails_on_a_leak(tmp_path):
+    root = staged(
+        tmp_path, {"miopen/miopen.h": "miopenStatus_t miopenFoo_impl(void);\n"}
+    )
+    assert abi.main(["check-installed-headers", str(root)]) == 1
+
+
+def test_check_installed_headers_that_cannot_run_exits_2(tmp_path):
+    assert abi.main(["check-installed-headers", str(tmp_path / "missing")]) == 2
