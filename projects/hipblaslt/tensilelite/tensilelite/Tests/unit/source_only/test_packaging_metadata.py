@@ -75,7 +75,33 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     assert "_tensilelite_client_binding.py" in archived_names
     assert "tensilelite_configure_client.py" in archived_names
 
+def test_direct_wheel_build_requires_explicit_rocm_identity(tmp_path, monkeypatch):
+    source_root = _isolated_source(tmp_path)
+    rocm_root = tmp_path / "ambient-rocm"
+    (rocm_root / ".info").mkdir(parents=True)
+    (rocm_root / ".info/version").write_text("9.9.9\n", encoding="utf-8")
+    monkeypatch.setenv("ROCM_PATH", str(rocm_root))
+    monkeypatch.delenv("TENSILELITE_ROCM_VERSION", raising=False)
 
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-build-isolation",
+            "--no-deps",
+            "--wheel-dir",
+            str(tmp_path / "wheels"),
+            ".",
+        ],
+        cwd=source_root,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "TENSILELITE_ROCM_VERSION" in result.stderr
 def test_uv_lock_matches_dynamic_package_metadata():
     lock = tomllib.loads((_PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8"))
     package = next(package for package in lock["package"] if package["name"] == "tensilelite")
