@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -133,6 +134,20 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamic4DIndexCalculati
     EXPECT_EQ(indices15[1], 1);
     EXPECT_EQ(indices15[2], 1);
     EXPECT_EQ(indices15[3], 1);
+}
+
+TEST_F(TestCpuFpReferenceUtilities, FillNdIndicesOverwritesAReusedBuffer)
+{
+    // Each worker refills one buffer for its whole range, so a fill must size the buffer
+    // to the rank and overwrite every entry, whatever an earlier item or callee left in it.
+    const ParallelTensorRange range(std::vector<int64_t>{3, 4});
+
+    std::vector<int64_t> indices{9, 9, 9, 9, 9};
+    range.fillNdIndices(7, indices);
+    EXPECT_EQ(indices, (std::vector<int64_t>{1, 3}));
+
+    range.fillNdIndices(4, indices);
+    EXPECT_EQ(indices, (std::vector<int64_t>{1, 0}));
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicSingleThreadExecution)
@@ -483,8 +498,8 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorDynamicThreadSafety)
 
 TEST_F(TestCpuFpReferenceUtilities, BuildDenseOffsetsIsRowMajor)
 {
-    // The normalization references replaced an iterateAlongDimensions walk with this
-    // table, so the order has to match: last dimension varies fastest.
+    // The normalization references accumulate in walk order, so the order is part of
+    // their numerical contract: last dimension varies fastest.
     const std::vector<int64_t> strides{10, 1};
     const auto offsets = buildDenseOffsets({2, 3}, strides.data());
 
@@ -540,8 +555,8 @@ TEST_F(TestCpuFpReferenceUtilities, FlatOffsetReducesOnlyTheLeadingIndices)
 
 TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowEmitsTapsInRowMajorWindowOrder)
 {
-    // Convolution accumulates in tap order, so this ordering is what keeps results
-    // bit-identical to the iterateAlongDimensions formulation it replaced.
+    // Convolution accumulates in tap order, so this ordering is part of its numerical
+    // contract: last window dimension varies fastest.
     const std::vector<int64_t> extents{2, 3};
     const std::vector<int64_t> windowStrides{3, 1};
     const std::vector<int64_t> sourceStrides{100, 10};
@@ -556,11 +571,45 @@ TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowEmitsTapsInRowMajorWindowOr
     const std::vector<int64_t> expectedWindow{0, 1, 2, 3, 4, 5};
     const std::vector<int64_t> expectedSource{0, 10, 20, 100, 110, 120};
 
-    ASSERT_EQ(window.taps().size(), expectedWindow.size());
+    const auto& taps = window.expand();
+    ASSERT_EQ(taps.size(), expectedWindow.size());
     for(size_t i = 0; i < expectedWindow.size(); ++i)
     {
-        EXPECT_EQ(window.taps()[i].windowOffset, expectedWindow[i]) << "tap " << i;
-        EXPECT_EQ(window.taps()[i].sourceOffset, expectedSource[i]) << "tap " << i;
+        EXPECT_EQ(taps[i].windowOffset, expectedWindow[i]) << "tap " << i;
+        EXPECT_EQ(taps[i].sourceOffset, expectedSource[i]) << "tap " << i;
+    }
+}
+
+TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowForEachTapMatchesExpand)
+{
+    // wgrad walks its window with forEachTap where fprop and dgrad expand theirs; both
+    // accumulate in tap order, so the walk must visit exactly the expanded taps in the
+    // same order. Three dimensions with taps dropped from each exercise every odometer
+    // carry.
+    const std::vector<int64_t> extents{3, 4, 5};
+    const std::vector<int64_t> windowStrides{20, 5, 1};
+    const std::vector<int64_t> sourceStrides{1000, 100, 10};
+
+    ConvolutionWindow window;
+    window.build(extents.size(),
+                 extents.data(),
+                 windowStrides.data(),
+                 sourceStrides.data(),
+                 [](size_t dim, int64_t index) -> int64_t {
+                     return (index == static_cast<int64_t>(dim)) ? -1 : index;
+                 });
+
+    const auto expanded = window.expand();
+    ASSERT_EQ(expanded.size(), 2u * 3u * 4u);
+
+    std::vector<ConvolutionWindow::Tap> walked;
+    window.forEachTap([&walked](const ConvolutionWindow::Tap& tap) { walked.push_back(tap); });
+
+    ASSERT_EQ(walked.size(), expanded.size());
+    for(size_t i = 0; i < expanded.size(); ++i)
+    {
+        EXPECT_EQ(walked[i].windowOffset, expanded[i].windowOffset) << "tap " << i;
+        EXPECT_EQ(walked[i].sourceOffset, expanded[i].sourceOffset) << "tap " << i;
     }
 }
 
@@ -577,11 +626,12 @@ TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowDropsTapsWithNoSourceElemen
             return index == 0 ? -1 : index - 1;
         });
 
-    ASSERT_EQ(window.taps().size(), 2u);
-    EXPECT_EQ(window.taps()[0].windowOffset, 1);
-    EXPECT_EQ(window.taps()[0].sourceOffset, 0);
-    EXPECT_EQ(window.taps()[1].windowOffset, 2);
-    EXPECT_EQ(window.taps()[1].sourceOffset, 1);
+    const auto& taps = window.expand();
+    ASSERT_EQ(taps.size(), 2u);
+    EXPECT_EQ(taps[0].windowOffset, 1);
+    EXPECT_EQ(taps[0].sourceOffset, 0);
+    EXPECT_EQ(taps[1].windowOffset, 2);
+    EXPECT_EQ(taps[1].sourceOffset, 1);
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowFactorsValidityPerDimension)
@@ -600,9 +650,10 @@ TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowFactorsValidityPerDimension
                  sourceStrides.data(),
                  [](size_t dim, int64_t index) { return (dim == 0 && index == 1) ? -1 : index; });
 
-    ASSERT_EQ(window.taps().size(), 2u);
-    EXPECT_EQ(window.taps()[0].windowOffset, 0);
-    EXPECT_EQ(window.taps()[1].windowOffset, 1);
+    const auto& taps = window.expand();
+    ASSERT_EQ(taps.size(), 2u);
+    EXPECT_EQ(taps[0].windowOffset, 0);
+    EXPECT_EQ(taps[1].windowOffset, 1);
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowIsEmptyWhenNoTapHasASource)
@@ -617,7 +668,11 @@ TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowIsEmptyWhenNoTapHasASource)
             return -1;
         });
 
-    EXPECT_TRUE(window.taps().empty());
+    EXPECT_TRUE(window.expand().empty());
+
+    int visits = 0;
+    window.forEachTap([&visits](const ConvolutionWindow::Tap&) { visits++; });
+    EXPECT_EQ(visits, 0);
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowRebuildReplacesPreviousTaps)
@@ -632,16 +687,17 @@ TEST_F(TestCpuFpReferenceUtilities, ConvolutionWindowRebuildReplacesPreviousTaps
         extents.size(), extents.data(), strides.data(), strides.data(), [](size_t, int64_t index) {
             return index;
         });
-    ASSERT_EQ(window.taps().size(), 4u);
+    ASSERT_EQ(window.expand().size(), 4u);
 
     window.build(
         extents.size(), extents.data(), strides.data(), strides.data(), [](size_t, int64_t index) {
             return index < 2 ? index : -1;
         });
 
-    ASSERT_EQ(window.taps().size(), 2u);
-    EXPECT_EQ(window.taps()[0].windowOffset, 0);
-    EXPECT_EQ(window.taps()[1].windowOffset, 1);
+    const auto& taps = window.expand();
+    ASSERT_EQ(taps.size(), 2u);
+    EXPECT_EQ(taps[0].windowOffset, 0);
+    EXPECT_EQ(taps[1].windowOffset, 1);
 }
 
 // ============================================================================
@@ -697,40 +753,54 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchReusesScratc
     CountingScratch::constructions = 0;
 
     constexpr int64_t ELEMENT_COUNT = 10;
-    std::atomic<int> maxItemsSeen{0};
+    int maxItemsSeen = 0;
 
     auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
         [&maxItemsSeen](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)indices;
             scratch.itemsSeen++;
-            maxItemsSeen = std::max(maxItemsSeen.load(), scratch.itemsSeen);
+            maxItemsSeen = std::max(maxItemsSeen, scratch.itemsSeen);
         },
         std::vector<int64_t>{ELEMENT_COUNT});
     functor(1);
 
     EXPECT_EQ(CountingScratch::constructions.load(), 1);
-    EXPECT_EQ(maxItemsSeen.load(), static_cast<int>(ELEMENT_COUNT));
+    EXPECT_EQ(maxItemsSeen, static_cast<int>(ELEMENT_COUNT));
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchIsolatesThreads)
 {
     // Threads must not share one scratch; sharing would be a data race in every caller.
-    // All workers are alive concurrently, so their addresses are necessarily distinct.
+    // Every worker parks on its first item until all of them have arrived, so all their
+    // scratches are alive at once and distinct scratches must have distinct addresses.
     constexpr int64_t ELEMENT_COUNT = 1000;
     constexpr std::size_t THREAD_COUNT = 4;
 
     std::mutex mutex;
+    std::condition_variable arrived;
+    std::size_t arrivals = 0;
     std::set<const void*> addresses;
 
     auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
-        [&mutex, &addresses](CountingScratch& scratch, const std::vector<int64_t>& indices) {
+        [&](CountingScratch& scratch, const std::vector<int64_t>& indices) {
             (void)indices;
-            const std::lock_guard<std::mutex> lock(mutex);
+            if(scratch.itemsSeen++ > 0)
+            {
+                return;
+            }
+
+            std::unique_lock<std::mutex> lock(mutex);
             addresses.insert(&scratch);
+            ++arrivals;
+            arrived.notify_all();
+            // Bounded so a worker that never starts fails the test instead of hanging it.
+            arrived.wait_for(
+                lock, std::chrono::seconds(30), [&arrivals] { return arrivals == THREAD_COUNT; });
         },
         std::vector<int64_t>{ELEMENT_COUNT});
     functor(THREAD_COUNT);
 
+    EXPECT_EQ(arrivals, THREAD_COUNT);
     EXPECT_EQ(addresses.size(), THREAD_COUNT);
 }
 
@@ -760,24 +830,6 @@ TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchVisitsEveryI
         EXPECT_EQ(visitCounts[i].load(), 1)
             << "index " << i << " was visited the wrong number of times";
     }
-}
-
-TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchStopsOnFalse)
-{
-    // The bool early-exit contract carries over from the plain functor.
-    std::atomic<int> visits{0};
-
-    auto functor = makeParallelTensorFunctorWithScratch<CountingScratch>(
-        [&visits](CountingScratch& scratch, const std::vector<int64_t>& indices) {
-            (void)scratch;
-            visits++;
-            return indices[0] < 3;
-        },
-        std::vector<int64_t>{100});
-    functor(1);
-
-    // Indices 0, 1 and 2 continue; index 3 returns false and stops the thread.
-    EXPECT_EQ(visits.load(), 4);
 }
 
 TEST_F(TestCpuFpReferenceUtilities, ParallelTensorFunctorWithScratchDoesNothingForAnEmptyRange)

@@ -153,10 +153,7 @@ auto callFuncUnpackArgs(F f, T args)
 
 /**
  * @brief Row-major decomposition of a flat work index, plus the split of that work
- * across threads.
- *
- * Factored out so the parallel tensor functors below differ only in what they hand the
- * callee, not in how the work is divided.
+ * across threads. Shared by the parallel tensor functors below.
  */
 struct ParallelTensorRange
 {
@@ -217,6 +214,52 @@ struct ParallelTensorRange
                 = JoinableThread([&body, workBegin, workEnd] { body(workBegin, workEnd); });
         }
     }
+
+    /**
+     * @brief Calls `func(scratch, indices)` for every position of the index space, in
+     * parallel.
+     *
+     * Each worker thread owns one default-constructed `Scratch` and one index buffer for
+     * its whole work range. fillNdIndices rewrites the buffer before every call, so the
+     * callee may modify it. A callee returning `bool` stops its own thread early when it
+     * returns false.
+     */
+    template <typename Scratch, typename F>
+    void forEachIndex(std::size_t numThreads, const F& func) const
+    {
+        static_assert(std::is_default_constructible_v<Scratch>,
+                      "Scratch must be default constructible; one is created per worker thread");
+
+        runChunked(numThreads, [this, &func](std::size_t workBegin, std::size_t workEnd) {
+            Scratch scratch;
+            std::vector<int64_t> indices;
+
+            for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
+            {
+                fillNdIndices(workIdx, indices);
+
+                // Probed with the call-site argument types - non-const lvalues. Probing an
+                // rvalue or a `const&` misses a callee taking `std::vector<int64_t>&`, which
+                // would then bind fine at the call below and have its bool silently dropped.
+                if constexpr(std::is_invocable_r_v<bool, const F&, Scratch&, std::vector<int64_t>&>)
+                {
+                    if(!func(scratch, indices))
+                    {
+                        return;
+                    }
+                }
+                else
+                {
+                    func(scratch, indices);
+                }
+            }
+        });
+    }
+};
+
+/// Scratch for callees that need none.
+struct NoScratch
+{
 };
 
 /**
@@ -238,31 +281,10 @@ struct ParallelTensorFunctorDynamic : ParallelTensorRange
 
     void operator()(std::size_t numThreads = 1) const
     {
-        runChunked(numThreads, [this](std::size_t workBegin, std::size_t workEnd) {
-            // One index buffer per thread, refilled per work item. The callee only reads
-            // it, so it never needs to be a fresh allocation.
-            std::vector<int64_t> indices;
-
-            for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
-            {
-                fillNdIndices(workIdx, indices);
-
-                // Probed with the call-site expression type - a non-const lvalue. Probing an
-                // rvalue or a `const&` misses a functor taking `std::vector<int64_t>&`, which
-                // would then bind fine at the call below and have its bool silently dropped.
-                if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>&>)
-                {
-                    if(!func(indices))
-                    {
-                        return;
-                    }
-                }
-                else
-                {
-                    func(indices);
-                }
-            }
-        });
+        forEachIndex<NoScratch>(
+            numThreads, [this](NoScratch&, std::vector<int64_t>& indices) -> decltype(auto) {
+                return func(indices);
+            });
     }
 };
 
@@ -271,22 +293,14 @@ struct ParallelTensorFunctorDynamic : ParallelTensorRange
  * worker thread its own `Scratch`.
  *
  * The scratch is constructed once per thread and reused for every work item that thread
- * handles. That is the lifetime a callee needs for a buffer it rebuilds per work item but
- * must not reallocate per work item - a ConvolutionWindow, for instance.
- *
- * ParallelTensorFunctorDynamic cannot express that: it invokes the callee with indices
- * only, so a callee needing state that outlives a single work item has nowhere to put it
- * short of a function-local `thread_local`. Prefer this, which makes the lifetime explicit
- * and ends it with the parallel region.
+ * handles: the lifetime of a buffer the callee rebuilds per work item but must not
+ * reallocate per work item, such as a ConvolutionWindow.
  *
  * The callee is invoked as `func(scratch, indices)`.
  */
 template <typename Scratch, typename F>
 struct ParallelTensorFunctorWithScratch : ParallelTensorRange
 {
-    static_assert(std::is_default_constructible_v<Scratch>,
-                  "Scratch must be default constructible; one is created per worker thread");
-
     F func;
 
     ParallelTensorFunctorWithScratch(F f, const std::vector<int64_t>& dimensions)
@@ -297,48 +311,29 @@ struct ParallelTensorFunctorWithScratch : ParallelTensorRange
 
     void operator()(std::size_t numThreads = 1) const
     {
-        runChunked(numThreads, [this](std::size_t workBegin, std::size_t workEnd) {
-            Scratch scratch;
-            std::vector<int64_t> indices;
-
-            for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
-            {
-                fillNdIndices(workIdx, indices);
-
-                if constexpr(std::is_invocable_r_v<bool, F, Scratch&, std::vector<int64_t>&>)
-                {
-                    if(!func(scratch, indices))
-                    {
-                        return;
-                    }
-                }
-                else
-                {
-                    func(scratch, indices);
-                }
-            }
-        });
+        forEachIndex<Scratch>(numThreads, func);
     }
 };
 
 /**
- * @brief The valid taps of a convolution window, flattened to offset pairs.
+ * @brief The valid taps of a convolution window, as flat offset pairs.
  *
- * Each spatial dimension of a convolution maps a window index to a source index
- * independently, and independently decides that the tap has no source element -
- * it lands in padding, or (for dgrad) is not stride-aligned. Validity and both
- * flat offsets therefore factor per dimension, so the whole window resolves once
- * per output element rather than per (output element x channel x tap).
+ * Each spatial dimension maps a window index to a source index independently, and
+ * independently decides that the tap has no source element - it lands in padding, or
+ * (for dgrad) is not stride-aligned. `build()` therefore resolves the valid taps of each
+ * dimension separately, and the window is their row-major cartesian product. A consumer
+ * that revisits the window `expand()`s the product into a list; one whose window spans a
+ * whole tensor walks it with `forEachTap()` instead, which holds no product.
  *
  * Contracts:
  * - Not thread safe. One instance per concurrent user; obtain one from
  *   ParallelTensorFunctorWithScratch rather than sharing or making it `static`.
- * - `build()` invalidates the reference returned by any prior `taps()`.
- *
- * Buffers are reused across rebuilds, so a reused instance stops allocating after
- * the first output element. That is the whole point: an index-vector formulation
- * costs several `std::vector<int64_t>` per tap, which dominates runtime on
- * allocators without a per-thread cache (the Windows heap, notably).
+ * - Buffers are reused across rebuilds, so a reused instance stops allocating once it
+ *   has seen its largest window.
+ * - `build()` invalidates the reference returned by any prior `expand()`.
+ * - `expand()` and `forEachTap()` both produce the taps in row-major window order.
+ *   Convolution accumulates in tap order, so this ordering is part of the numerical
+ *   contract, not an implementation detail.
  */
 class ConvolutionWindow
 {
@@ -350,7 +345,7 @@ public:
     };
 
     /**
-     * @brief Rebuilds the tap list for a single output position.
+     * @brief Resolves the valid taps of every spatial dimension for one window position.
      *
      * @param nDims Number of spatial dimensions.
      * @param extents Window extent per spatial dimension.
@@ -358,9 +353,6 @@ public:
      * @param sourceStrides Strides of the sampled tensor, spatial dimensions only.
      * @param mapIndex `(dim, windowIndex) -> sourceIndex`, negative when the tap
      *        has no source element.
-     *
-     * Taps come out in row-major window order. Convolution accumulates in tap order,
-     * so this ordering is part of the numerical contract, not an implementation detail.
      */
     template <typename MapIndex>
     void build(std::size_t nDims,
@@ -369,11 +361,11 @@ public:
                const int64_t* sourceStrides,
                MapIndex&& mapIndex)
     {
-        _taps.assign(1, Tap{0, 0});
+        _dimTaps.clear();
+        _dimEnds.clear();
 
         for(std::size_t dim = 0; dim < nDims; ++dim)
         {
-            _dimTaps.clear();
             for(int64_t windowIndex = 0; windowIndex < extents[dim]; ++windowIndex)
             {
                 const int64_t sourceIndex = mapIndex(dim, windowIndex);
@@ -383,47 +375,120 @@ public:
                         Tap{windowIndex * windowStrides[dim], sourceIndex * sourceStrides[dim]});
                 }
             }
+            _dimEnds.push_back(_dimTaps.size());
+        }
+    }
 
+    /**
+     * @brief The whole window as a list, one Tap per valid window position.
+     *
+     * The list grows with the window, so use it where the window is the kernel's extent.
+     */
+    const std::vector<Tap>& expand()
+    {
+        _taps.assign(1, Tap{0, 0});
+
+        for(std::size_t dim = 0; dim < _dimEnds.size(); ++dim)
+        {
             // Prefixes outer, this dimension inner: keeps the product in row-major order.
             _scratch.clear();
             for(const auto& prefix : _taps)
             {
-                for(const auto& tail : _dimTaps)
+                for(std::size_t i = dimBegin(dim); i < _dimEnds[dim]; ++i)
                 {
-                    _scratch.push_back(Tap{prefix.windowOffset + tail.windowOffset,
-                                           prefix.sourceOffset + tail.sourceOffset});
+                    _scratch.push_back(Tap{prefix.windowOffset + _dimTaps[i].windowOffset,
+                                           prefix.sourceOffset + _dimTaps[i].sourceOffset});
                 }
             }
             _taps.swap(_scratch);
+        }
 
-            if(_taps.empty())
+        return _taps;
+    }
+
+    /**
+     * @brief Calls `visit(tap)` for every tap, in the same order as `expand()`.
+     *
+     * Holds one cursor per dimension rather than the product, so memory stays bounded by
+     * the sum of the extents where the window spans a whole tensor.
+     */
+    template <typename Visit>
+    void forEachTap(Visit&& visit)
+    {
+        const std::size_t nDims = _dimEnds.size();
+        if(nDims == 0)
+        {
+            visit(Tap{0, 0});
+            return;
+        }
+        for(std::size_t dim = 0; dim < nDims; ++dim)
+        {
+            if(dimBegin(dim) == _dimEnds[dim])
             {
                 return;
             }
         }
-    }
 
-    const std::vector<Tap>& taps() const
-    {
-        return _taps;
+        // An odometer over the outer dimensions; the innermost is walked directly.
+        const std::size_t inner = nDims - 1;
+        _cursor.resize(inner);
+        for(std::size_t dim = 0; dim < inner; ++dim)
+        {
+            _cursor[dim] = dimBegin(dim);
+        }
+
+        do
+        {
+            Tap prefix{0, 0};
+            for(std::size_t dim = 0; dim < inner; ++dim)
+            {
+                prefix.windowOffset += _dimTaps[_cursor[dim]].windowOffset;
+                prefix.sourceOffset += _dimTaps[_cursor[dim]].sourceOffset;
+            }
+
+            for(std::size_t i = dimBegin(inner); i < _dimEnds[inner]; ++i)
+            {
+                visit(Tap{prefix.windowOffset + _dimTaps[i].windowOffset,
+                          prefix.sourceOffset + _dimTaps[i].sourceOffset});
+            }
+        } while(advanceCursor());
     }
 
 private:
+    std::size_t dimBegin(std::size_t dim) const
+    {
+        return dim == 0 ? 0 : _dimEnds[dim - 1];
+    }
+
+    // Steps the outer-dimension odometer, last dimension fastest. Returns false once
+    // every combination has been visited.
+    bool advanceCursor()
+    {
+        for(std::size_t dim = _cursor.size(); dim-- > 0;)
+        {
+            if(++_cursor[dim] < _dimEnds[dim])
+            {
+                return true;
+            }
+            _cursor[dim] = dimBegin(dim);
+        }
+
+        return false;
+    }
+
+    std::vector<Tap> _dimTaps; ///< valid taps of every dimension, dimension-major
+    std::vector<std::size_t> _dimEnds; ///< end of each dimension's run in _dimTaps
+    std::vector<std::size_t> _cursor; ///< forEachTap position in each outer dimension
     std::vector<Tap> _taps;
-    std::vector<Tap> _dimTaps;
     std::vector<Tap> _scratch;
 };
 
 /**
  * @brief Row-major flat offsets for a dense walk of `extents` against `strides`.
  *
- * The normalization references walk a fixed sub-block of a tensor once per output
- * position, and the walk is identical for every output position. Building an index
- * vector per element - a heap allocation - and reducing it against the strides is
- * therefore repeated work: hoist it into a table built once per call and index that.
- *
- * `strides` must have `extents.size()` entries. A zero stride is meaningful, and is
- * how a broadcast axis contributes nothing to the address.
+ * Entry i is the offset of the i-th row-major position of the walk. `strides` must have
+ * `extents.size()` entries. A zero stride is meaningful, and is how a broadcast axis
+ * contributes nothing to the address.
  */
 inline std::vector<int64_t> buildDenseOffsets(const std::vector<int64_t>& extents,
                                               const int64_t* strides)
@@ -480,6 +545,9 @@ auto makeParallelTensorFunctorWithScratch(F f, const std::vector<int64_t>& dimen
 /**
  * @brief Reject a ragged tensor with a message identifying which argument it was.
  *
+ * The CPU references address memory through hoisted base pointers and strides, which
+ * is the dense layout only; a ragged tensor rebases every batch at its own offset.
+ *
  * @param tensor The tensor to check.
  * @param errorPrefix Prefix identifying the calling CPU reference (e.g. "MyOp: ").
  * @param name The argument name to report if the tensor is ragged.
@@ -491,6 +559,17 @@ inline void validateNoRaggedTensor(const hipdnn_data_sdk::utilities::ITensor& te
     if(tensor.raggedIterationInfo().has_value())
     {
         throw std::runtime_error(errorPrefix + "ragged " + name + " tensor is not supported");
+    }
+}
+
+/// Overload for an optional argument; a null tensor passes.
+inline void validateNoRaggedTensor(const hipdnn_data_sdk::utilities::ITensor* tensor,
+                                   const std::string& errorPrefix,
+                                   const char* name)
+{
+    if(tensor != nullptr)
+    {
+        validateNoRaggedTensor(*tensor, errorPrefix, name);
     }
 }
 

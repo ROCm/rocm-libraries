@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -16,6 +17,8 @@ namespace hipdnn_test_sdk::utilities
 
 class CpuFpReferenceConvolution
 {
+    static constexpr auto PREFIX = "CpuFpReferenceConvolution: ";
+
 public:
     // Check if this CPU implementation supports the given node configuration
     static bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
@@ -61,7 +64,7 @@ public:
                       const std::vector<int64_t>& prePadding,
                       const std::vector<int64_t>& postPadding)
     {
-        validateInput(x, w, y, strides, dilations, prePadding, postPadding);
+        validateInput(x, w, y, {"x", "w", "y"}, strides, dilations, prePadding, postPadding);
 
         // Extract dimensions - NC[spatial...] format for x/y, [G*K][C][spatial...] for w
         const auto& xDims = x.dims();
@@ -73,7 +76,7 @@ public:
         const int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
         int64_t channelsPerGroup = wDims[1]; // C
 
-        int64_t nSpatialDims = static_cast<int64_t>(xDims.size()) - 2;
+        const std::size_t nSpatialDims = xDims.size() - 2;
         std::vector<int64_t> xSpatialDims(xDims.begin() + 2, xDims.end());
         std::vector<int64_t> kernelSpatialDims(wDims.begin() + 2, wDims.end());
         std::vector<int64_t> ySpatialDims(yDims.begin() + 2, yDims.end());
@@ -82,9 +85,8 @@ public:
         const int64_t nGroups = nInputChannels / channelsPerGroup;
         const int64_t yChannelsPerGroup = totalOutputChannels / nGroups;
 
-        // Raw pointers and strides are hoisted once. The inner loops never call
-        // getHostValue/setHostValue: each of those costs a virtual memory() call plus a
-        // stride reduction over a freshly allocated index vector.
+        // Tensors are addressed through hoisted base pointers and strides, which
+        // validateInput has restricted to the dense layout.
         const XDataType* xBase = x.memory().hostData();
         const WDataType* wBase = w.memory().hostData();
         YDataType* yBase = y.memory().hostData();
@@ -107,7 +109,7 @@ public:
             // Which kernel taps hit the logical x tensor depends only on the y spatial
             // position, so resolve the whole window once instead of per channel.
             window.build(
-                static_cast<size_t>(nSpatialDims),
+                nSpatialDims,
                 kernelSpatialDims.data(),
                 wStrides.data() + 2,
                 xStrides.data() + 2,
@@ -135,12 +137,13 @@ public:
 
             auto accumulator = static_cast<ComputeDataType>(0.0f);
 
+            const auto& taps = window.expand();
             for(int64_t c = 0; c < channelsPerGroup; ++c)
             {
                 const XDataType* xChannel = xBatch + (c * xStrides[1]);
                 const WDataType* wChannel = wFilter + (c * wStrides[1]);
 
-                for(const auto& tap : window.taps())
+                for(const auto& tap : taps)
                 {
                     accumulator = accumulator
                                   + (static_cast<ComputeDataType>(xChannel[tap.sourceOffset])
@@ -148,12 +151,9 @@ public:
                 }
             }
 
-            int64_t yOffset = (nIdx * yStrides[0]) + (yChannel * yStrides[1]);
-            for(int64_t dim = 0; dim < nSpatialDims; ++dim)
-            {
-                const auto dimIdx = static_cast<size_t>(dim);
-                yOffset += ySpatialIndices[dimIdx] * yStrides[dimIdx + 2];
-            }
+            const int64_t yOffset = (nIdx * yStrides[0]) + (yChannel * yStrides[1])
+                                    + hipdnn_test_sdk::detail::flatOffset(
+                                        ySpatialIndices, yStrides.data() + 2, nSpatialDims);
 
             yBase[yOffset] = static_cast<YDataType>(accumulator);
         };
@@ -190,7 +190,8 @@ public:
                       const std::vector<int64_t>& prePadding,
                       const std::vector<int64_t>& postPadding)
     {
-        validateInput(gradX, w, gradY, strides, dilations, prePadding, postPadding);
+        validateInput(
+            gradX, w, gradY, {"dx", "w", "dy"}, strides, dilations, prePadding, postPadding);
 
         // Extract dimensions - NC[spatial...] format for x/y, [G*K][C][spatial...] for w
         const auto& xDims = gradX.dims();
@@ -201,7 +202,7 @@ public:
         const int64_t totalOutputChannels = wDims[0]; // G * K (flattened)
         int64_t channelsPerGroup = wDims[1]; // C
 
-        int64_t nSpatialDims = static_cast<int64_t>(xDims.size()) - 2;
+        const std::size_t nSpatialDims = xDims.size() - 2;
         std::vector<int64_t> xSpatialDims(xDims.begin() + 2, xDims.end());
         std::vector<int64_t> kernelSpatialDims(wDims.begin() + 2, wDims.end());
         std::vector<int64_t> ySpatialDims(yDims.begin() + 2, yDims.end());
@@ -211,7 +212,7 @@ public:
         const int64_t nGroups = nInputChannels / channelsPerGroup; // G
         const int64_t yChannelsPerGroup = totalOutputChannels / nGroups; // K
 
-        // Raw pointers and strides are hoisted once; see fprop.
+        // Addressed through hoisted base pointers and strides; see fprop.
         DxDataType* gradXBase = gradX.memory().hostData();
         const WDataType* wBase = w.memory().hostData();
         const DyDataType* gradYBase = gradY.memory().hostData();
@@ -234,7 +235,7 @@ public:
             // Which kernel taps have a contributing y gradient depends only on the x
             // spatial position, so resolve the whole window once instead of per y channel.
             window.build(
-                static_cast<size_t>(nSpatialDims),
+                nSpatialDims,
                 kernelSpatialDims.data(),
                 wStrides.data() + 2,
                 yStrides.data() + 2,
@@ -265,7 +266,7 @@ public:
 
             auto vAcc = static_cast<ComputeDataType>(0.0f);
 
-            for(const auto& tap : window.taps())
+            for(const auto& tap : window.expand())
             {
                 // Iterate over each y channel in the group, as they all contribute to the x gradient
                 for(int64_t k = 0; k < yChannelsPerGroup; ++k)
@@ -281,12 +282,9 @@ public:
             }
 
             const int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
-            int64_t gradXOffset = (nIdx * xStrides[0]) + (xChannelIdx * xStrides[1]);
-            for(int64_t dim = 0; dim < nSpatialDims; ++dim)
-            {
-                const auto dimIdx = static_cast<size_t>(dim);
-                gradXOffset += xSpatialIndices[dimIdx] * xStrides[dimIdx + 2];
-            }
+            const int64_t gradXOffset = (nIdx * xStrides[0]) + (xChannelIdx * xStrides[1])
+                                        + hipdnn_test_sdk::detail::flatOffset(
+                                            xSpatialIndices, xStrides.data() + 2, nSpatialDims);
 
             gradXBase[gradXOffset] = static_cast<DxDataType>(vAcc);
         };
@@ -322,7 +320,8 @@ public:
                       const std::vector<int64_t>& prePadding,
                       const std::vector<int64_t>& postPadding)
     {
-        validateInput(x, gradW, gradY, strides, dilations, prePadding, postPadding);
+        validateInput(
+            x, gradW, gradY, {"x", "dw", "dy"}, strides, dilations, prePadding, postPadding);
 
         // Extract dimensions - NCHW format for x/y, [G*K][C][Y][X] for w (4D flattened)
         const auto& xDims = x.dims();
@@ -331,7 +330,7 @@ public:
 
         int64_t nBatch = yDims[0];
 
-        int64_t nSpatialDims = static_cast<int64_t>(xDims.size()) - 2;
+        const std::size_t nSpatialDims = xDims.size() - 2;
         std::vector<int64_t> xSpatialDims(xDims.begin() + 2, xDims.end());
         std::vector<int64_t> kernelSpatialDims(wDims.begin() + 2, wDims.end());
         std::vector<int64_t> ySpatialDims(yDims.begin() + 2, yDims.end());
@@ -344,7 +343,7 @@ public:
         const int64_t nGroups = nInputChannels / channelsPerGroup; // G
         const int64_t yChannelsPerGroup = totalOutputChannels / nGroups; // K
 
-        // Raw pointers and strides are hoisted once; see fprop.
+        // Addressed through hoisted base pointers and strides; see fprop.
         const XDataType* xBase = x.memory().hostData();
         DwDataType* gradWBase = gradW.memory().hostData();
         const DyDataType* gradYBase = gradY.memory().hostData();
@@ -353,7 +352,8 @@ public:
         const auto& wStrides = gradW.strides();
         const auto& yStrides = gradY.strides();
 
-        // `window` is per-thread scratch owned by the parallel functor.
+        // `window` is per-thread scratch owned by the parallel functor. Its extent is the
+        // y gradient's spatial extent, so it is walked rather than expanded.
         auto convolutionFunc = [&](hipdnn_test_sdk::detail::ConvolutionWindow& window,
                                    const std::vector<int64_t>& indices) {
             const int64_t gIdx = indices[0];
@@ -365,7 +365,7 @@ public:
 
             // Which y gradient positions sample a real x element depends only on the
             // kernel spatial position, so resolve the whole window once instead of per batch.
-            window.build(static_cast<size_t>(nSpatialDims),
+            window.build(nSpatialDims,
                          ySpatialDims.data(),
                          yStrides.data() + 2,
                          xStrides.data() + 2,
@@ -384,8 +384,7 @@ public:
 
             auto vAcc = static_cast<ComputeDataType>(0.0f);
 
-            for(const auto& tap : window.taps())
-            {
+            window.forEachTap([&](const hipdnn_test_sdk::detail::ConvolutionWindow::Tap& tap) {
                 for(int64_t n = 0; n < nBatch; ++n)
                 {
                     const DyDataType vOut = gradYChannel[(n * yStrides[0]) + tap.windowOffset];
@@ -395,14 +394,12 @@ public:
                            + (static_cast<ComputeDataType>(vOut)
                               * static_cast<ComputeDataType>(vIn));
                 }
-            }
+            });
 
-            int64_t gradWOffset = (yChannelIdx * wStrides[0]) + (cIdx * wStrides[1]);
-            for(int64_t dim = 0; dim < nSpatialDims; ++dim)
-            {
-                const auto dimIdx = static_cast<size_t>(dim);
-                gradWOffset += kernelSpatialIndices[dimIdx] * wStrides[dimIdx + 2];
-            }
+            const int64_t gradWOffset = (yChannelIdx * wStrides[0]) + (cIdx * wStrides[1])
+                                        + hipdnn_test_sdk::detail::flatOffset(kernelSpatialIndices,
+                                                                              wStrides.data() + 2,
+                                                                              nSpatialDims);
 
             gradWBase[gradWOffset] = static_cast<DwDataType>(vAcc);
         };
@@ -419,10 +416,19 @@ public:
     }
 
 private:
+    // Argument names reported by validation, in (x, w, y) role order.
+    struct ArgumentNames
+    {
+        const char* x;
+        const char* w;
+        const char* y;
+    };
+
     template <typename T1, typename T2, typename T3>
     static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<T1>& x,
                               const hipdnn_data_sdk::utilities::TensorBase<T2>& w,
                               const hipdnn_data_sdk::utilities::TensorBase<T3>& y,
+                              const ArgumentNames& names,
                               const std::vector<int64_t>& strides,
                               const std::vector<int64_t>& dilations,
                               const std::vector<int64_t>& prePadding,
@@ -431,15 +437,13 @@ private:
         if(x.dims().size() < 3)
         {
             throw std::invalid_argument(
-                "Input tensor must have at least 3 dimensions (N, C, spatial...)");
+                std::string(PREFIX)
+                + "input tensor must have at least 3 dimensions (N, C, spatial...)");
         }
 
-        // The kernels address memory through hoisted base pointers and strides, which is
-        // the dense layout only; a ragged tensor rebases every batch at its own offset.
-        static constexpr auto PREFIX = "CpuFpReferenceConvolution: ";
-        hipdnn_test_sdk::detail::validateNoRaggedTensor(x, PREFIX, "x");
-        hipdnn_test_sdk::detail::validateNoRaggedTensor(w, PREFIX, "w");
-        hipdnn_test_sdk::detail::validateNoRaggedTensor(y, PREFIX, "y");
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(x, PREFIX, names.x);
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(w, PREFIX, names.w);
+        hipdnn_test_sdk::detail::validateNoRaggedTensor(y, PREFIX, names.y);
 
         hipdnn_test_sdk::utilities::validateConvolutionParams(
             x, w, y, strides, dilations, prePadding, postPadding);

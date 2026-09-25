@@ -101,7 +101,7 @@ TEST(TestCpuFpReferenceRaggedRejection, ConvolutionDgradRejectsRaggedGradient)
             CpuFpReferenceConvolution::dgrad<float, float, float, float>(
                 gradX, w, gradY, {1, 1}, {1, 1}, {0, 0});
         },
-        "x");
+        "dx");
 }
 
 TEST(TestCpuFpReferenceRaggedRejection, ConvolutionWgradRejectsRaggedInput)
