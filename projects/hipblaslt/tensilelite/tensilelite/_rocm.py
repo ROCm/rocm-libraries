@@ -224,8 +224,14 @@ def _python_sdk_version() -> str | None:
     """Return the active rocm_sdk_core version, if it is installed."""
     try:
         import rocm_sdk_core
-    except ModuleNotFoundError:
-        return None
+    except ModuleNotFoundError as exc:
+        if exc.name == "rocm_sdk_core":
+            return None
+        raise TensileLiteRuntimeError(
+            "The active Python ROCm core package could not be imported.\n"
+            "  selected by: active Python rocm_sdk_core\n"
+            "Repair or reinstall the active rocm core package."
+        ) from exc
 
     try:
         return rocm_sdk_core.__version__
