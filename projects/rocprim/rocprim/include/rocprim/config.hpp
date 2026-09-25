@@ -161,7 +161,12 @@
     #if !defined(ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS)
         #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
     #endif
-    #if defined(__AMDGCN__)
+    #if defined(ROCPRIM_TARGET_SPIRV)
+        // Preserve late target selection for AMDGPU SPIR-V.
+        #define ROCPRIM_IS_CDNA5()                                \
+            (__builtin_amdgcn_processor_is("gfx1250")             \
+             || __builtin_amdgcn_processor_is("gfx1250-strict"))
+    #else
         // Concrete AMDGPU compilation already knows the target architecture
         // from preprocessor macros (see ROCPRIM_TARGET_CDNA5 above), so use
         // that instead of asking the builtin about a processor string that
@@ -171,11 +176,6 @@
         #else
             #define ROCPRIM_IS_CDNA5() 0
         #endif
-    #else
-        // Preserve late target selection for AMDGPU SPIR-V.
-        #define ROCPRIM_IS_CDNA5()                                \
-            (__builtin_amdgcn_processor_is("gfx1250")             \
-             || __builtin_amdgcn_processor_is("gfx1250-strict"))
     #endif
     #define ROCPRIM_IS_CDNA4() __builtin_amdgcn_processor_is("gfx950")
     #define ROCPRIM_IS_CDNA3()                                                              \
