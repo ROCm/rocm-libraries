@@ -68,6 +68,9 @@ def load_matrix_fragment(
         raise ValueError("matrix carrier type width mismatch")
     if packing.payload_bits % packing.carrier_bits:
         raise ValueError("matrix fragment payload must occupy whole carriers")
+    padding = packing.carrier_count - packing.live_carriers
+    if padding and carrier_type != I32:
+        raise ValueError("padded matrix fragments currently require i32 carriers")
     chunk_units = layout.chunk_bytes // unit_bytes
     origin_bytes = origin_bits // 8
     # Bound the last loaded unit across all chunks and lane groups, including k0.
@@ -109,10 +112,7 @@ def load_matrix_fragment(
     payload_type = VectorType(carrier_type, packing.live_carriers)
     if payload.type != payload_type:
         payload = b.bitcast(payload, payload_type)
-    padding = packing.carrier_count - packing.live_carriers
     if padding:
-        if carrier_type != I32:
-            raise ValueError("padded matrix fragments currently require i32 carriers")
         payload = b.vec_concat(payload, b.vector_splat(b.const_i32(0), padding))
     return payload
 

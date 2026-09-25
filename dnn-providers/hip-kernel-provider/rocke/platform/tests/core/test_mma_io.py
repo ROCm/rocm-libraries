@@ -168,11 +168,15 @@ def test_reject_bit_origin():
 
 @pytest.mark.parametrize(
     "dtype,alignment,error",
-    [("fp6", 3, "positive power of two"), ("fp4", 1, "packing width mismatch")],
+    [
+        ("fp6", 3, "positive power of two"),
+        ("fp4", 1, "packing width mismatch"),
+        ("f16", 2, "padded matrix fragments currently require i32 carriers"),
+    ],
 )
 def test_fragment_input_contract(dtype, alignment, error):
     b = IRBuilder("invalid_fragment")
-    ptr = b.param("A", PtrType(I8, "global"))
+    ptr = b.param("A", PtrType(storage_ir_type(dtype), "global"))
     zero = b.const_i32(0)
     before = serialize(b.kernel)
     with pytest.raises(ValueError, match=error):
@@ -183,7 +187,14 @@ def test_fragment_input_contract(dtype, alignment, error):
             zero,
             0,
             dtype=dtype,
-            layout=scaled_matrix_layout("fp6", 16),
+            layout=(
+                MatrixFragmentLayout(
+                    FragmentPacking(BitPacking(16), 8, 16, 16), 8, 1, 1
+                )
+                if dtype == "f16"
+                else scaled_matrix_layout("fp6", 16)
+            ),
+            carrier_type=F16 if dtype == "f16" else I32,
             alignment_bytes=alignment,
         )
     assert serialize(b.kernel) == before
