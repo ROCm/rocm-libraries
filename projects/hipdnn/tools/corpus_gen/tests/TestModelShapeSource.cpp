@@ -72,8 +72,8 @@ OperationMetadata shippedSdpa()
 
 /// A complete header in the spelling the miner emits, and one complete row.
 const char* kHeader = "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-                      "q.is_causal,q.alignment,q.dtype\n";
-const char* kRow    = "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,bf16\n";
+                      "q.is_causal,q.alignment,q.generate_stats,q.dtype\n";
+const char* kRow    = "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16\n";
 
 } // namespace
 
@@ -107,7 +107,8 @@ TEST(TestModelShapeSource, AColumnWithoutTheQueryPrefixStillReads)
     ModelShapeReport report;
 
     const std::string bare = "batch,heads,heads_kv,seqlen_q,seqlen_k,head_dim,is_causal,"
-                             "alignment,dtype\n1,64,8,4096,4096,128,true,top_left,bf16\n";
+                             "alignment,generate_stats,dtype\n"
+                             "1,64,8,4096,4096,128,true,top_left,false,bf16\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", bare), report);
     ASSERT_EQ(entries.size(), 1u);
@@ -124,8 +125,8 @@ TEST(TestModelShapeSource, ARowNamingAnotherOperationIsSkippedRatherThanCountedU
 
     const std::string mixed
         = "op," + std::string(kHeader).substr(std::string("name,").size())
-          + "gemm,1,64,8,4096,4096,128,true,top_left,bf16\n"
-            "sdpa_fwd,1,64,8,4096,4096,128,true,top_left,bf16\n";
+          + "gemm,1,64,8,4096,4096,128,true,top_left,false,bf16\n"
+            "sdpa_fwd,1,64,8,4096,4096,128,true,top_left,false,bf16\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", mixed), report);
 
@@ -145,9 +146,9 @@ TEST(TestModelShapeSource, AMisspelledColumnLosesEveryRowAndSaysWhichName)
 
     // `causal` for `is_causal`. Every row goes; a count alone would not say why.
     const std::string wrong = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,"
-                              "q.causal,q.alignment,q.dtype\n"
-                              "1,64,8,4096,4096,128,true,top_left,bf16\n"
-                              "2,64,8,2048,2048,128,true,top_left,bf16\n";
+                              "q.causal,q.alignment,q.generate_stats,q.dtype\n"
+                              "1,64,8,4096,4096,128,true,top_left,false,bf16\n"
+                              "2,64,8,2048,2048,128,true,top_left,false,bf16\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", wrong), report);
 
@@ -165,7 +166,7 @@ TEST(TestModelShapeSource, AValueTheDeclarationDoesNotAcceptIsRefusedRatherThanC
 
     const std::string bad
         = kHeader + std::string("mistyped,1,64,8,4096,4096,128,true,top_left,fp8_e4m3\n"
-                                "not a number,1,64,8,4096,4096,many,true,top_left,bf16\n");
+                                "not a number,1,64,8,4096,4096,many,true,top_left,false,bf16\n");
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", bad), report);
 
@@ -180,7 +181,7 @@ TEST(TestModelShapeSource, AQuotedFieldMayCarryACommaWithoutSplittingTheRow)
     ModelShapeReport report;
 
     const std::string quoted
-        = kHeader + std::string(R"("llama3-70b, prefill",1,64,8,4096,4096,128,true,top_left,bf16)")
+        = kHeader + std::string(R"("llama3-70b, prefill",1,64,8,4096,4096,128,true,top_left,false,bf16)")
           + "\n";
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", quoted), report);
@@ -211,7 +212,7 @@ TEST(TestModelShapeSource, NoOracleIsAppliedSoAShapeNobodyServesStillArrives)
     // Far past any benchmarking byte budget. Whether an engine serves a shape somebody runs is
     // a finding for the caller's admission to make, not a reason to drop the row here.
     const std::string huge
-        = kHeader + std::string("enormous,64,128,128,131072,131072,256,false,top_left,bf16\n");
+        = kHeader + std::string("enormous,64,128,128,131072,131072,256,false,top_left,false,bf16\n");
 
     const auto entries = readModelShapes(metadata, tree.write("m.csv", huge), report);
 

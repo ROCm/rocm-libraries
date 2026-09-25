@@ -1,8 +1,7 @@
 {
   "schema_version": "1.0",
-  "operation": "layernorm_fwd",
-  "display_name": "LayerNorm Forward",
-  "description": "Layer normalization over the trailing normalized dimensions.",
+  "operation": "rmsnorm_bwd",
+  "display_name": "RMS Normalization, Backward",
   "parameters": {
     "batch": {
       "type": "int64"
@@ -38,7 +37,6 @@
       "buckets": [
         768,
         1024,
-        1536,
         4096,
         5120,
         8192
@@ -49,9 +47,7 @@
       "buckets": [
         1,
         4,
-        16,
         32,
-        64,
         128
       ]
     },
@@ -66,11 +62,11 @@
     }
   },
   "graph_builder": {
-    "function": "layernormForward",
+    "function": "rmsNormBackward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
     "arguments": [
       {
-        "name": "dims",
+        "name": "dyDims",
         "kind": "expr",
         "value": [
           "$q.batch",
@@ -79,9 +75,79 @@
         ]
       },
       {
-        "name": "strides",
+        "name": "dyStrides",
         "kind": "strides_of",
-        "of": "dims"
+        "of": "dyDims"
+      },
+      {
+        "name": "xDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "xStrides",
+        "kind": "strides_of",
+        "of": "xDims"
+      },
+      {
+        "name": "scaleDims",
+        "kind": "expr",
+        "value": [
+          1,
+          1,
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "scaleStrides",
+        "kind": "strides_of",
+        "of": "scaleDims"
+      },
+      {
+        "name": "invRmsDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          1
+        ]
+      },
+      {
+        "name": "invRmsStrides",
+        "kind": "strides_of",
+        "of": "invRmsDims"
+      },
+      {
+        "name": "dxDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.seq_len",
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "dxStrides",
+        "kind": "strides_of",
+        "of": "dxDims"
+      },
+      {
+        "name": "dscaleDims",
+        "kind": "expr",
+        "value": [
+          1,
+          1,
+          "$q.hidden_dim"
+        ]
+      },
+      {
+        "name": "dscaleStrides",
+        "kind": "strides_of",
+        "of": "dscaleDims"
       },
       {
         "name": "dataType",
@@ -102,9 +168,14 @@
         "name": "rank",
         "kind": "direct",
         "source": "$q.rank"
+      },
+      {
+        "name": "invRmsDataType",
+        "kind": "constant",
+        "constant": "float"
       }
     ],
-    "// types": "Operands carry the declared dtype; statistics accumulate in fp32. Left to default, compute follows io, and hip-kernel-provider's Layernorm plan builder refuses any node whose compute_data_type is not fp32."
+    "// types": "Activations and their gradients carry the declared dtype; the saved inverse RMS is fp32 (HIP_MLOPS: 'RMSnorm stat tensors use unsupported data type' otherwise), and accumulation is fp32."
   },
   "archetypes": [
     {
@@ -247,5 +318,6 @@
     "exploration": 0.2
   },
   "// archetypes": "Normalization runs once or twice per transformer block, on the same activation tensor the block's matmuls produce -- so its shapes are the model's hidden width against however many tokens are in flight, not arbitrary three-dimensional boxes.",
-  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests."
+  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests.",
+  "description": "Gradients of RMS normalization over the trailing hidden dimension: dx from dy and the saved inverse RMS, and dscale."
 }

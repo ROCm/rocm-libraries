@@ -72,6 +72,12 @@ struct PoolEntry
     /// The stratification label (see RegimeLabel.hpp). Carried rather than recomputed so that
     /// ordering and reporting cannot disagree about which regime an entry is in.
     std::string regime;
+
+    /// What a cut is spread over: the entry's categorical combination (dtype, layout, mode...)
+    /// together with its regime. Empty falls back to the regime alone. Without the combination,
+    /// a declaration with no regime label spreads over nothing, a cut keeps whichever
+    /// combinations were searched first, and the last dtype disappears from the corpus.
+    std::string stratum;
 };
 
 /// The pools, keyed by source name.
@@ -210,11 +216,12 @@ inline std::vector<PoolEntry> spread(const std::vector<PoolEntry>& pool)
     std::map<std::string, std::vector<PoolEntry>> buckets;
     for(const auto& entry : pool)
     {
-        if(buckets.find(entry.regime) == buckets.end())
+        const auto& key = entry.stratum.empty() ? entry.regime : entry.stratum;
+        if(buckets.find(key) == buckets.end())
         {
-            order.push_back(entry.regime);
+            order.push_back(key);
         }
-        buckets[entry.regime].push_back(entry);
+        buckets[key].push_back(entry);
     }
 
     struct Placed
@@ -283,11 +290,10 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
     for(const auto& source : corpusSources())
     {
         const auto found = pools.find(source);
-        ordered[source] = found == pools.end() ? std::vector<PoolEntry>{} : found->second;
-        if(source == "model")
-        {
-            ordered[source] = detail::spread(ordered[source]);
-        }
+        // Every pool is spread before it is cut, not only the model pool: a pack or a search
+        // arrives in its own order, and taking a prefix of that keeps whatever came first.
+        ordered[source] = detail::spread(
+            found == pools.end() ? std::vector<PoolEntry>{} : found->second);
         capacity[source] = static_cast<int64_t>(ordered[source].size());
     }
 

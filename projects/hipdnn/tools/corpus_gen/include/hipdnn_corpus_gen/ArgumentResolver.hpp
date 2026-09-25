@@ -143,12 +143,30 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
 
             // All dimension expressions share a compiled descriptor program.
             std::vector<int64_t> dims;
-            dims.reserve(argument.expressions.size());
+            dims.reserve(argument.elementCount);
             try
             {
                 auto work = argument.expressions.workspace();
-                for(size_t i = 0; i < argument.expressions.size(); ++i)
+                for(size_t i = 0; i < argument.elementCount; ++i)
                 {
+                    if(i < argument.elementConditions.size()
+                       && argument.elementConditions[i].has_value())
+                    {
+                        const auto& when
+                            = argument.expressions.evaluate(*argument.elementConditions[i],
+                                                            context,
+                                                            work);
+                        const auto* flag = std::get_if<bool>(&when.raw);
+                        const bool present
+                            = flag != nullptr
+                                  ? *flag
+                                  : hipdnn_plugin_sdk::uhd::expression::Program::number(when)
+                                        != 0.0;
+                        if(!present)
+                        {
+                            continue;
+                        }
+                    }
                     const auto& value = argument.expressions.evaluate(i, context, work);
                     if(const auto* integer = std::get_if<int64_t>(&value.raw))
                     {

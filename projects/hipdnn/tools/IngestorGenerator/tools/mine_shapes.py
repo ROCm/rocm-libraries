@@ -804,10 +804,13 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
     which is only equivalent where Sq == Sk); a tabular source cannot say bottom-right
     -- `MASK_TYPE` deliberately has no spelling for it -- so it defaults to `top_left`.
     The column is always written because the declaration's argument resolution is
-    strict about a parameter it reads being present.
+    strict about a parameter it reads being present. `q.generate_stats` is always
+    `false` for the same reason: every source here records inference forwards, and
+    none says whether a shape also ran as a training forward.
     """
     columns = ["name", "op", "q.batch", "q.heads", "q.heads_kv", "q.seqlen_q",
-               "q.seqlen_k", "q.head_dim", "q.is_causal", "q.alignment", "q.dtype"]
+               "q.seqlen_k", "q.head_dim", "q.is_causal", "q.alignment",
+               "q.generate_stats", "q.dtype"]
     dropped: dict[str, int] = {}
     written = 0
     with path.open("w", newline="") as handle:
@@ -831,7 +834,7 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                 shape["seqlen_q"], shape["seqlen_k"], shape["hdim_q"],
                 "true" if causal else "false",
                 shape.get("alignment", "top_left") if causal else "top_left",
-                shape["dtype"],
+                "false", shape["dtype"],
             ])
             written += 1
     return {"written": written, "dropped": dropped}

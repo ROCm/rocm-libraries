@@ -865,19 +865,28 @@ class TestQueryCsv:
             "1,32,8,4096,4096,128,bf16,causal\n")
         assert rc == 0, log
         assert lines[0] == ("name,op,q.batch,q.heads,q.heads_kv,q.seqlen_q,"
-                            "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.dtype")
+                            "q.seqlen_k,q.head_dim,q.is_causal,q.alignment,q.generate_stats,"
+                            "q.dtype")
         assert lines[1].split(",")[1:] == [
             "sdpa_fwd", "1", "32", "8", "4096", "4096", "128", "true",
-            "top_left", "bf16"]
+            "top_left", "false", "bf16"]
 
-    def test_alignment_is_always_top_left(self, tmp_path):
-        """No source here can say bottom-right -- `MASK_TYPE` deliberately carries no
+    def test_a_tabular_row_is_written_top_left(self, tmp_path):
+        """A tabular source cannot say bottom-right -- `MASK_TYPE` deliberately carries no
         spelling for it -- but the column is written anyway, because the declaration's
         argument resolution is strict about a parameter it reads being present."""
         rc, log, lines = self._mine(
             tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
         assert rc == 0, log
-        assert lines[1].split(",")[-2] == "top_left"
+        assert lines[1].split(",")[-3] == "top_left"
+
+    def test_generate_stats_is_always_false(self, tmp_path):
+        """Every source records inference forwards; none says a shape also ran as a training
+        forward, so the column is written as false rather than left for the tool to refuse."""
+        rc, log, lines = self._mine(
+            tmp_path, "batch,heads_q,seqlen_q,seqlen_kv,head_dim\n1,32,4096,4096,128\n")
+        assert rc == 0, log
+        assert lines[1].split(",")[-2] == "false"
 
     def test_a_windowed_shape_is_dropped_by_name_and_counted(self, tmp_path):
         """`sdpa_fwd` declares no window parameter, so a swin shape cannot be written --
@@ -898,3 +907,32 @@ class TestQueryCsv:
         assert rc != 0
         assert len(lines) == 1
         assert "the model pool would be empty" in log
+
+    def test_a_graph_keeps_its_bottom_right_anchor(self, tmp_path):
+        """A graph states its anchor, and `_mask_from_attributes` reports it. Where
+        Sq != Sk the two anchors compute different outputs, so writing top-left here
+        would hand the corpus tool a different problem under the graph's name."""
+        graphs = tmp_path / "graphs"
+        graphs.mkdir()
+        (graphs / "g.json").write_text(json.dumps({
+            "name": "g",
+            "tensors": [
+                {"uid": 1, "name": "q", "dims": [1, 32, 512, 128], "data_type": "bf16"},
+                {"uid": 2, "name": "k", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+                {"uid": 3, "name": "v", "dims": [1, 8, 4096, 128], "data_type": "bf16"},
+            ],
+            "nodes": [{"type": "SdpaAttributes", "attributes": {
+                "q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3,
+                "causal_mask_bottom_right": True}}],
+        }))
+        query = tmp_path / "model-shapes.csv"
+        result = subprocess.run(
+            [sys.executable, str(_MINE), "--graphs", str(graphs),
+             "--out-query-csv", str(query)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        header, row = query.read_text().splitlines()
+        record = dict(zip(header.split(","), row.split(",")))
+        assert record["q.is_causal"] == "true"
+        assert record["q.alignment"] == "bottom_right"

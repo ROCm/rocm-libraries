@@ -193,3 +193,28 @@ TEST(TestPoolAssembly, ASourceWithNoPoolIsNotAnError)
     EXPECT_EQ(allocation.at("kernel"), 0);
     EXPECT_EQ(selected.size(), 2u);
 }
+
+TEST(TestPoolAssembly, ACutSweepPoolKeepsEveryCategoricalCombination)
+{
+    // A search arrives combination by combination -- every fp32 problem, then every bf16 one.
+    // Taking a prefix of that dropped bf16 from a pooling corpus entirely, though the engine
+    // served it. Spread over the stratum, a cut keeps each combination's share.
+    std::vector<PoolEntry> pool;
+    for(int64_t index = 0; index < 60; ++index)
+    {
+        auto entry = entryAt("sweep", index, "");
+        entry.stratum = index < 30 ? "dtype=fp32,|" : "dtype=bf16,|";
+        pool.push_back(entry);
+    }
+
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select({{"sweep", pool}}, 20, defaultShares(), allocation);
+
+    std::map<std::string, int64_t> perStratum;
+    for(const auto& entry : selected)
+    {
+        ++perStratum[entry.stratum];
+    }
+    const std::map<std::string, int64_t> expected{{"dtype=bf16,|", 10}, {"dtype=fp32,|", 10}};
+    EXPECT_EQ(perStratum, expected);
+}

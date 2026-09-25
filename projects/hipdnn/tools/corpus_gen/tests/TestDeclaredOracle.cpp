@@ -48,6 +48,7 @@ ProblemPoint sdpaPoint()
                         {"head_dim", int64_t{128}},
                         {"is_causal", true},
                         {"alignment", std::string("top_left")},
+                        {"generate_stats", false},
                         {"dtype", std::string("bf16")}};
 }
 

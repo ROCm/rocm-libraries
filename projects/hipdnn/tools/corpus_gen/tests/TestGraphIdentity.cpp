@@ -56,6 +56,7 @@ std::vector<uint8_t> someGraph()
                              {"head_dim", int64_t{128}},
                              {"is_causal", true},
                              {"alignment", std::string("top_left")},
+                             {"generate_stats", false},
                              {"dtype", std::string("bf16")}};
 
     const auto built = buildGraphFor(*parsed.metadata, point);

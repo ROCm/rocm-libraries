@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
-  "operation": "matmul",
-  "display_name": "Matrix Multiply",
-  "description": "C = A x B. A is [M, K], B is [K, N].",
+  "operation": "matmul_epilogue",
+  "display_name": "Matmul with Epilogue",
+  "description": "C = activation(A x B + bias): a matmul followed by a per-column bias add, an activation, or both, as one graph. The matmul problem space is matmul's.",
   "parameters": {
     "M": {
       "type": "int64"
@@ -36,6 +36,28 @@
         "col"
       ],
       "description": "Memory order of B."
+    },
+    "epilogue": {
+      "type": "enum",
+      "values": [
+        "bias_activation",
+        "bias",
+        "activation"
+      ],
+      "description": "What follows the matmul."
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "RELU_FWD",
+        "GELU_FWD",
+        "GELU_APPROX_TANH_FWD",
+        "SWISH_FWD",
+        "SIGMOID_FWD",
+        "TANH_FWD",
+        "ELU_FWD"
+      ],
+      "description": "The activation, when the epilogue has one; a FlatBuffers PointwiseMode enumerator name with its parameters unset."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -74,7 +96,7 @@
     }
   },
   "graph_builder": {
-    "function": "matmul",
+    "function": "matmulEpilogue",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
     "arguments": [
       {
@@ -167,6 +189,19 @@
         "of": "cDims"
       },
       {
+        "name": "biasDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.N"
+        ]
+      },
+      {
+        "name": "biasStrides",
+        "kind": "strides_of",
+        "of": "biasDims"
+      },
+      {
         "name": "dataType",
         "kind": "dtype_of",
         "source": "$q.dtype"
@@ -180,9 +215,19 @@
         "name": "intermediateDataType",
         "kind": "constant",
         "constant": "float"
+      },
+      {
+        "name": "epilogue",
+        "kind": "direct",
+        "source": "$q.epilogue"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
       }
     ],
-    "// types": "Operands carry the declared dtype; accumulation is fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hipBLASLt refuses ('Matmul node compute data type must be float')."
+    "// types": "Operands, bias and result carry the declared dtype; the matmul's output and the biased intermediate are fp32, and every node computes in fp32 -- hipBLASLt's epilogue contract."
   },
   "archetypes": [
     {
@@ -379,5 +424,24 @@
     "exploration": 0.2
   },
   "// archetypes": "Transformer projection shapes, where nearly all production GEMM time goes. M carries tokens and moves with batch and sequence length; N and K are model widths and take a few architecture-fixed values, which is why they are perturbed by whole 128-element multiples rather than scaled.",
-  "// mixture": "Same shares as conv_fwd; see the note there."
+  "// mixture": "Same shares as conv_fwd; see the note there.",
+  "constraints": [
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.epilogue",
+            "bias"
+          ]
+        },
+        {
+          "==": [
+            "$q.mode",
+            "RELU_FWD"
+          ]
+        }
+      ]
+    }
+  ],
+  "// constraints": "An epilogue with no activation ignores mode, so it is pinned to one value rather than repeating the same graph under every mode."
 }
