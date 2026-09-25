@@ -88,7 +88,7 @@ _ACTIVATION_ARG_INDEX = {
 # Top-level custom.config keys that are not in validParameters but must survive
 # the parameter-validation/strip pass in getCustomKernelConfig.
 #
-# These two are consumed structurally by Tensile (ProblemType drives the
+# These two are consumed structurally by TensileLite (ProblemType drives the
 # solution; InternalSupportParams threads through to the kernel writer) and
 # would otherwise be popped because they're not tunable parameters.
 #
@@ -282,7 +282,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
         f"Unknown amdgpu_metadata arg name '{name}'{where} while auto-inferring "
         f"a CustomKernel block. Either add an explicit CustomKernel: section "
         f"to custom.config, or extend _METADATA_NAME_TO_SEMANTIC in "
-        f"Tensile/CustomKernels.py."
+        f"tensilelite/CustomKernels.py."
     )
 
 _HEADER_SEMANTIC_ORDER = {
@@ -436,13 +436,13 @@ def getCustomKernelConfig(
 ################################################################################
 
 _EXTERNAL_HINT = (
-    "External kernels carry their full Tensile-side interface in custom.config. "
-    "To inject one from a Tensile test YAML, run:\n"
-    "  python -m Tensile.AddCustomConfig <file.s> --yaml <test.yaml>\n"
+    "External kernels carry their full TensileLite-side interface in custom.config. "
+    "To inject one from a TensileLite test YAML, run:\n"
+    "  python -m tensilelite.AddCustomConfig <file.s> --yaml <test.yaml>\n"
 )
 
 _TENSILE_HINT = (
-    "Tensile-generated kernels only need InternalSupportParams.KernArgsVersion in "
+    "TensileLite-generated kernels only need InternalSupportParams.KernArgsVersion in "
     "custom.config; ProblemType and tuning state come from the consuming logic file "
     "or test YAML. If the field is missing, regenerate the kernel with the current "
     "kernel writer."
@@ -463,13 +463,13 @@ def _missingMetadataMessage(kind, name, filepath, missing):
 def validateCustomKernelMetadata(name, directory=None):
     """Validates that a kernel has an embedded custom.config with required fields.
 
-    Tensile-generated kernels (no Source.Origin) only need
+    TensileLite-generated kernels (no Source.Origin) only need
     InternalSupportParams.KernArgsVersion -- the only field
     `getCustomKernelConfig` actually requires at runtime. Their ProblemType and
     tuning state live in the consuming logic file or test YAML and are merged
     on top of custom.config there.
 
-    External kernels (Source.Origin present) carry their full Tensile-side
+    External kernels (Source.Origin present) carry their full TensileLite-side
     interface and provenance in custom.config: Source, Features, Version,
     InternalSupportParams.KernArgsVersion, ProblemType, MatrixInstruction, and
     a CustomKernel block with args/macrotile/threads/grid.
@@ -523,7 +523,7 @@ def validateCustomKernelMetadata(name, directory=None):
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
 
     if missing:
-        kind = "External" if is_external else "Tensile"
+        kind = "External" if is_external else "TensileLite"
         return False, _missingMetadataMessage(kind, name, filepath, missing)
 
     return True, f"Kernel '{name}' metadata is valid"

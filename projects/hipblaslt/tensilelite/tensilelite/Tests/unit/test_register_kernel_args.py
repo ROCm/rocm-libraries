@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Coverage for ``KernelWriter._registerKernelArgs`` — the pure argument-metadata
-builder that produces the ``CustomKernel.args`` list for Tensile-generated
+builder that produces the ``CustomKernel.args`` list for TensileLite-generated
 kernels (the kernarg-buffer layout the C++ runtime packs against).
 
 Scope / what this does and does NOT guarantee:
