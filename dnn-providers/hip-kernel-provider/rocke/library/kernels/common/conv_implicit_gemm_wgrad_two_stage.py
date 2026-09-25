@@ -168,6 +168,10 @@ def build_implicit_gemm_conv_wgrad_two_stage(
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=arch,
+            # See the note in build_implicit_gemm_conv_wgrad: the merged
+            # group count is the real CTA multiplier. Equal at gm == 1.
+            groups=spec.grid_groups,
+            block_size=spec.block_size,
         ).split_k
         spec = dc_replace(spec, split_k=resolved)
 

@@ -135,12 +135,10 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
             self.assertIn("capability", why)
             self.assertIn("fp8", why)
 
-    def test_rejects_sliding_window(self):
+    def test_admits_sliding_window(self):
         with _Gfx942Arch():
-            ok, why = _candidate().admits(_req(sliding_window=64))
-            self.assertFalse(ok)
-            self.assertIn("capability", why)
-            self.assertIn("sliding_window", why)
+            ok, _ = _candidate().admits(_req(sliding_window=64))
+            self.assertTrue(ok)
 
     def test_rejects_sinks(self):
         with _Gfx942Arch():
@@ -275,6 +273,41 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             spec = _dense_spec(req)
             kd = build_attention_dense(spec, arch="gfx942")
             self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name_override)
+
+
+class TestGfx942SlidingWindow(unittest.TestCase):
+    """Sliding-window pass-through and capability tests, mirroring gfx950's suite."""
+
+    def test_sliding_window_zero_by_default(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req())
+            self.assertEqual(spec.sliding_window, 0)
+
+    def test_sliding_window_passes_through_to_spec(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req(sliding_window=128))
+            self.assertEqual(spec.sliding_window, 128)
+
+    def test_sliding_window_appears_in_kernel_name(self):
+        with _Gfx942Arch():
+            spec = _dense_spec(_req(sliding_window=256))
+            self.assertIn("swa256", spec.kernel_name())
+
+    def test_different_window_sizes(self):
+        with _Gfx942Arch():
+            for window in (64, 128, 256):
+                spec = _dense_spec(_req(sliding_window=window))
+                self.assertEqual(spec.sliding_window, window)
+
+    def test_sliding_window_in_supports_features(self):
+        self.assertIn("sliding_window", _candidate().capability.supports_features)
+
+    def test_sliding_window_requires_causal(self):
+        """sliding_window without causal is rejected by _dense_spec (spec validates it)."""
+        with _Gfx942Arch():
+            ok, why = _candidate().admits(_req(sliding_window=128, mask_type=0))
+            self.assertFalse(ok)
+            self.assertNotIn("capability", why)
 
 
 if __name__ == "__main__":

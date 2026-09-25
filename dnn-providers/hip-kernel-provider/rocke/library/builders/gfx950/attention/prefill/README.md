@@ -213,6 +213,8 @@ rejects an explicit `"on"`. Equal lengths preserve the equivalent top-left path.
 dense-pipe/D256 candidates: those kernels already shift the causal diagonal by
 each sequence's runtime KV/query length difference. The standalone gfx942 dense
 and gfx1250 WMMA candidates still reject a moving bottom-right diagonal.
+That rejection does not disable gfx942 dense sliding-window attention: top-left
+and equal-length bottom-right requests retain the windowed path on both grids.
 
 `dense_persistent="auto"` turns on the persistent grid-stride variant once there is
 enough work to fill the grid (`⌈Sq/256⌉·Hq·B >= num_persistent`) — i.e. the large-Sq

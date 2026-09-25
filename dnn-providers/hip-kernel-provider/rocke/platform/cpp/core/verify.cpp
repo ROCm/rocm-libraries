@@ -368,6 +368,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
         }
+        if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
+        {
+            v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
+        }
     }
     else if(is_cmp(o))
     {
