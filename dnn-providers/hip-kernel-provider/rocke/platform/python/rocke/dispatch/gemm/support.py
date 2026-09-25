@@ -207,10 +207,14 @@ def gemm_config_supported(q: GemmSupportQuery) -> Tuple[bool, str]:
                 False,
                 f"WMMA path supports only the 'mem' pipeline, got {q.pipeline!r}",
             )
-        if q.epilogue != "default":
+        # cshuffle is admitted on gfx1250 only; see
+        # instances/common/gemm_universal.py for why the emitter itself is
+        # arch-neutral and what the other WMMA targets are still waiting on.
+        if q.epilogue != "default" and q.arch != "gfx1250":
             return (
                 False,
-                f"WMMA path supports only the 'default' epilogue, got {q.epilogue!r}",
+                f"WMMA path supports the {q.epilogue!r} epilogue only on "
+                f"gfx1250, not {q.arch}",
             )
         for flag, label in (
             (q.preshuffle_b, "preshuffle_b"),

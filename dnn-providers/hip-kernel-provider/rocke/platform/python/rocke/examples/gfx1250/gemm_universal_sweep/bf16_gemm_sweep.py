@@ -66,6 +66,7 @@ def _make_spec(
     tdm_depth: int = 1,
 ) -> UniversalGemmSpec:
     target = config["target"]
+    problem = config["problem"]
     warp_tile_m, warp_tile_n, warp_tile_k = target["warp_tile"]
     dtype = str(target["dtype"])
     return UniversalGemmSpec(
@@ -85,9 +86,12 @@ def _make_spec(
             pipeline=pipeline,  # type: ignore[arg-type]
             scheduler=scheduler,  # type: ignore[arg-type]
             epilogue=epilogue,  # type: ignore[arg-type]
-            pad_m=True,
-            pad_n=True,
-            pad_k=True,
+            # A guard is dead code when the tile grid lands exactly on the
+            # extent, and ``pad_n`` forfeits the cshuffle wide store, so each
+            # one follows the shape rather than being forced on.
+            pad_m=int(problem["m"]) % tile_m != 0,
+            pad_n=int(problem["n"]) % tile_n != 0,
+            pad_k=int(problem["k"]) % tile_k != 0,
             waves_per_eu=waves_per_eu,
             lds_swizzle=lds_swizzle,
             lds_k_pad=lds_k_pad,

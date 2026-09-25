@@ -242,6 +242,27 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->block_size = 1024;
         spec->batched = false;
         break;
+    case 11: /* WMMA (gfx1250, wave32) cshuffle: c_layout()-driven acc scatter */
+        spec->name = "test_wmma_cshuffle_1250";
+        spec->tile = (rocke_gemm_tile_spec_t){.tile_m = 32,
+                                              .tile_n = 32,
+                                              .tile_k = 32,
+                                              .warp_m = 2,
+                                              .warp_n = 2,
+                                              .warp_k = 1,
+                                              .warp_tile_m = 16,
+                                              .warp_tile_n = 16,
+                                              .warp_tile_k = 32};
+        spec->trait.pipeline = "mem";
+        spec->trait.epilogue = "cshuffle";
+        spec->data.dtype_a = "bf16";
+        spec->data.dtype_b = "bf16";
+        spec->data.dtype_c = "bf16";
+        spec->data.dtype_acc = "fp32";
+        spec->wave_size = 32;
+        spec->block_size = 128;
+        spec->batched = false;
+        break;
     default:
         return -1;
     }
@@ -249,17 +270,25 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Config 9 exercises gfx942; all others use the gfx950 baseline. */
+/* Config 9 exercises gfx942 and 11 gfx1250; the rest use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
-    return idx == 9 ? "gfx942" : "gfx950";
+    if(idx == 9)
+    {
+        return "gfx942";
+    }
+    if(idx == 11)
+    {
+        return "gfx1250";
+    }
+    return "gfx950";
 }
 
 int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..10>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..11>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

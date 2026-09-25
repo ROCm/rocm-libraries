@@ -412,6 +412,22 @@ void rocke_gemm_emit_mfma_acc_scatter(rocke_ir_builder_t* b,
                                       void* user,
                                       bool n_base_first);
 
+/* _emit_wmma_acc_scatter(...): the WMMA sibling of the walk above. Each slot's
+ * (row, col) comes from the op's c_layout() map instead of lane math; the
+ * default and cshuffle epilogues share it through the same per_cell callback. */
+void rocke_gemm_emit_wmma_acc_scatter(rocke_ir_builder_t* b,
+                                      const rocke_gemm_universal_spec_t* spec,
+                                      const rocke_mmaop_t* op,
+                                      rocke_value_t* lane,
+                                      rocke_value_t* const* accs,
+                                      int num_accs,
+                                      rocke_value_t* m_base_off,
+                                      rocke_value_t* n_base_off,
+                                      int c_per_lane,
+                                      const rocke_type_t* storage_dtype,
+                                      rocke_gemm_per_cell_fn per_cell,
+                                      void* user);
+
 /* _emit_epilogue_default(...): direct vector-store epilogue (incl. the WMMA
  * c_layout scatter branch). fused_epilogue is opaque (NULL = matmul-only). */
 void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
@@ -451,10 +467,12 @@ void rocke_gemm_emit_epilogue_split_k(rocke_ir_builder_t* b,
                                       rocke_value_t* Cf32,
                                       int c_per_lane);
 
-/* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. */
+/* _emit_epilogue_cshuffle(...): LDS-staged cshuffle epilogue. `op` selects the
+ * accumulator -> LDS scatter: the MFMA acc scatter, or (family == "wmma") the
+ * op's c_layout() map. Steps 3/4 (barrier + wide global stores) are shared. */
 void rocke_gemm_emit_epilogue_cshuffle(rocke_ir_builder_t* b,
                                        const rocke_gemm_universal_spec_t* spec,
-                                       rocke_value_t* smem_unused,
+                                       const rocke_mmaop_t* op,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        rocke_value_t* warp_m_idx,

@@ -264,6 +264,37 @@ def _spec(idx: int) -> UniversalGemmSpec:
             block_size=1024,
             batched=False,
         )
+    if idx == 11:
+        # WMMA (gfx1250, wave32) cshuffle. The wave32 accumulator scatter comes
+        # from the op's c_layout() map rather than MFMA lane math, so this is
+        # the config that byte-validates the WMMA branch of
+        # _emit_epilogue_cshuffle. pad_m/pad_n stay off so the step-4 wide
+        # vector store is the path exercised rather than the guarded
+        # per-element fallback.
+        return (
+            UniversalGemmSpec(
+                name="test_wmma_cshuffle_1250",
+                tile=TileSpec(
+                    tile_m=32,
+                    tile_n=32,
+                    tile_k=32,
+                    warp_m=2,
+                    warp_n=2,
+                    warp_k=1,
+                    warp_tile_m=16,
+                    warp_tile_n=16,
+                    warp_tile_k=32,
+                ),
+                trait=TraitSpec(pipeline="mem", epilogue="cshuffle"),
+                data=DataSpec(
+                    dtype_a="bf16", dtype_b="bf16", dtype_c="bf16", dtype_acc="fp32"
+                ),
+                wave_size=32,
+                block_size=128,
+                batched=False,
+            ),
+            "gfx1250",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -271,7 +302,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..10>\n",
+        usage="usage: gemm_emit.py <config_index 0..11>\n",
     )
 
 

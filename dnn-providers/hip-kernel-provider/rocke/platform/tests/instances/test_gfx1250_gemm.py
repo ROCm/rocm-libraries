@@ -336,6 +336,47 @@ class TestGfx1250Gemm(unittest.TestCase):
                     issues = ll.count("call void @llvm.amdgcn.tensor.load.to.lds")
                     self.assertEqual(issues, 2 * (depth - 1) + 2)
 
+    def test_wmma_tdm_deep_ring_drains_before_aliased_cshuffle_tile(self):
+        """A deep ring must not leave mover writes in flight into the epilogue.
+
+        The ring's per-tile wait is partial, so its final iterations' look-ahead
+        fills are still in flight when the K-loop ends -- writes aimed at ring
+        slots inside the A/B pool. Under ``cshuffle`` the smem packer aliases the
+        C staging tile onto exactly those bytes, because IR liveness sees A/B die
+        at the loop's last *read* rather than when the hardware write lands. No
+        barrier helps: ``tile.sync`` drains VMEM and LDS, not TENSORcnt. Without
+        the post-loop drain a late fill overwrites the staged C tile, which is a
+        wrong answer rather than a fault, so assert the drain on the emission.
+        """
+        import re
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        for depth in (3, 4):
+            for no_alias in (False, True):
+                with self.subTest(tdm_depth=depth, cshuffle_no_alias=no_alias):
+                    ll = lower_kernel_to_llvm(
+                        build_universal_gemm(
+                            self._tdm_spec(
+                                depth=depth,
+                                epilogue="cshuffle",
+                                cshuffle_no_alias=no_alias,
+                            ),
+                            arch="gfx1250",
+                        ),
+                        arch="gfx1250",
+                    )
+                    waits = [
+                        int(n)
+                        for n in re.findall(r"wait\.tensorcnt\(i16 (\d+)\)", ll)
+                    ]
+                    # The drain is unconditional rather than predicated on the
+                    # aliasing: it is the ring that owes the invariant, and
+                    # ``cshuffle_no_alias`` is a tuning knob that must not be
+                    # load-bearing for correctness.
+                    self.assertEqual(sorted(waits), [0, depth - 2])
+
     def test_wmma_tdm_compiles_to_hsaco_per_depth(self):
         from rocke.helpers.compile import compile_kernel
         from rocke.instances.common.gemm_universal import build_universal_gemm
@@ -389,6 +430,136 @@ class TestGfx1250Gemm(unittest.TestCase):
             {t.lds_k_pad for t in tdm_traits},
             set(config["trait_config"]["lds_k_pad"]),
         )
+
+    @staticmethod
+    def _cshuffle_spec(
+        *, epilogue: str = "cshuffle", depth: int = 2, pad: bool = False
+    ):
+        """The m114688 case-study winner tile, epilogue/pad parameterised.
+
+        256x256x64 on a 8x4 warp grid (block 1024), WMMA 16x16x32 bf16, TDM
+        ping-pong, ``lds_k_pad=8``.
+        """
+        from rocke.instances.common.gemm_universal import (
+            DataSpec,
+            TileSpec,
+            TraitSpec,
+            UniversalGemmSpec,
+        )
+
+        return UniversalGemmSpec(
+            name="gfx1250_cshuffle_test",
+            tile=TileSpec(
+                tile_m=256,
+                tile_n=256,
+                tile_k=64,
+                warp_m=8,
+                warp_n=4,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            ),
+            trait=TraitSpec(
+                pipeline="mem",
+                scheduler="intrawave",
+                epilogue=epilogue,
+                tdm=True,
+                tdm_depth=depth,
+                lds_k_pad=8,
+                pad_m=pad,
+                pad_n=pad,
+                pad_k=pad,
+            ),
+            data=DataSpec(
+                dtype_a="bf16",
+                dtype_b="bf16",
+                dtype_c="bf16",
+                dtype_acc="fp32",
+                layout="RCR",
+            ),
+            wave_size=32,
+        )
+
+    def test_wmma_cshuffle_validation_contract(self):
+        """The WMMA path accepts both epilogues, and the LDS gate models the
+        A/B <-> C aliasing the emitter actually performs.
+
+        The winner tile's C staging tile is 128 KiB and its double-buffered
+        TDM A/B is 144 KiB. Counted additively that is 272 KiB against a 160
+        KiB cap, so an additive gate rejects every cshuffle spec at this tile;
+        the packer aliases C onto A/B, so the real peak is max(A/B, C).
+        """
+        from rocke.instances.common.gemm_universal import is_valid_spec
+
+        for epilogue in ("default", "cshuffle"):
+            for depth in (1, 2):
+                for pad in (False, True):
+                    with self.subTest(epilogue=epilogue, depth=depth, pad=pad):
+                        ok, why = is_valid_spec(
+                            self._cshuffle_spec(
+                                epilogue=epilogue, depth=depth, pad=pad
+                            ),
+                            arch="gfx1250",
+                        )
+                        self.assertTrue(ok, why)
+
+        # cshuffle_no_alias opts out of the aliasing, so the budget really is
+        # additive there and this tile no longer fits.
+        spec = self._cshuffle_spec()
+        no_alias = replace(
+            spec, trait=replace(spec.trait, cshuffle_no_alias=True)
+        )
+        ok, why = is_valid_spec(no_alias, arch="gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("LDS budget", why)
+
+    def test_wmma_cshuffle_stages_c_through_lds_without_extra_lds(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        def _lower(**kw):
+            return lower_kernel_to_llvm(
+                build_universal_gemm(self._cshuffle_spec(**kw), arch="gfx1250"),
+                arch="gfx1250",
+            )
+
+        cshuffle = _lower()
+        default = _lower(epilogue="default")
+
+        # Two 256x(64+8) bf16 operand buffers, ping-ponged = 144 KiB. The C
+        # staging tile (128 KiB) aliases onto them, so the pool is unchanged
+        # from the direct epilogue -- cshuffle is LDS-free at this tile.
+        self.assertIn("[147456 x i8]", cshuffle)
+        self.assertIn("[147456 x i8]", default)
+
+        # The accumulator reaches C through LDS, and the global stores are
+        # 8-wide (16 B) instead of the direct epilogue's per-slot scalars.
+        self.assertIn("store <8 x bfloat>", cshuffle)
+        self.assertNotIn("store <8 x bfloat>", default)
+        self.assertIn("addrspace(3)", cshuffle)
+
+    def test_wmma_cshuffle_pad_n_forfeits_the_wide_store(self):
+        """``pad_n`` degrades the cshuffle epilogue to element-granular stores.
+
+        The staging tile is always fully in bounds, but a partial output column
+        can cut a vector in half, and ``N`` is a runtime value -- so the
+        emitter guards each element separately rather than dropping the valid
+        columns at the head of the final vector. That is correct but forfeits
+        the vectorisation the epilogue exists to buy, so a padded ``N`` wants
+        the direct epilogue instead.
+        """
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.gemm_universal import build_universal_gemm
+
+        padded = lower_kernel_to_llvm(
+            build_universal_gemm(
+                self._cshuffle_spec(pad=True), arch="gfx1250"
+            ),
+            arch="gfx1250",
+        )
+        self.assertNotIn("store <8 x bfloat>", padded)
+        self.assertIn("store bfloat", padded)
 
     def test_bf16_qwen_gemm_shapes_validate_and_lower(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
