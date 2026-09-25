@@ -434,12 +434,10 @@ TEST_F(TestGpuProfilingControlDescriptor, StallGateExcludesHostSubmissionDelay)
     }
 
     constexpr auto HOST_DELAY = std::chrono::milliseconds(20);
-    // 256 B of memset work is small enough that its device duration can round to zero
-    // or even slip negative against ~1 us timer resolution, masking whatever the
-    // stall gate does or does not exclude. 4 MiB clears that floor with margin while
-    // still finishing well under the <5 ms stalled bound below (see
-    // TestAutotunePlugin's identical TIMING_SCRATCH_SIZE precedent).
-    constexpr size_t BUFFER_BYTES = size_t{4} * 1024 * 1024;
+    // A 4 MiB fill returned -15 us under the gate on Windows/gfx1101.
+    // Increase measured same-stream work so timer jitter does not dominate,
+    // while retaining the nonnegative and <5 ms assertions.
+    constexpr size_t BUFFER_BYTES = size_t{128} * 1024 * 1024;
 
     void* buffer = nullptr;
     ASSERT_EQ(hipMalloc(&buffer, BUFFER_BYTES), hipSuccess);
