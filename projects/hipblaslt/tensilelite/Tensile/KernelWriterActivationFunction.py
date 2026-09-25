@@ -26,7 +26,7 @@ from typing import List
 from rocisa import rocIsa
 
 from Tensile.Activation import ActivationInline, ActivationType
-from Tensile.Common.Architectures import isaToGfx, IsaVersion
+from Tensile.Common.Architectures import archMacroNames, IsaVersion
 from Tensile.KernelWriterBase import KernelWriterBase
 
 class KernelWriterActivationFunction(KernelWriterBase):
@@ -102,7 +102,9 @@ class KernelWriterActivationFunction(KernelWriterBase):
       tf.setKernel(arch, self.state["Kernel"]["WavefrontSize"])
       activationStrList.append(activation.generateInlineAssemblyBody(spaces, activationType))
 
-    activationStrSetList = list(set(activationStrList))
+    # fromkeys, not set: this order becomes the order of the #if/#elif arch
+    # guards emitted into Kernels.h, and set order is a salted string hash.
+    activationStrSetList = list(dict.fromkeys(activationStrList))
     # Return if all codes are the same.
     if len(activationStrSetList) == 1:
       return activationStrList[0]
@@ -119,10 +121,9 @@ class KernelWriterActivationFunction(KernelWriterBase):
     defineStr = []
     macroStr = "#if"
     for archList in cateArch:
-      defStr = "%s defined(__%s__)"%(macroStr, isaToGfx(archList[0]))
-      for arch in archList:
-        defStr += "|| defined(__%s__)"%isaToGfx(arch)
-      defStr += "\n"
+      macros = [m for arch in archList for m in archMacroNames(arch)]
+      cond = "|| ".join("defined(%s)"%m for m in macros)
+      defStr = "%s %s\n"%(macroStr, cond)
       defineStr.append(defStr)
       macroStr = "#elif"
 

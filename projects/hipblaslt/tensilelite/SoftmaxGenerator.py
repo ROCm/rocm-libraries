@@ -39,7 +39,8 @@ from contextlib import contextmanager
 import os.path
 
 from Tensile.Common.Utilities import _global_ti
-from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
+from Tensile.Common.Architectures import detectGlobalCurrentArch, gfxToIsa
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
 from Tensile.Common.RegisterPool import allocTmpGpr
@@ -733,11 +734,21 @@ if __name__ == '__main__':
 
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
-        assignGlobalParameters({})
         enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
-        isa = detectGlobalCurrentISA(0, enumerator)
-        arch = isaToGfx(isa)
+        # `arch` is the compile target for this kernel, so it has to be the name
+        # the device reported: gfx1250 and gfx1250-strict share an ISA, and
+        # deriving the name back from it would build for gfx1250 on either --
+        # code the strict device then refuses to load.
+        arch = detectGlobalCurrentArch(0, enumerator)
+        isa = gfxToIsa(arch)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
+        # Capabilities can only be built once the ISA is known, which is why this
+        # follows detection instead of preceding it. The overrides are what
+        # separate two architectures sharing an ISA, so a detected stepping is
+        # only actually honoured here.
+        isaInfoMap = makeIsaInfoMap([isa], toolchain_path)
+        applyArchCapOverrides(isaInfoMap, [arch])
+        assignGlobalParameters({}, isaInfoMap)
 
     _global_ti.init(isa, toolchain_path, False)
     waveFrontSize = 32 if isa[0] in [11, 12] else 64

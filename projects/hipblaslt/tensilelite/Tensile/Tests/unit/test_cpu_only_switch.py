@@ -162,6 +162,12 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
     def _no_shell(*a, **k):
         raise AssertionError("Architectures.run() shelled out under CpuOnly")
 
+    def _no_probe(*a, **k):
+        raise AssertionError("amdgpu-arch/rocminfo were probed under CpuOnly")
+
+    # Both sources, not just the enumerator: the spoof has to short-circuit
+    # detection entirely, and detect_gpu_archs is now its fallback.
+    monkeypatch.setattr(Arch, "detect_gpu_archs", _no_probe)
     monkeypatch.setattr(Arch, "run", _no_shell)
 
     result = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
@@ -181,6 +187,9 @@ def test_isa_belt_spoof(monkeypatch, _restore_gp, arch):
         calls["n"] += 1
         return _FakeProc()
 
+    # amdgpu-arch/rocminfo back the enumerator up; silenced so the shell-out seam
+    # under test is what answers rather than the real device.
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: [])
     monkeypatch.setattr(Arch, "run", _fake_run)
 
     result_off = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
@@ -473,7 +482,7 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
     output_dir = tmp_path / "output"
     # This test pins per-arch behavior, so its explicit --gpu-targets must win over
     # any global default forwarded through tensile_args (e.g. tox forwards
-    # --gpu-targets gfx1250v0 on a gfx1250 v0 host). argparse resolves --gpu-targets
+    # --gpu-targets gfx1250-strict on a gfx1250 v0 host). argparse resolves --gpu-targets
     # last-wins, so keep the explicit target AFTER *tensile_args.
     args = [
         str(_E2E_CONFIG),
@@ -632,6 +641,9 @@ def test_off_path_real_branches(monkeypatch, _restore_gp):
         isa_calls["n"] += 1
         return _FakeProc()
 
+    # amdgpu-arch/rocminfo back the enumerator up; silenced so the shell-out seam
+    # under test is what answers rather than the real device.
+    monkeypatch.setattr(Arch, "detect_gpu_archs", lambda: [])
     monkeypatch.setattr(Arch, "run", _fake_run)
     isa = Arch.detectGlobalCurrentISA(0, "amdgpu-arch")
     assert isa_calls["n"] == 1, "CpuOnly OFF must reach the real ISA shell-out path"

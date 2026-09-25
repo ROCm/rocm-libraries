@@ -39,7 +39,7 @@ from Tensile.CustomYamlLoader import (
 )
 
 GFX1250 = "gfx1250"
-GFX1250V0 = "gfx1250v0"
+GFX1250_STRICT = "gfx1250-strict"
 
 # The corpus's ``<codename>/<gfx_arch>/...`` layout always lives under a
 # directory named ``asm_full``. Callers rarely pass that exact directory,
@@ -208,111 +208,9 @@ def find_sibling_device_names_violations(
     return violations
 
 
-def find_gfx1250v0_overlay_violations(
-    logic_root: Path,
-    files: Optional[Sequence[Path]] = None,
-    overlay_required: bool = False,
-) -> List[str]:
-    """gfx1250 ships as two silicon revisions (v0, v1) sharing one ISA, arch
-    name, and compiler target; the runtime tells them apart only via
-    ``hipDeviceProp_t::asicRevision``, and ``TensileCreateLibrary`` globs one
-    tree, separating the revisions by ``ScheduleName`` alone. A mis-tagged
-    file fails silently -- dropped from v0, or leaked into every v1 build --
-    so this checks the invariant against the tree that actually ships.
-
-    ``files`` is the same caller-selected list ``find_sibling_device_names_
-    violations`` takes (the full corpus by default, or the already
-    ``--architecture``/``Experimental``-filtered set ``Run.py`` passes) --
-    both the overlay-contents and outside-overlay scans below are scoped to
-    it, not a fresh unconditional walk of ``logic_root``, so an excluded
-    file can't trip a violation the caller never selected. The
-    directory-*exists* requirement is independent of file selection, since
-    it is checking that the tree the runtime will actually read exists at
-    all, not something about the selected files:
-
-    1. if ``overlay_required`` -- an explicit caller policy, not implied by
-       ``--architecture`` (see below) -- the ``gfx1250v0`` overlay directory
-       must exist on disk. Not every ``TensileLogic``-checked corpus does a
-       v0/v1 split for gfx1250 in the first place -- e.g. hipSPARSELt's
-       corpus has no ``gfx1250v0`` directory at all -- so a missing overlay
-       is only a violation when the caller actually owns the split and says
-       so;
-    2. an *existing but empty* overlay (empty within the selected ``files``)
-       is always a violation, regardless of ``overlay_required``: a v0 build
-       reports success having written a library with no solutions in it,
-       and any tree deliberately doing the split should never leave the
-       overlay directory present-but-empty;
-    3. every selected file inside the overlay declares
-       ``ScheduleName: gfx1250v0``;
-    4. every selected file inside the overlay keeps
-       ``ArchitectureName: gfx1250`` (a stepping there is rejected by
-       ``TensileCreateLibrary``, and ``library/gfx1250v0/`` is a directory
-       the runtime never reads); and
-    5. no selected file *outside* the overlay claims
-       ``ScheduleName: gfx1250v0`` (checked regardless of whether the
-       overlay directory exists).
-
-    ``overlay_required`` must be an explicit, caller-owned policy rather
-    than inferred from whether ``gfx1250v0`` was requested: a shared
-    invocation (e.g. hipSPARSELt's, which never did a gfx1250 v0/v1 split)
-    can still be asked to build for architecture ``gfx1250v0`` without that
-    request implying its corpus owns the overlay. Only hipBLASLt's dedicated
-    gfx1250v0 device-library build (see ``device-library/CMakeLists.txt``,
-    and ``--require-gfx1250v0-overlay`` in ``ParseArguments.py``) sets this
-    ``True``.
-    """
-    logic_root = _resolve_corpus_root(logic_root)
-    if files is None:
-        files = sorted(logic_root.rglob("*.yaml"))
-    violations: List[str] = []
-    overlay_root = logic_root / GFX1250V0
-    overlay_exists = overlay_root.is_dir()
-    overlay_files = (
-        sorted(p for p in files if p.is_relative_to(overlay_root)) if overlay_exists else []
-    )
-
-    if overlay_required and not overlay_exists:
-        violations.append(
-            f"{GFX1250V0} overlay required but missing under {overlay_root}"
-        )
-    elif overlay_exists and not overlay_files:
-        violations.append(
-            f"{GFX1250V0} overlay ships no logic under {overlay_root} -- an "
-            "empty overlay means a v0 build reports success having written a "
-            "library with no solutions in it"
-        )
-
-    for p in overlay_files:
-        schedule_name = load_logic_schedule_name(p)
-        if schedule_name != GFX1250V0:
-            violations.append(
-                f"{p.relative_to(logic_root)}: overlay file declares "
-                f"ScheduleName {schedule_name!r}, expected {GFX1250V0!r}"
-            )
-        gfx_arch = load_logic_gfx_arch(p)
-        if gfx_arch != GFX1250:
-            violations.append(
-                f"{p.relative_to(logic_root)}: overlay file declares "
-                f"ArchitectureName {gfx_arch!r}, expected {GFX1250!r}"
-            )
-
-    for p in sorted(files):
-        if overlay_exists and p.is_relative_to(overlay_root):
-            continue
-        if load_logic_schedule_name(p) == GFX1250V0:
-            violations.append(
-                f"{p.relative_to(logic_root)}: declares ScheduleName "
-                f"{GFX1250V0!r} outside the {GFX1250V0} overlay directory"
-            )
-
-    return violations
-
-
 def check_corpus_invariants(
     logic_root: Path,
     files: Optional[Sequence[Path]] = None,
-    archs: Optional[Sequence[str]] = None,
-    overlay_required: bool = False,
 ) -> List[str]:
     """Aggregate the corpus-wide invariant checks into one flat violation
     list. Returns an empty list (rather than raising) when ``logic_root``
@@ -320,21 +218,9 @@ def check_corpus_invariants(
     cross-file comparison to make, so these checks are inapplicable rather
     than failing.
 
-    ``files`` and ``archs`` should be the caller's own already-selected file
-    list and requested ``--architecture`` values (``["all"]`` when no
-    filtering applies); both default to "the whole resolved corpus" for
-    hermetic tests and other callers that just want to check everything.
-
-    The gfx1250v0-overlay check runs whenever ``gfx1250v0`` or ``all`` is in
-    ``archs``, or ``overlay_required`` is set. ``overlay_required`` is a
-    separate, explicit caller policy, deliberately *not* inferred from
-    ``archs`` -- requesting architecture ``gfx1250v0`` does not by itself
-    mean the corpus being validated owns a gfx1250/gfx1250v0 split (e.g. a
-    shared invocation can ask for that architecture against hipSPARSELt's
-    corpus, which never did the split and has no overlay directory at all).
-    Only pass ``True`` when the caller actually owns that split (hipBLASLt's
-    dedicated gfx1250v0 device-library build; see
-    ``find_gfx1250v0_overlay_violations``).
+    ``files`` should be the caller's own already-selected file list, and
+    defaults to "the whole resolved corpus" for hermetic tests and other
+    callers that just want to check everything.
 
     The chip-ID-architecture-lock check (locking chip-ID-aware dispatch to
     ``gfx950``) is intentionally *not* included here: it guards a future
@@ -348,15 +234,8 @@ def check_corpus_invariants(
     resolved_root = _resolve_corpus_root(logic_root)
     if files is None:
         files = sorted(resolved_root.rglob("*.yaml"))
-    if archs is None:
-        archs = ["all"]
 
-    violations = list(find_sibling_device_names_violations(files, resolved_root))
-    if overlay_required or GFX1250V0 in archs or "all" in archs:
-        violations += find_gfx1250v0_overlay_violations(
-            resolved_root, files, overlay_required=overlay_required
-        )
-    return violations
+    return list(find_sibling_device_names_violations(files, resolved_root))
 
 
 def find_chip_id_arch_lock_violations(files: Sequence[Path]) -> List[str]:

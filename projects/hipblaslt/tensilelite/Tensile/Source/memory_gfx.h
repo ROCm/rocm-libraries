@@ -53,7 +53,7 @@
 #elif defined(__gfx1200__) || defined(__gfx1201__)
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x30020000
-#elif defined(__gfx1250__)
+#elif defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x00000000
 #else // not support
@@ -112,7 +112,7 @@ struct alignas(16) BufferResource
         //      base address bits [47:0] (47 bits)
         //      num_records bits [95:64] (32 bits)
 
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
         uint64_t addr = reinterpret_cast<uint64_t>(const_cast<void*>(base_addr));
 
         // bits [56:0] - base address (57 bits)

@@ -72,6 +72,7 @@ namespace TensileLite
         gfx1200,
         gfx1201,
         gfx1250,
+        gfx1250_strict,
         All
     };
 
@@ -138,6 +139,11 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1201";
         case LazyLoadingInit::gfx1250:
             return "TensileLibrary_*_gfx1250";
+        // These two share an ISA but not an ELF machine code, so neither may
+        // preload the other's libraries. Callers match this whole-string, so the
+        // pattern above stops at the bare name and this one requires the suffix.
+        case LazyLoadingInit::gfx1250_strict:
+            return "TensileLibrary_*_gfx1250-strict";
         case LazyLoadingInit::None:
             return "";
         }
