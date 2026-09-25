@@ -13,7 +13,7 @@ Key functions:
     configure: Generate TensileLite configs for GEMM types.
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
-    process_duplicates: Replace Tensile estimates for shared sizes with bench results.
+    process_duplicates: Replace TensileLite estimates for shared sizes with bench results.
 
 Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
 """
@@ -580,7 +580,7 @@ def process_duplicates(
     input_dir: str | Path,
     devices: Sequence[int] | None = None,
 ) -> None:
-    """Replace Tensile performance estimates for duplicated problem sizes.
+    """Replace TensileLite performance estimates for duplicated problem sizes.
 
     A completed config is a ``build_<name>`` directory whose ``3_LibraryLogic``
     directory is non-empty. A problem size is duplicated when the same library
