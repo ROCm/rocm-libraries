@@ -100,9 +100,7 @@ New to the DSL? Read in this order:
 37. [`reference/env_flags.md`](./reference/env_flags.md) — every environment variable (core, provider, tooling, diagnostic)
 38. [`reference/op_vocabulary.md`](./reference/op_vocabulary.md)
 39. [`reference/mfma_atom_catalog.md`](./reference/mfma_atom_catalog.md)
-40. [`reference/matrix_instructions_summary.md`](./reference/matrix_instructions_summary.md) — MFMA/WMMA/SMFMAC/SWMMAC opcode index per architecture, transcribed from the official AMD ISA documentation
-41. [`reference/dtype_support.md`](./reference/dtype_support.md) — which dtypes are supported at which layer (compiler / helpers / families), the hardware ceiling, and what each gap consists of
-42. [`reference/glossary.md`](./reference/glossary.md)
+40. [`reference/glossary.md`](./reference/glossary.md)
 
 ## One-Screen Summary
 
