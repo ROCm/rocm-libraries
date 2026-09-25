@@ -146,7 +146,7 @@ void rocsolver_syevdx_heevdx_getMemorySize(const rocblas_evect evect,
 
     // size of arrays for temporary tridiagonal elements
     *size_D = sizeof(S) * n * batch_count;
-    *size_E = sizeof(S) * n * batch_count;
+    *size_E = sizeof(S) * (n - 1) * batch_count;
 
     if(n < SYEVDX_MIN_DC_SIZE)
     {
@@ -292,13 +292,17 @@ rocblas_status rocsolver_syevdx_heevdx_template(rocblas_handle handle,
     else
     {
         // **** Use D&C approach ****
+        // always produce vectors of the tridiagonal form
+        bool with_vectors = (evect == rocblas_evect_original);
+        rocblas_evect evect2 = with_vectors ? rocblas_evect_tridiagonal : rocblas_evect_none; 
 
         rocsolver_stedcx_template<BATCHED, STRIDED, T>(
-            handle, evect, erange, n, vl, vu, il, iu, D, stride, E, stride, nev, W, strideW, Z,
+            handle, evect2, erange, n, vl, vu, il, iu, D, stride, E, stride, nev, W, strideW, Z,
             shiftZ, ldz, strideZ, info, batch_count, tmpT, (S*)work2, (S*)work3, (S*)work4,
             (S*)work5, work6_ifail, (S**)nsplit_workArr);
 
-        if(evect == rocblas_evect_original)
+        // final update to get vectors of the original matrix
+        if(with_vectors)
         {
             rocblas_int h_nev = (erange == rocblas_erange_index ? iu - il + 1 : n);
             rocsolver_ormtr_unmtr_template<BATCHED, STRIDED>(

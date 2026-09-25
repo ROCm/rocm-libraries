@@ -50,24 +50,29 @@ ROCSOLVER_KERNEL void stedcx_case1_kernel(const rocblas_erange range,
                                           const rocblas_stride strideD,
                                           rocblas_int* nev,
                                           S* WA,
-                                          const rocblas_stride strideW)
+                                          const rocblas_stride strideW,
+                                          const rocblas_int batch_count)
 {
-    int bid = hipBlockIdx_x;
+    const int bid_start = hipBlockIdx_z;
+    const int bid_inc = hipGridDim_z;
 
-    // select batch instance
-    S* D = DA + bid * strideD;
-    S* W = WA + bid * strideW;
+    for(auto bid = bid_start; bid < batch_count; bid += bid_inc)
+    {
+        // select batch instance
+        S* D = DA + bid * strideD;
+        S* W = WA + bid * strideW;
 
-    // check if diagonal element is in range and return
-    S d = D[0];
-    if(range == rocblas_erange_value && (d <= vlow || d > vup))
-    {
-        nev[bid] = 0;
-    }
-    else
-    {
-        nev[bid] = 1;
-        W[0] = d;
+        // check if diagonal element is in range and return
+        S d = D[0];
+        if(range == rocblas_erange_value && (d <= vlow || d > vup))
+        {
+            nev[bid] = 0;
+        }
+        else
+        {
+            nev[bid] = 1;
+            W[0] = d;
+        }
     }
 }
 
@@ -99,56 +104,60 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
     const int tidy = hipThreadIdx_y;
     const int bidx = hipBlockIdx_x;
     const int bidy = hipBlockIdx_y;
-    const int bid = hipBlockIdx_z;
+    const int bid_start = hipBlockIdx_z;
     const int bdimx = hipBlockDim_x;
     const int bdimy = hipBlockDim_y;
     const int gdimx = hipGridDim_x;
     const int gdimy = hipGridDim_y;
+    const int bid_inc = hipGridDim_z;
     const int myrow = bidx * bdimx + tidx;
     const int mycol = bidy * bdimy + tidy;
     const int step_row = bdimx * gdimx;
     const int step_col = bdimy * gdimy;
 
-    // batch instance
-    S* D = DD + bid * strideD;
-    S* W = WW + bid * strideW;
-    T* V = VV + bid * strideV;
-    rocblas_int* nev = nevA + bid;
-    T* C = (CC) ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr;
-
-    // all values in positions 'in' till 'out' will be selected
-    bool value = (range == rocblas_erange_value);
-    bool all = (range == rocblas_erange_all);
-    bool vectors = (evect != rocblas_evect_none);
-    rocblas_int in = il - 1;
-    rocblas_int out = iu;
-    if(all)
+    for(auto bid = bid_start; bid < batch_count; bid += bid_inc)
     {
-        in = 0;
-        out = n;
-    }
-    else if(value)
-    {
-        in = bisearch(vl, D, n, false, false);
-        out = bisearch(vu, D, n, false, false);
-    }
+        // batch instance
+        S* D = DD + bid * strideD;
+        S* W = WW + bid * strideW;
+        T* V = VV + bid * strideV;
+        rocblas_int* nev = nevA + bid;
+        T* C = (CC) ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr;
 
-    // select values and corresponding vectors
-    for(auto j = in + mycol; j < out; j += step_col)
-    {
-        if(myrow == 0)
-            W[j - in] = D[j];
-
-        if(vectors)
+        // all values in positions 'in' till 'out' will be selected
+        bool value = (range == rocblas_erange_value);
+        bool all = (range == rocblas_erange_all);
+        bool vectors = (evect != rocblas_evect_none);
+        rocblas_int in = il - 1;
+        rocblas_int out = iu;
+        if(all)
         {
-            for(auto i = myrow; i < n; i += step_row)
-                C[i + (j - in) * ldc] = V[i + j * ldv];
+            in = 0;
+            out = n;
         }
-    }
+        else if(value)
+        {
+            in = bisearch(vl, D, n, false, false);
+            out = bisearch(vu, D, n, false, false);
+        }
 
-    // final number of selected values
-    if(myrow == 0 && mycol == 0)
-        *nev = out - in;
+        // select values and corresponding vectors
+        for(auto j = in + mycol; j < out; j += step_col)
+        {
+            if(myrow == 0)
+                W[j - in] = D[j];
+
+            if(vectors)
+            {
+                for(auto i = myrow; i < n; i += step_row)
+                    C[i + (j - in) * ldc] = V[i + j * ldv];
+            }
+        }
+
+        // final number of selected values
+        if(myrow == 0 && mycol == 0)
+            *nev = out - in;
+    }
 }
 
 /******************* Host functions ********************************************/
@@ -275,7 +284,8 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
                     "il:", il, "iu:", iu, "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
 
     // NOTE: only case evect = N and evect = I are implemented as this routine
-    // is only for internal use by syevdx.
+    // is only for internal use by syevdx. For performance reasons, The call to 
+    // stedc always computes the vectors even if evect = N.
 
     // quick return
     if(batch_count == 0)
@@ -287,6 +297,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
+    rocblas_int bcblocks = 1;//std::min(65536, batch_count);
 
     // info = 0
     ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
@@ -295,10 +306,14 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     if(n == 1)
     {
         if(evect != rocblas_evect_none)
+        {
+            /** TODO: reset_batch_info should be modified to work with any grid configuration and
+                    not with batch_count hardwired to the grid dimension. **/ 
             ROCSOLVER_LAUNCH_KERNEL(reset_batch_info<T>, dim3(1, batch_count), dim3(1, 1), 0,
                                     stream, C, strideC, n, 1);
-        ROCSOLVER_LAUNCH_KERNEL(stedcx_case1_kernel, dim3(batch_count), dim3(1), 0, stream, erange,
-                                vl, vu, D, strideD, nev, W, strideW);
+        }
+        ROCSOLVER_LAUNCH_KERNEL(stedcx_case1_kernel, dim3(1, 1, bcblocks), dim3(1), 0, stream, erange,
+                                vl, vu, D, strideD, nev, W, strideW, batch_count);
     }
     if(n <= 1)
         return rocblas_status_success;
@@ -323,7 +338,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
 
     // Discard values and vectors out of range
     rocblas_int nblocks = ceildiv(n, BS2);
-    ROCSOLVER_LAUNCH_KERNEL((stedcx_select_kernel<T>), dim3(nblocks, nblocks, batch_count),
+    ROCSOLVER_LAUNCH_KERNEL((stedcx_select_kernel<T>), dim3(nblocks, nblocks, bcblocks),
                             dim3(BS2, BS2), 0, stream, evect, erange, n, vl, vu, il, iu, D, strideD,
                             nev, W, strideW, C, shiftC, ldc, strideC, tmpT, ldt, strideT,
                             batch_count);
