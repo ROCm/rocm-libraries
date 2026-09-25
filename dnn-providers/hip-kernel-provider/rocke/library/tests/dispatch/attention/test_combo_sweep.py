@@ -63,6 +63,12 @@ def _args(**kw):
         progress=False,
         top=0,
         verbose_errors=False,
+        warmup=3,
+        iters=10,
+        benchmark_iterations=5,
+        seed=7,
+        tolerance=0.03,
+        no_check=False,
     )
     base.update(kw)
     return SimpleNamespace(**base)
@@ -110,9 +116,83 @@ class TestComboSweepLifecycle(unittest.TestCase):
         )
         self.assertLess(causal, full)
 
+    def test_repeated_timing_prepares_once_checks_once_and_uses_median(self):
+        class Tensor:
+            def reshape_as(self, _other):
+                return self
+
+            def float(self):
+                return self
+
+            def __sub__(self, _other):
+                return self
+
+            def abs(self):
+                return self
+
+            def max(self):
+                return self
+
+            def item(self):
+                return 0.01
+
+        tensor = Tensor()
+        tensors = {
+            "q": tensor,
+            "k": tensor,
+            "v": tensor,
+            "out": tensor,
+            "_dense_q": tensor,
+            "_dense_k": tensor,
+            "_dense_v": tensor,
+        }
+        binding = SimpleNamespace(launch=mock.Mock())
+        result = SimpleNamespace(
+            candidate=object(),
+            spec=object(),
+            bind_torch=mock.Mock(return_value=binding),
+        )
+        values = [0.10, 0.05, 0.07, 0.06, 0.04]
+        cuda = SimpleNamespace(
+            current_stream=mock.Mock(return_value=SimpleNamespace(cuda_stream=7)),
+            synchronize=mock.Mock(),
+        )
+        with (
+            mock.patch.dict(sys.modules, {"torch": SimpleNamespace(cuda=cuda)}),
+            mock.patch.object(sweep, "_row_skeleton", return_value={"kind": "dense"}),
+            mock.patch.object(sweep, "_dense_tensors", return_value=tensors) as prepare,
+            mock.patch.object(sweep, "_reference", return_value=tensor) as reference,
+            mock.patch("rocke.runtime.time_launches", side_effect=values) as timing,
+            mock.patch("rocke.runtime.synchronize_and_release"),
+        ):
+            row = sweep._run_result(
+                _req(),
+                result,
+                _args(warmup=15, iters=50, benchmark_iterations=5),
+                0,
+            )
+        prepare.assert_called_once()
+        result.bind_torch.assert_called_once()
+        reference.assert_called_once()
+        self.assertEqual(timing.call_count, 5)
+        self.assertEqual(binding.launch.call_count, 1)
+        self.assertEqual(row["ms"], 0.06)
+        self.assertEqual(row["timing"]["excluded_initial_iterations"], 1)
+        self.assertEqual(row["timing"]["warmup_executions_per_iteration"], 15)
+        self.assertEqual(row["timing"]["timed_executions_per_iteration"], 50)
+
     def test_offset_limit_preserve_absolute_indices(self):
         idxs = [i for i, _req, _res in sweep.iter_shard(_args(offset=1, limit=2))]
         self.assertEqual(idxs, [1, 2])
+
+    def test_isolated_child_keeps_outer_timing_count(self):
+        result = SimpleNamespace(candidate=SimpleNamespace(name="candidate"))
+        argv = sweep._child_argv(
+            _args(benchmark_iterations=7),
+            _req(),
+            result,
+        )
+        self.assertEqual(argv[argv.index("--benchmark-iterations") + 1], "7")
 
     def test_invalid_host_validation_does_not_isolate_or_init_torch(self):
         req = _req(algorithm="attention_dense")

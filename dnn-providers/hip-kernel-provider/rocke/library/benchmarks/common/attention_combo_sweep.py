@@ -425,7 +425,18 @@ def _run_result(req, result, args, index: int) -> dict:
             )
             out = tensors["out"]
             max_abs = float((out.reshape_as(ref).float() - ref).abs().max().item())
-        ms = time_launches(call, warmup=args.warmup, iters=args.iters, stream=stream)
+        benchmark_iterations = max(
+            1, int(getattr(args, "benchmark_iterations", 1) or 1)
+        )
+        values = [
+            time_launches(
+                call,
+                warmup=args.warmup,
+                iters=args.iters,
+                stream=stream,
+            )
+            for _ in range(benchmark_iterations)
+        ]
         synchronize_and_release(stream)
     except Exception as exc:  # noqa: BLE001
         row.update(status="error", reason=f"{type(exc).__name__}: {exc}")
@@ -433,14 +444,32 @@ def _run_result(req, result, args, index: int) -> dict:
             traceback.print_exc()
         return row
 
+    used = values[1:] if len(values) > 1 else values
+    ordered = sorted(used)
+    ms = ordered[len(ordered) // 2]
+    flops = _flops(req)
     ok = args.no_check or (max_abs == max_abs and max_abs <= args.tolerance)
     row.update(
         status="ok" if ok else "mismatch",
         path=kind if kind == "dense" else str(getattr(result.spec, "path", "unified")),
         ms=ms,
         us=ms * 1000.0,
-        tflops=_flops(req) / (ms * 1e-3) / 1e12,
+        tflops=flops / (ms * 1e-3) / 1e12,
         max_abs=max_abs,
+        spread_pct=100.0 * (max(used) - min(used)) / max(ms, 1e-12),
+        timing={
+            "benchmark_iteration_count": len(values),
+            "warmup_executions_per_iteration": int(args.warmup),
+            "timed_executions_per_iteration": int(args.iters),
+            "excluded_initial_iterations": 1 if len(values) > 1 else 0,
+            "benchmark_iterations": [
+                {
+                    "amortized_us": value * 1000.0,
+                    "tflops": flops / (value * 1e-3) / 1e12,
+                }
+                for value in values
+            ],
+        },
     )
     return row
 
@@ -472,6 +501,8 @@ def _child_argv(args, req, result) -> list:
         str(args.warmup),
         "--iters",
         str(args.iters),
+        "--benchmark-iterations",
+        str(getattr(args, "benchmark_iterations", 1)),
         "--seed",
         str(args.seed),
         "--tolerance",
@@ -804,8 +835,14 @@ def main() -> int:
         default=0,
         help="configs to skip within each shape; not a global index across shapes",
     )
-    ap.add_argument("--warmup", type=int, default=3)
-    ap.add_argument("--iters", type=int, default=10)
+    ap.add_argument("--warmup", type=int, default=15)
+    ap.add_argument("--iters", type=int, default=50)
+    ap.add_argument(
+        "--benchmark-iterations",
+        type=int,
+        default=5,
+        help="outer timing batches; discard the first and rank by median",
+    )
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--tolerance", type=float, default=0.03)
     ap.add_argument("--no-check", action="store_true")
@@ -832,6 +869,8 @@ def main() -> int:
     ap.add_argument("--run-spec-key", default="")
     ap.add_argument("--run-pickle", default="", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.benchmark_iterations < 1:
+        ap.error("--benchmark-iterations must be >= 1")
     if args.arch is None:
         args.arch = _default_arch()
     if args.list_only:
