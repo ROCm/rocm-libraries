@@ -134,10 +134,10 @@ struct Multiply {
             __m256i a_hi = _mm256_unpackhi_epi8(a, avx_px0);
             __m256i b_hi = _mm256_unpackhi_epi8(b, avx_px0);
 
-            // Exact 8x8->16-bit product (max 255*255 = 65025 fits in uint16). Saturate-pack it
-            // straight back down to 8 bits instead of masking to the low byte, which wrapped.
-            __m256i prod_lo = _mm256_mullo_epi16(a_lo, b_lo);
-            __m256i prod_hi = _mm256_mullo_epi16(a_hi, b_hi);
+            // packus_epi16 treats its inputs as signed, so products >= 32768 must be clamped
+            // unsigned first.
+            __m256i prod_lo = _mm256_min_epu16(_mm256_mullo_epi16(a_lo, b_lo), avx_mask8);
+            __m256i prod_hi = _mm256_min_epu16(_mm256_mullo_epi16(a_hi, b_hi), avx_mask8);
 
             return _mm256_packus_epi16(prod_lo, prod_hi);
         } else if constexpr (std::is_same<T, Rpp8s>::value) {
@@ -150,7 +150,7 @@ struct Multiply {
             __m256i b_hi =
                 _mm256_srai_epi16(_mm256_slli_epi16(_mm256_unpackhi_epi8(b, avx_px0), 8), 8);
 
-            // Exact signed 8x8->16-bit product (range [-16384, 16129] fits in int16). Saturate-
+            // Exact signed 8x8->16-bit product (range [-16256, 16384] fits in int16). Saturate-
             // pack it straight back down to 8 bits instead of masking to the low byte, which
             // wrapped.
             __m256i prod_lo = _mm256_mullo_epi16(a_lo, b_lo);
