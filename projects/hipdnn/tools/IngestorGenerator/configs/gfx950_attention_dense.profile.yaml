@@ -262,13 +262,16 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, seqlen_q, seqlen_kv, batch, block_m, block_n]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n]
     guard: >
-      kernelMatches() returns false (no panic) if any field disagrees, the
-      candidate's tile is illegal, or the candidate is ragged (ragged != 0).
-      Entries require seqlen_q % block_m == 0 and seqlen_kv % block_n == 0
-      per candidate. score() ranks an applicable 256/64 baseline first, then
-      ascending (block_m, block_n).
+      kernelMatches() returns false (no panic) if dtype, head_size,
+      num_query_heads, num_kv_heads, causal or sliding_window disagrees with
+      the graph, the candidate's tile is illegal, or the candidate is ragged
+      (ragged != 0). The metadata's batch, seqlen_q and seqlen_kv are build
+      inputs of a shape-generic kernel and are never compared; the graph's
+      shape enters only through seqlen_q % block_m == 0 and
+      seqlen_kv % block_n == 0 per candidate. score() ranks an applicable
+      256/64 baseline first, then ascending (block_m, block_n).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 
   - name: kernargs

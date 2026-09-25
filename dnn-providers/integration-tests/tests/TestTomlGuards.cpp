@@ -10,6 +10,10 @@ using hipdnn_integration_tests::checkTomlSkip;
 using hipdnn_integration_tests::currentTestName;
 using hipdnn_integration_tests::findTomlValidatorOverride;
 using hipdnn_integration_tests::gradingForTensor;
+using hipdnn_integration_tests::ToleranceOverride;
+using hipdnn_integration_tests::ValidatorOverride;
+using hipdnn_integration_tests::ValidatorOverrideKind;
+using hipdnn_integration_tests::bundle::ValidatorKind;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -90,26 +94,44 @@ TEST(TestTomlGuards, GradingForTensorKeepsTheCallersToleranceWhenNoSettings)
     const auto grading
         = gradingForTensor("SomeTest.Name", "LayernormBackward_0::DSCALE", 1e-3f, 2e-3f);
 
-    EXPECT_EQ(grading.kind, hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE);
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
     EXPECT_FLOAT_EQ(grading.atol, 1e-3f);
     EXPECT_FLOAT_EQ(grading.rtol, 2e-3f);
 }
 
-// What gradingForTensor hands back when a [[validator_overrides]] entry selects the
-// matching-infinities kind. Unlike rms, which zeroes atol/rtol because a threshold
-// decided the verdict instead, this kind still grades every finite element by them —
-// so it has to carry the tolerance the harness resolved, not discard it.
-TEST(TestTomlGuards, AllCloseMatchingInfinitiesToleranceCarriesAtolAndRtol)
-{
-    const auto grading
-        = hipdnn_integration_tests::bundle::ComparisonTolerance::allCloseMatchingInfinities(1e-3f,
-                                                                                            2e-3f);
+// ---------------------------------------------------------------------------
+// gradingForTensor — overrides resolved by the caller, no TestConfig dependency
+// ---------------------------------------------------------------------------
 
-    EXPECT_EQ(grading.kind,
-              hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
+// A matching-infinities entry still grades every finite element by atol/rtol, so with no
+// [[tolerance_overrides]] entry it has to keep the tolerance the harness resolved.
+TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesKeepsTheCallersTolerance)
+{
+    const ValidatorOverride matchingInfinities{ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES,
+                                               0.0f};
+
+    const auto grading = gradingForTensor(
+        "SdpaFwd.Masked", "SdpaFwd_0::LSE", matchingInfinities, std::nullopt, 1e-3f, 2e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
     EXPECT_FLOAT_EQ(grading.atol, 1e-3f);
     EXPECT_FLOAT_EQ(grading.rtol, 2e-3f);
-    EXPECT_FLOAT_EQ(grading.rmsThreshold, 0.0f);
+}
+
+// A [[tolerance_overrides]] entry applies to a matching-infinities tensor exactly as it
+// does to an allclose one.
+TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesAppliesTheToleranceOverride)
+{
+    const ValidatorOverride matchingInfinities{ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES,
+                                               0.0f};
+    const ToleranceOverride tomlTolerance{5e-2f, 6e-2f};
+
+    const auto grading = gradingForTensor(
+        "SdpaFwd.Masked", "SdpaFwd_0::LSE", matchingInfinities, tomlTolerance, 1e-3f, 2e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
+    EXPECT_FLOAT_EQ(grading.atol, 5e-2f);
+    EXPECT_FLOAT_EQ(grading.rtol, 6e-2f);
 }
 
 // NOLINTEND(readability-identifier-naming)

@@ -161,7 +161,7 @@ Apply fragments to their actual consumers, preserving unrelated entries:
 | `IngestorPacks.hpp` declaration **and** `IngestorPacks.cpp`'s `s_packs` row | `$PROVIDER/src/engines/kernel_ingestor_engine/` | Always — both, or the pack vanishes from the static-archive binary |
 | Engine test `target_sources` | `$PROVIDER/src/tests/engines/kernel_ingestor_engine/CMakeLists.txt` | Always — the applicable tests and any census suite |
 | `add_kernels_for_embedding(TARGET … FILES … KEYS …)` | `$PROVIDER/src/tests/CMakeLists.txt` | Only `kernel_source.kind == "embedded_source"` — see [extend.md](extend.md) |
-| `hkp_register_census_tests(TARGET … PACK_NAME … SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
+| `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME … [ARCHES …] SUITES … EXPECTED_CASES …)` | `$PROVIDER/src/tests/CMakeLists.txt` | A census suite that reads exactly one pack target's shard |
 | Descriptors themselves | — | **Never.** There is no descriptor splice |
 
 **Descriptors need no CMake edit.** The packer walks a source root recursively and no
@@ -174,7 +174,7 @@ test target exists:
 
 ```cmake
 hkp_register_census_tests(
-    TARGET hip_kernel_provider_tests
+    TARGET hip_kernel_provider_census_tests
     PACK_NAME unit
     SUITES TestPointwisePacks
     EXPECTED_CASES
@@ -189,8 +189,16 @@ hkp_register_census_tests(
 )
 ```
 
-`PACK_NAME` selects the wired pack target whose `OUT_ROOT` and recorded arch list the
-entries address. A suite is declarable **only where it reads exactly one pack's shard**:
+`TARGET` is the census binary, `hip_kernel_provider_census_tests`: census suites
+(`Test<Name>Packs.cpp`) are compiled into it, never into `hip_kernel_provider_tests`,
+because every census case needs a shard and the census environment that an ordinary
+unit run must not require. `PACK_NAME` selects the wired pack target whose `OUT_ROOT`
+and recorded arch list the entries address. `ARCHES` optionally narrows that list:
+omitted, the suite registers at every arch the pack target was wired for (right for a
+suite whose fixtures cover the whole root, as here); given, at the intersection with
+the wired list, so a bundle that emits only for gfx950 passes `ARCHES gfx950` and a
+build packing other arches registers nothing for it; the keyword with no arch is fatal.
+A suite is declarable **only where it reads exactly one pack's shard**:
 `TestPointwisePacks` qualifies at the `unit` target, while `TestConvFwdPack` reads both
 the `unit` and `unit_shared` shards and is censused nowhere. `EXPECTED_CASES` pins the
 suite's case-name set and is hand-maintained for a hand-written suite: adding or
@@ -411,18 +419,19 @@ census is a direct native obligation with no Python launcher and no XML guard. S
 count decides eligibility, not the authored dialect: `TestPointwisePacks` is censused
 although `unit/pointwise/` is `embedded_source`.
 
-For each declared suite and each arch in the pack target's recorded list, CMake
-registers **four** tests. The census entry is
+For each declared suite and each eligible arch — the pack target's recorded list,
+narrowed by `ARCHES` when given — CMake registers **four** tests. The census entry is
 `hip-kernel-provider-hkp-census-<arch>-<suite>`, which invokes
 
 ```text
-hip_kernel_provider_tests --gtest_filter=<suite>.*
+hip_kernel_provider_census_tests --gtest_filter=<suite>.*
 ```
 
 with `HIPDNN_TEST_CENSUS_SUITE` set to that suite, `HIPDNN_TEST_EXPECTED_ARCH` to that
 arch — taken from the wired arch list, never from a detected device or the descriptors —
 and `HIPDNN_DESCRIPTOR_DIR` to that pack target's own `OUT_ROOT` shard for the arch,
-never a shared stage tree; labelled `unit_test;hip-kernel-provider;host`. The other
+never a shared stage tree; labelled `unit_test;hip-kernel-provider;host` plus the tier
+labels `HKP_PACK_CTEST_CATEGORIES_YAML` assigns, which the installed twin carries too. The other
 three append `-control-unvisited`, `-control-absent-root` and
 `-control-unregistered-case`, the last only where a pin exists. Each control breaks one
 precondition deliberately and passes on the census's own refusal wording rather than on
@@ -447,7 +456,7 @@ HIPDNN_TEST_CENSUS_SUITE="$CENSUS_SUITE" \
 HIPDNN_TEST_EXPECTED_ARCH="$ARCH" \
 HIPDNN_TEST_CENSUS_EXPECTED_CASES="$EXPECTED_CASES" \
 HIPDNN_DESCRIPTOR_DIR="$FINAL_DESCRIPTOR_ROOT" \
-"$INSTALL/bin/hip_kernel_provider_tests" --gtest_filter="${CENSUS_SUITE}.*"
+"$INSTALL/bin/hip_kernel_provider_census_tests" --gtest_filter="${CENSUS_SUITE}.*"
 ```
 
 Set `EXPECTED_CASES` to the same reviewed comma-separated case-name list the build-tree
@@ -474,7 +483,8 @@ directions, and an unpinned call also drops `-control-unregistered-case`.
 Fatal at configure, because a census that registers nothing looks like one that passed:
 a `PACK_NAME` no `hkp_wire_pack_target()` call wired and no dormancy accounts for (the
 message names wired and dormant roots separately); a `TARGET` missing or not given; an
-empty recorded arch list; and one suite declared at two pack targets, whose entry names
+`ARCHES` keyword naming no arch; an empty recorded arch list; and one suite declared at
+two pack targets, whose entry names
 carry arch and suite alone, so the second registration would silently take the first
 one's shard. A **dormant** `PACK_NAME` is the deliberate exception: the call registers
 nothing and reports at `STATUS`, naming the suites it left unregistered.

@@ -104,7 +104,10 @@ struct ValidatorOverride
 // resolved atol/rtol, except that an element that is infinite with the same sign in
 // both the reference and the device output compares equal; NaN, opposite-signed
 // infinities and finite-versus-infinite disagreements still fail. It is defined for
-// float, half, bfloat16 and double outputs only.
+// float, half, bfloat16 and double outputs only, and it exists only as a host
+// validator: a comparison that runs on the device (--validator gpu, or auto when the
+// GPU reference produced the expected values) fails the tensor, so a run grading with
+// it needs --validator cpu.
 // Validator entries are parsed strictly: 'rms' requires a positive 'rms_threshold',
 // and neither "allclose" nor "allclose_matching_infinities" may carry one, because
 // an entry that does not say exactly what it means is a load error rather than a

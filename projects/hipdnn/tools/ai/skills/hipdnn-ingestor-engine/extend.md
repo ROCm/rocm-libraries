@@ -91,11 +91,13 @@ kind; the packer copies none of these sources into the staged tree.
 
 Whole-engine checks cover shared KMDs and unchanged variants plus the new inventory. An
 addition whose suite is censused must run its
-`hip-kernel-provider-hkp-census-<arch>-<suite>` entry for **every** arch the owning pack
-target was wired for; an addition under an uncensused suite states its inventory through
-that suite's ordinary host run. [native-pack.md](native-pack.md) owns eligibility. Device
-proof must explicitly select and numerically verify the new candidate; passing the
-unchanged default is not extension acceptance.
+`hip-kernel-provider-hkp-census-<arch>-<suite>` entry for **every** arch that suite is
+registered at: the owning pack target's wired arches, narrowed by the call's `ARCHES`
+when it names any. The entry runs `hip_kernel_provider_census_tests`, the binary census
+suites are compiled into. An addition under an uncensused suite states its inventory
+through that suite's ordinary host run. [native-pack.md](native-pack.md) owns
+eligibility. Device proof must explicitly select and numerically verify the new
+candidate; passing the unchanged default is not extension acceptance.
 
 The handoff identifies retained IDs/references, changed/new files, baseline/final
 installations, whole-engine results and the addition's actual dispatch. RUNBOOK stage 5
