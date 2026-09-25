@@ -31,6 +31,10 @@ target_link_libraries(
 
 set(HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/test_sdk")
 
+# SKIP_IF_ASAN() -- named here on purpose. An audit for tests held back by a known ASAN error greps
+# for that token; the suppression list in src/AsanDefaultSuppressions.cpp is the other place such an
+# error can be parked, and this is the wiring that puts it into every test executable.
+#
 # src/AsanDefaultSuppressions.cpp defines __asan_default_suppressions(), which supplies the
 # suppression text from inside the binary and so needs no file, no install rule and no path that
 # survives relocation.

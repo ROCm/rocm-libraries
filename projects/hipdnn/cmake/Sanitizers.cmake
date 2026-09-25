@@ -190,14 +190,20 @@ if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANIT
     # variable) so a stale/poisoned entry cannot mask a failure across runs.
     set(HIPDNN_TEST_MIOPEN_CACHE_DIR "${CMAKE_BINARY_DIR}/miopen_test_cache")
 
+    # SKIP_IF_ASAN() -- named here on purpose, because an audit for tests held back by a known ASAN
+    # error greps for that token and would otherwise never reach this mechanism.
+    #
     # Suppressions for interceptor-detected errors in upstream libraries come from
     # __asan_default_suppressions() in test_sdk/src/AsanDefaultSuppressions.cpp, compiled into each
-    # test executable, so they apply to an installed or relocated tree with no file to locate.
+    # test executable, so they apply to an installed or relocated tree with no file to locate. Its
+    # suppression list is the second place an unfixed ASAN error can be parked, alongside any
+    # SKIP_IF_ASAN() call sites; audit both.
     #
-    # ASAN_OPTIONS is deliberately not set here, so a developer's own value is no longer overwritten
-    # (ctest's ENVIRONMENT property assigns unconditionally). It cannot switch these suppressions
-    # off, though: a user-supplied suppressions file is ADDED to them rather than replacing them,
-    # and no ASan flag disables them. Set HIPDNN_ASAN_NO_DEFAULT_SUPPRESSIONS to see the errors.
+    # ASAN_OPTIONS is deliberately not set here, so a developer's own value survives (ctest's
+    # ENVIRONMENT property assigns unconditionally). It cannot switch these suppressions off,
+    # though: a user-supplied suppressions file is ADDED to them rather than replacing them, and no
+    # ASan flag disables them. Seeing the suppressed errors needs an edit to
+    # AsanDefaultSuppressions.cpp and a rebuild.
 
     # Set environment variables for Address Sanitizer.
     # HSA_XNACK is only required for device-side ASAN (not HOST_ASAN).
