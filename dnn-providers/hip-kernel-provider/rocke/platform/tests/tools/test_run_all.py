@@ -25,14 +25,19 @@ def runner(monkeypatch):
 @pytest.mark.parametrize(
     "filename", ["rocke_storage", "provider_rocke_storage_test.exe"]
 )
+@pytest.mark.parametrize("override", [False, True])
 def test_runner_passes_registered_fixture_to_both_backends(
-    runner, monkeypatch, tmp_path, filename
+    runner, monkeypatch, tmp_path, filename, override
 ):
     (tmp_path / "CMakeCache.txt").touch()
     (tmp_path / "CTestTestfile.cmake").touch()
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
+    selected = tmp_path / "override" if override else executable
+    if override:
+        selected.touch()
+        monkeypatch.setenv("ROCKE_STORAGE_TEST", str(selected))
     calls = []
 
     def run(command, **kwargs):
@@ -59,7 +64,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
         (cmd, kw["env"]) for cmd, kw in calls if cmd[0] == runner.sys.executable
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
-    assert all(env["ROCKE_STORAGE_TEST"] == str(executable) for _, env in children)
+    assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
     assert "ROCKE_BACKEND" not in children[0][1]
     assert children[-1][1]["ROCKE_BACKEND"] == "both"
     assert calls[0][0] == [
@@ -70,6 +75,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
         "Debug",
     ]
     assert any(cmd[:3] == ["ctest", "-C", "Debug"] for cmd, _ in calls)
+    assert any("-R" in cmd for cmd, _ in calls) is not override
 
 
 @pytest.mark.parametrize("built", ["none", "partial", "all"])
@@ -164,16 +170,22 @@ def test_invalid_override_is_an_error(runner, monkeypatch, tmp_path):
         runner.native_pytest_env(tmp_path, "Release")
 
 
-@pytest.mark.parametrize("failure", ["build", "registration", "executable"])
+@pytest.mark.parametrize(
+    "failure", ["build", "build_override", "registration", "executable"]
+)
 def test_native_setup_failure_prevents_silently_skipped_pytest(
     runner, monkeypatch, tmp_path, failure
 ):
     (tmp_path / "CMakeCache.txt").touch()
+    if failure == "build_override":
+        executable = tmp_path / "override"
+        executable.touch()
+        monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     calls = []
 
     def run(command, **kwargs):
         calls.append(command)
-        if command[0] == "cmake" and failure == "build":
+        if command[0] == "cmake" and failure.startswith("build"):
             raise subprocess.CalledProcessError(1, command)
         command_path = [str(tmp_path / "missing")] if failure == "executable" else []
         listing = {"tests": [{"name": "rocke_storage", "command": command_path}]}
@@ -189,7 +201,10 @@ def test_native_setup_failure_prevents_silently_skipped_pytest(
     assert all(command[0] != runner.sys.executable for command in calls)
 
 
-def test_fresh_build_prepares_entire_ctest_suite(runner, tmp_path):
+@pytest.mark.parametrize("override", [False, True])
+def test_fresh_build_prepares_entire_ctest_suite(
+    runner, monkeypatch, tmp_path, override
+):
     if not shutil.which("cmake") or not shutil.which("ctest"):
         pytest.skip("CMake and CTest required for fresh-build regression")
     source = tmp_path / "source"
@@ -211,8 +226,15 @@ def test_fresh_build_prepares_entire_ctest_suite(runner, tmp_path):
     subprocess.run(
         ["cmake", "--build", str(build), "--target", "rocke_core"], check=True
     )
+    if override:
+        # An external fixture must not suppress the configured suite's build.
+        executable = tmp_path / "override"
+        executable.touch()
+        monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    if override:
+        assert env["ROCKE_STORAGE_TEST"] == str(executable)
     assert runner.ctest_ready(build, "Release")
     subprocess.run(
         ["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure"],

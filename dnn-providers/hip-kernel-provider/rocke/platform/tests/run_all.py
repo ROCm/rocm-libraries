@@ -119,7 +119,7 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     """Build the configured suite and supply native parity to both pytest passes."""
     env = dict(os.environ)
     executable = env.get("ROCKE_STORAGE_TEST")
-    if not executable and (build_root / "CMakeCache.txt").is_file():
+    if (build_root / "CMakeCache.txt").is_file():
         subprocess.run(
             [
                 "cmake",
@@ -130,13 +130,18 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             ],
             check=True,
         )
-        tests = ctest_tests(build_root, config, "^rocke_storage$")
-        commands = [
-            test.get("command", []) for test in tests if test["name"] == "rocke_storage"
-        ]
-        if len(commands) != 1 or not commands[0]:
-            raise ValueError("CTest did not resolve the built rocke_storage executable")
-        executable = commands[0][0]
+        if not executable:
+            tests = ctest_tests(build_root, config, "^rocke_storage$")
+            commands = [
+                test.get("command", [])
+                for test in tests
+                if test["name"] == "rocke_storage"
+            ]
+            if len(commands) != 1 or not commands[0]:
+                raise ValueError(
+                    "CTest did not resolve the built rocke_storage executable"
+                )
+            executable = commands[0][0]
     if executable:
         path = Path(executable).resolve()
         if not path.is_file():

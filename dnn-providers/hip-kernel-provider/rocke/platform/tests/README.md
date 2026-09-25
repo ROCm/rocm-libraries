@@ -116,6 +116,6 @@ receive that path, so storage IR/HIP parity and serialization tests run automati
 fixture-discovery failure stops the runner instead of silently skipping coverage.
 
 An explicit `ROCKE_STORAGE_TEST` overrides discovery and must name an existing
-executable. With no configured build or explicit override, the runner reports
-native storage parity as skipped; direct pytest invocations can use the same
-override.
+executable; it does not skip the configured build. With no configured build or
+explicit override, the runner reports native storage parity as skipped; direct
+pytest invocations can use the same override.

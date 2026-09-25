@@ -3,6 +3,7 @@
 """Core dtype names are independent of target support and retain public aliases."""
 
 import ast
+from typing import get_args, get_type_hints
 
 import pytest
 
@@ -149,3 +150,18 @@ def test_type_alias_does_not_enable_scalar_quantization(dtype):
     assert quant_ir_type(dtype) is not None
     with pytest.raises(ValueError, match="unsupported quant dtype"):
         quant_max_abs(dtype)
+
+
+def test_quant_dtype_annotations_match_scalar_and_logical_contracts():
+    from rocke import helpers
+    from rocke.helpers import quant
+
+    scalar = {"i8", "fp8e4m3", "bf8e5m2"}
+    assert set(get_args(quant.QDType)) == scalar
+    assert all(quant_max_abs(dtype) > 0 for dtype in get_args(quant.QDType))
+    logical = scalar | {"fp4e2m1", "fp6e2m3", "fp6e3m2"}
+    assert set(get_args(quant.LogicalQDType)) == logical
+    assert get_type_hints(ir_to_qdtype)["return"] == quant.LogicalQDType
+    assert all(ir_to_qdtype(quant_ir_type(dtype)) == dtype for dtype in logical)
+    assert helpers.QDType is quant.QDType
+    assert helpers.LogicalQDType is quant.LogicalQDType
