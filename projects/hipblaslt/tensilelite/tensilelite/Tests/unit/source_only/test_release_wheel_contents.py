@@ -232,6 +232,9 @@ def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
     )
     assert sdist.returncode == 0, sdist.stderr
     archive = next(sdist_dir.glob("*.tar.gz"))
+    wheel_environment = dict(environment)
+    wheel_environment.pop("TENSILELITE_ROCM_VERSION")
+    wheel_environment.pop("ROCM_PATH", None)
 
     wheel = subprocess.run(
         [
@@ -247,12 +250,29 @@ def test_compatibility_sdist_builds_a_self_contained_wheel(tmp_path):
             str(archive),
         ],
         cwd=tmp_path,
-        env=environment,
+        env=wheel_environment,
         capture_output=True,
         text=True,
     )
     assert wheel.returncode == 0, wheel.stderr
-    assert next(wheel_dir.glob("tensilelite_tensile_compat-*.whl")).is_file()
+    built_wheel = next(wheel_dir.glob("tensilelite_tensile_compat-*.whl"))
+    validation = subprocess.run(
+        [
+            sys.executable,
+            str(_VALIDATOR),
+            "--mode",
+            "compatibility",
+            "--wheel",
+            str(built_wheel),
+            "--expected-version",
+            "5.0.0+rocm7.2.4",
+            "--source-root",
+            str(source_root),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert validation.returncode == 0, validation.stderr
 
 
 def test_validator_rejects_cross_package_leaks_and_missing_runtime_dependencies(tmp_path):

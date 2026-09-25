@@ -10,7 +10,6 @@ import shutil
 from setuptools import setup
 from setuptools.command.build_py import build_py
 from setuptools.command.egg_info import egg_info
-from setuptools.command.sdist import sdist
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -64,22 +63,11 @@ class BuildEggInfo(egg_info):
         super().finalize_options()
 
 
-class SelfContainedSdist(sdist):
-    """Copy shared release metadata into the compatibility source archive."""
-
-    def make_release_tree(self, base_dir, files):
-        super().make_release_tree(base_dir, files)
-        release_root = Path(base_dir)
-        for name in ("VERSION", "release_metadata.py"):
-            shutil.copy2(_PROJECT_ROOT / name, release_root / name)
-
-
 setup(
     version=_version,
     install_requires=[f"tensilelite=={_version}"],
     cmdclass={
         "build_py": CleanBuildPy,
         "egg_info": BuildEggInfo,
-        "sdist": SelfContainedSdist,
     },
 )
