@@ -1753,6 +1753,118 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
     }
 }
 
+// ---------------------------------------------------------------------------
+// The shapes the checked-in BSHD bundles carry.
+//
+// The integration bundles are the only place a tile is launched rather than
+// merely selected, and a bundle that quietly stops reaching its tile still
+// passes: the engine keeps serving it on the baseline. These cases read each
+// bundle's numbers back as a GraphSpec, so a shape edited under
+// integration-test-bundles/ without re-deriving the divisibility rules fails
+// here, on a host, rather than silently narrowing on-device coverage to 256/64.
+// ---------------------------------------------------------------------------
+
+/// One checked-in BSHD bundle's graph, as its JSON spells it.
+GraphSpec bundleGraph(data_objects::DataType dataType,
+                      int64_t batch,
+                      int64_t numQueryHeads,
+                      int64_t numKvHeads,
+                      int64_t seqLenQ,
+                      int64_t seqLenKv,
+                      int64_t headSize)
+{
+    GraphSpec graph;
+    graph.dataType = dataType;
+    graph.batch = batch;
+    graph.numQueryHeads = numQueryHeads;
+    graph.numKvHeads = numKvHeads;
+    graph.seqLenQ = seqLenQ;
+    graph.seqLenKv = seqLenKv;
+    graph.headSize = headSize;
+    graph.headSizeV = headSize;
+    return graph;
+}
+
+/// The aligned cohort the catalog ships for @p graph's semantic fields: one
+/// candidate per tile authored at that head size, on canonical build inputs.
+std::vector<KernelSpec> bundleCohort(const GraphSpec& graph, int64_t causal)
+{
+    KernelSpec semantic = canonicalAligned();
+    semantic.dtype = graph.dataType == data_objects::DataType::HALF ? "FP16" : "BF16";
+    semantic.headSize = graph.headSize;
+    semantic.numQueryHeads = graph.numQueryHeads;
+    semantic.numKvHeads = graph.numKvHeads;
+    semantic.causal = causal;
+    return cohortOf(semantic, graph.headSize == 64 ? d64Tiles() : d128Tiles());
+}
+
+TEST(TestGfx950AttentionDenseTileMatch, BshdBundleShapesReachTheTilesTheyWereAuthoredFor)
+{
+    // quick/SdpaFwd/bshd/bf16/hd128_causal_bm128/Small.json -- 384 is a multiple of
+    // 128 and not of 256, so the baseline cannot serve and a bm128 tile leads.
+    GraphSpec causalBm128 = bundleGraph(data_objects::DataType::BFLOAT16, 1, 16, 2, 384, 384, 128);
+    causalBm128.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+
+    // quick/SdpaFwd/bshd/bf16/hd64_nomask_bn32/Small.json -- 288 is an odd multiple
+    // of 32, so block_n alone does the excluding and Sq != Skv rides along.
+    GraphSpec nomaskBn32 = bundleGraph(data_objects::DataType::BFLOAT16, 1, 32, 8, 512, 288, 64);
+    nomaskBn32.rightBound = -1;
+
+    // quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json -- Hkv 1, and the only
+    // fp16 unmasked bundle. Every authored D64 tile divides it, 256/256 included.
+    GraphSpec nomaskMqa = bundleGraph(data_objects::DataType::HALF, 2, 8, 1, 512, 512, 64);
+    nomaskMqa.rightBound = -1;
+
+    // standard/SdpaFwd/bshd/bf16/hd128_nomask_bm128/Prefill.json -- 1152 = 9 * 128,
+    // the tile-forcing case at a prefill length rather than a small one.
+    GraphSpec nomaskBm128
+        = bundleGraph(data_objects::DataType::BFLOAT16, 2, 64, 8, 1152, 1152, 128);
+    nomaskBm128.rightBound = -1;
+
+    // standard/SdpaFwd/bshd/fp16/hd128_causal_crossattn/Prefill.json -- top-left
+    // causal through the deprecated boolean, which unlike bottom-right is served
+    // at Sq != Skv.
+    GraphSpec causalCrossAttention
+        = bundleGraph(data_objects::DataType::HALF, 1, 32, 4, 512, 2048, 128);
+    causalCrossAttention.causalMaskDeprecated = true;
+    causalCrossAttention.rightBound = -1;
+
+    struct Case
+    {
+        const char* bundle;
+        GraphSpec graph;
+        int64_t causal;
+        TileSet admitted;
+        Tile coldWinner;
+    };
+    const std::vector<Case> cases{
+        {"bf16/hd128_causal_bm128",
+         causalBm128,
+         1,
+         TileSet{{128, 32}, {128, 64}, {128, 128}},
+         {128, 32}},
+        {"bf16/hd64_nomask_bn32", nomaskBn32, 0, TileSet{{128, 32}, {256, 32}}, {128, 32}},
+        {"fp16/hd64_nomask_mqa", nomaskMqa, 0, tileSetOf(d64Tiles()), {256, 64}},
+        {"bf16/hd128_nomask_bm128",
+         nomaskBm128,
+         0,
+         TileSet{{128, 32}, {128, 64}, {128, 128}},
+         {128, 32}},
+        {"fp16/hd128_causal_crossattn", causalCrossAttention, 1, tileSetOf(d128Tiles()), {256, 64}},
+    };
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.bundle);
+        const auto cohort = bundleCohort(c.graph, c.causal);
+        EXPECT_EQ(admittedTiles(c.graph, cohort), c.admitted);
+
+        const auto order = coldOrder(c.graph, cohort);
+        ASSERT_FALSE(order.empty()) << "no candidate survived, so the bundle would skip";
+        EXPECT_EQ(order.front(), c.coldWinner);
+    }
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
