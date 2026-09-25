@@ -60,6 +60,10 @@ def _validate_accesses(
     if len(set(access_ids)) != len(access_ids):
         raise LdsPredictionError("access_id values must be unique")
 
+    active_lanes = [access.lane for access in ordered if access.active]
+    if len(set(active_lanes)) != len(active_lanes):
+        raise LdsPredictionError("each request allows only one active access per lane")
+
     spec = get_opcode_spec(opcode)
     for access in ordered:
         if access.lane >= wave_size:
@@ -134,7 +138,10 @@ def predict_lds_conflicts(
     accesses: Sequence[LdsAccess],
     coordinate_axes: Sequence[str] = (),
 ) -> LdsConflictResult:
-    """Predict broadcasts and distinct-address conflicts for one LDS operation."""
+    """Predict conflicts and broadcasts for one LDS instruction in one wave.
+
+    Each lane may contribute at most one active access of the opcode's full width.
+    """
 
     if isinstance(coordinate_axes, (str, bytes)) or not isinstance(
         coordinate_axes, Sequence
