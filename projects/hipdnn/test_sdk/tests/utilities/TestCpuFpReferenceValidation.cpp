@@ -26,6 +26,12 @@ void makeTensorsEqual(T& tensor1, T& tensor2)
         tensor2.setHostValue(tensor1.getHostValue(indices), indices);
     });
 }
+
+template <typename T>
+float validationEpsilon()
+{
+    return static_cast<float>(std::numeric_limits<T>::epsilon());
+}
 } // namespace
 
 /* ======== CpuFpReferenceValidation tests ======== */
@@ -718,6 +724,172 @@ TYPED_TEST(CpuFpReferenceValidationNanInf, PassesForFiniteValues)
     tensor2.fillTensorWithValue(1.0f);
 
     EXPECT_TRUE(refValidation.allClose(tensor1, tensor2));
+}
+
+/* ================================================= */
+
+/* ======== Matching infinity opt-in tests (TYPED_TEST across fp types) ======== */
+
+template <typename T>
+class CpuFpReferenceValidationMatchingInf : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(CpuFpReferenceValidationMatchingInf, FpValidationTypes, );
+
+TYPED_TEST(CpuFpReferenceValidationMatchingInf, NegativeInfinitiesEqualOnlyWhenOptedIn)
+{
+    const float epsilon = validationEpsilon<TypeParam>();
+    const CpuFpReferenceValidation<TypeParam> strictValidation(epsilon, epsilon);
+    const CpuFpReferenceValidation<TypeParam> matchingInfValidation(
+        epsilon, epsilon, MatchingInfinities::ACCEPTED);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(strictValidation.allClose(tensor1, tensor2));
+    EXPECT_TRUE(matchingInfValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationMatchingInf, PositiveInfinitiesEqualOnlyWhenOptedIn)
+{
+    const float epsilon = validationEpsilon<TypeParam>();
+    const CpuFpReferenceValidation<TypeParam> strictValidation(epsilon, epsilon);
+    const CpuFpReferenceValidation<TypeParam> matchingInfValidation(
+        epsilon, epsilon, MatchingInfinities::ACCEPTED);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(strictValidation.allClose(tensor1, tensor2));
+    EXPECT_TRUE(matchingInfValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationMatchingInf, OppositeSignedInfinitiesAlwaysFail)
+{
+    const float epsilon = validationEpsilon<TypeParam>();
+    const CpuFpReferenceValidation<TypeParam> strictValidation(epsilon, epsilon);
+    const CpuFpReferenceValidation<TypeParam> matchingInfValidation(
+        epsilon, epsilon, MatchingInfinities::ACCEPTED);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(strictValidation.allClose(tensor1, tensor2));
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationMatchingInf, FiniteVersusInfinityAlwaysFails)
+{
+    const float epsilon = validationEpsilon<TypeParam>();
+    const CpuFpReferenceValidation<TypeParam> strictValidation(epsilon, epsilon);
+    const CpuFpReferenceValidation<TypeParam> matchingInfValidation(
+        epsilon, epsilon, MatchingInfinities::ACCEPTED);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(strictValidation.allClose(tensor1, tensor2));
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+
+    tensor1.setHostValue(safeTestTypeCast<TypeParam>(1.0f), 0, 0);
+    tensor2.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+
+    EXPECT_FALSE(strictValidation.allClose(tensor1, tensor2));
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationMatchingInf, NaNAlwaysFails)
+{
+    const float epsilon = validationEpsilon<TypeParam>();
+    const CpuFpReferenceValidation<TypeParam> matchingInfValidation(
+        epsilon, epsilon, MatchingInfinities::ACCEPTED);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+
+    tensor2.setHostValue(std::numeric_limits<TypeParam>::quiet_NaN(), 0, 0);
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+
+    tensor1.setHostValue(safeTestTypeCast<TypeParam>(1.0f), 0, 0);
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+}
+
+TYPED_TEST(CpuFpReferenceValidationMatchingInf, FiniteMismatchStillFailsWhenOptedIn)
+{
+    const float epsilon = validationEpsilon<TypeParam>();
+    const CpuFpReferenceValidation<TypeParam> matchingInfValidation(
+        epsilon, epsilon, MatchingInfinities::ACCEPTED);
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<TypeParam> tensor1(dims);
+    Tensor<TypeParam> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(-std::numeric_limits<TypeParam>::infinity(), 0, 0);
+    tensor2.setHostValue(safeTestTypeCast<TypeParam>(2.0f), 1, 1);
+
+    EXPECT_FALSE(matchingInfValidation.allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidationMatchingInf, FactorySelectsTheRelaxedComparison)
+{
+    const auto strictValidation
+        = createAllCloseValidator(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const auto matchingInfValidation = createAllCloseMatchingInfinitiesValidator(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        std::numeric_limits<float>::epsilon(),
+        std::numeric_limits<float>::epsilon());
+    const std::vector<int64_t> dims = {2, 2};
+
+    Tensor<float> tensor1(dims);
+    Tensor<float> tensor2(dims);
+    tensor1.fillTensorWithValue(1.0f);
+    tensor2.fillTensorWithValue(1.0f);
+
+    tensor1.setHostValue(-std::numeric_limits<float>::infinity(), 0, 0);
+    tensor2.setHostValue(-std::numeric_limits<float>::infinity(), 0, 0);
+
+    EXPECT_FALSE(strictValidation->allClose(tensor1, tensor2));
+    EXPECT_TRUE(matchingInfValidation->allClose(tensor1, tensor2));
+}
+
+TEST(TestCpuFpReferenceValidationMatchingInf, FactoryRejectsIntegerDataTypes)
+{
+    EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(
+                     hipdnn_flatbuffers_sdk::data_objects::DataType::INT32, 0.0f, 0.0f),
+                 std::runtime_error);
 }
 
 /* ================================================= */
