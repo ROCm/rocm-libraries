@@ -341,7 +341,7 @@ KernelDefinition makeKernel(int64_t blockM = 256, int64_t blockN = 64)
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051b2");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051b3");
-    kernel.name = "attention_dense.bf16_d128_hq4_kv4_ca.gfx950";
+    kernel.name = "attention_dense.bf16_d128_hq4_kv4_c1_bm256_bn64.gfx950";
     kernel.source.kind = KernelSourceKind::KPACK;
     kernel.source.library = "there-is-no-archive-here.kpack";
     kernel.source.tocKey = "toc#0";

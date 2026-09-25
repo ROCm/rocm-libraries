@@ -237,7 +237,7 @@ KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a2");
     kernel.dispatchId
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a3");
-    kernel.name = "attention_dense.bf16_d128_hq4_kv4_ca.gfx950";
+    kernel.name = "attention_dense.bf16_d128_hq4_kv4_c1_bm256_bn64.gfx950";
     kernel.source.kind = KernelSourceKind::KPACK;
     kernel.source.library = "there-is-no-archive-here.kpack";
     kernel.source.tocKey = "toc#0";

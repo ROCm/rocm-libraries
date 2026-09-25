@@ -191,7 +191,7 @@ delegates_to_existing_plan: false
 #
 # The padding knobs are settled. The tile knobs are open sweep inputs; the
 # dispatcher default stays block_m=256/block_n=64, and the shipped catalog is the
-# explicit tile set in gfx950_attention_dense.yaml, not a sweep product.
+# `knob_sets` tile lists in gfx950_attention_dense.yaml, not a sweep product.
 sweep:
   lds_k_group_pad:
     verdict: >

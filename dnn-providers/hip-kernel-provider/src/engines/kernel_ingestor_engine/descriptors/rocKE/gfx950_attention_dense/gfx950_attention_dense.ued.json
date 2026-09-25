@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "id": "4159a8b6-84b4-4495-9ea9-5cfd2abfd3ca",
+  "id": "4b3a0123-578f-4e9c-a965-b010a18ff107",
   "name": "hipkernel:Gfx950AttentionDense",
   "sdk_version": "1.0.0",
   "graph_match": {
     "native": "hipkernel.gfx950_attention_dense.graph_match"
   },
-  "metadata": "5ee07e60-3ca8-4126-9e2f-50002e56953f",
-  "heuristic": "fdd1435f-05f2-4934-a89f-021a622572c5",
+  "metadata": "589bc6c6-d94e-4400-95d7-3e517f9b6b67",
+  "heuristic": "b01732db-91fe-43b4-8b49-3646c22eccc0",
   "knobs": [
     "head_size",
     "num_query_heads",
