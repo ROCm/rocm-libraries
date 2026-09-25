@@ -124,7 +124,7 @@ rocsparse_status rocsparse::gcoosort_by_column(rocsparse_handle    handle_,
 
 #define CALL_TEMPLATE(IDX_TYPE)                                                \
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_by_column_template<IDX_TYPE>( \
-        handle_, m, n, nnz, (IDX_TYPE*)row_data, (IDX_TYPE*)col_data, (IDX_TYPE*)perm, buffer))
+        handle_, m, n, nnz, row_data, col_data, perm, buffer))
     switch(idx_type)
     {
     // LCOV_EXCL_START
