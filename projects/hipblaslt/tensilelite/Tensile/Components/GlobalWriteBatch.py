@@ -4823,7 +4823,10 @@ class GlobalWriteBatchWriter:
     # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
     # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
     # Insert nop to ensure the store has latched its source VGPRs.
-    module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
+    # A rotating ring hands the next store a different quad, so there is nothing
+    # left for this wait state to fence.
+    if not self._pairPackRotating():
+      module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between store src and next pack dst"))
 
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
@@ -4974,7 +4977,13 @@ class GlobalWriteBatchWriter:
     if ring < 0:
       return self.cvtVgprStruct.vgprBf16Temp
     quads = self.cvtVgprStruct.numPairPackQuads
-    return ring + 4 * (self.parentWriter.states.subtilePairPackSlot % quads)
+    slot  = self.parentWriter.states.subtilePairPackSlot % quads
+    # Slot 0 is the cvt block's quad. Spending a register here costs batch size:
+    # numElementsPerBatch is numVgprAvailable // numVgprsPerElement, and once it
+    # falls below MIWaveTile[0] the alignment that keeps an (sba=0, sba=1) pair
+    # inside one batch is skipped, the pair splits, and the store degrades to two
+    # unpaired dwordx2 -- which is a miscompare, not just slower.
+    return self.cvtVgprStruct.vgprBf16Temp if slot == 0 else ring + 4 * (slot - 1)
 
   def _advancePairPackQuad(self):
     self.parentWriter.states.subtilePairPackSlot += 1

@@ -17863,7 +17863,11 @@ class KernelWriterAssembly(KernelWriter):
           pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "1")))
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
-        pairRing = self.vgprPool.checkOutAligned(4 * pairQuads, 2, tag="subtilePairPackRing") \
+        # Slot 0 of the ring is the cvt block's own quad, which the paired store
+        # already uses, so only the extra slots are checked out. Every register
+        # taken here comes off numElementsPerBatch, and that has a hard floor at
+        # MIWaveTile[0] -- see the note in _pairPackQuad.
+        pairRing = self.vgprPool.checkOutAligned(4 * (pairQuads - 1), 2, tag="subtilePairPackRing") \
                    if pairQuads > 1 else -1
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
