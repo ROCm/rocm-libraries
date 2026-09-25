@@ -691,7 +691,7 @@ def _emitDerived(sol, assembler):
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.tensilelite_create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
 
     with preserve_rocisa_kernel_state():
         kwa = KernelWriterAssembly(assembler, DebugConfig())
