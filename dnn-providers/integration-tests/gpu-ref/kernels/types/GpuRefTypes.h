@@ -16,6 +16,7 @@
 #include "GpuRefPointwiseArgs.h"
 #include "GpuRefRMSNormArgs.h"
 #include "GpuRefReductionArgs.h"
+#include "GpuRefResampleArgs.h"
 
 namespace gpu_ref
 {
