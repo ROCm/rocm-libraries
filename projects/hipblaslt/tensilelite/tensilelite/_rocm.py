@@ -70,7 +70,13 @@ def _windows_sdk_root() -> Path:
             "ROCM_PATH is unset and the Windows ROCm SDK root could not be resolved. "
             "Set ROCM_PATH to the matching SDK installation."
         ) from exc
-    return Path(proc.stdout.strip())
+    root = proc.stdout.strip()
+    if not root:
+        raise TensileLiteRuntimeError(
+            "ROCM_PATH is unset and rocm-sdk returned an empty Windows ROCm SDK root. "
+            "Set ROCM_PATH to the matching SDK installation."
+        )
+    return Path(root)
 
 
 def resolve_rocm_root() -> Path:
