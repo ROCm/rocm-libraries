@@ -14964,6 +14964,7 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreTt1PerStage = 0
     self.states.subtileStoreStageHighWater = 0
     self.states.subtileScalarPackSlot = 0
+    self.states.subtilePairPackSlot = 0
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1
@@ -17149,6 +17150,8 @@ class KernelWriterAssembly(KernelWriter):
     vgprScalarAddr: int = -1      # hoisted per-lane vaddr for the unpaired dwordx2 store; wave-invariant, one copy per store
     vgprScalarPackRing: int = -1  # base of the unpaired-store pack ring (numScalarPackPairs 2-vgpr pairs)
     numScalarPackPairs: int = 1   # pairs in that ring; 1 serialises every store on one pair
+    vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
+    numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
     # 128B-column merge (plsinStoreCol128Active): the offset-0 pair packs into the
     # +0..+3 quad as usual and the offset-64 pair into this second quad, so both are
     # live when _emitSubtileColumnMerge re-splits them by column.
@@ -17800,6 +17803,7 @@ class KernelWriterAssembly(KernelWriter):
 
       cvtVgprStruct  = None
       cvtVgpr        = None
+      pairRing       = -1
       # No hoisted lane math until emitSubtileStoreLaneMath below says otherwise; a
       # stale True would make batches skip a computation that never ran.
       self.states.subtileHoistedLaneGroupDelta = False
@@ -17833,7 +17837,8 @@ class KernelWriterAssembly(KernelWriter):
         #        2-aligned for its own buffer_store_dwordx4. +col+4 is the merge temp
         #        and +col+5 the columns-8-15 vaddr. Costs 6 vgprs over the 64B-run
         #        store, which is why it is gated rather than unconditional.
-        from .Components.GlobalWriteBatch import plsinScalarStoreActive, plsinStoreCol128Active
+        from .Components.GlobalWriteBatch import plsinScalarStoreActive, plsinStoreCol128Active, \
+                                                 plsinStorePermlane16Active
         scalarStore = plsinScalarStoreActive(kernel)
         packPairs   = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_PAIRS", "4"))) if scalarStore else 1
         numCvtVgprs = (8 + 2 * packPairs if scalarStore else 7) \
@@ -17843,8 +17848,23 @@ class KernelWriterAssembly(KernelWriter):
            plsinStoreCol128Active(kernel, True if self.states.subtileFusedFullTileStore else None):
           col128Base  = (numCvtVgprs + 1) & ~1   # 2-align the second pack quad
           numCvtVgprs = col128Base + 7
+        # Paired-store pack ring. On one quad every paired store's v_cvt_pk must wait
+        # for the previous store to latch that same quad, so no two paired stores can
+        # be in flight and none can be hoisted away from its own buffer_store -- all 32
+        # stores of an MT256x256 epilogue name vPack in the trace. Rotating quads
+        # removes that dependence. The merge path packs an M-adjacent pair into two
+        # named quads at once, so it keeps the single buffer.
+        # Held in its own allocation rather than appended to the cvt block: growing
+        # that block moves the slots after it and shifts the store batching, which
+        # dropped the paired dwordx4 store for the unpaired pair and miscompared.
+        pairQuads = 1
+        if kernel.get("UseSubtileImpl") and col128Base < 0 and \
+           plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None):
+          pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "1")))
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
+        pairRing = self.vgprPool.checkOutAligned(4 * pairQuads, 2, tag="subtilePairPackRing") \
+                   if pairQuads > 1 else -1
         cvtVgprStruct = self.BF16CVTVgprStruct(vgprBf16Temp=cvtVgpr, vgprBf16Mask=(cvtVgpr+1), \
                                                vgprFp32Nan=(cvtVgpr+2), vgprBf16Inc=(cvtVgpr+3), \
                                                vgprPermAddr=(cvtVgpr+4) if kernel.get("UseSubtileImpl") else -1, \
@@ -17853,6 +17873,8 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprScalarAddr=(cvtVgpr+7) if scalarStore else -1, \
                                                vgprScalarPackRing=(cvtVgpr+8) if scalarStore else -1, \
                                                numScalarPackPairs=packPairs, \
+                                               vgprPairPackRing=pairRing, \
+                                               numPairPackQuads=pairQuads, \
                                                vgprColPackB=(cvtVgpr+col128Base) if col128Base >= 0 else -1, \
                                                vgprColMergeTmp=(cvtVgpr+col128Base+4) if col128Base >= 0 else -1, \
                                                vgprColAddrQ=(cvtVgpr+col128Base+5) if col128Base >= 0 else -1, \
@@ -18097,6 +18119,8 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpVgpr.idx)
       if cvtVgpr is not None:
         self.vgprPool.checkIn(cvtVgpr)
+        if pairRing >= 0:
+          self.vgprPool.checkIn(pairRing)
       # The hoisted values die with the cvtVgpr block.
       self.states.subtileHoistedLaneGroupDelta = False
       self.states.subtileHoistedPermAddr = False

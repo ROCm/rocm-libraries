@@ -4446,10 +4446,13 @@ class GlobalWriteBatchWriter:
     # Composed from Phase1 (pack/address) + Phase2 (shuffle/store).  On the fallback
     # LDS path the split lets PLSIN interleave MFMAs across the ~88-cycle
     # ds_bpermute latency; the gfx950 permlane16 path has no lgkmcnt dependency.
+    vPack = self._pairPackQuad()
     module.add(self._emit16bitSubtilePairedStorePhase1(
       addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN,
-      interior=interior))
-    module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, interior=interior, forceSlc=forceSlc))
+      interior=interior, vPackOverride=vPack))
+    module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, interior=interior,
+                                                       forceSlc=forceSlc, vPackOverride=vPack))
+    self._advancePairPackQuad()
     return module
 
   def _emit16bitSubtilePairedStoreWoven(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, pairIdx: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0, forceSlc: bool = False) -> Module:
@@ -4462,8 +4465,10 @@ class GlobalWriteBatchWriter:
     (permlane + buffer_store) stays after the convert has filled vPack.
     """
     module = Module("16bitSubtilePairedStoreWoven")
+    vPack = self._pairPackQuad()
     phase1 = self._emit16bitSubtilePairedStorePhase1(
-      addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+      addrCalc, sumIdx0, sumIdx1, prefixOffset, tt0=tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN,
+      vPackOverride=vPack)
     module.add(phase1)
     gap = Module(f"PlsinGap_pair{pairIdx}")
     self._weaveEmitGroup(gap, pairIdx + self._weaveLookahead())
@@ -4473,7 +4478,9 @@ class GlobalWriteBatchWriter:
       phase1Items = list(phase1.flatitems())
       pairCapture["gap"] = gap
       pairCapture["gapAnchor"] = phase1Items[-1] if phase1Items else None
-    module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, forceSlc=forceSlc))
+    module.add(self._emit16bitSubtilePairedStorePhase2(addrCalc, tt0=tt0, forceSlc=forceSlc,
+                                                       vPackOverride=vPack))
+    self._advancePairPackQuad()
     return module
 
   def _emitCol128PairedPack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
@@ -4951,6 +4958,31 @@ class GlobalWriteBatchWriter:
 
   def _advanceScalarPackPair(self):
     self.parentWriter.states.subtileScalarPackSlot += 1
+
+  def _pairPackQuad(self) -> int:
+    """Base vgpr of the 4-dword pack quad this paired store uses.
+
+    A store cannot be scheduled away from the quad it packs into: the next
+    store's v_cvt_pk overwrites it, so with one quad every paired store is
+    pinned behind its predecessor's buffer_store. Rotating quads is what lets
+    a store's pack run early and its store issue where there is MFMA cover.
+
+    Like the unpaired ring, the counter lives on the writer state so it keeps
+    rotating across the per-batch rebuild of this object.
+    """
+    ring  = self.cvtVgprStruct.vgprPairPackRing
+    if ring < 0:
+      return self.cvtVgprStruct.vgprBf16Temp
+    quads = self.cvtVgprStruct.numPairPackQuads
+    return ring + 4 * (self.parentWriter.states.subtilePairPackSlot % quads)
+
+  def _advancePairPackQuad(self):
+    self.parentWriter.states.subtilePairPackSlot += 1
+
+  def _pairPackRotating(self) -> bool:
+    """Whether consecutive paired stores land on different quads."""
+    return self.cvtVgprStruct.vgprPairPackRing >= 0 and \
+           self.cvtVgprStruct.numPairPackQuads > 1
 
   def _emit16bitSubtileScalarPacks(self, sumIdx0: int, prefixOffset: int, tt0: int) -> Module:
     """Pack one subtile's 4 M-rows into vPack+0/+1, the dwordx2 store source."""

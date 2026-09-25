@@ -461,6 +461,7 @@ class StateValues:
   subtileStagedStoreSeam: Optional[int]  = None    # index of the store body within the fused-store module
   subtileStoreStageHighWater: int        = 0       # highest stage opened so far (survives per-batch writer rebuild)
   subtileScalarPackSlot: int             = 0       # rotating index into the unpaired-store pack ring
+  subtilePairPackSlot: int               = 0       # rotating index into the paired-store pack ring
   # Paired-store dwordx4 base hoist: which addrDVgpr / N group vgprAddrScratch currently
   # holds.  Lives on the writer state so it survives the per-batch rebuild of
   # GlobalWriteBatch -- as an instance field it reset every batch and the base was

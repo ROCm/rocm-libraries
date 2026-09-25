@@ -375,7 +375,7 @@ class SchedulerConfig:
         """
         if self.pgr < 2 or not self.blockSched:
             return False
-        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "0") != "0"
+        return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "1") != "0"
 
     @property
     def partitionSizesM(self) -> List[int]:
