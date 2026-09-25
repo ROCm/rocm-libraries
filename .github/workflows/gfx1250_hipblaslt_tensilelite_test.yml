@@ -179,7 +179,7 @@ jobs:
           export HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250"
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER=(--gtest_filter="$GTEST_FILTER_ARG")
-          # Drop every device-info banner line (specs + PCI chip ID) from console + log.
+          # Cleanup CI logs.
           scrub() { sed -u -E '/Query[[:space:]]+device/d; /Device[[:space:]]+ID[[:space:]]+[0-9]/d; /PCI[[:space:]]+Chip[[:space:]]+ID/d; /GB[[:space:]]+memory/d; /SCLK|MCLK/d; /compute[[:space:]]+capability/d; /maxGridDimX/d; /sharedMemPerBlock/d; /maxThreadsPerBlock/d; /warpSize/d'; }
           # Full suite in one pass.
           "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 | scrub | tee test_results/hipblaslt_test.log
