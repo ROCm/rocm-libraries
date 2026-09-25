@@ -1,6 +1,10 @@
 # TensileLite namespace migration: proposed PR split
 
-Status: implemented as a local replacement stack based on local `develop` at `b607a8ae0cfda0a27a0f6a1446cb3043a88c22c4`. The branches have not been pushed. The bridge is deliberately one-way and exists only between the package move and completion of the in-repo consumer migration.
+Status: historical planning snapshot. The replacement stack described below was
+subsequently created; the recorded commit identifiers and branch state describe
+the original analysis, not the current stack. The bridge is deliberately one-way
+and exists only between the package move and completion of the in-repo consumer
+migration.
 
 ## Objective and inspected scope
 

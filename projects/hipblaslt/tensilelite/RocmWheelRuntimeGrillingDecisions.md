@@ -66,10 +66,10 @@ installed wheel against that prefix contract, but it does not prove the active
 
 ### F5 — TheRock source builds pass an explicit ROCm identity
 
-TheRock passes both `THEROCK_ROCM_VERSION` and `THEROCK_PACKAGE_VERSION` to the
-hipBLASLt subproject. The build frontend prefers the package identity when
-available and falls back to the base version otherwise. Standalone builds read
-the selected conventional root's `.info/version`.
+TheRock passes `THEROCK_PACKAGE_VERSION` to the hipBLASLt subproject. The build
+frontend requires that value to contain a release identity and rejects missing,
+empty, or `git` values instead of falling back to `THEROCK_ROCM_VERSION`.
+Standalone builds read the selected conventional root's `.info/version`.
 
 ## Decisions
 
@@ -154,9 +154,10 @@ fails, or yields no supported AMD ISA. Retain the existing
 **Decision: Accepted — TheRock owns both public package entry points.**
 
 TheRock publishes the core tool trampolines; TensileLite adds no wrapper or
-ambient-PATH fallback. The production client will be a BLAS libraries payload
-with its own interpreter-local trampoline. Until that promotion lands, a Python
-SDK client request fails clearly unless an explicit client binding is present.
+ambient-PATH fallback. For a Python SDK installation, TensileLite searches the
+active interpreter and user script directories and selects the first
+`tensilelite-client` whose version matches the wheel. An explicit client binding
+remains exclusive and fails without falling back when it is invalid.
 
 ### G009 — What runtime provenance is retained?
 

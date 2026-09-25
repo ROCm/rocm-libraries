@@ -31,9 +31,9 @@ benchmark/validation executable used only by explicit client workflows.
 - Build the compatibility wheel only for release/artifact-test workflows. Keep
   one release identity from `VERSION` plus `release_metadata.py`; generate the
   native client version header only when the client target is enabled.
-- Keep rocisa and ROCm-release validation at package import. Resolve and
-  validate the configured or standard client only when a caller explicitly asks
-  for its path.
+- Validate the selected ROCm installation at package import. Import rocisa only
+  when generator code needs it, and resolve and validate the configured or
+  standard client only when a caller explicitly asks for its path.
 - Preserve `invoke install` as the full editable-development workflow, including
   client build and binding.
 - Install the client only through the non-Windows TensileLite test-artifact

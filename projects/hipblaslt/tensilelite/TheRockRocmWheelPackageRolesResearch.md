@@ -287,7 +287,7 @@ needs the assembled runtime closure, not devel. The Python installation uses
 
 This does **not** mean the Python wheel needs the client for every use. The
 current authoritative decision record says that import, help, logic validation,
-`TensileCreateLibrary`, and hipBLASLt device-library generation are client-free.
+`tensilelite create-library`, and hipBLASLt device-library generation are client-free.
 The client is required only when a benchmark or retune operation actually needs
 to launch it. That separation keeps it out of the Python wheel and the
 code-generation dependency graph; it does not make devel files a native-client
