@@ -133,10 +133,7 @@ using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
 using fmha_pipeline = {F_pipeline}<
     fmha_pipeline_problem>;
 
-using fmha_epilogue =
-    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
-                               typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
-                               {F_spad}, {F_dvpad}>>;
+{F_epilogue}
 
 using fmha_kernel = {F_kernel}<fmha_pipeline, fmha_epilogue>;
 
@@ -784,6 +781,28 @@ class FmhaFwdKernel:
         else:
             return "fmha_fwd_create_kargs_and_grids"
 
+    def _get_epilogue_decl(self) -> str:
+        if self.F_pipeline.tag == "qr_tdm":
+            return (
+                f"using fmha_epilogue = ck_tile::LdsShuffle2DEpilogue<\n"
+                f"    ck_tile::LdsShuffle2DEpilogueProblem<\n"
+                f"        typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,\n"
+                f"        typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,\n"
+                f"        fmha_shape::NumWarps,\n"
+                f"        {self.F_tile.F_bm0},\n"
+                f"        {self.F_tile.F_bn1},\n"
+                f"        {BOOL_MAP[self.F_pipeline.F_spad]},\n"
+                f"        {BOOL_MAP[self.F_pipeline.F_dvpad]}>>;"
+            )
+        return (
+            f"using fmha_epilogue =\n"
+            f"    ck_tile::Default2DEpilogue<ck_tile::Default2DEpilogueProblem<"
+            f"typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,\n"
+            f"                               typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,\n"
+            f"                               {BOOL_MAP[self.F_pipeline.F_spad]}, "
+            f"{BOOL_MAP[self.F_pipeline.F_dvpad]}>>;"
+        )
+
     def render(self) -> str:
         body = type(self)._get_kernel_header(self.F_pipeline.tag) + type(
             self
@@ -830,6 +849,7 @@ class FmhaFwdKernel:
             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_epilogue=self._get_epilogue_decl(),
         )
         if emits_kvscale_align(self.F_pipeline.tag, self.F_pipeline.F_qscale):
             body += FMHA_FWD_KVSCALE_ALIGN_TEMPLATE.format(F_arch=self.F_arch)
@@ -1511,7 +1531,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # qr_tdm: gfx1250 TDM pipeline, preferred for d=128.
             # Emitted first so runtime dispatcher selects qr_tdm over qr
             # when both match (dispatch order = list order in generated code).
-            # NOTE: dropout is not yet implemented in qr_tdm — only emit
+            # NOTE: dropout is not yet implemented in qr_tdm -- only emit
             # dropout="f" so dropout workloads fall through to qr.
             # Logits soft cap is not implemented either, so pin logits="f".
             if hdim == 128 and hdim_v == 128:
