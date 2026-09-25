@@ -26,19 +26,18 @@ import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
-from utils import TYPE_CONFIGS
-from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
+from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
 
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
-BLOCK_SIZES = [32, 64, 128, 256, 512, 1024]
-IPT = [1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+BLOCK_SIZES = [64, 128, 256]
+IPT = [1, 2, 4, 8, 16]
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_adjacent_difference')
+        return TunerArgs(algo_full_name='device_binary_search')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
@@ -48,34 +47,27 @@ class Tuner(BaseTuner):
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         return params
+
     def _get_key_type_name(self) -> str:
         return "value_type"
 
     def _get_value_type_name(self):
-        return ""
+        return "output_type"
 
     def _get_restrictions(
-        self, value_type: str, _: Optional[str] = None
+        self, value_type: str, output_type: Optional[str] = None
     ) -> Callable[[dict], bool]:
-        element_size = TYPE_CONFIGS[value_type].size
-
-        # based on legacy tuning 
-        MAX_SHARED_MEM = 65536
-
+        # There litterally was no restrictions in legacy tuner or benchmark
         def validate(params):
-            block_size = params['block_size_x']
-            ipt = params['ipt']
-
-            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2 )) + element_size
-
-            return ipt < max_ipt
+            return True
 
         return validate
 
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
         for val_type in COMMON_KEY_TYPES:
-            self.tune_type(val_type)
+            for out_type in COMMON_VALUE_TYPES:
+                self.tune_type(val_type, out_type)
 
 
 if __name__ == "__main__":
