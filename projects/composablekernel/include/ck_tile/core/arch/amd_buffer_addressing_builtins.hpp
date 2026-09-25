@@ -849,6 +849,9 @@ struct buffer_atomic_add_if<bf16_t, 2, pre_nop>
                                    index_t flag = 1)
     {
         static_assert(sizeof(T) == 4);
+        // A global atomic skips the buffer range check, so apply it here (res[2] = num_records).
+        const index_t in_range = flag && static_cast<uint32_t>(v_offset + i_offset) + sizeof(T) <=
+                                             static_cast<uint32_t>(res[2]);
         auto save_exec = READ_EXEC();
         using mbuf_t   = float;
         asm volatile(CMPX_LE_EXEC "  1, %4\n"
@@ -859,7 +862,7 @@ struct buffer_atomic_add_if<bf16_t, 2, pre_nop>
                        "v"(bit_cast<mbuf_t>(value)),
                        "s"(res.xy),
                        "n"(i_offset),
-                       "v"(flag),
+                       "v"(in_range),
                        "s"(save_exec)
                      : "memory");
     }
@@ -3179,7 +3182,8 @@ CK_TILE_DEVICE void amd_buffer_atomic_add(const thread_buffer<T, N>& src_thread_
 #if defined(__gfx942__)
     if constexpr(std::is_same<T, bf16_t>::value)
     {
-        if(dst_thread_element_valid)
+        // Global atomics have no buffer range check, so drop what the buffer path would drop.
+        if(dst_thread_element_valid && dst_thread_element_offset + N <= dst_element_space_size)
         {
             amd_global_atomic_add_impl<T, N>(src_thread_data,
                                              p_dst_wave + dst_thread_element_offset);
