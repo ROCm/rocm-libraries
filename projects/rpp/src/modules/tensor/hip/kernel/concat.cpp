@@ -25,10 +25,9 @@ SOFTWARE.
 #include "hip_tensor_executors.hpp"
 
 template <typename T>
-__global__ void concat_generic_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Strides,
-                                          uint* srcTensor2Strides, T* dstPtr, uint* dstStrides,
-                                          uint axis, uint numDims, Rpp32u* roiTensor,
-                                          Rpp32u* srcOffsets, Rpp32u* dstOffsets) {
+__global__ void concat_generic_hip_tensor(T* srcPtr1, T* srcPtr2, T* dstPtr, uint axis,
+                                          uint numDims, Rpp32u* roiTensor, Rpp32u* srcOffsets,
+                                          Rpp32u* dstOffsets) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x);
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
@@ -115,8 +114,8 @@ __global__ void concat_generic_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTenso
 }
 
 template <typename T>
-__global__ void concat_2d_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Strides,
-                                     uint* srcTensor2Strides, T* dstPtr, uint* dstStrides,
+__global__ void concat_2d_hip_tensor(T* srcPtr1, T* srcPtr2, uint2 srcTensor1StridesXY,
+                                     uint2 srcTensor2StridesXY, T* dstPtr, uint2 dstStridesXY,
                                      uint* srcDims1, uint* srcDims2) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
@@ -124,10 +123,10 @@ __global__ void concat_2d_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Str
     uint maxWidth = (srcDims1[1] > srcDims2[1]) ? srcDims1[1] : srcDims2[1];
     if (id_x >= maxWidth || id_y >= srcDims1[0]) return;
 
-    uint dstIdx = id_y * dstStrides[1] + id_x * dstStrides[0];
-    uint srcIdx1 = id_y * srcTensor1Strides[1] + id_x * srcTensor1Strides[0];
-    uint srcIdx2 = id_y * srcTensor2Strides[1] + id_x * srcTensor2Strides[0];
-    uint dstIdx2 = dstIdx + srcDims1[1] * dstStrides[0];
+    uint dstIdx = id_y * dstStridesXY.y + id_x * dstStridesXY.x;
+    uint srcIdx1 = id_y * srcTensor1StridesXY.y + id_x * srcTensor1StridesXY.x;
+    uint srcIdx2 = id_y * srcTensor2StridesXY.y + id_x * srcTensor2StridesXY.x;
+    uint dstIdx2 = dstIdx + srcDims1[1] * dstStridesXY.x;
 
     d_float8 src_f8;
     // copy src1
@@ -137,7 +136,7 @@ __global__ void concat_2d_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Str
             rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &src_f8);
         } else {
             for (int i = 0; i < (srcDims1[1] - id_x); i++)
-                dstPtr[dstIdx + i * dstStrides[0]] = srcPtr1[srcIdx1 + i * srcTensor1Strides[0]];
+                dstPtr[dstIdx + i * dstStridesXY.x] = srcPtr1[srcIdx1 + i * srcTensor1StridesXY.x];
         }
     }
 
@@ -148,14 +147,14 @@ __global__ void concat_2d_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Str
             rpp_hip_pack_float8_and_store8(dstPtr + dstIdx2, &src_f8);
         } else {
             for (int i = 0; i < (srcDims2[1] - id_x); i++)
-                dstPtr[dstIdx2 + i * dstStrides[0]] = srcPtr2[srcIdx2 + i * srcTensor2Strides[0]];
+                dstPtr[dstIdx2 + i * dstStridesXY.x] = srcPtr2[srcIdx2 + i * srcTensor2StridesXY.x];
         }
     }
 }
 
 template <typename T>
-__global__ void concat_3d_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Strides,
-                                     uint* srcTensor2Strides, T* dstPtr, uint* dstStrides,
+__global__ void concat_3d_hip_tensor(T* srcPtr1, T* srcPtr2, uint2 srcTensor1StridesZY,
+                                     uint2 srcTensor2StridesZY, T* dstPtr, uint2 dstStridesZY,
                                      uint* srcDims1, uint* srcDims2) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
@@ -164,9 +163,9 @@ __global__ void concat_3d_hip_tensor(T* srcPtr1, T* srcPtr2, uint* srcTensor1Str
     uint maxLength = (srcDims1[2] > srcDims2[2]) ? srcDims1[2] : srcDims2[2];
     if (id_x >= maxLength || id_y >= srcDims1[1] || id_z >= srcDims1[0]) return;
 
-    uint dstIdx = id_z * dstStrides[1] + id_y * dstStrides[2] + id_x;
-    uint srcIdx1 = id_z * srcTensor1Strides[1] + id_y * srcTensor1Strides[2] + id_x;
-    uint srcIdx2 = id_z * srcTensor2Strides[1] + id_y * srcTensor2Strides[2] + id_x;
+    uint dstIdx = id_z * dstStridesZY.x + id_y * dstStridesZY.y + id_x;
+    uint srcIdx1 = id_z * srcTensor1StridesZY.x + id_y * srcTensor1StridesZY.y + id_x;
+    uint srcIdx2 = id_z * srcTensor2StridesZY.x + id_y * srcTensor2StridesZY.y + id_x;
     uint dstIdx2 = dstIdx + srcDims1[2];
 
     d_float8 src_f8;
@@ -246,29 +245,27 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
             cumDstOffset += dstSize;
         }
 
+        // Axis-adjusted strides are computed on local copies: the descriptors are caller-owned
+        // and must not be modified (a repeated call with the same descriptors would break).
+        Rpp32u src1Strides[RPPT_MAX_DIMS], src2Strides[RPPT_MAX_DIMS], dstStrides[RPPT_MAX_DIMS];
+        memcpy(src1Strides, srcPtr1GenericDescPtr->strides, sizeof(src1Strides));
+        memcpy(src2Strides, srcPtr2GenericDescPtr->strides, sizeof(src2Strides));
+        memcpy(dstStrides, dstGenericDescPtr->strides, sizeof(dstStrides));
         if (axis == 0) {
-            srcPtr1GenericDescPtr->strides[1] = srcPtr1GenericDescPtr->strides[0];
-            srcPtr1GenericDescPtr->strides[0] = 1;
-            srcPtr2GenericDescPtr->strides[1] = srcPtr2GenericDescPtr->strides[0];
-            srcPtr2GenericDescPtr->strides[0] = 1;
-            dstGenericDescPtr->strides[1] = dstGenericDescPtr->strides[0];
-            dstGenericDescPtr->strides[0] = 1;
+            src1Strides[1] = src1Strides[0];
+            src1Strides[0] = 1;
+            src2Strides[1] = src2Strides[0];
+            src2Strides[0] = 1;
+            dstStrides[1] = dstStrides[0];
+            dstStrides[0] = 1;
         } else if (axis == 1) {
-            srcPtr1GenericDescPtr->strides[0] = srcPtr1GenericDescPtr->strides[2];
-            srcPtr2GenericDescPtr->strides[0] = srcPtr2GenericDescPtr->strides[2];
-            dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[2];
+            src1Strides[0] = src1Strides[2];
+            src2Strides[0] = src2Strides[2];
+            dstStrides[0] = dstStrides[2];
         }
-
-        // srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr are caller-owned and may
-        // live in ordinary host memory, but the kernel dereferences strides on-device. Stage the
-        // (already axis-adjusted) stride arrays into scratchBufferPinned as well, right after
-        // dimsBuffer's used range, mirroring how dimsBuffer itself is passed to the kernel below.
-        Rpp32u* src1StridesStaging = dimsBuffer + batchSize * numDims * 2;
-        Rpp32u* src2StridesStaging = src1StridesStaging + RPPT_MAX_DIMS;
-        Rpp32u* dstStridesStaging = src2StridesStaging + RPPT_MAX_DIMS;
-        memcpy(src1StridesStaging, srcPtr1GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-        memcpy(src2StridesStaging, srcPtr2GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-        memcpy(dstStridesStaging, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        uint2 src1StridesXY = make_uint2(src1Strides[0], src1Strides[1]);
+        uint2 src2StridesXY = make_uint2(src2Strides[0], src2Strides[1]);
+        uint2 dstStridesXY = make_uint2(dstStrides[0], dstStrides[1]);
 
         for (int batchCount = 0; batchCount < batchSize; batchCount++) {
             Rpp32u* roi1 = roiTensor + batchCount * numDims * 2;
@@ -296,9 +293,8 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), srcPtr1 + src1Offsets[batchCount],
-                               srcPtr2 + src2Offsets[batchCount], src1StridesStaging,
-                               src2StridesStaging, dstPtr + dstOffsets[batchCount],
-                               dstStridesStaging, srcDims1, srcDims2);
+                               srcPtr2 + src2Offsets[batchCount], src1StridesXY, src2StridesXY,
+                               dstPtr + dstOffsets[batchCount], dstStridesXY, srcDims1, srcDims2);
             HIP_CHECK_LAUNCH_RETURN();
         }
     } else if (numDims == 3) {
@@ -343,32 +339,30 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
             cumDstOffset += dstSize;
         }
 
+        // Axis-adjusted strides are computed on local copies: the descriptors are caller-owned
+        // and must not be modified (a repeated call with the same descriptors would break).
+        Rpp32u src1Strides[RPPT_MAX_DIMS], src2Strides[RPPT_MAX_DIMS], dstStrides[RPPT_MAX_DIMS];
+        memcpy(src1Strides, srcPtr1GenericDescPtr->strides, sizeof(src1Strides));
+        memcpy(src2Strides, srcPtr2GenericDescPtr->strides, sizeof(src2Strides));
+        memcpy(dstStrides, dstGenericDescPtr->strides, sizeof(dstStrides));
         if (axis == 0) {
-            srcPtr1GenericDescPtr->strides[2] = srcPtr1GenericDescPtr->strides[0];
-            srcPtr1GenericDescPtr->strides[0] = srcPtr1GenericDescPtr->strides[1] = 1;
-            srcPtr2GenericDescPtr->strides[2] = srcPtr2GenericDescPtr->strides[0];
-            srcPtr2GenericDescPtr->strides[0] = srcPtr2GenericDescPtr->strides[1] = 1;
-            dstGenericDescPtr->strides[2] = dstGenericDescPtr->strides[0];
-            dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[1] = 1;
+            src1Strides[2] = src1Strides[0];
+            src1Strides[0] = src1Strides[1] = 1;
+            src2Strides[2] = src2Strides[0];
+            src2Strides[0] = src2Strides[1] = 1;
+            dstStrides[2] = dstStrides[0];
+            dstStrides[0] = dstStrides[1] = 1;
         } else if (axis == 1) {
-            srcPtr1GenericDescPtr->strides[2] = srcPtr1GenericDescPtr->strides[1];
-            srcPtr1GenericDescPtr->strides[0] = srcPtr1GenericDescPtr->strides[1] = 1;
-            srcPtr2GenericDescPtr->strides[2] = srcPtr2GenericDescPtr->strides[1];
-            srcPtr2GenericDescPtr->strides[0] = srcPtr2GenericDescPtr->strides[1] = 1;
-            dstGenericDescPtr->strides[2] = dstGenericDescPtr->strides[1];
-            dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[1] = 1;
+            src1Strides[2] = src1Strides[1];
+            src1Strides[0] = src1Strides[1] = 1;
+            src2Strides[2] = src2Strides[1];
+            src2Strides[0] = src2Strides[1] = 1;
+            dstStrides[2] = dstStrides[1];
+            dstStrides[0] = dstStrides[1] = 1;
         }
-
-        // srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr are caller-owned and may
-        // live in ordinary host memory, but the kernel dereferences strides on-device. Stage the
-        // (already axis-adjusted) stride arrays into scratchBufferPinned as well, right after
-        // dimsBuffer's used range, mirroring how dimsBuffer itself is passed to the kernel below.
-        Rpp32u* src1StridesStaging = dimsBuffer + batchSize * numDims * 2;
-        Rpp32u* src2StridesStaging = src1StridesStaging + RPPT_MAX_DIMS;
-        Rpp32u* dstStridesStaging = src2StridesStaging + RPPT_MAX_DIMS;
-        memcpy(src1StridesStaging, srcPtr1GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-        memcpy(src2StridesStaging, srcPtr2GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-        memcpy(dstStridesStaging, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
+        uint2 src1StridesZY = make_uint2(src1Strides[1], src1Strides[2]);
+        uint2 src2StridesZY = make_uint2(src2Strides[1], src2Strides[2]);
+        uint2 dstStridesZY = make_uint2(dstStrides[1], dstStrides[2]);
 
         for (int batchCount = 0; batchCount < batchSize; batchCount++) {
             Rpp32u* roi1 = roiTensor + batchCount * numDims * 2;
@@ -406,9 +400,8 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), srcPtr1 + src1Offsets[batchCount],
-                               srcPtr2 + src2Offsets[batchCount], src1StridesStaging,
-                               src2StridesStaging, dstPtr + dstOffsets[batchCount],
-                               dstStridesStaging, srcDims1, srcDims2);
+                               srcPtr2 + src2Offsets[batchCount], src1StridesZY, src2StridesZY,
+                               dstPtr + dstOffsets[batchCount], dstStridesZY, srcDims1, srcDims2);
             HIP_CHECK_LAUNCH_RETURN();
         }
     } else {
@@ -466,24 +459,12 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
 
         globalThreads_x = maxElements;
 
-        // srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr are caller-owned and may
-        // live in ordinary host memory, but the kernel dereferences strides on-device. Stage the
-        // stride arrays into scratchBufferPinned as well, right after dstOffsets' used range,
-        // mirroring how mergedRoiTensor/srcOffsets/dstOffsets are already passed to the kernel.
-        Rpp32u* src1StridesStaging = dstOffsets + batchSize;
-        Rpp32u* src2StridesStaging = src1StridesStaging + RPPT_MAX_DIMS;
-        Rpp32u* dstStridesStaging = src2StridesStaging + RPPT_MAX_DIMS;
-        memcpy(src1StridesStaging, srcPtr1GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-        memcpy(src2StridesStaging, srcPtr2GenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-        memcpy(dstStridesStaging, dstGenericDescPtr->strides, RPPT_MAX_DIMS * sizeof(Rpp32u));
-
         hipLaunchKernelGGL(concat_generic_hip_tensor,
                            dim3(ceil((float)globalThreads_x / 1024),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(1024, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM), 0,
-                           handle.GetStream(), srcPtr1, srcPtr2, src1StridesStaging,
-                           src2StridesStaging, dstPtr, dstStridesStaging, axis,
+                           handle.GetStream(), srcPtr1, srcPtr2, dstPtr, axis,
                            dstGenericDescPtr->numDims - 1, mergedRoiTensor, srcOffsets, dstOffsets);
         HIP_CHECK_LAUNCH_RETURN();
     }
