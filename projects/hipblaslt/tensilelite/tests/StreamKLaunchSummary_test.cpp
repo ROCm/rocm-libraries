@@ -193,6 +193,60 @@ namespace
     };
 } // namespace
 
+TEST(StreamKLaunchSummaryTest, UniformSummationStaggerRespectsPersistentCapability)
+{
+    struct Case
+    {
+        TileProcessingStrategy strategy;
+        bool                   perTile;
+        bool                   runtimeStagger;
+        size_t                 mapping;
+        bool                   uniformOrder;
+        size_t                 expectedStagger;
+    };
+    const Case cases[] = {
+        {TileProcessingStrategy::None, false, true, 1, true, 16},
+        {TileProcessingStrategy::DataParallel, false, true, 1, true, 0},
+        {TileProcessingStrategy::StreamK, false, true, 1, true, 0},
+        {TileProcessingStrategy::DataParallel, true, true, 1, true, 16},
+        {TileProcessingStrategy::StreamK, true, true, 1, true, 16},
+        {TileProcessingStrategy::StreamK, true, true, 0, true, 0},
+        {TileProcessingStrategy::None, false, false, 1, true, 0},
+        {TileProcessingStrategy::StreamK, false, true, 1, false, 16},
+    };
+    AnalyticalEnv env;
+    for(const auto& test : cases)
+    {
+        SCOPED_TRACE(::testing::Message() << toString(test.strategy) << " perTile=" << test.perTile
+                                         << " runtimeStagger=" << test.runtimeStagger
+                                         << " mapping=" << test.mapping
+                                         << " uniformOrder=" << test.uniformOrder);
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.tileProcessingStrategy = test.strategy;
+        solution.sizeMapping.workGroupMapping       = 1;
+        solution.sizeMapping.workGroupMappingXCC    = 0;
+        solution.sizeMapping.globalSplitU           = 1;
+        solution.sizeMapping.globalAccumulation     = 4;
+        solution.sizeMapping.staggerU               = 16;
+        solution.sizeMapping.staggerUMapping        = test.mapping;
+        solution.sizeMapping.staggerStrideShift     = 2;
+        solution.internalArgsSupport.staggerU       = test.runtimeStagger;
+        solution.internalArgsSupport.perTileExtraIters = test.perTile;
+        solution.problemType.mxScaleFormat = 1;
+        auto problem = makeGemmProblem(1024, 1024, 1024);
+        problem.setParams().setUniformSummationOrder(test.uniformOrder);
+
+        const auto [mapping, stagger, shift]
+            = solution.calculateAutoStaggerU(problem, &env.device, 0, 1);
+        EXPECT_EQ(stagger, test.expectedStagger);
+        EXPECT_EQ(mapping, test.expectedStagger ? test.mapping : 0u);
+        EXPECT_EQ(shift, test.expectedStagger ? 2u : 0u);
+        if(test.uniformOrder)
+            EXPECT_TRUE(solution.uniformSummationOrderSupported(problem, env.device));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // No-drift contract: the snapshot fields equal what the individual production
 // helpers report, so the summary reflects the REAL decisions (not a re-derivation

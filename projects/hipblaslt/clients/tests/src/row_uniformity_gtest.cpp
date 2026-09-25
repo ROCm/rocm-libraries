@@ -1453,7 +1453,7 @@ namespace
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
-        solution->sizeMapping.streamK          = 0;
+        solution->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
         solution->internalArgsSupport.staggerU = true;
         solution->sizeMapping.staggerUMapping  = 1;
         solution->sizeMapping.staggerU         = 16;
@@ -1469,7 +1469,7 @@ namespace
         }
 
         auto remap = probeSolution();
-        remap->sizeMapping.streamK            = 0;
+        remap->sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::None;
         remap->internalArgsSupport.staggerU   = true;
         remap->sizeMapping.staggerUMapping    = 0;
         remap->sizeMapping.staggerU           = 16;
