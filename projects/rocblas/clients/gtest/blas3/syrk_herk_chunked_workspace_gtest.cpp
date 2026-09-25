@@ -132,9 +132,11 @@ namespace
         return (size_t(n) * size_t(n - 1)) / 2;
     }
 
-    // Batches per chunk. Must match c_YZ_grid_launch_limit, which is
-    // library-internal and so cannot be referenced from a client test.
-    constexpr rocblas_int limit = (1 << 16) - 1; // 65535
+    // Batches per chunk. Must match c_i64_grid_YZ_chunk, which is library-internal
+    // and so cannot be referenced from a client test. The value is the 16-bit grid
+    // ceiling rounded down to a multiple of 16, which is also the stride
+    // rocblas_internal_gemm_64 uses for its own batch loop.
+    constexpr rocblas_int limit = ((1 << 16) - 1) & ~0xf; // 65520
 
     // Expected workspace bytes under the chunked scheme.
     // Mirrors the production formula in rocblas_syrk_herk.hpp.

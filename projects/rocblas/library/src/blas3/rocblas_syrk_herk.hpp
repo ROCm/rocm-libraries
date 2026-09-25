@@ -24,6 +24,7 @@
 
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
+#include "int64_helpers.hpp" // c_i64_grid_YZ_chunk
 #include "rocblas_gemm.hpp"
 #include "rocblas_level3_threshold.hpp"
 
@@ -64,13 +65,22 @@ inline size_t rocblas_internal_syrk_herk_workspace(rocblas_handle handle,
     if(rocblas_use_only_gemm<T>(handle, n, k))
         if(n > 0 && batch_count > 0)
         {
-            // The host-side launcher processes at most c_YZ_grid_launch_limit batches
+            // The host-side launcher processes at most c_i64_grid_YZ_chunk batches
             // per chunk, reusing the same workspace buffer for each chunk.  Only
-            // min(batch_count, c_YZ_grid_launch_limit) triangle slots are live
+            // min(batch_count, c_i64_grid_YZ_chunk) triangle slots are live
             // simultaneously, so peak allocation is proportional to the chunk size
-            // rather than the full batch count.  All arithmetic uses size_t to
-            // prevent signed overflow in the product tri(n) * sizeof(T) * chunk.
-            size_t chunk = size_t(std::min(batch_count, (rocblas_int)c_YZ_grid_launch_limit));
+            // rather than the full batch count.
+            //
+            // The bound is c_i64_grid_YZ_chunk (65520), not the larger
+            // c_YZ_grid_launch_limit (65535) that the copy kernel's gridDim.z could
+            // take: rocblas_internal_gemm_64 splits its own batch loop at
+            // c_i64_grid_YZ_chunk, so a chunk of 65535 would issue a full 65520-batch
+            // GEMM followed by a 15-batch one.  Matching the constant makes every
+            // full chunk exactly one GEMM launch.
+            //
+            // All arithmetic uses size_t to prevent signed overflow in the product
+            // tri(n) * sizeof(T) * chunk.
+            size_t chunk = size_t(std::min(batch_count, (rocblas_int)c_i64_grid_YZ_chunk));
             size         = (size_t(n) * size_t(n - 1) / 2) * sizeof(T) * chunk;
         }
 

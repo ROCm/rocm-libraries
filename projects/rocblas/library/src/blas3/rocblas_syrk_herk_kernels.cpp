@@ -102,16 +102,20 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
                   ? (HERM ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose)
                   : rocblas_operation_none;
 
-        // Process batches in chunks of at most c_YZ_grid_launch_limit.  The
-        // workspace is sized for one chunk, so each iteration reuses the same
-        // buffer.  Within a chunk the kernel uses blockIdx.z (0..chunk_size-1)
-        // to index W_C and (batch_offset + blockIdx.z) to load/store d_C.
-        // Stream ordering serialises chunk N's restore before chunk N+1's save.
+        // Process batches in chunks of at most c_i64_grid_YZ_chunk.  The workspace
+        // is sized for one chunk, so each iteration reuses the same buffer.  Within
+        // a chunk the kernel uses blockIdx.z (0..chunk_size-1) to index W_C and
+        // (batch_offset + blockIdx.z) to load/store d_C.  Stream ordering serialises
+        // chunk N's restore before chunk N+1's save.
+        //
+        // The chunk matches rocblas_internal_gemm_64's own batch-loop stride rather
+        // than the copy kernel's larger gridDim.z ceiling, so a full chunk lowers to
+        // exactly one GEMM launch instead of a 65520-batch launch plus a 15-batch
+        // remainder.  Only the final partial chunk is short.
         rocblas_int batch_off = 0;
         while(batch_off < batch_count)
         {
-            rocblas_int chunk
-                = std::min(batch_count - batch_off, (rocblas_int)c_YZ_grid_launch_limit);
+            rocblas_int chunk = std::min(batch_count - batch_off, (rocblas_int)c_i64_grid_YZ_chunk);
 
             // Save: copy triangular region of C into workspace
             if(rocblas_fill_upper == uplo)
