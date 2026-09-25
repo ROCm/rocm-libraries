@@ -134,9 +134,9 @@ namespace
     // workspace and so forcing a split needs several GB of it. The host chunk
     // loop therefore runs exactly one iteration here, and the multi-chunk
     // indexing -- batch_off, the A and C pointer advances, the local-to-absolute
-    // batch mapping -- is verified only through the size-query battery's
-    // arithmetic, not through the kernels. The kernel's grid-stride sweep does
-    // run, since chunk_size exceeds the grid ceiling.
+    // batch mapping -- is covered by the nightly battery at the end of this
+    // file, which pays the memory to force a split. The kernel's grid-stride
+    // sweep does run here, since chunk_size exceeds the grid ceiling.
     constexpr size_t c_budget = size_t(1024) * 1024 * 1024;
 
     // Port of rocblas_syrk_herk_chunk_size. Kept deliberately literal so a change
@@ -946,6 +946,53 @@ namespace
     // the host and patching only the one element that has to differ per batch.
     // -----------------------------------------------------------------------
 
+    // Holds the guarded workspace for a nightly test. These buffers are around
+    // a gigabyte, and the batteries below are full of ASSERT_* that return
+    // early, so a plain hipFree at the end would leak on the first real failure
+    // and turn the following tests into spurious out-of-memory failures that
+    // bury it.
+    class scoped_workspace
+    {
+    public:
+        scoped_workspace(rocblas_handle handle, size_t bytes)
+            : m_handle(handle)
+            , m_bytes(bytes)
+        {
+            if((hipMalloc)(&m_ptr, bytes + c_canary_bytes) != hipSuccess)
+                m_ptr = nullptr;
+        }
+
+        ~scoped_workspace()
+        {
+            if(m_ptr)
+            {
+                (void)rocblas_set_workspace(m_handle, nullptr, 0);
+                (void)(hipFree)(m_ptr);
+            }
+        }
+
+        scoped_workspace(const scoped_workspace&) = delete;
+        scoped_workspace& operator=(const scoped_workspace&) = delete;
+
+        bool valid() const
+        {
+            return m_ptr != nullptr;
+        }
+        void* get() const
+        {
+            return m_ptr;
+        }
+        size_t bytes() const
+        {
+            return m_bytes;
+        }
+
+    private:
+        rocblas_handle m_handle = nullptr;
+        void*          m_ptr    = nullptr;
+        size_t         m_bytes  = 0;
+    };
+
     // n is under every gemm-only threshold (the lowest is 1600) so the path is
     // selected, while being large enough that the triangle per batch is big and
     // the batch count needed to overflow the budget stays small.
@@ -961,9 +1008,18 @@ namespace
         return chunk + chunk / 2;
     }
 
+    // Value seeded at strictly-upper (row, col).  Distinct per element, so the
+    // triangle readback detects a packing that permutes slots and not merely
+    // one that skips them.  Both components are at most n, exact in float.
+    template <typename T>
+    static T upper_seed(rocblas_int row, rocblas_int col)
+    {
+        return make_val<T>(double(row + 1), rocblas_is_complex<T> ? double(col + 1) : 0.0);
+    }
+
     // Seeds one n x n block: real diagonal, zero strictly-lower (the GEMM
-    // overwrites it), constant strictly-upper.  The per-batch distinct value is
-    // patched into (0,1) afterwards so the bulk of the block can be shared.
+    // overwrites it), per-element strictly-upper.  The per-batch distinct value
+    // is patched into (0,1) afterwards so the bulk of the block can be shared.
     template <typename T>
     static void fill_template_block(std::vector<T>& block, rocblas_int n)
     {
@@ -975,7 +1031,7 @@ namespace
                 if(row == col)
                     e = diag_seed<T>();
                 else if(row < col)
-                    e = expected_upper<T>(0); // patched per batch at (0,1)
+                    e = upper_seed<T>(row, col); // patched per batch at (0,1)
             }
     }
 
@@ -1033,10 +1089,10 @@ namespace
         // Exact-sized workspace plus a guard. The defect this PR fixes is an
         // out-of-bounds workspace write, and this is the only multi-chunk
         // coverage, so the bound is checked here too.
-        void* d_ws = nullptr;
-        ASSERT_EQ((hipMalloc)(&d_ws, queried + c_canary_bytes), hipSuccess);
-        ASSERT_TRUE(fill_canary(d_ws, queried));
-        ASSERT_EQ(rocblas_set_workspace(handle, d_ws, queried), rocblas_status_success);
+        scoped_workspace ws(handle, queried);
+        ASSERT_TRUE(ws.valid()) << "failed to allocate " << queried << " bytes of workspace";
+        ASSERT_TRUE(fill_canary(ws.get(), queried));
+        ASSERT_EQ(rocblas_set_workspace(handle, ws.get(), queried), rocblas_status_success);
 
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
@@ -1109,13 +1165,14 @@ namespace
         // Everywhere else in this file n is 2, so tri(n) is 1 and the triangle
         // packing is only ever evaluated at index 0. Read back one full
         // strictly-upper triangle so the index arithmetic is exercised across
-        // its whole range: save and restore share the formula, so any entry
-        // landing on the wrong slot shows up as a value that was not restored.
+        // its whole range. Save and restore share the formula, and the seeds are
+        // distinct per element, so both a slot the formula never writes and a
+        // pair of slots it transposes show up.
         {
             const rocblas_int b = batch_count - 1;
 
-            std::vector<T> block(c_elems);
-            ASSERT_EQ(hipMemcpy(block.data(),
+            std::vector<T> result_block(c_elems);
+            ASSERT_EQ(hipMemcpy(result_block.data(),
                                 (T*)dC + size_t(b) * c_elems,
                                 c_elems * sizeof(T),
                                 hipMemcpyDeviceToHost),
@@ -1125,23 +1182,20 @@ namespace
             for(rocblas_int col = 1; col < n; ++col)
                 for(rocblas_int row = 0; row < col; ++row)
                 {
-                    // Only (0,1) carries the per-batch value; the rest of the
-                    // triangle was seeded uniformly.
+                    // Only (0,1) carries the per-batch value.
                     const T want
-                        = (row == 0 && col == 1) ? expected_upper<T>(b) : expected_upper<T>(0);
-                    const T got = block[size_t(row) + size_t(col) * size_t(n)];
+                        = (row == 0 && col == 1) ? expected_upper<T>(b) : upper_seed<T>(row, col);
+                    const T got = result_block[size_t(row) + size_t(col) * size_t(n)];
                     if(re_of(got) != re_of(want) || im_of(got) != im_of(want))
                         ++mismatches;
                 }
 
             EXPECT_EQ(mismatches, size_t(0))
                 << mismatches << " of " << tri_n(n)
-                << " strictly-upper entries were not restored, batch " << b;
+                << " strictly-upper entries were not restored to their own slot, batch " << b;
         }
 
-        expect_canary_clean(handle, d_ws, queried);
-        ASSERT_EQ(rocblas_set_workspace(handle, nullptr, 0), rocblas_status_success);
-        ASSERT_EQ((hipFree)(d_ws), hipSuccess);
+        expect_canary_clean(handle, ws.get(), queried);
     }
 
     // Batched form of the multi-chunk battery.  This is the only place the
@@ -1149,8 +1203,9 @@ namespace
     // every batch at one buffer cannot tell whether the launcher advanced the
     // pointer array. Two buffers keyed on chunk index can -- dropping the
     // advance feeds chunk 0's A to every chunk, which the chunk-1 probe catches.
-    // Keying on batch parity would not work, because the chunk sizes here are
-    // even and a batch one chunk away shares its parity.
+    // Keying on batch parity would be unreliable: it only distinguishes
+    // adjacent chunks when the chunk is odd, and that varies by type here --
+    // 2052 for ssyrk, 513 for zherk. Chunk index always differs by one.
     template <typename T, op_kind K, typename ApiFunc>
     static void run_multichunk_batched(ApiFunc api)
     {
@@ -1171,10 +1226,10 @@ namespace
         if(!queried)
             GTEST_SKIP() << "gemm-only workspace path not active on this device";
 
-        void* d_ws = nullptr;
-        ASSERT_EQ((hipMalloc)(&d_ws, queried + c_canary_bytes), hipSuccess);
-        ASSERT_TRUE(fill_canary(d_ws, queried));
-        ASSERT_EQ(rocblas_set_workspace(handle, d_ws, queried), rocblas_status_success);
+        scoped_workspace ws(handle, queried);
+        ASSERT_TRUE(ws.valid()) << "failed to allocate " << queried << " bytes of workspace";
+        ASSERT_TRUE(fill_canary(ws.get(), queried));
+        ASSERT_EQ(rocblas_set_workspace(handle, ws.get(), queried), rocblas_status_success);
 
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
@@ -1255,9 +1310,7 @@ namespace
             expect_val_eq(corner[2], expected_upper<T>(b), "C[0,1] (upper preserved)", b);
         }
 
-        expect_canary_clean(handle, d_ws, queried);
-        ASSERT_EQ(rocblas_set_workspace(handle, nullptr, 0), rocblas_status_success);
-        ASSERT_EQ((hipFree)(d_ws), hipSuccess);
+        expect_canary_clean(handle, ws.get(), queried);
     }
 
     // -----------------------------------------------------------------------
