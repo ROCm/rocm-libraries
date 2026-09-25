@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from config_harness import solutions_from_config
+from config_harness import emit_kernels_from_config, solutions_from_config
 from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameFull
 
 pytestmark = pytest.mark.unit
@@ -69,6 +69,23 @@ def test_baseline_and_streamk_sweep_preserves_inactive_default(tmp_path):
     assert {(s["TileProcessingStrategy"], s["WorkAssignment"]) for s in states} == {
         ("None", "StaticGrid"), ("StreamK", "StaticGrid"),
     }
+
+
+@pytest.mark.parametrize("strategy", ["DataParallel", "StreamK"])
+def test_debug_persistent_loop_branches_back_to_loop_entry(tmp_path, strategy):
+    config = _config({
+        "TileProcessingStrategy": [strategy], "WorkAssignment": ["StaticGrid"],
+        "DebugPersistentKernelLoopForever": [True],
+    })
+    path = tmp_path / "debug_loop.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    kernels = emit_kernels_from_config(path, arch="gfx942", limit=1)
+    assert len(kernels) == 1
+    _, source, error = kernels[0]
+    assert error == 0
+    close = source.split("label_PersistentLoopClose:", 1)[1]
+    assert "label_PersistentLoopStart" in close
+    assert "s_setpc_b64" in close
 
 
 @pytest.mark.parametrize("assignment", ("DynamicWorkQueue", "Hybrid"))
