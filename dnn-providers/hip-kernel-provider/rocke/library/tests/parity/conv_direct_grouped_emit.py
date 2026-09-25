@@ -401,6 +401,44 @@ def _spec(idx: int):
             N=2, H=8, W=8, groups=8, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
         )
         return ("wgrad", DirectConvWgradSpec(problem=p, mfma_k=16), "gfx942")
+    if idx == 30:
+        # wgrad bf16: bf16 I/O and the bf16 MFMA atom, same LDS transpose
+        # staging. Pins that only the atom and the element type move.
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return ("wgrad", DirectConvWgradSpec(problem=p), "gfx950")
+    if idx == 31:
+        # wgrad bf16 at mfma_k=16: the narrow atom under bf16, one ds_read_tr
+        # per fragment.
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "wgrad",
+            DirectConvWgradSpec(problem=p, mfma_k=16, ho_per_block=2),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

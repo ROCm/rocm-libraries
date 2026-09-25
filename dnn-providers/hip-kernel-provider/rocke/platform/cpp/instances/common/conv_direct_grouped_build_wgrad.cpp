@@ -27,7 +27,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h> /* strcmp for the p.dtype test */
 
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_b_io_ir_type */
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_internal.h"
@@ -59,7 +61,7 @@ static rocke_value_t* rocke_dconv_wgrad__tr_read(rocke_dconv_wgrad_ctx_t* ctx,
 
     indices[0] = ctx->c0;
     indices[1] = base;
-    frag = rocke_b_ds_read_tr16_b64(b, smem, indices, 2, rocke_f16());
+    frag = rocke_b_ds_read_tr16_b64(b, smem, indices, 2, ctx->io_type);
 
     for(rd = 1; rd < ctx->N_TR_READS; ++rd)
     {
@@ -69,7 +71,7 @@ static rocke_value_t* rocke_dconv_wgrad__tr_read(rocke_dconv_wgrad_ctx_t* ctx,
         rocke_value_t* idx2[2];
         idx2[0] = ctx->c0;
         idx2[1] = addr;
-        nxt = rocke_b_ds_read_tr16_b64(b, smem, idx2, 2, rocke_f16());
+        nxt = rocke_b_ds_read_tr16_b64(b, smem, idx2, 2, ctx->io_type);
         frag = rocke_b_vec_concat(b, frag, nxt);
     }
     return frag;
@@ -139,6 +141,10 @@ static rocke_value_t* rocke_dconv_wgrad__issue_delta(rocke_dconv_wgrad_ctx_t* ct
 
     safe_off
         = rocke_b_select(b, both_ok, rocke_b_mul(b, off, ctx->c_half_bytes), ctx->oob_sentinel);
+    if(ctx->is_bf16)
+    {
+        return rocke_b_buffer_load_vN_bf16(b, ctx->a_rsrc, safe_off, ctx->c0, ctx->VEC_CH / 2);
+    }
     return rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_off, ctx->c0, ctx->VEC_CH / 2);
 }
 
@@ -149,7 +155,7 @@ static void rocke_dconv_wgrad__commit_delta(rocke_dconv_wgrad_ctx_t* ctx, rocke_
     rocke_value_t* indices[2];
     indices[0] = ctx->c0;
     indices[1] = rocke_dconv_wgrad__lds_run(ctx, ctx->dy_wave_off_f16, ctx->c_ld_sp);
-    rocke_b_smem_store_vN_f16(b, ctx->dy_lds, indices, 2, vec, ctx->VEC_CH);
+    rocke_b_smem_store_vN(b, ctx->dy_lds, indices, 2, vec, ctx->VEC_CH);
 }
 
 /* _issue_s_strip(hi_val, hi_ok): start the DRAM reads of one X strip.
@@ -198,7 +204,10 @@ static bool rocke_dconv_wgrad__issue_s_strip(rocke_dconv_wgrad_ctx_t* ctx,
         both_ok = rocke_b_land(b, rocke_b_land(b, hi_ok, ctx->strip_col_ok[pass_idx]), x_ok);
         safe
             = rocke_b_select(b, both_ok, rocke_b_mul(b, off, ctx->c_half_bytes), ctx->oob_sentinel);
-        out[pass_idx] = rocke_b_buffer_load_vN_f16(b, ctx->b_rsrc, safe, ctx->c0, ctx->VEC_CH / 2);
+        out[pass_idx]
+            = ctx->is_bf16
+                  ? rocke_b_buffer_load_vN_bf16(b, ctx->b_rsrc, safe, ctx->c0, ctx->VEC_CH / 2)
+                  : rocke_b_buffer_load_vN_f16(b, ctx->b_rsrc, safe, ctx->c0, ctx->VEC_CH / 2);
     }
     return true;
 }
@@ -218,7 +227,7 @@ static void rocke_dconv_wgrad__commit_s_strip(rocke_dconv_wgrad_ctx_t* ctx,
         indices[0] = ctx->c0;
         indices[1]
             = rocke_dconv_wgrad__lds_run(ctx, ctx->s_strip_off_f16, ctx->strip_cols[pass_idx]);
-        rocke_b_smem_store_vN_f16(b, ctx->s_strip_lds, indices, 2, vecs[pass_idx], ctx->VEC_CH);
+        rocke_b_smem_store_vN(b, ctx->s_strip_lds, indices, 2, vecs[pass_idx], ctx->VEC_CH);
     }
 }
 
@@ -275,8 +284,9 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     }
 
     ctx->p = spec->problem;
-    ctx->Ho = rocke_direct_conv_problem_Ho(&ctx->p);
-    ctx->Wo = rocke_direct_conv_problem_Wo(&ctx->p);
+    /* p.Ho / p.Wo: (X + 2*PAD - K) // stride + 1 */
+    ctx->Ho = (ctx->p.H + 2 * ctx->p.PAD - ctx->p.KH) / ctx->p.stride + 1;
+    ctx->Wo = (ctx->p.W + 2 * ctx->p.PAD - ctx->p.KW) / ctx->p.stride + 1;
     ctx->KH = ctx->p.KH;
     ctx->KW = ctx->p.KW;
     if(ctx->KH > ROCKE_DCONV_WGRAD_MAX_KH || ctx->KW > ROCKE_DCONV_WGRAD_MAX_KW)
@@ -329,8 +339,17 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->THREADS);
 
+    /* io_type = _io_type(p.dtype): dY and X are f16 or bf16. dW is always
+     * fp32 -- the split-K reduction lands through fp32 global atomics. */
+    ctx->io_type = rocke_b_io_ir_type(b, ctx->p.dtype ? ctx->p.dtype : "fp16");
+    if(ctx->io_type == NULL)
     {
-        const rocke_type_t* f16ptr = rocke_ptr_type(b, rocke_f16(), "global");
+        return false; /* builder sticky error already set by rocke_b_io_ir_type */
+    }
+    ctx->is_bf16 = ctx->p.dtype && strcmp(ctx->p.dtype, "bf16") == 0;
+
+    {
+        const rocke_type_t* ioptr = rocke_ptr_type(b, ctx->io_type, "global");
         const rocke_type_t* f32ptr = rocke_ptr_type(b, rocke_f32(), "global");
         rocke_param_opts_t ro;
         rocke_param_opts_t dw;
@@ -343,8 +362,8 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
         ro.readonly_set = true;
         ro.align = 16;
         ro.align_set = true;
-        ctx->A = rocke_b_param(b, "A", f16ptr, &ro);
-        ctx->Bp = rocke_b_param(b, "B", f16ptr, &ro);
+        ctx->A = rocke_b_param(b, "A", ioptr, &ro);
+        ctx->Bp = rocke_b_param(b, "B", ioptr, &ro);
 
         /* D: read-modify-write through global_atomic_add -> neither readonly
          * nor writeonly; align 4 (fp32). */
@@ -480,13 +499,13 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
         int shape[2];
         shape[0] = 1;
         shape[1] = ctx->WAVES_K * ctx->WAVES_Q * ctx->LDS_SIZE_DY;
-        ctx->dy_lds = rocke_b_smem_alloc(b, rocke_f16(), shape, 2, "dy_lds");
+        ctx->dy_lds = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "dy_lds");
     }
     {
         int shape[2];
         shape[0] = 1;
         shape[1] = ctx->WAVES_C * ctx->WAVES_Q * ctx->STRIP_PER_Q;
-        ctx->s_strip_lds = rocke_b_smem_alloc(b, rocke_f16(), shape, 2, "s_strip");
+        ctx->s_strip_lds = rocke_b_smem_alloc(b, ctx->io_type, shape, 2, "s_strip");
     }
 
     /* ---- Per-thread loader decomposition ---- */
@@ -556,7 +575,7 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
         }
     }
     {
-        rocke_value_t* ring_zero = rocke_b_zero_vec_f16(b, ctx->VEC_CH);
+        rocke_value_t* ring_zero = rocke_b_zero_vec(b, ctx->io_type, ctx->VEC_CH);
         for(r = 0; r < ctx->KH; ++r)
         {
             ctx->delta_ring[r] = ring_zero;
@@ -688,15 +707,20 @@ void rocke_dconv_wgrad_row_loop(rocke_dconv_wgrad_ctx_t* ctx)
             rocke_value_t* dy_vec = ctx->delta_ring[ring_slot];
             for(s = 0; s < KW; ++s)
             {
+                /* _mfma(io_dtype, "16x16x{32,16}", dy_vec, x_vecs[s], acc) */
                 if(ctx->spec->mfma_k == 32)
                 {
                     ctx->acc[r][s]
-                        = rocke_b_mfma_f32_16x16x32_f16(b, dy_vec, x_vecs[s], ctx->acc[r][s]);
+                        = ctx->is_bf16
+                              ? rocke_b_mfma_f32_16x16x32_bf16(b, dy_vec, x_vecs[s], ctx->acc[r][s])
+                              : rocke_b_mfma_f32_16x16x32_f16(b, dy_vec, x_vecs[s], ctx->acc[r][s]);
                 }
                 else
                 {
                     ctx->acc[r][s]
-                        = rocke_b_mfma_f32_16x16x16_f16(b, dy_vec, x_vecs[s], ctx->acc[r][s]);
+                        = ctx->is_bf16
+                              ? rocke_b_mfma_f32_16x16x16_bf16(b, dy_vec, x_vecs[s], ctx->acc[r][s])
+                              : rocke_b_mfma_f32_16x16x16_f16(b, dy_vec, x_vecs[s], ctx->acc[r][s]);
                 }
             }
         }

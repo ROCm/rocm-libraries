@@ -1774,7 +1774,7 @@ def is_valid_spec_32c(
     from rocke.core.arch import ArchTarget
 
     try:
-        ArchTarget.from_gfx(arch)  # rejects an arch the catalog does not know
+        target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
     p = spec.problem
@@ -3273,6 +3273,13 @@ class DirectConvWgradSpec:
         from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
+        # ``p.short()`` does not carry the dtype, so the bf16 flag is what keeps
+        # an fp16 and a bf16 kernel of the same shape from colliding on name --
+        # which the artifact maps, the parity golden and the module loader all
+        # key on.
+        flags = {"wq": self.waves_q} if self.waves_q > 1 else {}
+        if p.dtype == "bf16":
+            flags["bf16"] = True
         return kernel_name_join(
             self.name,
             p.short(),
@@ -3280,11 +3287,13 @@ class DirectConvWgradSpec:
             f"bc{self.block_c}",
             f"hpb{self.ho_per_block}",
             f"mk{self.mfma_k}",
-            flags={"wq": self.waves_q} if self.waves_q > 1 else {},
+            flags=flags,
         )
 
     def validate(self) -> None:
         p = self.problem
+        if p.dtype not in ("fp16", "bf16"):
+            raise ValueError(f"DirectConvWgradSpec: unsupported dtype {p.dtype!r}")
         if p.kpg < self.wave_tile_k:
             raise ValueError(f"kpg {p.kpg} must be >= wave_tile_k {self.wave_tile_k}")
         if p.cpg < self.wave_tile_c:
@@ -3326,6 +3335,8 @@ def is_valid_wgrad_spec(
     except KeyError as e:
         return False, str(e)
     p = spec.problem
+    if p.dtype not in ("fp16", "bf16"):
+        return False, f"unsupported dtype {p.dtype!r}; expected 'fp16' or 'bf16'"
     if p.kpg < spec.wave_tile_k:
         return False, f"kpg {p.kpg} must be >= wave_tile_k {spec.wave_tile_k}"
     if p.cpg < spec.wave_tile_c:
@@ -3340,14 +3351,17 @@ def is_valid_wgrad_spec(
         return False, f"mfma_k must be 16 or 32 (got {spec.mfma_k})"
     if p.stride != 1:
         return False, _WGRAD_STRIDE_WHY.format(stride=p.stride)
+    ab_dtype = "bf16" if p.dtype == "bf16" else "f16"
     if not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=16
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=16
     ):
-        return False, f"missing mfma_f32_16x16x16_f16 on {arch}"
+        return False, f"missing mfma_f32_16x16x16_{ab_dtype} on {arch}"
     if spec.mfma_k == 32 and not target.mma.has_shape(
-        a_dtype="f16", b_dtype="f16", c_dtype="fp32", m=16, n=16, k=32
+        a_dtype=ab_dtype, b_dtype=ab_dtype, c_dtype="fp32", m=16, n=16, k=32
     ):
-        return False, f"mfma_k=32 needs mfma_f32_16x16x32_f16, absent on {arch}"
+        return False, (
+            f"mfma_k=32 needs mfma_f32_16x16x32_{ab_dtype}, absent on {arch}"
+        )
     if not target.memory.has_ds_read_tr:
         return False, (
             f"wgrad LDS staging requires ds_read_tr16_b64 (gfx950+), absent on {arch}"
@@ -3389,6 +3403,12 @@ def build_direct_conv_wgrad(
     Wo = p.Wo
     KH, KW = p.KH, p.KW
 
+    # dY and X are p.dtype (fp16 or bf16); dW is always fp32, because the
+    # split-K reduction lands through fp32 global atomics and a 16-bit
+    # accumulator would lose the small per-block contributions outright.
+    io_dtype = p.dtype
+    io_type = _io_type(io_dtype)
+
     WAVE_K = spec.wave_tile_k  # 16
     WAVE_C = spec.wave_tile_c  # 16
     WAVES_K = spec.waves_k
@@ -3397,9 +3417,9 @@ def build_direct_conv_wgrad(
     THREADS = spec.threads_per_block
     HPB = spec.ho_per_block  # output rows per block
 
-    # MFMA variants controlled by spec.mfma_k:
-    #   mfma_k=16: mfma_f32_16x16x16_f16, WO_BLOCK=16, vec4 loads (4 f16 per thread)
-    #   mfma_k=32: mfma_f32_16x16x32_f16, WO_BLOCK=32, vec8 loads (8 f16 per thread)
+    # MFMA variants controlled by spec.mfma_k (atom dtype follows p.dtype):
+    #   mfma_k=16: mfma_f32_16x16x16_*, WO_BLOCK=16, vec4 loads (4 elems/thread)
+    #   mfma_k=32: mfma_f32_16x16x32_*, WO_BLOCK=32, vec8 loads (8 elems/thread)
     #     → 2× spatial positions per MFMA atom → 2× fewer loop iterations
     #     → vec8 DRAM loads → 2× better cache-line utilisation
     # ---- Algorithm: delta register ring + S-row strip ----
@@ -3492,8 +3512,8 @@ def build_direct_conv_wgrad(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = THREADS
 
-    A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    A = b.param("A", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
+    Bp = b.param("B", PtrType(io_type, "global"), noalias=True, readonly=True, align=16)
     D = b.param("D", PtrType(F32, "global"), noalias=True, align=4)
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
@@ -3622,12 +3642,14 @@ def build_direct_conv_wgrad(
     # The waves that share a tile write it redundantly; that costs a duplicate
     # DRAM read (L1/L2 resident) and a duplicate ds_write, and buys away the
     # second barrier plus the cross-wave dependency it would impose.
-    dy_lds = b.smem_alloc(F16, [1, WAVES_K * WAVES_Q * LDS_SIZE_DY], name_hint="dy_lds")
+    dy_lds = b.smem_alloc(
+        io_type, [1, WAVES_K * WAVES_Q * LDS_SIZE_DY], name_hint="dy_lds"
+    )
 
     # Column-major [col=STRIP_COLS rows, c_ch=TR_N cols]; s-tap = row shift.
     STRIP_PER_Q = STRIP_COLS_PAD * TR_N
     s_strip_lds = b.smem_alloc(
-        F16, [1, WAVES_C * WAVES_Q * STRIP_PER_Q], name_hint="s_strip"
+        io_type, [1, WAVES_C * WAVES_Q * STRIP_PER_Q], name_hint="s_strip"
     )
 
     # ---- Per-thread loader decomposition ----
@@ -3671,12 +3693,15 @@ def build_direct_conv_wgrad(
     # [spatial][channel] tile.
     def _tr_read(smem: "Value", part_off: "Value", row_shift: int) -> "Value":
         base = b.add(part_off, b.add(tr_flat, b.const_i32(row_shift * TR_N)))
-        frag = b.ds_read_tr16_b64(smem, c0, base, dtype=F16)
+        frag = b.ds_read_tr16_b64(smem, c0, base, dtype=io_type)
         for rd in range(1, N_TR_READS):
             frag = b.vec_concat(
                 frag,
                 b.ds_read_tr16_b64(
-                    smem, c0, b.add(base, b.const_i32(4 * rd * TR_N)), dtype=F16
+                    smem,
+                    c0,
+                    b.add(base, b.const_i32(4 * rd * TR_N)),
+                    dtype=io_type,
                 ),
             )
         return frag
@@ -3712,13 +3737,11 @@ def build_direct_conv_wgrad(
         k_ld = b.add(k_wave_base, c_ld_ch)
         off, _ = dy_desc.offset(b, n=n_i, h=ho_val, w=wo_sp, k=k_ld)
         safe_off = b.select(both_ok, b.mul(off, c_half_bytes), oob_sentinel)
-        return b.buffer_load_vN_f16(a_rsrc, safe_off, c0, VEC_CH // 2)
+        return _buf_load_vN(b, io_dtype, a_rsrc, safe_off, c0, VEC_CH // 2)
 
     def _commit_delta(vec: "Value") -> None:
         """Land a dY fragment in dy_lds[sp][k_ch] — one ds_write per lane."""
-        b.smem_store_vN_f16(
-            dy_lds, [c0, _lds_run(dy_wave_off_f16, c_ld_sp)], vec, n=VEC_CH
-        )
+        b.smem_store_vN(dy_lds, [c0, _lds_run(dy_wave_off_f16, c_ld_sp)], vec, n=VEC_CH)
 
     # The strip columns this wave loads: pass ``base + j * STRIP_GROUPS`` of the
     # partition it shares with the other k-waves (see the LDS staging note).
@@ -3753,7 +3776,7 @@ def build_direct_conv_wgrad(
             )
             both_ok = b.land(b.land(hi_ok, _strip_col_ok[pass_idx]), x_ok)
             safe = b.select(both_ok, b.mul(off, c_half_bytes), oob_sentinel)
-            out.append(b.buffer_load_vN_f16(b_rsrc, safe, c0, VEC_CH // 2))
+            out.append(_buf_load_vN(b, io_dtype, b_rsrc, safe, c0, VEC_CH // 2))
         return out
 
     def _commit_s_strip(vecs: List["Value"]) -> None:
@@ -3763,7 +3786,7 @@ def build_direct_conv_wgrad(
         and land them in the partition's pad rows, which nothing reads.
         """
         for pass_idx, col in enumerate(_strip_cols):
-            b.smem_store_vN_f16(
+            b.smem_store_vN(
                 s_strip_lds,
                 [c0, _lds_run(s_strip_off_f16, col)],
                 vecs[pass_idx],
@@ -3772,8 +3795,8 @@ def build_direct_conv_wgrad(
 
     # ---- Accumulators and delta register ring ----
     acc: List[List["Value"]] = [[zero_acc] * KW for _ in range(KH)]
-    # KH-slot register ring: ring[i] = <VEC_CH x f16> for dY row i
-    delta_ring: List["Value"] = [b.zero_vec_f16(VEC_CH)] * KH
+    # KH-slot register ring: ring[i] = <VEC_CH x io_type> for dY row i
+    delta_ring: List["Value"] = [b.zero_vec(io_type, VEC_CH)] * KH
 
     # ---- Prologue: pre-load KH-1 past delta rows into the ring ----
     # For hi_block B (hi_block_start = B*HPB), the ring needs delta rows from
@@ -3844,11 +3867,9 @@ def build_direct_conv_wgrad(
         for r in range(KH):
             ring_slot = (hi_in_blk + KH - r) % KH  # compile-time!
             dy_vec = delta_ring[ring_slot]
+            shape = "16x16x32" if spec.mfma_k == 32 else "16x16x16"
             for s in range(KW):
-                if spec.mfma_k == 32:
-                    acc[r][s] = b.mfma_f32_16x16x32_f16(dy_vec, x_vecs[s], acc[r][s])
-                else:
-                    acc[r][s] = b.mfma_f32_16x16x16_f16(dy_vec, x_vecs[s], acc[r][s])
+                acc[r][s] = _mfma(b, io_dtype, shape, dy_vec, x_vecs[s], acc[r][s])
 
         b.s_setprio(0)
         b.s_barrier_bare()

@@ -511,6 +511,38 @@ static int make_cfg(int idx,
         *kind = KIND_WGRAD;
         *arch = "gfx942";
         return 0;
+    case 30:
+        /* wgrad bf16: bf16 I/O and the bf16 MFMA atom, same LDS transpose
+         * staging. Pins that only the atom and the element type move. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
+    case 31:
+        /* wgrad bf16 at mfma_k=16: the narrow atom under bf16, one ds_read_tr
+         * per fragment. */
+        p.N = 2;
+        p.H = 8;
+        p.W = 8;
+        p.groups = 8;
+        p.cpg = 16;
+        p.kpg = 16;
+        p.dtype = "bf16";
+        *swg = rocke_direct_conv_wgrad_spec_default();
+        swg->problem = p;
+        swg->mfma_k = 16;
+        swg->ho_per_block = 2;
+        *kind = KIND_WGRAD;
+        *arch = "gfx950";
+        return 0;
     default:
         return -1;
     }

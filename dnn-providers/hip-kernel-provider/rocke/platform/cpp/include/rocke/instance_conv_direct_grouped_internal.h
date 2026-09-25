@@ -703,6 +703,11 @@ typedef struct rocke_dconv_wgrad_ctx
     int HPB; /* spec.ho_per_block                          */
     int WO_BLOCK; /* spec.mfma_k                                */
     int VEC_CH; /* spec.mfma_k / 4                            */
+
+    /* dY/X element type; dW stays fp32 (the split-K reduction is fp32 atomics). */
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() per p.dtype */
+    int is_bf16; /* 1 when p.dtype == "bf16", 0 otherwise      */
+
     int n_wo_tiles;
     int STRIP_COLS; /* WO_BLOCK + KW - 1                          */
     int TR_N; /* WAVE_K (LDS row width)                     */

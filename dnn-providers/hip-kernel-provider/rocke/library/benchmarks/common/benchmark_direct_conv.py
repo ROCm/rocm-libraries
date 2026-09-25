@@ -27,6 +27,7 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 from builders.common.conv_reference import conv_reference as _conv_reference
 from builders.common.conv_reference import dgrad_reference as _dgrad_reference_shared
+from builders.common.conv_reference import wgrad_reference as _wgrad_reference_shared
 
 # ---------------------------------------------------------------------------
 # Swept parameter grids
@@ -887,6 +888,7 @@ def _run_wgrad_sweep(
     *,
     args,
     problem,
+    dtype: str = "fp16",
     arch: str,
     compile_kernel,
     jobs: int,
@@ -901,7 +903,7 @@ def _run_wgrad_sweep(
     import torch
 
     from rocke.helpers.manifest import conv_args_signature
-    from rocke.instances.common.conv_direct_grouped import (
+    from kernels.common.conv_direct_grouped import (
         DirectConvWgradSpec,
         build_direct_conv_wgrad,
         is_valid_wgrad_spec,
@@ -909,10 +911,13 @@ def _run_wgrad_sweep(
     from rocke.runtime.hip_module import HipError
 
     p = problem
+    # dY and X carry the problem dtype; dW is fp32 either way -- the
+    # split-K reduction lands through fp32 global atomics.
+    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
 
     torch.manual_seed(42)
-    X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16).uniform_(
+    X_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
     dW_t = torch.zeros(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float32)
@@ -920,7 +925,7 @@ def _run_wgrad_sweep(
     bytes_xfer = float(X_t.nbytes + dY_t.nbytes + dW_t.nbytes)
     flop = float(p.flops)
 
-    sig_wg = conv_args_signature("fp16")
+    sig_wg = conv_args_signature(dtype)
 
     # (waves_k, waves_c, waves_q). waves_c > 1 is what lets one block cover the
     # whole C axis, which is the difference between reading dY once and reading
@@ -953,7 +958,7 @@ def _run_wgrad_sweep(
     ]
 
     print(
-        f"Sweeping wgrad configurations for {arch} fp16→fp32 {p.short()} ...",
+        f"Sweeping wgrad configurations for {arch} {dtype}→fp32 {p.short()} ...",
         flush=True,
     )
 
@@ -985,16 +990,6 @@ def _run_wgrad_sweep(
     )
     n_built = len(artifact_map)
 
-    ref_out_wg = None
-    if args.verify or args.dump_fail:
-        from rocke.benchmark.conv_reference import wgrad_reference
-
-        ref_out_wg = wgrad_reference(X_t, dY_t, p)
-        print(
-            f"Reference wgrad computed via torch ({tuple(ref_out_wg.shape)}, {ref_out_wg.dtype}).",
-            flush=True,
-        )
-
     rt = Runtime()
     results = []
 
@@ -1004,6 +999,18 @@ def _run_wgrad_sweep(
     rt.memcpy_h2d(X_dev, u8(X_t), X_t.nbytes)
     rt.memcpy_h2d(dY_dev, u8(dY_t), dY_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)
+
+    # After the Runtime, as in every other sweep here: torch and rocke each
+    # bring up their own HIP runtime, and whichever initialises second loses --
+    # torch first leaves rocke's hipModuleGetFunction reporting "named symbol
+    # not found" for every kernel.
+    ref_out_wg = None
+    if args.verify or args.dump_fail:
+        ref_out_wg = _wgrad_reference_shared(X_t, dY_t, _DirectConvProblemAdapter(p))
+        print(
+            f"Reference wgrad computed via torch ({tuple(ref_out_wg.shape)}, {ref_out_wg.dtype}).",
+            flush=True,
+        )
 
     n_run = 0
     for combo, spec, kernel in pending:
@@ -1959,10 +1966,36 @@ def main() -> int:
             stride=args.sH,
             dtype=args.dtype,
         )
+        cases = [(problem, args.dtype, args.direction)]
+
+    _common = dict(
+        args=args,
+        arch=arch,
+        compile_kernel=compile_kernel,
+        jobs=args.jobs,
+        synchronize_and_release=synchronize_and_release,
+        time_launches=time_launches,
+        Runtime=Runtime,
+        KernelLauncher=KernelLauncher,
+        LaunchConfig=LaunchConfig,
+        u8=_u8,
+    )
+
+    all_rc = 0
+    for case_idx, (problem, dtype, direction) in enumerate(cases):
+        if len(cases) > 1:
+            print(f"\n{'#'*72}", flush=True)
+            print(
+                f"# Case {case_idx + 1}/{len(cases)}: {problem.short()} dtype={dtype} dir={direction}",
+                flush=True,
+            )
+            print(f"{'#'*72}", flush=True)
+
+        cpg = problem.cpg
         if direction == "dgrad":
             rc, _ = _run_dgrad_sweep(problem=problem, dtype=dtype, **_common)
         elif direction == "wgrad":
-            rc, _ = _run_wgrad_sweep(problem=problem, **_common)
+            rc, _ = _run_wgrad_sweep(problem=problem, dtype=dtype, **_common)
         elif cpg == 1:
             rc, _ = _run_depthwise_sweep(problem=problem, dtype=dtype, **_common)
         else:

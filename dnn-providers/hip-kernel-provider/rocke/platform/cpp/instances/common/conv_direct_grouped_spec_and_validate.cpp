@@ -1844,8 +1844,9 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     char bc_buf[24];
     char hpb_buf[24];
     char mk_buf[24];
-    const char* flag_names[1];
-    int flag_on[1];
+    const char* flag_names[2];
+    int flag_on[2];
+    const char* dtype;
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -1864,12 +1865,17 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     parts[2] = bc_buf;
     parts[3] = hpb_buf;
     parts[4] = mk_buf;
-    /* Python: flags={"wq": waves_q} if waves_q > 1 else {}. kernel_name_join
-     * appends the NAME (not the value) for a truthy entry, and waves_q > 1 is
-     * exactly when the entry exists and is truthy. */
+    /* Python: flags={"wq": waves_q} if waves_q > 1 else {}, then flags["bf16"]
+     * when p.dtype == "bf16". kernel_name_join appends the NAME (not the value)
+     * for a truthy entry, and waves_q > 1 is exactly when the entry exists and
+     * is truthy -- so a false entry and an absent one name the same kernel.
+     * Order matches the Python dict's insertion order: wq, then bf16. */
+    dtype = spec->problem.dtype ? spec->problem.dtype : "fp16";
     flag_names[0] = "wq";
     flag_on[0] = (spec->waves_q > 1) ? 1 : 0;
-    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 1, out, out_cap, NULL);
+    flag_names[1] = "bf16";
+    flag_on[1] = (strcmp(dtype, "bf16") == 0) ? 1 : 0;
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
 rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
@@ -1893,6 +1899,14 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
         return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
+    /* if p.dtype not in ("fp16", "bf16"): raise ValueError(...) */
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            ROCKE_DCONV_WGRAD_RAISE("DirectConvWgradSpec: unsupported dtype '%s'", dt);
+        }
+    }
     if(p->kpg < spec->wave_tile_k)
     {
         ROCKE_DCONV_WGRAD_RAISE("kpg %d must be >= wave_tile_k %d", p->kpg, spec->wave_tile_k);
@@ -1973,6 +1987,13 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         return false;
     }
     p = &spec->problem;
+    {
+        const char* dt = p->dtype ? p->dtype : "fp16";
+        if(strcmp(dt, "fp16") != 0 && strcmp(dt, "bf16") != 0)
+        {
+            ROCKE_DCONV_WGRAD_REJECT("unsupported dtype '%s'; expected 'fp16' or 'bf16'", dt);
+        }
+    }
     if(p->kpg < spec->wave_tile_k)
     {
         ROCKE_DCONV_WGRAD_REJECT("kpg %d must be >= wave_tile_k %d", p->kpg, spec->wave_tile_k);
@@ -2002,14 +2023,19 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
         ROCKE_DCONV_WGRAD_REJECT(ROCKE_WGRAD_STRIDE_WHY, p->stride);
     }
     mma = rocke_archtarget_mma(target);
-    if(!rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16))
     {
-        ROCKE_DCONV_WGRAD_REJECT("missing mfma_f32_16x16x16_f16 on %s", arch);
-    }
-    if(spec->mfma_k == 32
-       && !rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
-    {
-        ROCKE_DCONV_WGRAD_REJECT("mfma_k=32 needs mfma_f32_16x16x32_f16, absent on %s", arch);
+        /* ab_dtype: "f16" or "bf16" based on problem.dtype */
+        const char* ab = (p->dtype && strcmp(p->dtype, "bf16") == 0) ? "bf16" : "f16";
+        if(!rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 16))
+        {
+            ROCKE_DCONV_WGRAD_REJECT("missing mfma_f32_16x16x16_%s on %s", ab, arch);
+        }
+        if(spec->mfma_k == 32
+           && !rocke_mma_catalog_has_shape(mma, "mma", ab, ab, "fp32", 16, 16, 32))
+        {
+            ROCKE_DCONV_WGRAD_REJECT(
+                "mfma_k=32 needs mfma_f32_16x16x32_%s, absent on %s", ab, arch);
+        }
     }
     if(!target->memory.has_ds_read_tr)
     {
