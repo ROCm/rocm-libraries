@@ -59,6 +59,7 @@ from .emit import (
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc, fragment_length, make_fragment
 from .layouts import make_tile_desc
+from .scheduling import InstrClass, derive_sched_group_counts
 from .mma import (
     TileMma,
     Tiling,
@@ -146,5 +147,8 @@ __all__ = [
     "TransformPlan",
     "ReorderPlan",
     "WarpDistributionEncoding",  # extension substrate (rarely built by hand)
+    # instruction-scheduling helpers (generic classes, not MMA-specific -> package root)
+    "InstrClass",
+    "derive_sched_group_counts",
     # ---- MACHINERY is intentionally NOT re-exported (see the module docstring) ------------------
 ]

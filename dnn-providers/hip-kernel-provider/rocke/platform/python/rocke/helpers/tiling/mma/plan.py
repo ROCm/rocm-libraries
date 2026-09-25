@@ -228,6 +228,13 @@ class TileMmaPlan:
         return (self._m_subtiles, self._n_subtiles, self._k_subtiles)
 
     @property
+    def mfma_count(self) -> int:
+        """The number of matrix-instruction atoms the driver issues per wave-tile cluster (the
+        product of the subtile grid). The single source for a schedule's MFMA count -- never re-typed
+        by a kernel."""
+        return self._m_subtiles * self._n_subtiles * self._k_subtiles
+
+    @property
     def tiling(self) -> Tiling:
         return self._tiling
 

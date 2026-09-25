@@ -44,8 +44,9 @@ TileMma((16,16,16), a,b,c, target)          TileMma((64,64,32), a,b,c, target,
 | `load_fragment(b, ptr, window, desc, lane, *, pad=0, lds_swizzle=False)` | memory -> Fragment (zero-pads OOB) | yes | addressing from `desc.layout`; `pad` = clip fill (0); `lds_swizzle` = bank-swizzle POLICY (§5c) |
 | `store_fragment(b, ptr, window, frag, lane, *, lds_swizzle=False)` | Fragment -> memory (drops OOB) | yes | cast frag dtype -> desc dtype; `lds_swizzle` = bank-swizzle POLICY (§5c) |
 | `TileMma(shape, a,b,c, target, tiling=, style=)` | intrinsic resolver + subtile driver | no | atom/layouts/op_id/wave_size from traits; `style=` picks the operand-layout profile |
-| `Tiling(atom_shape=, order=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK" |
+| `Tiling(atom_shape=, order=, mac_prio=)` | the MMA object's knobs | no | atom=shape (single MMA), order="MNK", mac_prio=0 (setprio off; §5d) |
 | `CanonicalStyle()` / `InterleavedStyle()` | the operand-layout profile (`style=`) | no | default canonical; interleaved = wide free-contiguous loads |
+| `InstrClass` / `derive_sched_group_counts(plan, ...)` | `sched_group_barrier` scheduling — class masks + per-trip counts | no (`InstrClass` int mask; verb IR-free) | scheduling cadence is a perf KNOB, off by default (§5d) |
 
 Free `make_*` factories over thin value objects (`TensorDesc`/`TensorWindow` in `descriptors.py`;
 `TileDesc`/`Fragment` in `fragments.py`); three verbs (`emit.py`); one driver (`mma/`). The
@@ -322,6 +323,29 @@ fa = load_fragment(b, lds_a, win, a_desc, tid, lds_swizzle=b32_swizzle)  # ...SA
 **Whether / which policy to apply is a decision, not a default** — a bank-conflict vs bandwidth vs
 instruction-issue tradeoff. The model, the width ladder, and the binding-stage decision live in
 `lds_banks.md` (measure; do not pick blind).
+
+---
+
+## 5d. Instruction scheduling — `mac_prio` + `sched_group_barrier` (perf KNOBS, Part C, BUILT)
+
+Two levers control how the compiler schedules the steady-state K-loop. Both are **perf-tuning KNOBS**
+— off by default (the recording stays byte-identical), reorder ISSUE not the math (bit-exact), and are
+**measured, not derived** (sweep per arch/shape; the wins to date are gfx90a-shaped).
+
+- **`Tiling(mac_prio=0..3)`** — wave issue priority (`s_setprio`) raised after the FIRST matrix atom of
+  each cluster and dropped after the last. The **driver owns the placement** (`mma/driver.py`); a
+  single-atom cluster emits nothing. `0` = off. Raising *after* the first atom (not before) is the
+  measured-stable placement.
+- **`InstrClass` + `derive_sched_group_counts(plan, *, tile_m, tile_n, n_waves, vw)`**
+  (`scheduling.py`, both package-root exports) — author a `sched_group_barrier` cadence directly.
+  `InstrClass` is the instruction-class mask vocabulary (`MFMA` / `DS_READ` / `DS_WRITE` /
+  `VMEM_READ` / `VMEM_WRITE` / `VALU`; the value IS the mask). The helper returns the per-class
+  instruction counts for one trip — MFMA from `plan.mfma_count`, DS/VMEM from the tile geometry — so
+  the count math has ONE home and cannot drift. `vw` (the kernel's wide-mem access width) is
+  **required** — a per-kernel choice, not derivable from the dtype. The cadence *structure* stays
+  local to each kernel; only the counts are shared. Mutually exclusive with `iglp_opt`.
+
+The demos (`tiling_gemm_{interwave,pipelined,interleaved}_demo.py`) show real, non-trivial cadences.
 
 ---
 

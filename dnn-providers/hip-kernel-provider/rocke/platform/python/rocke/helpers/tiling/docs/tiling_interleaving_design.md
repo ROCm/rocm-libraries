@@ -1054,7 +1054,7 @@ the value of reaching a chain via a **free symmetry rises** (symmetry moves noth
 - **De-aliasing helps ONLY when the read is EXPOSED (single-buffer).** In the double-buffered winner the
   prefetch overlap HIDES the read conflict, so a pad only HURTS (it spends LDS the config can't afford). The
   winner is therefore NOT read-conflict-limited — its remaining MFMA idle is issue-arbitration (addressed by
-  `mac_prio`) + barrier/latency.
+  the `mac_prio` knob; see `tiling_api_surface.md` §5d) + barrier/latency.
 - **MfmaUtil is the causal signal, not `ALUStalledByLDS`** (a VALU counter, blind to the matrix pipe). The pad
   intervention PROVES causation: conflict DOWN + MfmaUtil UP + perf UP together (not mere correlation).
 - **Not latency- or HBM-bound:** the MAC block per K-trip (32 MFMA) ≫ every memory latency (MFMA/LDS/L2/HBM,
