@@ -76,6 +76,9 @@ const vector<vector<int>> large_matrix_sizeB_range = {
     {100, 0}, {150, 0}, {200, 1}, {524, 2}, {1000, 2},
 };
 
+const vector<vector<int>> large_batch_sizeA_range = {{7, 7, 7}};
+const vector<vector<int>> large_batch_sizeB_range = {{7, 0}, {7, 1}, {7, 2}};
+
 Arguments getrs_npvt_setup_arguments(getrs_npvt_tuple tup)
 {
     vector<int> matrix_sizeA = std::get<0>(tup);
@@ -89,17 +92,11 @@ Arguments getrs_npvt_setup_arguments(getrs_npvt_tuple tup)
     arg.set<rocblas_int>("ldb", matrix_sizeA[2]);
 
     if(matrix_sizeB[1] == 0)
-    {
         arg.set<char>("trans", 'N');
-    }
     else if(matrix_sizeB[1] == 1)
-    {
         arg.set<char>("trans", 'T');
-    }
     else
-    {
         arg.set<char>("trans", 'C');
-    }
 
     // only testing standard use case/defaults for strides
 
@@ -108,13 +105,13 @@ Arguments getrs_npvt_setup_arguments(getrs_npvt_tuple tup)
     return arg;
 }
 
-template <typename I>
+template <typename I, int BATCH_COUNT = 3>
 class GETRS_NPVT_BASE : public ::TestWithParam<getrs_npvt_tuple>
 {
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -123,11 +120,9 @@ protected:
         Arguments arg = getrs_npvt_setup_arguments(GetParam());
 
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("nrhs") == 0)
-        {
             testing_getrs_npvt_bad_arg<BATCHED, STRIDED, T, I>();
-        }
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_getrs_npvt<BATCHED, STRIDED, T, I>(arg);
     }
 };
@@ -137,6 +132,14 @@ class GETRS_NPVT : public GETRS_NPVT_BASE<rocblas_int>
 };
 
 class GETRS_NPVT_64 : public GETRS_NPVT_BASE<int64_t>
+{
+};
+
+class GETRS_NPVT_LARGE_BATCH : public GETRS_NPVT_BASE<rocblas_int, 65537>
+{
+};
+
+class GETRS_NPVT_LARGE_BATCH_64 : public GETRS_NPVT_BASE<rocblas_int, 65537>
 {
 };
 
@@ -224,6 +227,47 @@ TEST_P(GETRS_NPVT_64, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batch case
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
 // strided_batched tests
 
 TEST_P(GETRS_NPVT, strided_batched__float)
@@ -266,6 +310,48 @@ TEST_P(GETRS_NPVT_64, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large strided batch
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GETRS_NPVT_LARGE_BATCH_64, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          GETRS_NPVT,
                          Combine(ValuesIn(large_matrix_sizeA_range),
@@ -283,3 +369,13 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GETRS_NPVT_64,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GETRS_NPVT_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_sizeA_range),
+                                 ValuesIn(large_batch_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         GETRS_NPVT_LARGE_BATCH_64,
+                         Combine(ValuesIn(large_batch_sizeA_range),
+                                 ValuesIn(large_batch_sizeB_range)));
