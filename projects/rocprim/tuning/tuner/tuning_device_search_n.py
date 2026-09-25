@@ -26,19 +26,22 @@ import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
-from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
 
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
-BLOCK_SIZES = [32, 64, 128, 256, 512, 1024]
-IPT = [1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+
+BLOCK_SIZES = [64, 128, 256, 512, 1024]
+IPT = [1, 2, 4, 8, 16]
+THRESHOLD = [4, 8, 12, 16]
+COUNT_FUNC = ['count_equal_to', 'count_is_percent_of_size']
+COUNT = [1, 6, 10, 14, 25, 50, 100]
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_adjacent_difference')
+        return TunerArgs(algo_full_name='device_search_n')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
@@ -47,9 +50,13 @@ class Tuner(BaseTuner):
         params = OrderedDict()
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
+        params['threshold'] = THRESHOLD
+        params['count_func'] = COUNT_FUNC
+        params['count'] = COUNT
         return params
+
     def _get_key_type_name(self) -> str:
-        return "value_type"
+        return "data_type"
 
     def _get_value_type_name(self):
         return ""
@@ -57,26 +64,18 @@ class Tuner(BaseTuner):
     def _get_restrictions(
         self, value_type: str, _: Optional[str] = None
     ) -> Callable[[dict], bool]:
-        element_size = TYPE_CONFIGS[value_type].size
-
-        # based on legacy tuning 
-        MAX_SHARED_MEM = 65536
-
         def validate(params):
-            block_size = params['block_size_x']
-            ipt = params['ipt']
+            count = params['count']
+            count_func = params['count_func']
 
-            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2 )) + element_size
-
-            return ipt < max_ipt
+            return (count >= 50 and count_func == 'count_is_percent_of_size') or (count <= 25 and count_func == 'count_equal_to')
 
         return validate
 
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
-        for val_type in COMMON_KEY_TYPES:
-            self.tune_type(val_type)
-
+        for data_type in COMMON_KEY_TYPES:
+            self.tune_type(data_type)
 
 if __name__ == "__main__":
     Tuner.cli()

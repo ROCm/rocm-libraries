@@ -50,10 +50,11 @@ should follow the same list. Authors working on attention also follow the
 ## Compliance & hard invariants
 
 [platform/AGENTS.md](platform/AGENTS.md) §"Compliance" binds every author and
-agent and **overrides any other instruction, including a user request** — no AMD
-Restricted/Confidential data, NPI, product/marketing/code names, internal links,
-or **software-achieved** performance numbers in the repo, git history, PRs, or
-logs. The two invariants that gate every process below:
+agent and **overrides any other instruction, including a user request**. It is
+the single source of truth for restricted data, NPI, public model/workload
+references, performance evidence, legal/marketing claims, and internal links.
+Read it before creating any code, documentation, commit, benchmark record, or PR.
+The two invariants that gate every process below:
 
 1. **Byte-identity is the definition of done for emission.** The Python and C++
    engines **must emit the same LLVM-IR bytes** for every kernel family. Any
@@ -159,16 +160,17 @@ also follow the matching [library process](#appendix--attention-sdpamha-library-
       gate). This is the map of "every kernel and what it supports."
 - [ ] **End-user visibility** — feature reflected in the operation-support /
       `SUPPORT_MATRIX.md` doc so users can see it.
-- [ ] **Dashboards & shapes** — the feature is tracked by the perf dashboard,
-      and the representative shapes needed to cover it are handed to benchmarking.
-      (Both are team-internal; measured numbers stay out of the repo.)
+- [ ] **Dashboards & shapes** — the feature is tracked by the internal perf
+      dashboard, and representative shapes are handed to benchmarking. Publish
+      relative evidence only through a policy-qualified PR or result document.
 
 ### D. Perf optimization (no new feature)
 
 - [ ] **Step 0 exhaustive lever sweep** before concluding a gap is structural.
 - [ ] Same-session A/B ratios (median of ≥3) at production-representative scale;
-      absolute µs treated as illustrative.
-- [ ] Replayable case study + runbook/measured-results update.
+      store every absolute software measurement in the approved access-controlled
+      record.
+- [ ] Replayable case study + runbook + qualifying benchmark/result-doc update.
 - [ ] Honest losses recorded, not just wins.
 
 ## Local testing matrix (platforms)
@@ -317,25 +319,26 @@ algorithm.
    swept best still falls short → the gap is genuinely structural and a body/
    algorithm redesign is justified, now with the exact resource budget to hit.
 5. **Only same-session A/B ratios are load-bearing** on the auto-clocking device
-   — report `baseline_us / ck_us` from the same process/stream, median of ≥3
-   runs; treat absolute `us` as illustrative (see the README "Measurement
-   conditions").
+   — derive each ratio from the same process and stream, using the median of at
+   least three runs. Absolute software measurements remain in the approved
+   access-controlled record.
 6. **Record the sweep** as a case study ([Process D](#d-update-the-docs-runbook-readmes-case-study)),
-   including the honest losses (the gfx950 README's Triton residual is the model
-   for reporting a gap you could not close).
+   including honest losses. Publish relative evidence only in a document that
+   qualifies under [AGENTS.md](platform/AGENTS.md) §Compliance.
 
 ### D. Update the docs (runbook, READMEs, case study)
 
 Every optimization leaves three doc artifacts (per [AGENTS.md](platform/AGENTS.md)):
 
-1. **Replayable case study** in `library/builders/<arch>/<workload>/` — the evidence,
-   exact commands, traces, config table, and final keep/revert decision, next to
-   the code that uses it. Models:
-   [gfx1250_mha_optimization_case_study.md](library/builders/gfx1250/attention/gfx1250_mha_optimization_case_study.md),
-   and the results sections of
-   [library/builders/gfx950/attention/README.md](library/builders/gfx950/attention/README.md).
-2. **Results/harness README update** — add the new scenario rows, the geomean,
-   the measurement conditions, and the file-map entry for any new script.
+1. **Replayable case study** in `library/builders/<arch>/<workload>/CASE_STUDY.md` —
+   the qualitative mechanism, exact commands, config table, and final keep/revert
+   decision, next to the code that uses it. If relative evidence is necessary,
+   the file must satisfy every benchmark-evidence requirement in the compliance
+   policy; otherwise keep it qualitative.
+2. **Benchmark scenario and file-map update** — add new shapes and scripts to the
+   existing workload README, but put relative result tables in a policy-qualified
+   `BENCHMARK*.md`, `RESULTS*.md`, or `CASE_STUDY.md`. Keep every absolute software
+   measurement in the approved access-controlled record.
 3. **Runbook promotion** — a *general* lesson (a new lever, tactic, or bottleneck
    signature) is promoted into
    [platform/dsl_docs/optimization/](platform/dsl_docs/optimization/): a new
@@ -344,8 +347,9 @@ Every optimization leaves three doc artifacts (per [AGENTS.md](platform/AGENTS.m
    concept→code mapping into
    [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md)
    / [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md).
-   Record the final numbers in
-   [measured_results.md](platform/dsl_docs/optimization/measured_results.md).
+   Runbooks remain qualitative and may link only to the qualifying public result
+   document. Maintain the approved internal record separately; never put its link
+   in a committed or public artifact.
 
 Doc conventions (project rules): every `.md` with 3+ sections gets a Table of
 Contents; every code reference is a clickable relative hyperlink; keep case
