@@ -146,7 +146,14 @@ namespace TensileLite
             virtual int error() const = 0;
 
         protected:
+            /// Record a non-fatal error.
+            virtual void recordNonFatalError()
+            {
+                m_encounteredNonFatalError = true;
+            }
+
             std::shared_ptr<ResultReporter> m_reporter;
+            bool                            m_encounteredNonFatalError = false;
         };
 
     } // namespace Client
