@@ -372,8 +372,8 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
     Args:
         library_path (str | Path): Path to the input library.
         output_path (str | Path): Path to the output normalized library.
-        hipblaslt_path (str | Path, optional): Path to hipBLASLt installation. 
-            If set, will append the path to sys.path to find tensilelite.
+        hipblaslt_path (str | Path, optional): Path to hipBLASLt installation.
+            If set, temporarily prepends the path to sys.path to find tensilelite.
 
     Raises:
         FileNotFoundError: If library path does not exist.
@@ -382,12 +382,14 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
     if not library_path.is_file():
         raise FileNotFoundError(f"Library path not found: '{library_path}'")
 
+    tensilelite_path = None
     if hipblaslt_path is not None:
         hipblaslt_path = Path(hipblaslt_path)
         if not hipblaslt_path.is_dir():
             raise FileNotFoundError(f"hipBLASLt path not found: '{hipblaslt_path}'")
         import sys
-        sys.path.append(str(hipblaslt_path / "tensilelite"))
+        tensilelite_path = str(hipblaslt_path / "tensilelite")
+        sys.path.insert(0, tensilelite_path)
 
     try:
         from tensilelite import LibraryIO
@@ -395,6 +397,9 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
         raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+    finally:
+        if tensilelite_path is not None:
+            sys.path.remove(tensilelite_path)
     
     data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):
