@@ -1109,7 +1109,7 @@ def test_dp_only_pap_skips_loop_counter_checkpoint(monkeypatch):
     # DataParallel keeps LoopCounter/OrigLoopCounter constant (idempotent
     # recompute, PAP never runs on the last tile), so prefetchAcrossPersistent
     # skips the 2-VGPR checkpoint/restore entirely
-    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not isDataParallel).
+    # (KernelWriterAssembly: snapshotLoopCounter = HalfPLR or not isPersistentDataParallel).
     writer, items = _prefetch_across_persistent(monkeypatch, TileProcessingStrategy="DataParallel")
 
     assert not any(tag == "PAP loop counters" for _, _, tag in writer.vgprPool.checked_out)

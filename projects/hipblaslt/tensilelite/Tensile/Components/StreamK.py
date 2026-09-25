@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isDataParallel, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isPersistent, isPersistentDataParallel, hasDynamicAssignment, hasHybridAssignment
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GLOBALModifiers, replaceHolder, EXEC,\
@@ -1438,7 +1438,7 @@ class StreamK(TileProcessingStrategy):
         module = Module("StreamK Common storeBranches")
 
         # No branches when no StreamK partial/fixup path can be reached.
-        if kernel["StreamKAtomic"] or isDataParallel(kernel):
+        if kernel["StreamKAtomic"] or isPersistentDataParallel(kernel):
             return module
 
         memOrder = Component.StreamKMemoryOrdering.find(writer)
@@ -1794,7 +1794,7 @@ class StreamK(TileProcessingStrategy):
         module = Module("StreamK Common writePartials")
 
         # No partial writes for atomic or DP-only StreamK.
-        if kernel["StreamKAtomic"] or isDataParallel(kernel):
+        if kernel["StreamKAtomic"] or isPersistentDataParallel(kernel):
             return module
 
         module.add(skPartialsLabel)

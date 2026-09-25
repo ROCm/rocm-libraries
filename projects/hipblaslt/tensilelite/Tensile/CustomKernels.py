@@ -25,7 +25,7 @@
 from .resources import custom_kernel_names, custom_kernel_text
 from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
-from .ExecutionPolicy import isPersistent, isDataParallel
+from .ExecutionPolicy import isPersistent, isPersistentDataParallel
 
 import re
 import yaml
@@ -343,7 +343,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     hasNumWGArg = any(a.get("semantic") == "NumWorkGroups" for a in args)
 
-    if isDataParallel(kernelConfig):
+    # DataParallel assigns whole tiles to persistent workgroups. Ordinary GEMM
+    # uses strategy None and reaches the tile-grid branches below.
+    if isPersistentDataParallel(kernelConfig):
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
         batched = kernelConfig.get("ProblemType", {}).get("Batched", False)

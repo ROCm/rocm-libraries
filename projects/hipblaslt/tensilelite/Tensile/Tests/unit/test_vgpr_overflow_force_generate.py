@@ -30,7 +30,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.ExecutionPolicy import isDataParallel, isPersistent
+from Tensile.ExecutionPolicy import isPersistentDataParallel, isPersistent
 
 pytestmark = pytest.mark.unit
 
@@ -207,7 +207,7 @@ class TestForceGenerateKernel:
 
     def _getKernelSource(self, warnings):
         namespace = {"Solution": object, "printWarning": warnings.append,
-                     "isPersistent": isPersistent, "isDataParallel": isDataParallel}
+                     "isPersistent": isPersistent, "isPersistentDataParallel": isPersistentDataParallel}
         _exec(_funcDef(_KERNEL_WRITER_PY, "_getKernelSource"), namespace)
         return namespace["_getKernelSource"]
 

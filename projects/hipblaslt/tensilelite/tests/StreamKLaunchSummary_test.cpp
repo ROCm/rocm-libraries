@@ -214,7 +214,6 @@ TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicPartialTiles)
     const auto   red   = solution.getSKReduction(problem, env.device);
     const size_t grid  = solution.getSKGrid(problem, env.device, tiles, red);
 
-    EXPECT_EQ(d.streamKMode, 4);
     EXPECT_TRUE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.tiles, tiles);
@@ -256,7 +255,6 @@ TEST(StreamKLaunchSummaryTest, Sk5OnResolvesDynamicTree)
 
     auto d = solution.computeStreamKDecisions(problem, env.device);
 
-    EXPECT_EQ(d.streamKMode, 5);
     EXPECT_TRUE(d.effectiveDynamic);
     EXPECT_TRUE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
@@ -278,7 +276,6 @@ TEST(StreamKLaunchSummaryTest, Sk5OffResolvesStaticSk3)
 
     auto d = solution.computeStreamKDecisions(problem, env.device);
 
-    EXPECT_EQ(d.streamKMode, 5);
     EXPECT_FALSE(d.effectiveDynamic);
     EXPECT_FALSE(d.isDynamic) << "SK5-OFF must take the static (SK3) sub-path";
     EXPECT_EQ(d.numQueues, 8u); // baked count still reported (informational)
@@ -308,7 +305,6 @@ TEST(StreamKLaunchSummaryTest, Sk3StaticPartialTilesReserveWorkspace)
 
     auto d = solution.computeStreamKDecisions(problem, device);
 
-    EXPECT_EQ(d.streamKMode, 3);
     EXPECT_FALSE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     ASSERT_NE(d.tiles % d.skGrid, 0u) << "test needs partial tiles";
@@ -439,7 +435,7 @@ TEST(PersistentLaunchSummaryTest, CompiledDataParallelDiffersFromStreamKWorkspac
     EXPECT_TRUE(fallback.workspaceDPFallbackFired);
     EXPECT_EQ(fallback.finalGrid, fallback.tiles);
     EXPECT_TRUE(streamK.sizeMapping.isStreamK());
-    EXPECT_FALSE(streamK.sizeMapping.isDataParallel());
+    EXPECT_FALSE(streamK.sizeMapping.isPersistentDataParallel());
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +558,6 @@ TEST(StreamKLaunchSummaryTest, NonStreamKProducesInertSnapshot)
     auto                device  = makeDevice(_MI350_CHIP_ID, _SPX_CU, "mi350spx");
 
     auto d = solution.computeStreamKDecisions(problem, device);
-    EXPECT_EQ(d.streamKMode, 0);
     EXPECT_FALSE(d.isDynamic);
     EXPECT_FALSE(d.dpOnly);
     EXPECT_EQ(d.skGrid, 0u);
@@ -607,6 +602,44 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryEmitsFields)
     EXPECT_NE(line.find("mode:"), std::string::npos);
     EXPECT_NE(line.find("grid:"), std::string::npos);
     EXPECT_NE(line.find("work-queue:"), std::string::npos);
+}
+
+TEST(StreamKLaunchSummaryTest, LegacyModeFieldsFollowNamedPolicy)
+{
+    using TensileLite::TileProcessingStrategy;
+    using TensileLite::WorkAssignment;
+    struct Case
+    {
+        TileProcessingStrategy strategy;
+        WorkAssignment assignment;
+        bool effectiveDynamic;
+        const char* number;
+        const char* label;
+    };
+    const Case cases[] = {
+        {TileProcessingStrategy::None, WorkAssignment::StaticGrid, false, "0", "none"},
+        {TileProcessingStrategy::DataParallel, WorkAssignment::StaticGrid, false, "0", "none"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, false, "3", "SK3(static)"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::DynamicWorkQueue, false, "4", "SK4(dynamic)"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, false, "5", "SK5->static(SK3)"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, true, "5", "SK5->dynamic(SK4)"},
+    };
+    auto problem = makeGemmProblem(4096, 4224, 64);
+    for(auto const& test : cases)
+    {
+        SCOPED_TRACE(test.label);
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3);
+        solution.sizeMapping.tileProcessingStrategy = test.strategy;
+        solution.sizeMapping.workAssignment = test.assignment;
+        StreamKDecisions decisions;
+        decisions.effectiveDynamic = test.effectiveDynamic;
+        std::ostringstream os;
+        solution.printStreamKLaunchSummary(os, problem, decisions);
+        const auto text = collapseSpaces(os.str());
+        EXPECT_NE(text.find(std::string("streamK = ") + test.number), std::string::npos);
+        EXPECT_NE(text.find(std::string("mode = ") + test.label), std::string::npos);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -832,7 +865,6 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     // ...and it came from the real helper, not from a special case in the snapshot.
     EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel);
 
-    EXPECT_EQ(d.streamKMode, 3);
     EXPECT_FALSE(d.isDynamic) << "isDynamic implies tree reduction";
     EXPECT_EQ(d.tiles, 64u) << "256/128 * 4096/128 = 2 * 32";
     EXPECT_EQ(problem.getItersPerTile(solution.sizeMapping), 64u)
@@ -1528,7 +1560,6 @@ TEST(StreamKLaunchSummaryTest, FixedGridOverrideWinsGridAttribution)
 
     // Anti-vacuity: the override actually ran.
     ASSERT_TRUE(d.fixedGridUsed) << "scenario must actually take the skFixedGrid override";
-    EXPECT_EQ(d.streamKMode, 3);
     EXPECT_FALSE(d.isDynamic);
     EXPECT_EQ(d.reduction, origami::reduction_t::tree);
     EXPECT_EQ(d.tiles, 1056u);

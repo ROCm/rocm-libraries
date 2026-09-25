@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isStreamK, isDataParallel, normalize_execution_policy
+from Tensile.ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel, normalize_execution_policy
 
 from typing import Dict
 

@@ -449,7 +449,7 @@ namespace
                                      pack.itersPerTile,
                                      pack.grid,
                                      pAMDGPU->skFullTiles,
-                                     solution.sizeMapping.isDataParallel());
+                                     solution.sizeMapping.isPersistentDataParallel());
             pack.skTiles      = split.skTiles;
             pack.skItersPerWG = split.skItersPerWG;
         }

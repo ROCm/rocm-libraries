@@ -23,7 +23,7 @@
 ################################################################################
 
 
-from Tensile.ExecutionPolicy import isPersistent, isDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -14437,7 +14437,7 @@ class KernelWriterAssembly(KernelWriter):
       self.sgprBpeList = ["GSULog2BpeC", "GSULog2BpeD"] if kernel["GlobalSplitU"] != 0 else []
 
       # Set BPE based on reduction algorithm
-      if self.states.tileProcessing.emitsWorkspaceReductionBpe and not isDataParallel(kernel):
+      if self.states.tileProcessing.emitsWorkspaceReductionBpe and not isPersistentDataParallel(kernel):
         sgprLog2BpeC = self.sgprPool.checkOut(1, tag="globalWriteWorkGroupInit_sgprLog2BpeC", preventOverflow=False)
         sgprLog2BpeD = self.sgprPool.checkOut(1, tag="globalWriteWorkGroupInit_sgprLog2BpeD", preventOverflow=False)
 
@@ -14468,7 +14468,7 @@ class KernelWriterAssembly(KernelWriter):
       if not isPersistent(kernel):
         module.add(self.undefineSgpr("AddressC"))
 
-      if self.states.tileProcessing.emitsWorkspaceReductionBpe and not isDataParallel(kernel):
+      if self.states.tileProcessing.emitsWorkspaceReductionBpe and not isPersistentDataParallel(kernel):
         if not kernel["StoreRemapVectorWidth"]:
           self.sgprPool.checkIn(sgprLog2BpeD)
           self.sgprPool.checkIn(sgprLog2BpeC)
@@ -14664,7 +14664,7 @@ class KernelWriterAssembly(KernelWriter):
       # Check for StreamK Kernel when ArgType == 3 (General Batched GEMM)
       # AddressFlags == 0, then parallel reduction in StreamK and SrdC/D needs to be initialized to workspace pointer (AddressC/D)
       # AddressFlags != 0, then not parallel reduction in StreamK and SrdC/D should be initialized to batch matrix address from pointer array (AddressC/D)      
-      if isDataParallel(kernel):
+      if isPersistentDataParallel(kernel):
         # DP-only: reduction is always forced to the tree path (AddressFlags != 0
         # invariant), so initializeSrdAddressFlagsCheck always branches to the
         # general-batched (Srd=0) initialization. Fold it to an unconditional branch
@@ -15102,7 +15102,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VMadU32U24(dst=vgpr(coord0), src0=(kernel["MatrixInstM"]*kernel["MatrixInstBM"]), src1=vgpr(waveCoord0), src2=vgpr(coord0), \
                 comment="coord0 += waveCoord0 * wave M shape(blockM*MiM)"))
 
-      if hasStaticAssignment(kernel) and not isDataParallel(kernel):
+      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
         module.add(VAddLShiftLeftU32(
           dst=vgpr(storeRemapLW), \
           src0=vgpr(tmpV0), \
@@ -15144,7 +15144,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(VLShiftLeftB32(dst=vgpr(coord0), shiftHex=hex(log2(gwvw)), src=vgpr(coord0), \
                 comment="lds coord0 offset *= gwvw (each thread hold gwvw element)"))
 
-      if hasStaticAssignment(kernel) and not isDataParallel(kernel):
+      if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
         module.add(VAddLShiftLeftU32(
                   dst=vgpr(storeRemapLR), \
                   src0=vgpr(tmpV0), \
@@ -15205,7 +15205,7 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.storeRemapAS = []
       for i in range(0, nElements, gwvw):
         self.vgprs.storeRemapAS.append(self.vgprPool.checkOutAligned(int(rpv), int(rpv), "store element d"))
-    if hasStaticAssignment(kernel) and not isDataParallel(kernel):
+    if hasStaticAssignment(kernel) and not isPersistentDataParallel(kernel):
         self.sgprPool.checkIn(self.sgprBpeList[1])
         self.sgprPool.checkIn(self.sgprBpeList[0])
     return module
@@ -15225,7 +15225,7 @@ class KernelWriterAssembly(KernelWriter):
 
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
     # print("len(elements)= ", len(elements_1))
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isDataParallel(kernel)))
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isPersistentDataParallel(kernel)))
     module = Module("notLocalSplitUGlobalWrite")
     storeModule, deferredGSU0 = self.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -15272,7 +15272,7 @@ class KernelWriterAssembly(KernelWriter):
     vectorWidths   = [fullVw, edgeVw]
     vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isDataParallel(kernel)))
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.tileProcessing.requiresWorkspaceReductionStorePath or isPersistentDataParallel(kernel)))
     module = Module("localSplitUGlobalWrite")
     storeModule, _ = self.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -15992,7 +15992,7 @@ class KernelWriterAssembly(KernelWriter):
         # is not entered. Assert to keep this dead AddressFlags reader out of DP-only
         # codegen and to fail loudly (rather than read a removed SGPR) if that
         # invariant ever changes.
-        assert not isDataParallel(kernel), \
+        assert not isPersistentDataParallel(kernel), \
           "StreamKForceDPOnly must not reach the GSU-split AddressFlags store branch"
         if deferGSU0:
           gsu0DeferredLabel = Label(label=self.labels.getNameInc("GW_B0_Deferred"), comment="")
@@ -19062,7 +19062,7 @@ class KernelWriterAssembly(KernelWriter):
     # DP-only tiles are always full: StreamKLocalStart/End are constant
     # (0 / ItersPerTile) and the next-tile setup recomputes the same values,
     # so they need no checkpoint/restore. (DP-only PAP: skip unneeded state.)
-    if not isDataParallel(kernel):
+    if not isPersistentDataParallel(kernel):
       names.append("StreamKLocalStart")
       names.append("StreamKLocalEnd")
     if len(kernel["SpaceFillingAlgo"]):
@@ -19126,7 +19126,7 @@ class KernelWriterAssembly(KernelWriter):
     # Under StreamKForceDPOnly the reduction is always forced to the tree path
     # (Synchronizer always non-null, AddressFlags != 0 invariant), so this
     # parallel-reduction skip never fires; fold it out.
-    if not isDataParallel(kernel):
+    if not isPersistentDataParallel(kernel):
       module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
       module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     # Variant-specific "is there a next persistent iteration?" predicate. SK3
@@ -19155,7 +19155,7 @@ class KernelWriterAssembly(KernelWriter):
       # (idempotent) and PAP never runs on the last tile. Skip the 2-VGPR
       # checkpoint/restore. (DP-only PAP saving.)  HalfPLR is the exception: it
       # enters PAP while LoopCounter is one, so the counters must be preserved.
-      snapshotLoopCounter = kernel["HalfPLR"] or not isDataParallel(kernel)
+      snapshotLoopCounter = kernel["HalfPLR"] or not isPersistentDataParallel(kernel)
       if snapshotLoopCounter:
         prevLoopVgpr = self.vgprPool.checkOutAligned(2, 1, "PAP loop counters")
         module.add(VMovB32(dst=vgpr(prevLoopVgpr), src=sgpr(loopCounterName), comment="checkpoint LoopCounter for PAP restore"))
@@ -20798,7 +20798,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # DP-only: StreamKLocalStart == 0, so the K-offset is 0 * increment == 0 and
     # applying it is a no-op. StreamKLocalStart is not allocated in DP-only mode.
-    if isDataParallel(kernel):
+    if isPersistentDataParallel(kernel):
       return mod
 
     # A shared scale set offsets its owner once; the other data tensor remains independent.
@@ -20840,7 +20840,7 @@ class KernelWriterAssembly(KernelWriter):
       # the tail iteration index is (ItersPerTile - 1). StreamKLocalEnd is not
       # allocated in DP-only mode; derive it from the ItersPerTile constant
       # (kept in a VGPR on gfx1250).
-      if isDataParallel(kernel):
+      if isPersistentDataParallel(kernel):
         sIpt = self.acquirePersistentConstSgpr(kernel, "ItersPerTile")
         if self.isPersistentConstantsToVgprEnabled(kernel):
           mod.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.persistentConstVgprs["ItersPerTile"])))

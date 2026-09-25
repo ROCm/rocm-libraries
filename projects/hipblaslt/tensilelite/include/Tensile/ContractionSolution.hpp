@@ -320,6 +320,7 @@ namespace TensileLite
         size_t depthUorMT1;
     };
 
+    // None selects ordinary GEMM; DataParallel and StreamK use persistent workgroups.
     enum class TileProcessingStrategy { None, DataParallel, StreamK };
     enum class WorkAssignment { StaticGrid, DynamicWorkQueue, Hybrid };
 
@@ -341,6 +342,26 @@ namespace TensileLite
         case WorkAssignment::DynamicWorkQueue: return "DynamicWorkQueue";
         case WorkAssignment::Hybrid: return "Hybrid";
         }
+        throw std::runtime_error("Invalid WorkAssignment");
+    }
+
+    inline TileProcessingStrategy parseTileProcessingStrategy(std::string const& name)
+    {
+        for(auto strategy : {TileProcessingStrategy::None,
+                             TileProcessingStrategy::DataParallel,
+                             TileProcessingStrategy::StreamK})
+            if(name == toString(strategy))
+                return strategy;
+        throw std::runtime_error("Invalid TileProcessingStrategy");
+    }
+
+    inline WorkAssignment parseWorkAssignment(std::string const& name)
+    {
+        for(auto assignment : {WorkAssignment::StaticGrid,
+                               WorkAssignment::DynamicWorkQueue,
+                               WorkAssignment::Hybrid})
+            if(name == toString(assignment))
+                return assignment;
         throw std::runtime_error("Invalid WorkAssignment");
     }
 
@@ -377,7 +398,7 @@ namespace TensileLite
         WorkAssignment workAssignment = WorkAssignment::StaticGrid;
         bool isPersistent() const { return tileProcessingStrategy != TileProcessingStrategy::None; }
         bool isStreamK() const { return tileProcessingStrategy == TileProcessingStrategy::StreamK; }
-        bool isDataParallel() const { return tileProcessingStrategy == TileProcessingStrategy::DataParallel; }
+        bool isPersistentDataParallel() const { return tileProcessingStrategy == TileProcessingStrategy::DataParallel; }
         bool hasStaticAssignment() const { return isPersistent() && workAssignment == WorkAssignment::StaticGrid; }
         bool hasDynamicAssignment() const { return isPersistent() && workAssignment == WorkAssignment::DynamicWorkQueue; }
         bool hasHybridAssignment() const { return isPersistent() && workAssignment == WorkAssignment::Hybrid; }
@@ -388,7 +409,7 @@ namespace TensileLite
                 throw std::runtime_error("StreamKAtomic must be 0 or 1");
             if(!isStreamK() && streamKAtomic)
                 throw std::runtime_error("StreamKAtomic requires TileProcessingStrategy=StreamK");
-            if(isDataParallel() && workAssignment != WorkAssignment::StaticGrid)
+            if(isPersistentDataParallel() && workAssignment != WorkAssignment::StaticGrid)
                 throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
         }
         int    streamKAtomic              = 0;
@@ -478,7 +499,6 @@ namespace TensileLite
         size_t               grid      = 0;
         // StreamK=5 tri-state (0=OFF default/SK3, 1=ON/SK4, 2=AUTO); see
         // hipblasLtStreamKTileSchedulingMode_t. Ignored when streamK != 5.
-        int                  streamKTileSchedulingMode = 0;
         int                  smCountTarget = 0; // 0 = use all device CUs; >0 engages origami heuristic when mode is OFF
     };
 
@@ -636,14 +656,12 @@ namespace TensileLite
     struct StreamKDecisions
     {
         // --- Mode ---
-        // available: sizeMapping.streamK, the mode solve() uses (0 = not StreamK, else 3/4/5).
-        int  streamKMode      = 0;
         // available: streamK5EffectiveDynamic(), the same helper solve()'s grid path uses
         // (SK5 resolved to the dynamic SK4 sub-path). Only meaningful for SK5: it stays
         // false for SK4 even though SK4 is unconditionally dynamic, so ask isDynamic
         // (below) -- not this -- whether a launch takes the dynamic path.
         bool effectiveDynamic = false;
-        // recomputed: derived from streamKMode + effectiveDynamic (SK4, or SK5 resolved dynamic).
+        // recomputed: DynamicWorkQueue assignment, or Hybrid resolved dynamic.
         // Launch-relevant rather than merely reported: solve() consumes this as the
         // dynamicQueuePath predicate guarding the work-stealing rejection.
         bool isDynamic        = false;
@@ -701,12 +719,12 @@ namespace TensileLite
 
         // --- DP-only ---
         // The three flags below distinguish the source of a data-parallel-only launch:
-        //   forceDPOnly              -> sizeMapping.isDataParallel() compile-time param
+        //   forceDPOnly              -> sizeMapping.isPersistentDataParallel() compile-time param
         //   streamKDP                -> TENSILE_STREAMK_DATA_PARALLEL debug override
         //   workspaceDPFallbackFired -> runtime workspace-insufficient (below)
         // recomputed: OR of the three DP triggers above.
         bool dpOnly      = false;
-        // available: sizeMapping.isDataParallel() param.
+        // available: sizeMapping.isPersistentDataParallel() param.
         bool forceDPOnly = false;
         // available: Debug::useStreamKDataParrallel() (TENSILE_STREAMK_DATA_PARALLEL).
         bool streamKDP   = false;
@@ -1006,7 +1024,7 @@ namespace TensileLite
         // recomputed). Has no effect on the launch beyond producing these values, and
         // never mutates solution or problem state. For a non-StreamK solution
         // (!sizeMapping.isStreamK()) it returns immediately with a default-initialised
-        // snapshot whose streamKMode is sizeMapping.streamK.
+        // snapshot resolved from sizeMapping's execution policy.
         PersistentLaunchSettings resolvePersistentSettings(Problem const& problem,
                                                            Hardware const& hardware) const;
 

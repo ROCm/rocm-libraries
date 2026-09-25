@@ -71,12 +71,19 @@ def _write_variant(tmp_path, name, *, fork_overrides=None):
     list; an existing fork entry is replaced, otherwise appended.
     """
     from Tensile import LibraryIO
+    from Tensile.ExecutionPolicy import ALIASES
     import yaml
 
     cfg = copy.deepcopy(LibraryIO.read(_STREAMK_MULTICAST))
     if fork_overrides:
         fork = cfg["BenchmarkProblems"][0][1]["ForkParameters"]
         for key, val in fork_overrides.items():
+            # Replace the inherited spelling before adding the explicit override.
+            aliases = {old for old, new in ALIASES.items() if new == key}
+            for entry in fork:
+                for alias in aliases:
+                    entry.pop(alias, None)
+            fork[:] = [entry for entry in fork if entry]
             replaced = False
             for entry in fork:
                 if key in entry:

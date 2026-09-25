@@ -29,7 +29,7 @@ currently land on the same pool sizes (93/97/101/105 of 106); FP4 is covered bec
 it reaches them through a different allocation path -- different global-read widths,
 LDS layout and scale-block bookkeeping -- that could drift away from FP8.
 
-NOTE on the tight corner: PGL1/SKFDPO0/PGR1/SIA0 sits at 105 of 106, i.e. one
+NOTE on the tight corner: PGL1/StrategyStreamK/PGR1/SIA0 sits at 105 of 106, i.e. one
 spare SGPR. The uniform-summation-order selector (bit 29 of
 ``MagicShiftItersPerTile``, which chooses between the historical global "first-E"
 Stream-K K-split mapping and the per-tile extra-iters mapping) deliberately does
@@ -73,7 +73,7 @@ _DATA_DIR = os.path.join(
 # the tight corner went untested.
 _FORK_AXES = (
     ("PGL", "PrefetchGL2", (0, 1)),
-    ("SKFDPO", "StreamKForceDPOnly", (0, 1)),
+    ("Strategy", "TileProcessingStrategy", ("StreamK", "DataParallel")),
     ("PGR", "PrefetchGlobalRead", (1, 2)),
     ("SIA", "ScheduleIterAlg", (0, 4)),
 )
@@ -96,7 +96,7 @@ _EXPECTED_KERNELS = len(_EXPECTED_VARIANTS)
 # The tightest variant: 105 of 106 SGPRs once WaveIdx is released before the loop,
 # 107 while it is held. If this one is ever missing from the sweep, the budget
 # assertion is running with spare headroom and proves nothing.
-_TIGHT_VARIANT = "PGL1/SKFDPO0/PGR1/SIA0"
+_TIGHT_VARIANT = "PGL1/StrategyStreamK/PGR1/SIA0"
 
 assert _TIGHT_VARIANT in _EXPECTED_VARIANTS, (
     f"_TIGHT_VARIANT {_TIGHT_VARIANT!r} is not in the _FORK_AXES product -- it went "

@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
@@ -3673,7 +3673,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Under StreamKForceDPOnly the reduction is always forced to the tree path
     # (AddressFlags != 0 invariant), so this parallel-reduction skip never fires;
     # fold it out and keep only the PersistentIteration >= PersistentIterationEnd (last-tile) check.
-    if not isDataParallel(kernel):
+    if not isPersistentDataParallel(kernel):
       module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip Subtile PAP"))
       module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
     module.add(SCmpGeU32(src0=sgpr("PersistentIteration"), src1=sgpr("PersistentIterationEnd"), comment="No next persistent iteration"))
@@ -10152,7 +10152,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # -4 SGPRs). The .kd metadata (Components/Signature.py) and the host kernarg builder
     # (ContractionSolution.cpp singleCallArgs) are gated identically so the positional
     # layout stays consistent host<->device.
-    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel):
+    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel):
       if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
         self.defineSgpr("AddressWS", numSgprAddressWS)
         self.defineSgpr("AddressFlags", numSgprAddressFlags)
@@ -10205,7 +10205,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.numSgprBeta = numSgprBeta
 
     # ver3 places AddressWS after alpha/beta, see the StreamK block above.
-    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel) \
+    if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel) \
        and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
       self.defineSgpr("AddressWS", numSgprAddressWS)
       self.states.numSgprPersistent += numSgprAddressWS
@@ -10374,7 +10374,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # two persistent SGPRs; all readers are constant-folded/removed under
       # DP-only (see StreamK.py Common methods, graWorkGroup, and the TDM
       # StreamK-offset helpers, all gated on StreamKForceDPOnly).
-      if not isDataParallel(kernel):
+      if not isPersistentDataParallel(kernel):
         requiredUnalignedSgprVar += [
           "StreamKLocalStart",
           "StreamKLocalEnd",
@@ -10399,7 +10399,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # AddressFlags are likewise dropped for DP-only (see the kernarg define
       # above): all their runtime readers are constant-folded/removed, and the
       # .kd metadata + host kernarg builder are gated to match.
-      if kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel):
+      if kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel):
         requiredAligned4SgprVar.append("SrdWS")
 
     if kernel["UseSubtileImpl"]:
@@ -12453,7 +12453,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self._registerKernelArgs(kernel)
     gridX = "TilesXYBatchGSU"
     if isPersistent(kernel):
-      gridX = "PersistentGrid" if isDataParallel(kernel) else ("PersistentWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "PersistentNoBatch")
+      gridX = "PersistentGrid" if isPersistentDataParallel(kernel) else ("PersistentWithBatch" if kernel["ProblemType"]["NumIndicesC"] > 2 else "PersistentNoBatch")
     kernel["CustomKernel"] = {
       "name": self.states.kernelName,
       "args": self.kernelArgDefs,

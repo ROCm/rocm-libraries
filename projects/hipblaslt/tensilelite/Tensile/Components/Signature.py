@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa.code import SignatureBase
 from rocisa.enum import SignatureValueKind as SVK
 from ..Component import Signature
@@ -285,7 +285,7 @@ class SignatureDefault(Signature):
         # host (ContractionSolution.cpp singleCallArgs) matches by not appending
         # ws/Flags under streamKForceDPOnly, so the positional kernarg layout stays
         # consistent host<->device.
-        if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel):
+        if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel):
             if kernel["InternalSupportParams"]["KernArgsVersion"] < 3:
                 signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
@@ -337,7 +337,7 @@ class SignatureDefault(Signature):
                                         SVK.SIG_VALUE, pack_cptValueType)
 
         # ver3 places AddressWS after alpha/beta, see the StreamK block above.
-        if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isDataParallel(kernel) \
+        if isStreamK(kernel) and kernel["StreamKAtomic"] == 0 and not isPersistentDataParallel(kernel) \
            and kernel["InternalSupportParams"]["KernArgsVersion"] >= 3:
             signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
 
