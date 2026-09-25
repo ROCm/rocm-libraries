@@ -5979,7 +5979,7 @@ namespace TensileLite
             = customKernel.workspaceType == CustomWorkspaceType::StreamK
               || customKernel.workspaceType == CustomWorkspaceType::StreamKWithReduction;
         // Handwritten custom kernels advertise Stream-K via workspaceType, not
-        // sizeMapping.streamK. Without this, solve() enters the Stream-K path
+        // sizeMapping's execution policy. Without this, solve() enters the Stream-K path
         // (customStreamK) then this helper returns grid=0 and hipLaunch fails
         // with numWorkGroups=(0,1,1).
         if(!sizeMapping.isStreamK() && !customStreamK)
@@ -6610,8 +6610,8 @@ namespace TensileLite
             // a missing analytical hardware) and prints a debug line, so a
             // second call would double-print and widen the throw surface.
             // Resolve it at most once, and only when a caller that did not
-            // already hand one down actually asks. Returns false for every
-            // sizeMapping.streamK other than 5, where there is no sub-mode.
+            // already hand one down actually asks. Returns false for a
+            // non-Hybrid assignment, where there is no per-launch sub-mode.
             bool sk5DynamicKnown = false;
             bool sk5DynamicValue = false;
             auto sk5DynamicSubMode = [&]() -> bool {
@@ -7078,7 +7078,6 @@ namespace TensileLite
                                                      Hardware const& hardware) const
     {
         StreamKDecisions d;
-        // Deprecated scraper-facing integer encoding, confined to this adapter.
         if(!sizeMapping.isStreamK())
             return d;
 
@@ -7243,21 +7242,6 @@ namespace TensileLite
         auto reductionStr = [](origami::reduction_t r) {
             return r == origami::reduction_t::parallel ? "parallel(DP)" : "tree";
         };
-        // Retain the legacy labels and numeric field only at the reporting boundary.
-        const int legacyStreamKMode = !sizeMapping.isStreamK() ? 0
-            : sizeMapping.hasDynamicAssignment() ? 4 : sizeMapping.hasHybridAssignment() ? 5 : 3;
-        const char* modeStr = "?";
-        switch(legacyStreamKMode)
-        {
-        case 0: modeStr = "none"; break;
-        case 3: modeStr = "SK3(static)"; break;
-        case 4: modeStr = "SK4(dynamic)"; break;
-        case 5:
-            modeStr = d.effectiveDynamic ? "SK5->dynamic(SK4)" : "SK5->static(SK3)";
-            break;
-        default: modeStr = "SK?"; break;
-        }
-
         // Which fallback (if any) turned the initially-selected grid into the
         // final launch grid. Reported alongside selectedGrid vs finalGrid.
         // Ordered latest-clamp-wins, i.e. the reverse of the order they are applied:
@@ -7347,8 +7331,6 @@ namespace TensileLite
            << " WorkAssignment=" << toString(sizeMapping.workAssignment)
            << " EffectiveWorkAssignment=" << (d.isDynamic ? "DynamicWorkQueue" : "StaticGrid") << "\n";
         os << "  mode:\n";
-        field(9, "mode", modeStr);
-        field(9, "streamK", std::to_string(legacyStreamKMode));
         field(9, "reduction", reductionStr(d.reduction));
         field(9, "isDynamic", yn(d.isDynamic));
 

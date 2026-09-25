@@ -1875,7 +1875,7 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
-    if state.get("StreamK", 0) and state["ProblemType"].get("OutputAmaxD", False):
+    if isPersistent(state) and state["ProblemType"].get("OutputAmaxD", False):
       reject(state, printRejectionReason,
              "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
              "final-output tile per workgroup, not persistent or partial StreamK tiles")

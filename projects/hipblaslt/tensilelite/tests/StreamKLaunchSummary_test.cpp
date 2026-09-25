@@ -74,7 +74,8 @@ namespace
 
     void initStreamKSolution(ContractionSolution& solution, int streamK)
     {
-        solution.sizeMapping.tileProcessingStrategy = TensileLite::TileProcessingStrategy::StreamK;
+        solution.sizeMapping.tileProcessingStrategy = streamK == 0
+            ? TensileLite::TileProcessingStrategy::None : TensileLite::TileProcessingStrategy::StreamK;
         solution.sizeMapping.workAssignment = (streamK == 4 ? TensileLite::WorkAssignment::DynamicWorkQueue : streamK == 5 ? TensileLite::WorkAssignment::Hybrid : TensileLite::WorkAssignment::StaticGrid);
         solution.sizeMapping.streamKAtomic         = 0;
 
@@ -604,41 +605,47 @@ TEST(StreamKLaunchSummaryTest, PrintSummaryEmitsFields)
     EXPECT_NE(line.find("work-queue:"), std::string::npos);
 }
 
-TEST(StreamKLaunchSummaryTest, LegacyModeFieldsFollowNamedPolicy)
+TEST(StreamKLaunchSummaryTest, SummaryReportsNamedPolicyAndEffectiveAssignment)
 {
-    using TensileLite::TileProcessingStrategy;
-    using TensileLite::WorkAssignment;
     struct Case
     {
         TileProcessingStrategy strategy;
         WorkAssignment assignment;
-        bool effectiveDynamic;
-        const char* number;
-        const char* label;
+        bool dynamic;
+        const char* expectedPolicy;
     };
     const Case cases[] = {
-        {TileProcessingStrategy::None, WorkAssignment::StaticGrid, false, "0", "none"},
-        {TileProcessingStrategy::DataParallel, WorkAssignment::StaticGrid, false, "0", "none"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, false, "3", "SK3(static)"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::DynamicWorkQueue, false, "4", "SK4(dynamic)"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, false, "5", "SK5->static(SK3)"},
-        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, true, "5", "SK5->dynamic(SK4)"},
+        {TileProcessingStrategy::None, WorkAssignment::StaticGrid, false,
+         "TileProcessingStrategy=None WorkAssignment=StaticGrid EffectiveWorkAssignment=StaticGrid"},
+        {TileProcessingStrategy::DataParallel, WorkAssignment::StaticGrid, false,
+         "TileProcessingStrategy=DataParallel WorkAssignment=StaticGrid EffectiveWorkAssignment=StaticGrid"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::StaticGrid, false,
+         "TileProcessingStrategy=StreamK WorkAssignment=StaticGrid EffectiveWorkAssignment=StaticGrid"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::DynamicWorkQueue, true,
+         "TileProcessingStrategy=StreamK WorkAssignment=DynamicWorkQueue EffectiveWorkAssignment=DynamicWorkQueue"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, false,
+         "TileProcessingStrategy=StreamK WorkAssignment=Hybrid EffectiveWorkAssignment=StaticGrid"},
+        {TileProcessingStrategy::StreamK, WorkAssignment::Hybrid, true,
+         "TileProcessingStrategy=StreamK WorkAssignment=Hybrid EffectiveWorkAssignment=DynamicWorkQueue"},
     };
     auto problem = makeGemmProblem(4096, 4224, 64);
     for(auto const& test : cases)
     {
-        SCOPED_TRACE(test.label);
+        SCOPED_TRACE(test.expectedPolicy);
         ContractionSolution solution;
         initStreamKSolution(solution, 3);
         solution.sizeMapping.tileProcessingStrategy = test.strategy;
         solution.sizeMapping.workAssignment = test.assignment;
         StreamKDecisions decisions;
-        decisions.effectiveDynamic = test.effectiveDynamic;
+        decisions.isDynamic = test.dynamic;
         std::ostringstream os;
         solution.printStreamKLaunchSummary(os, problem, decisions);
         const auto text = collapseSpaces(os.str());
-        EXPECT_NE(text.find(std::string("streamK = ") + test.number), std::string::npos);
-        EXPECT_NE(text.find(std::string("mode = ") + test.label), std::string::npos);
+        EXPECT_NE(text.find(test.expectedPolicy), std::string::npos);
+        EXPECT_EQ(text.find("streamK ="), std::string::npos);
+        EXPECT_EQ(text.find("SK3"), std::string::npos);
+        EXPECT_EQ(text.find("SK4"), std::string::npos);
+        EXPECT_EQ(text.find("SK5"), std::string::npos);
     }
 }
 

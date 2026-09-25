@@ -115,7 +115,7 @@ def test_assign_custom_kernel_params_streamk_partials_accumulation():
 def test_assign_custom_kernel_params_derives_streamk_workspace():
     # Non-atomic Stream-K reduces partial tiles through the workspace, so a
     # block that declares none must be sized from the compute type.
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     Solution._assignCustomKernelParameters(state)
     assert state["CustomKernel"]["workspaceType"] == "StreamKWithReduction"
     assert state["CustomKernel"]["workspaceSizePerElemC"] == 4
@@ -124,7 +124,7 @@ def test_assign_custom_kernel_params_derives_streamk_workspace():
 
 def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type():
     state = _ck_state(
-        StreamK=2,
+        TileProcessingStrategy="StreamK",
         StreamKAtomic=0,
         ProblemType={"ComputeDataType": DataType("d"), "DestDataType": DataType("d")},
     )
@@ -133,7 +133,7 @@ def test_assign_custom_kernel_params_derives_streamk_workspace_from_compute_type
 
 
 def test_assign_custom_kernel_params_keeps_declared_workspace():
-    state = _ck_state(StreamK=2, StreamKAtomic=0)
+    state = _ck_state(TileProcessingStrategy="StreamK", StreamKAtomic=0)
     state["CustomKernel"]["workspaceType"] = "StreamK"
     state["CustomKernel"]["workspaceSizePerElemC"] = 2
     Solution._assignCustomKernelParameters(state)
@@ -143,7 +143,7 @@ def test_assign_custom_kernel_params_keeps_declared_workspace():
 
 @pytest.mark.parametrize("over", [
     {},                                # not Stream-K at all
-    {"StreamK": 2, "StreamKAtomic": 1},  # atomic Stream-K needs no reduction buffer
+    {"TileProcessingStrategy": "StreamK", "StreamKAtomic": 1},  # atomic needs no reduction buffer
 ])
 def test_assign_custom_kernel_params_no_workspace_without_partials(over):
     state = _ck_state(**over)
