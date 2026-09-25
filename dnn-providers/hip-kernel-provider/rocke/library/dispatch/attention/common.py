@@ -45,6 +45,8 @@ bind to until phase 6 moves the routing policy up.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from enum import IntEnum
+from operator import index
 from typing import Tuple
 
 from kernels.common.attention_unified import (
@@ -65,6 +67,33 @@ FAMILY = "attention_unified"
 ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
 
 
+class AttentionMaskType(IntEnum):
+    """Attention-mask ordinals matching ``plan_utils::MaskType``.
+
+    These are mask kinds, not hipDNN ``DiagonalAlignment`` ordinals.
+    """
+
+    NO_MASK = 0
+    TOP_LEFT_CAUSAL = 1
+    BOTTOM_RIGHT_CAUSAL = 2
+    SLIDING_WINDOW = 3
+
+
+_ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
+
+
+def _parse_attention_mask_type(value: object) -> AttentionMaskType:
+    """Return a validated mask enum without truncating or parsing strings."""
+    try:
+        ordinal = index(value)
+        return AttentionMaskType(ordinal)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "mask_type must be an exact integer ordinal in "
+            f"{_ATTENTION_MASK_ORDINALS}, got {value!r}"
+        ) from exc
+
+
 @dataclass(frozen=True)
 class AttentionRequest(OperatorRequest):
     """Normalized scaled-dot-product-attention request."""
@@ -77,7 +106,7 @@ class AttentionRequest(OperatorRequest):
     hdim_q: int
     hdim_v: int
     arch: str
-    mask_type: int = 0  # 0=none, 1=causal/top-left, ...
+    mask_type: AttentionMaskType | int = AttentionMaskType.NO_MASK
     use_sinks: bool = False
     sliding_window: int = 0
     kv_block_size: int = 16  # paged KV block_size (modulus); {16,32,64}
@@ -109,6 +138,8 @@ class AttentionRequest(OperatorRequest):
     def normalized(self) -> dict:
         d = asdict(self)
         d["dtype"] = self.dtype.lower()
+        # IntEnum and raw-int callers describe the same request/cache identity.
+        d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
         return d
 
     def dims(self) -> dict[str, int]:
@@ -125,8 +156,18 @@ class AttentionRequest(OperatorRequest):
 
     def features(self) -> frozenset[str]:
         active = set()
-        if int(self.mask_type) != 0:
+        try:
+            mask_type = _parse_attention_mask_type(self.mask_type)
+        except ValueError:
+            # Let _request_errors report the invalid ordinal. In particular, do
+            # not silently classify an arbitrary nonzero value as causal.
+            mask_type = None
+        if mask_type is not None and mask_type != AttentionMaskType.NO_MASK:
             active.add("causal")
+        if mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and int(
+            self.seqlen_q
+        ) != int(self.seqlen_k):
+            active.add("causal_bottom_right")
         if int(self.sliding_window) > 0:
             active.add("sliding_window")
         if bool(self.use_sinks):
@@ -147,7 +188,9 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
-ATTENTION_FEATURES = frozenset({"causal", "sliding_window", "sinks", "fp8"})
+ATTENTION_FEATURES = frozenset(
+    {"causal", "causal_bottom_right", "sliding_window", "sinks", "fp8"}
+)
 
 
 def _request_errors(req: OperatorRequest) -> list[str]:
@@ -163,6 +206,10 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append("only hdim_q == hdim_v is supported")
     if int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
+    try:
+        _parse_attention_mask_type(req.mask_type)
+    except ValueError as exc:
+        errors.append(str(exc))
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:
