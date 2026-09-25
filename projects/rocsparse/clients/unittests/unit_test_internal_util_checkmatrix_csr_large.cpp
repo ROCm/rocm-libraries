@@ -307,7 +307,8 @@ namespace
     constexpr int32_t small_m    = 4096;
     constexpr int32_t small_grid = 2; // deliberately far below what m needs
 
-    // Drive rocsparse::check_matrix_csr_device<256, WF_SIZE> over a 4096-row
+    // Drive the grid-stride instantiation
+    // rocsparse::check_matrix_csr_device<256, WF_SIZE, true> over a 4096-row
     // matrix with one nonzero per row, using `small_grid` blocks. `bad_last_col`
     // selects whether the single nonzero of the last row carries a legal column
     // index or an out-of-range one.
@@ -351,7 +352,7 @@ namespace
         (void)hipGetLastError();
 
         hipLaunchKernelGGL(
-            (rocsparse::check_matrix_csr_device<256, WF_SIZE, float, int32_t, int32_t>),
+            (rocsparse::check_matrix_csr_device<256, WF_SIZE, true, float, int32_t, int32_t>),
             dim3(small_grid),
             dim3(256),
             0,
