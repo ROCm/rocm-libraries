@@ -233,6 +233,16 @@ def test_sdist_keeps_its_rocm_identity_when_built_into_a_wheel(tmp_path):
     )
 
 
+def test_rocisa_python_package_outputs_are_configuration_invariant():
+    cmake = (_PROJECT_ROOT / "rocisa/CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "function(_rocisa_set_python_package_output_directory" in cmake
+    assert "LIBRARY_OUTPUT_DIRECTORY_${_config_upper}" in cmake
+    assert "RUNTIME_OUTPUT_DIRECTORY_${_config_upper}" in cmake
+    assert "_rocisa_set_python_package_output_directory(\n        _rocisa" in cmake
+    assert "_rocisa_set_python_package_output_directory(\n            stinkytofu_python" in cmake
+
+
 def test_removed_source_autobuild_option_is_not_referenced():
     paths = (
         _PROJECT_ROOT.parent / "CMakeLists.txt",
