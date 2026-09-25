@@ -440,8 +440,8 @@ doc). Entries are keyed on the logic file path plus the solution's `SolutionName
 content-derived name adopted in [PR #9355](https://github.com/ROCm/rocm-libraries/pull/9355) so that
 keys survive library re-tuning instead of drifting with a positional index, and each entry carries a
 `ticket:` field. The checker re-validates every entry and reports the ones that no longer reproduce, so
-a fixed bug is detected rather than skipped forever. All 14 current entries document the same gfx950
-validation drift.
+a fixed bug is detected rather than skipped forever. The list is currently empty because those gfx950
+validation-drift entries were removed after becoming stale.
 
 `--strict-known-bugs` turns that detection into a failure, but it defaults off and nothing passes it
 today, so a stale entry only warns. Enforcing it is tracked in AIHPBLAS-4196, which proposes the
