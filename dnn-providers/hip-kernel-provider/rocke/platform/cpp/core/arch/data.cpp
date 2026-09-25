@@ -708,6 +708,67 @@ static const rocke_layout_map_t lm_mfma_32x32x16_a = {ROCKE_MMA_ROLE_A, 8, 64, _
 static const rocke_layout_map_t lm_mfma_32x32x16_b = {ROCKE_MMA_ROLE_B, 8, 64, _mfma_b_32x32x16};
 static const rocke_layout_map_t lm_mfma_32x32x16_c = {ROCKE_MMA_ROLE_ACC, 16, 64, _mfma_acc_32x32};
 
+static void _mfma_a_16x16x8_xf32(
+    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
+{
+    rocke_value_t* c = rocke_b_const_i32(b, 16);
+    rocke_value_t* axis = rocke_b_mod(b, lane, c);
+    rocke_value_t* group = rocke_b_div(b, lane, c);
+    rocke_value_t* two = rocke_b_const_i32(b, 2);
+    rocke_value_t* base = rocke_b_mul(b, group, two);
+    rocke_value_t* index = rocke_b_const_i32(b, slot);
+    rocke_value_t* k = rocke_b_add(b, base, index);
+    *c0 = axis;
+    *c1 = k;
+}
+
+static void _mfma_b_16x16x8_xf32(
+    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
+{
+    rocke_value_t* c = rocke_b_const_i32(b, 16);
+    rocke_value_t* axis = rocke_b_mod(b, lane, c);
+    rocke_value_t* group = rocke_b_div(b, lane, c);
+    rocke_value_t* two = rocke_b_const_i32(b, 2);
+    rocke_value_t* base = rocke_b_mul(b, group, two);
+    rocke_value_t* index = rocke_b_const_i32(b, slot);
+    rocke_value_t* k = rocke_b_add(b, base, index);
+    *c0 = k;
+    *c1 = axis;
+}
+
+static void _mfma_a_32x32x4_xf32(
+    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
+{
+    rocke_value_t* c = rocke_b_const_i32(b, 32);
+    rocke_value_t* axis = rocke_b_mod(b, lane, c);
+    rocke_value_t* group = rocke_b_div(b, lane, c);
+    rocke_value_t* two = rocke_b_const_i32(b, 2);
+    rocke_value_t* base = rocke_b_mul(b, group, two);
+    rocke_value_t* index = rocke_b_const_i32(b, slot);
+    rocke_value_t* k = rocke_b_add(b, base, index);
+    *c0 = axis;
+    *c1 = k;
+}
+
+static void _mfma_b_32x32x4_xf32(
+    rocke_ir_builder_t* b, rocke_value_t* lane, int slot, rocke_value_t** c0, rocke_value_t** c1)
+{
+    rocke_value_t* c = rocke_b_const_i32(b, 32);
+    rocke_value_t* axis = rocke_b_mod(b, lane, c);
+    rocke_value_t* group = rocke_b_div(b, lane, c);
+    rocke_value_t* two = rocke_b_const_i32(b, 2);
+    rocke_value_t* base = rocke_b_mul(b, group, two);
+    rocke_value_t* index = rocke_b_const_i32(b, slot);
+    rocke_value_t* k = rocke_b_add(b, base, index);
+    *c0 = k;
+    *c1 = axis;
+}
+
+static const rocke_layout_map_t lm_xf32_16_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a_16x16x8_xf32};
+static const rocke_layout_map_t lm_xf32_16_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_16x16x8_xf32};
+static const rocke_layout_map_t lm_xf32_32_a = {ROCKE_MMA_ROLE_A, 2, 64, _mfma_a_32x32x4_xf32};
+static const rocke_layout_map_t lm_xf32_32_b = {ROCKE_MMA_ROLE_B, 2, 64, _mfma_b_32x32x4_xf32};
+
 /* --- mfma_f32_16x16x4_f32: a/b/c present (frag 1/1/4, wave64) (#8348) --- */
 static const rocke_layout_map_t lm_mfma_16x16x4_f32_a
     = {ROCKE_MMA_ROLE_A, 1, 64, _mfma_a_16x16x4_f32};
@@ -890,6 +951,8 @@ static_assert(offsetof(rocke_ati_mma_frag_row_t, c_frag_len) == sizeof(const cha
               "c_frag_len must immediately follow op_id (no leading padding)");
 
 static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
+    {"mfma_f32_32x32x4_xf32", 16},
+    {"mfma_f32_16x16x8_xf32", 4},
     /* --- MFMA fp32 (wave64) --- */
     {"mfma_f32_16x16x4_f32", 4},
     {"mfma_f32_32x32x2_f32", 16},
@@ -1040,6 +1103,37 @@ static const rocke_mma_op_t k_mma_gfx90a[] = {
 
 /* ----------------------------- gfx942 (CDNA) ----------------------------- */
 static const rocke_mma_op_t k_mma_gfx942[] = {
+    {"mma",
+     "tf32",
+     "tf32",
+     "fp32",
+     16,
+     16,
+     8,
+     "mfma_f32_16x16x8_xf32",
+     2,
+     2,
+     4,
+     64,
+     &lm_xf32_16_a,
+     &lm_xf32_16_b,
+     &lm_mfma_16x16x4_f32_c},
+    {"mma",
+     "tf32",
+     "tf32",
+     "fp32",
+     32,
+     32,
+     4,
+     "mfma_f32_32x32x4_xf32",
+     2,
+     2,
+     16,
+     64,
+     &lm_xf32_32_a,
+     &lm_xf32_32_b,
+     &lm_mfma_32x32x2_f32_c},
+
     {"mma",
      "fp32",
      "fp32",

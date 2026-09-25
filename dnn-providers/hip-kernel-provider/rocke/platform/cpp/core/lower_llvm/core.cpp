@@ -20,6 +20,7 @@
  * stub bodies remain in this file.
  */
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -978,7 +979,7 @@ const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
             return "i8";
         if(strcmp(n, "i16") == 0)
             return "i16";
-        if(strcmp(n, "i32") == 0)
+        if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0)
             return "i32";
         if(strcmp(n, "i64") == 0)
             return "i64";
@@ -1076,7 +1077,7 @@ const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
     {
         rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for (null)");
     }
-    if(strcmp(name, "i32") == 0)
+    if(strcmp(name, "i32") == 0 || strcmp(name, "tf32") == 0)
         return "i32";
     if(strcmp(name, "i64") == 0)
         return "i64";
@@ -1114,7 +1115,7 @@ const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
                 lelem = "half";
             else if(strcmp(elem, "bf16") == 0)
                 lelem = "bfloat";
-            else if(strcmp(elem, "i32") == 0)
+            else if(strcmp(elem, "i32") == 0 || strcmp(elem, "tf32") == 0)
                 lelem = "i32";
             else
             {
@@ -1629,7 +1630,7 @@ static int ll_smem_seg_size(const rocke_type_t* stype)
         eb = 1;
     else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
         eb = 2;
-    else if(strcmp(n, "i32") == 0 || strcmp(n, "f32") == 0)
+    else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
         eb = 4;
     else if(strcmp(n, "i64") == 0)
         eb = 8;
@@ -1932,6 +1933,9 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
     rocke_opcode_t oc = op->opcode;
     rocke_ll_op_fn fn = NULL;
     if(oc > ROCKE_OP_INVALID && oc < ROCKE_OP__COUNT)

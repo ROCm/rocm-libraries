@@ -51,6 +51,7 @@ I64 = Type("i64")
 BF16 = Type("bf16")
 F16 = Type("f16")
 F32 = Type("f32")
+TF32 = Type("tf32")
 FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
 FP4E2M1 = Type("fp4e2m1")
@@ -75,6 +76,7 @@ def dtype_to_ir_type(dtype: str) -> Type:
         "fp16": F16,
         "bf16": BF16,
         "fp32": F32,
+        "tf32": TF32,
         "fp8e4m3": FP8E4M3,
         "bf8e5m2": BF8E5M2,
         "fp4e2m1": FP4E2M1,
@@ -910,6 +912,49 @@ class IRBuilder:
         if v.type.name not in ("f16", "bf16"):
             raise ValueError(f"cast_to_f32 unsupported from {v.type.name}")
         return self._op("arith.cast_to_f32", [v], [F32], result_name_hint="f32").result
+
+    def cvt_f32_to_tf32(self, v: Value) -> Value:
+        """Round f32 to TF32 precision (RNE), carried as i32 bits.
+
+        Finite encodings have 13 zero low bits. Infinities and signed zero are
+        preserved; NaNs are quieted and retain their upper payload bits.
+        Use bitcast(v, TF32) to request native XF32 truncation without rounding.
+        """
+        if v.type != F32:
+            raise ValueError("cvt_f32_to_tf32 expects f32 input")
+        bits = self.bitcast(v, I32)
+        magnitude_mask = self.const_i32(2147483647)
+        mag = self.land(bits, magnitude_mask)
+        sign_mask = self.const_i32(-2147483648)
+        sign = self.land(bits, sign_mask)
+        exponent_mask = self.const_i32(2139095040)
+        exp = self.land(mag, exponent_mask)
+        exponent_all_ones = self.const_i32(2139095040)
+        special = self.cmp_eq(exp, exponent_all_ones)
+        zero = self.const_i32(0)
+        safe = self.select(special, zero, mag)
+        discarded_bits = self.const_i32(13)
+        shift = self.lshr(safe, discarded_bits)
+        low_bit = self.const_i32(1)
+        odd = self.land(shift, low_bit)
+        rounding_bias = self.const_i32(4095)
+        bias = self.add(odd, rounding_bias)
+        rounded = self.add(safe, bias)
+        precision_mask = self.const_i32(-8192)
+        rounded = self.land(rounded, precision_mask)
+        rounded = self.lor(rounded, sign)
+        fraction_mask = self.const_i32(8388607)
+        frac = self.land(mag, fraction_mask)
+        zero_fraction = self.const_i32(0)
+        is_nan = self.cmp_ne(frac, zero_fraction)
+        quiet_bit = self.const_i32(4194304)
+        quiet = self.lor(bits, quiet_bit)
+        nan_precision_mask = self.const_i32(-8192)
+        quiet = self.land(quiet, nan_precision_mask)
+        nonfinite = self.select(is_nan, quiet, bits)
+        result = self.select(special, nonfinite, rounded)
+        result = self.bitcast(result, TF32)
+        return result
 
     def cast_f32_to(self, v: Value, target: Type) -> Value:
         if v.type.name != "f32":
@@ -1778,7 +1823,7 @@ class IRBuilder:
         elem_bytes = (
             1
             if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4 if elem_name in ("f32", "i32") else 2
+            else 4 if elem_name in ("f32", "i32", "tf32") else 2
         )
         self._op(
             "tile.smem_store_vN",
@@ -1816,9 +1861,18 @@ class IRBuilder:
         96-bit payloads (12 bytes, six halfwords, or three words), using element
         alignment. The target and alignment determine instruction selection.
         """
-        if dtype.name not in ("f16", "bf16", "f32", "i32", "fp8e4m3", "bf8e5m2", "i8"):
+        if dtype.name not in (
+            "f16",
+            "bf16",
+            "f32",
+            "i32",
+            "tf32",
+            "fp8e4m3",
+            "bf8e5m2",
+            "i8",
+        ):
             raise ValueError(
-                "smem_load_vN supports f16 / bf16 / f32 / i32 / fp8e4m3 / "
+                "smem_load_vN supports f16 / bf16 / f32 / i32 / tf32 / fp8e4m3 / "
                 f"bf8e5m2 / i8, got {dtype.name}"
             )
         allowed_n = (
@@ -1874,6 +1928,11 @@ class IRBuilder:
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         """
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
+        from .tf32 import tf32_mma_error
+
+        error = tf32_mma_error(op_id, [a, b, c, *extra])
+        if error:
+            raise ValueError(error)
         c_frag_len = (
             op.c_frag_len
             if hasattr(op, "c_frag_len") and op.c_frag_len
@@ -4187,7 +4246,7 @@ class IRBuilder:
             elem_bytes = 2
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
-        elif elem_name in ("f32", "i32"):
+        elif elem_name in ("f32", "i32", "tf32"):
             elem_bytes = 4
             if n == 16:
                 raise ValueError(f"global_store_vN n=16 not supported for {elem_name}")
