@@ -34,12 +34,12 @@ _OPTIONAL_REQUIREMENTS = {
     "ujson": "ujson",
 }
 _CANONICAL_REQUIREMENTS = {
-    "filelock",
-    "joblib",
-    "msgpack",
-    "numpy",
-    "packaging",
-    "pyyaml",
+    ("filelock", ""),
+    ("joblib", ">=1.4.0"),
+    ("msgpack", ""),
+    ("numpy", ""),
+    ("packaging", ""),
+    ("pyyaml", ""),
 }
 _COMPATIBILITY_SCRIPTS = {
     "Tensile": "tensilelite_tensile_compat.commands:tensile",
@@ -165,7 +165,7 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
                     f"canonical wheel must not declare source-provisioned rocisa, got {rocisa}"
                 )
             mandatory = {
-                canonicalize_name(requirement.name)
+                (canonicalize_name(requirement.name), str(requirement.specifier))
                 for requirement in requirements
                 if requirement.marker is None
             }
@@ -175,6 +175,22 @@ def validate(wheel: Path, mode: str, source_root: Path, expected_version: str) -
                     f"{sorted(_CANONICAL_REQUIREMENTS)}, got {sorted(mandatory)}"
                 )
             extras = set(metadata.get_all("Provides-Extra", []))
+            if extras != set(_OPTIONAL_REQUIREMENTS):
+                problems.append(
+                    "canonical extras must be exactly "
+                    f"{sorted(_OPTIONAL_REQUIREMENTS)}, got {sorted(extras)}"
+                )
+            marked_requirements = {
+                canonicalize_name(requirement.name)
+                for requirement in requirements
+                if requirement.marker is not None
+            }
+            if marked_requirements != set(_OPTIONAL_REQUIREMENTS.values()):
+                problems.append(
+                    "canonical optional dependencies must be exactly "
+                    f"{sorted(_OPTIONAL_REQUIREMENTS.values())}, "
+                    f"got {sorted(marked_requirements)}"
+                )
             for extra, dependency in _OPTIONAL_REQUIREMENTS.items():
                 matches = [req for req in requirements if canonicalize_name(req.name) == dependency]
                 if extra not in extras or not any(
