@@ -4,7 +4,7 @@
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import subprocess
 
 from packaging.version import Version
@@ -61,13 +61,14 @@ def test_different_worktrees_have_different_installation_keys(tmp_path, monkeypa
 
 
 def test_binding_root_and_helper_cache_share_tensilelite_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: tmp_path))
     installation = binding.Installation(tmp_path / "package", "id", "1.0+rocm1.0.0")
     assert binding.binding_path(installation) == tmp_path / ".tensilelite/bindings/id/client.json"
 
 
 def test_configure_atomically_replaces_and_reset_removes_one_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))
     installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
     client = (tmp_path / "client").absolute()
     client.write_text("client", encoding="utf-8")
@@ -83,8 +84,60 @@ def test_configure_atomically_replaces_and_reset_removes_one_file(tmp_path, monk
     assert not path.exists()
 
 
+def test_ensure_revalidates_an_unchanged_client(tmp_path, monkeypatch):
+    installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
+    client = (tmp_path / "client").absolute()
+    client.write_text("client", encoding="utf-8")
+    validated = []
+    monkeypatch.setattr(configure_client, "current_installation", lambda: installation)
+    monkeypatch.setattr(configure_client, "read_binding", lambda unused: client)
+    monkeypatch.setattr(
+        configure_client,
+        "binding_path",
+        lambda unused: pytest.fail("unchanged --ensure-client must not rewrite the binding"),
+    )
+    monkeypatch.setattr(
+        configure_client,
+        "validate_client",
+        lambda path, version: validated.append((path, version)),
+    )
+
+    assert configure_client.configure(client, ensure=True) == client
+    assert validated == [(client, installation.version)]
+
+
+def test_ensure_rejects_a_stale_client_at_the_unchanged_path(tmp_path, monkeypatch):
+    installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
+    client = (tmp_path / "client").absolute()
+    client.write_text("client", encoding="utf-8")
+    monkeypatch.setattr(configure_client, "current_installation", lambda: installation)
+    monkeypatch.setattr(configure_client, "read_binding", lambda unused: client)
+
+    def reject(path, version):
+        raise binding.ClientBindingError(f"stale {version}: {path}")
+
+    monkeypatch.setattr(configure_client, "validate_client", reject)
+
+    with pytest.raises(binding.ClientBindingError, match="stale 5.0.0"):
+        configure_client.configure(client, ensure=True)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("file:///C:/work/tree", PureWindowsPath("C:/work/tree")),
+        ("file://localhost/C:/work/tree", PureWindowsPath("C:/work/tree")),
+        ("file://server/share/tree", PureWindowsPath("//server/share/tree")),
+        ("file:///C:/work/a%20tree", PureWindowsPath("C:/work/a tree")),
+    ],
+)
+def test_file_url_path_preserves_windows_roots(url, expected):
+    assert binding._file_url_path(url, platform="win32") == expected
+
+
 def test_configured_binding_is_exclusive_even_when_missing(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))
     installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
     configured = (tmp_path / "missing-client").absolute()
     path = binding.binding_path(installation)
@@ -99,7 +152,8 @@ def test_configured_binding_is_exclusive_even_when_missing(tmp_path, monkeypatch
 
 
 def test_default_client_candidate_uses_first_existing_executable_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))
     installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
     primary = tmp_path / "primary"
     fallback = tmp_path / "fallback"

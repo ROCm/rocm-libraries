@@ -107,8 +107,8 @@ def _build_and_install_stinkytofu(
     build_dir.mkdir(parents=True, exist_ok=True)
 
     rocm_s = rocm if isinstance(rocm, str) else str(rocm)
-    _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
-    _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+    _cxx = f"{rocm_s}/bin/amdclang++"
+    _cc = f"{rocm_s}/bin/amdclang"
 
     st = _load_stinkytofu_tasks()
     cmake_cmd = [
@@ -182,7 +182,22 @@ def _pip_install_rocisa(
         f"{prefix}{os.pathsep}{_existing_prefix}" if _existing_prefix else str(prefix)
     )
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
-    c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
+    c.run(
+        shlex.join(
+            [
+                str(pathlib.Path(sys.executable).absolute()),
+                "-m",
+                "pip",
+                "install",
+                "--no-build-isolation",
+                "-e",
+                str(src),
+            ]
+        ),
+        env=env,
+    )
+
+
 @task(
     help={
         "clean": "Remove the client build directory before building.",
