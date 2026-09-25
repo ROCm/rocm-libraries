@@ -30,10 +30,19 @@ SOFTWARE.
 
 #if _WIN32
 #include <intrin.h>
-#else
+#elif defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #include <smmintrin.h>
 #include <x86intrin.h>
+#else
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#include <simde/x86/avx2.h>
+#include <simde/x86/f16c.h>
+#include <simde/x86/fma.h>
+// SIMDE bug: native alias block omits _MM_FROUND_NO_EXC
+#ifndef _MM_FROUND_NO_EXC
+#define _MM_FROUND_NO_EXC 0x08
+#endif
 #endif
 
 #define M256I(m256i_register) (*((_m256i_union*)&m256i_register))
@@ -220,17 +229,27 @@ union RppSIMD256 {
 };
 
 inline void rpp_storeu_si32(void* __p, __m128i __b) {
+#if defined(__x86_64__) || defined(_M_X64)
     struct __storeu_si32 {
         int __v;
     } __attribute__((__packed__, __may_alias__));
     ((struct __storeu_si32*)__p)->__v = ((__v4si)__b)[0];
+#else
+    int __v = _mm_cvtsi128_si32(__b);
+    memcpy(__p, &__v, sizeof(__v));
+#endif
 }
 
 inline void rpp_storeu_si64(void* __p, __m128i __b) {
+#if defined(__x86_64__) || defined(_M_X64)
     struct __storeu_si64 {
         long long __v;
     } __attribute__((__packed__, __may_alias__));
     ((struct __storeu_si64*)__p)->__v = ((__v2di)__b)[0];
+#else
+    long long __v = _mm_cvtsi128_si64(__b);
+    memcpy(__p, &__v, sizeof(__v));
+#endif
 }
 
 inline void rpp_pixel_check_0to1(__m256* p, Rpp32s numVectors) {

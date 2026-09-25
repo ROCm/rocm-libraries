@@ -47,10 +47,24 @@ typedef halfhpp Rpp16f;
 
 #if _WIN32
 #include <intrin.h>
-#else
+#elif defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #include <smmintrin.h>
 #include <x86intrin.h>
+#else
+// HIP device compiler cannot parse altivec.h ("vector" keyword clash),
+// so disable SIMDE native backends during GPU compilation passes.
+#if defined(__HIP_DEVICE_COMPILE__)
+#define SIMDE_NO_NATIVE
+#endif
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#include <simde/x86/avx2.h>
+#include <simde/x86/f16c.h>
+#include <simde/x86/fma.h>
+// SIMDE bug: native alias block omits _MM_FROUND_NO_EXC
+#ifndef _MM_FROUND_NO_EXC
+#define _MM_FROUND_NO_EXC 0x08
+#endif
 #endif
 #include <vector>
 

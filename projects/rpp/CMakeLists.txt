@@ -217,23 +217,30 @@ endif()
 
 # set global compiler flags for the project
 # -fPIC -- Generate position-independent code if possible.
-# -mavx2 -- Support MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX and AVX2 built-in functions and code generation.
-# -mfma -- Support MMX, SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2, AVX and FMA built-in functions and code generation.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -mavx2 -mf16c -mfma")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 
-# Check AVX/SSE support
-include(CheckCXXCompilerFlag)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+    # x86 SIMD flags
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2 -mf16c -mfma")
 
-# Check AVX flag
-check_cxx_compiler_flag("-mavx" COMPILER_SUPPORTS_AVX)
-if(COMPILER_SUPPORTS_AVX)
-    add_definitions(-D__AVX2__)
-else()
-    # Check SSE flag
-    check_cxx_compiler_flag("-msse4" COMPILER_SUPPORTS_SSE)
-    if(COMPILER_SUPPORTS_SSE)
-        add_definitions(-D__SSE4_1__)
+    # Check AVX/SSE support
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mavx" COMPILER_SUPPORTS_AVX)
+    if(COMPILER_SUPPORTS_AVX)
+        add_definitions(-D__AVX2__)
+    else()
+        check_cxx_compiler_flag("-msse4" COMPILER_SUPPORTS_SSE)
+        if(COMPILER_SUPPORTS_SSE)
+            add_definitions(-D__SSE4_1__)
+        endif()
     endif()
+else()
+    # Non-x86: use SIMDE for portable SIMD intrinsics
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SIMDE REQUIRED simde)
+    include_directories(SYSTEM ${SIMDE_INCLUDE_DIRS})
+    add_definitions(-D__AVX2__)
+    message("-- ${Green}SIMDE found: ${SIMDE_INCLUDE_DIRS} (AVX2 emulation enabled)${ColourReset}")
 endif()
 
 #Generate version info
