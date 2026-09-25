@@ -219,6 +219,19 @@ namespace
         }
         return false;
     }
+
+    /**
+     * Every entry for a key: current-schema rows first, then legacy rows,
+     * which can only be matched on the fields the legacy format records.
+     */
+    std::vector<TensileLite::TunedEntry> tuned_entries_for(const TensileLite::ProblemOverride& key)
+    {
+        const auto& map     = TensileLite::OverrideMap::getMap();
+        auto        entries = map.find(key);
+        const auto  legacy  = map.findLegacy(key);
+        entries.insert(entries.end(), legacy.begin(), legacy.end());
+        return entries;
+    }
 } // namespace
 
 bool problem_override_from_file(rocblaslt_handle&                 handle,
@@ -241,9 +254,10 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
     {
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
-        TensileLite::ProblemOverride prob_key(RocblasltContractionProblem2ProblemOverride(problem));
+        const TensileLite::ProblemOverride             prob_key
+            = RocblasltContractionProblem2ProblemOverride(problem);
 
-        for(const auto& entry : m_override.find(prob_key))
+        for(const auto& entry : tuned_entries_for(prob_key))
         {
             if(success)
                 break;
@@ -347,9 +361,9 @@ bool problem_override_from_file_cpp(
     {
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
-        TensileLite::ProblemOverride prob_key(TensileDataGemm2ProblemOverride(gemmData));
+        const TensileLite::ProblemOverride prob_key = TensileDataGemm2ProblemOverride(gemmData);
 
-        for(const auto& entry : m_override.find(prob_key))
+        for(const auto& entry : tuned_entries_for(prob_key))
         {
             if(success)
                 break;
