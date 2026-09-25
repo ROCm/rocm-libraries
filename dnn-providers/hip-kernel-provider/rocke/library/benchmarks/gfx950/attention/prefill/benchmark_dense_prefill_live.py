@@ -51,13 +51,14 @@ import torch  # noqa: E402
 
 from kernels.gfx950.attention_dense import (  # noqa: E402
     AttentionDenseSpec,
+    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.helpers.spec import SignatureBuilder  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -121,24 +122,22 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
         backend="python",
         capture_ir_text=False,
     )
-    sb = (
-        SignatureBuilder()
-        .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
-        .ptr("o_ptr", spec.dtype)
-        .scalar("scale", "f32")
-    )
-    if spec.runtime_shape:
-        sb = (
-            sb.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
-    if spec.varlen:
-        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    # Call the kernel module's OWN signature rather than re-deriving the
+    # parameter list here. The hand-rolled copy this replaces gated the three
+    # shape scalars on ``spec.runtime_shape``; the body declares them on
+    # ``_has_shape_params`` (i.e. on every non-persistent spec), and the two
+    # predicates are NOT the same -- they diverge for exactly the sub-modes that
+    # take the shape as params AND bake it somewhere else: varlen, ragged,
+    # paged, sliding-window. For those the launcher packed a kernarg buffer
+    # three scalars short of what the kernel reads, so the body picked up
+    # garbage for seqlen and, where a later param followed, read every one of
+    # them from the wrong offset.
+    #
+    # Nothing downstream should re-derive an ABI that has a single definition,
+    # which is why this now calls it instead of mirroring it.
     lch = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sb.build()
+        hsaco=art.hsaco, kernel_name=art.kernel_name,
+        signature=attention_dense_signature(spec),
     )
     _LAUNCHER_CACHE[key] = lch
     return lch
@@ -244,7 +243,10 @@ def bench_dense(
             stream=stream,
         )
         vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-        if spec.runtime_shape:
+        # _has_shape_params, not runtime_shape: the question here is whether the
+        # kernel DECLARES these params, not whether it reads the shape only from
+        # them. See the signature note in _dense_launcher.
+        if _has_shape_params(spec):
             vals["batch"] = int(spec.batch)
             vals["seqlen_q"] = int(spec.seqlen_q)
             vals["seqlen_kv"] = int(spec.seqlen_kv)

@@ -223,15 +223,25 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                     f"qb_traversal must be one of {sorted(QB_TRAVERSALS)}, "
                     f"got {self.qb_traversal!r}"
                 )
-            if not self.persistent:
-                raise ValueError(
-                    "digit_order is persistent-only on gfx950: the non-persistent "
-                    "body has runtime_shape, so NQB and batch are kernargs and a "
-                    "linear-index decode would divide by a runtime radix. Turning "
-                    "runtime_shape off is NOT the fix -- it also switches the body "
-                    "to a baked k-tile trip count, which would confound the "
-                    "ordering comparison with unrelated codegen."
-                )
+            # NOTE: this was persistent-only, on the reasoning that the
+            # non-persistent body has runtime_shape, so NQB and batch are
+            # kernargs and a linear-index decode would divide by a RUNTIME
+            # radix -- many instructions, and paid per work item.
+            #
+            # That reasoning had a hole. digit_order already forces
+            # runtime_shape OFF (see the property), because its decode bakes
+            # every radix and so must keep per-shape cache identity. The radices
+            # are therefore compile-time constants on this path too, and every
+            # div/mod folds to a magic-number multiply exactly as on gfx942.
+            # The per-work-item worry was misplaced besides: the non-persistent
+            # body decodes ONCE per CTA, not once per work item.
+            #
+            # The second half of the old objection was real, and is handled
+            # elsewhere rather than by leaving half the mapping space
+            # unreachable: turning runtime_shape off ALSO switches this body to
+            # a baked k-tile trip count, so a generic-vs-named comparison would
+            # span two codegen configurations. The fix is to hold that flag
+            # equal on both arms -- force_baked_shape on the named spec.
             if self.default_grid_order != "qb_major":
                 raise ValueError(
                     "digit_order supersedes default_grid_order; set exactly one"
@@ -336,12 +346,25 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         non-runtime k-tile trip count -- so they must keep per-shape identity.
         ``persistent`` is excluded for a stronger reason: it is a separate body that
         declares no shape params at all."""
+        if self.force_baked_shape:
+            return False
         return not (
             self.persistent
             or self.ragged
             or self.varlen
             or self.paged
             or self.sliding_window > 0
+            # EXPERIMENTAL generic ordering: its mixed-radix decode bakes every
+            # radix, batch and NQB included, so it must keep per-shape identity.
+            # Same exclusion, same reason, as sliding_window above.
+            #
+            # LOAD-BEARING on the non-persistent path, where digit_order is
+            # now accepted: without it one cache key and one kernel name would
+            # be shared across seqlens and batches that bake different radices
+            # and so lower to different IR -- i.e. one shape's binary served to
+            # another. (On the persistent path it is redundant, since
+            # ``persistent`` already excludes itself above.)
+            or bool(self.digit_order)
         )
 
     @property
@@ -573,7 +596,24 @@ def build_attention_dense(
         one_f = b.const_f32(1.0)
 
     _order = getattr(spec, "default_grid_order", "qb_major")
-    if _order.startswith("bt_hkv_minor"):
+    _digit_hkv = None
+    if spec.digit_order:
+        # EXPERIMENTAL generalized ordering, non-persistent. The grid is 1-D of
+        # W CTAs (see attention_dense_grid), one work item each, so the linear
+        # workgroup id IS the work index -- and it is the same linear id the
+        # hardware feeds to xcd = id % num_xcds that the shipped 3-D grid
+        # produces, since that grid linearizes x-fastest.
+        #
+        # 1-D is what makes all 24 orders reachable. A 3-D grid can only express
+        # the 12 orders with (hkv,hql) adjacent, because the other 12 need a
+        # digit pair split across two axes. Every radix is baked here --
+        # digit_order forces runtime_shape off -- so this lowers to
+        # magic-number multiplies, not integer division.
+        _nqb = (spec.seqlen_q + BLOCK_M - 1) // BLOCK_M
+        qb, hq, _digit_bt, _digit_hkv, _ = _digit_decode_values(
+            b, b.block_id_x(), spec, _nqb, causal
+        )
+    elif _order.startswith("bt_hkv_minor"):
         # grid=(B, Hq, nqb). Work index is bt + B*(a + Hq*blk), so the digits run
         # bt, hkv, hql, blk -- BVGQ. The head axis carries hkv as its LOW digit
         # (the hkv_minor swizzle) and the div/mod is by the BAKED Hkv, so no
@@ -630,10 +670,17 @@ def build_attention_dense(
         else:
             qb = _by
     # batch is on x for bt_hkv_minor (that is the point of the order), on z for
-    # every other grid order.
-    bt = (b.block_id_x() if _order.startswith("bt_hkv_minor")
-          else b.block_id_z())
-    hkv = b.div(hq, b.const_i32(gqa))
+    # every other grid order, and comes out of the decode itself when
+    # digit_order is driving a 1-D grid.
+    if spec.digit_order:
+        bt = _digit_bt
+    elif _order.startswith("bt_hkv_minor"):
+        bt = b.block_id_x()
+    else:
+        bt = b.block_id_z()
+    # The generic decode already produced hkv as a digit; re-deriving it from hq
+    # would pay for a division the decode has already done.
+    hkv = _digit_hkv if _digit_hkv is not None else b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
     if varlen:
@@ -2419,6 +2466,11 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
         spec.seqlen_q + spec.block_m - 1
     ) // spec.block_m  # ceil: ragged partial block
     _order = getattr(spec, "default_grid_order", "qb_major")
+    if getattr(spec, "digit_order", ""):
+        # 1-D grid of W: the body decodes the work index from the linear
+        # workgroup id itself. Same CTA count and same linearization as the 3-D
+        # grids below, so the XCD round-robin sees an identical id sequence.
+        return (nqb * spec.num_query_heads * spec.batch, 1, 1)
     if _order.startswith("bt_hkv_minor"):
         # x = batch, y = head axis (kv-head low), z = query block.
         return (spec.batch, spec.num_query_heads, nqb)

@@ -557,6 +557,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         way: a policy that reads a shape field would make two shapes share a cache
         key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
+        if self.force_baked_shape:
+            return False
         return not (
             self.persistent
             or self.ragged

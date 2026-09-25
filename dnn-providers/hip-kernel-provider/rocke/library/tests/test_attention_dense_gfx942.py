@@ -225,6 +225,10 @@ _SPEC_PERTURBATIONS = {
     "paged": (),  # unbuildable (not yet supported)
     "block_size": (),  # unbuildable (paged-only, paged not supported)
     "num_kv_blocks": (),  # unbuildable (paged-only, paged not supported)
+    # Measurement control: flipping it OFF puts sq/sk/b{batch} back into the
+    # name, so it is name-visible wherever runtime_shape was True, and inert
+    # (same name, same IR) wherever it was already False.
+    "force_baked_shape": (True, False),
     "block_m": (128, 512),
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),

@@ -235,6 +235,26 @@ class AttentionDenseSpec:
     # architecture-specific migration can move it independently in a follow-up.
     lazy_rescale: bool = True
 
+    # force_baked_shape: MEASUREMENT CONTROL, not a tuning knob. Forces
+    # ``runtime_shape`` off, so the body bakes batch/seqlen instead of reading
+    # them as kernargs.
+    #
+    # It exists because ``runtime_shape`` is not a free variable: it switches
+    # shape reads between kernargs and constants, and on gfx950 it also flips
+    # the body to a baked k-tile trip count. Comparing two mappings that differ
+    # in it measures the flag, not the mapping. The generic ``digit_order`` path
+    # bakes every radix and so is always runtime_shape=False; without this field
+    # a generic-vs-named comparison on a runtime_shape path is confounded by
+    # construction, which is exactly how one such comparison was already
+    # misread.
+    #
+    # Setting it cannot cause a cache collision: flipping runtime_shape OFF puts
+    # sq/sk/b{batch} BACK into the kernel name, so a forced spec and an unforced
+    # one at the same shape are already distinct names. Where runtime_shape is
+    # False anyway (persistent, ragged, paged, sliding-window) this is inert --
+    # same name, same IR.
+    force_baked_shape: bool = False
+
     # Problem modes currently implemented only by a subset of architectures.
     # They remain shared semantic fields so supports_* can reject unsupported
     # requests explicitly; unlike codegen knobs, they never silently no-op.

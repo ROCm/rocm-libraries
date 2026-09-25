@@ -1337,6 +1337,87 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertIn(req, names)
         self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
 
+    def test_gfx950_signature_matches_the_built_kernels_params(self):
+        """The gfx950 dense ABI is checked against the kernel it describes.
+
+        The gfx942 analogue of this test exists; gfx950 had none, and the gap was
+        not theoretical. gfx950 declares the three shape scalars on
+        ``_has_shape_params`` (every non-persistent spec) while gfx942 declares
+        them on ``runtime_shape`` -- so on gfx950 the two predicates DIVERGE for
+        the sub-modes that take the shape as params and also bake it somewhere
+        else: varlen, ragged, paged, sliding-window. A launcher that gated on the
+        wrong one packed a kernarg buffer three scalars short of what the body
+        reads, which corrupts results on GPU only and is invisible on host.
+
+        The ground truth has to be the built ``KernelDef``: comparing two
+        hand-written lists cannot catch a skew, because both sides are
+        hand-written. The arms below are chosen to straddle the divergence
+        rather than to enumerate modes.
+        """
+        from rocke.core.ir import PtrType
+        from rocke.helpers.spec import ptr_type_str
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            _has_shape_params,
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        def expected_type_str(param):
+            if isinstance(param.type, PtrType):
+                return ptr_type_str(param.type.pointee.name, param.type.space)
+            return param.type.name
+
+        base = dict(
+            batch=2, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
+            num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
+            block_n=64,
+        )
+        arms = {
+            "runtime-shape": AttentionDenseSpec(**base),
+            "sliding-window": AttentionDenseSpec(**base, sliding_window=512),
+            "forced-baked": AttentionDenseSpec(**base, force_baked_shape=True),
+            "persistent": AttentionDenseSpec(
+                **base, persistent=True, num_persistent=256),
+        }
+        for arm, spec in arms.items():
+            with self.subTest(arm=arm):
+                params = build_attention_dense(spec, arch="gfx950").params
+                sig = attention_dense_signature(spec)
+                self.assertEqual(
+                    [a["name"] for a in sig], [p.name for p in params],
+                    f"gfx950 {arm} ABI: attention_dense_signature does not match "
+                    "the b.param order the builder emits; the launcher would "
+                    "pack kernargs into the wrong slots",
+                )
+                self.assertEqual(
+                    [a["type"] for a in sig],
+                    [expected_type_str(p) for p in params],
+                    f"gfx950 {arm} ABI: signature disagrees with the built "
+                    "kernel on a param type",
+                )
+                # The predicate the ABI actually turns on -- asserted directly so
+                # a future change to _has_shape_params cannot quietly re-open the
+                # gap by making the two agree again on these arms only.
+                self.assertEqual(
+                    _has_shape_params(spec),
+                    "batch" in [p.name for p in params],
+                    f"gfx950 {arm}: _has_shape_params disagrees with the body",
+                )
+
+        # The divergence itself: these three arms all DECLARE the shape params,
+        # but only the first reads the shape exclusively from them. If this ever
+        # stops holding, the two predicates have merged and the note above is
+        # stale.
+        self.assertEqual(
+            [arms[a].runtime_shape for a in
+             ("runtime-shape", "sliding-window", "forced-baked")],
+            [True, False, False],
+        )
+        self.assertTrue(all(
+            _has_shape_params(arms[a]) for a in
+            ("runtime-shape", "sliding-window", "forced-baked")))
+
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
