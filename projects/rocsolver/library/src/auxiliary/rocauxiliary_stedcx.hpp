@@ -114,9 +114,7 @@ ROCSOLVER_KERNEL void stedcx_select_kernel(const rocblas_evect evect,
     S* W = WW + bid * strideW;
     T* V = VV + bid * strideV;
     rocblas_int* nev = nevA + bid;
-    T* C;
-    if(CC)
-        C = load_ptr_batch<T>(CC, bid, shiftC, strideC);
+    T* C = (CC) ? load_ptr_batch<T>(CC, bid, shiftC, strideC) : nullptr;
 
     // all values in positions 'in' till 'out' will be selected
     bool value = (range == rocblas_erange_value);
@@ -318,7 +316,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
             eigen values and vectors that are out of the desired range. Whether this could be
             exploited somehow to improve performance must be explored in the future. The new stedc
             code will allow to do this easily as values are always ordered during the merging process.
-            Runing the stedcx_select_kernel would not be necessary.**/
+            Running the stedcx_select_kernel would not be necessary.**/
     rocsolver_stedc_template<false, ISBATCHED, T>(
         handle, rocblas_evect_tridiagonal, n, D, 0, strideD, E, 0, strideE, tmpT, 0, ldt, strideT,
         info, batch_count, work_stack, tempvect, tempgemm, tmpz, splits, workArr);
