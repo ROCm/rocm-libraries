@@ -8,7 +8,41 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path, PurePosixPath
+import shutil
 import zipfile
+
+
+_CANONICAL_PATHS = (
+    Path("tensilelite"),
+    Path("_tensilelite_client_binding.py"),
+    Path("tensilelite_configure_client.py"),
+)
+_COMPATIBILITY_PATHS = (Path("tensilelite_tensile_compat"),)
+
+
+def _remove_owned_paths(destination: Path, members: list[zipfile.ZipInfo]) -> None:
+    top_levels = {PurePosixPath(member.filename).parts[0] for member in members}
+    if "tensilelite" in top_levels:
+        owned_paths = _CANONICAL_PATHS
+        dist_info_patterns = ("tensilelite-*.dist-info",)
+    elif "tensilelite_tensile_compat" in top_levels:
+        owned_paths = _COMPATIBILITY_PATHS
+        dist_info_patterns = ("tensilelite_tensile_compat-*.dist-info",)
+    else:
+        raise ValueError("wheel contains no recognized TensileLite package root")
+
+    for relative_path in owned_paths:
+        path = destination / relative_path
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
+    for pattern in dist_info_patterns:
+        for path in destination.glob(pattern):
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
 
 
 def install_wheels(wheels: list[Path], destination: Path) -> None:
@@ -24,6 +58,7 @@ def install_wheels(wheels: list[Path], destination: Path) -> None:
             ]
             if invalid:
                 raise ValueError(f"wheel contains unsafe paths: {invalid}")
+            _remove_owned_paths(destination, members)
             archive.extractall(destination, members)
 
 
