@@ -2873,9 +2873,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     spec.kernel_name()`` in ``run_attention_dense_torch`` trips on the second
     shape served from the cache. The name assertion below covers that.
 
-    The control uses ``persistent`` rather than ``sliding_window``: gfx942
-    rejects sliding_window in ``supports_attention_dense``, so a swa spec never
-    reaches the builder at all and could not lower for the comparison.
+    The baked-shape control below uses ``persistent`` to leave the runtime path;
+    ``sliding_window`` is the other off-path spec on gfx942 now that
+    ``supports_attention_dense`` admits it.
     """
 
     # fp16 is arbitrary here -- every dtype takes the same runtime-shape cut now
@@ -3019,9 +3019,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         Without it, a builder that ignored batch/seqlen_q/seqlen_kv entirely --
         emitting one kernel that is wrong everywhere -- would satisfy the guard
-        above vacuously. ``persistent`` is the only way off the runtime path on
-        gfx942; ragged/varlen/paged/swa are rejected by
-        ``supports_attention_dense`` and never reach the builder.
+        above vacuously. ``persistent`` and ``sliding_window`` are the two specs
+        off the runtime path on gfx942 (``runtime_shape`` excludes both); this
+        control uses ``persistent``. ``ragged``/``varlen``/``paged`` are rejected
+        by ``supports_attention_dense`` and never reach the builder.
         """
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
@@ -3439,6 +3440,69 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
         )
         ll = lower_kernel_to_llvm(build_unified_attention_2d_tiled(spec))
         self.assertIn('"amdgpu-waves-per-eu"="2,2"', ll)
+
+    def test_gfx950_fp16_sinks_gate_selection(self):
+        """Gate firing and waves_per_eu for fp16+sinks on gfx950 — verified by
+        selector output, not by inference.
+
+        Gate 1 (_enable_combo_2d): fp16, D=64, block_size=32, GQA-8, sinks,
+          multi-seq prefill. Must fire -> wpe=4 from _select_2d_waves_per_eu.
+        Gate 2 (_enable_gfx950_sink_prefill_wpe3): fp16, D=64, block_size=16,
+          num_seqs<=1, full-causal, sinks. Must fire -> wpe=3.
+
+        CPU-only (no GPU, no comgr): exercises the selector logic in isolation.
+        """
+        from unittest.mock import patch
+
+        import kernels.common.attention_unified as au
+        from kernels.common.attention_unified import UnifiedAttentionProblem
+
+        gate1_problem = UnifiedAttentionProblem(
+            head_size=64,
+            block_size=32,
+            dtype="fp16",
+            num_query_heads=64,
+            num_kv_heads=8,
+            total_q=1280,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            use_sinks=True,
+            num_seqs=2,
+        )
+        gate2_problem = UnifiedAttentionProblem(
+            head_size=64,
+            block_size=16,
+            dtype="fp16",
+            num_query_heads=64,
+            num_kv_heads=8,
+            total_q=2048,
+            max_seqlen_q=2048,
+            max_seqlen_k=2048,
+            use_sinks=True,
+            num_seqs=1,
+        )
+
+        with patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            # Gate 1: combo must fire, selecting wpe=4
+            self.assertTrue(
+                au._enable_combo_2d(gate1_problem),
+                "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
+            )
+            self.assertEqual(
+                au._select_2d_waves_per_eu(gate1_problem),
+                4,
+                "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
+            )
+            # Gate 2: wpe3 gate must fire, selecting wpe=3
+            self.assertTrue(
+                au._enable_gfx950_sink_prefill_wpe3(gate2_problem),
+                "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
+            )
+            self.assertEqual(
+                au._select_2d_waves_per_eu(gate2_problem),
+                3,
+                "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
+            )
 
 
 # ---------------------------------------------------------------------
