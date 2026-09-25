@@ -33,7 +33,7 @@ import functools
 import re
 import shutil
 
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 # --- assembly canonicalization ---------------------------------------------
 
