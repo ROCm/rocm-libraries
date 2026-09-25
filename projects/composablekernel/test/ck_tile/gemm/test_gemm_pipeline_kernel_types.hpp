@@ -27,6 +27,8 @@ using CompAsyncEightWaves =
     ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompAsyncEightWaves>;
 using CompTDMV1 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV1>;
 using CompTDMV2 = ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMV2>;
+using CompTDMProducerConsumer =
+    ck_tile::integral_constant<GemmPipelineType, GemmPipelineType::CompTDMProducerConsumer>;
 
 using Persistent    = std::true_type;
 using NonPersistent = std::false_type;
@@ -322,6 +324,17 @@ using KernelTypesCompTDMWmma = ::testing::Types<
 
 using KernelTypesCompAsyncWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync>
+>;
+
+// Every layout, a persistent case that reuses the barriers across tiles, and an fp8 case whose
+// K block spans several WMMA K steps.
+using KernelTypesCompTDMProducerConsumerWmma = ::testing::Types<
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompTDMProducerConsumer>,
+    std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompTDMProducerConsumer>,
+    std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompTDMProducerConsumer>,
+    std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompTDMProducerConsumer>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompTDMProducerConsumer, Persistent>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I64,         I64,          I128,       I16,        I16, Intrawave,        CompTDMProducerConsumer>
 >;
 
 // clang-format on
