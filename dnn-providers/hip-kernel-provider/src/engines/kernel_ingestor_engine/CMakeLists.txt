@@ -9,9 +9,9 @@
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
-    # Descriptors naming these packs are not in this tree. They arrive from the install tree:
-    # test_descriptors/ for the test binaries, and descriptor-packaging/examples/descriptors
-    # where the superbuild CI lane points the production source root.
+    # Pointwise and Conv descriptors are test fixtures under test_descriptors/; a Pointwise
+    # bundle also sits in descriptor-packaging/examples/descriptors, where the superbuild CI
+    # lane points the production source root. Gfx950AttentionDense ships from descriptors/.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950AttentionDenseNative.cpp

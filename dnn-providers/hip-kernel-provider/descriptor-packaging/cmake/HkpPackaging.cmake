@@ -1317,12 +1317,13 @@ endfunction()
 #   production, so it is resolved once here for every root; unresolvable comgr is fatal
 #   at configure.
 #
-#   The root defaults to the provider's in-tree descriptor root, which currently holds no
-#   descriptor, so production packaging is dormant unless the root is pointed at a
-#   populated one. Root empty, or holding no descriptor = dormant. The default root also
-#   goes dormant when no descriptor under it declares an architecture this build packs
-#   for; a named root in the same state is the packer's hard failure. Root set but not a
-#   directory = fatal. The tests are wired regardless.
+#   The root defaults to the provider's in-tree descriptor root, which holds the rocKE
+#   gfx950 attention_dense descriptors, so production packaging runs wherever the build
+#   packs for an architecture a descriptor under it declares. Root empty, or holding no
+#   descriptor = dormant. The default root also goes dormant when no descriptor under it
+#   declares an architecture this build packs for; a named root in the same state is the
+#   packer's hard failure. Root set but not a directory = fatal. The tests are wired
+#   regardless.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -1575,6 +1576,11 @@ endfunction()
 #   has CMAKE_INSTALL_BINDIR and the plugin engine directory. The test root is rewritten
 #   first: both roots sit under the same engine directory, and doing the shorter one
 #   first would leave the longer one half-substituted.
+#
+#   Labels are not known here either: the build-tree entry receives its tier labels from
+#   HKP_PACK_CTEST_CATEGORIES_YAML only after every entry of the call is registered. The
+#   twin carries a per-entry placeholder that _hkp_resolve_census_install_labels()
+#   replaces with the labels the build-tree entry ends up with.
 # ---------------------------------------------------------------------------
 function(_hkp_record_census_install_entry _name _target _filter _env _pass_regex)
     # _arch is read from the calling scope rather than passed: every caller is
@@ -1602,7 +1608,7 @@ function(_hkp_record_census_install_entry _name _target _filter _env _pass_regex
     string(APPEND _text
         "set_tests_properties([=[${_name}]=] PROPERTIES"
         " ENVIRONMENT \"${_install_env}\""
-        " LABELS \"unit_test;hip-kernel-provider;host\""
+        " LABELS \"@HKP_CENSUS_LABELS:${_name}@\""
         " TIMEOUT 300")
     if(DEFINED TEST_ENVIRONMENT_MODIFICATION)
         string(APPEND _text
@@ -1617,6 +1623,56 @@ function(_hkp_record_census_install_entry _name _target _filter _env _pass_regex
 
     set_property(GLOBAL APPEND_STRING PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch} "${_text}")
     set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_SHARD_ARCHES "${_arch}")
+    set_property(GLOBAL APPEND PROPERTY HKP_CENSUS_UNLABELLED_${_arch} "${_name}")
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_label_census_entries(<arch>...)
+#   Tier-label the census entries hkp_register_census_tests() just add_test()'d, then give
+#   their installed twins at each <arch> the same labels.
+#
+#   Called from hkp_register_census_tests(); a CMake function opens no directory scope of
+#   its own, so the YAML's regex patterns reach those entries through the parser's
+#   directory-property enumeration (see hkp_register_tests() for why EXPLICIT_TESTS is not
+#   used). Tier expansion is the parser's, which is why _hkp_add_census_test()'s literal
+#   LABELS string cannot carry it.
+# ---------------------------------------------------------------------------
+function(_hkp_label_census_entries)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
+       AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    endif()
+    _hkp_resolve_census_install_labels(${ARGN})
+endfunction()
+
+
+# ---------------------------------------------------------------------------
+# _hkp_resolve_census_install_labels(<arch>...)
+#   Give every installed census twin recorded at <arch> the labels its build-tree entry
+#   carries now, and forget it as pending.
+#
+#   Copying the build-tree labels, rather than re-deriving them for the installed file,
+#   is what keeps the two trees in the same tiers. The YAML's census pattern is a regex,
+#   which the parser expands against the directory's registered tests; ctest reading an
+#   installed file has no such enumeration, so a twin labelled only by its literal
+#   descriptive labels would drop out of `ctest -L quick` in the install tree while
+#   running in it in the build tree.
+#
+#   Callable only from the directory scope that add_test()'d the entries, which is the
+#   only scope in which their TEST properties can be read.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_census_install_labels)
+    foreach(_arch IN LISTS ARGN)
+        get_property(_pending GLOBAL PROPERTY HKP_CENSUS_UNLABELLED_${_arch})
+        get_property(_text GLOBAL PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch})
+        foreach(_name IN LISTS _pending)
+            get_property(_labels TEST "${_name}" PROPERTY LABELS)
+            string(REPLACE "@HKP_CENSUS_LABELS:${_name}@" "${_labels}" _text "${_text}")
+        endforeach()
+        set_property(GLOBAL PROPERTY HKP_CENSUS_SHARD_TEXT_${_arch} "${_text}")
+        set_property(GLOBAL PROPERTY HKP_CENSUS_UNLABELLED_${_arch} "")
+    endforeach()
 endfunction()
 
 
@@ -1938,16 +1994,8 @@ function(hkp_register_census_tests)
         endforeach()
     endforeach()
 
-    # The loop above add_test()'d every entry in THIS directory scope -- a CMake function
-    # opens none of its own -- so the YAML's regex patterns reach them through the
-    # parser's directory-property enumeration; see hkp_register_tests() for why
-    # EXPLICIT_TESTS is not used. Tier expansion is the parser's, which is why
-    # _hkp_add_census_test()'s literal LABELS string cannot carry it. The call sits after
-    # the loop because every return above it registers nothing.
-    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
-       AND COMMAND apply_ctest_category_labels)
-        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
-    endif()
+    # Labelling sits after the loop because every return above it registers nothing.
+    _hkp_label_census_entries(${_arches})
 endfunction()
 
 
@@ -2004,6 +2052,14 @@ endfunction()
 function(hkp_finalize_census_install)
     cmake_parse_arguments(PARSE_ARGV 0 ARG ""
                           "COMMON_TEST_FILE;BINDIR;PLUGIN_ENGINE_DIR" "")
+
+    # Shards are written at configure time into a tree that is installed wholesale, and
+    # the discovery stub registers every shard it finds, so one left by an earlier
+    # configuration -- an architecture since dropped, a root since redirected -- would
+    # keep shipping its entries. Every shard this configuration carries is rewritten below.
+    if(HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR)
+        file(REMOVE_RECURSE "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/census")
+    endif()
 
     get_property(_arches GLOBAL PROPERTY HKP_CENSUS_SHARD_ARCHES)
     if(NOT _arches)

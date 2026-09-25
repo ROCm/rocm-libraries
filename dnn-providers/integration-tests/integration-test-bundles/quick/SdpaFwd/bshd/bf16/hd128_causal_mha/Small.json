@@ -48,7 +48,7 @@
         "right_bound": 0,
         "max_seq_len_kv": null,
         "diagonal_alignment": "BOTTOM_RIGHT",
-        "mma_core_mode": "float",
+        "mma_core_mode": "unset",
         "implementation": "AUTO"
       }
     }

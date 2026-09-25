@@ -240,7 +240,9 @@ for a `[[validator_overrides]]` RMS check); output checked against the CPU refer
 or against golden data is compared on the host (`CpuFpReferenceValidation` /
 `CpuFpReferenceMiopenRmsValidation`). That holds for every mode, including each step
 of the `auto` fallback chain, and for C++ graph tests under
-`--reference-executor gpu|cpu`.
+`--reference-executor gpu|cpu`. A `[[validator_overrides]]`
+`"allclose_matching_infinities"` check has a host validator only: a comparison
+that resolves to the device fails that tensor instead of running it.
 
 `--validator auto|cpu|gpu` (or `HIPDNN_TEST_VALIDATOR`) overrides that choice for
 every comparison in the run, independently of the reference. `auto` (the default)
@@ -466,7 +468,12 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   output whose correct value is infinite on both sides — an SDPA forward
   log-sum-exp row that is fully masked is `-inf` in the reference and `-inf` on
   the device, and both are right, but `|ref - impl|` is NaN and plain allclose
-  fails the tensor. Neither `"rms"` nor `"allclose_matching_infinities"` is
+  fails the tensor. It is **host-only**: there is no device implementation, so a
+  tensor it selects fails with "Validator override NOT APPLICABLE ON DEVICE"
+  whenever its comparison runs on the device — under `auto` that is every run
+  where the GPU reference produced the expected values. Run such a config with
+  `--validator cpu` (or `HIPDNN_TEST_VALIDATOR=cpu`), or narrow the `tensors`
+  glob. Neither `"rms"` nor `"allclose_matching_infinities"` is
   defined for integer outputs (RMS has no integer formulation; an integer has no
   infinity to match): they are float, half, bfloat16 and double only, and a glob
   wide enough to catch an integer output fails that tensor with a message naming

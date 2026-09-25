@@ -67,6 +67,19 @@ def census_keyword_values(fragment: str, keyword: str):
     return values
 
 
+def census_inline_values(fragment: str, keyword: str) -> list[str]:
+    """The tokens following a keyword written on the same line as its value, such as
+    ``TARGET`` (on the call's opening line) and ``SUITES``. Exactly one line of the call
+    must lead with the keyword."""
+    leading = []
+    for line in census_call_lines(fragment):
+        tokens = line.replace(CENSUS_CALL, "", 1).split()
+        if tokens and tokens[0] == keyword:
+            leading.append(tokens[1:])
+    assert len(leading) == 1, f"expected one line leading with {keyword}:\n{fragment}"
+    return leading[0]
+
+
 class TestFragmentsAgreeWithEachOther:
 
     def test_ingestor_packs_hpp_declares_the_same_register_fn_the_cpp_row_uses(
@@ -188,6 +201,61 @@ class TestFragmentsAgreeWithEachOther:
                 f"fragment names '{name}', which this run never wrote under tests/ "
                 f"(wrote: {sorted(written_basenames)})"
             )
+
+
+class TestCensusSuiteRunsOnTheCensusBinary:
+    """The pack census needs a descriptor shard and the census environment; the matcher
+    test needs neither. The fragment therefore compiles the two into different binaries
+    and registers the census against the one holding the census suite. Naming the unit
+    binary would put package-census state back on every ordinary unit run, and a census
+    registered on a binary that does not compile its suite runs zero cases and passes.
+    """
+
+    SPLICE_HEADING = re.compile(r"^## Splice point 5[ab]: into target_sources\((\w+) ")
+
+    @classmethod
+    def _source_targets(cls, fragment: str) -> dict[str, str]:
+        """Each spliced source basename, keyed to the target_sources() block its splice
+        heading names."""
+        placed = {}
+        heading_target = None
+        for line in fragment.splitlines():
+            heading = cls.SPLICE_HEADING.match(line)
+            if heading:
+                heading_target = heading.group(1)
+                continue
+            source = re.fullmatch(
+                r"\s*\$\{CMAKE_CURRENT_SOURCE_DIR\}/packs/(\w+\.cpp)", line
+            )
+            if source:
+                assert heading_target, f"{line.strip()} precedes every splice heading"
+                assert source.group(1) not in placed, f"{line.strip()} is spliced twice"
+                placed[source.group(1)] = heading_target
+        return placed
+
+    def test_the_census_registers_on_the_binary_that_compiles_its_suite(
+        self, generator, gfx950_attention_dense_config, tmp_path
+    ):
+        config = gfx950_attention_dense_config
+        written = generator.render(config, tmp_path)
+        fragment = (tmp_path / "fragments" / "cmake_test_sources.txt").read_text()
+        suite = f"Test{config.engine.pascal_name}Packs"
+        matchers = f"Test{config.engine.pascal_name}Matchers"
+
+        assert census_inline_values(fragment, "TARGET") == [
+            "hip_kernel_provider_census_tests"
+        ]
+        assert census_inline_values(fragment, "PACK_NAME") == ["product"]
+        assert census_inline_values(fragment, "SUITES") == [suite]
+        assert f"tests/{suite}.cpp" in written, (
+            f"the census names {suite}, which this run never wrote, so its gtest "
+            "filter would match nothing"
+        )
+
+        assert self._source_targets(fragment) == {
+            f"{suite}.cpp": "hip_kernel_provider_census_tests",
+            f"{matchers}.cpp": "hip_kernel_provider_tests",
+        }, fragment
 
 
 @pytest.fixture
