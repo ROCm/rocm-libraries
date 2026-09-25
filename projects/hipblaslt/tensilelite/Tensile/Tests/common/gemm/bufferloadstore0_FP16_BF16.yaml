@@ -30,7 +30,7 @@ GlobalParameters:
   KernelTime: True
   BoundsCheck: 4
   PrintSolutionRejectionReason: True
-  KeepBuildTmp: True
+  #KeepBuildTmp: True
 BenchmarkProblems:
   - # hgemm NN
     - # ProblemType
