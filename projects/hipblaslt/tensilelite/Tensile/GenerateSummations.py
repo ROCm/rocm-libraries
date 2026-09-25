@@ -38,23 +38,29 @@ from . import LibraryIO
 from . import ClientWriter
 from .TensileCreateLibrary import tensileLibraryFile
 from Tensile.Common import ensurePath, printExit
-from Tensile.Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
+from Tensile.Common.Architectures import gfxToSwCodename, detectGlobalCurrentArch, gfxToIsa
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters
 from .SolutionStructs import ProblemSizes
 from .Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 
-def createLibraryForBenchmark(logicPath, libraryPath, currentPath):
+def createLibraryForBenchmark(logicPath, libraryPath, currentPath, gfxName):
     """
     takes the path of existing logic files as input and adds the summation
     model for each of the solutions. This is used in the Tile Aware Metirc
     Selection.
+
+    Built for ``gfxName`` rather than "all", because "all" is expanded from the
+    supported ISAs and so cannot name an architecture that shares another's --
+    on gfx1250-strict silicon it builds into library/gfx1250/, which is not
+    where this then reads the result back from.
     """
 
     pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibrary")
     args = [pythonExePath, \
         "--new-client-only", "--no-short-file-names", \
-        "--architecture=all", "--code-object-version=default", "--library-format=yaml", \
+        f"--architecture={gfxName}", "--code-object-version=default", "--library-format=yaml", \
         logicPath, libraryPath, "HIP"]
 
     try:
@@ -66,16 +72,28 @@ def GenerateSummations(userArgs):
 
     inputLogicPath = userArgs[0]
     outputPath = userArgs[1]
-    isaInfoMap = assignGlobalParameters({})
     cxxCompiler, cCompiler, enumerator = validateToolchain(ToolchainDefaults.CXX_COMPILER,
                                                            ToolchainDefaults.C_COMPILER,
                                                            ToolchainDefaults.DEVICE_ENUMERATOR)
 
-    currentISA = detectGlobalCurrentISA(0, enumerator)
-    gfxName = isaToGfx(currentISA)
+    # The codename selects which logic files get a summation model, and the two
+    # gfx1250 steppings have separate ones. Going through the ISA to name them
+    # would point both steppings at gfx1250's.
+    gfxName = detectGlobalCurrentArch(0, enumerator)
     commonName = gfxToSwCodename(gfxName)
 
-    globPath = os.path.join(inputLogicPath, "{}*".format(commonName))
+    # Capabilities can only be built once the architecture is known, so this
+    # follows detection. `assignGlobalParameters` returns nothing -- the map it is
+    # handed is the one the logic files are later parsed with.
+    isaInfoMap = makeIsaInfoMap([gfxToIsa(gfxName)], cxxCompiler)
+    applyArchCapOverrides(isaInfoMap, [gfxName])
+    assignGlobalParameters({}, isaInfoMap)
+
+    # Anchored on the separator every logic filename uses. Unanchored, "gfx1250*"
+    # also matches "gfx1250-strict_*", so a run on plain gfx1250 silicon would
+    # benchmark the other stepping's solutions and write its model back into the
+    # strict logic files.
+    globPath = os.path.join(inputLogicPath, "{}_*".format(commonName))
     logicFileNames = glob.glob(globPath)
 
     for logicFileName in logicFileNames:
@@ -109,7 +127,7 @@ def GenerateSummations(userArgs):
             rawLogic
 
         copyfile(logicFileName, localLogicFilePath)
-        createLibraryForBenchmark(localLogicPath, libPath, currentPath)
+        createLibraryForBenchmark(localLogicPath, libPath, currentPath, gfxName)
 
         exactList = []
 

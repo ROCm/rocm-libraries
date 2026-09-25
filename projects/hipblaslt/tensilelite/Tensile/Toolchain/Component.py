@@ -31,6 +31,7 @@ from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
 from Tensile.Common import SemanticVersion, print2
+from Tensile.Common.Architectures import bundleTargetsOf, toolchainTargetOf
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -171,14 +172,19 @@ class Assembler(Component):
             # genuinely bad, rather than a confusing traceback from this helper.
             return
 
+        # The `(?:-[0-9a-z]+)*` is what makes this replace a name that already
+        # carries a stepping. Without it the match stops at gfx1250 and the old
+        # `-strict` survives in the tail, leaving a directive that contradicts
+        # the -mcpu it is supposed to agree with. Feature qualifiers (`:xnack-`)
+        # are in the tail on purpose and are kept.
         target = f"amdgcn-amd-amdhsa--{targetGfx}"
         updated = sub(
-            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^"]*")',
+            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-z]+(?:-[0-9a-z]+)*([^"]*")',
             rf'\1{target}\2',
             src,
         )
         updated = sub(
-            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^\s]*)',
+            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-z]+(?:-[0-9a-z]+)*([^\s]*)',
             rf'\1{target}\2',
             updated,
         )
@@ -196,6 +202,8 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
+        # A stepping assembles as the architecture it steps; see toolchainTargetOf.
+        targetGfx = toolchainTargetOf(targetGfx)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
@@ -274,7 +282,11 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={gfx}" for gfx in target_list]
+        # A stepping compiles as the architecture it steps, so it can collide with
+        # that architecture in the same list; dict.fromkeys drops the duplicate and
+        # keeps the order. See toolchainTargetOf.
+        targets = dict.fromkeys(toolchainTargetOf(gfx) for gfx in target_list)
+        archFlags = [f"--offload-arch={gfx}" for gfx in targets]
         args = [
             *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
         ]
@@ -318,20 +330,27 @@ class Bundler(Component):
         Args:
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
-            gfx: The target GPU architecture.
+            target: The architecture the code object was requested for. The
+                runtime unbundles by matching the agent's reported target, so a
+                stepping is offered under both its own name and the one it steps;
+                see bundleTargetsOf.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
         """
         devnull = "/dev/null" if os_name != "nt" else "NUL"
+        # One --input per target: the bundler pairs them positionally after the
+        # host entry, so a stepping hands it the same file twice on purpose.
+        entries = bundleTargetsOf(target)
         args = [
             self._component_path,
             "--compress",
             "--type=o",
             "--bundle-align=4096",
-            f"--targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa-unknown-{target}",
+            "--targets=host-x86_64-unknown-linux-gnu,"
+            + ",".join(f"hipv4-amdgcn-amd-amdhsa-unknown-{e}" for e in entries),
             f"--input={devnull}",
-            f"--input={srcPath}",
+            *(f"--input={srcPath}" for _ in entries),
             f"--output={destPath}",
         ]
 
@@ -391,10 +410,16 @@ class Linker(Component):
         Since it is possible for the character limit of the operating system to be exceeded
         when invoking the linker, LLVM allows the provision of arguments via a "response file"
         Reference: https://llvm.org/docs/CommandLine.html#response-files
+
+        Named after the code object it describes, and so written beside it rather
+        than into the working directory: two builds covering architectures that
+        share an ISA run at once from one directory, and a shared name lets one
+        link the other's objects into its own code object, silently.
         """
-        with open(Path.cwd() / "clang_args.txt", "wt") as file:
+        responsePath = Path(destPath).with_name(Path(destPath).name + ".linker_args")
+        with open(responsePath, "wt") as file:
             file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
-        return [*(self.default_args), "-o", destPath, "@clang_args.txt"]
+        return [*(self.default_args), "-o", destPath, f"@{responsePath}"]
 
     def _use_response_file(self, args: List[str]) -> bool:
         """

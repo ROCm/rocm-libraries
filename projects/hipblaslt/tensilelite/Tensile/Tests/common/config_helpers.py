@@ -38,6 +38,11 @@ from Tensile.Common.DataType import DataType
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 
+# The architectures the functional model stands in for. Both spellings are
+# listed rather than derived from one another: a stepping is its own
+# architecture here, exactly as it is everywhere else.
+FFM_EMULATED_ARCHS = ("gfx1250", "gfx1250-strict")
+
 # Safe either way; bandit's B506 check only recognises the SafeLoader/CSafeLoader spelling,
 # so the call sites using this name carry a bare nosec marker. Never spell that marker out
 # with its leading hash here, or bandit parses this comment too (SEC-00404).
@@ -138,7 +143,10 @@ def configMarks(filepath, rootDir, availableArchs):
     if arch_val and markNamed(arch_val) not in marks:
         marks.append(markNamed(arch_val))
 
-    arch_in_name = re.search(r'(gfx\d+)', components[-1])
+    # The stepping suffix is part of the name it marks: without it
+    # ``tdm_gfx1250-strict.yaml`` would mark itself gfx1250 and claim to be a
+    # config for the architecture it exists to stay off of.
+    arch_in_name = re.search(r'(gfx\d+(?:-strict)?)', components[-1])
     if arch_in_name and markNamed(arch_in_name.group(1)) not in marks:
         marks.append(markNamed(arch_in_name.group(1)))
 
@@ -165,11 +173,11 @@ def configMarks(filepath, rootDir, availableArchs):
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
     # fails under FFM emulation only. Turn it into an xfail only when running 
     # under FFM — keyed on the emulator's HSA_MODEL_MEMFILE backing plus the 
-    # gfx1250 arch — so it never fires on HW or on other emulators/arches, 
-    # where the test must still run.
+    # arches the model stands in for — so it never fires on HW or on other 
+    # emulators/arches, where the test must still run.
     if (
         os.environ.get("HSA_MODEL_MEMFILE")
-        and "gfx1250" in availableArchs
+        and any(a in FFM_EMULATED_ARCHS for a in availableArchs)
         and markNamed("ffm_fail") in marks
     ):
         marks.append(pytest.mark.xfail)

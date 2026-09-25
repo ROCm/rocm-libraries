@@ -44,8 +44,8 @@
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
-#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
+#include "rocblaslt_arch_candidates.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocroller_host.hpp"
 #include "tensile_host.hpp"
@@ -2688,24 +2688,38 @@ std::string rocblaslt_internal_get_arch_name()
     return ArchName{}(deviceProperties);
 }
 
-// The GEMM library subtree the current device loads; folds in asicRevision, the
-// only signal telling the gfx1250 revisions apart (see rocblaslt_arch_revision.hpp).
-std::string rocblaslt_internal_get_library_arch_name()
+// exported. The architecture with both decorations removed. See
+// rocblaslt_arch_candidates.hpp for why the stripping order matters.
+std::string rocblaslt_internal_get_base_arch_name(const hipDeviceProp_t& prop)
 {
-    int deviceId = 0;
-    static_cast<void>(hipGetDevice(&deviceId));
-    // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
-    hipDeviceProp_t deviceProperties{};
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
+    return rocblaslt_arch_base_name(prop.gcnArchName);
+}
+
+// exported. The architecture names that may serve this device, best first.
+//
+// The rule itself is in rocblaslt_arch_candidates.hpp, kept HIP-free so it can be
+// unit-tested without a GPU. This is the part that cannot be: reading the
+// revision off the device.
+std::vector<std::string> rocblaslt_internal_get_arch_name_candidates(const hipDeviceProp_t& prop)
+{
 #if HIP_VERSION >= 307
-    const int asicRevision = deviceProperties.asicRevision;
+    return rocblaslt_arch_name_candidates(prop.gcnArchName, prop.asicRevision);
 #else
-    // asicRevision doesn't exist before HIP 3.7. Use -1, not 0: 0 is the v0 marker
-    // and would wrongly pick gfx1250v0. gfx1250 needs ROCm 7+, so this only guards
-    // compilation on older HIP.
-    const int asicRevision = -1;
+    // Without asicRevision there is nothing to derive from, so offer only the
+    // base architecture -- which is what the reported name gave us before this
+    // existed, and so preserves the old behaviour exactly.
+    return {rocblaslt_arch_base_name(prop.gcnArchName)};
 #endif
-    return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
+}
+
+// exported. Candidates for the current device.
+std::vector<std::string> rocblaslt_internal_get_arch_name_candidates()
+{
+    int deviceId;
+    static_cast<void>(hipGetDevice(&deviceId));
+    hipDeviceProp_t deviceProperties;
+    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
+    return rocblaslt_internal_get_arch_name_candidates(deviceProperties);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

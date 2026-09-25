@@ -467,12 +467,25 @@ rocblaslt_status
 rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matmul_desc dst);
 
 // for internal use during testing, fetch arch name
+// The name the runtime reports for the current device. This is also the compiler
+// target its kernels were built for -- including a silicon-revision variant such
+// as gfx1250-strict, which ROCr reports for gfx1250 A0 parts -- so it names both
+// the device-library subtree and the files inside it.
 std::string rocblaslt_internal_get_arch_name();
 
-// The library subtree the current device loads: "gfx1250v0" for a v0 part (its
-// own tree only, no fallback), otherwise the base name. Filenames inside the
-// subtree keep the revision-agnostic rocblaslt_internal_get_arch_name().
-std::string rocblaslt_internal_get_library_arch_name();
+// The architecture with both decorations removed -- the feature suffix
+// (":xnack-") and a trailing stepping ("-strict") -- so that the two names one
+// A0 can report, depending on HSA_DISABLE_GFX12_STRICT, collapse onto one base.
+std::string rocblaslt_internal_get_base_arch_name(const hipDeviceProp_t& prop);
+
+// The architecture names that may serve a device, best first, derived from
+// hipDeviceProp_t::asicRevision rather than from the name the runtime reported.
+//
+// Never empty, and the last entry is always the base architecture: callers are
+// expected to take the first candidate whose device library this install
+// actually ships, which is what keeps a gfx1250-only package working on an A0.
+std::vector<std::string> rocblaslt_internal_get_arch_name_candidates(const hipDeviceProp_t& prop);
+std::vector<std::string> rocblaslt_internal_get_arch_name_candidates();
 
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
