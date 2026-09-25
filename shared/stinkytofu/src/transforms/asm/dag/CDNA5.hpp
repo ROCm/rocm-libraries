@@ -1508,8 +1508,11 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                 if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
                     const HwInstDesc* desc = inst.getHwInstDesc();
                     matchingDsLoads.push_back(makeDsLoadDrainEntry(
-                        hw_, static_cast<int>(inst.latencyCycles), desc ? desc->dsThroughput : 0,
-                        desc ? desc->dsMaxDrain : 0, static_cast<int>(inst.issueCycles), numWaves));
+                        hw_, {.latency = static_cast<int>(inst.latencyCycles),
+                              .dsThroughput = desc ? desc->dsThroughput : 0,
+                              .dsMaxDrain = desc ? desc->dsMaxDrain : 0,
+                              .isaIssueCycles = static_cast<int>(inst.issueCycles),
+                              .numWaves = numWaves}));
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
                     break;

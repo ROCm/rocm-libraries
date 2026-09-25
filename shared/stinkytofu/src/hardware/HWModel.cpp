@@ -122,14 +122,13 @@ int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves) {
     return issueCycles * std::min(numWaves, share);
 }
 
-DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency, int dsThroughput,
-                                      int dsMaxDrain, int isaIssueCycles, int rawNumWaves) {
-    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
+DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, const DsLoadDrainInputs& in) {
+    const int numWaves = std::clamp(in.numWaves, kMinModeledWaves, kMaxModeledWaves);
     return {
-        .latency = latency > 0 ? latency : hw.lds.readDrainLatency,
-        .throughput = dsThroughput > 0 ? dsThroughput : hw.lds.dsLoadDefaultThroughput,
-        .maxDrain = dsMaxDrain > 0 ? dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
-        .issueCycles = dsIssueCyclesForWaves(hw, isaIssueCycles, numWaves),
+        .latency = in.latency > 0 ? in.latency : hw.lds.readDrainLatency,
+        .throughput = in.dsThroughput > 0 ? in.dsThroughput : hw.lds.dsLoadDefaultThroughput,
+        .maxDrain = in.dsMaxDrain > 0 ? in.dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
+        .issueCycles = dsIssueCyclesForWaves(hw, in.isaIssueCycles, numWaves),
     };
 }
 

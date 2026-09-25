@@ -169,15 +169,29 @@ struct DsLoadDrainEntry {
     int issueCycles = 0;
 };
 
+/// Named inputs to makeDsLoadDrainEntry. All fields are ints, so a positional
+/// parameter list here (latency, dsThroughput, dsMaxDrain, isaIssueCycles,
+/// numWaves) is one transposition away from a silent bug; call sites must
+/// name each field instead.
+struct DsLoadDrainInputs {
+    /// Instruction's own latency; 0 selects hw.lds.readDrainLatency.
+    int latency = 0;
+    /// HwInstDesc::dsThroughput; 0 selects hw.lds.dsLoadDefaultThroughput.
+    int dsThroughput = 0;
+    /// HwInstDesc::dsMaxDrain; 0 selects hw.lds.dsLoadDefaultMaxDrain.
+    int dsMaxDrain = 0;
+    /// Bare per-instruction ISA issue cost (HwInstDesc::issue /
+    /// StinkyInstruction::issueCycles), not yet wave-sharing-adjusted.
+    int isaIssueCycles = 0;
+    /// GemmTileConfig::NumWaves for the kernel this instruction belongs to.
+    int numWaves = 0;
+};
+
 /// Resolve a drain-model entry from an instruction's latency, ISA issue cost,
-/// resident wave count, and optional HwInstDesc overrides. \p dsThroughput /
-/// \p dsMaxDrain of 0 select the arch defaults on \p hw. \p isaIssueCycles is
-/// the bare per-instruction ISA number (HwInstDesc::issue /
-/// StinkyInstruction::issueCycles); this resolves and stores the real,
-/// wave-sharing-adjusted cost via dsIssueCyclesForWaves.
-STINKYTOFU_EXPORT DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, int latency,
-                                                        int dsThroughput, int dsMaxDrain,
-                                                        int isaIssueCycles, int numWaves);
+/// resident wave count, and optional HwInstDesc overrides. Resolves and
+/// stores the real, wave-sharing-adjusted cost via dsIssueCyclesForWaves.
+STINKYTOFU_EXPORT DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw,
+                                                        const DsLoadDrainInputs& in);
 
 /// Homogeneous-burst drain estimate. \p issueSpacing is the real per-load
 /// issue cost (see dsIssueCyclesForWaves) -- already wave-sharing-adjusted,

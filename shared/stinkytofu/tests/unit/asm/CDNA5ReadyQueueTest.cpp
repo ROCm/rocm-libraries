@@ -123,8 +123,11 @@ class CDNA5ReadyQueueTest : public ::testing::Test {
 
 DsLoadDrainEntry entryFromOpcode(const HWModel& hw, GFX opcode, int latency, int numWaves) {
     const HwInstDesc* desc = getMCIDByUOp(opcode, GfxArchID::Gfx1250);
-    return makeDsLoadDrainEntry(hw, latency, desc ? desc->dsThroughput : 0,
-                                desc ? desc->dsMaxDrain : 0, desc ? desc->issue : 0, numWaves);
+    return makeDsLoadDrainEntry(hw, {.latency = latency,
+                                     .dsThroughput = desc ? desc->dsThroughput : 0,
+                                     .dsMaxDrain = desc ? desc->dsMaxDrain : 0,
+                                     .isaIssueCycles = desc ? desc->issue : 0,
+                                     .numWaves = numWaves});
 }
 
 }  // namespace
@@ -211,8 +214,8 @@ TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesExperimentalTypeSpecificMaximum) {
     EXPECT_EQ(drain(4, 135), 128);
     EXPECT_EQ(drain(2, 255), 170);
     // Fallback defaults via makeDsLoadDrainEntry.
-    const DsLoadDrainEntry fallback =
-        makeDsLoadDrainEntry(hw, kLoadLatency, 0, 0, /*isaIssueCycles=*/1, kNumWaves);
+    const DsLoadDrainEntry fallback = makeDsLoadDrainEntry(
+        hw, {.latency = kLoadLatency, .isaIssueCycles = 1, .numWaves = kNumWaves});
     EXPECT_EQ(fallback.throughput, 4);
     EXPECT_EQ(fallback.maxDrain, 120);
     EXPECT_EQ(fallback.issueCycles, kIssueSpacing);
