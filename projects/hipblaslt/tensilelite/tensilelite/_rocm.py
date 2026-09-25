@@ -333,7 +333,7 @@ def _validate_system_rocm(
         distribution=distribution,
         distribution_version=distribution_version,
         expected_version=_rocm_base_version(expected),
-        actual_version=actual,
+        actual_version=_rocm_base_version(actual),
         path=path,
         source=resolved.source,
     )
