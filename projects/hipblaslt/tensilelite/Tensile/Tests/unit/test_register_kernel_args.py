@@ -179,12 +179,16 @@ def test_streamk_static_adds_workspace_and_all_scalar_args():
         assert expected in sems
 
 
-def test_data_parallel_keeps_legacy_scheduling_args_without_workspace():
-    sems = _sems(_writer(), _kernel(TileProcessingStrategy="DataParallel"))
-    for expected in ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
-                     "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]:
-        assert expected in sems
-    assert "AddressWorkspace" not in sems and "AddressFlags" not in sems
+def test_data_parallel_omits_streamk_partition_args():
+    sems = _sems(_writer(), _kernel(
+        TileProcessingStrategy="DataParallel",
+        InternalSupportParams={"KernArgsVersion": 3, "PersistentLoopArgsVersion": 1},
+    ))
+    assert "ItersPerTile" in sems and "PersistentGrid" in sems
+    assert sems.index("PersistentGrid") == sems.index("ItersPerTile") + 1
+    for omitted in ["AddressWorkspace", "AddressFlags", "MagicNumberItersPerTile",
+                    "MagicShiftItersPerTile", "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]:
+        assert omitted not in sems
 
 
 def test_streamk_atomic_omits_workspace_addresses():
