@@ -2123,9 +2123,9 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Uniform summation order requires StaggerU == 0; clamping the mapping
-        // alone is not enough, because a StreamK workgroup that owns more than
-        // one tile breaks uniformity under every mapping.
+        // Uniform summation order can keep mapping 1 only when the kernel can
+        // apply row-uniform staggering. Persistent kernels also require the
+        // per-tile iteration capability; otherwise disable staggering.
         //
         // The placement of this clamp is load-bearing. It must sit AFTER the
         // TENSILE_FIXED_STAGGERU* overrides directly above, or an env override
@@ -2136,12 +2136,12 @@ namespace TensileLite
         {
             const bool rowUniformStaggerCapable
                 = internalArgsSupport.staggerU
-                  && (sizeMapping.streamK == 0 || internalArgsSupport.perTileExtraIters);
+                  && (!sizeMapping.isPersistent() || internalArgsSupport.perTileExtraIters);
             if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
             {
-            defaultStaggerUMapping     = 0;
-            defaultStaggerU            = 0;
-            defaultStaggerUStrideShift = 0;
+                defaultStaggerUMapping     = 0;
+                defaultStaggerU            = 0;
+                defaultStaggerUStrideShift = 0;
             }
         }
 
@@ -6522,8 +6522,8 @@ namespace TensileLite
                               + " with GSU=" + std::to_string(gsu) + " is not row-uniform");
 
         // Recomputes exactly what generateSingleCall() packs. The clamp in
-        // calculateAutoStaggerU() should already have forced this to 0; checking
-        // it anyway is what catches a future path that bypasses the clamp.
+        // calculateAutoStaggerU() permits nonzero staggering only with mapping
+        // 1 and the required kernel capabilities. Check the resolved result too.
         const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, sk.grid));
         const auto   resolvedStaggerUParams
             = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
