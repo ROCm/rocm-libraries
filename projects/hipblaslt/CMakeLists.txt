@@ -713,7 +713,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
     rocm_install(
-        TARGETS hipblaslt-test
+        TARGETS hipblaslt-test hipblaslt-tuning-store-test
         COMPONENT tests
     )
     rocm_install(
