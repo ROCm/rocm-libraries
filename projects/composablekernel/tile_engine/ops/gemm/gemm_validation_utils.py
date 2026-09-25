@@ -71,6 +71,45 @@ GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON = (
 )
 
 
+# Ops whose kernels have no async (comp_async) or TDM (comp_tdm, comp_tdm_v2 +
+# tdm epilogue) path (grouped quant GEMM, GEMM multi-ABD) reject these traits on
+# every arch instead of silently emitting a kernel of another pipeline/epilogue.
+UNSUPPORTED_ASYNC_TDM_PIPELINES = tuple(GEMM_ASYNC_PIPELINES + GEMM_TDM_PIPELINES)
+UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
+
+
+def reject_async_tdm_traits(op_name, pipeline, epilogue):
+    """Raise ValueError if pipeline/epilogue is an async/TDM-only trait."""
+    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
+        raise ValueError(f"{op_name} does not support the {pipeline} pipeline")
+    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        raise ValueError(f"{op_name} does not support the {epilogue} epilogue")
+
+
+def reject_async_tdm_trait_string(op_name, trait_combo):
+    """Same check on a raw '_'-joined trait string (before it is split).
+
+    comp_async/comp_tdm/comp_tdm_v2 contain '_', so a plain split would parse
+    them as pipeline 'comp' and mis-assign every following field.
+    """
+    # Longest first so comp_tdm_v2 is not reported as comp_tdm.
+    for pipeline in sorted(UNSUPPORTED_ASYNC_TDM_PIPELINES, key=len, reverse=True):
+        if trait_combo == pipeline or trait_combo.startswith(pipeline + "_"):
+            reject_async_tdm_traits(op_name, pipeline, None)
+    for epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        if epilogue in trait_combo.split("_"):
+            reject_async_tdm_traits(op_name, None, epilogue)
+
+
+def reject_async_tdm_config(op_name, config):
+    """Reject async/TDM values listed in a trait_config before enumeration."""
+    trait_config = config.get("trait_config", {})
+    for pipeline in trait_config.get("pipeline", {}).get("values", []):
+        reject_async_tdm_traits(op_name, pipeline, None)
+    for epilogue in trait_config.get("epilogue", {}).get("values", []):
+        reject_async_tdm_traits(op_name, None, epilogue)
+
+
 def _is_true(value) -> bool:
     """Accept both JSON booleans and their string spellings."""
     return value is True or str(value).lower() == "true"

@@ -24,6 +24,7 @@ Reference:
 """
 
 import argparse
+import functools
 import itertools
 import json
 import logging
@@ -40,32 +41,17 @@ from codegen_common import (
     validate_rowcol_tensor_quant_gfx_arch,
     make_rowcolquant_kernel_name,
     rowcol_tensor_quant_default_tile,
+    reject_async_tdm_traits as _reject_async_tdm_traits,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
-# The async (comp_async) and TDM (comp_tdm, comp_tdm_v2 + tdm epilogue) pipelines
-# are not implemented for grouped rowcolquant GEMM: the quant pipeline problem is
-# synchronous and the kernel uses a CShuffle-style epilogue. Reject them on
-# every arch with a clear error instead of skipping or mislabelling a kernel.
-UNSUPPORTED_ASYNC_TDM_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2")
-UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
-
-
-def reject_async_tdm_traits(pipeline: str, epilogue: str) -> None:
-    """Raise ValueError if pipeline/epilogue is async/TDM-only."""
-    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
-        raise ValueError(
-            f"grouped_gemm_rowcolquant does not support the '{pipeline}' pipeline "
-            "(async/TDM pipelines are not implemented for grouped quant GEMM)"
-        )
-    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
-        raise ValueError(
-            f"grouped_gemm_rowcolquant does not support the '{epilogue}' epilogue "
-            "(TDM epilogue is not implemented for grouped quant GEMM)"
-        )
+# No async/TDM kernel path for this op: bind the shared guard to its name.
+reject_async_tdm_traits = functools.partial(
+    _reject_async_tdm_traits, "grouped_gemm_rowcolquant"
+)
 
 
 # =============================================================================

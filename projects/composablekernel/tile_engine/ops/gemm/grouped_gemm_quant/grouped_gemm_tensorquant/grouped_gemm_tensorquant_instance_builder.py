@@ -3,6 +3,7 @@
 
 import os
 import argparse
+import functools
 import importlib.util
 import multiprocessing
 import concurrent.futures
@@ -28,51 +29,6 @@ def _import_gemm_kernel_builder():
 GemmKernelBuilder = _import_gemm_kernel_builder()
 
 
-# The async (comp_async) and TDM (comp_tdm, comp_tdm_v2 + tdm epilogue) paths are
-# not available for grouped_gemm_tensorquant: the quant pipeline problem is synchronous
-# and the kernel is CompV3 + CShuffle only. Reject them on every arch with a
-# clear error instead of silently emitting a kernel of a different
-# pipeline/epilogue.
-UNSUPPORTED_ASYNC_TDM_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2")
-UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
-
-
-def reject_async_tdm_traits(pipeline, epilogue):
-    """Raise ValueError if pipeline/epilogue is an async/TDM-only trait."""
-    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
-        raise ValueError(
-            f"grouped_gemm_tensorquant does not support the {pipeline} pipeline"
-        )
-    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
-        raise ValueError(
-            f"grouped_gemm_tensorquant does not support the {epilogue} epilogue"
-        )
-
-
-def reject_async_tdm_trait_string(trait_combo):
-    """Same check on a raw '_'-joined trait string (before it is split).
-
-    comp_async/comp_tdm/comp_tdm_v2 contain '_', so a plain split would parse
-    them as pipeline 'comp' and mis-assign every following field.
-    """
-    # Longest first so comp_tdm_v2 is not reported as comp_tdm.
-    for pipeline in sorted(UNSUPPORTED_ASYNC_TDM_PIPELINES, key=len, reverse=True):
-        if trait_combo == pipeline or trait_combo.startswith(pipeline + "_"):
-            reject_async_tdm_traits(pipeline, None)
-    for epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
-        if epilogue in trait_combo.split("_"):
-            reject_async_tdm_traits(None, epilogue)
-
-
-def _reject_async_tdm_config(config):
-    """Reject async/TDM values listed in a trait_config before enumeration."""
-    trait_config = config.get("trait_config", {})
-    for pipeline in trait_config.get("pipeline", {}).get("values", []):
-        reject_async_tdm_traits(pipeline, None)
-    for epilogue in trait_config.get("epilogue", {}).get("values", []):
-        reject_async_tdm_traits(None, epilogue)
-
-
 def _import_validation_utils():
     """Import validation utilities from the parent gemm directory."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +43,19 @@ def _import_validation_utils():
 
 
 _validation_utils = _import_validation_utils()
+
+
+# No async/TDM kernel path for this op: bind the shared guards to its name.
+_OP_NAME = "grouped_gemm_tensorquant"
+reject_async_tdm_traits = functools.partial(
+    _validation_utils.reject_async_tdm_traits, _OP_NAME
+)
+reject_async_tdm_trait_string = functools.partial(
+    _validation_utils.reject_async_tdm_trait_string, _OP_NAME
+)
+_reject_async_tdm_config = functools.partial(
+    _validation_utils.reject_async_tdm_config, _OP_NAME
+)
 
 
 class GroupedTensorQuantGemmKernelBuilder(GemmKernelBuilder):

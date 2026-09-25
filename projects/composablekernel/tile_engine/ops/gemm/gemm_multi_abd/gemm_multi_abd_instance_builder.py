@@ -3,6 +3,7 @@
 
 import os
 import argparse
+import functools
 import importlib.util
 import multiprocessing
 import concurrent.futures
@@ -45,45 +46,17 @@ _validation_utils = _import_validation_utils()
 LAYOUT_MAP = _validation_utils.LAYOUT_MAP
 
 
-# The async (comp_async) and TDM (comp_tdm, comp_tdm_v2 + tdm epilogue) paths are
-# not available for gemm_multi_abd: the multi-ABD tuple problem has no async/TDM
-# pipeline or TDM epilogue. Reject them on every arch with a clear error instead
-# of silently emitting a kernel of a different pipeline/epilogue.
-UNSUPPORTED_ASYNC_TDM_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2")
-UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
-
-
-def reject_async_tdm_traits(pipeline, epilogue):
-    """Raise ValueError if pipeline/epilogue is an async/TDM-only trait."""
-    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
-        raise ValueError(f"gemm_multi_abd does not support the {pipeline} pipeline")
-    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
-        raise ValueError(f"gemm_multi_abd does not support the {epilogue} epilogue")
-
-
-def reject_async_tdm_trait_string(trait_combo):
-    """Same check on a raw '_'-joined trait string (before it is split).
-
-    comp_async/comp_tdm/comp_tdm_v2 contain '_', so a plain split would parse
-    them as pipeline 'comp' and mis-assign every following field.
-    """
-    # Longest first so comp_tdm_v2 is not reported as comp_tdm.
-    for pipeline in sorted(UNSUPPORTED_ASYNC_TDM_PIPELINES, key=len, reverse=True):
-        if trait_combo == pipeline or trait_combo.startswith(pipeline + "_"):
-            reject_async_tdm_traits(pipeline, None)
-    for epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
-        if epilogue in trait_combo.split("_"):
-            reject_async_tdm_traits(None, epilogue)
-
-
-def _reject_async_tdm_config(config):
-    """Reject async/TDM values listed in a trait_config before enumeration."""
-    trait_config = config.get("trait_config", {})
-    for pipeline in trait_config.get("pipeline", {}).get("values", []):
-        reject_async_tdm_traits(pipeline, None)
-    for epilogue in trait_config.get("epilogue", {}).get("values", []):
-        reject_async_tdm_traits(None, epilogue)
-
+# No async/TDM kernel path for this op: bind the shared guards to its name.
+_OP_NAME = "gemm_multi_abd"
+reject_async_tdm_traits = functools.partial(
+    _validation_utils.reject_async_tdm_traits, _OP_NAME
+)
+reject_async_tdm_trait_string = functools.partial(
+    _validation_utils.reject_async_tdm_trait_string, _OP_NAME
+)
+_reject_async_tdm_config = functools.partial(
+    _validation_utils.reject_async_tdm_config, _OP_NAME
+)
 
 def get_multi_abd_base_layouts(layout_code):
     """

@@ -791,6 +791,28 @@ GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
 )
 
 
+# The grouped quant GEMM kernels have no async (comp_async) or TDM (comp_tdm,
+# comp_tdm_v2 + tdm epilogue) implementation: the quant pipeline problem is
+# synchronous and the kernel uses a CShuffle-style epilogue. Their codegens
+# reject these traits on every arch instead of skipping or mislabelling a kernel.
+UNSUPPORTED_ASYNC_TDM_PIPELINES = GFX1250_ONLY_PIPELINES
+UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
+
+
+def reject_async_tdm_traits(op_name: str, pipeline: str, epilogue: str) -> None:
+    """Raise ValueError if pipeline/epilogue is an async/TDM-only trait."""
+    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
+        raise ValueError(
+            f"{op_name} does not support the '{pipeline}' pipeline "
+            "(async/TDM pipelines are not implemented for grouped quant GEMM)"
+        )
+    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        raise ValueError(
+            f"{op_name} does not support the '{epilogue}' epilogue "
+            "(TDM epilogue is not implemented for grouped quant GEMM)"
+        )
+
+
 def gfx1250_pipeline_reject_reason(
     gpu_target: str,
     pipeline: str,
