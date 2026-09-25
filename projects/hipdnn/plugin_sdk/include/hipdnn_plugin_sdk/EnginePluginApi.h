@@ -168,13 +168,19 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *
  * ENGINE predicts ordinary execution with tuning off, without enumerating or
  * scoring configurations. CONFIGURATION returns an engine ID and complete knob
- * settings identifying one configuration, with its physical, calibrated TFLOPS.
+ * settings identifying one configuration, with its predicted value.
  * Neither request may benchmark, tune, or execute GPU work.
  * Description requests publish the model binding and input features even when no
  * model is installed. A missing prediction never changes engine applicability.
  *
+ * The request names its ranking metric in engine_config.ranking_metric (empty means
+ * "tflops"; RFC 0019 §11.4). The output's `metric` is always that metric, whatever the
+ * status, and an AVAILABLE `value` is in its registered units. An engine with no model
+ * for the metric reports UNAVAILABLE; it never answers in another metric, and the host
+ * treats an answer in another metric as INVALID. An unregistered metric is BAD_PARAM.
+ *
  * @param[in] handle Engine plugin handle.
- * @param[in] engine_config Serialized EngineConfig, including selection constraints.
+ * @param[in] engine_config Serialized EngineConfig: selection constraints and metric.
  * @param[in] op_graph Serialized operation graph.
  * @param[in] kind Requested prediction layer.
  * @param[in] evaluate Zero for description only, one to evaluate the prediction.
@@ -227,6 +233,11 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 
 /**
  * @brief Creates an execution context for a specific engine configuration and an operation graph.
+ *
+ * An engine that chooses its own kernel here ranks its catalog by
+ * engine_config.ranking_metric (empty means "tflops"; RFC 0019 §11.4), so a configuration
+ * selected by `time` builds the kernel predicted fastest rather than the highest-throughput
+ * one. Explicit knob settings still constrain that choice.
  *
  * @param[in] handle The engine plugin handle.
  * @param[in] engine_config A pointer to a structure where the serialized `EngineConfig` from

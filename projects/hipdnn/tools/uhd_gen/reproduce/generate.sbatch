@@ -6,7 +6,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --output=%x-%j.log
 #
-# Generate layer-2 (sort_kernel_catalog) and layer-1 (predict_engine_tflops) heuristics
+# Generate layer-2 (sort_kernel_catalog) and layer-1 (predict_engine) heuristics
 # for one engine against a STAGED corpus -- `corpus_build`'s output, not a corpus the
 # generator proposes for itself.
 #
@@ -31,6 +31,12 @@ GRAPHS=${UHD_GRAPHS:?set UHD_GRAPHS to a staged corpus directory}
 # UHD_ROLES=l2,l1 arrives as UHD_ROLES=l2 plus a stray empty l1 -- which is how run 67929135
 # collected and trained L2 over 909 graphs and then silently skipped L1 entirely.
 ROLES=${UHD_ROLES:-l2+l1}
+# Ranking metrics to train, `+`-separated for the same reason (RFC 0019 §4.4): one UHD per
+# metric per role from one run. Unset keeps generate's default (tflops, with the metric-less
+# fallback for an engine publishing no work count) and the `<role>/model/` layout; several
+# metrics write `<role>/model_<metric>/`.
+METRIC_ARGS=()
+[ -n "${UHD_METRICS:-}" ] && METRIC_ARGS=(--metric ${UHD_METRICS//+/ })
 SHARDS=${UHD_SHARDS:-1}
 SHARD=${UHD_SHARD:-0}
 ARCH=${UHD_ARCH:-gfx942}
@@ -252,7 +258,7 @@ if [[ "+$ROLES+" == *"+l2+"* ]]; then
         --engine "$ENGINE" --engine-id "$ENGINE_ID" \
         --bench "$BENCH" --plugin-dir "$PLUGIN_DIR" \
         --feature-evaluator "$FEATURE_EVAL" \
-        --role sort_kernel_catalog --arch "$ARCH" \
+        --role sort_kernel_catalog "${METRIC_ARGS[@]}" --arch "$ARCH" \
         --name "$ENGINE catalog ranker ($ARCH, $ADMITTED graphs)" \
         --output-dir "$OUT/l2" > "$OUT/l2.stdout" 2> "$OUT/l2.stderr"
     echo "L2 generate rc=$? in $(( $(date +%s) - L2_START ))s"
@@ -260,7 +266,7 @@ if [[ "+$ROLES+" == *"+l2+"* ]]; then
 fi
 
 if [[ "+$ROLES+" == *"+l1+"* ]]; then
-    step "LAYER 1 - predict_engine_tflops over $ADMITTED graphs"
+    step "LAYER 1 - predict_engine over $ADMITTED graphs"
     # After L2 is installed: an immediate run executes whatever the installed catalog
     # ranker picked, so these labels describe the selector that will ship.
     L1_START=$(date +%s)
@@ -270,8 +276,8 @@ if [[ "+$ROLES+" == *"+l1+"* ]]; then
         --engine "$ENGINE" --engine-id "$ENGINE_ID" \
         --bench "$BENCH" --plugin-dir "$PLUGIN_DIR" \
         --feature-evaluator "$FEATURE_EVAL" \
-        --role predict_engine_tflops --arch "$ARCH" \
-        --name "$ENGINE throughput ($ARCH, $ADMITTED graphs)" \
+        --role predict_engine "${METRIC_ARGS[@]}" --arch "$ARCH" \
+        --name "$ENGINE estimate ($ARCH, $ADMITTED graphs)" \
         --output-dir "$OUT/l1" > "$OUT/l1.stdout" 2> "$OUT/l1.stderr"
     echo "L1 generate rc=$? in $(( $(date +%s) - L1_START ))s"
     tail -20 "$OUT/l1.stdout"; echo "--- stderr ---"; tail -10 "$OUT/l1.stderr"

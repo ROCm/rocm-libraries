@@ -35,17 +35,32 @@ def _tree(root):
     _write(root / "engine.ued.json", {"version": "1.0", "id": UED, "name": "test:engine",
            "metadata": KMD, "knobs": ["block_size", "tile_m"],
            "sort_kernel_catalog": {"gfx942": OLD, "gfx950": OTHER, "default": OTHER},
-           "predict_engine_tflops": {"gfx942": OTHER}})
+           "predict_engine": {"gfx942": OTHER}})
     _write(root / "metadata.kmd.json", {"version": "1.0", "id": KMD, "fields": []})
+    # The incumbent gfx942 ranker is installed: promotion reads a bound UHD's metric to
+    # decide whether the incoming one replaces it.
+    _installed(root / "old.uhd.json", OLD)
     return root
 
 
-def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None):
+def _installed(path, identity, score=None):
+    """An installed static_order UHD, metric-less unless `score` names one."""
+    doc = {"version": "1.0", "id": identity, "name": "installed", "adapter": "static_order",
+           "static_order": {}}
+    if score is not None:
+        doc.update(objective={"tflops": "max", "time": "min"}[score["metric"]], score=score)
+    return _write(path, doc)
+
+
+def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None, metric=None):
     provenance = provenance if provenance is not None else snapshot_provenance(tree, arch="gfx942")
     doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
            "objective": "max", "features_signature": ["$kernel.block_size"],
            "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
            "tree_data": {"artifact": artifact}}
+    if metric is not None:
+        doc.update(objective={"tflops": "max", "time": "min"}[metric],
+                   score={"metric": metric, "calibrated": True, "transform": "log1p"})
     _write(root / "heuristic.uhd.json", doc)
     _write(root / "train_manifest.json", {"training_arches": ["gfx942"], "trained_against": provenance})
     payload = root / artifact
@@ -64,7 +79,7 @@ def test_promotion_updates_only_the_requested_arch_and_role(tmp_path):
     model = _model(tmp_path / "model", tree)
     _apply(build_plan(model, tree))
     expected = copy.deepcopy(original)
-    expected["sort_kernel_catalog"]["gfx942"] = NEW
+    expected["sort_kernel_catalog"]["gfx942"] = [NEW]
     assert _read(tree / "engine.ued.json") == expected
 
 
@@ -93,7 +108,7 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     tree = _tree(tmp_path / "tree")
     ued = _read(tree / "engine.ued.json")
     ued["sort_kernel_catalog"] = {"gfx942": OLD}
-    ued.pop("predict_engine_tflops")
+    ued.pop("predict_engine")
     _write(tree / "engine.ued.json", ued)
     first = _model(tmp_path / "first", tree)
     (first / "model.bin").write_bytes(b"first model weights")
@@ -112,13 +127,13 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     elif binding == "architecture":
         arch = "gfx950"
     else:
-        role = "predict_engine_tflops"
+        role = "predict_engine"
     provenance = snapshot_provenance(tree, engine=engine, arch=arch)
     second = _model(tmp_path / "second", tree, identity=OTHER, provenance=provenance)
     document = _read(second / "heuristic.uhd.json")
     if binding == "role":
         document.update(features_signature=["$graph.flops"],
-                        score={"units": "tflops", "calibrated": True, "transform": "identity"})
+                        score={"metric": "tflops", "calibrated": True, "transform": "identity"})
     _write(second / "heuristic.uhd.json", document)
     _write(second / "train_manifest.json", {"training_arches": [arch], "trained_against": provenance})
     (second / "model.bin").write_bytes(b"second model weights")
@@ -127,12 +142,12 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
 
     assert first_plan.destination_descriptor.read_bytes() == first_descriptor
     assert first_artifact.read_bytes() == b"first model weights"
-    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == NEW
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [NEW]
     installed = {
         _read(path)["id"]: (path, _read(path))
         for path in tree.rglob("*.uhd.json")
     }
-    selected = _read(second_plan.ued_path)[role][arch]
+    [selected] = _read(second_plan.ued_path)[role][arch]
     path, document = installed[selected]
     assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == b"second model weights"
 
@@ -152,7 +167,7 @@ def test_dry_run_makes_no_writes(tmp_path):
     assert _files(tmp_path) == before
 
 
-@pytest.mark.parametrize("role,arch", [("sort_kernel_catalog", "gfx950"), ("predict_engine_tflops", "gfx942")])
+@pytest.mark.parametrize("role,arch", [("sort_kernel_catalog", "gfx950"), ("predict_engine", "gfx942")])
 def test_shared_identity_cannot_be_rewritten_from_another_binding(tmp_path, role, arch):
     tree = _tree(tmp_path / "tree")
     model = _model(tmp_path / "model", tree, identity=OTHER)
@@ -162,7 +177,7 @@ def test_shared_identity_cannot_be_rewritten_from_another_binding(tmp_path, role
     (tree / "model.bin").write_bytes(b"untargeted model")
     ued = _read(tree / "engine.ued.json")
     ued["sort_kernel_catalog"] = {"gfx942": OLD}
-    ued.pop("predict_engine_tflops")
+    ued.pop("predict_engine")
     ued.setdefault(role, {})[arch] = OTHER
     _write(tree / "engine.ued.json", ued)
     before = _files(tmp_path)
@@ -257,7 +272,7 @@ def test_explicit_knob_removal_requires_retraining_for_prospective_revision(tmp_
 def test_explicit_knob_removal_bumps_semantic_not_file_revision(tmp_path):
     tree = _tree(tmp_path / "tree")
     ued = _read(tree / "engine.ued.json")
-    ued.pop("predict_engine_tflops")
+    ued.pop("predict_engine")
     ued["sort_kernel_catalog"] = {"gfx942": OLD}
     _write(tree / "engine.ued.json", ued)
     provenance = snapshot_provenance(tree)
@@ -297,8 +312,9 @@ def test_ambiguous_architecture_requires_an_explicit_target(tmp_path, arches):
     _write(model / "train_manifest.json", {"training_arches": arches})
     with pytest.raises(PromoteError):
         build_plan(model, tree)
+    _installed(tree / "other.uhd.json", OTHER)
     _apply(build_plan(model, tree, arch="default"))
-    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["default"] == NEW
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["default"] == [NEW]
 
 
 def test_training_architecture_cannot_be_silently_retargeted(tmp_path):
@@ -317,8 +333,86 @@ def test_additive_semantic_revision_accepts_without_rewriting_training_snapshot(
     _write(tree / "engine.ued.json", ued)
     plan = build_plan(model, tree)
     _apply(plan)
-    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == NEW
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [NEW]
     assert _read(plan.destination_descriptor)["trained_against"] == trained
+
+
+def _bind(tree, value):
+    ued = _read(tree / "engine.ued.json")
+    ued["sort_kernel_catalog"]["gfx942"] = value
+    _write(tree / "engine.ued.json", ued)
+
+
+def test_a_new_metric_joins_the_arch_list_beside_the_incumbent(tmp_path):
+    """RFC 0019 §3.1: one UHD per metric under an arch key. A single id is a one-element
+    list, so binding a second metric turns it into two, and neither file is disturbed."""
+    tree = _tree(tmp_path / "tree")
+    _installed(tree / "old.uhd.json", OLD, {"metric": "tflops", "calibrated": False})
+    first = _files(tree)
+    plan = build_plan(_model(tmp_path / "model", tree, metric="time"), tree)
+    _apply(plan)
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [OLD, NEW]
+    assert plan.old_heuristic is None
+    assert plan.destination_descriptor.parent.name == "time"
+    assert all(_files(tree)[path] == content for path, content in first.items()
+               if path.name != "engine.ued.json")
+
+
+def test_a_retrained_metric_replaces_only_its_own_entry_in_place(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    _installed(tree / "old.uhd.json", OLD, {"metric": "time", "calibrated": False})
+    _installed(tree / "other.uhd.json", OTHER, {"metric": "tflops", "calibrated": False})
+    _bind(tree, [OLD, OTHER])
+    plan = build_plan(_model(tmp_path / "model", tree, metric="time"), tree)
+    _apply(plan)
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [NEW, OTHER]
+    assert plan.old_heuristic == OLD
+
+
+def test_a_metric_less_ranker_replaces_only_the_metric_less_entry(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    _installed(tree / "other.uhd.json", OTHER, {"metric": "tflops", "calibrated": False})
+    _bind(tree, [OTHER, OLD])
+    _apply(build_plan(_model(tmp_path / "model", tree), tree))
+    assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [OTHER, NEW]
+
+
+def test_a_bound_uhd_the_tree_does_not_contain_cannot_be_classified(tmp_path):
+    """The metric lives in the UHD, not the UED, so an unreadable binding could be the
+    incoming metric's incumbent or another metric's model; either guess corrupts the map."""
+    tree = _tree(tmp_path / "tree")
+    (tree / "old.uhd.json").unlink()
+    model = _model(tmp_path / "model", tree, metric="time")
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match="not installed"):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+def test_an_arch_already_binding_two_uhds_of_one_metric_is_refused(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    _installed(tree / "old.uhd.json", OLD, {"metric": "time", "calibrated": False})
+    _installed(tree / "other.uhd.json", OTHER, {"metric": "time", "calibrated": False})
+    _bind(tree, [OLD, OTHER])
+    with pytest.raises(PromoteError, match="at most one"):
+        build_plan(_model(tmp_path / "model", tree, metric="time"), tree)
+
+
+@pytest.mark.parametrize("score,objective", [
+    ({"metric": "latency", "transform": "log1p"}, "min"),
+    ({"metric": "time", "transform": "log1p"}, "max"),
+    ({"metric": "tflops", "transform": "log1p"}, "min"),
+    ({"calibrated": True, "transform": "log1p"}, "max"),
+    ({"units": "tflops", "transform": "log1p"}, "max"),
+])
+def test_a_score_must_name_a_registered_metric_in_its_own_direction(tmp_path, score, objective):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    doc = _read(model / "heuristic.uhd.json")
+    doc.update(score=score, objective=objective)
+    _write(model / "heuristic.uhd.json", doc)
+    with pytest.raises(PromoteError):
+        build_plan(model, tree)
 
 
 @pytest.mark.parametrize("payload", ["missing.bin", "../outside.bin", "metadata.kmd.json"])
@@ -374,12 +468,12 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1"):
     doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
            "objective": "max", "features_signature": ["$graph.work"],
            "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
-           "score": {"units": "tflops", "calibrated": True, "transform": "identity"},
+           "score": {"metric": "tflops", "calibrated": True, "transform": "identity"},
            "tree_data": {"artifact": "model.bin"}}
     _write(root / "heuristic.uhd.json", doc)
     _write(root / "train_manifest.json",
            {"training_arches": ["gfx950"], "trained_against": provenance,
-            "role": "predict_engine_tflops"})
+            "role": "predict_engine"})
     (root / "model.bin").write_bytes(b"incoming model")
     return root
 
@@ -394,12 +488,12 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
     before = _read(tree / "engine.ued.json")
     model = _opaque_model(tmp_path / "model")
 
-    plan = build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine_tflops", arch="gfx950")
+    plan = build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
     _apply(plan)
 
     assert plan.ued_path is None
     assert _read(tree / "engine.ued.json") == before, "no role map may change"
-    installed = tree / "heuristics" / "ASM_SDPA_ENGINE" / "predict_engine_tflops" / "gfx950"
+    installed = tree / "heuristics" / "ASM_SDPA_ENGINE" / "predict_engine" / "gfx950" / "tflops"
     assert _read(installed / "heuristic.uhd.json")["id"] == NEW
     assert (installed / "model.bin").read_bytes() == b"incoming model"
 
@@ -414,7 +508,7 @@ def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
            "tree_data": {"artifact": "other.bin"}})
     model = _opaque_model(tmp_path / "model")
     with pytest.raises(PromoteError, match="already installed"):
-        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine_tflops", arch="gfx950")
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
 
 
 def test_an_engine_with_no_catalog_cannot_be_given_a_catalog_ranker(tmp_path):

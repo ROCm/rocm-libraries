@@ -13,6 +13,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -28,6 +29,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/ingestor/BenchmarkPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
@@ -204,12 +206,16 @@ public:
             = benchmarkingOverrideFromEnv().value_or(readBenchmarkingEnabled(engineConfig));
     }
 
+    /// Kernel choice follows the engine configuration's ranking metric (RFC 0019 §11.4):
+    /// that metric's `sort_kernel_catalog` UHD ranks the catalog when it has one, the
+    /// engine's default ranker otherwise, and the sorted order is cached per metric.
     void buildPlan(const THandle& handle,
                    const IGraph& opGraph,
-                   const IEngineConfig& /*engineConfig*/,
+                   const IEngineConfig& engineConfig,
                    TContext& executionContext) const override
     {
-        const auto context = contextFor(handle, opGraph);
+        const auto context
+            = contextFor(handle, opGraph, heuristics::rankingMetric(engineConfig).name);
         const auto& settings = executionContext.executionSettings().ingestorSettings;
         const auto catalog = _stateManager.sortedCatalog(context);
         if(catalog.entries.empty())
@@ -332,7 +338,8 @@ public:
                         "ingestor: engine '"
                         << _engine.name << "' selected kernel " << toString(filtered[rank].kernelId)
                         << " at rank " << rank << " from " << filtered.size() << " candidate(s) ("
-                        << catalog.entries.size() << " before knob filtering)");
+                        << catalog.entries.size() << " before knob filtering) ranked by metric '"
+                        << context.rankingMetric << "'");
 
                     executionContext.setPlan(std::move(plan));
                     return;
@@ -664,13 +671,19 @@ public:
         return features;
     }
 
-    /// @brief Predicts an executable configuration identified by its exposed knobs.
+    /// @brief Predicts an executable configuration identified by its exposed knobs, in the
+    ///        ranking metric @p config carries.
+    ///
+    /// Only that metric's own calibrated ranker answers (RFC 0019 §11.4): the default ranker
+    /// may choose kernels for a metric with no ranker, but its number is another metric's.
     void predictConfiguration(const THandle& handle,
                               const IGraph& graph,
                               const IEngineConfig& config,
                               hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT& result) const
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
+        const auto& metric = heuristics::rankingMetric(config);
+        result.metric = std::string(metric.name);
         validateKnobConstraints(config);
         if(readBenchmarkingEnabled(config))
         {
@@ -680,7 +693,7 @@ public:
         }
         TSettings executionSettings;
         initializeExecutionSettings(handle, graph, config, executionSettings);
-        const auto context = contextFor(handle, graph);
+        const auto context = contextFor(handle, graph, metric.name);
         auto catalog = _stateManager.unsortedCatalog(context);
         const auto filtered
             = applyConstraints(catalog, executionSettings.ingestorSettings, context);
@@ -694,10 +707,12 @@ public:
         // KernelIngestorStateManager::calibratedRanking().
         const auto ranking = _stateManager.calibratedRanking(catalog, filtered, context, modelId);
         catalog.entries = filtered;
-        result.reason = "No calibrated configuration prediction is available";
+        result.reason
+            = "No calibrated '" + result.metric + "' configuration prediction is available";
         for(const auto& scored : ranking)
         {
-            if(!std::isfinite(scored.score) || scored.score <= 0.0)
+            if(scored.score == 0.0
+               || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, scored.score))
             {
                 continue;
             }
@@ -755,7 +770,7 @@ public:
                     }
                 }
                 result.engine_config = std::move(exact);
-                result.tflops = scored.score;
+                result.value = scored.score;
                 result.uhd_id = modelId;
                 result.status = PredictionStatus::AVAILABLE;
                 result.reason.clear();
@@ -910,6 +925,15 @@ private:
     /// resolved.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
+        return contextFor(handle, opGraph, hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC);
+    }
+
+    /// @param rankingMetric A registered metric's name, viewing the registry's storage (see
+    ///        MatchContext::rankingMetric).
+    MatchContext contextFor(const THandle& handle,
+                            const IGraph& opGraph,
+                            std::string_view rankingMetric) const
+    {
         const auto deviceId = _deviceResolver.deviceId(handle);
         const auto& deviceProperties = _deviceResolver.deviceProperties(deviceId);
         if(deviceId == NO_DEVICE || deviceProperties.gcnArchName.empty())
@@ -923,7 +947,7 @@ private:
                                         "engine '" + _engine.name
                                             + "' cannot build a plan: " + reason);
         }
-        return MatchContext{opGraph, deviceId, deviceProperties};
+        return MatchContext{opGraph, deviceId, deviceProperties, rankingMetric};
     }
 
     KnobFilter readKnobFilter(const IEngineConfig& engineConfig) const

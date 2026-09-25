@@ -64,7 +64,11 @@ INSTANTIATE_TEST_SUITE_P(
         CatalogKeyInequalityCase{"DifferentEngineMajorVersion",
                                  CatalogKey{makeGraphId(1), 0, {1, 0, 0}}},
         CatalogKeyInequalityCase{"DifferentEnginePatchVersion",
-                                 CatalogKey{makeGraphId(1), 0, {0, 0, 1}}}),
+                                 CatalogKey{makeGraphId(1), 0, {0, 0, 1}}},
+        // RFC 0019 §11.4: an order ranked for one metric is not an order for another, so
+        // a `time` request must never read the entry a `tflops` request cached.
+        CatalogKeyInequalityCase{"DifferentRankingMetric",
+                                 CatalogKey{makeGraphId(1), 0, {}, "time"}}),
     [](const ::testing::TestParamInfo<CatalogKeyInequalityCase>& info) { return info.param.name; });
 
 TEST(TestIngestorMatchContext, CatalogKeyHashIsConsistentForEqualKeys)

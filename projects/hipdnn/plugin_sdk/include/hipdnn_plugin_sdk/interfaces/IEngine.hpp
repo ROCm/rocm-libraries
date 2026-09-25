@@ -6,12 +6,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -103,15 +105,23 @@ public:
     }
 
     /**
-     * @brief Describes or evaluates an optional calibrated throughput prediction.
+     * @brief Describes or evaluates an optional calibrated prediction in the metric the
+     * configuration names.
      *
-     * Absence of a model is independent of engine applicability. Legacy engines
-     * return UNAVAILABLE; CONFIGURATION estimates must identify the exact plan.
+     * The metric is `heuristics::rankingMetric(config)` (RFC 0019 §11.4). Every answer,
+     * whatever its status, carries that metric; an AVAILABLE value is in its registered
+     * units. An engine with no model for the metric reports UNAVAILABLE rather than
+     * answering in another one. Absence of a model is independent of engine
+     * applicability. Legacy engines return UNAVAILABLE; CONFIGURATION estimates must
+     * identify the exact plan.
+     *
+     * @throws HipdnnPluginException BAD_PARAM for an unregistered metric: it is a malformed
+     *         request, not a missing model.
      */
     virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(THandle&,
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&,
-                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                       hipdnnEnginePredictionKind_t kind,
                       bool /*evaluate*/) const
     {
@@ -121,8 +131,9 @@ public:
         prediction.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
                               ? PredictionKind::CONFIGURATION
                               : PredictionKind::ENGINE;
+        prediction.metric = std::string(heuristics::rankingMetric(config).name);
         prediction.status = PredictionStatus::UNAVAILABLE;
-        prediction.reason = "Engine does not provide throughput predictions";
+        prediction.reason = "Engine does not provide predictions";
         return prediction;
     }
 

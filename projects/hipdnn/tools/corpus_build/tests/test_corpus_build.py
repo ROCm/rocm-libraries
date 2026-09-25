@@ -429,7 +429,7 @@ def test_a_pack_with_one_kernel_per_geometry_is_reported_as_deterministic(tmp_pa
     assert stats["deterministic"] is True
     assert stats["max_candidates"] == 1
     assert stats["eligible"] == 0
-    assert "predict_engine_tflops" in stats["shut_out"]
+    assert "predict_engine" in stats["shut_out"]
 
 
 def test_a_pack_emptied_by_too_high_a_gate_says_where_to_set_it(tmp_path):
@@ -471,7 +471,7 @@ def test_the_shut_out_note_reaches_the_operator(tmp_path, sources, capsys):
                  "--model-catalog", str(sources["catalog"])]) == 0
     printed = capsys.readouterr().out
     assert "dense.kdp.json contributed no geometry" in printed
-    assert "predict_engine_tflops" in printed
+    assert "predict_engine" in printed
 
 
 def test_the_catalog_yields_the_geometries_it_records():

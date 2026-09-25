@@ -622,7 +622,7 @@ TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
     SKIP_IF_NO_DEVICES();
 
     const MiopenEngine engine(
-        1, "test:miopen", {{"default", "0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}});
+        1, "test:miopen", {{"default", {"0f4d2c8b-6a19-4e73-9d05-8b1746ca3e2f"}}});
 
     auto builder = createValidBatchnormInferenceGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -636,11 +636,15 @@ TEST(TestMiopenEngine, ReportsNoEstimateWhenItsDeclaredL1ModelIsNotDeployed)
               hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(prediction.engine_id, 1);
     EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE);
+    // A configuration naming no metric asks in the default one, and the answer says so.
+    EXPECT_EQ(prediction.metric, "tflops");
 }
 
 /// MIOpen selects its own solution, so it has no exact configuration of ours to predict:
 /// RFC 0019 §11.2's "A only (opaque)" row. Declining must stay a decline rather than
-/// becoming an error once the engine started answering the ENGINE query.
+/// becoming an error once the engine started answering the ENGINE query, and it carries
+/// the requested metric: the backend rejects any answer, a decline included, whose metric
+/// differs from the request.
 TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
 {
     SKIP_IF_NO_DEVICES();
@@ -649,7 +653,10 @@ TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
 
     auto builder = createValidBatchnormInferenceGraph();
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-    const EngineConfigWrapper config(nullptr, 0);
+    flatbuffers::FlatBufferBuilder configBuilder;
+    configBuilder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfigDirect(
+        configBuilder, 1, nullptr, "time"));
+    const EngineConfigWrapper config(configBuilder.GetBufferPointer(), configBuilder.GetSize());
     HipdnnMiopenHandle handle;
 
     const auto prediction
@@ -657,6 +664,7 @@ TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
     EXPECT_EQ(prediction.status,
               hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::CONFIGURATION);
+    EXPECT_EQ(prediction.metric, "time");
 }
 
 /// The two MIOpen engines are different engines with different performance, so each must
@@ -665,17 +673,21 @@ TEST(TestMiopenEngine, DeclinesTheConfigurationPredictionQuery)
 TEST(TestMiopenEngine, EachDeclaredEngineNamesADistinctWellFormedModelId)
 {
     std::set<std::string> seen;
-    for(const auto* ids : {&MIOPEN_ENGINE_L1_MODELS, &MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS})
+    for(const auto* declared : {&MIOPEN_ENGINE_L1_MODELS, &MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS})
     {
-        EXPECT_FALSE(ids->empty());
-        for(const auto& [arch, id] : *ids)
+        EXPECT_FALSE(declared->empty());
+        for(const auto& [arch, ids] : *declared)
         {
             EXPECT_FALSE(arch.empty());
-            // A malformed literal would not fail the build -- it would silently mean
-            // "this engine never binds a model" -- so it is checked here.
-            EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
-                << id;
-            EXPECT_TRUE(seen.insert(id).second) << "two engines declare " << id;
+            EXPECT_FALSE(ids.empty()) << "arch '" << arch << "' declares an empty model list";
+            for(const auto& id : ids)
+            {
+                // A malformed literal would not fail the build -- it would silently mean
+                // "this engine never binds a model" -- so it is checked here.
+                EXPECT_NO_THROW(static_cast<void>(hipdnn_flatbuffers_sdk::utilities::parseUuid(id)))
+                    << id;
+                EXPECT_TRUE(seen.insert(id).second) << "id declared twice: " << id;
+            }
         }
     }
 }

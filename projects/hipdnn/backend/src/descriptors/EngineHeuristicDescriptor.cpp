@@ -15,6 +15,7 @@
 
 // Heuristics framework
 #include "heuristics/DeviceProperties.hpp"
+#include "heuristics/RankingMetric.hpp"
 #include "heuristics/SelectionHeuristic.hpp"
 #include "logging/Logging.hpp"
 #include "plugin/HeuristicPlugin.hpp"
@@ -29,6 +30,7 @@
 #include <cstring>
 #include <set>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 
 namespace hipdnn_backend
@@ -133,6 +135,26 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     return policyIds;
 }
 
+std::string EngineHeuristicDescriptor::resolveRankingMetric() const
+{
+    // RFC 0019 §11.4: the same precedence as the policy order — environment, then the
+    // descriptor attribute, then the default — so an operator can re-rank a deployed
+    // application by another metric without rebuilding it.
+    const std::string envStr = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEUR_RANKING_METRIC");
+    if(!envStr.empty())
+    {
+        // The attribute path refuses an unknown name at set; the environment has no set,
+        // so refuse it here rather than rank by a metric with no direction.
+        THROW_IF_NULL(hipdnn_data_sdk::utilities::findRankingMetric(envStr),
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "HIPDNN_HEUR_RANKING_METRIC names unregistered ranking metric '" + envStr
+                          + "'");
+        HIPDNN_BACKEND_LOG_INFO("Using environment variable ranking metric '{}'", envStr);
+        return envStr;
+    }
+    return std::string(heuristics::resolveRankingMetric(_rankingMetric).name);
+}
+
 void EngineHeuristicDescriptor::syncPolicySlots(const std::vector<int64_t>& orderedPolicyIds)
 {
     // Ensure one SelectionHeuristic per policy slot.
@@ -212,6 +234,8 @@ void EngineHeuristicDescriptor::finalize()
     auto engineRm = handle->getPluginResourceManager();
     auto heurRm = handle->getHeuristicPluginResourceManager();
 
+    _effectiveRankingMetric = resolveRankingMetric();
+
     // Get candidate engine IDs from engine plugins
     auto candidates = engineRm->getApplicableEngineIds(_graph.get(), _findFirst);
 
@@ -241,10 +265,13 @@ void EngineHeuristicDescriptor::finalize()
 
     // Get serialized graph from GraphDescriptor
     const hipdnnPluginConstData_t serializedGraph = _graph->getSerializedGraph();
+    // Every prediction a policy sees is asked in the effective metric; the resource manager
+    // turns an answer in any other metric into INVALID (RFC 0019 §11.4).
     const heuristics::SelectionHeuristic::PredictionProvider predict
         = [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
               hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
               config.engine_id = engineId;
+              config.ranking_metric = _effectiveRankingMetric;
               flatbuffers::FlatBufferBuilder builder;
               builder.Finish(
                   hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
@@ -346,7 +373,7 @@ void EngineHeuristicDescriptor::finalize()
             selection->setSerializedGraph(&serializedGraph);
 
             // Call finalize on this policy
-            if(!selection->finalize(predict))
+            if(!selection->finalize(predict, _effectiveRankingMetric))
             {
                 // Policy declined or not applicable - continue to next policy
                 continue;
@@ -444,6 +471,16 @@ void EngineHeuristicDescriptor::getAttribute(hipdnnBackendAttributeName_t attrib
     case HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT:
         getPolicyOrder(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT:
+        // The effective metric resolved at finalize, not the attribute as set: a caller
+        // reading it back wants to know what the results were ranked by.
+        getString(_effectiveRankingMetric,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "EngineHeuristicDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -474,6 +511,9 @@ void EngineHeuristicDescriptor::setAttribute(hipdnnBackendAttributeName_t attrib
         break;
     case HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT:
         setPolicyOrder(attributeType, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT:
+        setRankingMetric(attributeType, elementCount, arrayOfElements);
         break;
     default:
         throw HipdnnException(
@@ -614,6 +654,11 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
                 "descriptor is null.");
 
             auto engine = std::make_shared<EngineDescriptor>();
+            // A result engine's own prediction answers in the metric it was ranked by.
+            engine->setAttribute(HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT,
+                                 HIPDNN_TYPE_CHAR,
+                                 static_cast<int64_t>(_effectiveRankingMetric.size()),
+                                 _effectiveRankingMetric.data());
 
             const auto* resultConfig
                 = i < _engineConfigs.size() ? _engineConfigs[i].get() : nullptr;
@@ -644,6 +689,14 @@ void EngineHeuristicDescriptor::getEngineConfigs(hipdnnBackendAttributeType_t at
             {
                 config->setEngineConfig(*resultConfig, true);
             }
+            // RFC 0019 §11.4: the metric travels with the chosen configuration to plan
+            // build, so an engine that picks its own kernel ranks its catalog by the metric
+            // the engines were ranked by. Stamped on every result, with or without a
+            // policy-supplied configuration, overriding whatever metric a plugin wrote.
+            config->setAttribute(HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                                 HIPDNN_TYPE_CHAR,
+                                 static_cast<int64_t>(_effectiveRankingMetric.size()),
+                                 _effectiveRankingMetric.data());
         }
 
         *elementCount = std::min(requestedElementCount, static_cast<int64_t>(_engineIds.size()));
@@ -789,6 +842,21 @@ void EngineHeuristicDescriptor::getPolicyOrder(hipdnnBackendAttributeType_t attr
     *elementCount = static_cast<int64_t>(count);
 }
 
+void EngineHeuristicDescriptor::setRankingMetric(hipdnnBackendAttributeType_t attributeType,
+                                                 int64_t elementCount,
+                                                 const void* arrayOfElements)
+{
+    std::string metric;
+    setString(metric,
+              attributeType,
+              elementCount,
+              arrayOfElements,
+              "EngineHeuristicDescriptor failed to set ranking metric");
+    // Refused here, where the request is made, not discovered while sorting (RFC 0019 §4.4).
+    std::ignore = heuristics::resolveRankingMetric(metric);
+    _rankingMetric = std::move(metric);
+}
+
 std::string EngineHeuristicDescriptor::toString() const
 {
     std::string str = "EngineHeuristicDescriptor: {heuristicMode=";
@@ -807,6 +875,10 @@ std::string EngineHeuristicDescriptor::toString() const
             str += hipdnn_data_sdk::utilities::formatEngineIdHex(_policyOrder[i]);
         }
         str += ']';
+    }
+    if(!_rankingMetric.empty())
+    {
+        str += ", rankingMetric=" + _rankingMetric;
     }
     str += '}';
     return str;

@@ -268,7 +268,7 @@ TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability
     model.featuresSignature = {"$kernel.block_size"};
     model.score = {"tflops", true, "identity"};
     model.engineName = descriptor.name;
-    model.role = "predict_engine_tflops";
+    model.role = "predict_engine";
     model.arch = "default";
     model.trainedAgainstJson
         = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
@@ -277,7 +277,7 @@ TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability
     const StubEngine engine(std::move(descriptor),
                             makeStubStateManager(),
                             resolver,
-                            {{"default", model}},
+                            {{"tflops", {{"default", model}}}},
                             {},
                             "selector-test");
     StubHandle handle;
@@ -290,7 +290,55 @@ TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability
     const auto evaluated
         = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
     EXPECT_EQ(evaluated.status, PredictionStatus::INVALID);
+    EXPECT_EQ(evaluated.metric, "tflops") << "a config naming no metric asks in the default";
     EXPECT_TRUE(engine.isApplicable(handle, graph));
+}
+
+/// An engine config as the backend stamps one: no knobs, only the ranking metric.
+flatbuffers::FlatBufferBuilder configWithMetric(const std::string& metric)
+{
+    hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+    config.ranking_metric = metric;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
+    return builder;
+}
+
+/// RFC 0019 §4.4: a metric the registry does not know has no direction to rank by, so it is
+/// the caller's error -- refused where the request is made -- rather than an engine with no
+/// estimate. Answering UNAVAILABLE would let a typo read as "no engine serves this".
+TEST(TestIngestorGenericEngine, AnUnregisteredRankingMetricIsABadParameter)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x69));
+    const auto buffer = configWithMetric("latency");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
+        buffer.GetBufferPointer(), buffer.GetSize());
+
+    const auto expectBadParam = [](const auto& call) {
+        try
+        {
+            call();
+            ADD_FAILURE() << "an unregistered metric was accepted";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+        }
+    };
+    for(const auto kind : {HIPDNN_ENGINE_PREDICTION_ENGINE, HIPDNN_ENGINE_PREDICTION_CONFIGURATION})
+    {
+        expectBadParam([&] { engine.getPrediction(handle, graph, config, kind, true); });
+    }
+    // Plan build ranks the catalog by the same field, so it refuses the same way.
+    StubContext context;
+    expectBadParam([&] { engine.initializeExecutionContext(handle, graph, config, context); });
 }
 
 enum class ConfigurationCatalog
@@ -358,7 +406,8 @@ TEST_P(TestIngestorConfigurationPrediction, ReturnsOnlyUniquelyAddressableConfig
     }
     ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE);
     const auto expectedBlockSize = GetParam() == ConfigurationCatalog::SINGLETON ? 64 : 128;
-    EXPECT_DOUBLE_EQ(prediction.tflops, expectedBlockSize);
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_DOUBLE_EQ(prediction.value, expectedBlockSize);
     ASSERT_NE(prediction.engine_config, nullptr);
     flatbuffers::FlatBufferBuilder serialized;
     serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
@@ -373,6 +422,18 @@ TEST_P(TestIngestorConfigurationPrediction, ReturnsOnlyUniquelyAddressableConfig
     ASSERT_EQ(candidates->candidates()->size(), 1U);
     EXPECT_EQ(candidates->candidates()->Get(0)->id()->str(),
               toString(testId(GetParam() == ConfigurationCatalog::SINGLETON ? 0x64 : 0x65)));
+
+    // The only calibrated ranker estimates tflops. Asked in `time`, L2 has no ranker of that
+    // metric and says so in that metric -- it never reports the tflops number as a time, even
+    // though the tflops ranker would still pick the kernel at plan build (RFC 0019 §11.4).
+    const auto timeBuffer = configWithMetric("time");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper timeConfig(
+        timeBuffer.GetBufferPointer(), timeBuffer.GetSize());
+    const auto inTime = engine.getPrediction(
+        handle, graph, timeConfig, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(inTime.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(inTime.metric, "time");
+    EXPECT_EQ(inTime.engine_config, nullptr);
 }
 
 INSTANTIATE_TEST_SUITE_P(KnobTuples,

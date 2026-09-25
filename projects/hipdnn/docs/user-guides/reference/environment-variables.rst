@@ -147,6 +147,34 @@ Both are read once, at the calling module's first backend call.
   That first call caches the outcome, failure included, and closes the setter before it starts searching.
   After a failed load, ``setBackendLibraryPath_ext()`` returns ``false`` and stores nothing, so trying a different directory requires a new process.
 
+.. _engine-selection-variables:
+
+Engine selection
+================
+
+``HIPDNN_HEUR_RANKING_METRIC``
+------------------------------
+
+Selects the ranking metric the prediction-based engine selection policies
+(``HeuristicMode::A`` and ``HeuristicMode::B``) order engines by, and that the chosen
+engine then picks its kernel by:
+
+- ``tflops``: calibrated throughput in TFLOPS; higher is better (default)
+- ``time``: predicted execution time in milliseconds; lower is better
+
+When set, it overrides the metric an application requested with
+``Graph::set_ranking_metric()`` (``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT``); when
+unset or empty, that request applies, and ``tflops`` when there is none. It is read
+each time an engine heuristic descriptor is finalized, and applies only to heuristic
+selection: a prediction or engine configuration that names its own metric is
+unaffected. A value that is not a registered metric fails heuristic finalization with
+``HIPDNN_STATUS_BAD_PARAM`` rather than falling back to another metric. An engine with
+no model for the selected metric is ranked after the engines that have one.
+
+.. code:: bash
+
+  export HIPDNN_HEUR_RANKING_METRIC=time
+
 Secure execution
 ================
 

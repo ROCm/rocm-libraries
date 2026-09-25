@@ -126,8 +126,7 @@ inline bool artifactHashMatches(const std::string& path, const std::string& expe
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if(!file)
     {
-        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: cannot open " << path
-                                                                  << " to verify its hash");
+        HIPDNN_SDK_LOG_ERROR("CustomLibraryAdapter: cannot open " << path << " to verify its hash");
         return false;
     }
     const auto size = file.tellg();
@@ -296,7 +295,7 @@ inline std::unique_ptr<CustomLibraryAdapter>
     // library verified afterwards has already executed whatever it wanted to. That
     // ordering is why this cannot be hoisted to the caller the way EnginePredictor used to
     // do it -- and why the same .so bound as `sort_kernel_catalog` went unverified while
-    // the `predict_engine_tflops` binding of it was checked.
+    // the `predict_engine` binding of it was checked.
     if(!expectedModelHash.empty() && !detail::artifactHashMatches(libraryPath, expectedModelHash))
     {
         return nullptr;

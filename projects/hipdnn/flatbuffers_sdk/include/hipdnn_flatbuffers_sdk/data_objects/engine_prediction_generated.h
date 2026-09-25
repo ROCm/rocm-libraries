@@ -93,12 +93,13 @@ struct EnginePredictionT : public ::flatbuffers::NativeTable {
   int64_t engine_id = 0;
   hipdnn_flatbuffers_sdk::data_objects::PredictionKind kind = hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE;
   hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE;
-  double tflops = 0.0;
+  double value = 0.0;
   std::string uhd_id{};
   std::string reason{};
   std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT> engine_config{};
   std::string binding_json{};
   std::string features_json{};
+  std::string metric{};
   EnginePredictionT() = default;
   EnginePredictionT(const EnginePredictionT &o);
   EnginePredictionT(EnginePredictionT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -112,12 +113,13 @@ struct EnginePrediction FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_ENGINE_ID = 4,
     VT_KIND = 6,
     VT_STATUS = 8,
-    VT_TFLOPS = 10,
+    VT_VALUE = 10,
     VT_UHD_ID = 12,
     VT_REASON = 14,
     VT_ENGINE_CONFIG = 16,
     VT_BINDING_JSON = 18,
-    VT_FEATURES_JSON = 20
+    VT_FEATURES_JSON = 20,
+    VT_METRIC = 22
   };
   int64_t engine_id() const {
     return GetField<int64_t>(VT_ENGINE_ID, 0);
@@ -137,11 +139,11 @@ struct EnginePrediction FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_status(hipdnn_flatbuffers_sdk::data_objects::PredictionStatus _status = static_cast<hipdnn_flatbuffers_sdk::data_objects::PredictionStatus>(0)) {
     return SetField<uint8_t>(VT_STATUS, static_cast<uint8_t>(_status), 0);
   }
-  double tflops() const {
-    return GetField<double>(VT_TFLOPS, 0.0);
+  double value() const {
+    return GetField<double>(VT_VALUE, 0.0);
   }
-  bool mutate_tflops(double _tflops = 0.0) {
-    return SetField<double>(VT_TFLOPS, _tflops, 0.0);
+  bool mutate_value(double _value = 0.0) {
+    return SetField<double>(VT_VALUE, _value, 0.0);
   }
   const ::flatbuffers::String *uhd_id() const {
     return GetPointer<const ::flatbuffers::String *>(VT_UHD_ID);
@@ -173,12 +175,18 @@ struct EnginePrediction FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   ::flatbuffers::String *mutable_features_json() {
     return GetPointer<::flatbuffers::String *>(VT_FEATURES_JSON);
   }
+  const ::flatbuffers::String *metric() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_METRIC);
+  }
+  ::flatbuffers::String *mutable_metric() {
+    return GetPointer<::flatbuffers::String *>(VT_METRIC);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_ENGINE_ID, 8) &&
            VerifyField<uint8_t>(verifier, VT_KIND, 1) &&
            VerifyField<uint8_t>(verifier, VT_STATUS, 1) &&
-           VerifyField<double>(verifier, VT_TFLOPS, 8) &&
+           VerifyField<double>(verifier, VT_VALUE, 8) &&
            VerifyOffset(verifier, VT_UHD_ID) &&
            verifier.VerifyString(uhd_id()) &&
            VerifyOffset(verifier, VT_REASON) &&
@@ -189,6 +197,8 @@ struct EnginePrediction FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyString(binding_json()) &&
            VerifyOffset(verifier, VT_FEATURES_JSON) &&
            verifier.VerifyString(features_json()) &&
+           VerifyOffset(verifier, VT_METRIC) &&
+           verifier.VerifyString(metric()) &&
            verifier.EndTable();
   }
   EnginePredictionT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -209,8 +219,8 @@ struct EnginePredictionBuilder {
   void add_status(hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status) {
     fbb_.AddElement<uint8_t>(EnginePrediction::VT_STATUS, static_cast<uint8_t>(status), 0);
   }
-  void add_tflops(double tflops) {
-    fbb_.AddElement<double>(EnginePrediction::VT_TFLOPS, tflops, 0.0);
+  void add_value(double value) {
+    fbb_.AddElement<double>(EnginePrediction::VT_VALUE, value, 0.0);
   }
   void add_uhd_id(::flatbuffers::Offset<::flatbuffers::String> uhd_id) {
     fbb_.AddOffset(EnginePrediction::VT_UHD_ID, uhd_id);
@@ -226,6 +236,9 @@ struct EnginePredictionBuilder {
   }
   void add_features_json(::flatbuffers::Offset<::flatbuffers::String> features_json) {
     fbb_.AddOffset(EnginePrediction::VT_FEATURES_JSON, features_json);
+  }
+  void add_metric(::flatbuffers::Offset<::flatbuffers::String> metric) {
+    fbb_.AddOffset(EnginePrediction::VT_METRIC, metric);
   }
   explicit EnginePredictionBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -243,15 +256,17 @@ inline ::flatbuffers::Offset<EnginePrediction> CreateEnginePrediction(
     int64_t engine_id = 0,
     hipdnn_flatbuffers_sdk::data_objects::PredictionKind kind = hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE,
     hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
-    double tflops = 0.0,
+    double value = 0.0,
     ::flatbuffers::Offset<::flatbuffers::String> uhd_id = 0,
     ::flatbuffers::Offset<::flatbuffers::String> reason = 0,
     ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineConfig> engine_config = 0,
     ::flatbuffers::Offset<::flatbuffers::String> binding_json = 0,
-    ::flatbuffers::Offset<::flatbuffers::String> features_json = 0) {
+    ::flatbuffers::Offset<::flatbuffers::String> features_json = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> metric = 0) {
   EnginePredictionBuilder builder_(_fbb);
-  builder_.add_tflops(tflops);
+  builder_.add_value(value);
   builder_.add_engine_id(engine_id);
+  builder_.add_metric(metric);
   builder_.add_features_json(features_json);
   builder_.add_binding_json(binding_json);
   builder_.add_engine_config(engine_config);
@@ -267,27 +282,30 @@ inline ::flatbuffers::Offset<EnginePrediction> CreateEnginePredictionDirect(
     int64_t engine_id = 0,
     hipdnn_flatbuffers_sdk::data_objects::PredictionKind kind = hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE,
     hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
-    double tflops = 0.0,
+    double value = 0.0,
     const char *uhd_id = nullptr,
     const char *reason = nullptr,
     ::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::EngineConfig> engine_config = 0,
     const char *binding_json = nullptr,
-    const char *features_json = nullptr) {
+    const char *features_json = nullptr,
+    const char *metric = nullptr) {
   auto uhd_id__ = uhd_id ? _fbb.CreateString(uhd_id) : 0;
   auto reason__ = reason ? _fbb.CreateString(reason) : 0;
   auto binding_json__ = binding_json ? _fbb.CreateString(binding_json) : 0;
   auto features_json__ = features_json ? _fbb.CreateString(features_json) : 0;
+  auto metric__ = metric ? _fbb.CreateString(metric) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateEnginePrediction(
       _fbb,
       engine_id,
       kind,
       status,
-      tflops,
+      value,
       uhd_id__,
       reason__,
       engine_config,
       binding_json__,
-      features_json__);
+      features_json__,
+      metric__);
 }
 
 ::flatbuffers::Offset<EnginePrediction> CreateEnginePrediction(::flatbuffers::FlatBufferBuilder &_fbb, const EnginePredictionT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -298,12 +316,13 @@ inline bool operator==(const EnginePredictionT &lhs, const EnginePredictionT &rh
       (lhs.engine_id == rhs.engine_id) &&
       (lhs.kind == rhs.kind) &&
       (lhs.status == rhs.status) &&
-      (lhs.tflops == rhs.tflops) &&
+      (lhs.value == rhs.value) &&
       (lhs.uhd_id == rhs.uhd_id) &&
       (lhs.reason == rhs.reason) &&
       ((lhs.engine_config == rhs.engine_config) || (lhs.engine_config && rhs.engine_config && *lhs.engine_config == *rhs.engine_config)) &&
       (lhs.binding_json == rhs.binding_json) &&
-      (lhs.features_json == rhs.features_json);
+      (lhs.features_json == rhs.features_json) &&
+      (lhs.metric == rhs.metric);
 }
 
 inline bool operator!=(const EnginePredictionT &lhs, const EnginePredictionT &rhs) {
@@ -315,24 +334,26 @@ inline EnginePredictionT::EnginePredictionT(const EnginePredictionT &o)
       : engine_id(o.engine_id),
         kind(o.kind),
         status(o.status),
-        tflops(o.tflops),
+        value(o.value),
         uhd_id(o.uhd_id),
         reason(o.reason),
         engine_config((o.engine_config) ? new hipdnn_flatbuffers_sdk::data_objects::EngineConfigT(*o.engine_config) : nullptr),
         binding_json(o.binding_json),
-        features_json(o.features_json) {
+        features_json(o.features_json),
+        metric(o.metric) {
 }
 
 inline EnginePredictionT &EnginePredictionT::operator=(EnginePredictionT o) FLATBUFFERS_NOEXCEPT {
   std::swap(engine_id, o.engine_id);
   std::swap(kind, o.kind);
   std::swap(status, o.status);
-  std::swap(tflops, o.tflops);
+  std::swap(value, o.value);
   std::swap(uhd_id, o.uhd_id);
   std::swap(reason, o.reason);
   std::swap(engine_config, o.engine_config);
   std::swap(binding_json, o.binding_json);
   std::swap(features_json, o.features_json);
+  std::swap(metric, o.metric);
   return *this;
 }
 
@@ -348,12 +369,13 @@ inline void EnginePrediction::UnPackTo(EnginePredictionT *_o, const ::flatbuffer
   { auto _e = engine_id(); _o->engine_id = _e; }
   { auto _e = kind(); _o->kind = _e; }
   { auto _e = status(); _o->status = _e; }
-  { auto _e = tflops(); _o->tflops = _e; }
+  { auto _e = value(); _o->value = _e; }
   { auto _e = uhd_id(); if (_e) _o->uhd_id = _e->str(); }
   { auto _e = reason(); if (_e) _o->reason = _e->str(); }
   { auto _e = engine_config(); if (_e) { if(_o->engine_config) { _e->UnPackTo(_o->engine_config.get(), _resolver); } else { _o->engine_config = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::EngineConfigT>(_e->UnPack(_resolver)); } } else if (_o->engine_config) { _o->engine_config.reset(); } }
   { auto _e = binding_json(); if (_e) _o->binding_json = _e->str(); }
   { auto _e = features_json(); if (_e) _o->features_json = _e->str(); }
+  { auto _e = metric(); if (_e) _o->metric = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<EnginePrediction> EnginePrediction::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EnginePredictionT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -367,23 +389,25 @@ inline ::flatbuffers::Offset<EnginePrediction> CreateEnginePrediction(::flatbuff
   auto _engine_id = _o->engine_id;
   auto _kind = _o->kind;
   auto _status = _o->status;
-  auto _tflops = _o->tflops;
+  auto _value = _o->value;
   auto _uhd_id = _o->uhd_id.empty() ? 0 : _fbb.CreateString(_o->uhd_id);
   auto _reason = _o->reason.empty() ? 0 : _fbb.CreateString(_o->reason);
   auto _engine_config = _o->engine_config ? CreateEngineConfig(_fbb, _o->engine_config.get(), _rehasher) : 0;
   auto _binding_json = _o->binding_json.empty() ? 0 : _fbb.CreateString(_o->binding_json);
   auto _features_json = _o->features_json.empty() ? 0 : _fbb.CreateString(_o->features_json);
+  auto _metric = _o->metric.empty() ? 0 : _fbb.CreateString(_o->metric);
   return hipdnn_flatbuffers_sdk::data_objects::CreateEnginePrediction(
       _fbb,
       _engine_id,
       _kind,
       _status,
-      _tflops,
+      _value,
       _uhd_id,
       _reason,
       _engine_config,
       _binding_json,
-      _features_json);
+      _features_json,
+      _metric);
 }
 
 inline const hipdnn_flatbuffers_sdk::data_objects::EnginePrediction *GetEnginePrediction(const void *buf) {

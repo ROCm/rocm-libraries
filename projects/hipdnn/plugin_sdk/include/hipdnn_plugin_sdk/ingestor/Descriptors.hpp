@@ -142,10 +142,14 @@ enum class UhdAdapter
     CUSTOM_LIBRARY, ///< An author-supplied `.so`, dlopened and called by symbol (§7.2).
 };
 
-/// Units and calibration of a UHD's score, for cross-engine comparison (RFC 0019 §11.3).
+/// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
+/// §4.4, §11.3).
 struct UhdScore
 {
-    std::string units; ///< e.g. "tflops", "ms".
+    /// A registered ranking metric (RankingMetrics.hpp), which fixes the units and the
+    /// direction; empty for a ranker that orders its catalog without predicting a comparable
+    /// number (a `native` comparator, a `static_order`).
+    std::string metric;
     bool calibrated = false; ///< True iff comparable across engines.
     std::string transform; ///< Applied to raw model output: "identity", "log1p".
 };
@@ -263,23 +267,28 @@ struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// The engine's catalog-ranking UHD, resolved for the running architecture.
+    /// The engine's default catalog ranker for the `default` architecture key (see
+    /// DescriptorSet::heuristic), or nullopt when there is none.
     ///
     /// nullopt when the engine ships no UHD; selection then falls back to the
-    /// descriptor-declared order. Must equal `DescriptorSet::heuristic`'s id when set.
-    /// Cached `default` entry of @ref sortKernelCatalog.
+    /// descriptor-declared order. Equals `DescriptorSet::heuristic`'s id when set. Filled by
+    /// resolveDescriptorSets(), never at parse: which of a role list's UHDs is the default
+    /// ranker depends on the metric each declares, which only the loaded UHDs say.
     std::optional<DescriptorId> heuristicId;
 
     /// RFC 0019 §3.1: an engine names up to three role-scoped UHDs, each mapped by
     /// architecture, and each independently optional.
     ///
-    ///   sort_kernel_catalog        ranks the catalog and picks the kernel
-    ///   predict_engine_tflops      cheap f(graph) -> expected perf, for engine selection
+    ///   sort_kernel_catalog        ranks the catalog and picks the kernel, one per metric
+    ///   predict_engine             cheap f(graph) -> expected metric value, one per metric
     ///   predict_applicable_kernels generates the candidate set (future, JIT case)
     ///
-    /// Keyed by `gcnArchName`, with an optional `default` fallback.
-    std::map<std::string, DescriptorId> sortKernelCatalog;
-    std::map<std::string, DescriptorId> predictEngineTflops;
+    /// Keyed by `gcnArchName`, with an optional `default` fallback. The two scoring roles
+    /// map each architecture to a list: the loader indexes it by the metric each UHD
+    /// declares in its own `score.metric`, since the metric is a fact about the model and
+    /// restating it here would be a second copy that could disagree.
+    std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
+    std::map<std::string, std::vector<DescriptorId>> predictEngine;
     std::map<std::string, DescriptorId> predictApplicableKernels;
     DescriptorId metadataSchemaId;
     std::vector<std::string> knobs;
@@ -532,28 +541,33 @@ struct DescriptorSet
 {
     EngineDescriptor engine;
     MetadataSchema schema;
-    /// The resolved UHD for the `default` architecture.
-    /// nullopt when this engine ships no ranking model; the generic engine then ranks on
-    /// `priority` then descriptor id. See makeKernelHeuristic().
+    /// The default ranker for the `default` architecture key (RFC 0019 §3.1): the
+    /// metric-less `sort_kernel_catalog` UHD if there is one, else the one for
+    /// `DEFAULT_RANKING_METRIC`. nullopt when neither exists; the generic engine then ranks
+    /// on `priority` then descriptor id. See makeKernelHeuristic().
     std::optional<HeuristicDescriptor> heuristic;
 
-    /// RFC 0019 §3.1: the engine's catalog-ranking UHD per architecture, keyed as the UED
-    /// wrote it, `default` included.
+    /// RFC 0019 §3.1: the engine's catalog-ranking UHDs, by the metric each declares (`""`
+    /// for the metric-less ranker) and then by architecture, keyed as the UED wrote it,
+    /// `default` included.
     ///
     /// Resolution cannot happen at load: descriptor discovery is a process-wide memoized
     /// static that runs before any device exists. §8.3's "exact gcnArchName, then default"
     /// therefore happens at first rank(), where the device is known -- which is also what
-    /// §9.2 asks for, load-on-demand with a per-engine cache.
-    std::map<std::string, HeuristicDescriptor> heuristicsByArch;
-    /// Resolved cheap graph/device models; never consumed by catalog ranking.
-    std::map<std::string, HeuristicDescriptor> enginePredictionsByArch;
-    std::set<std::string> unavailableEnginePredictionArches;
+    /// §9.2 asks for, load-on-demand with a per-engine cache. The fallback is per metric:
+    /// (gfx942, time) falls back to (default, time), never to another metric.
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> heuristicsByMetric;
+    /// Resolved cheap graph/device models by metric, then architecture; never consumed by
+    /// catalog ranking. Every `predict_engine` UHD declares a metric, so there is no `""`.
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> enginePredictionsByMetric;
     std::vector<MatchDescriptor> matchers;
     std::vector<DispatchDescriptor> dispatches;
     std::vector<KernelDescriptorPack> packs;
-    /// Explicitly named models that could not be used. An exact-arch failure must
-    /// not silently select another architecture's default model.
-    std::set<std::string> unavailableHeuristicArches;
+    /// Explicitly named models that could not be used, by metric (`""` for the metric-less
+    /// ranker) and architecture key. An exact-arch failure must not silently select another
+    /// architecture's model for the same metric.
+    std::map<std::string, std::set<std::string>> unavailableHeuristicArches;
+    std::map<std::string, std::set<std::string>> unavailableEnginePredictionArches;
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

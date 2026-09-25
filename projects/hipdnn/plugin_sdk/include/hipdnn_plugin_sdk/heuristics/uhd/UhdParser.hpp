@@ -11,6 +11,7 @@
 #include <set>
 #include <string_view>
 
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
@@ -349,20 +350,29 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     if(root.contains("score"))
     {
         const auto& score = root.at("score");
-        keys(score, {"units", "calibrated", "transform"}, where + " score");
-        if(score.contains("units"))
+        keys(score, {"metric", "calibrated", "transform"}, where + " score");
+        if(score.contains("metric"))
         {
-            result.scoreUnits = text(score, "units", where);
+            result.scoreMetric = text(score, "metric", where);
+            // RFC 0019 §4.4: the registry is closed and owned by hipDNN, because the backend
+            // orders engines by these numbers and must know each metric's units and direction
+            // rather than trust the model that produced them. A name it does not know has
+            // neither, so the document is refused here rather than discovered while sorting.
+            if(hipdnn_data_sdk::utilities::findRankingMetric(result.scoreMetric) == nullptr)
+            {
+                fail("UHD score.metric '" + result.scoreMetric
+                     + "' is not a registered ranking metric in " + where);
+            }
         }
         if(score.contains("transform"))
         {
             result.scoreTransform = text(score, "transform", where);
             // RFC 0019 §4 and §11.3: `score.transform` exists so a consumer can invert it and
-            // recover `score.units`, which is what makes the number comparable. The vocabulary
-            // is therefore closed, and this is where it closes -- an unsupported name reaching
-            // applyInverse falls through its identity branch and reports a transformed number
-            // as if it were in the declared units: still positive, still ordered, and wrong by
-            // whatever the transform was.
+            // recover the metric's registered units, which is what makes the number comparable.
+            // The vocabulary is therefore closed, and this is where it closes -- an unsupported
+            // name reaching applyInverse falls through its identity branch and reports a
+            // transformed number as if it were in the metric's units: still positive, still
+            // ordered, and wrong by whatever the transform was.
             if(!score_transform::isSupported(result.scoreTransform))
             {
                 fail("UHD score.transform must be one of "
@@ -378,9 +388,23 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
             result.scoreCalibrated = score.at("calibrated").get<bool>();
         }
     }
-    if(result.scoreCalibrated && result.objective != "max")
+    // A calibrated score is a claim that the number is comparable across engines, and a
+    // number is comparable only in a named quantity (RFC 0019 §4.4).
+    if(result.scoreCalibrated && result.scoreMetric.empty())
     {
-        fail("calibrated UHD score requires objective max in " + where);
+        fail("calibrated UHD score requires score.metric in " + where);
+    }
+    // The metric fixes the direction; `objective` only restates it, so the two must agree
+    // or the model ranks one way while engine selection compares the other.
+    if(!result.scoreMetric.empty())
+    {
+        const auto expected = std::string(hipdnn_data_sdk::utilities::objectiveOf(
+            *hipdnn_data_sdk::utilities::findRankingMetric(result.scoreMetric)));
+        if(result.objective != expected)
+        {
+            fail("UHD score.metric '" + result.scoreMetric + "' requires objective " + expected
+                 + " in " + where);
+        }
     }
     if(root.contains("trained_against"))
     {

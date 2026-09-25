@@ -9,6 +9,8 @@
 #include <atomic>
 #include <flatbuffers/detached_buffer.h>
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace hipdnn_backend
 {
@@ -39,6 +41,9 @@ private:
     int64_t _candidateOffset = 0;
     int64_t _candidateLimit = MAX_CANDIDATE_LIMIT;
     bool _predictionEvaluate = true;
+    /// Metric the engine-kind prediction is asked in (empty = default). Frozen at finalize
+    /// with the other inputs, so the one cached prediction below is always in this metric.
+    std::string _predictionMetric;
     std::vector<std::shared_ptr<const KnobSettingDescriptor>> _candidateScope;
 
     /// Computed on first read and owned by this descriptor, each behind its own flag so
@@ -96,7 +101,7 @@ private:
                        int64_t* elementCount,
                        void* arrayOfElements) const;
 
-    /// Packs the engine-kind prediction once.
+    /// Packs the engine-kind prediction in _predictionMetric once.
     const flatbuffers::DetachedBuffer& ensurePrediction() const;
 
     void getPrediction(hipdnnBackendAttributeType_t attributeType,
@@ -110,6 +115,10 @@ private:
 
     void setInspectionScalar(hipdnnBackendAttributeName_t attributeName,
                              hipdnnBackendAttributeType_t attributeType,
+                             int64_t elementCount,
+                             const void* arrayOfElements);
+
+    void setPredictionMetric(hipdnnBackendAttributeType_t attributeType,
                              int64_t elementCount,
                              const void* arrayOfElements);
 

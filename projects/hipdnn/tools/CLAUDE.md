@@ -13,14 +13,21 @@ from where you stood.
 | role | question it answers | who has one |
 |---|---|---|
 | `sort_kernel_catalog` (L2) | which of MY candidate kernels is fastest for this graph | an engine that enumerates a catalog |
-| `predict_engine_tflops` (L1) | how fast will I run this graph, in TFLOPS | every engine, including ones with no catalog |
+| `predict_engine` (L1) | how fast will I run this graph, in the requested metric | every engine, including ones with no catalog |
 
 **Always L2 first, then L1, in that order and ideally in one job.** An immediate run
 executes whatever the installed catalog ranker picked, so L1's labels describe the selector
 that ships. Training L1 against an uninstalled L2 measures a selector nobody will run.
 
-L1 is the only score compared *across* engines. That is why it is calibrated TFLOPS, why a
+L1 is the only score compared *across* engines. That is why it is calibrated, why a
 stale one is refused rather than de-rated, and why its errors matter more than L2's.
+
+Both roles are trained **per ranking metric** (RFC 0019 §4.4): `tflops` (the default; FLOPs
+over `avgTimeMs`, higher wins) and `time` (`avgTimeMs` itself, lower wins). Pass
+`--metric tflops time` to `uhd_gen generate` to emit one UHD per metric from one catalog
+sweep; promotion adds each to the UED's arch list and replaces only the entry of the same
+metric. An L1 `time` model is measured with the engine choosing its kernel under `time`, so
+L1 collects once per metric.
 
 ## Step 0 — find out what the engines can actually serve
 
@@ -117,7 +124,7 @@ Every one of these was hit on a real run and cost between 20 minutes and two hou
 | job builds an unexpected commit | compute sites resolve `github.com` to mirrors that lag the login node | `git bundle create delta.bundle <base>..HEAD`, stage it, pass `UHD_BUNDLE=/exchange/delta.bundle` |
 | `Repository lacks these prerequisite commits` | a bundle applies relative to a base, and a `--depth 1` clone has no ancestors | clone `--depth 200` (all scripts here do) |
 | `held-out corpus has no evaluable candidate ranking` | the eval slice happened to land on single-candidate problems, though the corpus as a whole ranks | collect more contested problems, or give the engine a knob its `kernel_match` does NOT pin; see the flyDSL catalog below |
-| `deterministic catalog: all N problem(s) … had exactly one candidate` | the matcher pins every distinguishing field, so kernel identity is a total function of the problem and `scoreKernel` is inert | not a corpus defect and no knob will fix it at this catalog: train `--role predict_engine_tflops`. The collected stage is preserved and is exactly the labels L1 needs |
+| `deterministic catalog: all N problem(s) … had exactly one candidate` | the matcher pins every distinguishing field, so kernel identity is a total function of the problem and `scoreKernel` is inert | not a corpus defect and no knob will fix it at this catalog: train `--role predict_engine`. The collected stage is preserved and is exactly the labels L1 needs |
 | `NOTE: <pack> contributed no geometry` during Step 1 | either the pack is deterministic, or `--min-candidates` is set above its densest geometry | the note says which, and what to set the gate to when it is the second |
 | `Ambiguous enrolled knob tuple for candidates X and Y` | two candidates differ only in something not declared as an int KMD field | declare the distinguishing knob; `generate.py` exposes every int field automatically |
 | `incoming UHD id … is already installed; refusing duplicate identity` | an opaque engine's model is bound BY its UUID, and the tree already ships one | intended: replace the shipped document, do not promote a second copy |
@@ -169,9 +176,9 @@ Two rules follow:
    equality and a mismatch is refused. If you find yourself regenerating models after an
    unrelated commit, the revision string has regained a git hash — fix the string, not the
    models.
-3. **Never publish a model that scored nothing.** Non-positive predicted TFLOPS are
-   reported as declines (`metrics.unscored_rows`) because the runtime treats them as
-   INVALID and falls back to static ordering; a model where *every* row declines must fail.
+3. **Never publish a model that scored nothing.** Predictions the metric cannot take
+   (negative TFLOPS, non-positive time) are reported as declines (`metrics.unscored_rows`)
+   because the runtime treats them as INVALID; a model where *every* row declines must fail.
 4. **No measured performance numbers in the repository.** Models and methodology, yes;
    CSVs, eval reports and TFLOPS figures in committed docs, no.
 5. **A corpus must not decide the contest.** Anything pinned in the graph document that an
@@ -188,9 +195,10 @@ python3 -m uhd_gen promote --model-dir <out>/l2/model \
     --engine hipkernel:Gfx950AttentionDense --role sort_kernel_catalog --arch gfx950 --dry-run
 ```
 
-Drop `--dry-run` once the plan reads correctly. For an engine with no UED, the same command
-writes the document under `heuristics/<engine>/<role>/<arch>/`; that path must also be
-staged by CMake or the loader never sees it (see `HIPDNN_ASM_SDPA_DESCRIPTOR_FILES`).
+Drop `--dry-run` once the plan reads correctly. The document lands under
+`heuristics/<ued-id or engine>/<role>/<arch>/<metric>/` (a metric-less ranker directly under
+`<arch>/`). For an engine with no UED that path must also be staged by CMake or the loader
+never sees it (see `HIPDNN_ASM_SDPA_DESCRIPTOR_FILES`).
 
 Then re-run `engine_matrix.sbatch` against the committed branch: the models are proven when
-the engines report `available` with TFLOPS instead of `unavailable`.
+the engines report `available` with a value in the requested metric instead of `unavailable`.

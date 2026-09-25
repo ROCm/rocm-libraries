@@ -6,6 +6,7 @@
 #include <exception>
 #include <map>
 #include <string>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
@@ -13,6 +14,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/HipEngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 
 #include "version.h"
 
@@ -63,16 +65,17 @@ constexpr const char* SELECTOR_REVISION
 /// Resolves AsmSdpaEngine::L1_MODEL_IDS through the descriptor catalog the provider has
 /// already parsed (RFC 0019 Open Question 7, RESOLVED). Never throws: with no descriptor
 /// tree installed the catalog is empty, nothing resolves, and the engine reports
-/// UNAVAILABLE exactly as it did before any model existed.
+/// UNAVAILABLE exactly as it did before any model existed. Each resolved model binds
+/// under the metric its own `score.metric` declares; the table names ids, not metrics.
 void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
-    std::map<std::string, ingestor::DescriptorId> declared;
+    std::map<std::string, std::vector<ingestor::DescriptorId>> declared;
     for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
     {
         try
         {
-            declared.emplace(arch, hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+            declared[std::string(arch)].push_back(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
         }
         catch(const std::exception& error)
         {
@@ -90,13 +93,19 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
         AsmSdpaEngine::engineName(),
         SELECTOR_REVISION,
         declared);
-    for(const auto& [arch, model] : resolved.byArch)
+    for(const auto& [metric, byArch] : resolved.byMetric)
     {
-        binding.bind(arch, ingestor::UhdKernelHeuristic::configFrom(model));
+        for(const auto& [arch, model] : byArch)
+        {
+            binding.bind(metric, arch, ingestor::UhdKernelHeuristic::configFrom(model));
+        }
     }
-    for(const auto& [arch, refusal] : resolved.refused)
+    for(const auto& [metric, byArch] : resolved.refused)
     {
-        binding.markUnusable(arch, refusal.status, refusal.reason);
+        for(const auto& [arch, refusal] : byArch)
+        {
+            binding.markUnusable(metric, arch, refusal.status, refusal.reason);
+        }
     }
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -174,6 +183,9 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     result.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION ? PredictionKind::CONFIGURATION
                                                                  : PredictionKind::ENGINE;
     result.status = PredictionStatus::UNAVAILABLE;
+    // Outside the try below: an unregistered metric is a bad request (BAD_PARAM), not a
+    // missing answer, and must not be reported as one.
+    result.metric = std::string(hipdnn_plugin_sdk::heuristics::rankingMetric(config).name);
     if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
     {
         // RFC 0019 §11.2's "A only (opaque)" row: this engine exposes no catalog and no
@@ -185,8 +197,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     {
         const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
-        return _l1Models.predict(
-            id(), engineName(), SELECTOR_REVISION, device.gcnArchName, features, evaluate);
+        return _l1Models.predict(id(),
+                                 engineName(),
+                                 SELECTOR_REVISION,
+                                 result.metric,
+                                 device.gcnArchName,
+                                 features,
+                                 evaluate);
     }
     catch(const std::exception& error)
     {

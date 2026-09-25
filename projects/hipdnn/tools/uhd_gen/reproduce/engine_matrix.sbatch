@@ -136,7 +136,7 @@ for graph in graphs:
                 except json.JSONDecodeError:
                     continue
                 row.update({k: doc.get(k) for k in
-                            ("status", "prediction_kind", "tflops", "model", "reason", "is_valid")})
+                            ("status", "prediction_kind", "metric", "value", "model", "reason", "is_valid")})
                 break
         rows.append(row)
 (out / "l1-matrix.json").write_text(json.dumps(rows, indent=1))

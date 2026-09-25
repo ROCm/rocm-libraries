@@ -51,12 +51,13 @@
  * typed registration (`discoverDescriptorSets()` -> `registerNativeIngestorSymbols()` ->
  * `loadValidatedDescriptorSets<Handle>()`) and census the loaded bundle.
  *
- * Every UHD a UED binds through a role map (`sort_kernel_catalog`,
- * `predict_engine_tflops`, `predict_applicable_kernels`), for every architecture key, is
- * additionally loaded through the real `UhdKernelHeuristic::tryCreate`: its features must
- * read only declared KMD fields, match their `features_hash`, and -- given
- * `--feature-samples` for dynamic bindings -- extract for every candidate kernel. No
- * native scorer is ever executed.
+ * Every UHD a UED binds through a role map (`sort_kernel_catalog`, `predict_engine`,
+ * `predict_applicable_kernels`), for every architecture key and -- in the two scoring
+ * roles, which name one model per ranking metric -- every listed model, is additionally
+ * loaded through the real `UhdKernelHeuristic::tryCreate`: its features must read only
+ * declared KMD fields, match their `features_hash`, and -- given `--feature-samples` for
+ * dynamic bindings -- extract for every candidate kernel. No native scorer is ever
+ * executed.
  */
 
 namespace
@@ -213,6 +214,31 @@ const char* severityName(hipdnnSeverity_t severity)
     return "UNKNOWN";
 }
 
+/// Calls @p visit(arch, id) for every model a single-valued role map names.
+template <typename Visit>
+void forEachRoleModel(const std::map<std::string, DescriptorId>& references, Visit&& visit)
+{
+    for(const auto& [arch, id] : references)
+    {
+        visit(arch, id);
+    }
+}
+
+/// Calls @p visit(arch, id) for every model a scoring role names: one per metric per
+/// architecture (RFC 0019 §3.1), so every entry of every list.
+template <typename Visit>
+void forEachRoleModel(const std::map<std::string, std::vector<DescriptorId>>& references,
+                      Visit&& visit)
+{
+    for(const auto& [arch, ids] : references)
+    {
+        for(const auto& id : ids)
+        {
+            visit(arch, id);
+        }
+    }
+}
+
 /// Every native symbol name one DescriptorSet references, across all its hook kinds:
 /// `engine.graphMatchNativeSymbol`, every `matchers[].matchSymbol` (dispatched by
 /// `matcher.scope` onto the graph- or kernel-scoped registry), every
@@ -227,8 +253,8 @@ struct HarvestedSymbols
     std::set<std::string> dispatch;
     /// ScoreRegistry comparators: a ranking model with no feature signature.
     std::set<std::string> score;
-    /// uhd::NativeScorerRegistry scorers: every `predict_engine_tflops` model, and any
-    /// ranking model that declares a feature signature (`detail::usableModel`).
+    /// uhd::NativeScorerRegistry scorers: every `predict_engine` model, and any ranking
+    /// model that declares a feature signature (`detail::usableModel`).
     std::set<std::string> featureScore;
 };
 
@@ -257,26 +283,24 @@ HarvestedSymbols harvestSymbols(const std::vector<DescriptorSet>& sets,
         {
             harvested.dispatch.insert(dispatch.dispatchSymbol);
         }
-        // Every role and every architecture, not only the resolved `default` ranking
-        // model: a native model reachable only through a per-arch key, or through an L1
-        // role, would otherwise reach the loader unregistered and be disabled here while
-        // the real provider, which registers it, loads it fine.
-        const auto harvestRole
-            = [&](const std::map<std::string, DescriptorId>& references, bool uhdScorer) {
-                  for(const auto& [arch, id] : references)
-                  {
-                      const auto* model = detail::findDescriptor(catalog.heuristics, id);
-                      if(model == nullptr || model->adapter != UhdAdapter::NATIVE)
-                      {
-                          continue;
-                      }
-                      (uhdScorer || !model->featuresSignature.empty() ? harvested.featureScore
-                                                                      : harvested.score)
-                          .insert(model->nativeSymbol);
-                  }
-              };
+        // Every role, every architecture and every metric's model, not only the resolved
+        // `default` ranking model: a native model reachable only through a per-arch key, a
+        // second metric, or an L1 role would otherwise reach the loader unregistered and be
+        // disabled here while the real provider, which registers it, loads it fine.
+        const auto harvestRole = [&](const auto& references, bool uhdScorer) {
+            forEachRoleModel(references, [&](const std::string&, const DescriptorId& id) {
+                const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                if(model == nullptr || model->adapter != UhdAdapter::NATIVE)
+                {
+                    return;
+                }
+                (uhdScorer || !model->featuresSignature.empty() ? harvested.featureScore
+                                                                : harvested.score)
+                    .insert(model->nativeSymbol);
+            });
+        };
         harvestRole(set.engine.sortKernelCatalog, /*uhdScorer=*/false);
-        harvestRole(set.engine.predictEngineTflops, /*uhdScorer=*/true);
+        harvestRole(set.engine.predictEngine, /*uhdScorer=*/true);
         harvestRole(set.engine.predictApplicableKernels, /*uhdScorer=*/false);
     }
     return harvested;
@@ -377,112 +401,122 @@ nlohmann::json validateModels(const DescriptorCatalog& catalog,
             fields.insert(field.name);
         }
 
-        const auto checkRole = [&](const char* role,
-                                   const std::map<std::string, DescriptorId>& references) {
-            for(const auto& [arch, id] : references)
+        const auto checkModel = [&](const char* role,
+                                    const std::string& arch,
+                                    const DescriptorId& id) {
+            // `metric` is the ranking metric the model declares (null for a metric-less
+            // ranker, or when the model did not resolve): a scoring role names one model
+            // per metric, so (role, arch, metric) is what identifies a binding.
+            nlohmann::json check{{"engine", set.engine.name},
+                                 {"role", role},
+                                 {"arch", arch},
+                                 {"metric", nullptr},
+                                 {"model", toString(id)},
+                                 {"success", false}};
+            try
             {
-                nlohmann::json check{{"engine", set.engine.name},
-                                     {"role", role},
-                                     {"arch", arch},
-                                     {"model", toString(id)},
-                                     {"success", false}};
-                try
+                const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                if(model == nullptr)
                 {
-                    const auto* model = detail::findDescriptor(catalog.heuristics, id);
-                    if(model == nullptr)
-                    {
-                        throw std::invalid_argument("Missing or invalid referenced UHD");
-                    }
-                    const hipdnn_plugin_sdk::uhd::FeatureExtractor extractor(
-                        model->featuresSignature, model->categoricalEncoding);
-                    if(!extractor.validateAgainstKmdFields(fields))
-                    {
-                        throw std::invalid_argument("Feature references an undeclared KMD field");
-                    }
-                    if(!model->featuresSignature.empty()
-                       && extractor.getSignatureHash() != model->featuresHash)
-                    {
-                        throw std::invalid_argument("Feature contract hash mismatch");
-                    }
-                    // Force every artifact through the real loader, including non-default
-                    // architectures. No score function registered above is ever executed.
-                    const auto loaded = UhdKernelHeuristic::tryCreate(
-                        *model, set.engine.name, set.engine.knobs, fields);
-                    if(!loaded)
-                    {
-                        throw std::invalid_argument("Model load failed; see runtime diagnostics");
-                    }
-                    size_t evaluated = 0;
-                    if(!model->featuresSignature.empty())
-                    {
-                        std::vector<const nlohmann::json*> relevantSamples;
-                        for(const auto& sample : samples)
-                        {
-                            if(sample.at("engine") == set.engine.name
-                               && (arch == "default" || sample.at("arch") == arch))
-                            {
-                                relevantSamples.push_back(&sample);
-                            }
-                        }
-                        if(relevantSamples.empty())
-                        {
-                            relevantSamples.push_back(nullptr);
-                        }
-                        for(const auto* sample : relevantSamples)
-                        {
-                            hipdnn_plugin_sdk::uhd::FeatureExtractionContext context;
-                            if(sample != nullptr)
-                            {
-                                bindSample(context, sample->at("bindings"));
-                            }
-                            const auto target
-                                = sample == nullptr ? arch : sample->at("arch").get<std::string>();
-                            for(const auto& pack : set.packs)
-                            {
-                                if(target != "default" && !pack.arch.empty()
-                                   && std::find(pack.arch.begin(), pack.arch.end(), target)
-                                          == pack.arch.end())
-                                {
-                                    continue;
-                                }
-                                for(const auto& kernel : pack.kernels)
-                                {
-                                    KernelDefinition definition;
-                                    definition.kernelId = kernel.id;
-                                    definition.metadata = kernel.metadata;
-                                    context.clearKernelVars();
-                                    context.bindKernelVars(detail::kernelVarsFrom(definition));
-                                    // Missing dynamic values are errors, not zeros or made-up
-                                    // device facts. Supply a sample from real enumeration.
-                                    static_cast<void>(extractor.extract(context));
-                                    ++evaluated;
-                                }
-                            }
-                        }
-                        if(evaluated == 0)
-                        {
-                            throw std::invalid_argument(
-                                "No matching candidate to validate feature bindings");
-                        }
-                    }
-                    check["feature_rows_checked"] = evaluated;
-                    check["native_execution"] = "not_exercised";
-                    check["success"] = true;
+                    throw std::invalid_argument("Missing or invalid referenced UHD");
                 }
-                catch(const std::exception& error)
+                if(!model->score.metric.empty())
                 {
-                    check["error"] = error.what();
-                    HIPDNN_PLUGIN_LOG_ERROR("descriptor validator: engine='"
-                                            << set.engine.name << "' role=" << role << " arch='"
-                                            << arch << "' model=" << toString(id) << ": "
-                                            << error.what()
-                                            << "; dynamic bindings require --feature-samples");
+                    check["metric"] = model->score.metric;
                 }
-                checks.push_back(std::move(check));
+                const hipdnn_plugin_sdk::uhd::FeatureExtractor extractor(
+                    model->featuresSignature, model->categoricalEncoding);
+                if(!extractor.validateAgainstKmdFields(fields))
+                {
+                    throw std::invalid_argument("Feature references an undeclared KMD field");
+                }
+                if(!model->featuresSignature.empty()
+                   && extractor.getSignatureHash() != model->featuresHash)
+                {
+                    throw std::invalid_argument("Feature contract hash mismatch");
+                }
+                // Force every artifact through the real loader, including non-default
+                // architectures. No score function registered above is ever executed.
+                const auto loaded = UhdKernelHeuristic::tryCreate(
+                    *model, set.engine.name, set.engine.knobs, fields);
+                if(!loaded)
+                {
+                    throw std::invalid_argument("Model load failed; see runtime diagnostics");
+                }
+                size_t evaluated = 0;
+                if(!model->featuresSignature.empty())
+                {
+                    std::vector<const nlohmann::json*> relevantSamples;
+                    for(const auto& sample : samples)
+                    {
+                        if(sample.at("engine") == set.engine.name
+                           && (arch == "default" || sample.at("arch") == arch))
+                        {
+                            relevantSamples.push_back(&sample);
+                        }
+                    }
+                    if(relevantSamples.empty())
+                    {
+                        relevantSamples.push_back(nullptr);
+                    }
+                    for(const auto* sample : relevantSamples)
+                    {
+                        hipdnn_plugin_sdk::uhd::FeatureExtractionContext context;
+                        if(sample != nullptr)
+                        {
+                            bindSample(context, sample->at("bindings"));
+                        }
+                        const auto target
+                            = sample == nullptr ? arch : sample->at("arch").get<std::string>();
+                        for(const auto& pack : set.packs)
+                        {
+                            if(target != "default" && !pack.arch.empty()
+                               && std::find(pack.arch.begin(), pack.arch.end(), target)
+                                      == pack.arch.end())
+                            {
+                                continue;
+                            }
+                            for(const auto& kernel : pack.kernels)
+                            {
+                                KernelDefinition definition;
+                                definition.kernelId = kernel.id;
+                                definition.metadata = kernel.metadata;
+                                context.clearKernelVars();
+                                context.bindKernelVars(detail::kernelVarsFrom(definition));
+                                // Missing dynamic values are errors, not zeros or made-up
+                                // device facts. Supply a sample from real enumeration.
+                                static_cast<void>(extractor.extract(context));
+                                ++evaluated;
+                            }
+                        }
+                    }
+                    if(evaluated == 0)
+                    {
+                        throw std::invalid_argument(
+                            "No matching candidate to validate feature bindings");
+                    }
+                }
+                check["feature_rows_checked"] = evaluated;
+                check["native_execution"] = "not_exercised";
+                check["success"] = true;
             }
+            catch(const std::exception& error)
+            {
+                check["error"] = error.what();
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor validator: engine='"
+                                        << set.engine.name << "' role=" << role << " arch='" << arch
+                                        << "' model=" << toString(id) << ": " << error.what()
+                                        << "; dynamic bindings require --feature-samples");
+            }
+            checks.push_back(std::move(check));
+        };
+        const auto checkRole = [&](const char* role, const auto& references) {
+            forEachRoleModel(references, [&](const std::string& arch, const DescriptorId& id) {
+                checkModel(role, arch, id);
+            });
         };
         checkRole("sort_kernel_catalog", set.engine.sortKernelCatalog);
-        checkRole("predict_engine_tflops", set.engine.predictEngineTflops);
+        checkRole("predict_engine", set.engine.predictEngine);
         checkRole("predict_applicable_kernels", set.engine.predictApplicableKernels);
     }
     return checks;

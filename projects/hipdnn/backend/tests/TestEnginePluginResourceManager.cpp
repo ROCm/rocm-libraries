@@ -102,7 +102,8 @@ protected:
             });
         _prediction.engine_id = 100;
         _prediction.status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE;
-        _prediction.tflops = 10.0;
+        _prediction.value = 10.0;
+        _prediction.metric = "tflops";
         _prediction.uhd_id = "b29341f4-7a55-4b9b-b9a2-8cb3cac13368";
         _config.engine_id = 100;
     }
@@ -133,7 +134,7 @@ protected:
 TEST_F(TestEnginePredictionTransport, NonfiniteEstimateCannotRankAnEngine)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
-    _prediction.tflops = std::numeric_limits<double>::infinity();
+    _prediction.value = std::numeric_limits<double>::infinity();
     const auto result = query();
     EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
     EXPECT_EQ(result.engine_config, nullptr);
@@ -157,6 +158,72 @@ TEST_F(TestEnginePredictionTransport, RejectsConfigurationThatChangesWorkspaceCo
     const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
     EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
     EXPECT_EQ(result.engine_config, nullptr);
+}
+
+// RFC 0019 §11.4: the host checks that the answer is in the requested metric. An answer
+// in another one is a claim about a different quantity, invalid whatever its status, and
+// the rejection still names the metric that was asked for.
+TEST_F(TestEnginePredictionTransport, AnswerInAnotherMetricIsInvalid)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _prediction.metric = "time";
+    auto result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::INVALID);
+    EXPECT_EQ(result.metric, "tflops");
+
+    _prediction.status = fb::PredictionStatus::UNAVAILABLE;
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+    _prediction.metric.clear();
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+
+    _prediction.metric = "tflops";
+    result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(result.metric, "tflops");
+}
+
+// Validity of an AVAILABLE value is the requested metric's: zero is a legal (worst)
+// throughput but never a legal time.
+TEST_F(TestEnginePredictionTransport, AvailableValueIsValidatedByTheRequestedMetric)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _prediction.value = 0.0;
+    EXPECT_EQ(query().status, fb::PredictionStatus::AVAILABLE);
+
+    _config.ranking_metric = "time";
+    _prediction.metric = "time";
+    EXPECT_EQ(query().status, fb::PredictionStatus::INVALID);
+    _prediction.value = 2.5;
+    const auto result = query();
+    EXPECT_EQ(result.status, fb::PredictionStatus::AVAILABLE);
+    EXPECT_EQ(result.metric, "time");
+    EXPECT_DOUBLE_EQ(result.value, 2.5);
+}
+
+TEST_F(TestEnginePredictionTransport, UnregisteredRequestedMetricIsRefusedBeforeThePlugin)
+{
+    _config.ranking_metric = "flops";
+    EXPECT_CALL(*_plugin, getPrediction(_, _, _, _, _, _)).Times(0);
+    ASSERT_THROW_HIPDNN_STATUS(query(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// A configuration selected by metric M builds by M, so the returned configuration names
+// it; one the plugin says it selected by another metric is refused.
+TEST_F(TestEnginePredictionTransport, SelectedConfigurationCarriesTheRequestedMetric)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    _config.ranking_metric = "time";
+    _prediction.metric = "time";
+    _prediction.kind = fb::PredictionKind::CONFIGURATION;
+    _prediction.engine_config = std::make_unique<fb::EngineConfigT>();
+    _prediction.engine_config->engine_id = 100;
+    const auto result = query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+    ASSERT_EQ(result.status, fb::PredictionStatus::AVAILABLE);
+    ASSERT_NE(result.engine_config, nullptr);
+    EXPECT_EQ(result.engine_config->ranking_metric, "time");
+
+    _prediction.engine_config->ranking_metric = "tflops";
+    EXPECT_EQ(query(HIPDNN_ENGINE_PREDICTION_CONFIGURATION).status, fb::PredictionStatus::INVALID);
 }
 
 TEST(TestEngineDetailsWrapper, DestroysPluginDetailsWhenFlatbufferVerificationFails)

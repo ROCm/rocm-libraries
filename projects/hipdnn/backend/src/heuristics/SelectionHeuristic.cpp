@@ -176,7 +176,8 @@ bool SelectionHeuristic::finalize()
     return plugin->finalize(_descriptor);
 }
 
-bool SelectionHeuristic::finalize(const PredictionProvider& predict)
+bool SelectionHeuristic::finalize(const PredictionProvider& predict,
+                                  const std::string& rankingMetric)
 {
     THROW_IF_FALSE(
         _descriptor != nullptr, HIPDNN_STATUS_NOT_INITIALIZED, "Policy descriptor not initialized");
@@ -189,7 +190,7 @@ bool SelectionHeuristic::finalize(const PredictionProvider& predict)
         std::vector<flatbuffers::DetachedBuffer> buffers;
     } context{predict, _inputEngineIds, {}};
     const hipdnnHeuristicHostCallbacks_t host{
-        1,
+        2,
         sizeof(hipdnnHeuristicHostCallbacks_t),
         &context,
         [](void* opaque,
@@ -224,7 +225,8 @@ bool SelectionHeuristic::finalize(const PredictionProvider& predict)
             {
                 return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
             }
-        }};
+        },
+        rankingMetric.c_str()};
     return plugin->finalizeWithHost(_descriptor, &host);
 }
 

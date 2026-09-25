@@ -7,6 +7,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineOrdering.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -19,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -27,9 +29,14 @@ namespace hipdnn_backend::heuristics::prediction
 namespace
 {
 using namespace hipdnn_flatbuffers_sdk::data_objects;
+using hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
+using hipdnn_data_sdk::utilities::findRankingMetric;
+using hipdnn_data_sdk::utilities::isBetterMetricValue;
+using hipdnn_data_sdk::utilities::isValidMetricValue;
 using hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME;
 using hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME;
 using hipdnn_data_sdk::utilities::policyNameToId;
+using hipdnn_data_sdk::utilities::RankingMetric;
 
 thread_local char lastError[1024]{};
 
@@ -80,7 +87,7 @@ struct RankedEngine
 {
     int64_t id;
     bool available = false;
-    double tflops = 0;
+    double value = 0;
     flatbuffers::DetachedBuffer config;
 };
 
@@ -147,9 +154,25 @@ bool usableConfig(const EngineConfig* config, int64_t engineId)
     return true;
 }
 
+// The metric this finalize ranks by. A version 1 host predates metrics and meant TFLOPS;
+// a version 2 host names the metric, and a table too short to carry the field is read
+// the same way as version 1 rather than past its end. nullptr: a name no registry row
+// matches, which cannot be ranked because it has no direction.
+const RankingMetric* requestedMetric(const hipdnnHeuristicHostCallbacks_t& host)
+{
+    constexpr auto METRIC_END
+        = offsetof(hipdnnHeuristicHostCallbacks_t, ranking_metric) + sizeof(const char*);
+    if(host.version < 2 || host.struct_size < METRIC_END)
+    {
+        return findRankingMetric(DEFAULT_RANKING_METRIC);
+    }
+    return host.ranking_metric == nullptr ? nullptr : findRankingMetric(host.ranking_metric);
+}
+
 const EnginePrediction* query(const hipdnnHeuristicHostCallbacks_t& host,
                               int64_t engineId,
-                              hipdnnEnginePredictionKind_t kind)
+                              hipdnnEnginePredictionKind_t kind,
+                              const RankingMetric& metric)
 {
     hipdnnPluginConstData_t data{};
     if(host.get_prediction(host.context, engineId, kind, &data) != HIPDNN_PLUGIN_STATUS_SUCCESS
@@ -161,9 +184,12 @@ const EnginePrediction* query(const hipdnnHeuristicHostCallbacks_t& host,
     const auto expectedKind = kind == HIPDNN_ENGINE_PREDICTION_ENGINE
                                   ? PredictionKind::ENGINE
                                   : PredictionKind::CONFIGURATION;
+    // The host already refuses an answer in another metric; checking again costs nothing
+    // and keeps a value from being compared against numbers of a different quantity.
     if(prediction->engine_id() != engineId || prediction->kind() != expectedKind
-       || prediction->status() != PredictionStatus::AVAILABLE
-       || !std::isfinite(prediction->tflops()) || prediction->tflops() < 0)
+       || prediction->status() != PredictionStatus::AVAILABLE || prediction->metric() == nullptr
+       || prediction->metric()->string_view() != metric.name
+       || !isValidMetricValue(metric, prediction->value()))
     {
         return nullptr;
     }
@@ -173,6 +199,16 @@ const EnginePrediction* query(const hipdnnHeuristicHostCallbacks_t& host,
         return nullptr;
     }
     return prediction;
+}
+
+std::string joinIds(const std::vector<int64_t>& ids)
+{
+    std::string names;
+    for(const auto id : ids)
+    {
+        names += (names.empty() ? "" : ", ") + std::to_string(id);
+    }
+    return names;
 }
 } // namespace
 
@@ -406,15 +442,30 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         {
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
-        if(host->version != 1 || host->struct_size < sizeof(hipdnnHeuristicHostCallbacks_t)
+        if(host->version < 1
+           || host->struct_size < offsetof(hipdnnHeuristicHostCallbacks_t, get_prediction)
+                                      + sizeof(host->get_prediction)
            || host->get_prediction == nullptr)
         {
+            return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+        }
+        const auto* metric = requestedMetric(*host);
+        if(metric == nullptr)
+        {
+            std::snprintf(lastError,
+                          sizeof(lastError),
+                          "Host names unregistered ranking metric '%s'",
+                          host->ranking_metric == nullptr ? "(null)" : host->ranking_metric);
             return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
         }
         if(!desc.graphSet || !desc.session->devicePropertiesSet)
         {
             return HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED;
         }
+        // RFC 0019 §11.2: the quick policy (ModeA) ranks by L1 alone and never evaluates
+        // L2 — not even to fill in the winner's kernel, which plan build chooses by the
+        // same metric (RFC 0019 Open Question 21, option (b)). The thorough policy (ModeB)
+        // asks each engine for L2 first and falls back to L1 where L2 has no answer.
         desc.ranked.reserve(desc.engineIds.size());
         bool available = false;
         for(const auto id : desc.engineIds)
@@ -423,27 +474,28 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             const EnginePrediction* estimate = nullptr;
             if(desc.modeB)
             {
-                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_CONFIGURATION);
+                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, *metric);
             }
             if(estimate == nullptr)
             {
-                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_ENGINE);
+                estimate = query(*host, id, HIPDNN_ENGINE_PREDICTION_ENGINE, *metric);
             }
             EngineConfigT config;
             config.engine_id = id;
             if(estimate != nullptr)
             {
                 row.available = true;
-                row.tflops = estimate->tflops();
+                row.value = estimate->value();
                 available = true;
-                if(desc.modeB && estimate->kind() == PredictionKind::CONFIGURATION)
+                if(estimate->kind() == PredictionKind::CONFIGURATION)
                 {
+                    // L2 estimates retain the exact scored configuration and all its knobs.
                     estimate->engine_config()->UnPackTo(&config);
                 }
             }
-            // L1-only and unknown engines use their ordinary selector; only the quick
-            // policy's winner is refined below (RFC 0019 §11.2).
-            // L2 estimates retain the exact scored configuration and all its knobs.
+            // Engines without an L2 configuration keep a knob-less config, so their own
+            // selector picks the kernel at plan build, ranked by the same metric.
+            config.ranking_metric = std::string(metric->name);
             flatbuffers::FlatBufferBuilder builder;
             builder.Finish(EngineConfig::Pack(builder, &config));
             row.config = builder.Release();
@@ -451,42 +503,52 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         }
         if(!available)
         {
+            // A static order returned from here would read as a ranking by the metric it
+            // is not, so decline and let the next policy (normally static ordering) say
+            // what it is (RFC 0019 §11.2).
+            PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
+                                   "%s declined: no engine serves '%.*s' at %s",
+                                   desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME,
+                                   static_cast<int>(metric->name.size()),
+                                   metric->name.data(),
+                                   desc.modeB ? "L1 or L2" : "L1");
             desc.ranked.clear();
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
-        std::stable_sort(desc.ranked.begin(),
-                         desc.ranked.end(),
-                         [](const RankedEngine& left, const RankedEngine& right) {
-                             if(left.available != right.available)
-                             {
-                                 return left.available;
-                             }
-                             return left.available && left.tflops > right.tflops;
-                         });
-        // RFC 0019 §11.2: the quick policy "ranks applicable engines by A; picks the
-        // winner; if the winner has a config UHD (B), runs it to pick the kernel"
-        // (§11.2 quick policy, table row "A and B"). Only the winner drills down —
-        // losers are never scored at the kernel level — and the ranking is untouched
-        // because §11.2 ranks by A alone. A winner that answers nothing usable keeps
-        // its knob-less config and performs its own kernel selection (row "A only").
-        if(!desc.modeB && desc.ranked.front().available)
+        // Scored engines first, best-first in the metric's direction; ties and the
+        // unscored tail follow the static rules (RFC 0019 §11.2), not candidate-arrival
+        // order, which is neither those rules nor deterministic.
+        std::vector<int64_t> staticOrder = desc.engineIds;
+        hipdnn_data_sdk::utilities::sortEngineIds(staticOrder);
+        std::unordered_map<int64_t, std::size_t> staticRank;
+        staticRank.reserve(staticOrder.size());
+        for(std::size_t rank = 0; rank < staticOrder.size(); ++rank)
         {
-            auto& winner = desc.ranked.front();
-            if(const auto* drilled
-               = query(*host, winner.id, HIPDNN_ENGINE_PREDICTION_CONFIGURATION))
-            {
-                EngineConfigT config;
-                drilled->engine_config()->UnPackTo(&config);
-                flatbuffers::FlatBufferBuilder builder;
-                builder.Finish(EngineConfig::Pack(builder, &config));
-                winner.config = builder.Release();
-            }
+            staticRank.emplace(staticOrder[rank], rank);
         }
-        // RFC 0019 §11.2: an engine that supplies neither estimate "falls back to
-        // static ordering; contributes no score" (table row "No declared model") and
-        // "is ordered by the existing static rules". Emitting the unscored tail in
-        // candidate-arrival order is neither the static rules nor deterministic, so
-        // order it with the shared static ordering; scored rows keep their ranking.
+        std::sort(desc.ranked.begin(),
+                  desc.ranked.end(),
+                  [&](const RankedEngine& left, const RankedEngine& right) {
+                      if(left.available != right.available)
+                      {
+                          return left.available;
+                      }
+                      if(left.available)
+                      {
+                          if(isBetterMetricValue(*metric, left.value, right.value))
+                          {
+                              return true;
+                          }
+                          if(isBetterMetricValue(*metric, right.value, left.value))
+                          {
+                              return false;
+                          }
+                      }
+                      return staticRank.at(left.id) < staticRank.at(right.id);
+                  });
+        // An unscored engine may hold a perfectly good model for another metric, or (under
+        // ModeA) an L2 model this policy declined to pay for; its place is vendor
+        // precedence, not merit, and the result does not show that, so say it once.
         const auto tail = std::find_if(desc.ranked.begin(),
                                        desc.ranked.end(),
                                        [](const RankedEngine& row) { return !row.available; });
@@ -498,47 +560,19 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
             {
                 unscored.push_back(row->id);
             }
-            hipdnn_data_sdk::utilities::sortEngineIds(unscored);
-            // Engine ids are unique (policySetEngineIds rejects duplicates), so each
-            // target id selects exactly one row and the permutation is a swap chain.
-            for(std::size_t i = 0; i < unscored.size(); ++i)
-            {
-                const auto slot = tail + static_cast<std::ptrdiff_t>(i);
-                if(slot->id == unscored[i])
-                {
-                    continue;
-                }
-                std::iter_swap(slot,
-                               std::find_if(slot + 1,
-                                            desc.ranked.end(),
-                                            [target = unscored[i]](const RankedEngine& row) {
-                                                return row.id == target;
-                                            }));
-            }
-            // Mode A ranks on the engine-level prediction alone and never asks an
-            // engine for a configuration-level one, so an engine here may hold a
-            // perfectly good `sort_kernel_catalog` model that this policy declined to
-            // pay for. That is the deliberate cost of the quick policy (RFC 0019
-            // §11.2), but it is not visible in the result, so say it out loud: the
-            // ordering these engines received is vendor precedence, not merit, and
-            // Mode B is the policy that would have scored them.
-            if(!desc.modeB)
-            {
-                std::string names;
-                for(const auto id : unscored)
-                {
-                    names += (names.empty() ? "" : ", ") + std::to_string(id);
-                }
-                PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
-                                       "ModeA ranked %zu of %zu engines on their engine-level "
-                                       "prediction; engine(s) %s supplied none and were appended "
-                                       "in static order without being scored. Select "
-                                       "SelectionHeuristic::ModeB to rank on configuration-level "
-                                       "predictions instead.",
-                                       desc.ranked.size() - unscored.size(),
-                                       desc.ranked.size(),
-                                       names.c_str());
-            }
+            PREDICTION_BUILTIN_LOG(HIPDNN_SEV_WARN,
+                                   "%s ranked %zu of %zu engines by '%.*s' at %s; engine(s) %s "
+                                   "had no usable '%.*s' prediction and were appended in static "
+                                   "order without being scored.",
+                                   desc.modeB ? MODE_B_POLICY_NAME : MODE_A_POLICY_NAME,
+                                   desc.ranked.size() - unscored.size(),
+                                   desc.ranked.size(),
+                                   static_cast<int>(metric->name.size()),
+                                   metric->name.data(),
+                                   desc.modeB ? "L1 or L2" : "L1",
+                                   joinIds(unscored).c_str(),
+                                   static_cast<int>(metric->name.size()),
+                                   metric->name.data());
         }
         desc.finalized = true;
         *applied = 1;

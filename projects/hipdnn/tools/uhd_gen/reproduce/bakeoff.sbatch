@@ -110,7 +110,7 @@ for entry in "${ENTRIES[@]}"; do
     model_dir=${rest%%:*}; engine=${rest#*:}
     echo "-- $label: $model_dir -> $engine"
     python3 -m uhd_gen promote --model-dir "$model_dir" --descriptor-tree "$TREE_ROOT" \
-        --engine "$engine" --role predict_engine_tflops --arch "$ARCH" 2>&1 | tail -4
+        --engine "$engine" --role predict_engine --arch "$ARCH" 2>&1 | tail -4
 done
 export HIPDNN_DESCRIPTOR_DIR="$TREE_ROOT"
 
@@ -141,22 +141,22 @@ for graph in graphs:
                     doc = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                row.update({k: doc.get(k) for k in ("status", "prediction_kind", "tflops", "reason")})
+                row.update({k: doc.get(k) for k in ("status", "prediction_kind", "metric", "value", "reason")})
                 break
         rows.append(row)
 (out / "predictions.json").write_text(json.dumps(rows, indent=1))
 
-scored = [r for r in rows if r.get("tflops") is not None]
+scored = [r for r in rows if r.get("value") is not None]
 print(f"  {len(graphs)} graphs x {len(engines)} engines; {len(scored)} scored predictions")
 for name, _ in engines:
     mine = [r for r in rows if r["engine"] == name]
-    ok = [r for r in mine if r.get("tflops") is not None]
+    ok = [r for r in mine if r.get("value") is not None]
     served = [r for r in mine if r["rc"] == 0]
     if served:
         print(f"    {name:34s} answers {len(served):4d}  scored {len(ok):4d}")
 by_graph = {}
 for row in scored:
-    by_graph.setdefault(row["graph"], {})[row["engine"]] = row["tflops"]
+    by_graph.setdefault(row["graph"], {})[row["engine"]] = row["value"]
 contested = {g: s for g, s in by_graph.items() if len(s) > 1}
 print(f"  predicted winner is decidable on {len(contested)} graphs")
 wins = {}

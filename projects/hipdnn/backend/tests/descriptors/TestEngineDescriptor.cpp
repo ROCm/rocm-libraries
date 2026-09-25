@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 
+#include <array>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -1129,6 +1130,12 @@ TEST_F(TestEngineDescriptor, CandidatePageBoundsRejectNonProgressingOrUnboundedR
         engine->setAttribute(
             HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate),
         HIPDNN_STATUS_BAD_PARAM);
+    const std::string unregistered = "flops";
+    ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT,
+                                                    HIPDNN_TYPE_CHAR,
+                                                    static_cast<int64_t>(unregistered.size()),
+                                                    unregistered.data()),
+                               HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestEngineDescriptor, CandidateScopeRequiresFinalizedKnobChoices)
@@ -1142,7 +1149,7 @@ TEST_F(TestEngineDescriptor, CandidateScopeRequiresFinalizedKnobChoices)
         HIPDNN_STATUS_BAD_PARAM_NOT_FINALIZED);
 }
 
-TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateFlag)
+TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindEvaluateFlagAndMetric)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
     auto engine = getEngineDescriptor();
@@ -1152,6 +1159,11 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateF
     EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
     ASSERT_NO_THROW(engine->setAttribute(
         HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate));
+    const std::string metric = "time";
+    ASSERT_NO_THROW(engine->setAttribute(HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT,
+                                         HIPDNN_TYPE_CHAR,
+                                         static_cast<int64_t>(metric.size()),
+                                         metric.data()));
     ASSERT_NO_THROW(engine->finalize());
 
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
@@ -1171,6 +1183,8 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateF
             const auto* config = fb::GetEngineConfig(engineConfig.ptr);
             EXPECT_EQ(config->engine_id(), ENGINE_ID);
             EXPECT_TRUE(config->knobs() == nullptr || config->knobs()->size() == 0u);
+            // RFC 0019 §11.4: the request names the metric the engine must answer in.
+            EXPECT_EQ(config->ranking_metric()->string_view(), "time");
             fb::EnginePredictionT prediction;
             prediction.engine_id = ENGINE_ID;
             prediction.kind = fb::PredictionKind::ENGINE;
@@ -1193,4 +1207,12 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindAndTheEvaluateF
     EXPECT_EQ(published->kind(), fb::PredictionKind::ENGINE);
     EXPECT_EQ(published->status(), fb::PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(published->reason()->str(), "no model");
+
+    std::array<char, 16> readBack{};
+    ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT,
+                                         HIPDNN_TYPE_CHAR,
+                                         static_cast<int64_t>(readBack.size()),
+                                         &elementCount,
+                                         readBack.data()));
+    EXPECT_STREQ(readBack.data(), "time");
 }

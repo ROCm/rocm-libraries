@@ -33,6 +33,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace
@@ -98,23 +99,24 @@ protected:
         _plugin->setSerializedGraph(_descriptor.get(), &bytes);
     }
 
-    EnginePredictionT& estimate(int64_t id, hipdnnEnginePredictionKind_t kind, double tflops)
+    EnginePredictionT& estimate(int64_t id, hipdnnEnginePredictionKind_t kind, double value)
     {
         auto& result = _predictions[{id, kind}];
         result.engine_id = id;
         result.kind = kind == HIPDNN_ENGINE_PREDICTION_ENGINE ? PredictionKind::ENGINE
                                                               : PredictionKind::CONFIGURATION;
         result.status = PredictionStatus::AVAILABLE;
-        result.tflops = tflops;
+        result.value = value;
+        result.metric = _metric;
         if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
         {
             result.engine_config = std::make_unique<EngineConfigT>();
             result.engine_config->engine_id = id;
             auto knob = std::make_unique<KnobSettingT>();
             knob->knob_id = "tile";
-            IntValueT value;
-            value.value = 128;
-            knob->value.Set(value);
+            IntValueT tile;
+            tile.value = 128;
+            knob->value.Set(tile);
             result.engine_config->knobs.push_back(std::move(knob));
         }
         return result;
@@ -122,7 +124,7 @@ protected:
 
     hipdnnHeuristicHostCallbacks_t host()
     {
-        return {1,
+        return {2,
                 sizeof(hipdnnHeuristicHostCallbacks_t),
                 this,
                 [](void* context,
@@ -148,9 +150,11 @@ protected:
                     const auto& bytes = self._buffers.back();
                     *output = {bytes.data(), bytes.size()};
                     return HIPDNN_PLUGIN_STATUS_SUCCESS;
-                }};
+                },
+                _metric.c_str()};
     }
 
+    std::string _metric = "tflops";
     HeuristicPluginManager _manager;
     std::shared_ptr<HeuristicPlugin> _plugin;
     ScopedResource<hipdnnHeuristicHandle_t> _handle;
@@ -180,57 +184,78 @@ TEST_F(TestPredictionPolicies, RegistersBothPredictionPoliciesUnderTheirCanonica
     EXPECT_NE(findPredictionPlugin(fresh), nullptr);
 }
 
-// RFC 0019 §11.2 quick policy: "Rank applicable engines by A; pick the winner; if the
-// winner has a config UHD (B), run it to pick the kernel. Only the winner drills down,
-// so losers are never scored at the kernel level." The drill-down chooses the winner's
-// kernel; it never chooses the winner (the table's "A and B" row ranks by A).
-TEST_F(TestPredictionPolicies, ModeARanksByL1AndOnlyTheWinnerDrillsIntoL2)
+// RFC 0019 §11.2 quick policy: rank applicable engines by A (L1) alone. B (L2) is never
+// evaluated under this policy, for any engine — not even to fill in the winner's kernel,
+// which plan build chooses by the same metric (Open Question 21, option (b)).
+TEST_F(TestPredictionPolicies, ModeARanksByL1AndNeverQueriesConfigurationPredictions)
 {
     selectMode(MODE_A_POLICY_NAME, {1, 2, 3, 4});
     estimate(1, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
     estimate(2, HIPDNN_ENGINE_PREDICTION_ENGINE, 20);
     estimate(4, HIPDNN_ENGINE_PREDICTION_ENGINE, 20);
-    // A loser's L2 score beats every L1 estimate — it must never be asked for it.
+    // An L2 score that beats every L1 estimate: under ModeA it must never be asked for.
     estimate(1, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, 500);
-    // The winner's L2 score is worse than the runner-up's L1 estimate: ranking is by A.
     estimate(2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, 1);
     const auto services = host();
     ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
     EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()), (std::vector<int64_t>{2, 4, 1, 3}));
 
-    // Every applicable engine is asked for A exactly once and only the winner is also
-    // asked for B, so the quick policy pays exactly one kernel enumeration.
     const std::map<Key, size_t> expected{{{1, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
                                          {{2, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
                                          {{3, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
-                                         {{4, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u},
-                                         {{2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION}, 1u}};
+                                         {{4, HIPDNN_ENGINE_PREDICTION_ENGINE}, 1u}};
     EXPECT_EQ(_calls, expected);
 
-    // The winner carries the kernel its drill-down picked; losers and unknown engines
-    // keep the knob-less config that leaves kernel choice to their ordinary selector.
-    const auto winner = _plugin->getEngineConfig(_descriptor.get(), 2);
-    ASSERT_NE(winner, nullptr);
-    ASSERT_EQ(winner->knobs.size(), 1u);
-    EXPECT_EQ(winner->knobs[0]->knob_id, "tile");
-    ASSERT_NE(winner->knobs[0]->value.AsIntValue(), nullptr);
-    EXPECT_EQ(winner->knobs[0]->value.AsIntValue()->value, 128);
-    for(const auto loser : {int64_t{1}, int64_t{3}, int64_t{4}})
+    // Every engine, winner included, keeps a knob-less config naming the metric, so its
+    // own selector picks the kernel at plan build by that metric.
+    for(const auto id : {int64_t{1}, int64_t{2}, int64_t{3}, int64_t{4}})
     {
-        const auto config = _plugin->getEngineConfig(_descriptor.get(), loser);
+        const auto config = _plugin->getEngineConfig(_descriptor.get(), id);
         ASSERT_NE(config, nullptr);
-        EXPECT_EQ(config->engine_id, loser);
+        EXPECT_EQ(config->engine_id, id);
         EXPECT_TRUE(config->knobs.empty());
+        EXPECT_EQ(config->ranking_metric, "tflops");
     }
+}
 
-    // RFC 0019 §11.2 row "A only (opaque)": a winner that declines B keeps its
-    // knob-less config and runs its own kernel selection. The ranking is unchanged.
-    _predictions.erase(Key(2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION));
-    _calls.clear();
+// RFC 0019 §4.4/§11.2: engines are compared in the requested metric's direction. For
+// `time` lower is better, and a value the metric rejects (a non-positive time) or an
+// answer in another metric scores nothing rather than ranking first.
+TEST_F(TestPredictionPolicies, TimeMetricRanksLowerFirstAndRejectsForeignOrInvalidValues)
+{
+    _metric = "time";
+    for(const auto* mode : {MODE_A_POLICY_NAME, MODE_B_POLICY_NAME})
+    {
+        _predictions.clear();
+        selectMode(mode, {1, 2, 3, 4, 5});
+        estimate(1, HIPDNN_ENGINE_PREDICTION_ENGINE, 5.0);
+        estimate(2, HIPDNN_ENGINE_PREDICTION_ENGINE, 2.0);
+        estimate(3, HIPDNN_ENGINE_PREDICTION_ENGINE, 8.0);
+        estimate(4, HIPDNN_ENGINE_PREDICTION_ENGINE, 0.0);
+        estimate(5, HIPDNN_ENGINE_PREDICTION_ENGINE, 0.5).metric = "tflops";
+        const auto services = host();
+        ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services)) << mode;
+        EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()),
+                  (std::vector<int64_t>{2, 1, 3, 4, 5}))
+            << mode;
+        EXPECT_EQ(_plugin->getEngineConfig(_descriptor.get(), 2)->ranking_metric, "time") << mode;
+    }
+}
+
+// Equal values do not fall back to candidate-arrival order: RFC 0019 §11.2 breaks ties
+// by the static rules.
+TEST_F(TestPredictionPolicies, TiesFollowStaticOrderNotArrivalOrder)
+{
+    using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    selectMode(MODE_A_POLICY_NAME, {HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_ID});
+    estimate(HIPBLASLT_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
+    estimate(MIOPEN_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
+    const auto services = host();
     ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
-    EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()), (std::vector<int64_t>{2, 4, 1, 3}));
-    EXPECT_EQ(_calls[Key(2, HIPDNN_ENGINE_PREDICTION_CONFIGURATION)], 1u);
-    EXPECT_TRUE(_plugin->getEngineConfig(_descriptor.get(), 2)->knobs.empty());
+    EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()),
+              (std::vector<int64_t>{MIOPEN_ENGINE_ID, HIPBLASLT_ENGINE_ID}));
 }
 
 // RFC 0019 §11.2 table row "No declared model": an engine that answers neither query
@@ -293,6 +318,7 @@ TEST_F(TestPredictionPolicies, ModeBMixesL2AndL1AndOwnsExactScoredConfig)
     EXPECT_EQ(scored->knobs[0]->knob_id, "tile");
     ASSERT_NE(scored->knobs[0]->value.AsIntValue(), nullptr);
     EXPECT_EQ(scored->knobs[0]->value.AsIntValue()->value, 128);
+    EXPECT_EQ(scored->ranking_metric, "tflops");
     ASSERT_NE(fallback, nullptr);
     EXPECT_TRUE(fallback->knobs.empty());
 }
@@ -332,22 +358,91 @@ TEST_F(TestPredictionPolicies, MissingOrInvalidModelsDeclineAndInvalidatePreviou
     }
 }
 
+// File-scope: the C-ABI logging callback is a plain function pointer.
+std::vector<std::string>* gPredictionLogLines = nullptr;
+
+void capturePredictionLog(hipdnnSeverity_t, const char* message)
+{
+    if(gPredictionLogLines != nullptr && message != nullptr)
+    {
+        gPredictionLogLines->emplace_back(message);
+    }
+}
+
+// RFC 0019 §11.2: a policy with nothing scored declines and says which metric and which
+// levels nobody served, so a static-order result is never mistaken for a ranking.
+TEST_F(TestPredictionPolicies, DeclineNamesTheMetricAndTheLevelsAsked)
+{
+    auto abi = hipdnn_backend::heuristics::prediction::populateFunctionTable();
+    std::vector<std::string> lines;
+    gPredictionLogLines = &lines;
+    ASSERT_EQ(abi.setLoggingCallback(&capturePredictionLog), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_EQ(abi.setLogLevel(HIPDNN_SEV_INFO), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    _metric = "time";
+    const std::vector<std::pair<const char*, std::string>> cases{
+        {MODE_A_POLICY_NAME, "no engine serves 'time' at L1"},
+        {MODE_B_POLICY_NAME, "no engine serves 'time' at L1 or L2"}};
+    for(const auto& testCase : cases)
+    {
+        const char* mode = testCase.first;
+        const std::string& reason = testCase.second;
+        lines.clear();
+        selectMode(mode, {1, 2});
+        // A perfectly good TFLOPS answer is not a `time` answer.
+        estimate(1, HIPDNN_ENGINE_PREDICTION_ENGINE, 100).metric = "tflops";
+        const auto services = host();
+        EXPECT_FALSE(_plugin->finalizeWithHost(_descriptor.get(), &services)) << mode;
+        EXPECT_TRUE(std::any_of(lines.begin(), lines.end(), [&](const std::string& line) {
+            return line.find(reason) != std::string::npos
+                   && (mode != MODE_A_POLICY_NAME || line.find("L1 or L2") == std::string::npos);
+        })) << mode;
+    }
+
+    abi.setLoggingCallback(nullptr);
+    gPredictionLogLines = nullptr;
+}
+
 TEST_F(TestPredictionPolicies, RejectsIncompatibleScopedHostBeforeInvokingCallbacks)
 {
     selectMode(MODE_A_POLICY_NAME, {1});
     auto services = host();
-    services.version = 2;
+    services.version = 0;
     EXPECT_THROW(_plugin->finalizeWithHost(_descriptor.get(), &services),
                  hipdnn_backend::HipdnnException);
     services.version = 1;
     services.struct_size = offsetof(hipdnnHeuristicHostCallbacks_t, get_prediction);
     EXPECT_THROW(_plugin->finalizeWithHost(_descriptor.get(), &services),
                  hipdnn_backend::HipdnnException);
+    services.version = 2;
     services.struct_size = sizeof(hipdnnHeuristicHostCallbacks_t);
     services.get_prediction = nullptr;
     EXPECT_THROW(_plugin->finalizeWithHost(_descriptor.get(), &services),
                  hipdnn_backend::HipdnnException);
+    // A metric the registry does not know has no direction to rank by.
+    services = host();
+    services.ranking_metric = "flops";
+    EXPECT_THROW(_plugin->finalizeWithHost(_descriptor.get(), &services),
+                 hipdnn_backend::HipdnnException);
+    services.ranking_metric = nullptr;
+    EXPECT_THROW(_plugin->finalizeWithHost(_descriptor.get(), &services),
+                 hipdnn_backend::HipdnnException);
     EXPECT_TRUE(_calls.empty());
+}
+
+// A version 1 table predates ranking_metric and ends before it; it means TFLOPS and the
+// policy must not read past the table to find out.
+TEST_F(TestPredictionPolicies, VersionOneHostRanksByTflops)
+{
+    selectMode(MODE_A_POLICY_NAME, {1, 2});
+    estimate(1, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
+    estimate(2, HIPDNN_ENGINE_PREDICTION_ENGINE, 20);
+    auto services = host();
+    services.version = 1;
+    services.struct_size = offsetof(hipdnnHeuristicHostCallbacks_t, ranking_metric);
+    services.ranking_metric = "time"; // Beyond struct_size: must be ignored.
+    ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
+    EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()), (std::vector<int64_t>{2, 1}));
 }
 
 TEST_F(TestPredictionPolicies, ConfigCannotEscapeItsEngineOrFinalizationLifetime)

@@ -314,10 +314,13 @@ def _canonical_uhd_validator():
     "valid", "missing_objective", "missing_provenance", "legacy_provenance",
     "wrong_body", "two_bodies", "legacy_derived", "bare_feature", "empty_feature",
     "invalid_hash", "unknown_header", "unsupported_format",
+    "tflops_metric", "time_metric", "legacy_units", "unregistered_metric",
+    "calibrated_without_metric", "metric_objective_mismatch",
 ])
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
     validator = _canonical_uhd_validator()
     doc = _model_uhd("model.bin")
+    valid = mutation in ("valid", "tflops_metric", "time_metric")
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -340,10 +343,26 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["unknown"] = True
     elif mutation == "unsupported_format":
         doc["version"] = "1.1"
+    elif mutation == "tflops_metric":
+        doc["score"] = {"metric": "tflops", "calibrated": True, "transform": "log1p"}
+    elif mutation == "time_metric":
+        # RFC 0019 §4.4: a time model is minimized, so the registry fixes `min`.
+        doc["objective"] = "min"
+        doc["score"] = {"metric": "time", "calibrated": True}
+    elif mutation == "legacy_units":
+        # `units` is gone: the metric names the quantity and the registry its units.
+        doc["score"] = {"units": "tflops", "calibrated": True}
+    elif mutation == "unregistered_metric":
+        doc["score"] = {"metric": "bandwidth"}
+    elif mutation == "calibrated_without_metric":
+        # Comparable across engines only in a named quantity.
+        doc["score"] = {"calibrated": True}
+    elif mutation == "metric_objective_mismatch":
+        # The metric fixes the direction; `objective` only restates it.
+        doc["score"] = {"metric": "time"}
     root = tmp_path / "src"
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "model.bin").write_bytes(b"artifact")
-    valid = mutation == "valid"
     assert validator.is_valid(doc) == valid
     if valid:
         flat = load_flat_input(root, log=lambda *_: None)
@@ -365,7 +384,7 @@ def test_schema_admits_the_extension_namespaces_the_loader_ignores():
     doc["x-trained-by"] = "uhd_gen 3.2"
     doc["_internal"] = {"ticket": "SWDEV-000000"}
     doc["provenance"] = {"dataset": "nightly", "rows": 4096}
-    doc["score"] = {"units": "tflops", "x-sampler": "sobol"}
+    doc["score"] = {"metric": "tflops", "x-sampler": "sobol"}
     doc["trained_against"]["_run"] = 17
     doc["tree_data"]["x-bytes"] = 2048
 
@@ -381,24 +400,30 @@ def test_schema_admits_the_extension_namespaces_the_loader_ignores():
     assert not validator.is_valid(stray_nested)
 
 
-def test_schema_pairs_a_calibrated_score_with_a_max_objective():
-    """RFC 0019 §4.1: "A `calibrated` score requires `objective: max`" -- a calibrated number
-    is a throughput, and a throughput is maximized. Checked here rather than discovered when
-    an engine's estimate sorts backwards (§11.3).
+def test_schema_ties_the_objective_to_the_score_metric():
+    """RFC 0019 §4.4: the registered metric fixes the direction -- `tflops` is maximized,
+    `time` minimized -- and `objective` must restate it, calibrated or not. A score with no
+    metric is an uncalibrated ordering and may run either way.
     """
     validator = _canonical_uhd_validator()
     doc = _model_uhd("model.bin")
-    doc["score"] = {"units": "tflops", "calibrated": True}
+    doc["score"] = {"metric": "tflops", "calibrated": True}
 
     doc["objective"] = "max"
     assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
-
     doc["objective"] = "min"
     assert not validator.is_valid(doc)
 
-    # Only a calibrated score is tied to the direction; an uncalibrated `min` model is legal
-    # and needs no trainer-side negation (§4.1's `objective` row).
-    doc["score"]["calibrated"] = False
+    doc["score"] = {"metric": "time", "calibrated": False}
+    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    doc["objective"] = "max"
+    assert not validator.is_valid(doc)
+
+    # A metric-less ordering is legal in either direction and needs no trainer-side
+    # negation (§4.1's `objective` row).
+    doc["score"] = {"calibrated": False}
+    assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
+    doc["objective"] = "min"
     assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
 
 
@@ -419,25 +444,79 @@ def test_schema_requires_the_signature_a_categorical_encoding_encodes():
     assert validator.is_valid(doc), [error.message for error in validator.iter_errors(doc)]
 
 
-def test_all_role_and_arch_models_remain_reachable_when_packaging(tmp_path, main_fixture):
-    from hkp_pack.descriptors import reachable_generic_ids
+def _metric_uhd(identity: str, metric: str | None) -> dict:
+    """A native UHD scoring in @p metric, or a metric-less ordering for None."""
+    doc = _native_uhd()
+    doc["id"] = identity
+    if metric is not None:
+        doc["objective"] = {"tflops": "max", "time": "min"}[metric]
+        doc["score"] = {"metric": metric, "calibrated": True}
+    return doc
+
+
+_TFLOPS_ID = "433a8b19-8e34-4f74-86d6-b6495a6483f3"
+_TIME_ID = "533a8b19-8e34-4f74-86d6-b6495a6483f3"
+_OTHER_TFLOPS_ID = "633a8b19-8e34-4f74-86d6-b6495a6483f3"
+_ORDERING_ID = "733a8b19-8e34-4f74-86d6-b6495a6483f3"
+
+
+def _root_with_roles(tmp_path: Path, main_fixture: Path, **roles) -> Path:
+    """The main fixture with extra per-metric UHDs, its UED's roles overridden by @p roles."""
     root = tmp_path / "src"
     shutil.copytree(main_fixture, root)
+    for identity, metric in ((_TFLOPS_ID, "tflops"), (_TIME_ID, "time"),
+                             (_OTHER_TFLOPS_ID, "tflops"), (_ORDERING_ID, None)):
+        _write_json(root / f"model_{identity[:3]}.uhd.json", _metric_uhd(identity, metric))
     ued_path = root / "pointwise.ued.json"
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
-    original = next(iter(ued["sort_kernel_catalog"].values()))
-    second = _native_uhd()
-    third = _native_uhd()
-    third["id"] = "333a8b19-8e34-4f74-86d6-b6495a6483f3"
-    _write_json(root / "estimate.uhd.json", second)
-    _write_json(root / "generator.uhd.json", third)
-    ued["sort_kernel_catalog"]["gfx950"] = second["id"]
-    ued["predict_engine_tflops"] = {"gfx942": second["id"]}
-    ued["predict_applicable_kernels"] = {"default": third["id"]}
+    ued.update(roles)
+    _write_json(ued_path, ued)
+    return root
+
+
+def test_all_role_and_arch_models_remain_reachable_when_packaging(tmp_path, main_fixture):
+    from hkp_pack.descriptors import reachable_generic_ids
+    root = _root_with_roles(
+        tmp_path, main_fixture,
+        # One model per metric: the list form, whose every entry must survive pruning.
+        predict_engine={"gfx942": [_TFLOPS_ID, _TIME_ID]},
+        predict_applicable_kernels={"default": _ORDERING_ID},
+    )
+    ued_path = root / "pointwise.ued.json"
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    original = ued["sort_kernel_catalog"]["default"]
+    ued["sort_kernel_catalog"]["gfx950"] = [_OTHER_TFLOPS_ID, original]
     _write_json(ued_path, ued)
     flat = load_flat_input(root, log=lambda *_: None)
     retained = reachable_generic_ids(flat, flat.kdps())
-    assert {original, second["id"], third["id"]} <= retained
+    assert {original, _TFLOPS_ID, _TIME_ID, _OTHER_TFLOPS_ID, _ORDERING_ID} <= retained
+
+
+@pytest.mark.parametrize("roles, message", [
+    # RFC 0019 §3.1: at most one model per metric for an architecture, or the loader
+    # cannot choose and disables the metric there.
+    ({"sort_kernel_catalog": {"gfx942": [_TFLOPS_ID, _OTHER_TFLOPS_ID]}}, "metric 'tflops'"),
+    ({"predict_engine": {"default": [_TFLOPS_ID, _OTHER_TFLOPS_ID]}}, "metric 'tflops'"),
+    # At most one metric-less ranker, for the same reason.
+    ({"sort_kernel_catalog": {"default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5",
+                                          _ORDERING_ID]}}, "no metric"),
+    # An engine prediction is a value in a registered metric's units, or nothing.
+    ({"predict_engine": {"gfx942": _ORDERING_ID}}, "declares no score.metric"),
+])
+def test_packaging_rejects_ambiguous_per_metric_models(tmp_path, main_fixture, roles, message):
+    root = _root_with_roles(tmp_path, main_fixture, **roles)
+    with pytest.raises(HkpPackError, match=message):
+        load_flat_input(root, log=lambda *_: None)
+
+
+def test_one_metric_per_architecture_is_per_architecture(tmp_path, main_fixture):
+    """The same metric under two architecture keys is two models for two devices, not a
+    collision: uniqueness is per (architecture, metric)."""
+    root = _root_with_roles(
+        tmp_path, main_fixture,
+        predict_engine={"gfx942": _TFLOPS_ID, "gfx950": [_OTHER_TFLOPS_ID, _TIME_ID]},
+    )
+    load_flat_input(root, log=lambda *_: None)
 
 
 @pytest.mark.parametrize("legacy", [
@@ -451,4 +530,19 @@ def test_packaging_rejects_legacy_heuristic_spellings(tmp_path, legacy):
         "name": "test:engine", **legacy,
     })
     with pytest.raises(HkpPackError):
+        load_flat_input(root, log=lambda *_: None)
+
+
+@pytest.mark.parametrize("roles, message", [
+    # Renamed to `predict_engine`; the old spelling is an unknown key, not an alias.
+    ({"predict_engine_tflops": {"gfx942": _TFLOPS_ID}}, "unknown fields"),
+    ({"predict_engine": {"gfx942": []}}, "nonempty list"),
+    ({"sort_kernel_catalog": {"gfx942": [_TFLOPS_ID, _TFLOPS_ID.upper()]}}, "twice"),
+    ({"predict_engine": {"gfx942": [_TFLOPS_ID, "not-a-uuid"]}}, "requires a UUID"),
+    # A candidate generator has no metric to key a list on (RFC 0019 §3.1).
+    ({"predict_applicable_kernels": {"default": [_ORDERING_ID]}}, "requires a UUID"),
+])
+def test_packaging_rejects_malformed_role_values(tmp_path, main_fixture, roles, message):
+    root = _root_with_roles(tmp_path, main_fixture, **roles)
+    with pytest.raises(HkpPackError, match=message):
         load_flat_input(root, log=lambda *_: None)

@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -27,6 +28,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -687,7 +689,7 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
     heuristic.featuresHash = config.featuresHash;
     heuristic.categoricalEncoding = config.categoricalEncoding;
     heuristic.objective = config.objective;
-    heuristic.score = {config.scoreUnits, config.scoreCalibrated, config.scoreTransform};
+    heuristic.score = {config.scoreMetric, config.scoreCalibrated, config.scoreTransform};
     heuristic.nativeSymbol = config.nativeSymbol;
     heuristic.modelArtifactPath = config.modelArtifactPath;
     heuristic.modelHash = config.modelHash;
@@ -824,7 +826,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                       "name",
                       "sdk_version",
                       "sort_kernel_catalog",
-                      "predict_engine_tflops",
+                      "predict_engine",
                       "predict_applicable_kernels",
                       "metadata",
                       "knobs",
@@ -839,46 +841,80 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
     requireScopedName(engine.name, where);
     engine.revision = declaredRevisionOf(root, where);
     // Roles are independently optional, but an authored role is always an arch map.
-    const auto readRole
-        = [&root, &where](const char* key, std::map<std::string, DescriptorId>& into) {
-              const auto found = root.find(key);
-              if(found == root.end())
-              {
-                  return;
-              }
-              if(!found->is_object() || found->empty())
-              {
-                  fail(std::string(where) + ": '" + key + "' must be a non-empty arch -> id map");
-              }
-              for(const auto& entry : found->items())
-              {
-                  if(entry.key() != "default" && !isPlausibleArchBaseId(entry.key()))
-                  {
-                      fail(std::string(where) + ": '" + key + "' has an invalid architecture key '"
-                           + entry.key() + "'");
-                  }
-                  into.emplace(entry.key(), requireId(*found, entry.key(), where));
-              }
-          };
+    const auto readRole = [&root, &where](const char* key, const auto& readValue) {
+        const auto found = root.find(key);
+        if(found == root.end())
+        {
+            return;
+        }
+        if(!found->is_object() || found->empty())
+        {
+            fail(std::string(where) + ": '" + key + "' must be a non-empty arch -> id map");
+        }
+        for(const auto& entry : found->items())
+        {
+            if(entry.key() != "default" && !isPlausibleArchBaseId(entry.key()))
+            {
+                fail(std::string(where) + ": '" + key + "' has an invalid architecture key '"
+                     + entry.key() + "'");
+            }
+            readValue(*found, entry.key());
+        }
+    };
+    // RFC 0019 §3.1: the two scoring roles map an architecture to one UHD per metric, so the
+    // value is a list; a single id is a one-element list, so an existing role map needs no
+    // rewrite. The list names models, never metrics -- each UHD declares its own.
+    const auto readList = [&where](const char* key,
+                                   std::map<std::string, std::vector<DescriptorId>>& into) {
+        return [key, &into, &where](const nlohmann::json& role, const std::string& arch) {
+            const auto& value = role.at(arch);
+            const std::string entryWhere
+                = std::string(where) + ": '" + key + "' entry for '" + arch + "'";
+            auto& ids = into[arch];
+            if(value.is_string())
+            {
+                ids.push_back(requireId(role, arch, where));
+                return;
+            }
+            if(!value.is_array() || value.empty())
+            {
+                fail(entryWhere + " must be a UUID or a non-empty list of UUIDs");
+            }
+            for(const auto& element : value)
+            {
+                if(!element.is_string())
+                {
+                    fail(entryWhere + " must list UUID strings");
+                }
+                DescriptorId id{};
+                try
+                {
+                    id = hipdnn_flatbuffers_sdk::utilities::parseUuid(element.get<std::string>());
+                }
+                catch(const std::invalid_argument& error)
+                {
+                    fail(entryWhere + " holds a value that is not a UUID: " + error.what());
+                }
+                // Repeating an id says nothing a single mention does not, and reads as a
+                // second model where there is one (RFC 0020 §4.6, `uniqueItems`).
+                if(std::find(ids.begin(), ids.end(), id) != ids.end())
+                {
+                    fail(entryWhere + " lists " + element.get<std::string>() + " twice");
+                }
+                ids.push_back(id);
+            }
+        };
+    };
 
-    readRole("sort_kernel_catalog", engine.sortKernelCatalog);
-    readRole("predict_engine_tflops", engine.predictEngineTflops);
-    readRole("predict_applicable_kernels", engine.predictApplicableKernels);
+    readRole("sort_kernel_catalog", readList("sort_kernel_catalog", engine.sortKernelCatalog));
+    readRole("predict_engine", readList("predict_engine", engine.predictEngine));
+    // Single-valued: a candidate generator produces the set a ranker then scores, so it has
+    // no metric to key a list on (RFC 0019 §3.1).
+    readRole("predict_applicable_kernels",
+             [&engine, &where](const nlohmann::json& role, const std::string& arch) {
+                 engine.predictApplicableKernels.emplace(arch, requireId(role, arch, where));
+             });
 
-    // The `default` model, and only that.
-    //
-    // RFC 0019 §8.3 resolves against the running gcnArchName first, and that cannot happen
-    // here: descriptor discovery is a process-wide memoized static that runs before any device
-    // or stream exists (Container's engine-id enumeration calls it), and getDeviceArch needs a
-    // stream. So the arch step happens at first rank(), reading the candidates DescriptorSet
-    // carries in heuristicsByArch, and this field carries only §8.3's second step.
-    //
-    // A single arch-named entry is not a default for other devices.
-    if(const auto fallback = engine.sortKernelCatalog.find("default");
-       fallback != engine.sortKernelCatalog.end())
-    {
-        engine.heuristicId = fallback->second;
-    }
     engine.metadataSchemaId = requireId(root, "metadata", where);
     engine.knobs = optionalStringArray(root, "knobs", where);
     requireNoDuplicates(engine.knobs, "knob", where);
@@ -1997,7 +2033,7 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
  * engine does meanwhile.
  *
  * @param uhdScorer Selects the registry by ROLE, not by the model's shape: a
- *                  `predict_engine_tflops` model always resolves through
+ *                  `predict_engine` model always resolves through
  *                  uhd::NativeScorerRegistry (the registry makeUhdAdapter consults),
  *                  while a ranking model without a feature signature is a ScoreRegistry
  *                  comparator. Inferring that from featuresSignature would disable a
@@ -2049,6 +2085,49 @@ inline bool usableModel(const std::string& engineName,
         }
     }
     return usable;
+}
+
+/// A metric as a diagnostic names it: the metric-less ranker has no name to print.
+inline std::string describeMetric(const std::string& metric)
+{
+    return metric.empty() ? std::string("(none)") : "'" + metric + "'";
+}
+
+/// The default ranker for architecture key @p arch (RFC 0019 §3.1): the metric-less
+/// `sort_kernel_catalog` UHD if there is one, else the one for DEFAULT_RANKING_METRIC, else
+/// nullptr. An exact key lookup: arch fallback is the ranker's job at rank time.
+inline const HeuristicDescriptor* defaultRankerFor(
+    const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric,
+    const std::string& arch)
+{
+    for(const std::string& metric :
+        {std::string(), std::string(hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC)})
+    {
+        if(const auto rankers = byMetric.find(metric); rankers != byMetric.end())
+        {
+            if(const auto found = rankers->second.find(arch); found != rankers->second.end())
+            {
+                return &found->second;
+            }
+        }
+    }
+    return nullptr;
+}
+
+/// Re-derives DescriptorSet::heuristic and EngineDescriptor::heuristicId from what survived
+/// resolution, so both always name the ranker the `default` key would actually use.
+inline void refreshDefaultRanker(DescriptorSet& set)
+{
+    if(const auto* ranker = defaultRankerFor(set.heuristicsByMetric, "default"))
+    {
+        set.heuristic = *ranker;
+        set.engine.heuristicId = ranker->id;
+    }
+    else
+    {
+        set.heuristic.reset();
+        set.engine.heuristicId.reset();
+    }
 }
 
 } // namespace detail
@@ -2310,60 +2389,139 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                                          const std::string& arch) {
             return detail::provenanceError(model, arch, &engine, schema, set.packs, set.matchers);
         };
-        const auto resolveRole = [&](const char* roleName,
-                                     const std::map<std::string, DescriptorId>& references,
-                                     bool ranking) {
-            for(const auto& [arch, id] : references)
-            {
-                const auto* model = detail::findDescriptor(catalog.heuristics, id);
-                std::string reason = model == nullptr ? "missing or invalid UHD descriptor"
-                                                      : provenanceError(*model, arch);
-                // engineName/role/arch are the loader's own backfill below, so a
-                // resolved model always agrees with the role map that named it.
-                if(!reason.empty())
-                {
-                    HIPDNN_PLUGIN_LOG_ERROR(
-                        "descriptor loader: engine '"
-                        << engine.name << "' role=" << roleName << " arch='" << arch
-                        << "' model=" << toString(id) << " disabled: " << reason
-                        << "; engine remains available with declared-order fallback");
-                    if(ranking)
-                    {
-                        set.unavailableHeuristicArches.insert(arch);
-                    }
-                    else if(std::string_view(roleName) == "predict_engine_tflops")
-                    {
-                        set.unavailableEnginePredictionArches.insert(arch);
-                    }
-                    continue;
-                }
-                if(ranking)
-                {
-                    auto& resolved = set.heuristicsByArch.emplace(arch, *model).first->second;
-                    resolved.treeRoot = catalog.heuristics.at(id).treeRoot;
-                    if(arch == "default")
-                    {
-                        set.heuristic = resolved;
-                    }
-                }
-                else if(std::string_view(roleName) == "predict_engine_tflops")
-                {
-                    auto& resolved
-                        = set.enginePredictionsByArch.emplace(arch, *model).first->second;
-                    resolved.treeRoot = catalog.heuristics.at(id).treeRoot;
-                    resolved.engineName = engine.name;
-                    resolved.role = roleName;
-                    resolved.arch = arch;
-                }
-            }
+        const auto disabled = [&](const char* roleName,
+                                  const std::string& arch,
+                                  const DescriptorId& id,
+                                  const std::string& reason) {
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                    << engine.name << "' role=" << roleName << " arch='" << arch
+                                    << "' model=" << toString(id) << " disabled: " << reason
+                                    << "; engine remains available with declared-order fallback");
         };
-        resolveRole("sort_kernel_catalog", engine.sortKernelCatalog, true);
-        resolveRole("predict_engine_tflops", engine.predictEngineTflops, false);
-        resolveRole("predict_applicable_kernels", engine.predictApplicableKernels, false);
-        if(!set.heuristic.has_value())
+        // RFC 0019 §3.1: a scoring role maps an arch key to a list, indexed by the metric each
+        // UHD declares. One UHD per (role, arch key, metric): two claiming one metric is a load
+        // error for that metric on that key, since no rule could choose between them and
+        // picking either would make the ranking depend on list order. Every refusal records
+        // (metric, arch) as unavailable, so a failed exact entry never falls back to the
+        // `default` key's model for the same metric.
+        const auto resolveScoringRole
+            = [&](const char* roleName,
+                  const std::map<std::string, std::vector<DescriptorId>>& references,
+                  bool ranking,
+                  std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric,
+                  std::map<std::string, std::set<std::string>>& unavailable) {
+                  for(const auto& [arch, ids] : references)
+                  {
+                      std::map<std::string,
+                               std::vector<std::pair<DescriptorId, const HeuristicDescriptor*>>>
+                          declared;
+                      bool unidentified = false;
+                      for(const auto& id : ids)
+                      {
+                          const auto* model = detail::findDescriptor(catalog.heuristics, id);
+                          if(model == nullptr)
+                          {
+                              disabled(roleName, arch, id, "missing or invalid UHD descriptor");
+                              unidentified = true;
+                              continue;
+                          }
+                          // An estimate is compared across engines, which is meaningful only
+                          // in a named quantity (RFC 0019 §11.1); a ranker may order its own
+                          // catalog without one.
+                          if(!ranking && model->score.metric.empty())
+                          {
+                              disabled(roleName,
+                                       arch,
+                                       id,
+                                       "declares no score.metric, which every "
+                                           + std::string(roleName) + " UHD must");
+                              continue;
+                          }
+                          declared[model->score.metric].emplace_back(id, model);
+                      }
+                      for(const auto& [metric, models] : declared)
+                      {
+                          if(models.size() > 1)
+                          {
+                              std::string named;
+                              for(const auto& entry : models)
+                              {
+                                  named += (named.empty() ? "" : ", ") + toString(entry.first);
+                              }
+                              HIPDNN_PLUGIN_LOG_ERROR(
+                                  "descriptor loader: engine '"
+                                  << engine.name << "' role=" << roleName << " arch='" << arch
+                                  << "' names more than one UHD for metric "
+                                  << detail::describeMetric(metric) << " (" << named
+                                  << "); disabling that metric on that architecture key, engine "
+                                     "remains available");
+                              unavailable[metric].insert(arch);
+                              continue;
+                          }
+                          const auto& [id, model] = models.front();
+                          if(const auto reason = provenanceError(*model, arch); !reason.empty())
+                          {
+                              disabled(roleName, arch, id, reason);
+                              unavailable[metric].insert(arch);
+                              continue;
+                          }
+                          auto& resolved = byMetric[metric].emplace(arch, *model).first->second;
+                          resolved.treeRoot = catalog.heuristics.at(id).treeRoot;
+                          if(!ranking)
+                          {
+                              // engineName/role/arch are the loader's own backfill, so a
+                              // resolved model always agrees with the role map that named it.
+                              resolved.engineName = engine.name;
+                              resolved.role = roleName;
+                              resolved.arch = arch;
+                          }
+                      }
+                      // A missing entry declared a metric nobody can read. It could have been any
+                      // metric this list does not otherwise serve, so each of those is withheld on
+                      // this key rather than left free to fall back across architectures.
+                      if(unidentified)
+                      {
+                          std::vector<std::string> candidates;
+                          if(ranking)
+                          {
+                              candidates.emplace_back();
+                          }
+                          for(const auto& metric : hipdnn_data_sdk::utilities::RANKING_METRICS)
+                          {
+                              candidates.emplace_back(metric.name);
+                          }
+                          for(const auto& metric : candidates)
+                          {
+                              if(declared.count(metric) == 0)
+                              {
+                                  unavailable[metric].insert(arch);
+                              }
+                          }
+                      }
+                  }
+              };
+        resolveScoringRole("sort_kernel_catalog",
+                           engine.sortKernelCatalog,
+                           true,
+                           set.heuristicsByMetric,
+                           set.unavailableHeuristicArches);
+        resolveScoringRole("predict_engine",
+                           engine.predictEngine,
+                           false,
+                           set.enginePredictionsByMetric,
+                           set.unavailableEnginePredictionArches);
+        // Validated for its diagnostics only; nothing consumes a candidate generator yet.
+        for(const auto& [arch, id] : engine.predictApplicableKernels)
         {
-            set.engine.heuristicId.reset();
+            const auto* model = detail::findDescriptor(catalog.heuristics, id);
+            const auto reason = model == nullptr ? std::string("missing or invalid UHD descriptor")
+                                                 : provenanceError(*model, arch);
+            if(!reason.empty())
+            {
+                disabled("predict_applicable_kernels", arch, id, reason);
+            }
         }
+        detail::refreshDefaultRanker(set);
 
         sets.push_back(std::move(set));
     }
@@ -2444,19 +2602,19 @@ struct DeclaredModelRefusal
     std::string reason;
 };
 
-/// One opaque engine's resolved L1 binding: the models its provider declared, keyed by
-/// architecture exactly as the declaration spelled them, and the architectures whose
-/// declared id named a model this build refused.
+/// One opaque engine's resolved L1 binding: the models its provider declared, keyed by the
+/// metric each declares and then by architecture exactly as the declaration spelled it, and
+/// the (metric, architecture) pairs whose declared model this build refused.
 struct DeclaredEnginePredictions
 {
-    std::map<std::string, HeuristicDescriptor> byArch;
-    /// Kept apart from an architecture that is simply absent from both maps: nothing
-    /// declared or nothing deployed is silence with no diagnosis to report.
-    std::map<std::string, DeclaredModelRefusal> refused;
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> byMetric;
+    /// Kept apart from a pair that is simply absent from both maps: nothing declared or
+    /// nothing deployed is silence with no diagnosis to report.
+    std::map<std::string, std::map<std::string, DeclaredModelRefusal>> refused;
 };
 
 /**
- * @brief The `predict_engine_tflops` models an engine with no UED declared by UUID.
+ * @brief The `predict_engine` models an engine with no UED declared by UUID.
  *
  * RFC 0019 Open Question 7 (RESOLVED): an engine that ships no UED binds its L1 model by
  * naming that UHD's UUID in its provider's own engine definition. The declaration is
@@ -2492,82 +2650,126 @@ struct DeclaredEnginePredictions
  *                         binding check the predictor runs.
  * @param selectorRevision What this build of the engine reports as its selector identity;
  *                         the same string the engine passes to uhd::predictEngine.
- * @param declared         Architecture (`default`, or a `gcnArchName` prefix) to UHD id.
+ * @param declared         Architecture (`default`, or a `gcnArchName` prefix) to UHD ids,
+ *                         one per metric (RFC 0019 §11.4). The metric of each comes from
+ *                         the UHD it names, never from the declaration: a declared UHD that
+ *                         names no registered metric is logged and dropped, and two naming
+ *                         one metric for one architecture refuse that metric there.
  */
-inline DeclaredEnginePredictions
-    resolveDeclaredEnginePredictions(const DescriptorCatalog& catalog,
-                                     const std::string& engineName,
-                                     const std::string& selectorRevision,
-                                     const std::map<std::string, DescriptorId>& declared)
+inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
+    const DescriptorCatalog& catalog,
+    const std::string& engineName,
+    const std::string& selectorRevision,
+    const std::map<std::string, std::vector<DescriptorId>>& declared)
 {
     using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
-    constexpr const char* ROLE = "predict_engine_tflops";
+    constexpr const char* ROLE = "predict_engine";
     DeclaredEnginePredictions resolved;
-    for(const auto& [arch, id] : declared)
+    const auto refuse = [&](const std::string& metric,
+                            const std::string& arch,
+                            const DescriptorId& id,
+                            PredictionStatus status,
+                            std::string reason) {
+        HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                << engineName << "' role=" << ROLE << " metric='" << metric
+                                << "' arch='" << arch << "' declared model=" << toString(id)
+                                << " disabled: " << reason
+                                << "; engine remains available with declared-order fallback");
+        resolved.refused[metric].insert_or_assign(arch,
+                                                  DeclaredModelRefusal{status, std::move(reason)});
+    };
+    for(const auto& [arch, ids] : declared)
     {
-        const auto* model = detail::findDescriptor(catalog.heuristics, id);
-        if(model == nullptr)
+        std::map<std::string, std::vector<std::pair<DescriptorId, const HeuristicDescriptor*>>>
+            byMetric;
+        for(const auto& id : ids)
         {
-            HIPDNN_PLUGIN_LOG_INFO("descriptor loader: engine '"
-                                   << engineName << "' declares " << ROLE << " model "
-                                   << toString(id) << " for arch '" << arch
-                                   << "', which is not deployed; the engine reports no "
-                                      "prediction for it");
-            continue;
+            const auto* model = detail::findDescriptor(catalog.heuristics, id);
+            if(model == nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("descriptor loader: engine '"
+                                       << engineName << "' declares " << ROLE << " model "
+                                       << toString(id) << " for arch '" << arch
+                                       << "', which is not deployed; the engine reports no "
+                                          "prediction for it");
+                continue;
+            }
+            // There is no metric to refuse it under, so it is dropped rather than refused.
+            if(hipdnn_data_sdk::utilities::findRankingMetric(model->score.metric) == nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                        << engineName << "' role=" << ROLE << " arch='" << arch
+                                        << "' declared model=" << toString(id)
+                                        << " names no registered score.metric; dropping it");
+                continue;
+            }
+            byMetric[model->score.metric].emplace_back(id, model);
         }
-        std::string reason = detail::provenanceError(*model, arch, nullptr, nullptr, {}, {});
-        auto status = PredictionStatus::INVALID;
-        HeuristicDescriptor bound;
-        if(reason.empty())
+        for(const auto& [metric, models] : byMetric)
         {
-            bound = *model;
-            // Backfilled by the loader from the declaration, never authored (§3.1's rule,
-            // applied to a declaration that lives in code rather than in a UED).
-            bound.treeRoot = catalog.heuristics.at(id).treeRoot;
-            bound.engineName = engineName;
-            bound.role = ROLE;
-            bound.arch = arch;
-            if(!detail::usableModel(
-                   engineName, arch, bound, "the engine reports no prediction", /*uhdScorer=*/true))
+            const auto& [id, model] = models.front();
+            if(models.size() > 1)
             {
-                reason = "model failed its symbol or artifact pre-flight";
+                refuse(metric,
+                       arch,
+                       id,
+                       PredictionStatus::INVALID,
+                       "more than one declared " + std::string(ROLE) + " UHD names metric '"
+                           + metric + "' for this architecture");
+                continue;
             }
-            else if(bound.trainedAgainstSelectorRevision.empty())
+            std::string reason = detail::provenanceError(*model, arch, nullptr, nullptr, {}, {});
+            auto status = PredictionStatus::INVALID;
+            HeuristicDescriptor bound;
+            if(reason.empty())
             {
-                // An unqualified L1 model cannot be checked against anything, which is a
-                // contract failure rather than a wrong-build one -- hence INVALID.
-                reason = "model records no trained_against.selector_revision, so it cannot "
-                         "be matched to a provider build";
+                bound = *model;
+                // Backfilled by the loader from the declaration, never authored (§3.1's rule,
+                // applied to a declaration that lives in code rather than in a UED).
+                bound.treeRoot = catalog.heuristics.at(id).treeRoot;
+                bound.engineName = engineName;
+                bound.role = ROLE;
+                bound.arch = arch;
+                if(!detail::usableModel(engineName,
+                                        arch,
+                                        bound,
+                                        "the engine reports no prediction",
+                                        /*uhdScorer=*/true))
+                {
+                    reason = "model failed its symbol or artifact pre-flight";
+                }
+                else if(bound.trainedAgainstSelectorRevision.empty())
+                {
+                    // An unqualified L1 model cannot be checked against anything, which is a
+                    // contract failure rather than a wrong-build one -- hence INVALID.
+                    reason = "model records no trained_against.selector_revision, so it cannot "
+                             "be matched to a provider build";
+                }
+                else if(bound.trainedAgainstSelectorRevision != selectorRevision)
+                {
+                    status = PredictionStatus::UNAVAILABLE;
+                    reason = "model was trained against " + bound.trainedAgainstSelectorRevision
+                             + ", engine reports " + selectorRevision;
+                }
             }
-            else if(bound.trainedAgainstSelectorRevision != selectorRevision)
+            if(!reason.empty())
             {
-                status = PredictionStatus::UNAVAILABLE;
-                reason = "model was trained against " + bound.trainedAgainstSelectorRevision
-                         + ", engine reports " + selectorRevision;
+                refuse(metric, arch, id, status, std::move(reason));
+                continue;
             }
+            resolved.byMetric[metric].emplace(arch, std::move(bound));
         }
-        if(!reason.empty())
-        {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                    << engineName << "' role=" << ROLE << " arch='" << arch
-                                    << "' declared model=" << toString(id)
-                                    << " disabled: " << reason
-                                    << "; engine remains available with declared-order fallback");
-            resolved.refused.emplace(arch, DeclaredModelRefusal{status, std::move(reason)});
-            continue;
-        }
-        resolved.byArch.emplace(arch, std::move(bound));
     }
     return resolved;
 }
 
 /// @brief The roots form: parses @p roots once and resolves @p declared out of them.
 /// A provider that already holds a catalog should pass it rather than pay a second walk.
-inline DeclaredEnginePredictions
-    resolveDeclaredEnginePredictions(const std::vector<std::filesystem::path>& roots,
-                                     const std::string& engineName,
-                                     const std::string& selectorRevision,
-                                     const std::map<std::string, DescriptorId>& declared)
+inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
+    const std::vector<std::filesystem::path>& roots,
+    const std::string& engineName,
+    const std::string& selectorRevision,
+    const std::map<std::string, std::vector<DescriptorId>>& declared)
 {
     return resolveDeclaredEnginePredictions(
         loadDescriptorCatalog(roots), engineName, selectorRevision, declared);
@@ -2648,48 +2850,36 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const DescriptorCa
             }
         }
         // A UED-named prediction model is loaded exactly like a ranking model, so it
-        // gets exactly the same pre-flight (detail::usableModel).
-        const auto usableModel =
-            [&set](const std::string& arch, const auto& model, const char* absent, bool uhdScorer) {
-                return detail::usableModel(set.engine.name, arch, model, absent, uhdScorer);
-            };
-        for(auto modelIt = set.heuristicsByArch.begin(); modelIt != set.heuristicsByArch.end();)
-        {
-            if(usableModel(modelIt->first,
-                           modelIt->second,
-                           "kernels will rank by priority, then descriptor id",
-                           /*uhdScorer=*/false))
-            {
-                ++modelIt;
-            }
-            else
-            {
-                const auto& arch = modelIt->first;
-                set.unavailableHeuristicArches.insert(arch);
-                if(arch == "default")
+        // gets exactly the same pre-flight (detail::usableModel), per metric: a failed
+        // (metric, arch) entry is withheld without touching that arch's other metrics.
+        const auto prune =
+            [&set](auto& byMetric, auto& unavailable, const char* absent, bool uhdScorer) {
+                for(auto metricIt = byMetric.begin(); metricIt != byMetric.end();)
                 {
-                    set.heuristic.reset();
-                    set.engine.heuristicId.reset();
+                    auto& byArch = metricIt->second;
+                    for(auto modelIt = byArch.begin(); modelIt != byArch.end();)
+                    {
+                        if(detail::usableModel(
+                               set.engine.name, modelIt->first, modelIt->second, absent, uhdScorer))
+                        {
+                            ++modelIt;
+                            continue;
+                        }
+                        unavailable[metricIt->first].insert(modelIt->first);
+                        modelIt = byArch.erase(modelIt);
+                    }
+                    metricIt = byArch.empty() ? byMetric.erase(metricIt) : std::next(metricIt);
                 }
-                modelIt = set.heuristicsByArch.erase(modelIt);
-            }
-        }
-        for(auto modelIt = set.enginePredictionsByArch.begin();
-            modelIt != set.enginePredictionsByArch.end();)
-        {
-            if(usableModel(modelIt->first,
-                           modelIt->second,
-                           "the engine reports no prediction",
-                           /*uhdScorer=*/true))
-            {
-                ++modelIt;
-            }
-            else
-            {
-                set.unavailableEnginePredictionArches.insert(modelIt->first);
-                modelIt = set.enginePredictionsByArch.erase(modelIt);
-            }
-        }
+            };
+        prune(set.heuristicsByMetric,
+              set.unavailableHeuristicArches,
+              "kernels will rank by priority, then descriptor id",
+              /*uhdScorer=*/false);
+        prune(set.enginePredictionsByMetric,
+              set.unavailableEnginePredictionArches,
+              "the engine reports no prediction",
+              /*uhdScorer=*/true);
+        detail::refreshDefaultRanker(set);
 
         // A name hashing onto an engine someone else already registered is dropped and the
         // incumbent stands (RFC 0020 §10.2.1's drop-all applies to UEDs in a collision, not

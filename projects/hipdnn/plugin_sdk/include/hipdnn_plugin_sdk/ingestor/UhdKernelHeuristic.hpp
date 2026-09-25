@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -19,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
@@ -163,34 +165,33 @@ inline std::unordered_set<std::string> kernelAxesOf(const uhd::FeatureExtractor&
 class UhdKernelHeuristic : public IKernelHeuristic
 {
 public:
-    /// @returns nullptr when the UHD cannot be brought up, so the caller can substitute
-    ///          declared-order ranking. Never throws.
-    /// Builds an instance that holds no model of its own, only the per-arch candidates.
+    /// Builds an instance that holds no model of its own, only the per-(metric, arch)
+    /// candidates.
     ///
-    /// RFC 0019 §8.3 resolves "exact gcnArchName, then `default`". A UED may name per-arch
-    /// models and no `default`, and that engine must still rank by model on the architectures
-    /// it does name. Previously such a UED produced no object at all -- there was nothing to
-    /// build eagerly -- so the whole map was discarded and the engine ranked by declared order
-    /// everywhere, including on the architectures it had a model for.
-    static std::shared_ptr<UhdKernelHeuristic>
-        makeArchResolver(const std::map<std::string, HeuristicDescriptor>& byArch,
-                         const std::string& describedBy,
-                         const std::vector<std::string>& knobs,
-                         const std::unordered_set<std::string>& kmdFields = {},
-                         const std::set<std::string>& unavailableArches = {})
+    /// RFC 0019 §3.1 and §8.3: a role maps each architecture to one UHD per metric, resolved
+    /// "exact gcnArchName, then `default`" within the requested metric. A UED may name
+    /// per-arch models and no `default`, and that engine must still rank by model on the
+    /// architectures it does name.
+    /// @param byMetric Metric (`""` for the metric-less ranker) to arch key to descriptor.
+    /// @param unavailable Metric to arch keys whose named model was refused: such a key never
+    ///        falls back to the `default` key's model for the same metric.
+    static std::shared_ptr<UhdKernelHeuristic> makeResolver(
+        const std::map<std::string, std::map<std::string, HeuristicDescriptor>>& byMetric,
+        const std::string& describedBy,
+        const std::vector<std::string>& knobs,
+        const std::unordered_set<std::string>& kmdFields = {},
+        const std::map<std::string, std::set<std::string>>& unavailable = {})
     {
         auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
-        built->_byArch = byArch;
+        built->_byMetric = byMetric;
         built->_knobs = knobs;
         built->_kmdFields = kmdFields;
-        built->_unavailableArches = unavailableArches;
-        if(const auto fallback = byArch.find("default"); fallback != byArch.end())
-        {
-            built->_config = configFrom(fallback->second);
-        }
+        built->_unavailable = unavailable;
         return built;
     }
 
+    /// @returns nullptr when the UHD cannot be brought up, so the caller can substitute
+    ///          declared-order ranking. Never throws.
     /// @param knobs The UED's declared knob names; @p kmdFields the KMD's declared field
     ///        names. RFC 0019 §6.3 check 2 is two assertions over the same set, so both
     ///        halves arrive the same way: a caller that cannot supply one supplies an empty
@@ -200,8 +201,7 @@ public:
         tryCreate(const HeuristicDescriptor& descriptor,
                   const std::string& describedBy,
                   const std::vector<std::string>& knobs = {},
-                  const std::unordered_set<std::string>& kmdFields = {},
-                  const std::map<std::string, HeuristicDescriptor>& byArch = {})
+                  const std::unordered_set<std::string>& kmdFields = {})
     {
         // RFC 0019 §9.4's first component: "descriptor load and model parse". Timed from
         // the top of the build so it covers configFrom, the extractor's signature
@@ -231,9 +231,6 @@ public:
                         descriptor.nativeSymbol, describedBy);
                 }
                 built->_hasDefaultModel = true;
-                built->_byArch = byArch;
-                built->_knobs = knobs;
-                built->_kmdFields = kmdFields;
                 return built;
             }
 
@@ -356,8 +353,8 @@ public:
             if(adapter->expectedFeatureCount() != extractor->featureCount())
             {
                 HIPDNN_PLUGIN_LOG_ERROR(
-                    "uhd: " << describedBy << " model expects "
-                            << adapter->expectedFeatureCount() << " features, its signature "
+                    "uhd: " << describedBy << " model expects " << adapter->expectedFeatureCount()
+                            << " features, its signature "
                             << "produces " << extractor->featureCount()
                             << "; the model is not used and kernels rank by priority, then id");
                 return nullptr;
@@ -366,12 +363,6 @@ public:
             auto built = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(
                 std::move(config), std::move(adapter), std::move(extractor), describedBy));
             built->_timing.loadNs.store(elapsedNs(loadStart), std::memory_order_relaxed);
-            // Kept for RFC 0019 §8.3: the arch this was built from is whatever the loader
-            // resolved (the `default` entry), and rank() re-resolves against the running
-            // device the first time it sees one that these do not describe.
-            built->_byArch = byArch;
-            built->_knobs = knobs;
-            built->_kmdFields = kmdFields;
             return built;
         }
         catch(const std::exception& e)
@@ -397,7 +388,7 @@ public:
         config.featuresHash = descriptor.featuresHash;
         config.categoricalEncoding = descriptor.categoricalEncoding;
         config.objective = descriptor.objective;
-        config.scoreUnits = descriptor.score.units;
+        config.scoreMetric = descriptor.score.metric;
         config.scoreCalibrated = descriptor.score.calibrated;
         config.scoreTransform = descriptor.score.transform;
         config.staticOrderFields = descriptor.staticOrderFields;
@@ -446,10 +437,11 @@ public:
                  const BoundTokens& bound,
                  const KernelDefinition& kernel) const override
     {
-        if(!_byArch.empty() || !_unavailableArches.empty())
+        if(isResolver())
         {
-            const auto resolved = resolveForArch(context.deviceProperties.gcnArchName);
-            return resolved ? resolved->score(context, bound, kernel) : 0.0;
+            const auto choice = chooseRanker(std::string(context.rankingMetric),
+                                             context.deviceProperties.gcnArchName);
+            return choice.model ? choice.model->score(context, bound, kernel) : 0.0;
         }
         if(_direct)
         {
@@ -468,47 +460,62 @@ public:
         return scoreCandidate(_extractor->extract(ctx)).reported;
     }
 
-    /// @brief Scores the matching architecture in physical TFLOPS, including a singleton catalog.
+    /// @brief Scores the matching architecture in physical units of `context.rankingMetric`,
+    ///        best first in that metric's direction, including a singleton catalog.
     ///
     /// The single answer to "is this engine's score comparable against another engine's". It
     /// replaced a `scoreIsCalibrated()` accessor that read `_config.scoreCalibrated` off *this*
-    /// object: on a resolver built by makeArchResolver that config is the `default` entry's, or
-    /// nothing at all, while the ranking comes from the architecture's own model -- so the flag
-    /// answered for a descriptor that was not the one ranking, in both directions.
+    /// object: on a resolver that config is nobody's, while the ranking comes from the
+    /// architecture's own model -- so the flag answered for a descriptor that was not the one
+    /// ranking, in both directions.
     ///
-    /// RFC 0019.13 §15.1 already refused the one combination that would make a calibrated score
-    /// incoherent -- calibrated together with a descending objective -- so a calibrated score
-    /// reaching here is ascending TFLOPS, which is what §11.3 asks a cross-engine comparison to
-    /// be given.
+    /// Only the requested metric's own ranker answers (RFC 0019 §11.4): the default ranker
+    /// picks kernels when a metric has none, but its number is in another metric, and
+    /// reporting it would be the substitution §4.4 forbids. The model must be calibrated, and
+    /// its objective is the metric's registered direction -- the parser already refuses any
+    /// other -- so the order rankWith produced is already best-first in that direction.
     std::vector<ScoredKernel> calibratedRanking(const Catalog& catalog,
                                                 const MatchContext& context,
                                                 std::string& modelId) const override
     {
-        if(!_byArch.empty() || !_unavailableArches.empty())
+        if(isResolver())
         {
-            const auto resolved = resolveForArch(context.deviceProperties.gcnArchName);
+            const auto resolved = resolveFor(std::string(context.rankingMetric),
+                                             context.deviceProperties.gcnArchName);
             return resolved ? resolved->calibratedRanking(catalog, context, modelId)
                             : std::vector<ScoredKernel>{};
         }
-        if(!_hasDefaultModel || !_config.scoreCalibrated || _config.scoreUnits != "tflops"
-           || _config.objective != "max"
+        const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
+        if(!_hasDefaultModel || metric == nullptr || _config.scoreMetric != metric->name
+           || !_config.scoreCalibrated
+           || _config.objective != hipdnn_data_sdk::utilities::objectiveOf(*metric)
            || (!_direct
                && (!_adapter || !_extractor
                    || !_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))))
         {
             return {};
         }
-        auto ranking = rankWith(catalog, context);
-        if(_direct)
+        // A direct scorer is ordered higher-first by IKernelHeuristic::rankScored and never
+        // sees the objective, so its order is best-first only for a metric where higher wins.
+        if(_direct
+           && metric->direction != hipdnn_data_sdk::utilities::MetricDirection::HIGHER_IS_BETTER)
         {
-            for(auto& candidate : ranking)
-            {
-                candidate.score
-                    = uhd::score_transform::applyInverse(candidate.score, _config.scoreTransform);
-            }
+            return {};
+        }
+        auto ranking = rankWith(catalog, context);
+        for(auto& candidate : ranking)
+        {
+            // A model's reported score is oriented so higher wins; undoing the orientation
+            // recovers the physical value. 0 is the no-measurement sentinel either way, and
+            // stays +0 rather than becoming -0 under a `min` objective.
+            candidate.score = _direct ? uhd::score_transform::applyInverse(candidate.score,
+                                                                           _config.scoreTransform)
+                              : candidate.score == 0.0 ? 0.0
+                                                       : _objectiveSign * candidate.score;
         }
         // Degraded rankings use zero sentinels, never available physical estimates.
-        if(ranking.empty() || !std::isfinite(ranking.front().score) || ranking.front().score <= 0.0)
+        if(ranking.empty() || ranking.front().score == 0.0
+           || !hipdnn_data_sdk::utilities::isValidMetricValue(*metric, ranking.front().score))
         {
             return {};
         }
@@ -522,10 +529,10 @@ public:
     std::string traceDecidedBy() const override
     {
         // What this object decides by *absent an architecture*, which is all a context-free
-        // accessor can honestly answer. A resolver built by makeArchResolver holds candidates
-        // and no model, so its default is declared order even though it will rank by model on
-        // the architectures it does name. The per-ranking answer is the trace line, which is
-        // emitted where the device is known -- and that is the one §12 actually specifies.
+        // accessor can honestly answer. A resolver holds candidates and no model, so its
+        // default is declared order even though it will rank by model on the architectures
+        // it does name. The per-ranking answer is the trace line, which is emitted where the
+        // device and the metric are known -- and that is the one §12 actually specifies.
         return _hasDefaultModel ? "model" : "declared_order";
     }
 
@@ -534,13 +541,14 @@ public:
     /// the field the model is actually reading.
     std::optional<std::string> groupFeature() const override
     {
-        // A resolver built by makeArchResolver holds no model of its own. There is no device
-        // here to resolve against, so it answers for its `default` entry -- the same
-        // context-free reading traceDecidedBy() takes.
-        if(!_byArch.empty() || !_unavailableArches.empty())
+        // A resolver holds no model of its own. There is no device or request here to resolve
+        // against, so it answers for what a default-metric request would rank with on the
+        // `default` entry -- the same context-free reading traceDecidedBy() takes.
+        if(isResolver())
         {
-            const auto resolved = resolveForArch({});
-            return resolved ? resolved->groupFeature() : std::nullopt;
+            const auto choice
+                = chooseRanker(std::string(hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC), {});
+            return choice.model ? choice.model->groupFeature() : std::nullopt;
         }
         if(_adapter == nullptr)
         {
@@ -578,56 +586,77 @@ public:
         // §5 step 7 reserves for "no measurement" -- a claim about the model, not about how many
         // kernels survived filtering. Stamping it for a healthy model made a one-candidate
         // catalog indistinguishable from a degraded ranking. Resolving and scoring costs one
-        // model load per engine per architecture, cached by resolveForArch, which is what the
-        // number meaning what it says is worth.
+        // model load per engine per (metric, architecture), cached by resolveFor, which is what
+        // the number meaning what it says is worth.
         if(catalog.entries.empty())
         {
             return {};
         }
-        // RFC 0019 §8.3: exact gcnArchName, then `default`. Resolved here rather than at
-        // load because descriptor discovery is a process-wide static that runs before any
-        // device exists -- and §9.2 asks for load-on-demand with a per-engine cache anyway,
-        // which is what this is.
-        if(const auto forArch = resolveForArch(context.deviceProperties.gcnArchName))
-        {
-            return forArch->rankWith(catalog, context);
-        }
-        if(_hasDefaultModel && _byArch.empty() && _unavailableArches.empty())
+        if(!isResolver() && _hasDefaultModel)
         {
             return rankWith(catalog, context);
         }
+        const auto& arch = context.deviceProperties.gcnArchName;
+        const std::string metric(context.rankingMetric);
+        // RFC 0019 §11.4: the requested metric's ranker when it resolves for this device,
+        // else the engine's default ranker, recording which. Resolved here rather than at
+        // load because descriptor discovery is a process-wide static that runs before any
+        // device exists -- and §9.2 asks for load-on-demand with a per-engine cache anyway,
+        // which is what this is.
+        if(const auto choice = chooseRanker(metric, arch); choice.model)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
+                                   << _describedBy << " metric=" << metric
+                                   << " ranker=" << choice.source << " ranker_metric="
+                                   << (choice.metric.empty() ? "(none)" : choice.metric)
+                                   << " arch=" << arch);
+            return choice.model->rankWith(catalog, context);
+        }
 
-        // §8.3's third step, which had no implementation: exact, then `default`, then
-        // unavailable. A UED naming models only for other architectures has nothing to say
-        // about this one, and using one of them anyway would rank this device on a model
-        // trained for different hardware -- silently, since the ranking would look normal.
-        reportNoModelForArchOnce(context.deviceProperties.gcnArchName);
+        // §8.3's third step: exact, then `default`, then unavailable -- for the requested
+        // metric and for the default ranker alike. A UED naming models only for other
+        // architectures has nothing to say about this one, and using one of them anyway would
+        // rank this device on a model trained for different hardware -- silently, since the
+        // ranking would look normal.
+        reportNoModelForArchOnce(arch, metric);
 
         // §12's trace, on this path too. Every other degraded path emits one; this branch was
         // added without it, so a selection that fell through for want of an architecture was
         // the one degradation the trace could not account for.
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
                                              << " reason=no_model_for_arch"
-                                             << " arch=" << context.deviceProperties.gcnArchName
+                                             << " metric=" << metric << " arch=" << arch
                                              << " candidates=" << catalog.entries.size());
         return detail::asScored(detail::declaredOrder(catalog.entries));
     }
 
-    /// Resolve once per authored architecture, sharing the default model across all
-    /// devices that use it. An explicitly unavailable/failed exact entry must never
-    /// turn into a successful default model selection.
-    std::shared_ptr<const UhdKernelHeuristic> resolveForArch(const std::string& arch) const
+    /// The ranker @p metric's own UHD names for @p arch, resolved once per authored
+    /// (metric, architecture key) and shared across all devices that use it. RFC 0019 §3.1's
+    /// arch fallback stays inside the metric: (gfx942, time) falls back to (default, time),
+    /// never to another metric. An explicitly unavailable/failed exact entry must never turn
+    /// into a successful default model selection.
+    std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
+                                                         const std::string& arch) const
     {
-        for(const auto& unavailable : _unavailableArches)
+        static const std::set<std::string> NONE_UNAVAILABLE;
+        const auto refusedIt = _unavailable.find(metric);
+        const auto& refused
+            = refusedIt == _unavailable.end() ? NONE_UNAVAILABLE : refusedIt->second;
+        for(const auto& unavailable : refused)
         {
             if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))
             {
                 return nullptr;
             }
         }
+        const auto models = _byMetric.find(metric);
+        if(models == _byMetric.end())
+        {
+            return nullptr;
+        }
         const HeuristicDescriptor* chosen = nullptr;
         std::string key;
-        for(const auto& [candidate, descriptor] : _byArch)
+        for(const auto& [candidate, descriptor] : models->second)
         {
             if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX)
                && candidate.size() > key.size())
@@ -638,11 +667,12 @@ public:
         }
         if(chosen == nullptr)
         {
-            if(_unavailableArches.count("default"))
+            if(refused.count("default") != 0)
             {
                 return nullptr;
             }
-            if(const auto fallback = _byArch.find("default"); fallback != _byArch.end())
+            if(const auto fallback = models->second.find("default");
+               fallback != models->second.end())
             {
                 chosen = &fallback->second;
                 key = "default";
@@ -653,7 +683,8 @@ public:
             return nullptr;
         }
         const std::lock_guard<std::mutex> lock(_archMutex);
-        if(const auto cached = _archCache.find(key); cached != _archCache.end())
+        const auto cacheKey = std::make_pair(metric, key);
+        if(const auto cached = _archCache.find(cacheKey); cached != _archCache.end())
         {
             return cached->second;
         }
@@ -664,14 +695,59 @@ public:
         auto loaded = tryCreate(*chosen, _describedBy, _knobs, _kmdFields);
         if(!loaded)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " model for '" << key
-                                            << "' failed; kernels rank by declared order");
+            HIPDNN_PLUGIN_LOG_ERROR("uhd: " << _describedBy << " model for metric "
+                                            << (metric.empty() ? "(none)" : "'" + metric + "'")
+                                            << " on '" << key << "' failed to load");
         }
-        _archCache.emplace(key, loaded);
+        _archCache.emplace(cacheKey, loaded);
         return loaded;
     }
 
 private:
+    /// Which ranker decides a kernel choice, and why -- the answer §11.4 asks the trace for.
+    struct RankerChoice
+    {
+        std::shared_ptr<const UhdKernelHeuristic> model;
+        /// `metric` when the requested metric's own ranker decided, `default` when the
+        /// engine's default ranker stood in for it.
+        const char* source = "declared_order";
+        /// The metric the deciding UHD declares; empty for the metric-less ranker.
+        std::string metric;
+    };
+
+    /// True for an instance built by makeResolver, which ranks through per-(metric, arch)
+    /// children rather than a model of its own.
+    bool isResolver() const
+    {
+        return !_byMetric.empty() || !_unavailable.empty();
+    }
+
+    /// RFC 0019 §3.1 and §11.4: kernel choice for @p metric uses that metric's ranker when it
+    /// resolves for @p arch, else the engine's default ranker -- the metric-less
+    /// `sort_kernel_catalog` UHD if any, else the one for DEFAULT_RANKING_METRIC -- else
+    /// nothing, and the caller falls back to static order. Each candidate resolves with its
+    /// own metric's arch fallback, so no step borrows another metric's arch entry.
+    RankerChoice chooseRanker(const std::string& metric, const std::string& arch) const
+    {
+        if(auto own = resolveFor(metric, arch))
+        {
+            return {std::move(own), "metric", metric};
+        }
+        for(const std::string& fallback :
+            {std::string(), std::string(hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC)})
+        {
+            if(fallback == metric)
+            {
+                continue;
+            }
+            if(auto standIn = resolveFor(fallback, arch))
+            {
+                return {std::move(standIn), "default", fallback};
+            }
+        }
+        return {};
+    }
+
     /// One candidate's number, in the two forms that must not be conflated.
     struct CandidateScore
     {
@@ -841,13 +917,14 @@ private:
             // unassertable, and unassertable observability is the thing §12 is trying to avoid.
             HIPDNN_PLUGIN_LOG_INFO("uhd trace: " << _describedBy << " decided_by=declared_order"
                                                  << " reason=ranking_failed"
+                                                 << " metric=" << context.rankingMetric
                                                  << " candidates=" << catalog.entries.size()
                                                  << " uhd=" << _config.uhdId
                                                  << " adapter=" << _config.adapterType
                                                  << " features_hash=" << _config.featuresHash);
             // Declared order carries no model score. It reports 0 -- RFC 0019 §5 step 7's
             // value for "no measurement" -- so a degraded ranking and a model that scored zero
-            // describe themselves the same way, which is what lets estimateTflops apply one
+            // describe themselves the same way, which is what lets calibratedRanking apply one
             // rule. traceDecidedBy() is where the two are told apart.
             return detail::asScored(detail::declaredOrder(catalog.entries));
         }
@@ -893,10 +970,12 @@ private:
 
         HIPDNN_PLUGIN_LOG_INFO("uhd trace: "
                                << _describedBy << " decided_by=" << traceDecidedBy()
+                               << " metric=" << context.rankingMetric
                                << " winner=" << toString(scored.front().entry->kernelId)
-                               << group.str() << " candidates=" << scored.size()
-                               << " arch=" << context.deviceProperties.gcnArchName
-                               << " uhd=" << _config.uhdId << " adapter=" << _config.adapterType
+                               << group.str() << " candidates=" << scored.size() << " arch="
+                               << context.deviceProperties.gcnArchName << " uhd=" << _config.uhdId
+                               << " adapter=" << _config.adapterType << " score_metric="
+                               << (_config.scoreMetric.empty() ? "(none)" : _config.scoreMetric)
                                << " objective=" << _config.objective
                                << " features_hash=" << _config.featuresHash << " " << timingTrace()
                                << " ranked=[" << candidates.str() << "]");
@@ -914,9 +993,8 @@ private:
     {
         const auto selections = _timing.selections.load(std::memory_order_relaxed);
         const auto candidates = _timing.candidates.load(std::memory_order_relaxed);
-        const auto per = [](uint64_t total, uint64_t count) {
-            return count == 0 ? 0 : total / count;
-        };
+        const auto per
+            = [](uint64_t total, uint64_t count) { return count == 0 ? 0 : total / count; };
         std::ostringstream out;
         out << "load_ns=" << _timing.loadNs.load(std::memory_order_relaxed)
             << " prefix_ns=" << per(_timing.prefixNs.load(std::memory_order_relaxed), selections)
@@ -946,9 +1024,8 @@ private:
     {
     }
 
-    /// The model's raw output, returned to its declared units and oriented so that larger
-    /// is better.
-    /// The model's score, oriented so higher always wins, or 0 when there is no usable number.
+    /// The model's score, returned to its metric's units and oriented so higher always wins,
+    /// or 0 when there is no usable number.
     ///
     /// Non-finite is reachable without anything malformed: `applyInverse` reports out-of-domain
     /// as NaN, and a GBDT raw score is unbounded, so a `log`/`exp`/`sqrt`-transformed model
@@ -956,11 +1033,11 @@ private:
     /// scorer can return anything at all.
     ///
     /// Zero, not NaN, because RFC 0019 §5 step 7 already fixed what "no measurement" looks like
-    /// one layer up -- "the engine reports an estimated throughput of 0... and loses on merit
-    /// rather than by exception" -- and a per-kernel score that means the same thing should say
-    /// it the same way. Nothing needs the two distinguished: §15.2's callers use the order, and
-    /// the caller that reads the value is calibratedRanking, which withholds a ranking whose top
-    /// score is not a positive measurement -- so estimateTflops reports 0 for this case too.
+    /// one layer up -- the engine reports no estimate and "loses on merit rather than by
+    /// exception" -- and a per-kernel score that means the same thing should say it the same
+    /// way. Nothing needs the two distinguished: §15.2's callers use the order, and the caller
+    /// that reads the value is calibratedRanking, which withholds a ranking whose top score is
+    /// not a valid measurement.
     CandidateScore scoreCandidate(const std::vector<double>& row) const
     {
         return scoreFromRaw(_adapter->score(row));
@@ -1009,7 +1086,7 @@ private:
     /// The engine still selects, by declared order, which RFC 0019 §5 step 7 makes a legal
     /// ranking -- so without this the only symptom is that a UHD-carrying engine quietly stops
     /// using its UHD on some machines and not others.
-    void reportNoModelForArchOnce(const std::string& arch) const
+    void reportNoModelForArchOnce(const std::string& arch, const std::string& metric) const
     {
         if(_reportedNoModelForArch.exchange(true))
         {
@@ -1017,14 +1094,19 @@ private:
         }
 
         std::ostringstream named;
-        for(const auto& [candidate, descriptor] : _byArch)
+        for(const auto& [modelMetric, byArch] : _byMetric)
         {
-            named << (named.tellp() == std::streampos(0) ? "" : ", ") << candidate;
+            for(const auto& [candidate, descriptor] : byArch)
+            {
+                named << (named.tellp() == std::streampos(0) ? "" : ", ")
+                      << (modelMetric.empty() ? "(none)" : modelMetric) << "@" << candidate;
+            }
         }
-        HIPDNN_PLUGIN_LOG_WARN("uhd: " << _describedBy << " names no model for '" << arch
-                                       << "' and no 'default' (it names: " << named.str()
-                                       << "); kernels rank by priority, then descriptor id. "
-                                          "Further occurrences are not logged.");
+        HIPDNN_PLUGIN_LOG_WARN(
+            "uhd: " << _describedBy << " names no model for '" << arch << "' in metric '" << metric
+                    << "' and no default ranker or 'default' entry (it names: " << named.str()
+                    << "); kernels rank by priority, then descriptor id. "
+                       "Further occurrences are not logged.");
     }
 
     /// Reports a model predicting outside the range its target can occupy, once per heuristic.
@@ -1050,7 +1132,7 @@ private:
                     << " of " << total << " candidates (raw=" << _lastOutOfRangeRaw
                     << ", recovered=" << _lastOutOfRangeRecovered << ", transform='"
                     << _config.scoreTransform
-                    << "'). A throughput cannot be negative, so those scores are discarded and "
+                    << "'). A metric value cannot be negative, so those scores are discarded and "
                        "those candidates rank last. "
                     << (affected == total
                             ? "Every candidate was affected, so this ranking is declared order "
@@ -1059,16 +1141,18 @@ private:
                     << " Further occurrences for this heuristic are not logged.");
     }
 
-    /// Authored architecture entries and their lazily loaded per-engine models.
-    std::map<std::string, HeuristicDescriptor> _byArch;
-    std::set<std::string> _unavailableArches;
+    /// Authored (metric, architecture) entries and their lazily loaded per-engine models.
+    std::map<std::string, std::map<std::string, HeuristicDescriptor>> _byMetric;
+    std::map<std::string, std::set<std::string>> _unavailable;
     std::vector<std::string> _knobs;
 
     /// The KMD's declared field names, carried so a per-arch model resolved later faces
     /// RFC 0019 §6.3 check 2's first assertion as well.
     std::unordered_set<std::string> _kmdFields;
     mutable std::mutex _archMutex;
-    mutable std::map<std::string, std::shared_ptr<const UhdKernelHeuristic>> _archCache;
+    /// Keyed by (metric, arch key): one UHD per metric per key, so the pair names a model.
+    mutable std::map<std::pair<std::string, std::string>, std::shared_ptr<const UhdKernelHeuristic>>
+        _archCache;
 
     uhd::UhdConfig _config;
     std::shared_ptr<const IKernelHeuristic> _direct;
@@ -1120,7 +1204,7 @@ private:
     };
     mutable SelectionTiming _timing;
 
-    /// False for an instance built by makeArchResolver: it carries candidates but no model of
+    /// False for an instance built by makeResolver: it carries candidates but no model of
     /// its own, so §8.3's `default` step has nothing to fall back to.
     bool _hasDefaultModel = false;
 };

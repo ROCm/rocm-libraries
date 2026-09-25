@@ -60,6 +60,9 @@ TEST(TestSelectionHeuristicHost, BoundsRequestsAndKeepsBorrowedBuffersUntilFinal
     functions.policyFinalizeWithHost = [](hipdnnHeuristicPolicyDescriptor_t,
                                           const hipdnnHeuristicHostCallbacks_t* host,
                                           int32_t* applied) {
+        // Version 2 carries the finalize's metric, borrowed for the call.
+        EXPECT_EQ(host->version, 2u);
+        EXPECT_STREQ(host->ranking_metric, "time");
         hipdnnPluginConstData_t first{};
         EXPECT_EQ(host->get_prediction(host->context, 999, HIPDNN_ENGINE_PREDICTION_ENGINE, &first),
                   HIPDNN_PLUGIN_STATUS_BAD_PARAM);
@@ -80,7 +83,8 @@ TEST(TestSelectionHeuristicHost, BoundsRequestsAndKeepsBorrowedBuffersUntilFinal
             = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::EnginePrediction>(
                 first.ptr);
         EXPECT_EQ(prediction->engine_id(), 1);
-        EXPECT_EQ(prediction->tflops(), 42);
+        EXPECT_EQ(prediction->value(), 42);
+        EXPECT_EQ(prediction->metric()->string_view(), "time");
         *applied = 1;
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     };
@@ -102,15 +106,18 @@ TEST(TestSelectionHeuristicHost, BoundsRequestsAndKeepsBorrowedBuffersUntilFinal
     }
     selection.setEngineIds(ids);
     size_t calls = 0;
-    EXPECT_TRUE(selection.finalize([&](int64_t engineId, hipdnnEnginePredictionKind_t) {
-        ++calls;
-        hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT prediction;
-        prediction.engine_id = engineId;
-        prediction.kind = hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE;
-        prediction.status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE;
-        prediction.tflops = 42;
-        return prediction;
-    }));
+    EXPECT_TRUE(selection.finalize(
+        [&](int64_t engineId, hipdnnEnginePredictionKind_t) {
+            ++calls;
+            hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT prediction;
+            prediction.engine_id = engineId;
+            prediction.kind = hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE;
+            prediction.status = hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE;
+            prediction.value = 42;
+            prediction.metric = "time";
+            return prediction;
+        },
+        "time"));
     EXPECT_EQ(calls, 64u);
 }
 

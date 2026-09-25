@@ -13249,13 +13249,17 @@ TEST_F(TestGraph, HeuristicModeAAndBTravelAsPolicyOrderNotAsBackendMode)
                                     policyNameToId("SelectionHeuristic::StaticOrdering")}));
 }
 
-// No prediction policy requested -> the frontend must not touch the policy-order
-// attribute at all, so HIPDNN_HEUR_POLICY_ORDER and the backend's built-in default
-// keep their precedence (RFC 0007 §5.3.3).
+// No prediction policy or ranking metric requested -> the frontend must not touch the
+// policy-order or ranking-metric attributes at all, so HIPDNN_HEUR_POLICY_ORDER,
+// HIPDNN_HEUR_RANKING_METRIC and the backend's built-in defaults keep their precedence
+// (RFC 0007 §5.3.3).
 TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
 {
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, _, _, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT, _, _, _))
         .Times(0);
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _));
@@ -13267,4 +13271,141 @@ TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
         reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
         {HeuristicMode::FALLBACK});
     EXPECT_TRUE(error.is_good()) << error.get_message();
+}
+
+// Captures a HIPDNN_TYPE_CHAR attribute value as the backend reads it: count bytes, no NUL.
+static auto captureStringAttribute(std::string& value)
+{
+    return [&value](hipdnnBackendDescriptor_t,
+                    hipdnnBackendAttributeName_t,
+                    hipdnnBackendAttributeType_t,
+                    int64_t count,
+                    const void* arrayOfElements) {
+        value.assign(static_cast<const char*>(arrayOfElements), static_cast<size_t>(count));
+        return HIPDNN_STATUS_SUCCESS;
+    };
+}
+
+// Only registered metrics are accepted, and a rejected name leaves the metric already
+// requested in force rather than resetting it to the default.
+TEST_F(TestGraph, SetRankingMetricAcceptsOnlyRegisteredMetrics)
+{
+    Graph graph;
+    EXPECT_EQ(graph.get_ranking_metric(), "tflops");
+    ASSERT_TRUE(graph.set_ranking_metric("time").is_good());
+    EXPECT_EQ(graph.get_ranking_metric(), "time");
+    for(const char* metric : {"latency", "TIME", ""})
+    {
+        EXPECT_EQ(graph.set_ranking_metric(metric).code, ErrorCode::INVALID_VALUE) << metric;
+        EXPECT_EQ(graph.get_ranking_metric(), "time");
+    }
+}
+
+TEST_F(TestGraph, RankingMetricTravelsOnTheHeuristicDescriptor)
+{
+    // Every other attribute keeps the fixture's default action.
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    auto* heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9912);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    std::string metric;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    heurDesc, HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT, HIPDNN_TYPE_CHAR, _, _))
+        .WillOnce(captureStringAttribute(metric));
+
+    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+    const auto error = detail::createEngineHeuristicDescriptorForGraph(
+        heuristicDesc,
+        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
+        {HeuristicMode::A},
+        /*findFirst=*/false,
+        "time");
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    EXPECT_EQ(metric, "time");
+}
+
+// The metric set on the Graph reaches the heuristic descriptor the Graph itself creates,
+// where the prediction policies rank by it.
+TEST_F(TestGraph, GraphRankingMetricReachesItsHeuristicQueries)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.set_ranking_metric("time").is_good());
+
+    // Allow descriptor-path calls (engine/config descriptors, setAttribute) the test
+    // does not inspect.
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    auto* heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5679);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    std::string metric;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(
+                    heurDesc, HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT, HIPDNN_TYPE_CHAR, _, _))
+        .WillOnce(captureStringAttribute(metric));
+    // No engines: the ranked result is irrelevant, only what the request carried.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_RESULTS, _, 0, _, nullptr))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 0;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<int64_t> rankedEngineIds;
+    EXPECT_EQ(graph.get_ranked_engine_ids(rankedEngineIds, {HeuristicMode::A}).code,
+              ErrorCode::GRAPH_NOT_SUPPORTED);
+    EXPECT_EQ(metric, "time");
+}
+
+// An engine configuration the Graph builds itself for an explicit engine carries the
+// metric too, so that engine's kernel choice at plan build follows it.
+TEST_F(TestGraph, GraphRankingMetricReachesExplicitEngineConfigs)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    ASSERT_TRUE(graph.set_ranking_metric("time").is_good());
+
+    // Allow descriptor-path calls (engine/plan descriptors, setAttribute) the test
+    // does not inspect.
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    auto engineCfgDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xBB02);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce(
+            [&engineCfgDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineCfgDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    std::string metric;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(
+            engineCfgDesc, HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT, HIPDNN_TYPE_CHAR, _, _))
+        .WillOnce(captureStringAttribute(metric));
+
+    setupEngineWithNoKnobs(*_mockBackend);
+    auto result = graph.create_execution_plan_ext(42, {});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(metric, "time");
 }

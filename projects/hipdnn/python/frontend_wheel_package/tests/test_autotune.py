@@ -97,6 +97,17 @@ def test_prediction_heuristic_modes_are_distinct():
     assert hipdnn.HeuristicMode.B != hipdnn.HeuristicMode.FALLBACK
 
 
+def test_ranking_metric_accepts_only_registered_names():
+    """A rejected metric is reported as an Error and leaves the requested one in force."""
+    graph = hipdnn.Graph()
+    assert graph.get_ranking_metric() == "tflops"
+    assert graph.set_ranking_metric("time").is_good()
+    assert graph.get_ranking_metric() == "time"
+    for name in ("latency", "TIME", ""):
+        assert graph.set_ranking_metric(name).is_bad(), name
+        assert graph.get_ranking_metric() == "time"
+
+
 def test_autotune_cache_write_outcome_enum():
     """AutotuneCacheWriteOutcome exposes every C++ enumerator."""
     names = {

@@ -1,6 +1,6 @@
 """Cross-engine comparison of L1 collections over one corpus.
 
-Each engine's `uhd_gen generate --role predict_engine_tflops` run writes a `corpus.csv`
+Each engine's `uhd_gen generate --role predict_engine` run writes a `corpus.csv`
 of measured immediate throughput, one row per (graph, device). Joined on the `benchmark`
 id -- the UUID5 the corpus mints from the canonical graph document, which is stable
 across engines and runs -- those files answer the question the heuristics exist for:

@@ -45,19 +45,20 @@ def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5):
 
 # Callers take the `evaluator` fixture: the digest below is the runtime's, computed by the
 # shared binary, because RFC 0019 §6.3 leaves features_hash with exactly one definition.
-def descriptor(row):
+def descriptor(row, metric="tflops"):
     return {"version": "1.0", "id": UHD, "name": "immediate model", "adapter": "tree_data",
-            "trained_against": row["binding"]["trained_against"], "objective": "max",
-            "score": {"units": "tflops", "calibrated": True, "transform": "log1p"},
+            "trained_against": row["binding"]["trained_against"],
+            "objective": {"tflops": "max", "time": "min"}[metric],
+            "score": {"metric": metric, "calibrated": True, "transform": "log1p"},
             "features_signature": ["$graph.flops"],
             "features_hash": compute_features_hash(["$graph.flops"]),
             "tree_data": {"artifact": "model.bin"}}
 
 
-def bundle(row, prediction, training_keys=()):
+def bundle(row, prediction, training_keys=(), metric="tflops"):
     # The owning engine is recorded by the training manifest's binding, never by the
     # descriptor: RFC 0019 Section 3.1 leaves that binding to the UED role map.
-    return SimpleNamespace(descriptor=descriptor(row),
+    return SimpleNamespace(descriptor=descriptor(row, metric),
                            manifest={"training_problem_keys": list(training_keys),
                                      "binding": copy.deepcopy(row["binding"]),
                                      "arch": row["arch"]},
@@ -169,7 +170,7 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
     row = measurement()
     row["binding"]["uhd_id"] = "old-model"
     response = copy.deepcopy(row)
-    response.update(model=UHD, status="available", tflops=1234)
+    response.update(model=UHD, status="available", metric="tflops", value=1234)
     response["binding"]["uhd_id"] = UHD
     model = descriptor(row)
     scorer = prediction_scorer(model, [response])
@@ -178,6 +179,33 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
     changed["features"]["constraint.workspace_limit"] = 0
     with pytest.raises(ValueError):
         scorer(normalize_corpus(pd.DataFrame([changed])))
+    # The answer names its metric, and one in another metric is refused, never converted.
+    wrong_metric = copy.deepcopy(response)
+    wrong_metric["metric"] = "time"
+    with pytest.raises(ValueError, match="metric"):
+        prediction_scorer(model, [wrong_metric])
+
+
+def test_time_predictions_rank_lower_first_and_report_in_milliseconds(evaluator):
+    """RFC 0019 §4.4: `time` is avgTimeMs directly and lower wins, so the engine with the
+    lower predicted time is picked and the report is keyed by `time`, not throughput."""
+    fast, slow = measurement(), measurement(engine=8, elapsed=4)
+    report = evaluate_immediate(pd.DataFrame([fast, slow]),
+                                [bundle(fast, 3.0, metric="time"), bundle(slow, 2.5, metric="time")],
+                                eval_fraction=1, seed=0, include_per_problem=True)
+    assert (report["metric"], report["target"], report["objective"]) == ("time", "avgTimeMs", "min")
+    assert report["per_problem"][0]["picked_engine"] == 8
+    assert report["per_problem"][0]["best_immediate_time"] == 2.0
+    assert report["metrics"]["immediate_selection"]["regret"]["mean"] == pytest.approx(1.0)
+    assert report["metrics"]["per_engine"][fast["engine_name"]]["signed_bias_time"] == pytest.approx(1.0)
+
+
+def test_engines_are_only_compared_in_one_metric(evaluator):
+    first, second = measurement(), measurement(engine=8)
+    with pytest.raises(ValueError, match="same metric"):
+        evaluate_immediate(pd.DataFrame([first, second]),
+                           [bundle(first, 1000), bundle(second, 2.0, metric="time")],
+                           eval_fraction=1, seed=0)
 
 
 def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifact(tmp_path, evaluator):
@@ -210,12 +238,42 @@ def test_real_immediate_training_and_promotion_loads_standard_calibrated_artifac
     assert installed.role == ROLE
     assert np.all(np.abs(predictions - np.asarray([2 * (1 + index / 240) for index in range(24)])) < 0.3)
     ued = json.loads((root / "engine.ued.json").read_text(encoding="utf-8"))
-    assert ued[ROLE]["gfx942"] == installed.descriptor["id"]
+    assert ued[ROLE]["gfx942"] == [installed.descriptor["id"]]
+
+
+def test_time_l1_training_declares_the_metric_its_label_and_direction(tmp_path, evaluator):
+    """`--metric time` trains on avgTimeMs directly and declares the direction the metric
+    fixes; a label or objective that contradicts the metric is refused before any output."""
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    from uhd_gen.__main__ import main
+
+    rows = []
+    for index in range(24):
+        row = measurement(graph=f"graph-{index}")
+        row["features"]["graph.flops"] = float(2e9 * (index + 1))
+        row["avgTimeMs"] = 1.0 + index / 10
+        rows.append(row)
+    corpus = tmp_path / "immediate.json"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    model_dir = tmp_path / "trained"
+    common = ["train", "--role", ROLE, "--input", str(corpus), "--features", "graph.flops",
+              "--num-boost-round", "4", "--early-stopping", "2"]
+    assert main([*common, "--metric", "time", "--target", "tflops", "--output-dir", str(model_dir)]) == 1
+    assert main([*common, "--metric", "time", "--objective", "max", "--output-dir", str(model_dir)]) == 1
+    assert not model_dir.exists()
+    assert main([*common, "--metric", "time", "--output-dir", str(model_dir)]) == 0
+    uhd = json.loads((model_dir / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    manifest = json.loads((model_dir / "train_manifest.json").read_text(encoding="utf-8"))
+    assert uhd["objective"] == "min"
+    assert uhd["score"] == {"metric": "time", "calibrated": True, "transform": "log1p"}
+    assert (manifest["target"], manifest["score_metric"], manifest["timing_statistic"]) == (
+        "avgTimeMs", "time", "avgTimeMs")
 
 
 def test_a_prediction_the_runtime_would_refuse_is_a_decline_not_a_broken_artifact(evaluator):
-    """A physical TFLOPS prediction that is not positive is one EnginePredictor reports as
-    INVALID, falling back to static ordering for that graph. The model is fitted on log1p
+    """A prediction its metric cannot take is one the engine reports as INVALID, leaving
+    the engine unscored for that graph. The model is fitted on log1p
     and inverted with expm1, so a log-space prediction below zero lands in (-1, 0) -- a few
     rows at the bottom of the range. Failing the artifact discarded a trained AITER model
     over 4 rows in 495 (run 67929709); the rows are now reported and skipped."""

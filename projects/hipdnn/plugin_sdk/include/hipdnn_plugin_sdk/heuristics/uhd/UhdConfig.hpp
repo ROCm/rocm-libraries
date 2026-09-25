@@ -37,8 +37,10 @@ struct UhdConfig
     std::string featuresHash;
     std::string objective = "max"; // "max" or "min"
 
-    // Score metadata for cross-engine comparison (RFC §5, §12.3)
-    std::string scoreUnits; // e.g., "tflops", "ms"
+    // Score metadata for cross-engine comparison (RFC 0019 §4.4, §11.3). The metric names
+    // a registered ranking metric (RankingMetrics.hpp), which fixes units and direction;
+    // empty for a ranker that orders its catalog without predicting a comparable number.
+    std::string scoreMetric; // e.g., "tflops", "time"
     bool scoreCalibrated = false; // cross-engine comparable?
     std::string scoreTransform; // e.g., "log1p", "identity"
 

@@ -28,6 +28,7 @@
 
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
@@ -379,7 +380,7 @@ int64_t firstBlockSize(const DescriptorSet& set, const std::string& arch = "gfx9
     return ranked.front().getIntMetadata("block_size");
 }
 
-/// A `predict_engine_tflops` model resolves through uhd::NativeScorerRegistry, which is a
+/// A `predict_engine` model resolves through uhd::NativeScorerRegistry, which is a
 /// different registry from the ScoreRegistry a catalog ranker's comparator uses, so
 /// ScopedSymbols above cannot stand in for this one.
 const std::string L1_SCORER_SYMBOL = "descriptorloader.l1_scorer";
@@ -406,6 +407,15 @@ public:
     ScopedL1Scorer& operator=(const ScopedL1Scorer&) = delete;
 };
 
+/// The `objective` the registry fixes for @p metric. Read from the registry rather than
+/// spelled per fixture, because the parser refuses any other pairing: a fixture that got
+/// it wrong would test the rejection instead of what it set out to.
+std::string objectiveFor(const std::string& metric)
+{
+    return std::string(hipdnn_data_sdk::utilities::objectiveOf(
+        *hipdnn_data_sdk::utilities::findRankingMetric(metric)));
+}
+
 /// What a test's "provider" reports as its build identity. An opaque engine's model is
 /// bound only when it recorded this exact string (RFC 0019 §4.1
 /// `trained_against.selector_revision`), so the mismatch cases vary it deliberately.
@@ -418,32 +428,48 @@ const std::string L1_SELECTOR_REVISION = "test-provider/1.2.3/opaque-untuned-v1/
 /// was measured on, which is the one thing the loader can check for itself.
 ///
 /// @param selectorRevision The provider build this model claims to have been measured on.
+/// @param metric The registered metric the model predicts in.
 nlohmann::json declaredL1Document(const std::string& id,
-                                  const std::string& selectorRevision = L1_SELECTOR_REVISION)
+                                  const std::string& selectorRevision = L1_SELECTOR_REVISION,
+                                  const std::string& metric = "tflops")
 {
     const std::vector<nlohmann::json> signature = {"$graph.flops"};
     return {{"version", "1.0"},
             {"id", id},
-            {"name", "engine throughput"},
+            {"name", "engine " + metric},
             {"adapter", "native"},
             {"native", {{"symbol", L1_SCORER_SYMBOL}}},
             {"features_signature", signature},
             {"features_hash", hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature)},
-            {"objective", "max"},
-            {"score", {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}},
+            {"objective", objectiveFor(metric)},
+            {"score", {{"metric", metric}, {"calibrated", true}, {"transform", "log1p"}}},
             {"trained_against", {{"selector_revision", selectorRevision}}}};
 }
 
 /// The declaration an opaque engine's provider compiles in, in the shape the loader takes.
-std::map<std::string, DescriptorId>
+/// An architecture repeated in @p entries lists a second id for it -- one per metric, each
+/// UHD naming its own (RFC 0019 §11.4).
+std::map<std::string, std::vector<DescriptorId>>
     declaration(const std::vector<std::pair<std::string, std::string>>& entries)
 {
-    std::map<std::string, DescriptorId> declared;
+    std::map<std::string, std::vector<DescriptorId>> declared;
     for(const auto& [arch, id] : entries)
     {
-        declared.emplace(arch, hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+        declared[arch].push_back(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
     }
     return declared;
+}
+
+/// The set's native UHD again under @p id, declaring @p metric, calibrated. Native and
+/// signature-less, so resolving it needs nothing beyond the catalog: what the cases using
+/// it exercise is the per-metric indexing alone.
+nlohmann::json metricUhd(Documents& documents, const std::string& id, const std::string& metric)
+{
+    auto uhd = documentOfType(documents, ".uhd.json");
+    uhd["id"] = id;
+    uhd["objective"] = objectiveFor(metric);
+    uhd["score"] = {{"metric", metric}, {"calibrated", true}};
+    return uhd;
 }
 
 } // namespace
@@ -561,10 +587,13 @@ TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
     auto& engineDocument = documentOfType(documents, ".ued.json");
     const auto uhdId = engineDocument.at("sort_kernel_catalog").at("default").get<std::string>();
 
-    // Same UHD under two arches and under a second role: what matters here is that the
-    // shape parses and every reference resolves, not that they differ.
+    // Same ranker under two arches, and a metric-declaring model under the second role --
+    // the one a `predict_engine` UHD must be. What matters here is that the shape parses and
+    // every reference resolves, not that the rankers differ.
+    const auto predictionId = testUuid('1', 'c');
     engineDocument["sort_kernel_catalog"] = {{"gfx942", uhdId}, {"default", uhdId}};
-    engineDocument["predict_engine_tflops"] = {{"default", uhdId}};
+    engineDocument["predict_engine"] = {{"default", predictionId}};
+    documents.push_back({".uhd.json", metricUhd(documents, predictionId, "tflops")});
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -572,10 +601,13 @@ TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
     ASSERT_EQ(sets.size(), 1u);
     const auto& engine = sets.front().engine;
     EXPECT_EQ(engine.sortKernelCatalog.size(), 2u);
-    EXPECT_EQ(engine.predictEngineTflops.size(), 1u);
-    // The resolved single reference every existing consumer reads is the default entry.
+    EXPECT_EQ(engine.predictEngine.size(), 1u);
+    ASSERT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+    EXPECT_EQ(sets.front().enginePredictionsByMetric.at("tflops").count("default"), 1u);
+    // The resolved single reference every existing consumer reads is the default entry's
+    // ranker, and never the prediction model: that one ranks engines, not kernels.
     ASSERT_TRUE(engine.heuristicId.has_value());
-    EXPECT_EQ(engine.sortKernelCatalog.at("default"), *engine.heuristicId);
+    EXPECT_EQ(engine.sortKernelCatalog.at("default").front(), *engine.heuristicId);
 }
 
 /// RFC 0019 §8.3 resolves the exact gcnArchName, then `default`, then nothing. An arch-named
@@ -585,7 +617,7 @@ TEST(TestDescriptorLoader, LoadsRoleScopedHeuristicsMappedByArchitecture)
 /// It used to, whenever the map held exactly one entry -- on the reasoning that one model means
 /// one model. The consequence was a gfx950-only UHD ranking every device, including ones it says
 /// nothing about, with nothing in the output to show it. The candidates stay in
-/// heuristicsByArch, where rank() resolves them against the running device.
+/// heuristicsByMetric, where rank() resolves them against the running device.
 TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
 {
     const ScopedSymbols symbols;
@@ -607,7 +639,195 @@ TEST(TestDescriptorLoader, ASingleArchScopedHeuristicDoesNotBecomeTheDefault)
 
     // But it is still reachable: discarding it would leave the engine ranking by declared order
     // even on gfx950, which is the architecture it does have a model for.
-    EXPECT_EQ(sets.front().heuristicsByArch.count("gfx950"), 1u);
+    ASSERT_EQ(sets.front().heuristicsByMetric.count(""), 1u);
+    EXPECT_EQ(sets.front().heuristicsByMetric.at("").count("gfx950"), 1u);
+}
+
+/// RFC 0019 §3.1: a scoring role maps an arch key to one UHD per metric, so a `time` model
+/// ships beside a `tflops` one without either replacing the other. The list names models,
+/// not metrics: each lands under the metric its own UHD declares, whatever its position.
+/// With no metric-less ranker listed, the `tflops` one is the engine's default ranker --
+/// never `time`, which would answer a throughput request with a time ordering.
+TEST(TestDescriptorLoader, ResolvesOneUhdPerMetricFromOneArchEntry)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("per_metric"));
+    auto documents = makeSetDocuments('1', "test:per_metric");
+    const auto tflopsId = testUuid('1', 'c');
+    const auto timeId = testUuid('1', 'e');
+    auto& engineDocument = documentOfType(documents, ".ued.json");
+    engineDocument["sort_kernel_catalog"]
+        = {{"default", nlohmann::json::array({tflopsId, timeId})}};
+    // Listed the other way round, so neither role can be read by position.
+    engineDocument["predict_engine"] = {{"default", nlohmann::json::array({timeId, tflopsId})}};
+    documents.push_back({".uhd.json", metricUhd(documents, tflopsId, "tflops")});
+    documents.push_back({".uhd.json", metricUhd(documents, timeId, "time")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.engine.sortKernelCatalog.at("default").size(), 2u);
+    EXPECT_EQ(set.engine.predictEngine.at("default").size(), 2u);
+    const std::vector<std::pair<std::string, std::string>> expected
+        = {{"tflops", tflopsId}, {"time", timeId}};
+    for(const auto& [metric, id] : expected)
+    {
+        ASSERT_EQ(set.heuristicsByMetric.count(metric), 1u) << metric;
+        ASSERT_EQ(set.heuristicsByMetric.at(metric).count("default"), 1u) << metric;
+        EXPECT_EQ(toString(set.heuristicsByMetric.at(metric).at("default").id), id);
+        ASSERT_EQ(set.enginePredictionsByMetric.count(metric), 1u) << metric;
+        ASSERT_EQ(set.enginePredictionsByMetric.at(metric).count("default"), 1u) << metric;
+        const auto& prediction = set.enginePredictionsByMetric.at(metric).at("default");
+        EXPECT_EQ(toString(prediction.id), id);
+        EXPECT_EQ(prediction.role, "predict_engine");
+    }
+    EXPECT_EQ(set.heuristicsByMetric.count(""), 0u);
+    EXPECT_TRUE(set.unavailableHeuristicArches.empty());
+    EXPECT_TRUE(set.unavailableEnginePredictionArches.empty());
+    ASSERT_TRUE(set.engine.heuristicId.has_value());
+    EXPECT_EQ(toString(*set.engine.heuristicId), tflopsId);
+}
+
+/// Two UHDs claiming one metric on one arch key leave no rule to choose between them, and
+/// taking either would make the ranking depend on list order. That metric is disabled on
+/// that key -- and only it: the metric-less ranker listed beside them still resolves, is
+/// still the default ranker, and still decides a `tflops` request, picking its winner (256)
+/// rather than the declared-order head (64).
+TEST(TestDescriptorLoader, DisablesAMetricTwoRankersClaimOnOneArch)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ranker_collision"));
+    auto documents = makeSetDocuments('1', "test:ranker_collision");
+    const auto rankerId = testUuid('1', ROLE_HEURISTIC);
+    const auto firstId = testUuid('1', 'c');
+    const auto secondId = testUuid('1', 'e');
+    documentOfType(documents, ".ued.json")["sort_kernel_catalog"]
+        = {{"default", nlohmann::json::array({rankerId, firstId, secondId})}};
+    documents.push_back({".uhd.json", metricUhd(documents, firstId, "tflops")});
+    documents.push_back({".uhd.json", metricUhd(documents, secondId, "tflops")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.heuristicsByMetric.count("tflops"), 0u);
+    ASSERT_EQ(set.unavailableHeuristicArches.count("tflops"), 1u);
+    EXPECT_EQ(set.unavailableHeuristicArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names more than one UHD for metric 'tflops'"))
+        << recorder.getRecordedLogsAsString();
+    ASSERT_TRUE(set.engine.heuristicId.has_value());
+    EXPECT_EQ(toString(*set.engine.heuristicId), rankerId);
+    EXPECT_EQ(firstBlockSize(set), 256);
+}
+
+/// The same rule on the L1 role: two `predict_engine` models claiming one metric on one arch
+/// key would make the engine's cross-engine number depend on list order, so neither answers
+/// for that metric there. The engine itself stays loaded.
+TEST(TestDescriptorLoader, DisablesAMetricTwoEnginePredictionsClaimOnOneArch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("prediction_collision"));
+    auto documents = makeSetDocuments('1', "test:prediction_collision");
+    const auto firstId = testUuid('1', 'c');
+    const auto secondId = testUuid('1', 'e');
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"default", nlohmann::json::array({firstId, secondId})}};
+    documents.push_back({".uhd.json", metricUhd(documents, firstId, "tflops")});
+    documents.push_back({".uhd.json", metricUhd(documents, secondId, "tflops")});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_TRUE(set.enginePredictionsByMetric.empty());
+    ASSERT_EQ(set.unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(set.unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names more than one UHD for metric 'tflops'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// RFC 0020 §4.6: a scoring role's value is one UUID or a list of distinct ones. A repeated
+/// id reads as a second model where there is one, so the UED is refused; the bare-string
+/// spelling every existing UED uses still means a one-element list, so none needs rewriting.
+TEST(TestDescriptorLoader, ReadsAScoringRoleAsAListOfDistinctIds)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("role_list"));
+    // makeSetDocuments spells its role as a bare string.
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    const auto repeatedId = testUuid('2', ROLE_HEURISTIC);
+    documentOfType(broken, ".ued.json")["sort_kernel_catalog"]
+        = {{"default", nlohmann::json::array({repeatedId, repeatedId})}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& engine = sets.front().engine;
+    EXPECT_EQ(engine.name, "test:valid");
+    ASSERT_EQ(engine.sortKernelCatalog.count("default"), 1u);
+    ASSERT_EQ(engine.sortKernelCatalog.at("default").size(), 1u);
+    EXPECT_EQ(toString(engine.sortKernelCatalog.at("default").front()),
+              testUuid('1', ROLE_HEURISTIC));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "lists " + repeatedId + " twice"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The L1 role became `predict_engine` when it became per metric (RFC 0019 §3.1). The old
+/// key is not an alias -- a UED still carrying it is refused like any unknown key, rather
+/// than loading with its L1 model silently unbound.
+TEST(TestDescriptorLoader, RejectsAnEngineSpellingTheRetiredPredictionRole)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("retired_role"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".ued.json")["predict_engine_tflops"]
+        = {{"default", testUuid('2', ROLE_HEURISTIC)}};
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'predict_engine_tflops'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The score block's free-text units field became `metric` (RFC 0019 §4.4): a metric names a
+/// registered quantity whose units and direction hipDNN owns. The old field is
+/// refused rather than read as a metric, so a UHD authored against it fails where it was
+/// authored; the engine naming it outlives it, ranking by declared order.
+TEST(TestDescriptorLoader, RejectsAUhdScoreCarryingUnits)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("score_units"));
+    auto documents = makeSetDocuments('1', "test:score_units");
+    documentOfType(documents, ".uhd.json")["score"] = {{"units", "tflops"}};
+    writeDocuments(dir.path(), documents);
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+    EXPECT_TRUE(catalog.heuristics.empty());
+    const auto sets = resolveDescriptorSets(catalog);
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().heuristic.has_value());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key 'units'"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST(TestDescriptorLoader, MissingArchitectureModelFallsBackWithoutUsingTheDefaultModel)
@@ -1611,7 +1831,7 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
 /// be wrong. They are the descriptor's own now, and every one of them changes what the
 /// heuristic computes: a dropped inline expression silently removes a feature the model was
 /// trained on, a dropped `categorical_encoding` entry silently renumbers a category, and a
-/// dropped `score` block silently relabels the units a caller compares across engines.
+/// dropped `score` block silently relabels the metric a caller compares across engines.
 ///
 /// The §6.4 `derived` block this case once also covered is gone: an expression is a
 /// signature entry now (slot 1 below), so it is carried and hashed as itself.
@@ -1642,7 +1862,7 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     // max with a calibrated score: the pair a cross-engine consumer may act on, and the
     // one combination where `calibrated` is not its default, so the boolean parse is real.
     heuristic["objective"] = "max";
-    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
     heuristic["tree_data"] = {{"artifact", "model.bin"}, {"hash", "sha256:model"}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
@@ -1659,7 +1879,7 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
               nlohmann::json::parse(R"({"ceil_div":["$q.M","$kernel.block_size"]})"));
     EXPECT_EQ(parsed.featuresHash,
               hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature, encoding));
-    EXPECT_EQ(parsed.score.units, "tflops");
+    EXPECT_EQ(parsed.score.metric, "tflops");
     EXPECT_TRUE(parsed.score.calibrated);
     EXPECT_EQ(parsed.score.transform, "log1p");
     EXPECT_EQ(parsed.modelHash, "sha256:model");
@@ -1667,12 +1887,12 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     EXPECT_EQ(parsed.categoricalEncoding.at("$q.dtype").at("bf16"), 1);
 }
 
-/// A cost-target UHD is ordinary: `min` on an uncalibrated score parses and is kept.
+/// A cost-target UHD is ordinary: `min` on an uncalibrated `time` score parses and is kept.
 ///
-/// The direction is the author's to choose, because only they know what their model
-/// predicts -- a model fitted on TFLOPS ranks descending, one fitted on latency ascending.
+/// The direction is fixed by the metric the author names, because only they know what their
+/// model predicts -- a model fitted on TFLOPS ranks descending, one fitted on time ascending.
 /// Neither is a fallback for the other, and dropping `min` on the floor would silently
-/// invert every ranking a latency model produces.
+/// invert every ranking a time model produces.
 TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
 {
     const ScopedSymbols symbols;
@@ -1687,7 +1907,7 @@ TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
     heuristic["trained_against"] = provenanceOf(documents);
     heuristic["objective"] = "min";
-    heuristic["score"] = {{"units", "latency_ms"}, {"calibrated", false}, {"transform", "log1p"}};
+    heuristic["score"] = {{"metric", "time"}, {"calibrated", false}, {"transform", "log1p"}};
     heuristic["tree_data"] = {{"artifact", "model.bin"}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
@@ -1695,19 +1915,27 @@ TEST(TestDescriptorLoader, KeepsAMinimisingObjectiveOnAnUncalibratedScore)
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    ASSERT_TRUE(sets.front().heuristic.has_value());
-    EXPECT_EQ(sets.front().heuristic->objective, "min");
-    EXPECT_FALSE(sets.front().heuristic->score.calibrated);
+    ASSERT_EQ(sets.front().heuristicsByMetric.count("time"), 1u);
+    ASSERT_EQ(sets.front().heuristicsByMetric.at("time").count("default"), 1u);
+    const auto& parsed = sets.front().heuristicsByMetric.at("time").at("default");
+    EXPECT_EQ(parsed.objective, "min");
+    EXPECT_EQ(parsed.score.metric, "time");
+    EXPECT_FALSE(parsed.score.calibrated);
+    // Kept for requests in `time`, but never the engine's default ranker: that is the
+    // metric-less ranker, else the `tflops` one, so a time model cannot silently decide a
+    // request that asked for throughput.
+    EXPECT_FALSE(sets.front().heuristic.has_value());
 }
 
-/// `min` with a calibrated score is a load error, not a preference.
+/// An `objective` contradicting the metric's registered direction is a load error, not a
+/// preference.
 ///
-/// RFC 0019 §11.3 defines cross-engine comparison on an absolute throughput metric, which
-/// is higher-wins by construction. A descriptor claiming both asks two engines to be
-/// ranked against each other while reporting their scores in opposite directions. Caught
+/// RFC 0019 §4.4: the metric fixes the direction -- `tflops` is higher-wins by registration
+/// -- and `objective` only restates it. A descriptor claiming `min` on `tflops` would rank
+/// its own catalog one way while engine selection compares its numbers the other. Caught
 /// at parse (RFC 0019.13 §15.1): at comparison time the symptom is an inverted choice
 /// between two engines, with nothing left to attribute it to.
-TEST(TestDescriptorLoader, RejectsAMinimisingObjectiveOnACalibratedScore)
+TEST(TestDescriptorLoader, RejectsAnObjectiveContradictingTheScoreMetric)
 {
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("objective_clash"));
@@ -1721,7 +1949,7 @@ TEST(TestDescriptorLoader, RejectsAMinimisingObjectiveOnACalibratedScore)
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
     heuristic["trained_against"] = provenanceOf(documents);
     heuristic["objective"] = "min";
-    heuristic["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
     heuristic["tree_data"] = {{"artifact", "model.bin"}};
     writeDocuments(dir.path(), documents);
     writeArtifact(dir.path() / "model.bin");
@@ -1733,6 +1961,8 @@ TEST(TestDescriptorLoader, RejectsAMinimisingObjectiveOnACalibratedScore)
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_FALSE(sets.front().heuristic.has_value());
     EXPECT_EQ(firstBlockSize(sets.front()), 64);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "requires objective max"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST(TestDescriptorLoader, RejectsStringifiedFeatureExpressions)
@@ -1809,7 +2039,7 @@ TEST(TestDescriptorLoader, AcceptsAModelArtifactAboveTheDescriptorButInsideTheTr
     EXPECT_EQ(sets.front().engine.name, "test:model_nested");
 }
 
-/// RFC 0019 §11.2: a `predict_engine_tflops` model reaches an engine through the UED role
+/// RFC 0019 §11.2: a `predict_engine` model reaches an engine through the UED role
 /// map, so it is loaded exactly like a ranking model and gets exactly the same pre-flight.
 /// The boundary check used to run over the ranking map only, which let a prediction model
 /// name an artifact outside the tree and defer the failure to the first query.
@@ -1833,9 +2063,9 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$graph.flops"});
     prediction["trained_against"] = provenanceOf(documents);
     prediction["objective"] = "max";
-    prediction["score"] = {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    prediction["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
     prediction["tree_data"] = {{"artifact", "../outside.bin"}};
-    documentOfType(documents, ".ued.json")["predict_engine_tflops"] = {{"default", predictionId}};
+    documentOfType(documents, ".ued.json")["predict_engine"] = {{"default", predictionId}};
     documents.push_back({".uhd.json", std::move(prediction)});
     writeDocuments(tree, documents);
     // Present, so the case is containment and not absence: without the file, the
@@ -1845,8 +2075,9 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(tree);
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_TRUE(sets.front().enginePredictionsByArch.empty());
-    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.count("default"), 1u);
+    EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+    ASSERT_EQ(sets.front().unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
     // Disabling a model never costs the engine, nor its catalog ranking: the ranking UHD
     // is still loaded and still picks its winner (256), not the declared-order head (64)
     // that EscapingModelArtifactIsDisabledWithoutDroppingTheEngine sees when the ranking
@@ -1859,7 +2090,7 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
 /// RFC 0019 Open Question 7 (RESOLVED): an engine with no UED declares its L1 model's
 /// UUID in provider code, and the loader resolves it out of the catalog it already
 /// parses. End to end, because "resolves" is only half the claim -- what the engine owes
-/// the policy is a calibrated TFLOPS number it can be ranked on.
+/// the policy is a calibrated number in the requested metric it can be ranked on.
 TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
 {
     const ScopedL1Scorer scorer;
@@ -1872,29 +2103,33 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionResolvesAndScores)
                                                            L1_SELECTOR_REVISION,
                                                            declaration({{"default", modelId}}));
 
-    ASSERT_EQ(resolved.byArch.size(), 1u);
+    ASSERT_EQ(resolved.byMetric.size(), 1u);
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    ASSERT_EQ(resolved.byMetric.at("tflops").size(), 1u);
     EXPECT_TRUE(resolved.refused.empty());
-    // Backfilled from the declaration, exactly as resolveRole backfills them from a UED
-    // role map: the document itself said none of this.
-    const auto& model = resolved.byArch.at("default");
+    // Backfilled from the declaration, exactly as resolveDescriptorSets backfills them from a
+    // UED role map: the document itself said none of this.
+    const auto& model = resolved.byMetric.at("tflops").at("default");
     EXPECT_EQ(model.engineName, "test:opaque");
-    EXPECT_EQ(model.role, "predict_engine_tflops");
+    EXPECT_EQ(model.role, "predict_engine");
     EXPECT_EQ(model.arch, "default");
     EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
 
     hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
-    binding.bind("default", UhdKernelHeuristic::configFrom(model));
+    binding.bind("tflops", "default", UhdKernelHeuristic::configFrom(model));
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
     const auto prediction = binding.predict(7,
                                             "test:opaque",
                                             L1_SELECTOR_REVISION,
+                                            "tflops",
                                             "gfx942:sramecc+:xnack-",
                                             features,
                                             /*evaluate=*/true);
 
     ASSERT_EQ(prediction.status, hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE);
-    EXPECT_NEAR(prediction.tflops, 42.0, 1e-12);
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_NEAR(prediction.value, 42.0, 1e-12);
     EXPECT_EQ(prediction.uhd_id, modelId);
 }
 
@@ -1922,29 +2157,38 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused
         L1_SELECTOR_REVISION,
         declaration({{"gfx942", refusedId}, {"gfx950", cleanId}}));
 
-    EXPECT_EQ(resolved.byArch.count("gfx942"), 0u);
-    EXPECT_EQ(resolved.byArch.count("gfx950"), 1u);
-    EXPECT_EQ(resolved.refused.count("gfx950"), 0u);
-    ASSERT_EQ(resolved.refused.count("gfx942"), 1u);
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& bound = resolved.byMetric.at("tflops");
+    EXPECT_EQ(bound.count("gfx942"), 0u);
+    EXPECT_EQ(bound.count("gfx950"), 1u);
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    const auto& refusals = resolved.refused.at("tflops");
+    EXPECT_EQ(refusals.count("gfx950"), 0u);
+    ASSERT_EQ(refusals.count("gfx942"), 1u);
     // A present model that failed its contract is a claim -- "do not pick me" -- not the
     // silence an absent one reports (RFC 0019 §11.2).
     using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
-    EXPECT_EQ(resolved.refused.at("gfx942").status, PredictionStatus::INVALID);
+    EXPECT_EQ(refusals.at("gfx942").status, PredictionStatus::INVALID);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "cannot satisfy"));
 
     hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
-    binding.bind("gfx950", UhdKernelHeuristic::configFrom(resolved.byArch.at("gfx950")));
-    for(const auto& [arch, refusal] : resolved.refused)
+    binding.bind("tflops", "gfx950", UhdKernelHeuristic::configFrom(bound.at("gfx950")));
+    for(const auto& [metric, byArch] : resolved.refused)
     {
-        binding.markUnusable(arch, refusal.status, refusal.reason);
+        for(const auto& [arch, refusal] : byArch)
+        {
+            binding.markUnusable(metric, arch, refusal.status, refusal.reason);
+        }
     }
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
     EXPECT_EQ(
-        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "gfx942", features, true).status,
+        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "tflops", "gfx942", features, true)
+            .status,
         PredictionStatus::INVALID);
     EXPECT_EQ(
-        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "gfx950", features, true).status,
+        binding.predict(7, "test:opaque", L1_SELECTOR_REVISION, "tflops", "gfx950", features, true)
+            .status,
         PredictionStatus::AVAILABLE);
 }
 
@@ -1975,24 +2219,26 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsR
     const auto engineB = resolveDeclaredEnginePredictions(
         catalog, "test:opaqueB", revisionB, declaration({{"default", modelB}}));
 
-    EXPECT_EQ(engineA.byArch.count("default"), 1u);
+    ASSERT_EQ(engineA.byMetric.count("tflops"), 1u);
+    EXPECT_EQ(engineA.byMetric.at("tflops").count("default"), 1u);
     EXPECT_TRUE(engineA.refused.empty());
-    EXPECT_TRUE(engineB.byArch.empty());
-    ASSERT_EQ(engineB.refused.count("default"), 1u);
+    EXPECT_TRUE(engineB.byMetric.empty());
+    ASSERT_EQ(engineB.refused.count("tflops"), 1u);
+    ASSERT_EQ(engineB.refused.at("tflops").count("default"), 1u);
 
     using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
-    const auto& refusal = engineB.refused.at("default");
+    const auto& refusal = engineB.refused.at("tflops").at("default");
     // Silence, not a claim: the model is not bad, it is not this build's.
     EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
     EXPECT_NE(refusal.reason.find(revisionA), std::string::npos) << refusal.reason;
     EXPECT_NE(refusal.reason.find(revisionB), std::string::npos) << refusal.reason;
 
     hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
-    binding.markUnusable("default", refusal.status, refusal.reason);
+    binding.markUnusable("tflops", "default", refusal.status, refusal.reason);
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
-    const auto prediction
-        = binding.predict(8, "test:opaqueB", revisionB, "gfx942", features, /*evaluate=*/true);
+    const auto prediction = binding.predict(
+        8, "test:opaqueB", revisionB, "tflops", "gfx942", features, /*evaluate=*/true);
     EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
     EXPECT_EQ(prediction.reason, refusal.reason);
 }
@@ -2024,16 +2270,17 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRef
           {"adapter", "native"},
           {"native", {{"symbol", L1_SCORER_SYMBOL}}},
           {"objective", "max"},
-          {"score", {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}}}});
+          {"score", {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}}}});
 
     const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
                                                            "test:opaque",
                                                            L1_SELECTOR_REVISION,
                                                            declaration({{"default", modelId}}));
 
-    EXPECT_TRUE(resolved.byArch.empty());
-    ASSERT_EQ(resolved.refused.count("default"), 1u);
-    EXPECT_EQ(resolved.refused.at("default").status,
+    EXPECT_TRUE(resolved.byMetric.empty());
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    ASSERT_EQ(resolved.refused.at("tflops").count("default"), 1u);
+    EXPECT_EQ(resolved.refused.at("tflops").at("default").status,
               hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
                                           "records no trained_against.selector_revision"));
@@ -2053,14 +2300,14 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithNoTreeInstalledResolvesNo
                                            L1_SELECTOR_REVISION,
                                            declaration({{"default", testUuid('e', '6')}}));
 
-    EXPECT_TRUE(resolved.byArch.empty());
+    EXPECT_TRUE(resolved.byMetric.empty());
     EXPECT_TRUE(resolved.refused.empty());
 
     hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
     const auto prediction = binding.predict(
-        7, "test:opaque", L1_SELECTOR_REVISION, "gfx942", features, /*evaluate=*/true);
+        7, "test:opaque", L1_SELECTOR_REVISION, "tflops", "gfx942", features, /*evaluate=*/true);
     EXPECT_EQ(prediction.status,
               hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE);
 }
@@ -2091,9 +2338,76 @@ TEST(TestDescriptorLoader, AUhdCannotClaimAnEngineRoleOrArch)
         EXPECT_TRUE(
             resolveDeclaredEnginePredictions(
                 catalog, "test:opaque", L1_SELECTOR_REVISION, declaration({{"default", modelId}}))
-                .byArch.empty());
+                .byMetric.empty());
     }
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "unknown key"));
+}
+
+/// RFC 0019 §11.4: an opaque engine declares one L1 model per metric for one architecture,
+/// and each answers only in its own metric. The declaration names models, never metrics, so
+/// the metric a model serves is read off its UHD. A declared UHD naming no metric has nothing
+/// to be indexed or refused under, so it is dropped -- loudly, and without becoming a
+/// refusal that would read as "this engine's model is bad" for some metric it never named.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
+{
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_metrics"));
+    const auto tflopsId = testUuid('e', 'b');
+    const auto timeId = testUuid('e', 'c');
+    const auto metriclessId = testUuid('e', 'd');
+    writeDocument(dir.path(), {".uhd.json", declaredL1Document(tflopsId)});
+    writeDocument(dir.path(),
+                  {".uhd.json", declaredL1Document(timeId, L1_SELECTOR_REVISION, "time")});
+    auto metricless = declaredL1Document(metriclessId);
+    // The whole block, not just the metric: a calibrated score naming no metric never parses,
+    // and this case needs a model that loads and only then fails to name a metric.
+    metricless.erase("score");
+    writeDocument(dir.path(), {".uhd.json", std::move(metricless)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(
+        loadDescriptorCatalog(dir.path()),
+        "test:opaque",
+        L1_SELECTOR_REVISION,
+        declaration({{"default", tflopsId}, {"default", timeId}, {"gfx942", metriclessId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.size(), 2u);
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    ASSERT_EQ(resolved.byMetric.count("time"), 1u);
+    // One `default` model each: the metric-less gfx942 declaration went nowhere.
+    ASSERT_EQ(resolved.byMetric.at("tflops").size(), 1u);
+    ASSERT_EQ(resolved.byMetric.at("time").size(), 1u);
+    EXPECT_EQ(toString(resolved.byMetric.at("tflops").at("default").id), tflopsId);
+    EXPECT_EQ(toString(resolved.byMetric.at("time").at("default").id), timeId);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names no registered score.metric"))
+        << recorder.getRecordedLogsAsString();
+
+    // Bound per metric, a request in either metric reaches that metric's model and no other.
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    for(const auto& [metric, byArch] : resolved.byMetric)
+    {
+        for(const auto& [arch, model] : byArch)
+        {
+            binding.bind(metric, arch, UhdKernelHeuristic::configFrom(model));
+        }
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const std::vector<std::pair<std::string, std::string>> expected
+        = {{"tflops", tflopsId}, {"time", timeId}};
+    for(const auto& [metric, id] : expected)
+    {
+        const auto prediction = binding.predict(
+            7, "test:opaque", L1_SELECTOR_REVISION, metric, "gfx942", features, /*evaluate=*/true);
+        ASSERT_EQ(prediction.status,
+                  hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+            << metric << ": " << prediction.reason;
+        EXPECT_EQ(prediction.metric, metric);
+        EXPECT_EQ(prediction.uhd_id, id);
+        EXPECT_NEAR(prediction.value, 42.0, 1e-12) << metric;
+    }
 }
 
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)

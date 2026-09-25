@@ -160,10 +160,10 @@ with its constant value), so the provenance says what was asked for and what nev
 | `--descriptor-tree` / `--provenance` | One | Descriptor snapshot used for collection, or its recorded identity/revision provenance |
 | `--engine` | If ambiguous | UED name or UUID in the descriptor tree |
 | `--feature-evaluator` | Only if undiscoverable | Shared `hipdnn_uhd_features` executable. Every signature needs it, raw references included: it is the one implementation of `features_hash`. Looked up in this order — this flag, `HIPDNN_UHD_FEATURE_EVALUATOR`, `bin/` and `build/bin/` under the interpreter prefix or above this package, then PATH. All relative, so a checkout mounted at a different root inside a container resolves the same way |
-| `--target` | No | Target column name (default: `tflops`) |
-| `--objective` | No | `max` or `min` (default: `max`). Pass `min` for a cost target such as `latency_ms`, or the runtime will prefer the *worst* kernel. |
-| `--score-units` | No | Units the score is expressed in (default: the `--target` column name) |
-| `--calibrated` | No | Declare the score cross-engine comparable — RFC 0019 §4.1's `score.calibrated` header, which §11.3 reads when it compares predicted throughput across engines. Off by default; nothing here verifies the claim, but RFC 0019.13 §11.2 pins a calibrated score to `avgTimeMs`, so `--timing-statistic avgTimeMs` is required alongside it. |
+| `--metric` | No | Ranking metric the score estimates (RFC 0019 §4.4): `tflops` (label column `tflops`, objective `max`) or `time` (label column `avgTimeMs`, objective `min`). Written as `score.metric`. Default: `tflops` when `--target` is omitted or is `tflops`; any other `--target` without `--metric` trains a metric-less ranker that orders its own catalog only. |
+| `--target` | No | Target column name (default: the metric's label column). With a metric it must be that label; a contradiction is refused. |
+| `--objective` | No | `max` or `min`. A metric fixes it and a contradicting value is refused; a metric-less model defaults to `max`, so pass `min` for a cost target such as `latency_ms`, or the runtime will prefer the *worst* kernel. |
+| `--calibrated` | No | Declare the score cross-engine comparable — RFC 0019 §4.1's `score.calibrated` header, which §11.3 reads when it compares predicted values across engines. Requires a metric. Off by default; nothing here verifies the claim, but RFC 0019.13 §11.2 pins a calibrated score to `avgTimeMs`, so `--timing-statistic avgTimeMs` is required alongside it. |
 | `--timing-statistic` | With `--calibrated` | Which measured timing the target was derived from (`avgTimeMs`, `minTimeMs`, `robustMeanMs`). Recorded in the manifest per §10.5: §11.2 refuses cross-engine comparison between models trained on different statistics, so it has to be readable off the artifact. |
 | `--group-by` | No | Columns for GroupKFold CV |
 | `--output-dir` | Yes | Output directory |
@@ -194,8 +194,14 @@ heuristic and no error.
 | `--remove-knob` | No | Explicit authored knob removal; requires compatible major-revised training provenance |
 | `--dry-run` | No | Print the plan, write nothing |
 
-`promote` copies the descriptor and artifact into the UED's directory and updates
-`<role>.<arch>`. It preserves other model references and authored knobs.
+`promote` copies the descriptor and artifact into the UED's directory — under
+`heuristics/<ued-id>/<role>/<arch>/<metric>/`, or directly under `<arch>/` for a
+metric-less ranker — and binds it under `<role>.<arch>`. `sort_kernel_catalog` and
+`predict_engine` bind a **list** per arch, one UHD per `score.metric` (RFC 0019 §3.1):
+the incoming UHD replaces only the bound UHD of its own metric (read from the bound UHD
+itself, which must therefore be installed in the tree) and otherwise joins the list; a
+single id is converted to a list. `predict_applicable_kernels` stays a single id. It
+preserves other model references and authored knobs.
 
 It validates everything before writing anything, and refuses rather than half-succeed:
 
@@ -238,6 +244,7 @@ python -m uhd_gen evaluate --input bench.csv --model-dir ./uhd_output
 
 ```
 Regret report (0019.13 §11.2, §11.4) -- ./uhd_output/eval_report.json
+  metric:             (none: ranks its own catalog only)
   target/objective:   minTimeMs (min)
   problems grouped by: benchmark, device
   split:              group_holdout_by_problem, seed 0, 12 eval / 48 train problem(s)
@@ -359,7 +366,7 @@ is.
 | `--eval-fraction` | No | Fraction of **problems** held out and scored (default: 0.2; `1.0` scores everything and says loudly that the figure is optimistic) |
 | `--seed` | No | Seed for the problem-level split (default: 0), recorded in the report |
 | `--target` | No | Measured column regret is computed in (default: the manifest's `target`) |
-| `--objective` | No | Override the direction read from the descriptor/manifest |
+| `--objective` | No | Override the direction read from the descriptor/manifest. Refused when it contradicts the descriptor's `score.metric` |
 | `--device-column` | No | Column holding device identity (default: `device`) |
 | `--regime-column` | No | Regime column for the per-regime table (default: the first of `regime`, `corpus_regime`, `q.regime`, `problem.regime` that is present) |
 | `--tie-rel-tolerance` | No | Tie tolerance for tie-aware recall (default: 0.01) |
@@ -370,9 +377,10 @@ is.
 
 The **objective is read, never assumed** — from the descriptor, falling back to the
 manifest. Both directions are legal and the wrong one inverts every number, so a corpus
-that offers neither is an error rather than a guess. Regret is asserted non-negative;
-a negative one means the direction is backwards, and `evaluate` fails instead of
-printing a plausible small number.
+that offers neither is an error rather than a guess. A descriptor naming a `score.metric`
+fixes the direction (`tflops` max, `time` min), so regret is always computed in the
+metric's direction. Regret is asserted non-negative; a negative one means the direction
+is backwards, and `evaluate` fails instead of printing a plausible small number.
 
 ### `eval_report.json`
 
@@ -380,7 +388,7 @@ printing a plausible small number.
 |-----|----------|
 | `schema` | `uhd_gen.eval_report/1` |
 | `corpus` | path, row count, problem count |
-| `target`, `objective` | what regret was measured in, and in which direction |
+| `metric`, `target`, `objective` | the descriptor's `score.metric` (null for a metric-less ranker), and what regret was measured in, in which direction |
 | `grouping` | the problem-identity columns, `degraded`, and why |
 | `split` | method, unit, seed, fraction, train/eval problem counts, and the evaluated problem keys |
 | `slice` | that `V(p)` is what the sweep measured rather than every applicable configuration, so `v*(p)` is a lower bound (§11.1) |
@@ -522,6 +530,16 @@ graph files or corpus directories, enumerates matched candidates through
 trains, evaluates a held-out problem/device split, and promotes.
 `--no-promote` validates installation without changing the shipping tree.
 
+`--metric` names the ranking metrics to train (`tflops`, `time`; repeatable or
+space-separated; default `tflops`). One run emits **one UHD per metric** (RFC 0019
+§13.4): with a single metric the model lands in `model/` exactly as before; with several,
+each lands in `model_<metric>/`, is evaluated on its own, and is promoted in turn — each
+promotion adds its UHD to the arch's role list and replaces only that metric's entry.
+The catalog sweep is timed once and feeds every metric; `--uhd-id` names one UHD and is
+refused when more than one metric is requested. `generation_manifest.json`
+(`uhd_gen.generation/2`) records a `models` entry per UHD with its metric, directory,
+corpus and the exact train/evaluate commands.
+
 `--graphs` takes both serialized forms: hand-written or exported `*.json`, and the
 binary FlatBuffers `hipdnn_corpus_gen` writes as `problems/<operation>_<n>.fb`, so a
 generated corpus composes with `generate` directly. Directories are searched
@@ -560,15 +578,18 @@ error. It is only consumed by the rename into `--output-dir` that a successful r
 performs, so nothing accumulates from runs that worked. Delete a reported stage once
 you no longer need what it measured.
 
-**What the catalog model is scored in.** When the engine publishes `graph.flops`,
-`generate` derives `tflops = graph.flops / (avgTimeMs * 1e9)` per candidate and trains
-`sort_kernel_catalog` on `tflops`/`max` with `score.calibrated: true` —
-`avgTimeMs` because RFC 0019.13 §11.2 pins a calibrated score to the mean. That is what
-gives the role the cross-engine standing RFC 0019 §11.1 describes, and with it §11.2's
-`B only` ranking row. Without a published work count it falls back to
-`robustMeanMs`/`min`/uncalibrated, which is legal (§2.5, §15.1) and ranks this engine's
-own catalog just as well, and warns that the score is no longer comparable with another
-engine's — Mode B then falls back to the engine's L1 prediction.
+**What the catalog model is scored in.** Each metric fixes its label (RFC 0019 §13.4):
+`tflops` is `graph.flops / (avgTimeMs * 1e9)`, derived per candidate from the engine's
+published `graph.flops`; `time` is `avgTimeMs` itself. Either is trained as
+`sort_kernel_catalog` with `score.calibrated: true` and the metric's objective (`max`,
+`min`) — `avgTimeMs` because RFC 0019.13 §11.2 pins a calibrated score to the mean. That
+is what gives the role the cross-engine standing RFC 0019 §11.1 describes, and with it
+§11.2's `B only` ranking row. When no `--metric` was given and the engine publishes no
+work count, it falls back to `robustMeanMs`/`min`/uncalibrated with **no** `score.metric`
+— the engine's metric-less default ranker, which is legal (§2.5, §15.1), ranks this
+engine's own catalog just as well, and warns that the score is no longer comparable with
+another engine's; the thorough policy then falls back to the engine's L1 prediction. An
+explicitly requested `--metric tflops` without a work count fails instead.
 
 `generate` takes the work count from the engine's own published `graph.flops`, which is
 the effective count the runtime computed for the graph it just ran. A corpus that was
@@ -579,38 +600,44 @@ differ only in which of its outputs they read.
 
 ### Engine-level immediate predictions
 
-`predict_engine_tflops` trains an engine's **normal untuned performance**, not
-the best configuration found by a sweep. Collection builds only that engine's
-plan with `global.benchmarking=0`, warms it up, and measures ordinary execution
-with HIP events. It does not enumerate configurations or invoke autotune; normal
-engine cache behavior is unchanged. Full-graph work and elapsed time determine the
-TFLOPS label; unsupported work accounting is not replaced with a guessed label.
+`predict_engine` trains an engine's **normal untuned performance**, not the best
+configuration found by a sweep. Collection builds only that engine's plan with
+`global.benchmarking=0`, warms it up, and measures ordinary execution with HIP events.
+It does not enumerate configurations or invoke autotune; normal engine cache behavior is
+unchanged. Full-graph work and elapsed time determine the TFLOPS label; unsupported work
+accounting is not replaced with a guessed label.
 
-The label is `graph.flops / (avgTimeMs * 1e9)`. RFC 0019.13 §11.2 (:2003) requires a
-UHD declaring `calibrated: true` to train on `avgTimeMs`, and §10.6.2 repeats it for
-this role specifically; L1 always declares it, so the mean is the label and never the
-minimum or the robust mean. `robustMeanMs` stays on every corpus row as §8.5's
-informational statistic, alongside `stddevMs` and `iters`. Which statistic produced the
-label is recorded as `timing_statistic` in `train_manifest.json`, because §11.2 refuses
-cross-engine comparison between models trained on different ones.
+The `tflops` label is `graph.flops / (avgTimeMs * 1e9)`; the `time` label is `avgTimeMs`.
+RFC 0019.13 §11.2 (:2003) requires a UHD declaring `calibrated: true` to train on
+`avgTimeMs`, and §10.6.2 repeats it for this role specifically; L1 always declares it, so
+the mean is the label and never the minimum or the robust mean. `robustMeanMs` stays on
+every corpus row as §8.5's informational statistic, alongside `stddevMs` and `iters`.
+Which statistic produced the label is recorded as `timing_statistic` in
+`train_manifest.json`, because §11.2 refuses cross-engine comparison between models
+trained on different ones.
+
+The engine picks its kernel at plan build with its ranker for the request's metric
+(RFC 0019 §11.4), so an immediate measurement belongs to one metric: collection passes
+`--ranking-metric <metric>` and checks the response names it, and a multi-metric L1 run
+collects once per metric into `corpus_<metric>.json`.
 
 ```bash
 hipdnn_bench --graph graph.json --engine-name vendor:gemm \
     --describe-engine-prediction --workspace-limit 67108864
 hipdnn_bench --graph graph.json --engine-name vendor:gemm \
-    --collect-immediate --workspace-limit 67108864
+    --collect-immediate --ranking-metric tflops --workspace-limit 67108864
 
 python -m uhd_gen generate \
     --graphs ./graphs --descriptor-tree ./descriptors \
     --engine vendor:gemm --engine-id <ENGINE-ID> \
-    --role predict_engine_tflops --arch gfx942 \
+    --role predict_engine --metric tflops time --arch gfx942 \
     --workspace-limit 67108864 \
     --features graph.flops device.cu_count \
     --output-dir ./immediate-model
 
 HIPDNN_DESCRIPTOR_PATH=./descriptors hipdnn_bench \
     --graph graph.json --engine-name vendor:gemm --predict-engine \
-    --workspace-limit 67108864
+    --ranking-metric time --workspace-limit 67108864
 ```
 
 Choose features from the description's published graph, device, and constraint
@@ -622,14 +649,16 @@ Generation preserves supplied graph UUIDs and assigns reproducible IDs to ID-les
 JSON inputs. It records the physical device ID, selector revision, commands,
 constraints, warmup, timing statistics, and disjoint training/evaluation graph-device
 identities. L1 evaluation reports calibration errors and cross-engine immediate
-selection regret; a corpus with only one measured engine cannot establish
-cross-engine selection quality.
+selection regret, in the model's metric and direction (keys such as
+`signed_bias_tflops` / `signed_bias_time`); every compared model must predict the same
+metric, and a corpus with only one measured engine cannot establish cross-engine
+selection quality.
 UED role-map keys use the bare architecture (for example, `gfx942`); candidate
 collection retains feature-suffixed architecture strings in `device_arch`.
 
 The runtime lives in `hipdnn_plugin_sdk/heuristics/uhd/` and is available without
 `HIPDNN_ENABLE_KERNEL_INGESTOR`, but an engine only reaches it through a binding that
-lives in compiled code: a `predict_engine_tflops` UED role for a descriptor-backed
+lives in compiled code: a `predict_engine` UED role for a descriptor-backed
 engine, or, for an engine that ships no UED, the UHD UUID its provider declares in its
 own engine definition (RFC 0019 Open Question 7, RESOLVED). Authoring an L1 model for an
 opaque engine therefore means publishing a UHD carrying one of the ids that engine
@@ -679,19 +708,21 @@ error = graph.create_execution_plans([hipdnn.HeuristicMode.B,
                                       hipdnn.HeuristicMode.FALLBACK])
 ```
 
-- **Mode A** ranks applicable engines by L1 TFLOPS, without querying L2 or
-  materializing losing engines' configuration catalogs. The chosen engine uses
-  its normal selector with tuning disabled.
-- **Mode B** uses an engine's calibrated L2 configuration prediction when
-  available, otherwise its L1 prediction. The L2 result owns an `EngineVariant`
-  containing the engine ID and explicit knob settings. Plan construction
-  preserves those settings to execute the scored configuration.
-- Engines without a usable prediction remain eligible after scored engines. If
-  no engine has a usable score, the prediction policy declines rather than
+- The quick policy (**Mode A**) ranks applicable engines by their L1 prediction in the
+  request's ranking metric, without querying L2 or materializing losing engines'
+  configuration catalogs. The chosen engine picks its kernel at plan build with its
+  ranker for that metric, tuning disabled.
+- The thorough policy (**Mode B**) uses an engine's calibrated L2 configuration
+  prediction in that metric when available, otherwise its L1 prediction. The L2 result
+  owns an `EngineVariant` containing the engine ID and explicit knob settings. Plan
+  construction preserves those settings to execute the scored configuration.
+- Engines without a usable prediction in the metric remain eligible after scored
+  engines. If no engine has a usable score, the prediction policy declines rather than
   fabricating a ranking. An explicitly supplied fallback mode can then run.
 
-`AVAILABLE` carries physical TFLOPS. `UNAVAILABLE` and `INVALID` do not remove
-engine applicability. Description queries do not evaluate a model; evaluated
+`AVAILABLE` carries a `value` in the requested `metric`'s units (TFLOPS for `tflops`,
+milliseconds for `time`); an engine never answers in another metric. `UNAVAILABLE` and
+`INVALID` do not remove engine applicability. Description queries do not evaluate a model; evaluated
 queries can omit binding/features metadata to keep the policy path lightweight.
 Neither prediction kind times GPU work; L2 may prepare a candidate to ensure the
 returned selection is executable.
@@ -710,12 +741,12 @@ Graph serialization embeds a built plan only when the engine advertises that
 capability; otherwise it stores the graph alone. For an engine without that
 capability, restore the graph and explicitly reapply the owned configuration.
 
-L2 cross-engine comparison requires a model trained against actual TFLOPS with
-`--target tflops --objective max --score-units tflops --calibrated
---timing-statistic avgTimeMs`. `generate` produces exactly that whenever the engine
-publishes `graph.flops`, and otherwise says in a warning that the model it produced
-ranks a catalog without being a calibrated L2 throughput estimate. Do not relabel a
-latency or arbitrary-score model as TFLOPS.
+L2 cross-engine comparison requires a model trained against the metric's own label with
+`--metric <m> --calibrated --timing-statistic avgTimeMs`. `generate` produces exactly
+that for every requested metric it can label, and for the default run on an engine that
+publishes no `graph.flops` says in a warning that the model it produced ranks a catalog
+without being a calibrated L2 estimate. Do not relabel a latency or arbitrary-score model
+as TFLOPS.
 
 ## Output
 
@@ -723,7 +754,7 @@ latency or arbitrary-score model as TFLOPS.
 
 ```
 output_dir/
-├── <stem>.uhd.json     # the UHD: features, objective, score units, artifact
+├── <stem>.uhd.json     # the UHD: features, objective, score metric, artifact
 ├── model.bin           # FlatBuffer GbdtModel for TreeDataAdapter
 └── train_manifest.json # training provenance
 ```
@@ -735,22 +766,25 @@ path relative to that file, so the directory relocates as a unit.
 
 For a descriptor-backed engine, the UED names the heuristic by id. `train` prints
 the id and records it in `train_manifest.json`; `promote` updates the UED and
-isolates model files by engine, role, and architecture:
+isolates model files by engine, role, architecture and metric:
 
 ```
 descriptor_tree/
-├── <engine>.ued.json   # <role>.<arch> names the new UHD
+├── <engine>.ued.json   # <role>.<arch> lists the UHDs, one per metric
 └── heuristics/
     └── <engine-uuid>/
         └── <role>/
             └── <arch>/
-                ├── <stem>.uhd.json
-                └── model.bin
+                ├── <stem>.uhd.json      # a metric-less ranker, if any
+                ├── model.bin
+                └── <metric>/
+                    ├── <stem>.uhd.json
+                    └── model.bin
 ```
 
-L1 and L2 may both use the default source filenames without overwriting each
-other: `<role>` keeps them in separate directories, and each is referenced from its
-own entry in the UED role map.
+L1 and L2, and each metric's model, may all use the default source filenames without
+overwriting each other: `<role>` and `<metric>` keep them in separate directories, and
+each is referenced from its own entry in the UED role map.
 
 ### The artifact is content-addressed, and reproducible
 
@@ -822,11 +856,15 @@ FlatBuffer this tool writes, and it goes through generated bindings.
   "features_signature": ["$q.M", "$q.N", "$q.K", "$kernel.tile_m", ...],
   "features_hash": "sha256:...",
   "objective": "max",
-  "score": {"units": "tflops", "calibrated": false, "transform": "log1p"},
+  "score": {"metric": "tflops", "calibrated": false, "transform": "log1p"},
   "categorical_encoding": {"$kernel.dtype": {"bf16": 0, "fp16": 1}},
   "tree_data": {"artifact": "model.bin"}
 }
 ```
+
+`score.metric` is the registered ranking metric the score estimates (`tflops` or `time`,
+RFC 0019 §4.4), and `objective` is always that metric's direction. A metric-less
+ranker omits `metric`, and cannot declare `calibrated: true`.
 
 `categorical_encoding` maps each string-valued feature to the codes the model was
 fitted with. It is derived from the training corpus, keyed by the full `$reference`
@@ -840,7 +878,7 @@ recorded in `train_manifest.json` (as `{}` when there is none) and is the one
 
 ## Training Details
 
-- **Target transform**: `log1p(tflops)` for scale-invariant training
+- **Target transform**: `log1p(target)` for scale-invariant training
 - **Cross-validation**: GroupKFold when `--group-by` specified
 - **Early stopping**: Prevents overfitting
 - **Model format**: LightGBM → FlatBuffer GbdtModel

@@ -28,6 +28,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/gbdt_model_generated.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -130,8 +131,13 @@ nlohmann::json snapshotProvenance(const std::vector<std::filesystem::path>& root
     };
     for(const auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
     {
-        const auto model = set.engine.sortKernelCatalog.find("default");
-        if(model == set.engine.sortKernelCatalog.end() || toString(model->second) != UHD_ID)
+        // The role maps each arch to a list of UHDs, one per metric; the generated model is
+        // bound when its id is anywhere in the `default` list.
+        const auto models = set.engine.sortKernelCatalog.find("default");
+        if(models == set.engine.sortKernelCatalog.end()
+           || std::none_of(models->second.begin(), models->second.end(), [](const auto& id) {
+                  return toString(id) == UHD_ID;
+              }))
         {
             continue;
         }
@@ -165,11 +171,11 @@ void writeUhd(const std::filesystem::path& path,
     json << "  \"features_hash\": \"" << featuresHash << "\",\n";
     json << "  \"objective\": \"max\",\n";
 
-    // Not calibrated: 9.0 and 1.0 are ordering, not throughput, so this score means nothing
-    // against another engine's (RFC 0019 §12.3). The leaf values are the score itself, so
-    // nothing has to be undone to read them.
-    json << "  \"score\": { \"units\": \"score\", \"calibrated\": false, "
-            "\"transform\": \"identity\" },\n";
+    // Not calibrated and no metric: 9.0 and 1.0 are ordering, not throughput, so this score
+    // means nothing against another engine's (RFC 0019 §12.3) and ranks no registered
+    // metric -- it is its engine's metric-less `sort_kernel_catalog` ranker (§4.4). The
+    // leaf values are the score itself, so nothing has to be undone to read them.
+    json << "  \"score\": { \"calibrated\": false, \"transform\": \"identity\" },\n";
 
     // Relative: resolved against this file's own directory, wherever the pack is staged.
     json << "  \"tree_data\": { \"artifact\": \"" << MODEL_FILE << "\" }\n";

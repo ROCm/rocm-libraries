@@ -749,15 +749,19 @@ private:
     /// Device comes from the context, not a separate argument, so one device's catalog
     /// never caches under another's key. The engine revision comes from this manager, not
     /// the context: the catalog is this engine's kernels ranked by this engine's heuristic,
-    /// and a context knows nothing about either.
+    /// and a context knows nothing about either. The ranking metric comes from the context,
+    /// because the sorted order and the calibrated ranking both depend on it (RFC 0019
+    /// §11.4); the key holds the registry's own view of the name, never the caller's, since
+    /// the key outlives the request.
     std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
         const auto graphId = tryGetGraphId(context.graph);
-        if(!graphId.has_value())
+        const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
+        if(!graphId.has_value() || metric == nullptr)
         {
             return std::nullopt;
         }
-        return CatalogKey{*graphId, context.deviceId, _engine.version};
+        return CatalogKey{*graphId, context.deviceId, _engine.version, metric->name};
     }
 
     Catalog catalogFor(const MatchContext& context) const
@@ -997,7 +1001,6 @@ private:
         }
         return ordered;
     }
-
 
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
     /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow

@@ -14,8 +14,8 @@ namespace hipdnn_plugin_sdk::uhd
 /// @brief Score transform utilities (RFC 0019 §5, §12.3).
 ///
 /// Models may be trained on a transformed target (e.g. log1p(tflops)). The declared
-/// `score.transform` names that transform so a consumer can invert it and recover the
-/// declared `score.units` — which is what makes cross-engine comparison meaningful.
+/// `score.transform` names that transform so a consumer can invert it and recover the value
+/// in `score.metric`'s registered units — which is what makes cross-engine comparison meaningful.
 ///
 /// The set of transforms is closed: a descriptor naming one we cannot invert is rejected
 /// when it is parsed (`parseUhdConfig`'s `score` block) and again where an engine binds an
@@ -69,7 +69,7 @@ inline std::string supportedTransformList()
 ///        SUPPORTED_TRANSFORMS; unknown names fall through unchanged, which is only
 ///        safe because `isSupported` rejects them at parse (and again at L1 binding),
 ///        so no path reaches here with a name this function cannot invert.
-/// @returns Score in the units declared by the UHD.
+/// @returns Score in the units of the UHD's `score.metric`.
 inline double applyInverse(double rawScore, const std::string& transform)
 {
     if(transform == "log1p")

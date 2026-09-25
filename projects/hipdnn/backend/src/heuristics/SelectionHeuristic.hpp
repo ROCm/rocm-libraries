@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
-#include <vector>
+#include <string>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/HeuristicsPluginApi.h>
@@ -125,12 +125,16 @@ public:
      */
     bool finalize();
 
+    /// Answers one candidate's prediction in the finalize's ranking metric. The provider
+    /// owns response validation: an answer in any other metric arrives as INVALID.
     using PredictionProvider
         = std::function<hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT(
             int64_t, hipdnnEnginePredictionKind_t)>;
 
-    /// Runs with borrowed prediction services, released before returning.
-    bool finalize(const PredictionProvider& predict);
+    /// Runs with borrowed prediction services, released before returning. @p rankingMetric
+    /// is the registered metric the policy ranks by; it reaches the plugin as the host
+    /// table's ranking_metric and must name the metric @p predict answers in.
+    bool finalize(const PredictionProvider& predict, const std::string& rankingMetric);
 
     /**
      * @brief Retrieves the sorted engine IDs after successful finalize.

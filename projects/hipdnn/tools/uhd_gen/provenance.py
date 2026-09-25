@@ -8,7 +8,7 @@ import re
 import uuid
 from pathlib import Path
 
-ROLES = ("sort_kernel_catalog", "predict_engine_tflops", "predict_applicable_kernels")
+ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 

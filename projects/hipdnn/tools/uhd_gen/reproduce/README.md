@@ -21,9 +21,9 @@ that is not, so on this branch that engine has kernels and no installed heuristi
 
 | engine | arch | roles | binding |
 |---|---|---|---|
-| `hipkernel:Gfx942AttentionDense` | gfx942 | `sort_kernel_catalog`, `predict_engine_tflops` | UED role map, `rocKE/gfx942_attention_dense/heuristics/` |
-| `hipkernel:Gfx950AttentionDense` | gfx950 | `sort_kernel_catalog`, `predict_engine_tflops` | UED role map, `rocKE/gfx950_attention_dense/heuristics/` — **integration branch only** |
-| `ASM_SDPA_ENGINE` | gfx942, gfx950 | `predict_engine_tflops` | UUID declared in `AsmSdpaEngine.hpp`; document staged from `src/engines/asm_sdpa_engine/descriptors/` |
+| `hipkernel:Gfx942AttentionDense` | gfx942 | `sort_kernel_catalog`, `predict_engine` | UED role map, `rocKE/gfx942_attention_dense/heuristics/` |
+| `hipkernel:Gfx950AttentionDense` | gfx950 | `sort_kernel_catalog`, `predict_engine` | UED role map, `rocKE/gfx950_attention_dense/heuristics/` — **integration branch only** |
+| `ASM_SDPA_ENGINE` | gfx942, gfx950 | `predict_engine` | UUID declared in `AsmSdpaEngine.hpp`; document staged from `src/engines/asm_sdpa_engine/descriptors/` |
 
 AITER owns no descriptor set, so its model is bound by the UUID the provider declares
 (RFC 0019 §4.1, Open Question 7) rather than by a role map. The document's `id` IS the
@@ -94,9 +94,14 @@ descriptor pack here, so on this branch it registers nothing to collect against.
 submission runs on either.
 
 `UHD_ROLES` is `+`-separated: sbatch's own `--export` parser splits its value on commas.
+`UHD_METRICS` (e.g. `tflops+time`, same separator) trains one UHD per ranking metric per
+role from the same run; unset, each role trains its default `tflops` model as before.
 
 Each run keeps `l1/corpus.csv` (one measured row per graph), `l1/model/` (the artifact and
-`eval_report.json`) and `declined.txt`. An engine with no catalog to rank takes `l1` alone.
+`eval_report.json`) and `declined.txt`. With several metrics these become
+`l1/corpus_<metric>.csv` and `l1/model_<metric>/` (L1 measures each metric separately,
+because the engine's kernel choice follows the metric), and `l2/model_<metric>/` beside
+one shared `l2/corpus.csv`. An engine with no catalog to rank takes `l1` alone.
 
 ## 3. Compare engines on what was measured
 

@@ -18,11 +18,16 @@ from .provenance import (
     provenance_for_engine, revision, select_engine, validate_provenance,
 )
 from .immediate import ROLE, validate_model
+from .ranking_metrics import RANKING_METRICS
 
 logger = logging.getLogger(__name__)
 UHD_SUFFIX = ".uhd.json"
 _ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
 _ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
+#: Roles whose arch key binds a list of UHDs, one per ranking metric (RFC 0019 §3.1).
+#: `predict_applicable_kernels` generates the candidate set rather than scoring it, so it
+#: has no metric to key on and stays single-valued.
+_METRIC_ROLES = ("sort_kernel_catalog", ROLE)
 
 
 class PromoteError(ValueError):
@@ -51,6 +56,8 @@ class PromotePlan:
     warnings: list[str] = field(default_factory=list)
     dropped_knobs: list[str] = field(default_factory=list)
     write_descriptor: bool = True
+    #: The incoming UHD's `score.metric`; None for a metric-less ranker.
+    metric: str | None = None
 
 
 def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
@@ -182,14 +189,17 @@ def _opaque_plan(descriptor_path, descriptor, identity, model_dir, descriptor_tr
     engine_name = str(engine or descriptor.get("engine") or "")
     if not engine_name:
         raise PromoteError("pass --engine: the canonical engine name the provider declares")
-    destination_dir = Path(descriptor_tree) / "heuristics" / _slug(engine_name) / role / arch
+    # One directory per metric, so the engine's `time` and `tflops` estimates for one arch
+    # never share a file name (RFC 0019 §3.1: one UHD per role, arch and metric).
+    metric = _score_metric(descriptor)
+    destination_dir = Path(descriptor_tree) / "heuristics" / _slug(engine_name) / role / arch / metric
     destination_descriptor = destination_dir / descriptor_path.name
     _contained(destination_descriptor, descriptor_tree, "destination descriptor")
     artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
     installed_descriptor = copy.deepcopy(descriptor)
     plan = PromotePlan(descriptor_path, identity, artifact_path, None, None,
                        engine_name, None, role, arch,
-                       destination_descriptor, installed_descriptor)
+                       destination_descriptor, installed_descriptor, metric=metric)
     if artifact_path is not None:
         destination_artifact = destination_dir / artifact_path.name
         _contained(destination_artifact, descriptor_tree, "destination artifact")
@@ -261,18 +271,36 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
         return opaque
     ued_path, original_ued = select_engine(index, engine)
     engine_name = str(original_ued.get("name", ""))
+    metric = _score_metric(descriptor)
+    # One directory per metric, so an engine's rankers for one arch never share a file name
+    # (RFC 0019 §3.1: one UHD per role, arch and metric). A metric-less ranker has the arch
+    # directory to itself.
     destination_dir = ued_path.parent / "heuristics" / original_ued["id"] / role / arch
+    if metric is not None:
+        destination_dir /= metric
     ueds = list(index["ued"].values())
     references = [ref for path, doc in ueds for ref in _role_references(path, doc)]
+    installed = []
+    installed_ids = {}
+    for path in sorted(descriptor_tree.rglob(f"*{UHD_SUFFIX}")):
+        if path.name == UHD_SUFFIX:
+            continue
+        doc = _load_json(path, "installed UHD")
+        current_id = descriptor_id(doc.get("id"), str(path))
+        if current_id in installed_ids:
+            raise PromoteError(f"duplicate installed UHD identity {current_id}: {installed_ids[current_id]} and {path}")
+        installed_ids[current_id] = path
+        installed.append((path, doc, current_id))
     ued = copy.deepcopy(original_ued)
-    old = ued.get(role, {}).get(arch)
+    bound, replaced = _rebind(ued, role, arch, identity, metric, installed_ids)
+    old = replaced[0] if replaced else None
     artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
     installed_descriptor = copy.deepcopy(descriptor)
     destination_descriptor = destination_dir / descriptor_path.name
     _contained(destination_descriptor, descriptor_tree, "destination descriptor")
     plan = PromotePlan(descriptor_path, identity, artifact_path, ued_path, ued,
                        engine_name, old, role, arch,
-                       destination_descriptor, installed_descriptor)
+                       destination_descriptor, installed_descriptor, metric=metric)
     plan.warnings.extend(gate_warnings)
     if remove_knobs:
         exposed = ued.get("knobs", [])
@@ -299,20 +327,11 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
     elif remove_knobs:
         raise PromoteError("explicit knob removal requires training provenance for the intended revised UED; retrain first")
 
-    installed = []
-    installed_ids = {}
-    for path in sorted(descriptor_tree.rglob(f"*{UHD_SUFFIX}")):
-        if path.name == UHD_SUFFIX:
-            continue
-        doc = _load_json(path, "installed UHD")
-        current_id = descriptor_id(doc.get("id"), str(path))
-        if current_id in installed_ids:
-            raise PromoteError(f"duplicate installed UHD identity {current_id}: {installed_ids[current_id]} and {path}")
-        installed_ids[current_id] = path
-        installed.append((path, doc, current_id))
     target = (ued_path.resolve(), role, arch)
+    # Only the entry this promotion replaces leaves the role map. Every other binding --
+    # including the other metrics' UHDs under this same arch key -- is held fixed.
     others = [(path, slot, target_arch, ref) for path, slot, target_arch, ref in references
-              if (path.resolve(), slot, target_arch) != target]
+              if (path.resolve(), slot, target_arch) != target or ref not in replaced]
     # A UUID shared by another role or architecture is immutable for this promotion,
     # even if the destination filename happens to be the model it already references.
     descriptor_changes = not _same_file(descriptor_path, destination_descriptor)
@@ -370,9 +389,63 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
                     raise PromoteError(f"knob removal would invalidate {other_role}/{other_arch}: {error}") from error
             if set(plan.dropped_knobs) & _kernel_references(model.get("features_signature", [])):
                 raise PromoteError(f"knob removal would affect {other_role}/{other_arch}")
-    ued.setdefault(role, {})[arch] = identity
+    ued.setdefault(role, {})[arch] = bound
     plan.write_descriptor = descriptor_changes
     return plan
+
+
+def _score_metric(document: dict) -> str | None:
+    """The ranking metric a UHD's score estimates; None for a metric-less ranker."""
+    score = document.get("score")
+    return score.get("metric") if isinstance(score, dict) else None
+
+
+def _role_value(value, role: str, where: str) -> list[str]:
+    """The UHD ids one arch key binds: one id, or for a metric-keyed role a list of them."""
+    if role in _METRIC_ROLES and isinstance(value, list):
+        if not value:
+            raise PromoteError(f"{where}: an empty list binds nothing; omit the architecture instead")
+        identities = [descriptor_id(item, where) for item in value]
+        if len(set(identities)) != len(identities):
+            raise PromoteError(f"{where}: lists the same UHD twice")
+        return identities
+    return [descriptor_id(value, where)]
+
+
+def _rebind(ued: dict, role: str, arch: str, identity: str, metric: str | None,
+            installed_ids: dict[str, Path]) -> tuple:
+    """The arch key's value once `identity` is bound, and the ids it displaces.
+
+    RFC 0019 §3.1 and §13.4: a metric-keyed role holds one UHD per metric under each arch
+    key, so the incoming UHD replaces only the entry of its own metric and otherwise joins
+    the others. The metric lives in each UHD, never in the UED, so the bound UHDs are read
+    to learn theirs -- a bound UHD this tree does not contain cannot be classified, and
+    guessing would either drop a live model or bind two of one metric.
+    """
+    where = f"{role}.{arch}"
+    value = ued.get(role, {}).get(arch)
+    current = [] if value is None else _role_value(value, role, where)
+    if role not in _METRIC_ROLES:
+        return identity, current
+
+    def same_metric(ref: str) -> bool:
+        if ref == identity:
+            return True
+        path = installed_ids.get(ref)
+        if path is None:
+            raise PromoteError(f"{where} binds UHD {ref}, which is not installed in this descriptor "
+                               "tree; its score.metric decides whether this promotion replaces it")
+        return _score_metric(_load_json(path, "bound UHD")) == metric
+
+    replaced = [ref for ref in current if same_metric(ref)]
+    if len(replaced) > 1:
+        raise PromoteError(f"{where} already binds {len(replaced)} UHDs for metric "
+                           f"{metric or '(none)'} ({', '.join(replaced)}); at most one is allowed")
+    # In place, so a replacement keeps its position; a new metric is appended.
+    bound = [identity if ref in replaced else ref for ref in current]
+    if not replaced:
+        bound.append(identity)
+    return bound, replaced
 
 
 def _role_references(path: Path, document: dict):
@@ -384,10 +457,11 @@ def _role_references(path: Path, document: dict):
         entries = document[role]
         if not isinstance(entries, dict) or not entries:
             raise PromoteError(f"{path}.{role} must be a nonempty arch-to-UUID map")
-        for arch, identity in entries.items():
+        for arch, value in entries.items():
             if arch != "default" and not _ARCH.fullmatch(arch):
                 raise PromoteError(f"{path}.{role}: invalid architecture {arch!r}")
-            yield path, role, arch, descriptor_id(identity, f"{path}.{role}.{arch}")
+            for identity in _role_value(value, role, f"{path}.{role}.{arch}"):
+                yield path, role, arch, identity
 
 
 def _validate_descriptor(document: dict, path: Path) -> None:
@@ -441,13 +515,24 @@ def _validate_descriptor(document: dict, path: Path) -> None:
             raise PromoteError(f"{path}: categorical_encoding requires value-to-integer maps")
     if "score" in document:
         score = document["score"]
-        if not isinstance(score, dict) or set(score) - {"units", "calibrated", "transform"}:
+        if not isinstance(score, dict) or set(score) - {"metric", "calibrated", "transform"}:
             raise PromoteError(f"{path}: invalid score header")
-        if any(key in score and (not isinstance(score[key], str) or not score[key])
-               for key in ("units", "transform")):
-            raise PromoteError(f"{path}: score units/transform must be nonempty strings")
+        if "transform" in score and (not isinstance(score["transform"], str) or not score["transform"]):
+            raise PromoteError(f"{path}: score.transform must be a nonempty string")
         if "calibrated" in score and not isinstance(score["calibrated"], bool):
             raise PromoteError(f"{path}: score.calibrated must be a boolean")
+        # RFC 0019 §4.1: the metric is registered, fixes the direction, and is what a
+        # calibrated score is calibrated in.
+        if "metric" in score:
+            if score["metric"] not in RANKING_METRICS:
+                raise PromoteError(f"{path}: score.metric {score['metric']!r} is not a registered "
+                                   f"ranking metric ({', '.join(RANKING_METRICS)})")
+            expected = RANKING_METRICS[score["metric"]].objective
+            if document.get("objective") != expected:
+                raise PromoteError(f"{path}: score.metric {score['metric']} ranks {expected}; "
+                                   f"objective {document.get('objective')!r} contradicts it")
+        elif score.get("calibrated") is True:
+            raise PromoteError(f"{path}: a calibrated score must name its metric")
     body = document[adapter]
     allowed = ({"order"} if adapter == "static_order" else {"symbol"} if adapter == "native"
                else {"library", "symbol", "hash", "config"} if adapter == "custom_library"
@@ -535,6 +620,7 @@ def _report(plan: PromotePlan, dry_run: bool) -> None:
     print("UHD promotion plan (dry run, nothing written)" if dry_run else "UHD promoted")
     binding = plan.ued_path if plan.ued_path is not None else "declared in provider code"
     print(f"  engine: {plan.engine_name}\n  binding: {binding}\n  role/arch: {plan.role}/{plan.arch}")
+    print(f"  metric: {plan.metric or '(none: metric-less ranker)'}")
     print(f"  heuristic was: {plan.old_heuristic or '(none)'}\n  heuristic now: {plan.descriptor_id}")
     for source, destination in plan.copies:
         print(f"  {'would copy' if dry_run else 'copy'}: {source} -> {destination}")

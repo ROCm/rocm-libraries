@@ -23,6 +23,7 @@
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlanBuilder.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
@@ -66,8 +67,9 @@ public:
     GenericEngine(EngineDescriptor engine,
                   std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
                   const IDeviceResolver<THandle>& deviceResolver,
-                  std::map<std::string, HeuristicDescriptor> predictions = {},
-                  std::set<std::string> unavailablePredictionArches = {},
+                  std::map<std::string, std::map<std::string, HeuristicDescriptor>> predictions
+                  = {},
+                  std::map<std::string, std::set<std::string>> unavailablePredictionArches = {},
                   std::string selectorRevision = {},
                   nlohmann::json provenance = nlohmann::json::object())
         : _engine(std::move(engine))
@@ -86,19 +88,28 @@ public:
                                         + "', which its metadata schema does not declare");
         }
         // RFC 0019 §3.1: the UED's role map is this engine's L1 binding, and it lives in
-        // the loader's resolution rather than in the UHD the map names.
-        for(const auto& [arch, descriptor] : predictions)
+        // the loader's resolution rather than in the UHD the map names. The metric is the
+        // one each UHD declares, by which the loader keyed it.
+        for(const auto& [metric, byArch] : predictions)
         {
-            _binding.bind(arch, UhdKernelHeuristic::configFrom(descriptor));
+            for(const auto& [arch, descriptor] : byArch)
+            {
+                _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
+            }
         }
-        // A UED named this architecture's model and the loader refused it: RFC 0019
+        // A UED named this (metric, architecture)'s model and the loader refused it: RFC 0019
         // §11.2's distrust signal, which is a claim ("do not pick me") rather than the
         // silence an engine with no model at all reports.
-        for(const auto& arch : unavailablePredictionArches)
+        for(const auto& [metric, arches] : unavailablePredictionArches)
         {
-            _binding.markUnusable(arch,
-                                  hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
-                                  "The selected engine-prediction UHD is missing or incompatible");
+            for(const auto& arch : arches)
+            {
+                _binding.markUnusable(
+                    metric,
+                    arch,
+                    hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID,
+                    "The selected engine-prediction UHD is missing or incompatible");
+            }
         }
     }
 
@@ -175,6 +186,10 @@ public:
     }
 
     /// @brief L1 uses only graph bindings; L2 returns the calibrated ranker's exact candidate.
+    ///
+    /// Both answer in the metric @p config carries (RFC 0019 §11.4), and every response names
+    /// it, whatever its status. An unregistered metric is the caller's error, not an absent
+    /// estimate, so it throws BAD_PARAM rather than reporting UNAVAILABLE.
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(THandle& handle,
                       const IGraph& graph,
@@ -183,12 +198,14 @@ public:
                       bool evaluate) const override
     {
         using namespace hipdnn_flatbuffers_sdk::data_objects;
+        const std::string metric(heuristics::rankingMetric(config).name);
         if(evaluate && kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
         {
             EnginePredictionT result;
             result.engine_id = _id;
             result.kind = PredictionKind::CONFIGURATION;
             result.status = PredictionStatus::UNAVAILABLE;
+            result.metric = metric;
             try
             {
                 _planBuilder.predictConfiguration(handle, graph, config, result);
@@ -205,6 +222,7 @@ public:
         auto result = _binding.predict(_id,
                                        _engine.name,
                                        _selectorRevision,
+                                       metric,
                                        arch,
                                        features,
                                        evaluate && kind == HIPDNN_ENGINE_PREDICTION_ENGINE);

@@ -125,7 +125,7 @@ def test_require_rankable_refuses_a_deterministic_catalog_and_names_the_other_ro
     with pytest.raises(DeterministicCatalogError) as caught:
         require_rankable(_corpus(1), engine="hipkernel:Gfx950AttentionDense")
     message = str(caught.value)
-    assert "predict_engine_tflops" in message
+    assert "predict_engine" in message
     assert "hipkernel:Gfx950AttentionDense" in message
 
 
@@ -226,5 +226,5 @@ def test_knob_analysis_reports_the_finding_instead_of_a_page_of_pinnable_fields(
     assert run_knobs(args) == 0
     out = capsys.readouterr().out
     assert "deterministic catalog" in out
-    assert "predict_engine_tflops" in out
+    assert "predict_engine" in out
     assert "PINNED" not in out

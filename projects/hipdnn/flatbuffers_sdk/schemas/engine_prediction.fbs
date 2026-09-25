@@ -15,8 +15,9 @@ table EnginePrediction {
     engine_id: int64;
     kind: PredictionKind;
     status: PredictionStatus;
-    // Physical calibrated TFLOPS, after applying the inverse model transform.
-    tflops: double;
+    // The prediction in `metric`'s registered units (RFC 0019 section 4.4), after
+    // applying the inverse model transform. Meaningful only when AVAILABLE.
+    value: double;
     uhd_id: string;
     reason: string;
     // Required for an AVAILABLE configuration prediction; selection must survive
@@ -25,6 +26,9 @@ table EnginePrediction {
     binding_json: string;
     // Published feature names, without a leading '$', mapped to scalar values.
     features_json: string;
+    // The registered ranking metric `value` is in. Always the metric the request named;
+    // an answer in any other metric is invalid rather than converted.
+    metric: string;
 }
 
 root_type EnginePrediction;

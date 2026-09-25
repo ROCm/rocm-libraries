@@ -61,19 +61,30 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
                               {"adapter", static_cast<int>(descriptor.adapter)},
                               {"native", descriptor.nativeSymbol},
                               {"objective", descriptor.objective},
+                              {"metric", descriptor.score.metric},
                               {"transform", descriptor.score.transform}};
     };
-    for(const auto& [arch, descriptor] : set.heuristicsByArch)
+    // Per metric, then arch: which model ranks depends on the request's metric as well as the
+    // device (RFC 0019 §11.4), so either changing is a different selector.
+    for(const auto& [metric, byArch] : set.heuristicsByMetric)
     {
-        selector["rankers"][arch] = rankerIdentity(descriptor);
+        for(const auto& [arch, descriptor] : byArch)
+        {
+            selector["rankers"][metric][arch] = rankerIdentity(descriptor);
+        }
     }
-    if(set.heuristic && set.heuristicsByArch.count("default") == 0)
+    // A set built in memory may carry only its default ranker.
+    if(set.heuristic && !selector["rankers"][set.heuristic->score.metric].contains("default"))
     {
-        selector["rankers"]["default"] = rankerIdentity(*set.heuristic);
+        selector["rankers"][set.heuristic->score.metric]["default"]
+            = rankerIdentity(*set.heuristic);
     }
-    for(const auto& arch : set.unavailableHeuristicArches)
+    for(const auto& [metric, arches] : set.unavailableHeuristicArches)
     {
-        selector["rankers"][arch] = "unavailable";
+        for(const auto& arch : arches)
+        {
+            selector["rankers"][metric][arch] = "unavailable";
+        }
     }
     for(const auto& matcher : set.matchers)
     {
@@ -131,18 +142,23 @@ inline std::string engineModelHash(const DescriptorSet& set)
                               {"adapter", static_cast<int>(descriptor.adapter)},
                               {"native", descriptor.nativeSymbol},
                               {"objective", descriptor.objective},
+                              {"metric", descriptor.score.metric},
                               {"transform", descriptor.score.transform}};
     };
 
-    // An ordered map, so the digest does not depend on hash-table iteration order.
+    // An ordered map, so the digest does not depend on hash-table iteration order. Keyed by
+    // metric and arch together: one UHD per (metric, arch key).
     std::map<std::string, nlohmann::json> rankers;
-    for(const auto& [arch, descriptor] : set.heuristicsByArch)
+    for(const auto& [metric, byArch] : set.heuristicsByMetric)
     {
-        rankers.emplace(arch, rankerIdentity(descriptor));
+        for(const auto& [arch, descriptor] : byArch)
+        {
+            rankers.emplace(metric + "@" + arch, rankerIdentity(descriptor));
+        }
     }
-    if(set.heuristic && rankers.count("default") == 0)
+    if(set.heuristic)
     {
-        rankers.emplace("default", rankerIdentity(*set.heuristic));
+        rankers.emplace(set.heuristic->score.metric + "@default", rankerIdentity(*set.heuristic));
     }
     if(rankers.empty())
     {
@@ -154,9 +170,9 @@ inline std::string engineModelHash(const DescriptorSet& set)
 /// @brief What identifies this engine to the caches that outlive one ranking.
 inline EngineIdentity engineIdentity(const DescriptorSet& set)
 {
-    // The UED's declared catalog-ranking UHD, falling back to the resolved `default`
-    // descriptor's own id: an engine may bind a model in provider code without naming it on
-    // the UED (RFC 0019 Open Question 7), and that model still identifies the cache directory.
+    // The resolved default ranker's id (DescriptorSet::heuristic), which the loader keeps in
+    // step with EngineDescriptor::heuristicId; read off the descriptor so a set built in memory
+    // without the loader still identifies its cache directory.
     std::string uhdId;
     if(set.engine.heuristicId.has_value())
     {
@@ -221,7 +237,7 @@ std::unique_ptr<KernelIngestorStateManager<THandle>>
                                          describedBy,
                                          knobs,
                                          kmdFields,
-                                         set.heuristicsByArch,
+                                         set.heuristicsByMetric,
                                          set.unavailableHeuristicArches);
     return std::make_unique<KernelIngestorStateManager<THandle>>(
         std::move(set.schema),
@@ -248,7 +264,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto identity = engineIdentity(set);
     auto knobs = set.engine.knobs;
-    auto predictions = std::move(set.enginePredictionsByArch);
+    auto predictions = std::move(set.enginePredictionsByMetric);
     auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
     auto provenance = enginePredictionProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);

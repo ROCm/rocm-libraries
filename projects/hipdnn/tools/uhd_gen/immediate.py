@@ -13,14 +13,15 @@ import pandas as pd
 from .features import signature_references
 from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
+from .ranking_metrics import RANKING_METRICS, RankingMetric, is_valid_metric_value, ranking_metric
 
-ROLE = "predict_engine_tflops"
+ROLE = "predict_engine"
 _ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
 _LEAKED_FIELDS = frozenset({
     "kernel", "kernel_features", "candidate", "candidate_id", "candidates", "results",
     "knob", "knobs", "knob_settings", "configuration", "engine_config",
-    "prediction", "predicted_tflops", "tflops", "timing", "latency", "robustMeanMs",
-    "robust_time_ms", "minTimeMs", "avgTimeMs", "succeeded", "is_valid",
+    "prediction", *(f"predicted_{name}" for name in RANKING_METRICS), "tflops", "timing",
+    "latency", "robustMeanMs", "robust_time_ms", "minTimeMs", "avgTimeMs", "succeeded", "is_valid",
 })
 
 #: RFC 0019.13 §11.2 (:2003): "A UHD declaring `calibrated: true` MUST train its score
@@ -213,21 +214,27 @@ def training_binding(frame: pd.DataFrame, engine: str | None = None) -> tuple[pd
     return frame.copy(), binding
 
 
-def validate_model(descriptor: dict) -> None:
-    if descriptor.get("objective") != "max":
-        raise ValueError("L1 prediction requires objective=max")
+def validate_model(descriptor: dict) -> RankingMetric:
+    """The admission rule for an L1 estimate (RFC 0019 §11.1); returns its metric.
+
+    Engine selection compares these numbers across engines, so the score must name a
+    registered metric, be calibrated, and carry that metric's direction.
+    """
     score = descriptor.get("score", {})
+    metric = ranking_metric(score.get("metric"))
+    if descriptor.get("objective") != metric.objective:
+        raise ValueError(f"L1 prediction of {metric.name!r} requires objective={metric.objective}")
     # The transform vocabulary belongs to `score_transform::isSupported` on the runtime
     # side; this narrower pair is not a second opinion about it. `evaluate`'s scorers
     # implement the identity and log1p inverses only, so a descriptor declaring any
     # other supported transform is loadable by the engine and not scoreable here --
     # a capability limit of this tool, reported where the scoring happens.
-    if (score.get("units") != "tflops" or score.get("calibrated") is not True
-            or score.get("transform") not in ("identity", "log1p")):
-        raise ValueError("L1 prediction requires calibrated tflops, and uhd_gen can only "
+    if score.get("calibrated") is not True or score.get("transform") not in ("identity", "log1p"):
+        raise ValueError("L1 prediction requires a calibrated score, and uhd_gen can only "
                          "score identity or log1p transforms")
     validate_provenance(descriptor.get("trained_against"))
     validate_signature(descriptor.get("features_signature", []))
+    return metric
 
 
 def check_model_binding(descriptor: dict, frame: pd.DataFrame) -> None:
@@ -244,6 +251,7 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
     import numpy as np
 
     identity = descriptor["id"]
+    metric = validate_model(descriptor).name
     selected = {}
     for response in responses:
         if response.get("model") != identity:
@@ -259,9 +267,14 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
                _text(response.get("device_id"), "device_id"), engine)
         if key in selected:
             raise ValueError("duplicate runtime prediction for the same engine/graph/device")
-        value = response.get("tflops")
-        if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
-            raise ValueError("runtime prediction must be finite nonnegative physical tflops")
+        # RFC 0019 §11.4: the answer names its metric and the host checks it. A value in
+        # another metric is not converted, it is the wrong answer.
+        if response.get("metric") != metric:
+            raise ValueError(f"runtime prediction answers metric {response.get('metric')!r}, "
+                             f"not the model's {metric!r}")
+        value = response.get("value")
+        if not is_valid_metric_value(metric, value):
+            raise ValueError(f"runtime prediction is not a valid {metric} value: {value!r}")
         selected[key] = (response, binding, float(value))
     if not selected:
         raise ValueError(f"no runtime predictions for UHD {identity}")
@@ -298,8 +311,9 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
     held_out = frame[keys.isin(split.eval_problems)].copy()
     by_engine = {}
     integrity = []
+    metrics = set()
     for bundle in bundles:
-        validate_model(bundle.descriptor)
+        metrics.add(validate_model(bundle.descriptor))
         engine = validate_binding(bundle.manifest.get("binding"))["engine"]
         if engine in by_engine:
             raise ValueError(f"multiple models supplied for immediate engine {engine}")
@@ -311,6 +325,14 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
             integrity.append("COMPROMISED")
         else:
             integrity.append("held_out")
+    # Engines are compared in one metric at a time (RFC 0019 §4.4): a `time` model and a
+    # `tflops` model rank in opposite directions and different units.
+    if len(metrics) != 1:
+        raise ValueError("cross-engine L1 evaluation needs every model to predict the same metric; got "
+                         + ", ".join(sorted(metric.name for metric in metrics)))
+    metric = metrics.pop()
+    name, label = metric.name, metric.label
+    predicted_column = f"predicted_{name}"
     missing = set(frame["engine_name"]) - set(by_engine)
     if missing:
         raise ValueError(f"missing per-engine models; pass --additional-model-dir for {sorted(missing)}")
@@ -332,44 +354,48 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
         values = np.asarray(bundle.scorer(selected), dtype=float)
         if values.shape != (len(selected),):
             raise ValueError("L1 model returned the wrong number of predictions")
-        # A physical TFLOPS prediction that is not positive is one the RUNTIME refuses:
-        # EnginePredictor reports INVALID rather than a score, and the engine falls back to
-        # static ordering for that graph. The model is fitted on log1p and inverted with
-        # expm1, so a log-space prediction below zero lands in (-1, 0) -- a handful of rows
-        # near the bottom of the range, not a broken artifact. Scoring them as declines
-        # here reports what the runtime will do; failing the whole artifact threw away a
-        # trained model over 4 rows in 495 (run 67929709).
-        impossible = ~np.isfinite(values) | (values <= 0)
+        # A prediction the metric cannot take is one the RUNTIME refuses: the engine reports
+        # INVALID rather than a score (isValidMetricValue), and selection orders it by the
+        # static rules for that graph. The model is fitted on log1p and inverted with expm1,
+        # so a log-space prediction below zero lands in (-1, 0) -- a handful of rows near the
+        # bottom of the range, not a broken artifact. Scoring them as declines here reports
+        # what the runtime will do; failing the whole artifact threw away a trained model
+        # over 4 rows in 495 (run 67929709).
+        impossible = np.array([not is_valid_metric_value(name, float(value)) for value in values], dtype=bool)
         values[impossible] = np.nan
         declined[engine] = int(impossible.sum())
         predicted.loc[selected.index] = values
-    held_out = held_out.assign(predicted_tflops=predicted)
-    unscored = int(held_out["predicted_tflops"].isna().sum())
-    held_out = held_out[held_out["predicted_tflops"].notna()].copy()
+    held_out = held_out.assign(**{predicted_column: predicted})
+    unscored = int(held_out[predicted_column].isna().sum())
+    held_out = held_out[held_out[predicted_column].notna()].copy()
     if held_out.empty:
-        raise ValueError("L1 model scored no evaluation row with a possible physical tflops")
+        raise ValueError(f"L1 model scored no evaluation row with a valid {name} value")
 
+    # Keyed by the metric so a `time` report never carries a field named for throughput;
+    # a `tflops` report keeps the keys it has always had.
     def calibration(group):
-        measured = group["tflops"].to_numpy(dtype=float)
-        error = group["predicted_tflops"].to_numpy(dtype=float) - measured
+        measured = group[label].to_numpy(dtype=float)
+        error = group[predicted_column].to_numpy(dtype=float) - measured
         relative = error / measured
-        return {"rows": len(group), "signed_bias_tflops": float(np.mean(error)),
-                "mean_absolute_error_tflops": float(np.mean(np.abs(error))),
-                "rmse_tflops": float(np.sqrt(np.mean(error * error))),
+        return {"rows": len(group), f"signed_bias_{name}": float(np.mean(error)),
+                f"mean_absolute_error_{name}": float(np.mean(np.abs(error))),
+                f"rmse_{name}": float(np.sqrt(np.mean(error * error))),
                 "signed_relative_bias": float(np.mean(relative)),
                 "mean_absolute_relative_error": float(np.mean(np.abs(relative)))}
 
     per_problem, regrets = [], []
     for key, group in held_out.groupby(list(grouping.columns), sort=True):
-        # Stable engine identity breaks prediction ties, independent of import order.
+        # Best first in the metric's direction; stable engine identity breaks prediction
+        # ties, independent of import order.
         ordered = group.sort_values("engine", kind="stable")
-        picked = ordered.loc[ordered["predicted_tflops"].idxmax()]
-        best = float(group["tflops"].max())
-        regret = regret_of(float(picked["tflops"]), best, "max") if len(group) > 1 else None
+        scores = ordered[predicted_column]
+        picked = ordered.loc[scores.idxmax() if metric.objective == "max" else scores.idxmin()]
+        best = float(group[label].max() if metric.objective == "max" else group[label].min())
+        regret = regret_of(float(picked[label]), best, metric.objective) if len(group) > 1 else None
         if regret is not None:
             regrets.append(regret)
         per_problem.append({"key": list(key), "engines": len(group), "picked_engine": int(picked["engine"]),
-                            "picked_tflops": float(picked["tflops"]), "best_immediate_tflops": best,
+                            f"picked_{name}": float(picked[label]), f"best_immediate_{name}": best,
                             "immediate_selection_regret": regret})
     status = "COMPROMISED" if "COMPROMISED" in integrity else "unknown" if "unknown" in integrity else "held_out"
     warnings = []
@@ -378,7 +404,7 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
     if eval_fraction == 1:
         warnings.append("Full supplied corpus evaluated; training overlap is reported separately.")
     report = {
-        "schema": REPORT_SCHEMA, "role": ROLE, "target": "tflops", "objective": "max",
+        "schema": REPORT_SCHEMA, "role": ROLE, "metric": name, "target": label, "objective": metric.objective,
         "corpus": {"rows": len(frame), "problems": len(set(keys))},
         "grouping": {"columns": list(grouping.columns), "degraded": False, "detail": grouping.detail},
         "split": {"method": split.method, "unit": "graph/device", "seed": seed,
@@ -387,10 +413,10 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
                   "eval_problem_keys": [list(key) for key in split.eval_problems]},
         "metrics": {"problems_scored": len(per_problem), "calibration": calibration(held_out),
                     "unscored_rows": {"total": unscored, "per_engine": declined,
-                                      "detail": "predictions the runtime would refuse as "
-                                                "non-positive physical tflops; the engine "
-                                                "falls back to static ordering for these"},
-                    "per_engine": {name: calibration(group) for name, group in held_out.groupby("engine_name")},
+                                      "detail": f"predictions the runtime would refuse as "
+                                                f"invalid {name} values; the engine is "
+                                                f"unscored for these"},
+                    "per_engine": {engine: calibration(group) for engine, group in held_out.groupby("engine_name")},
                     "immediate_selection": {"problems_compared": len(regrets),
                                             "regret": _summarise(regrets),
                                             "baseline": "best measured immediate engine; never tuned configurations"}},
@@ -400,8 +426,8 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
     if include_per_problem:
         report["per_problem"] = per_problem
         report["per_row"] = [{"key": [row["benchmark"], row["device"]], "engine": row["engine"],
-                              "measured_tflops": row["tflops"], "predicted_tflops": row["predicted_tflops"],
-                              "signed_error_tflops": row["predicted_tflops"] - row["tflops"],
-                              "signed_relative_error": row["predicted_tflops"] / row["tflops"] - 1}
+                              f"measured_{name}": row[label], predicted_column: row[predicted_column],
+                              f"signed_error_{name}": row[predicted_column] - row[label],
+                              "signed_relative_error": row[predicted_column] / row[label] - 1}
                              for row in held_out.to_dict(orient="records")]
     return report

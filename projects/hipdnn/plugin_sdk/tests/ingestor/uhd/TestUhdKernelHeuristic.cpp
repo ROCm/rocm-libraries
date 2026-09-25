@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <map>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -193,10 +194,10 @@ Fixture writeFixture(const std::filesystem::path& dir,
                      const hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec& tree,
                      const std::string& objective = "max",
                      const std::string& modelHash = {},
-                     // RFC 0019.13 §15.1 binds these: a calibrated score is cross-engine
-                     // TFLOPS and therefore ascending, so a descending objective defaults to
-                     // uncalibrated. A caller passing the pair explicitly is testing the rule.
-                     std::optional<bool> calibrated = std::nullopt,
+                     // RFC 0019 §4.4: every registered metric may be calibrated, since the
+                     // metric -- not the objective -- names the scale a value is compared on.
+                     // A caller passing false is testing the uncalibrated path.
+                     bool calibrated = true,
                      /// The target transform the model was trained under; its inverse runs at
                      /// score time. "exp" inverts as a logarithm, which is out of domain for a
                      /// negative prediction.
@@ -215,12 +216,15 @@ Fixture writeFixture(const std::filesystem::path& dir,
         .addTree(tree);
     model.buildToFile((dir / "model.bin").string());
 
-    return {"model.bin",
-            signatureHash,
-            objective,
-            calibrated.value_or(objective != "min"),
-            scoreTransform,
-            signature};
+    return {"model.bin", signatureHash, objective, calibrated, scoreTransform, signature};
+}
+
+/// The registered metric whose direction @p objective restates. The parser refuses a named
+/// metric whose objective disagrees with it (RFC 0019 §4.4), so every model here declares the
+/// metric its objective implies: a rate ascends (`tflops`), a cost descends (`time`).
+std::string metricFor(const std::string& objective)
+{
+    return objective == "min" ? "time" : "tflops";
 }
 
 /// The descriptor the loader would produce for a tree_data UHD in @p dir.
@@ -240,7 +244,7 @@ HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir,
     descriptor.featuresHash
         = featuresHash.empty() ? uhd::FeatureExtractor::computeHash(signature) : featuresHash;
     descriptor.objective = objective;
-    descriptor.score.units = "tflops";
+    descriptor.score.metric = metricFor(objective);
     descriptor.score.calibrated = calibrated;
     descriptor.score.transform = scoreTransform;
     descriptor.modelArtifactPath = artifact;
@@ -266,10 +270,15 @@ HeuristicDescriptor modelDescriptor(const std::filesystem::path& dir, const Fixt
 ///
 /// Only the tests that need a document the *parser* refuses build one of these. A
 /// descriptor assembled in memory has already skipped every check the parse performs, so a
-/// rule enforced there -- §15.1's calibrated/`min` pair is the one -- is only reachable
+/// rule enforced there -- §4.4's objective/metric agreement is the one -- is only reachable
 /// through the JSON.
-nlohmann::json
-    uhdDocument(const std::string& artifact, const std::string& objective, bool calibrated)
+///
+/// @param metric Omitted from the document when empty, which is how a metric-less ranker
+///        is spelled.
+nlohmann::json uhdDocument(const std::string& artifact,
+                           const std::string& objective,
+                           bool calibrated,
+                           const std::string& metric = "tflops")
 {
     nlohmann::json document;
     document["version"] = "1.0";
@@ -279,8 +288,11 @@ nlohmann::json
     document["features_signature"] = SIGNATURE;
     document["features_hash"] = uhd::FeatureExtractor::computeHash(SIGNATURE);
     document["objective"] = objective;
-    document["score"]
-        = {{"units", "tflops"}, {"calibrated", calibrated}, {"transform", "identity"}};
+    document["score"] = {{"calibrated", calibrated}, {"transform", "identity"}};
+    if(!metric.empty())
+    {
+        document["score"]["metric"] = metric;
+    }
     document["tree_data"] = {{"artifact", artifact}};
     document["trained_against"]
         = {{"ued", {{"id", "11000000-0000-0000-0000-000000000000"}, {"revision", "1.0"}}},
@@ -327,6 +339,33 @@ Catalog catalogAgainstPriority(int64_t seqlen)
     return catalog;
 }
 
+/// The same two kernels with the priorities swapped, so declared order puts the large tile
+/// first. For the cases where the model under test prefers the small tile: its winner then
+/// cannot coincide with the fallback's.
+Catalog catalogAlongPriority(int64_t seqlen)
+{
+    Catalog catalog;
+    catalog.entries = {kernelWith(0x01, 64, 1), kernelWith(0x02, 128, 100)};
+    catalog.bound["attention.seqlen"] = seqlen;
+    return catalog;
+}
+
+/// What an engine reports as its figure of merit in the context's metric (RFC 0019 §11.1):
+/// the calibrated ranking's top value, or the 0 that §5 step 7 gives "no measurement".
+double engineEstimate(const IKernelHeuristic& heuristic,
+                      const Catalog& catalog,
+                      const MatchContext& context)
+{
+    std::string modelId;
+    const auto calibrated = heuristic.calibratedRanking(catalog, context, modelId);
+    return calibrated.empty() ? 0.0 : calibrated.front().score;
+}
+
+/// Rankers keyed by metric (`""` for the metric-less one), then architecture key -- the
+/// shape DescriptorSet::heuristicsByMetric hands the factory.
+using RankersByArch = std::map<std::string, HeuristicDescriptor>;
+using RankersByMetric = std::map<std::string, RankersByArch>;
+
 } // namespace
 
 /// The signature the pair below is built around. Slot 0 is an inline expression and slot 1
@@ -343,8 +382,7 @@ const std::vector<nlohmann::json> EXPRESSION_SIGNATURE
 /// The same two slots with slot 0 computing something else. Same references, same arity:
 /// only the operator differs, which is the whole point.
 const std::vector<nlohmann::json> RESPELLED_SIGNATURE
-    = {nlohmann::json::parse(R"({"*":["$attention.seqlen","$kernel.tile_m"]})"),
-       "$kernel.tile_m"};
+    = {nlohmann::json::parse(R"({"*":["$attention.seqlen","$kernel.tile_m"]})"), "$kernel.tile_m"};
 
 TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseInlineExpressionChangedIsRefused)
 {
@@ -357,9 +395,13 @@ TEST(TestIngestorUhdKernelHeuristic, ADescriptorWhoseInlineExpressionChangedIsRe
     // tryCreate, not makeKernelHeuristic: the factory degrades a failed model to declared
     // order rather than returning null (§5), so asking it for null would test nothing.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_expression_changed");
-    const auto fixture = writeFixture(
-        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity",
-        EXPRESSION_SIGNATURE);
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      EXPRESSION_SIGNATURE);
 
     const auto descriptor = modelDescriptor(dir.path(),
                                             fixture.modelFileName,
@@ -377,13 +419,17 @@ TEST(TestIngestorUhdKernelHeuristic, AnExpressionCarryingDescriptorLoadsWhenItsH
     // The other half: with the expression agreeing end to end the descriptor comes up, so
     // the test above is refusing the swap rather than refusing inline expressions as such.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_inline_expression_agrees");
-    const auto fixture = writeFixture(
-        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity",
-        EXPRESSION_SIGNATURE);
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      EXPRESSION_SIGNATURE);
 
-    EXPECT_NE(UhdKernelHeuristic::tryCreate(
-                  modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS),
-              nullptr);
+    EXPECT_NE(
+        UhdKernelHeuristic::tryCreate(modelDescriptor(dir.path(), fixture), "test", KNOBS, FIELDS),
+        nullptr);
 }
 
 TEST(TestIngestorUhdKernelHeuristic, RanksByTheModelRatherThanByPriority)
@@ -433,6 +479,9 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
 {
     // Same model, same catalog; only `objective` differs. A UHD trained on a cost rather
     // than a rate has to rank ascending, and getting this wrong inverts it silently.
+    //
+    // A `min` model declares the `time` metric, so it is asked for a time ranking: under
+    // a tflops request it is not that metric's ranker and declared order would decide.
     const hipdnn_test_sdk::utilities::ScopedDirectory maxDir("uhd_kernel_heuristic_max");
     const hipdnn_test_sdk::utilities::ScopedDirectory minDir("uhd_kernel_heuristic_min");
     const auto maxFixture = writeFixture(maxDir.path(), preferLargeTiles(), "max");
@@ -448,16 +497,14 @@ TEST(TestIngestorUhdKernelHeuristic, AMinimisingObjectiveReversesTheOrder)
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
+    const MatchContext timeContext{graph, 0, properties, "time"};
 
-    // Priorities are chosen so neither answer coincides with declared order. With
-    // catalogAgainstPriority the minimising case would pass on a silent degradation,
+    // With catalogAgainstPriority the minimising case would pass on a silent degradation,
     // because declared order already puts the small tile first.
-    Catalog catalog;
-    catalog.entries = {kernelWith(0x01, 64, 1), kernelWith(0x02, 128, 100)};
-    catalog.bound["attention.seqlen"] = int64_t{2048};
+    const auto catalog = catalogAlongPriority(2048);
 
     const auto maxRanked = maximising->rank(catalog, context);
-    const auto minRanked = minimising->rank(catalog, context);
+    const auto minRanked = minimising->rank(catalog, timeContext);
 
     ASSERT_EQ(maxRanked.size(), 2U);
     ASSERT_EQ(minRanked.size(), 2U);
@@ -579,9 +626,8 @@ TEST(TestIngestorUhdKernelHeuristic, AKnobTheModelDoesNotReadIsWarnedAboutAndRan
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    const auto heuristic
-        = makeKernelHeuristic(
-            modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"}, FIELDS_WITH_SPLIT_K);
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(dir.path(), fixture), {}, {"tile_m", "split_k"}, FIELDS_WITH_SPLIT_K);
     ASSERT_NE(heuristic, nullptr);
     const testing::TestGraph graph;
     const auto properties = gfx942();
@@ -635,8 +681,7 @@ TEST(TestIngestorUhdKernelHeuristic, AModelReadingAFieldTheKmdDoesNotDeclareIsRe
     // The UED exposes `tile_m` as a knob, so check 2's second assertion passes and this can
     // only fail on the first. A KMD declaring `warp_n` and not `tile_m` is the realistic
     // shape of the drift: fields were renamed on one side of the pair.
-    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test-engine", KNOBS, {"warp_n"}),
-              nullptr);
+    EXPECT_EQ(UhdKernelHeuristic::tryCreate(descriptor, "test-engine", KNOBS, {"warp_n"}), nullptr);
 
     // §5 step 8 wants the failure attributable, and a message naming only the engine leaves
     // an author with several descriptors to open.
@@ -696,9 +741,11 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchSpecificModelOutranksTheDefaultOne)
         {"default", modelDescriptor(defaultDir.path(), fallback)},
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
-    const auto heuristic
-        = makeKernelHeuristic(
-            modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback),
+                                               {},
+                                               KNOBS,
+                                               FIELDS,
+                                               RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -724,9 +771,11 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnnamedArchFallsBackToDefault)
         {"default", modelDescriptor(defaultDir.path(), fallback)},
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
-    const auto heuristic
-        = makeKernelHeuristic(
-            modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback),
+                                               {},
+                                               KNOBS,
+                                               FIELDS,
+                                               RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -753,9 +802,11 @@ TEST(TestIngestorUhdKernelHeuristic, ArchResolutionIsStableAcrossCalls)
         {"default", modelDescriptor(defaultDir.path(), fallback)},
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
-    const auto heuristic
-        = makeKernelHeuristic(
-            modelDescriptor(defaultDir.path(), fallback), {}, KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback),
+                                               {},
+                                               KNOBS,
+                                               FIELDS,
+                                               RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -821,9 +872,8 @@ TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescri
     // An axis the UED does not expose still breaks the §6.3 contract, so ranking degrades.
     // The reverse -- a knob the model ignores -- no longer does, so it cannot be used to
     // reach the degraded path here.
-    const auto heuristic
-        = makeKernelHeuristic(
-            modelDescriptor(dir.path(), fixture), {}, {"split_k"}, FIELDS_WITH_SPLIT_K);
+    const auto heuristic = makeKernelHeuristic(
+        modelDescriptor(dir.path(), fixture), {}, {"split_k"}, FIELDS_WITH_SPLIT_K);
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -836,42 +886,53 @@ TEST(TestIngestorUhdKernelHeuristic, ADegradedRankingReportsTheZeroTheRfcPrescri
         << "a fallback ordering invented a score it did not compute";
 }
 
-TEST(TestIngestorUhdKernelHeuristic, ACalibratedScoreCannotAlsoBeMinimising)
+TEST(TestIngestorUhdKernelHeuristic, AnObjectiveContradictingItsMetricIsRefusedAtParse)
 {
-    // RFC 0019.13 §15.1: §11.3 requires a cross-engine score to be an absolute metric on a
-    // scale that means the same thing everywhere -- TFLOPS, which ascends. Accepting this pair
-    // would have engine selection compare one engine's throughput against another's latency
-    // and rank the faster engine last, with nothing in the output to show it happened. So the
-    // load fails rather than picking a direction.
+    // RFC 0019 §4.4: a registered metric fixes its own direction -- `tflops` ascends, `time`
+    // descends -- and `objective` only restates it. A `tflops` model declaring `min` would rank
+    // its own kernels one way while engine selection compared its figure the other, ranking the
+    // faster engine last with nothing in the output to show it happened. So the load fails
+    // rather than picking a direction.
     //
     // The descriptor IS the UHD, so the refusal happens where the JSON is parsed rather
     // than where a second file was opened; a descriptor handed to the factory has already
     // been through it. The document is therefore what this asserts on.
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_calibrated_min");
-    const auto fixture
-        = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/true);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_objective_contradicts_metric");
+    const auto fixture = writeFixture(dir.path(), preferLargeTiles(), "min");
+    const auto path = dir.path() / "test.uhd.json";
 
-    EXPECT_FALSE(parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true),
-                          dir.path() / "test.uhd.json")
+    EXPECT_FALSE(
+        parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true, "tflops"), path)
+            .has_value())
+        << "a minimising tflops UHD loaded";
+    EXPECT_FALSE(
+        parseUhd(uhdDocument(fixture.modelFileName, "max", /*calibrated=*/true, "time"), path)
+            .has_value())
+        << "a maximising time UHD loaded";
+
+    // A calibrated value is comparable only in a named quantity, so calibration without a
+    // metric is the other contradiction the parse refuses.
+    EXPECT_FALSE(parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true, ""), path)
                      .has_value())
-        << "a calibrated, minimising UHD loaded";
+        << "a calibrated UHD naming no metric loaded";
 
-    // The supported pairing -- rank on a cost target, decline cross-engine comparison -- still
-    // loads, so the check rejects the contradiction rather than the objective.
-    const hipdnn_test_sdk::utilities::ScopedDirectory okDir("uhd_uncalibrated_min");
-    const auto ok = writeFixture(okDir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false);
-    EXPECT_TRUE(parseUhd(uhdDocument(ok.modelFileName, "min", /*calibrated=*/false),
-                         okDir.path() / "test.uhd.json")
+    // The check rejects the contradiction, not the objective: a calibrated cost model that
+    // says it is one loads, and so does a metric-less ranker that only orders its own kernels.
+    EXPECT_TRUE(
+        parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true, "time"), path)
+            .has_value());
+    EXPECT_TRUE(parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/false, ""), path)
                     .has_value());
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ATransformTheRuntimeCannotInvertIsRefusedAtLoad)
 {
     // RFC 0019 §4 and §11.3: `score.transform` exists so a consumer can invert it and recover
-    // `score.units`. A name with no inverse here reaches applyInverse, falls through its
-    // identity branch, and reports the transformed number as if it were TFLOPS -- still
-    // positive, still ordered correctly, so no assertion on the winner can see it. That is why
-    // the vocabulary is closed and closed at parse: the descriptor never becomes a heuristic.
+    // the value in `score.metric`'s registered units. A name with no inverse here reaches
+    // applyInverse, falls through its identity branch, and reports the transformed number as
+    // if it were in those units -- still positive, still ordered correctly, so no assertion on
+    // the winner can see it. That is why the vocabulary is closed and closed at parse: the
+    // descriptor never becomes a heuristic.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_unknown_transform");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
 
@@ -896,15 +957,16 @@ TEST(TestIngestorUhdKernelHeuristic, ATransformTheRuntimeCannotInvertIsRefusedAt
 
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngineEstimate)
 {
-    // RFC 0019 §11.1's stopgap for `predict_engine_tflops`: with no distinct estimate model,
-    // the engine reports sort_kernel_catalog's best predicted score. The estimate must be the
-    // *same* number the ranking put first -- an estimate derived from a second traversal could
-    // disagree with the kernel actually selected, and the engine would be ranked on a plan it
-    // is not going to run.
+    // RFC 0019 §11.1's stopgap for `predict_engine`: with no distinct estimate model, the
+    // engine reports sort_kernel_catalog's best predicted value in the requested metric. The
+    // estimate must be the *same* number, for the *same* kernel, the ranking put first -- an
+    // estimate derived from a second traversal could disagree with the kernel actually
+    // selected, and the engine would be ranked on a plan it is not going to run.
     //
-    // Same by construction now rather than by coincidence: estimateTflops is calibratedRanking's
-    // top entry. It used to be rankScored's top entry gated on a separate `scoreIsCalibrated()`
-    // flag, and the two answered from different places once §8.3 resolution was involved.
+    // Same by construction rather than by coincidence: the estimate is calibratedRanking's top
+    // entry, and calibratedRanking orders through the ranking path itself. It used to be
+    // rankScored's top entry gated on a separate `scoreIsCalibrated()` flag, and the two
+    // answered from different places once §8.3 resolution was involved.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_engine_estimate");
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
@@ -917,18 +979,17 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelReportsItsTopScoreAsTheEngi
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
-    const auto estimate = heuristic->estimateTflops(catalogAgainstPriority(2048), context);
-    EXPECT_DOUBLE_EQ(estimate,
-                     heuristic->rankScored(catalogAgainstPriority(2048), context).front().score);
-    EXPECT_GT(estimate, 0.0) << "a real estimate must outrank the 0 a declining engine reports";
-
-    // And it is the calibrated ranking's own top entry, which is what makes disagreement
-    // unrepresentable rather than merely untested.
     std::string modelId;
     const auto calibrated
         = heuristic->calibratedRanking(catalogAgainstPriority(2048), context, modelId);
+    const auto selected = heuristic->rankScored(catalogAgainstPriority(2048), context);
     ASSERT_FALSE(calibrated.empty());
-    EXPECT_DOUBLE_EQ(estimate, calibrated.front().score);
+    ASSERT_FALSE(selected.empty());
+    EXPECT_EQ(calibrated.front().kernelId, selected.front().kernelId)
+        << "the estimate describes a kernel selection would not run";
+    EXPECT_DOUBLE_EQ(calibrated.front().score, selected.front().score);
+    EXPECT_GT(calibrated.front().score, 0.0)
+        << "a real estimate must outrank the 0 a declining engine reports";
     EXPECT_FALSE(modelId.empty()) << "a calibrated ranking did not name the model it came from";
 }
 
@@ -938,7 +999,7 @@ TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchite
     // own `_config`, and a resolver built from per-arch entries with no `default` holds no
     // config at all -- so the flag read false and the engine reported the 0 distrust sentinel on
     // the very architecture it shipped a calibrated model for. §11.3's comparison then ranked it
-    // beneath every engine that answered, while its ranking was calibrated TFLOPS all along.
+    // beneath every engine that answered, while its ranking was calibrated all along.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_estimate_per_arch");
     const auto onNine42
         = writeFixture(dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true);
@@ -947,14 +1008,15 @@ TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchite
         {"gfx942", modelDescriptor(dir.path(), onNine42)}};
 
     // No descriptor: there is no `default` for the loader to have resolved.
-    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(
+        std::nullopt, "test-engine", KNOBS, FIELDS, RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
-    EXPECT_GT(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0)
+    EXPECT_GT(engineEstimate(*heuristic, catalogAgainstPriority(2048), context), 0.0)
         << "an engine holding a calibrated model for this architecture declined to estimate";
 
     // The estimate follows the model that would rank, not the object holding the map: an
@@ -962,17 +1024,17 @@ TEST(TestIngestorUhdKernelHeuristic, APerArchCalibratedModelEstimatesOnAnArchite
     auto unnamed = gfx942();
     unnamed.gcnArchName = "gfx1100";
     EXPECT_DOUBLE_EQ(
-        heuristic->estimateTflops(catalogAgainstPriority(2048), MatchContext{graph, 0, unnamed}),
+        engineEstimate(*heuristic, catalogAgainstPriority(2048), MatchContext{graph, 0, unnamed}),
         0.0);
 }
 
-TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalibratedTflops)
+TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalibrated)
 {
     // The other direction of the same defect, and the dangerous one. The flag answered from the
     // `default` entry the resolver was built with while the gfx942 entry did the ranking, so a
     // UED whose default is calibrated and whose gfx942 model is not put that model's
-    // uncalibrated score on §11.3's cross-engine TFLOPS scale -- a number in no particular units
-    // compared against real throughputs.
+    // uncalibrated score on §11.3's cross-engine scale -- a number in no particular units
+    // compared against real measurements.
     const hipdnn_test_sdk::utilities::ScopedDirectory defaultDir("uhd_estimate_mixed_default");
     const hipdnn_test_sdk::utilities::ScopedDirectory archDir("uhd_estimate_mixed_gfx942");
     const auto fallback
@@ -984,8 +1046,11 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
         {"default", modelDescriptor(defaultDir.path(), fallback)},
         {"gfx942", modelDescriptor(archDir.path(), specific)}};
 
-    const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback),
+                                               "test-engine",
+                                               KNOBS,
+                                               FIELDS,
+                                               RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -998,8 +1063,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
     ASSERT_EQ(ranked.size(), 2U);
     ASSERT_EQ(ranked.front().kernelId, testId(0x02)) << "the default model ranked, not gfx942's";
 
-    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0)
-        << "an uncalibrated model's score was reported as calibrated TFLOPS";
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalogAgainstPriority(2048), context), 0.0)
+        << "an uncalibrated model's score was reported as a calibrated value";
 
     // gfx1100 does fall through to the calibrated `default`, and still estimates zero -- for the
     // second reason calibratedRanking is stricter than the flag was: that model was trained for
@@ -1008,7 +1073,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedArchModelIsNotReportedAsCalib
     auto unnamed = gfx942();
     unnamed.gcnArchName = "gfx1100";
     const MatchContext unnamedContext{graph, 0, unnamed};
-    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), unnamedContext), 0.0);
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalogAgainstPriority(2048), unnamedContext), 0.0);
     EXPECT_FALSE(heuristic->rankScored(catalogAgainstPriority(2048), unnamedContext).empty())
         << "withholding the estimate stopped the engine selecting";
 }
@@ -1032,22 +1097,26 @@ TEST(TestIngestorUhdKernelHeuristic, AnUncalibratedModelEstimatesZero)
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
-    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0);
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalogAgainstPriority(2048), context), 0.0);
     EXPECT_FALSE(heuristic->rankScored(catalogAgainstPriority(2048), context).empty())
         << "reporting a zero estimate must not stop it selecting";
 }
 
-TEST(TestIngestorKernelHeuristicEstimate, AnEngineWithNoModelEstimatesZero)
+TEST(TestIngestorKernelHeuristicEstimate, AnEngineWithNoModelOffersNoCalibratedRanking)
 {
-    // The fallback ranks on declared order and computes no figure of merit, so it reports the 0
-    // §5 step 7 prescribes. Reporting the priority it sorted by would put an arbitrary integer
-    // on a TFLOPS scale, where a large priority would outrank a real throughput.
+    // The fallback ranks on declared order and computes no figure of merit, so it offers no
+    // calibrated ranking and the engine reports the 0 §5 step 7 prescribes. Reporting the
+    // priority it sorted by would put an arbitrary integer on a metric's scale, where a large
+    // priority would outrank a real measurement.
     const testing::TestGraph graph;
     const auto properties = gfx942();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
-    EXPECT_DOUBLE_EQ(heuristic.estimateTflops(catalogAgainstPriority(2048), context), 0.0);
+    std::string modelId;
+    EXPECT_TRUE(
+        heuristic.calibratedRanking(catalogAgainstPriority(2048), context, modelId).empty());
+    EXPECT_TRUE(modelId.empty()) << "no model ranked, so none may be named";
 }
 
 TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotCorruptTheSort)
@@ -1084,15 +1153,16 @@ TEST(TestIngestorUhdKernelHeuristic, AModelWhoseTransformGoesOutOfDomainDoesNotC
     }
 
     // And the engine estimate agrees, which is the point of using one sentinel at both layers.
-    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0);
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalogAgainstPriority(2048), context), 0.0);
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelCannotReportANegativeThroughput)
 {
     // The case a finite-only guard misses, and the one most likely to occur: log1p is what
     // uhd_gen emits by default, and expm1 of a negative prediction is finite and negative. A
-    // calibrated score is TFLOPS (§11.3) and a throughput cannot be negative, so that value is
-    // the model predicting outside its target's range -- a training defect, not a slow kernel.
+    // calibrated tflops score is a throughput (§11.3) and a throughput cannot be negative, so
+    // that value is the model predicting outside its target's range -- a training defect, not
+    // a slow kernel.
     //
     // It matters which way it fails. A negative score is *below* the 0 that RFC 0019 §5 step 7
     // gives "no measurement", so an engine emitting nonsense would rank beneath an engine that
@@ -1118,7 +1188,7 @@ TEST(TestIngestorUhdKernelHeuristic, ACalibratedModelCannotReportANegativeThroug
         EXPECT_DOUBLE_EQ(entry.score, 0.0);
     }
 
-    EXPECT_DOUBLE_EQ(heuristic->estimateTflops(catalogAgainstPriority(2048), context), 0.0)
+    EXPECT_DOUBLE_EQ(engineEstimate(*heuristic, catalogAgainstPriority(2048), context), 0.0)
         << "the engine estimate went below the RFC's zero";
 }
 
@@ -1128,6 +1198,7 @@ TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBein
     // every *oriented* score is below zero while the underlying cost is perfectly ordinary.
     // A negative recovered value is meaningless; a negative oriented one is the normal case
     // for a cost target, and refusing it would refuse every candidate a min model ever ranks.
+    // A `min` model declares the `time` metric, so a time request is what it ranks.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_negative_oriented");
     const auto fixture
         = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/false, "identity");
@@ -1138,7 +1209,7 @@ TEST(TestIngestorUhdKernelHeuristic, AMinObjectiveScoresBelowZeroWithoutThatBein
 
     const testing::TestGraph graph;
     const auto properties = gfx942();
-    const MatchContext context{graph, 0, properties};
+    const MatchContext context{graph, 0, properties, "time"};
 
     const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
     ASSERT_EQ(scored.size(), 2U);
@@ -1152,6 +1223,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObje
     // "no measurement" is right -- RFC 0019 §5 step 7 -- but 0 is *greater* than every oriented
     // score a min objective produces, so using it to sort as well made an unmeasured candidate
     // outrank every measured one. It has to sort last whichever way the objective points.
+    // A `min` model declares the `time` metric, so a time request is what it ranks.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_unmeasured_last");
     const auto fixture = writeFixture(
         dir.path(), oneUsableOneOutOfRange(), "min", {}, /*calibrated=*/false, "identity");
@@ -1162,7 +1234,7 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObje
 
     const testing::TestGraph graph;
     const auto properties = gfx942();
-    const MatchContext context{graph, 0, properties};
+    const MatchContext context{graph, 0, properties, "time"};
 
     const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
     ASSERT_EQ(scored.size(), 2U);
@@ -1261,7 +1333,8 @@ TEST(TestIngestorUhdKernelHeuristic, PerArchModelsRankWithoutADefaultEntry)
         {"gfx950", modelDescriptor(gfx950Dir.path(), onNine50)}};
 
     // No descriptor: there is no `default` for the loader to have resolved.
-    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(
+        std::nullopt, "test-engine", KNOBS, FIELDS, RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1290,7 +1363,8 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
     const std::map<std::string, HeuristicDescriptor> byArch{
         {"gfx950", modelDescriptor(dir.path(), onNine50)}};
 
-    const auto heuristic = makeKernelHeuristic(std::nullopt, "test-engine", KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(
+        std::nullopt, "test-engine", KNOBS, FIELDS, RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     // A device the UED says nothing about.
@@ -1306,9 +1380,9 @@ TEST(TestIngestorUhdKernelHeuristic, AnArchNamedModelDoesNotRankAnArchitectureIt
     EXPECT_EQ(ranked.front().kernelId, testId(0x01))
         << "a model named only for gfx950 ranked a gfx1100 device";
 
-    // And it says so. Without this the only symptom is a UHD-carrying engine quietly not
-    // using its UHD on some machines and not others.
-    EXPECT_TRUE(recorder.hasLogContaining("names no model for 'gfx1100'"));
+    // And it says so, naming the metric the request ranked by. Without this the only symptom
+    // is a UHD-carrying engine quietly not using its UHD on some machines and not others.
+    EXPECT_TRUE(recorder.hasLogContaining("names no model for 'gfx1100' in metric 'tflops'"));
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedExplicitly)
@@ -1325,8 +1399,11 @@ TEST(TestIngestorUhdKernelHeuristic, ADefaultStillCoversAnArchitectureNotNamedEx
         {"default", modelDescriptor(defaultDir.path(), fallback)},
         {"gfx950", modelDescriptor(archDir.path(), specific)}};
 
-    const auto heuristic = makeKernelHeuristic(
-        modelDescriptor(defaultDir.path(), fallback), "test-engine", KNOBS, FIELDS, byArch);
+    const auto heuristic = makeKernelHeuristic(modelDescriptor(defaultDir.path(), fallback),
+                                               "test-engine",
+                                               KNOBS,
+                                               FIELDS,
+                                               RankersByMetric{{"tflops", byArch}});
     ASSERT_NE(heuristic, nullptr);
 
     const testing::TestGraph graph;
@@ -1385,14 +1462,14 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
         return makeKernelHeuristic(
             modelDescriptor(dir, fixture), "e", {"split_k"}, FIELDS_WITH_SPLIT_K);
     }
-    if(condition == "calibrated_and_minimising")
+    if(condition == "objective_contradicts_metric")
     {
-        // §15.1: the one combination the loader refuses outright. It is refused at the
-        // parse now -- the descriptor IS the UHD -- so the engine reaches the factory with
-        // no descriptor, and this goes through the document rather than round it.
-        const auto fixture = writeFixture(dir, preferLargeTiles(), "min", {}, /*calibrated=*/true);
+        // §4.4: a tflops model declaring `min`, which the loader refuses outright. It is
+        // refused at the parse -- the descriptor IS the UHD -- so the engine reaches the
+        // factory with no descriptor, and this goes through the document rather than round it.
+        const auto fixture = writeFixture(dir, preferLargeTiles(), "min");
         return makeKernelHeuristic(
-            parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true),
+            parseUhd(uhdDocument(fixture.modelFileName, "min", /*calibrated=*/true, "tflops"),
                      dir / "test.uhd.json"),
             "e",
             KNOBS,
@@ -1409,7 +1486,8 @@ std::shared_ptr<IKernelHeuristic> heuristicForCondition( // NOLINT(misc-use-inte
         const auto fixture = writeFixture(dir, preferLargeTiles());
         const std::map<std::string, HeuristicDescriptor> byArch{
             {"gfx950", modelDescriptor(dir, fixture)}};
-        return makeKernelHeuristic(std::nullopt, "e", KNOBS, FIELDS, byArch);
+        return makeKernelHeuristic(
+            std::nullopt, "e", KNOBS, FIELDS, RankersByMetric{{"tflops", byArch}});
     }
     return nullptr;
 }
@@ -1453,7 +1531,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(SelectionCondition{"healthy_model", "model"},
                       SelectionCondition{"features_hash_disagrees", "declared_order"},
                       SelectionCondition{"knobs_disagree_with_axes", "declared_order"},
-                      SelectionCondition{"calibrated_and_minimising", "declared_order"},
+                      SelectionCondition{"objective_contradicts_metric", "declared_order"},
                       SelectionCondition{"no_uhd_at_all", "declared_order"},
                       SelectionCondition{"arch_not_covered", "declared_order"}),
     [](const ::testing::TestParamInfo<SelectionCondition>& info) {
@@ -1603,7 +1681,7 @@ TEST(TestIngestorUhdKernelHeuristic, ABareReferenceSignatureStillSatisfiesTheKno
     // the parse turns that into "exposes [tile_m], model ranks on <none>" and refuses it.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_bare_signature");
     const auto fixture = writeFixture(
-        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity", SIGNATURE);
+        dir.path(), preferLargeTiles(), "max", {}, /*calibrated=*/true, "identity", SIGNATURE);
 
     const auto heuristic
         = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), "e", KNOBS, FIELDS);
@@ -1628,8 +1706,13 @@ TEST(TestIngestorUhdEngineKnobContract, MakeEngineCarriesTheUedsKnobsIntoTheMode
     // the UED into the engine; the knobs must be read before that move, or the check sees an
     // empty exposed set and refuses the model of every engine that declares a knob at all.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knobs");
-    const auto fixture = writeFixture(
-        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity", ENGINE_SIGNATURE);
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
 
     EXPECT_EQ(provenanceOfEngineRanking(engineSetRankingOnTileM(dir.path(), fixture, {"tile_m"})),
               "model");
@@ -1642,8 +1725,13 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineRankingOnAnAxisItDoesNotExposeIs
     // the knob the model ranks on, which §6.3 requires be refused -- selection would depend
     // on something the caller has no way to vary.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_knob_mismatch");
-    const auto fixture = writeFixture(
-        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity", ENGINE_SIGNATURE);
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
 
     EXPECT_EQ(provenanceOfEngineRanking(engineSetRankingOnTileM(dir.path(), fixture, {"split_k"})),
               "declared_order");
@@ -1656,8 +1744,13 @@ TEST(TestIngestorUhdEngineKnobContract, AnEngineExposingAKnobItsModelIgnoresStil
     // callers read -- it does not get reshaped by a training run. This is the shape of the
     // gfx942 attention engine, whose model went unused for exactly this reason.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_make_engine_unread_knob");
-    const auto fixture = writeFixture(
-        dir.path(), preferLargeTiles(), "max", {}, std::nullopt, "identity", ENGINE_SIGNATURE);
+    const auto fixture = writeFixture(dir.path(),
+                                      preferLargeTiles(),
+                                      "max",
+                                      {},
+                                      /*calibrated=*/true,
+                                      "identity",
+                                      ENGINE_SIGNATURE);
     // `split_k` is declared by the schema and carried by the kernels, so it is a legal
     // knob; the model simply does not rank on it, which is the constant-knob shape.
     EXPECT_EQ(provenanceOfEngineRanking(
@@ -1732,8 +1825,12 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnavailableExactArchitectureDoesNotUseDef
     const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_blocked_exact");
     const auto fixture = writeFixture(dir.path(), preferLargeTiles());
     const auto fallback = modelDescriptor(dir.path(), fixture);
-    const auto heuristic
-        = makeKernelHeuristic(fallback, {}, KNOBS, FIELDS, {{"default", fallback}}, {"gfx942"});
+    const auto heuristic = makeKernelHeuristic(fallback,
+                                               {},
+                                               KNOBS,
+                                               FIELDS,
+                                               RankersByMetric{{"tflops", {{"default", fallback}}}},
+                                               {{"tflops", {"gfx942"}}});
     const testing::TestGraph graph;
     const auto exact = gfx942();
     auto other = gfx942();
@@ -1758,7 +1855,9 @@ TEST(TestIngestorUhdKernelHeuristic, AFailedExactModelDoesNotUseDefault)
         {},
         KNOBS,
         FIELDS,
-        {{"default", fallback}, {"gfx942", modelDescriptor(dir.path(), "missing.bin")}});
+        RankersByMetric{
+            {"tflops",
+             {{"default", fallback}, {"gfx942", modelDescriptor(dir.path(), "missing.bin")}}}});
     const testing::TestGraph graph;
     const auto properties = gfx942();
     EXPECT_EQ(
@@ -1766,6 +1865,196 @@ TEST(TestIngestorUhdKernelHeuristic, AFailedExactModelDoesNotUseDefault)
             .front()
             .kernelId,
         testId(0x01));
+}
+
+/// RFC 0019 §3.1: a scoring role maps each architecture to one UHD *per metric*, and arch
+/// fallback runs inside the requested metric -- (gfx942, time) falls back to (default, time),
+/// never to (gfx942, tflops), and a metric with nothing for an architecture never borrows
+/// another metric's `default`. Either borrowing would still produce a normal-looking ranking,
+/// so only the model that answered can show it.
+TEST(TestIngestorUhdKernelHeuristic, ArchFallbackStaysInsideTheRequestedMetric)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir("uhd_metric_fallback_tflops");
+    const hipdnn_test_sdk::utilities::ScopedDirectory timeDir("uhd_metric_fallback_time");
+    // The tflops model prefers the large tile. The time model predicts 1 ms for the small tile
+    // and 9 ms for the large one, so under `min` the small tile wins. Distinct ids so the
+    // calibrated ranking's model id says which one answered.
+    auto throughput
+        = modelDescriptor(tflopsDir.path(), writeFixture(tflopsDir.path(), preferLargeTiles()));
+    throughput.id = testId(0xA1);
+    auto latency
+        = modelDescriptor(timeDir.path(), writeFixture(timeDir.path(), preferLargeTiles(), "min"));
+    latency.id = testId(0xB1);
+
+    const RankersByMetric rankers{{"tflops", {{"gfx942", throughput}}},
+                                  {"time", {{"default", latency}}}};
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "e", KNOBS, FIELDS, rankers);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto onGfx942 = gfx942();
+    auto onGfx950 = gfx942();
+    onGfx950.gcnArchName = "gfx950";
+    // Declared order puts the large tile first, so only the time model puts the small one there.
+    const auto catalog = catalogAlongPriority(2048);
+
+    // (gfx942, time) has no exact entry and falls back to (default, time), not to the gfx942
+    // key another metric owns.
+    const MatchContext timeOnGfx942{graph, 0, onGfx942, "time"};
+    const auto timeRanked = heuristic->rankScored(catalog, timeOnGfx942);
+    ASSERT_EQ(timeRanked.size(), 2U);
+    EXPECT_EQ(timeRanked.front().kernelId, testId(0x01))
+        << "a time request on gfx942 was not ranked by the time model";
+    std::string modelId;
+    EXPECT_FALSE(heuristic->calibratedRanking(catalog, timeOnGfx942, modelId).empty());
+    EXPECT_EQ(modelId, toString(latency.id));
+
+    // The control: the gfx942 key does belong to tflops.
+    modelId.clear();
+    EXPECT_FALSE(
+        heuristic->calibratedRanking(catalog, MatchContext{graph, 0, onGfx942}, modelId).empty());
+    EXPECT_EQ(modelId, toString(throughput.id));
+
+    // (gfx950, tflops) has neither an exact entry nor a `default` in tflops. The time model's
+    // `default` covers gfx950 for time only, so tflops ranks by declared order: the large tile
+    // first with the no-measurement 0, where the time model would have put the small one first.
+    const MatchContext tflopsOnGfx950{graph, 0, onGfx950};
+    const auto unranked = heuristic->rankScored(catalog, tflopsOnGfx950);
+    ASSERT_EQ(unranked.size(), 2U);
+    EXPECT_EQ(unranked.front().kernelId, testId(0x02)) << "the time model ranked a tflops request";
+    EXPECT_DOUBLE_EQ(unranked.front().score, 0.0);
+    modelId.clear();
+    EXPECT_TRUE(heuristic->calibratedRanking(catalog, tflopsOnGfx950, modelId).empty());
+    EXPECT_TRUE(recorder.hasLogContaining("names no model for 'gfx950' in metric 'tflops'"));
+
+    // While the same architecture under time does reach its own metric's `default`.
+    const auto timeOnGfx950
+        = heuristic->rankScored(catalog, MatchContext{graph, 0, onGfx950, "time"});
+    ASSERT_EQ(timeOnGfx950.size(), 2U);
+    EXPECT_EQ(timeOnGfx950.front().kernelId, testId(0x01));
+}
+
+/// RFC 0019 §11.4: an L2 value is physical, in the requested metric's registered units, best
+/// first in that metric's direction. For `time` that is ascending milliseconds -- the model's
+/// own prediction, not the negated key `objective: min` sorts by internally, which a caller
+/// comparing engines would read as every kernel taking negative time.
+TEST(TestIngestorUhdKernelHeuristic, ACalibratedTimeModelReportsAscendingMilliseconds)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_time_calibrated");
+    // preferLargeTiles predicts 1 for the small tile and 9 for the large one; read as a
+    // time, the small tile is the fast one.
+    const auto fixture
+        = writeFixture(dir.path(), preferLargeTiles(), "min", {}, /*calibrated=*/true, "identity");
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+
+    // catalogAlongPriority declares the slow kernel first, so declared order cannot pass.
+    std::string modelId;
+    const auto ranking = heuristic->calibratedRanking(
+        catalogAlongPriority(2048), MatchContext{graph, 0, properties, "time"}, modelId);
+    ASSERT_EQ(ranking.size(), 2U);
+    EXPECT_EQ(ranking[0].kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(ranking[0].score, 1.0);
+    EXPECT_EQ(ranking[1].kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(ranking[1].score, 9.0);
+    EXPECT_FALSE(modelId.empty());
+
+    // No substitution (§4.4): asked for tflops, a time model has no value to give.
+    modelId.clear();
+    EXPECT_TRUE(heuristic
+                    ->calibratedRanking(
+                        catalogAlongPriority(2048), MatchContext{graph, 0, properties}, modelId)
+                    .empty());
+    EXPECT_TRUE(modelId.empty());
+}
+
+/// RFC 0019 §3.1 and §11.4's default ranker: kernel choice for a metric with no ranker of its
+/// own uses the metric-less `sort_kernel_catalog` UHD if there is one, else the `tflops` one,
+/// else declared order. Only kernel choice falls back -- the calibrated ranking stays the
+/// requested metric's own, since a stand-in's number is in another metric (§4.4).
+TEST(TestIngestorUhdKernelHeuristic, TheDefaultRankerDecidesForAMetricWithNoRankerOfItsOwn)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory tflopsDir("uhd_default_ranker_tflops");
+    const hipdnn_test_sdk::utilities::ScopedDirectory metriclessDir(
+        "uhd_default_ranker_metricless");
+    const hipdnn_test_sdk::utilities::ScopedDirectory timeDir("uhd_default_ranker_time");
+    // The tflops ranker prefers the large tile and the metric-less one the small tile, each
+    // scoring its winner 9; declared order (catalogAlongPriority) puts the large tile first
+    // with the no-measurement 0. Winner and top score together name which of the three decided.
+    const auto throughput
+        = modelDescriptor(tflopsDir.path(), writeFixture(tflopsDir.path(), preferLargeTiles()));
+    auto metricless = modelDescriptor(
+        metriclessDir.path(),
+        writeFixture(metriclessDir.path(), preferSmallTiles(), "max", {}, /*calibrated=*/false));
+    metricless.score.metric.clear();
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext tflopsContext{graph, 0, properties};
+    const MatchContext timeContext{graph, 0, properties, "time"};
+    const auto catalog = catalogAlongPriority(2048);
+
+    // Only a tflops ranker: it decides a time request exactly as it decides its own.
+    const auto tflopsOnly = makeKernelHeuristic(
+        std::nullopt, "e", KNOBS, FIELDS, RankersByMetric{{"tflops", {{"default", throughput}}}});
+    const auto asTflops = tflopsOnly->rankScored(catalog, tflopsContext);
+    const auto asTime = tflopsOnly->rankScored(catalog, timeContext);
+    ASSERT_EQ(asTime.size(), 2U);
+    ASSERT_EQ(asTflops.size(), asTime.size());
+    for(size_t i = 0; i < asTime.size(); ++i)
+    {
+        EXPECT_EQ(asTime[i].kernelId, asTflops[i].kernelId) << "orders differ at " << i;
+        EXPECT_DOUBLE_EQ(asTime[i].score, asTflops[i].score);
+    }
+    EXPECT_DOUBLE_EQ(asTime.front().score, 9.0) << "declared order decided, not the tflops ranker";
+    EXPECT_TRUE(recorder.hasLogContaining("metric=time ranker=default ranker_metric=tflops"));
+
+    // It chose the kernels; it cannot report a time for them.
+    std::string modelId;
+    EXPECT_TRUE(tflopsOnly->calibratedRanking(catalog, timeContext, modelId).empty())
+        << "a tflops value was reported as a time";
+    EXPECT_FALSE(tflopsOnly->calibratedRanking(catalog, tflopsContext, modelId).empty());
+
+    // A metric-less ranker is the default ranker ahead of the tflops one. tflops keeps its own
+    // ranker, so only the time request changes hands.
+    const auto withMetricless = makeKernelHeuristic(
+        std::nullopt,
+        "e",
+        KNOBS,
+        FIELDS,
+        RankersByMetric{{"tflops", {{"default", throughput}}}, {"", {{"default", metricless}}}});
+    const auto metriclessDecides = withMetricless->rankScored(catalog, timeContext);
+    ASSERT_EQ(metriclessDecides.size(), 2U);
+    EXPECT_EQ(metriclessDecides.front().kernelId, testId(0x01))
+        << "the tflops ranker stood in ahead of the metric-less one";
+    EXPECT_DOUBLE_EQ(metriclessDecides.front().score, 9.0);
+    EXPECT_TRUE(recorder.hasLogContaining("metric=time ranker=default ranker_metric=(none)"));
+    const auto tflopsKeepsItsOwn = withMetricless->rankScored(catalog, tflopsContext);
+    ASSERT_EQ(tflopsKeepsItsOwn.size(), 2U);
+    EXPECT_EQ(tflopsKeepsItsOwn.front().kernelId, testId(0x02));
+    EXPECT_DOUBLE_EQ(tflopsKeepsItsOwn.front().score, 9.0);
+
+    // Neither: the engine's only ranker is a time model for another architecture, so the time
+    // request on gfx942 has nothing to stand in and ranks by priority, then id.
+    const auto latency
+        = modelDescriptor(timeDir.path(), writeFixture(timeDir.path(), preferLargeTiles(), "min"));
+    const auto neither = makeKernelHeuristic(
+        std::nullopt, "e", KNOBS, FIELDS, RankersByMetric{{"time", {{"gfx950", latency}}}});
+    const auto declared = neither->rankScored(catalog, timeContext);
+    ASSERT_EQ(declared.size(), 2U);
+    EXPECT_EQ(declared.front().kernelId, testId(0x02)) << "priority did not decide";
+    EXPECT_DOUBLE_EQ(declared.front().score, 0.0);
+    EXPECT_TRUE(recorder.hasLogContaining("names no model for 'gfx942' in metric 'time'"));
 }
 
 // ---- Two-layer selection: the group is half the answer ---------------------------------

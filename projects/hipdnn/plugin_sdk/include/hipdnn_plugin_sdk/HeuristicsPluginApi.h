@@ -84,21 +84,28 @@ typedef struct hipdnnHeuristicHandle_opaque* hipdnnHeuristicHandle_t;
 typedef struct hipdnnHeuristicPolicyDescriptor_opaque* hipdnnHeuristicPolicyDescriptor_t;
 
 /**
- * @brief Scoped host services for prediction-aware policies (ABI version 1).
+ * @brief Scoped host services for prediction-aware policies (ABI version 2).
  *
- * The table, context, callback, and returned EnginePrediction FlatBuffers are
- * borrowed and valid only during hipdnnHeuristicPolicyFinalizeWithHost.
+ * The table, context, callback, ranking_metric string, and returned EnginePrediction
+ * FlatBuffers are borrowed and valid only during hipdnnHeuristicPolicyFinalizeWithHost.
  * A plugin MUST NOT retain them, invoke callbacks asynchronously, or free host
  * buffers. Copy any configuration needed after finalize before returning.
  * Calls are synchronous on the finalize thread. Only input candidate engine IDs
- * may be queried. Scores are calibrated physical TFLOPS, not ordering keys.
+ * may be queried.
+ *
+ * Every prediction get_prediction returns is in the metric ranking_metric names
+ * (RFC 0019 §4.4, §11.2): its `value` is a calibrated physical quantity in that
+ * metric's registered units, not an ordering key, and better is higher or lower as
+ * the registered metric says. The host has already refused an answer in any other
+ * metric (status INVALID), so a policy compares values only in this one metric.
  *
  * Check version and struct_size before accessing callback fields. Future versions
- * may append fields; a larger struct_size with version 1 remains compatible.
+ * may append fields; a larger struct_size remains compatible. A version 1 table has
+ * no ranking_metric field and means "tflops".
  */
 typedef struct
 {
-    uint32_t version; ///< Host services version; currently 1.
+    uint32_t version; ///< Host services version; currently 2.
     size_t struct_size; ///< Size in bytes of this table.
     void* context; ///< Opaque borrowed callback context.
     hipdnnPluginStatus_t (*get_prediction)(
@@ -106,6 +113,9 @@ typedef struct
         int64_t engine_id,
         hipdnnEnginePredictionKind_t kind,
         hipdnnPluginConstData_t* prediction); ///< Borrow a verified EnginePrediction.
+    /// Version 2: the registered ranking metric ("tflops", "time", ...) this finalize
+    /// ranks by. NUL-terminated, never NULL, borrowed for the duration of finalize.
+    const char* ranking_metric;
 } hipdnnHeuristicHostCallbacks_t;
 
 /** @} */ // End of HeuristicPluginDataTypes group
@@ -358,6 +368,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
  * exported. Legacy plugins need not implement it. A null host means predictions
  * are unavailable; prediction-only policies decline with out_applied=0.
  * Neither host services nor prediction buffers may escape this call.
+ * A policy that ranks on predictions orders engines by host->ranking_metric, in that
+ * metric's direction, and declines when no candidate has a usable prediction in it
+ * rather than returning a static order dressed as a ranking (RFC 0019 §11.2).
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t desc,
@@ -373,6 +386,9 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
  * means this policy has no config for the engine (legacy ID-only behavior).
  * Config engine_id MUST match a returned input engine. A configuration-level
  * prediction must preserve every scored knob setting, not rerank later.
+ * The host stamps the finalize's ranking metric into every result configuration's
+ * ranking_metric, so the chosen engine ranks its own catalog by the same metric at
+ * plan build; a configuration naming an unregistered metric is rejected.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyGetEngineConfig(hipdnnHeuristicPolicyDescriptor_t desc,

@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -126,10 +128,15 @@ public:
      * @brief Dispatches a prediction or description to the requested engine.
      * @param handle Plugin handle for the graph's device.
      * @param opGraph Operation graph to predict.
-     * @param engineConfig Engine identity and explicit selection constraints.
+     * @param engineConfig Engine identity, explicit selection constraints, and the
+     *        ranking metric (`ranking_metric`, empty = "tflops") to answer in.
      * @param kind ENGINE never invokes CONFIGURATION as a fallback.
      * @param evaluate False publishes binding/features without model evaluation.
-     * @return Owned prediction; unavailable models do not affect applicability.
+     * @return Owned prediction in the requested metric; unavailable models do not affect
+     *         applicability.
+     * @throws HipdnnPluginException BAD_PARAM for an unknown kind or an unregistered
+     *         metric, before any engine sees the request (RFC 0019 §4.4: an unknown
+     *         metric is refused where the request is made).
      */
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(THandle& handle,
@@ -144,6 +151,7 @@ public:
             throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                         "Unknown engine prediction kind");
         }
+        std::ignore = heuristics::rankingMetric(engineConfig);
         return getEngine(engineConfig.engineId())
             .getPrediction(handle, opGraph, engineConfig, kind, evaluate);
     }

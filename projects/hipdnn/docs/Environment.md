@@ -131,6 +131,23 @@ empty tokens are skipped.|
     = "-1234567890123456789,SelectionHeuristic::StaticOrdering"
 ```
 
+#### HIPDNN_HEUR_RANKING_METRIC
+
+Overrides the ranking metric the prediction policies (`SelectionHeuristic::ModeA` / `SelectionHeuristic::ModeB`) order engines by (RFC 0019 §4.4, §11.4). Read by every `EngineHeuristicDescriptor::finalize()` call, with the same precedence as `HIPDNN_HEUR_POLICY_ORDER`: this variable, then the descriptor's `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT` attribute, then the default.
+
+| Value      | Description                                                |
+|------------|------------------------------------------------------------|
+| (unset or empty) | Use the descriptor attribute if set; otherwise `tflops`. |
+| `tflops`   | Calibrated throughput in TFLOPS; higher ranks first. |
+| `time`     | Predicted device time in milliseconds; lower ranks first. |
+
+Any other value fails `finalize()` with `HIPDNN_STATUS_BAD_PARAM`: an unregistered metric has no direction to rank by, and engines are never ranked by a metric other than the one requested. The effective metric is stamped into every configuration in `HIPDNN_ATTR_ENGINEHEUR_RESULTS`, so the chosen engine picks its kernel by the same metric at plan build. It affects only engine heuristic descriptors; the per-query `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` and `HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT` attributes are not overridden.
+
+**Example:**
+```bash
+export HIPDNN_HEUR_RANKING_METRIC=time
+```
+
       ####HIPDNN_HEUR_CONFIG_PATH
 
           Path to a JSON rule file consumed by the `SelectionHeuristic::Config` built

@@ -129,7 +129,7 @@ def _shut_out(stats: dict, min_candidates: int) -> str | None:
     if stats["deterministic"]:
         return (f"every one of its {stats['geometries']} geometries is served by exactly "
                 "one kernel, so it has nothing to rank at any --min-candidates. An engine "
-                "built on this pack wants a predict_engine_tflops model, not a "
+                "built on this pack wants a predict_engine model, not a "
                 "sort_kernel_catalog one.")
     if stats["too_few_candidates"] == stats["geometries"]:
         return (f"--min-candidates {min_candidates} dropped all {stats['geometries']} of "

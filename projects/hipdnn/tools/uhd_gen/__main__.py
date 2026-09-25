@@ -71,6 +71,7 @@ from .features import (
 )
 from .lgbm_to_flatbuffer import convert
 from .promote import add_promote_arguments, run_promote
+from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 from .train_uhd import build_feature_matrix, evaluate_regret, train_model
 
 logging.basicConfig(
@@ -235,32 +236,37 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--engine", help="UED name/UUID, or immediate engine canonical name/public ID")
     parser.add_argument("--feature-evaluator", help="Path to the shared hipdnn_uhd_features executable")
     parser.add_argument(
+        "--metric",
+        choices=tuple(RANKING_METRICS),
+        default=None,
+        help="Ranking metric the score estimates (RFC 0019 §4.4). It fixes the label "
+        "column (tflops: the tflops column; time: avgTimeMs), the objective and the units, "
+        "so a label cannot be paired with the wrong direction. Default: tflops when "
+        "--target is omitted or tflops; otherwise the model declares no metric and ranks "
+        "its own catalog only (a metric-less default ranker).",
+    )
+    parser.add_argument(
         "--target",
-        default="tflops",
-        help="Target column name (default: tflops)",
+        default=None,
+        help="Target column name (default: the metric's label column, else tflops). "
+        "With a metric it must be that metric's label.",
     )
     parser.add_argument(
         "--objective",
         choices=("max", "min"),
-        default="max",
-        help="Whether the runtime should maximize or minimize the score "
-        "(default: max, correct for throughput targets like tflops). Pass 'min' "
-        "for a cost target such as latency_ms.",
-    )
-    parser.add_argument(
-        "--score-units",
         default=None,
-        dest="score_units",
-        help="Units the score is expressed in (default: the --target column name).",
+        help="Whether the runtime should maximize or minimize the score. A metric fixes "
+        "it and a conflicting value is refused; a metric-less model defaults to max. Pass "
+        "'min' for a cost target such as latency_ms.",
     )
     parser.add_argument(
         "--calibrated",
         action="store_true",
         help="Declare the score cross-engine comparable: RFC 0019 §4.1's "
         "score.calibrated header, which RFC 0019 §11.3 reads when it compares "
-        "predicted throughput across engines. Only pass this if the target really is "
-        "calibrated across engines; it is not verified here, and an unwarranted claim "
-        "silently corrupts cross-engine comparison. RFC 0019.13 §11.2 additionally "
+        "predicted values across engines. Requires a metric. Only pass this if the target "
+        "really is calibrated across engines; it is not verified here, and an unwarranted "
+        "claim silently corrupts cross-engine comparison. RFC 0019.13 §11.2 additionally "
         "requires --timing-statistic avgTimeMs alongside it.",
     )
     parser.add_argument(
@@ -393,6 +399,45 @@ def _resolve_uhd_id(requested: str | None) -> str:
     return canonical
 
 
+def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
+    """Settle the metric, label column and objective before any data is read.
+
+    RFC 0019 §4.4: the metric fixes the units and the winning direction, and §13.4 fixes
+    its label, so with a metric named there is nothing left for --target or --objective
+    to choose -- only something for them to contradict. A model with no metric is a
+    within-engine ranker over whatever column it was given, and says nothing comparable.
+    """
+    from .immediate import LABEL_STATISTIC
+
+    if args.metric is None and args.target in (None, "tflops"):
+        args.metric = DEFAULT_RANKING_METRIC
+    if args.metric is None:
+        if immediate:
+            raise ValueError(f"{args.role} requires --metric: engine selection compares its "
+                             "score across engines, so it must name a registered metric")
+        if args.calibrated:
+            raise ValueError("--calibrated requires --metric: a calibrated score must name the "
+                             "quantity it is calibrated in (RFC 0019 §4.1)")
+        args.objective = args.objective or "max"
+        return
+    metric = ranking_metric(args.metric)
+    if args.target not in (None, metric.label):
+        raise ValueError(f"--metric {metric.name} trains on the {metric.label!r} column; "
+                         f"--target {args.target} contradicts it")
+    if args.objective not in (None, metric.objective):
+        raise ValueError(f"--metric {metric.name} fixes objective {metric.objective}; "
+                         f"--objective {args.objective} contradicts it")
+    args.target, args.objective = metric.label, metric.objective
+    if metric.label == LABEL_STATISTIC:
+        # This metric's label IS a timing statistic, so it cannot have been derived from
+        # another one.
+        if args.timing_statistic not in (None, LABEL_STATISTIC):
+            raise ValueError(f"--metric {metric.name} is labelled by {LABEL_STATISTIC}; "
+                             f"--timing-statistic {args.timing_statistic} contradicts it")
+        args.timing_statistic = LABEL_STATISTIC
+
+
+
 def _run_train(args: argparse.Namespace) -> int:
     from .provenance import snapshot_provenance, validate_provenance
     from .immediate import LABEL_STATISTIC, ROLE, read_corpus, training_binding, validate_signature
@@ -406,10 +451,9 @@ def _run_train(args: argparse.Namespace) -> int:
         uhd_id = _resolve_uhd_id(args.uhd_id)
         if Path(args.descriptor_name).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
             raise ValueError("--descriptor-name must be a file stem, not a path")
-        # This is captured before data preparation or fitting, never stamped later.
+        # Settled, and captured below, before data preparation or fitting, never stamped later.
+        _resolve_score(args, immediate)
         if immediate:
-            if args.target != "tflops" or args.objective != "max" or args.score_units not in (None, "tflops"):
-                raise ValueError("predict_engine_tflops requires --target tflops --objective max --score-units tflops")
             if args.report_regret:
                 raise ValueError("L1 evaluation compares immediate engines, not within-engine candidate regret")
             df, binding = training_binding(read_corpus(input_path), args.engine)
@@ -427,10 +471,11 @@ def _run_train(args: argparse.Namespace) -> int:
             args.group_by = ["benchmark", "device"]
             args.calibrated = True
             # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): L1 always declares a
-            # calibrated score, so its label is `avgTimeMs` and the manifest says so.
+            # calibrated score, so every label -- the time itself, or the throughput
+            # derived from it -- comes from `avgTimeMs`, and the manifest says so.
             if args.timing_statistic not in (None, LABEL_STATISTIC):
                 raise ValueError(
-                    f"predict_engine_tflops labels are derived from {LABEL_STATISTIC}; "
+                    f"{ROLE} labels are derived from {LABEL_STATISTIC}; "
                     f"--timing-statistic {args.timing_statistic} contradicts the corpus")
             args.timing_statistic = LABEL_STATISTIC
             observed_arches = sorted(df["arch"].unique())
@@ -609,7 +654,7 @@ def _run_train(args: argparse.Namespace) -> int:
             # it (§6.3). Only the digest is restated -- the kept columns of `matrix`
             # are already the values for the surviving entries.
             features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
-        if args.objective == "max" and _looks_like_cost_metric(args.target):
+        if args.metric is None and args.objective == "max" and _looks_like_cost_metric(args.target):
             logger.warning("Target '%s' looks like a cost; use --objective min to prefer faster candidates", args.target)
         groups = args.group_by
         if groups is None and "benchmark" in df.columns:
@@ -713,7 +758,10 @@ def _run_train(args: argparse.Namespace) -> int:
         "version": "1.0", "id": uhd_id, "name": args.name, "adapter": "tree_data",
         "features_signature": signature, "features_hash": features_hash,
         "trained_against": trained_against, "objective": args.objective,
-        "score": {"units": args.score_units or args.target, "calibrated": args.calibrated, "transform": "log1p"},
+        # RFC 0019 §4.1: `metric` names the registered quantity the score estimates, and
+        # is absent from a within-engine ranker that estimates none of them.
+        "score": {**({"metric": args.metric} if args.metric else {}),
+                  "calibrated": args.calibrated, "transform": "log1p"},
         # RFC 0019 §7.2: the body naming the artifact carries the digest of its bytes,
         # which TreeDataAdapter recomputes before parsing and refuses on mismatch. It
         # answers the question features_hash does not -- that one fingerprints the input
@@ -738,7 +786,7 @@ def _run_train(args: argparse.Namespace) -> int:
         "uhd_sha256": hashlib.sha256(descriptor_document.encode("utf-8")).hexdigest(),
         "model_sha256": model_sha256,
         "categorical_encoding": categorical_encoding, "target": args.target, "objective": args.objective,
-        "score_units": args.score_units or args.target, "score_calibrated": args.calibrated,
+        "score_metric": args.metric, "score_calibrated": args.calibrated,
         # RFC 0019.13 §10.5/§11.2: which measured timing the target came from. §11.2
         # refuses cross-engine comparison between models trained on different ones, so
         # a consumer has to be able to read it off the artifact rather than infer it.

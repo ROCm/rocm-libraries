@@ -84,6 +84,15 @@ prediction, the prediction policy declines and ordinary static engine selection
 still runs, so ``graph.create_execution_plans({HeuristicMode::B})`` never fails for
 want of a model. Setting ``HIPDNN_HEUR_POLICY_ORDER`` overrides the whole list.
 
+Both modes rank by one *ranking metric*, ``tflops`` by default: calibrated
+throughput, highest first. ``graph.set_ranking_metric("time")`` ranks by predicted
+milliseconds, lowest first, and makes the chosen engine pick its kernel by predicted
+time too; ``graph.get_ranking_metric()`` reads the choice back. An unregistered name
+returns an ``Error`` and leaves the metric unchanged. An engine whose models do not
+cover the requested metric is ranked after those that do, never by another metric,
+so if no engine has a model for it the prediction policy declines exactly as above.
+``HIPDNN_HEUR_RANKING_METRIC`` overrides the Graph's choice for heuristic selection.
+
 Error: Different memory utilities for allocating device memory
 --------------------------------------------------------------
 

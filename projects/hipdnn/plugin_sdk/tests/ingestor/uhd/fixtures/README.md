@@ -6,7 +6,7 @@ loop.
 
 | File | What it is |
 |---|---|
-| `tile_selector.uhd.json` | the UHD: `features_signature`, objective, score units, and the artifact it names |
+| `tile_selector.uhd.json` | the UHD: `features_signature`, objective, score metric, and the artifact it names |
 | `model.bin` | the GBDT artifact |
 | `train_manifest.json` | provenance, including the `features_hash` both sides must agree on |
 | `training_data.csv` | the input, so the model is reproducible rather than magic |

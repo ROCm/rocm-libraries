@@ -624,10 +624,10 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Explicit, like every other descriptor list here: one list feeds staging and install,
     # so the two cannot disagree about what ships.
     set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES
-        predict_engine_tflops/gfx942/asm_sdpa_engine_tflops.uhd.json
-        predict_engine_tflops/gfx942/asm_sdpa_engine_tflops.bin
-        predict_engine_tflops/gfx950/asm_sdpa_engine_tflops.uhd.json
-        predict_engine_tflops/gfx950/asm_sdpa_engine_tflops.bin
+        predict_engine/gfx942/asm_sdpa_engine_tflops.uhd.json
+        predict_engine/gfx942/asm_sdpa_engine_tflops.bin
+        predict_engine/gfx950/asm_sdpa_engine_tflops.uhd.json
+        predict_engine/gfx950/asm_sdpa_engine_tflops.bin
     )
     set(_asm_sdpa_staged)
     foreach(_descriptor IN LISTS HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES)

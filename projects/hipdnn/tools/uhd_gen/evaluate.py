@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 
 from .corpus_io import read_corpus_frame
+from .ranking_metrics import RANKING_METRICS
 
 logger = logging.getLogger(__name__)
 
@@ -749,8 +750,9 @@ def evaluate_corpus(
     # The report is not a gate (§11.4: "These metrics do not gate emission"), but a
     # systematic bias is the one failure a ranking report cannot show, so it is said out
     # loud rather than left for a reader to find in the JSON. Direction matters as much
-    # as size: an engine whose score reads high wins arbitrations it should lose, and one
-    # that reads low is passed over for work it would have done best.
+    # as size, and it is the metric's: a throughput that reads high, or a time that reads
+    # low, wins arbitrations it should lose; the opposite error is passed over for work
+    # it would have done best.
     selected = calibration.get("selected_candidate")
     if selected is not None:
         bias = selected["signed_relative_bias"]
@@ -760,9 +762,10 @@ def evaluate_corpus(
                 f"{'OVER' if bias > 0 else 'UNDER'}-predicts by {abs(bias):.1%} on average "
                 f"(threshold {CALIBRATION_BIAS_WARN:.0%}). Ranking within this engine is "
                 "unaffected -- a constant factor cannot reorder a catalog -- but RFC 0019 "
-                "§11.3 compares this number against other engines' predictions, so Mode A "
-                "and Mode B will "
-                f"{'favour' if bias > 0 else 'avoid'} this engine by roughly that margin."
+                "§11.3 compares this number against other engines' predictions, so the "
+                "quick and thorough policies will "
+                f"{'favour' if (bias > 0) == (objective == 'max') else 'avoid'} this engine "
+                "by roughly that margin."
             )
 
     report = _build_report(
@@ -772,6 +775,7 @@ def evaluate_corpus(
         split=split,
         target=target,
         objective=objective,
+        metric=(score_declaration or {}).get("metric"),
         regime_column=regime_column,
         tie_rel_tolerance=tie_rel_tolerance,
         tie_sigma=tie_sigma,
@@ -855,10 +859,10 @@ def _calibration_block(
             "detail": "No scored candidate carries a positive measurement to compare against.",
         }
 
-    units = declaration.get("units")
+    metric = declaration.get("metric")
     block: dict[str, Any] = {
         "status": "computed",
-        "units": units,
+        "metric": metric,
         "target": target,
         "all_candidates": _calibration_summary(predicted_array[usable], measured_array[usable]),
         "selected_candidate": (
@@ -870,14 +874,16 @@ def _calibration_block(
         ),
         "excluded_non_positive_rows": int((~usable).sum()),
     }
-    if units is not None and units != target:
+    label = RANKING_METRICS[metric].label if metric in RANKING_METRICS else None
+    if label != target:
         # Not fatal, and not silently fudged either: the two numbers are subtracted, so a
-        # reader has to be able to see whether they were on the same scale. The pipeline's
-        # own convention is `--target tflops --score-units tflops`.
+        # reader has to be able to see whether they were on the same scale. A registered
+        # metric fixes its label column (RFC 0019 §13.4), so any other target is a
+        # different quantity from the one the score claims to estimate.
         block["warning"] = (
-            f"score.units is {units!r} but the target column is {target!r}. These figures "
-            "subtract the prediction from the measurement, so they mean nothing unless "
-            "both are the same physical quantity."
+            f"score.metric {metric!r} is measured by the {label!r} column but the target "
+            f"column is {target!r}. These figures subtract the prediction from the "
+            "measurement, so they mean nothing unless both are the same physical quantity."
         )
     return block
 
@@ -1020,6 +1026,7 @@ def _build_report(
     split: Split,
     target: str,
     objective: str,
+    metric: str | None,
     regime_column: str | None,
     tie_rel_tolerance: float,
     tie_sigma: float,
@@ -1125,6 +1132,9 @@ def _build_report(
         "rfc": "0019.13 §11.2, §11.4",
         "generated": datetime.now(timezone.utc).isoformat(),
         "corpus": {"rows": corpus_rows, "problems": corpus_problems},
+        # The ranking metric the score estimates (RFC 0019 §4.4), or null for a
+        # metric-less ranker; regret is in `target`, in `objective`'s direction.
+        "metric": metric,
         "target": target,
         "objective": objective,
         "grouping": {
@@ -1397,14 +1407,16 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
     if role is None:
         # A promoted model ships without its training manifest, and RFC 0019 Section 3.1
         # leaves the role to the owning UED rather than the UHD. `promote` encodes that
-        # role map in the install layout, `<ued-id>/<role>/<arch>/`, so read it back.
+        # role map in the install layout, `<ued-id>/<role>/<arch>/[<metric>/]`, so read it
+        # back.
         from .provenance import ROLES
-        if model_dir.resolve().parent.name in ROLES:
-            role = model_dir.resolve().parent.name
-    immediate = role == "predict_engine_tflops"
-    if immediate:
-        from .immediate import validate_model
-        validate_model(descriptor)
+        for ancestor in model_dir.resolve().parents[:2]:
+            if ancestor.name in ROLES:
+                role = ancestor.name
+                break
+    from .immediate import ROLE, validate_model
+    immediate = role == ROLE
+    l1_metric = validate_model(descriptor) if immediate else None
 
     from .features import build_features_signature, compute_features_hash, signature_references
 
@@ -1472,7 +1484,8 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
                                         expected_hash=expected_hash, score_transform=transform)
 
     return ModelBundle(
-        scorer=scorer, features=list(features), target=manifest.get("target", "tflops" if immediate else None),
+        scorer=scorer, features=list(features),
+        target=manifest.get("target", l1_metric.label if l1_metric else None),
         objective=objective, source=str(candidate), trained_on=manifest.get("input_file"),
         training_rows=manifest.get("num_samples"), descriptor=descriptor, manifest=manifest, role=role,
         group_feature=group_feature,
@@ -1656,11 +1669,20 @@ def run_evaluate(args: argparse.Namespace) -> int:
     except (ValueError, OSError) as error:
         logger.error("%s", error)
         return 1
-    if bundle.role == "predict_engine_tflops":
+    from .immediate import ROLE
+
+    # A registered metric fixes the direction (RFC 0019 §4.4); an override that
+    # contradicts it would invert every regret, so it is refused rather than applied.
+    declared = bundle.descriptor.get("score", {}).get("metric")
+    if declared in RANKING_METRICS and args.objective not in (None, RANKING_METRICS[declared].objective):
+        logger.error("score.metric %r ranks %s; --objective %s contradicts it", declared,
+                     RANKING_METRICS[declared].objective, args.objective)
+        return 1
+    if bundle.role == ROLE:
         from .immediate import evaluate_immediate, read_corpus
         try:
-            if args.target not in (None, "tflops") or args.objective not in (None, "max"):
-                raise ValueError("L1 evaluation cannot override calibrated tflops/max semantics")
+            if args.target not in (None, RANKING_METRICS[declared].label):
+                raise ValueError(f"L1 evaluation of {declared!r} cannot override its calibrated label")
             if args.device_column not in (None, "device"):
                 raise ValueError("L1 evaluation groups by the recorded graph/device identity")
             bundles = [bundle] + [load_model(Path(path), feature_evaluator=args.feature_evaluator,
@@ -1691,7 +1713,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
             logger.error("%s", error)
             return 1
     if args.additional_model_dir or args.predictions:
-        logger.error("additional models and runtime predictions require predict_engine_tflops models")
+        logger.error("additional models and runtime predictions require %s models", ROLE)
         return 1
 
     # The same suffix rule and the same identity pinning the trainer applies, so a model
@@ -1804,6 +1826,7 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
         print(f"\n!! {warning}")
 
     print(f"\nRegret report ({report['rfc']}) -- {output_path}")
+    print(f"  metric:             {report.get('metric') or '(none: ranks its own catalog only)'}")
     print(f"  target/objective:   {report['target']} ({report['objective']})")
     print(f"  problems grouped by: {', '.join(report['grouping']['columns'])}")
     print(
@@ -1823,7 +1846,7 @@ def _print_summary(report: dict[str, Any], output_path: Path) -> None:
                 f"{report['exclusions']['problems_single_candidate']} problem(s) had a "
                 "single candidate: this engine's kernel choice is a total function of the\n"
                 "                      problem, so there is no ordering for a ranking "
-                "model to learn. Train --role predict_engine_tflops instead."
+                "model to learn. Train --role predict_engine instead."
             )
     else:
         print(
