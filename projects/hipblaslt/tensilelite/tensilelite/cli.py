@@ -9,13 +9,12 @@ import argparse
 from collections.abc import Callable, Sequence
 import sys
 
-
 _COMMAND_HELP = {
     "benchmark-cluster": "run the distributed benchmark workflow",
     "create-library": "generate device libraries from library logic",
     "generate-summations": "generate summation models for library logic",
     "logic": "validate library logic",
-    "logic-to-yaml": "convert library logic to a Tensile configuration",
+    "logic-to-yaml": "convert library logic to a TensileLite configuration",
     "merge-library": "merge tuned library logic without regressions",
     "retune-library": "retune an existing library logic file",
     "run": "run the benchmark and tuning workflow",
@@ -45,9 +44,9 @@ def _handler(command: str) -> Callable[[Sequence[str] | None], int | None]:
 
         return run
     if command == "generate-summations":
-        from .GenerateSummations import GenerateSummations
+        from .GenerateSummations import main
 
-        return GenerateSummations
+        return main
     if command == "logic":
         from .tensilelite_logic.run import main
 
@@ -80,6 +79,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="tensilelite",
         description="TensileLite generator, validation, and tuning tools.",
     )
+    parser.add_argument("--version", action="store_true", help="show the TensileLite version")
     parser.add_argument("command", nargs="?", choices=tuple(_COMMAND_HELP), help="command to run")
     return parser
 
@@ -99,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_help(parser)
         return 0
     if args[0] == "--version":
+        if len(args) != 1:
+            parser.error("--version does not accept additional arguments")
         from . import __version__
 
         print(__version__)
