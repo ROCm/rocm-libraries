@@ -423,25 +423,44 @@ formats, and adds **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
 | 121 | V_SWMMAC_F16_16X16X128_BF8_FP8 |
 | 122 | V_SWMMAC_F16_16X16X128_BF8_BF8 |
 
-### WMMA scale helpers (F8F6F4 / microscaling — separate encoding)
+### Scaled WMMA (F8F6F4 / FP4 microscaling — VOP3PX2 two-dword encoding)
+
+These are matrix instructions in their own right, not helpers. They use the
+two-dword **VOP3PX2** encoding: the first dword carries the base WMMA opcode and
+the second carries the scale opcode, so a single instruction names both.
+
+| Base opcode (dword 1) | Scale opcode (dword 2) | Instruction |
+|---|---|---|
+| 0x033 | 0x35 `SCALE` | V_WMMA_SCALE_F32_16X16X128_F8F6F4 |
+| 0x088 | 0x35 `SCALE` | V_WMMA_SCALE_F32_32X16X128_F4 |
+| 0x033 | 0x3a `SCALE16` | V_WMMA_SCALE16_F32_16X16X128_F8F6F4 |
+| 0x088 | 0x3a `SCALE16` | V_WMMA_SCALE16_F32_32X16X128_F4 |
+
+### WMMA scale-load helpers
+
+Separate scalar instructions that stage the per-block scale operands consumed by
+the table above.
+
 | Instruction |
 |---|
-| V_WMMA_SCALE_F32_16X16X128_F8F6F4 |
-| V_WMMA_SCALE_F32_32X16X128_F4 |
-| V_WMMA_SCALE16_F32_16X16X128_F8F6F4 |
-| V_WMMA_SCALE16_F32_32X16X128_F4 |
-| V_WMMA_LD_SCALE_B32 |
 | V_WMMA_LD_SCALE_PAIRED_B32 |
-| V_WMMA_LD_SCALE16_B64 |
 | V_WMMA_LD_SCALE16_PAIRED_B64 |
+
+> Only the `*_PAIRED_*` forms exist on this part. There is no unpaired
+> `V_WMMA_LD_SCALE_B32` / `V_WMMA_LD_SCALE16_B64`; the unpaired scale-load for
+> MFMA-class parts is the separate `V_MFMA_LD_SCALE_B32` (op `0x2c`).
 
 **Data types:** F16, BF16, F32, IU8, FP8/BF8, and **F8F6F4 & FP4** with
 per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 
-> **IU4 is not listed above on purpose.** The dense opcode table for this part
-> enumerates `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8` only — no
-> `IU4` form was located. Treat INT4 on this part as **unconfirmed** and check the
-> official ISA document before relying on it.
+> **IU4 is absent from this part.** Integer matrix here is `IU8`-only:
+> `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. Two independent
+> complete enumerations agree — the dense opcode table in the ISA document, and
+> LLVM's real-instruction block for this target (`VOP3PInstructions.td`), which
+> runs contiguously over `0x033` and `0x05b`–`0x088` with `IU8` at `0x072` /
+> `0x07b` and no `IU4` opcode anywhere in it. Every `IU4` WMMA/SWMMAC definition
+> in LLVM is gated to the RDNA3/RDNA3.5/RDNA4 classes instead. This is a
+> confirmed absence, not an unverified entry.
 
 ---
 
@@ -461,6 +480,11 @@ per-block **scale** operands. **No native XF32/TF32 or F64 matrix instruction.**
 | F8F6F4 / FP4 | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Block scaling (MX) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | Sparse (SMFMAC/SWMMAC) | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+
+`✅` = enumerated in that architecture's opcode table; `❌` = not present in it.
+
+**INT4 note:** the CDNA5 `❌` is a positive finding, not a gap in this survey —
+see the per-section note above.
 
 **XF32 note:** `V_MFMA_F32_16X16X8_XF32` (opcode 62) and
 `V_MFMA_F32_32X32X4_XF32` (opcode 63) are present on gfx942, a supported rocKE

@@ -21,14 +21,10 @@ there is only ever one copy to keep current.
 
 | | |
 |---|---|
-| **Basis** | Initial source review: [c90f135be20b456c3449fca3a3d5021acf092a14](https://github.com/ROCm/rocm-libraries/commit/c90f135be20b456c3449fca3a3d5021acf092a14), 2026-09-17. Review corrections checked against [7917434a5120f32400d7ef716529ece2b0a27ef1](https://github.com/ROCm/rocm-libraries/commit/7917434a5120f32400d7ef716529ece2b0a27ef1) and public ISA XML on 2026-09-23. |
+| **Basis** | Source review against `develop` at [26b228bb57890bb9a2016d0c8d5d55eaa1b4b1ef](https://github.com/ROCm/rocm-libraries/commit/26b228bb57890bb9a2016d0c8d5d55eaa1b4b1ef), 2026-09-17. Every `file:line` anchor and both §4B atom tables are valid against **that tree**; public ISA XML checked 2026-09-23. **Re-verify after any rebase that advances the base** — see "Keeping it current". |
 | **Method** | Initial review: source exploration of both engines. Scores in §2.4 use the criteria in §2.2 and source anchors in §2.6. Review corrections: public ISA XML and pinned LLVM source comparison, plus a Python host-side block-scale GEMM validator, signature, and IR-parameter probe. No GPU execution or numerical validation. Silicon claims come from [`matrix_instructions_summary.md`](./matrix_instructions_summary.md); declared atoms come from [arch_specs.json](../../python/rocke/core/arch/data/arch_specs.json). |
 | **Out of scope** | Runtime/dispatch dtype validation, the provider's C-api surface, and any measurement. |
-| **Keeping it current** | When a dtype's support changes at any layer, update the affected row(s) and the §2.6 anchors in the same change. The criteria (§2.2) and rubric (§2.3) are the stable part; the scores are not. |
-
-> Compliance note: this document records *capability facts and methodology* only.
-> It contains no measured, software-achieved performance numbers (per
-> `platform/AGENTS.md` §Compliance).
+| **Keeping it current** | When a dtype's support changes at any layer, update the affected row(s) and the §2.6 anchors in the same change. The criteria (§2.2) and rubric (§2.3) are the stable part; the scores are not. **Line anchors and the §4B atom tables are hand-maintained mirrors of the basis tree and go stale on rebase** — an arch entry gaining or losing atoms upstream silently invalidates §4B without touching this file. Re-check both against the new base before merging any rebase. |
 
 ---
 
@@ -37,7 +33,7 @@ there is only ever one copy to keep current.
 rocKE's compiler knows exactly **10 scalar IR types**, defined identically in
 both engines:
 
-- Python: `platform/python/rocke/core/ir.py:44-53`
+- Python: `platform/python/rocke/core/ir.py:43-52`
 - C++: `platform/cpp/include/rocke/ir.h:93-108`,
   `platform/cpp/core/ir/core_types.cpp:47-56`
 
@@ -54,7 +50,7 @@ both engines:
 | `fp8e4m3` | `i8` (storage) | 8 | float (OCP E4M3) |
 | `bf8e5m2` | `i8` (storage) | 8 | float (OCP E5M2) |
 
-LLVM mapping: `lower_llvm.py:1024-1060` (Python) ↔
+LLVM mapping: `lower_llvm.py:1093-1129` (Python, `_llvm_type`) ↔
 `cpp/core/lower_llvm/core.cpp:938-994` (C++). FP8/BF8 are carried as `i8`
 storage and materialized through `llvm.amdgcn.cvt.*` intrinsics — there is no
 native `<8 x fp8>` LLVM type in the emitter.
@@ -62,6 +58,19 @@ native `<8 x fp8>` LLVM type in the emitter.
 **Sub-byte / block formats are NOT scalar IR types.** `i4`, `fp4`, `fp6`, and
 the `e8m0` MX scale exist only as *packed encodings* consumed by dedicated
 helpers/atoms, never as first-class `Type` objects (see §4).
+
+> For contrast — and as a concrete shape for anyone closing these gaps — CK-Tile
+> does give every one of them a named logical type backed by a packed storage
+> representation: `pk_fp4_t = pk_float4_e2m1_t`
+> (`include/ck_tile/core/numeric/pk_fp4.hpp:192`), `pk_fp6_t = pk_float6_e2m3_t`
+> and `pk_bf6_t = pk_float6_e3m2_t` (`pk_f6.hpp:294-295`), `pk_int4_t`
+> (`pk_int4.hpp:17`), `e8m0_t` and `e5m3_t` for MX scales (`e8m0.hpp:54`,
+> `e5m3.hpp:37`), and `tf32_t = tfloat32_t` (`tfloat32.hpp:68`) — each with a
+> `native_t<>` specialization mapping the logical type to its storage. That
+> separation of *logical type* from *storage width* is what lets a sub-byte format
+> be named in an API signature without becoming an LLVM scalar type, and it is the
+> missing ingredient behind the C5=0 scores in §2.4. Noted as a design reference,
+> not a proposal in this document's scope.
 
 **Reduced-precision compute (the "tf32 request") is a mode, not a storage type.**
 It never appears as a tensor dtype: storage stays `f32` and the *precision* is
@@ -123,7 +132,7 @@ provider whose accepted dtype set defines the must-not-regress floor).
 | **C3** | **Conversion completeness** | Are casts to **and** from the `f32` hub present, plus the direct sibling casts that avoid a double bounce, with correct rounding/saturation? | Every hipDNN plan in this repo asserts `computeDataType() == DataType::FLOAT` (SDPA, RMSNorm, batchnorm, resample), so *every* tensor dtype must round-trip through f32 or it cannot participate. CK's `type_convert<Dst,Src>` is deliberately **total** over its type set; partial conversion coverage is the single most common way a dtype is "supported" on paper but unusable in a fusion. |
 | **C4** | **Memory I/O plumbing** | Scalar load/store, vectorised (`n∈{2,4,8}`) load/store, and pack/unpack at the helper surface — not just raw IR primitives. | A tensor dtype is only usable if a kernel can move it. CK exposes `buffer_load`/`buffer_store` at every vector width for each supported type; rocKE's equivalent is `helpers/io.py`. If `io.py` raises `ValueError` on a dtype, every small-op family (norm, reduce, elementwise, transpose) is closed to it regardless of what the compiler can express. |
 | **C5** | **Kernel-family reach** | How many shipping families actually accept it — GEMM, MFMA-GEMM, conv, attention, norm/quant epilogues? | This is the criterion the *user* feels. The reference set is the hipDNN op surface this provider implements: conv fwd/bwd/wgrad, SDPA fwd/bwd, batchnorm, RMSNorm, resample, matmul. A dtype that passes C1–C4 but ships in zero instances delivers nothing. |
-| **C6** | **Numerical / dialect hygiene** | Is rounding + saturation defined, and is the *encoding dialect* unambiguous at the arch boundary? | Purely a correctness criterion, and the one with the worst failure mode: silence. gfx942 fp8 is **FNUZ** and gfx950 fp8 is **OCP** — same bytes, results off by a power of two. CK models this explicitly with distinct `f8_fnuz_t` / `f8_ocp_t` types; rocKE currently carries it as an arch-dependent decode dialect, so this criterion tracks real risk, not pedantry. MX types add a second axis (E8M0 scales are power-of-two only). |
+| **C6** | **Numerical / dialect hygiene** | Is rounding + saturation defined, and is the *encoding dialect* unambiguous at the arch boundary? | Purely a correctness criterion, and the one with the worst failure mode: silence. gfx942 fp8 is **FNUZ** and gfx950 fp8 is **OCP** — same bytes, results off by a power of two. **Classic CK** models this in the type system with distinct `f8_fnuz_t` / `f8_ocp_t` (`include/ck/utility/amd_ck_fp8.hpp:35,331`); **CK-Tile** instead keeps one `fp8_t` / `bf8_t` pair and carries the dialect as an `fp8_interpretation` template parameter (`include/ck_tile/core/numeric/float8.hpp:39,130,188`) — two valid designs, but both make the dialect *explicit at every conversion site*. rocKE currently carries it as an arch-dependent decode dialect, so this criterion tracks real risk, not pedantry. MX types add a second axis (E8M0 scales are power-of-two only). |
 
 Not every criterion applies to every dtype. For `i1`, `i16`, and `i64`, this
 matrix assesses predicate/index/address storage and use: `C2` (matrix arithmetic),
@@ -156,10 +165,12 @@ planning questions and deliberately live outside this document (see
 94% row.
 
 > Sourcing note: the hipDNN and MIOpen statements are cited from files in this
-> repo (paths given inline). The **CK** rationale reflects the public
-> Composable-Kernel / CK-Tile type vocabulary — there is no CK checkout in this
-> tree, so CK is used as a design reference for *what a criterion should
-> require*, not as a line-cited source.
+> repo (paths given inline). **CK** is also in this monorepo
+> (`projects/composablekernel`), so CK claims below are line-cited too. Note that
+> "CK" covers two type vocabularies that differ on exactly the points this
+> document leans on: **classic CK** (`include/ck/`) and **CK-Tile**
+> (`include/ck_tile/`). Where they disagree — notably on FP8 dialect modelling —
+> both are named explicitly rather than merged.
 
 ### 2.4 Scored matrix
 
@@ -177,18 +188,19 @@ Gap categories: **[C]** conversion gap · **[P]** partial/plumbing gap ·
 | `bf16` | 3 | 3 | 2 | 3 | 3 | 3 | **94%** | [C] |
 | `f64` | 0 | 0 | 0 | 0 | 0 | 0 | **0%** | [M] |
 | **Float — 8-bit** | | | | | | | | |
-| `fp8e4m3` (OCP) | 3 | 3 | 1 | 0 | 1 | 1 | **50%** | [C][P] |
-| `bf8e5m2` (OCP) | 3 | 3 | 1 | 0 | 1 | 1 | **50%** | [C][P] |
-| `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 0 | 1 | 1 | **39%** | [P] |
+| `fp8e4m3` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
+| `bf8e5m2` (OCP) | 3 | 3 | 1 | 1 | 1 | 1 | **56%** | [C][P] |
+| `fp8 fnuz` (gfx942 only) | 1 | 3 | 1 | 1 | 1 | 1 | **44%** | [P] |
 | **Sub-byte / block formats** | | | | | | | | |
 | `i4` (packed) | 0 | 1 | 3 | 2 | 2 | 2 | **56%** | [P] |
 | `fp4` (E2M1, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
-| `fp6` (E3M2/E2M3, MX) | 0 | 2 | 1 | 1 | 0 | 2 | **33%** | [P][M] |
+| `fp6` (E2M3, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
+| `bf6` (E3M2, MX) | 0 | 2 | 0 | 1 | 0 | 2 | **28%** | [C][P][M] |
 | `e8m0` (MX scale) | 0 | 3 | 3 | 2 | 3 | 2 | **72%** | — |
 | **Integer** | | | | | | | | |
 | `i32` | 3 | 3 | 3 | 3 | 3 | — | **100%** | — |
 | `i1` | 3 | — | — | 1 | 3 | — | **78%** | [P] |
-| `i8` | 3 | 2 | 2 | 2 | 1 | — | **67%** | [P] |
+| `i8` | 3 | 2 | 2 | 2 | 1 | 2 | **67%** | [P] |
 | `i64` | 3 | — | — | 1 | 1 | — | **56%** | [P] |
 | `i16` | 3 | — | — | 2 | 1 | — | **67%** | [P] |
 | `u8` | 0 | 0 | 0 | 0 | 0 | — | **0%** | [M] |
@@ -213,20 +225,40 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
   for both.
 - **`fp8e4m3` / `bf8e5m2` C3=1** — `↔f32` only. No `→f16`, `→bf16`, or `→i8`,
   which is exactly the cast a mixed-precision attention inner loop wants.
-- **`fp8e4m3` / `bf8e5m2` C4=0** — `helpers/io.py:56-62` raises `ValueError` for
-  anything outside f16/fp16/bf16, so the entire I/O helper surface is closed;
-  callers must drop to IR primitives or `quant.py`.
+- **`fp8e4m3` / `bf8e5m2` C4=1** — one surface only, in one direction. The
+  *generic* helpers are closed: `helpers/io.py:51-62` (`io_ir_type`) raises
+  `ValueError` for anything outside f16/fp16/bf16, which shuts `load_scalar`,
+  `load_vec`, `store_scalar`, `store_vec` and `pack_f32_to` to fp8/bf8. But a
+  **packed store path does exist**: `pack_quant_chunk_f32` (`io.py:260-297`)
+  accepts `qdtype ∈ {"fp8","fp8e4m3","bf8","bf8e5m2","i8"}` and emits
+  `cvt_pk_{fp8,bf8,i8}_f32x4`, and `store_packed_chunk` (`io.py:300-315`) writes
+  the result. So a kernel *can* move fp8/bf8 out through the helper layer — it
+  just cannot read it back in, and has no scalar or arbitrary-width form. That is
+  Partial (1), not Absent (0).
 - **`fp8e4m3` / `bf8e5m2` C5=1** — present in block-scale GEMM A/B, MoE-fp8, and
   attention K/V, but **absent from universal GEMM** (`gemm_universal.py:659`
   raises `NotImplementedError` for any dtype that is not `F16`/`BF16`) and from
-  MFMA GEMM (`mfma_gemm.py:62-65`: "`f16` is the only shipped option").
+  MFMA GEMM, whose `_SUPPORTED_DTYPES` (`mfma_gemm.py:178`) is `("f16","bf16")`
+  and which rejects anything else at `:192-195`.
 - **`fp8*` C6=1** — the FNUZ/OCP split is guarded only in the attention path;
   nothing generalizes it, so the same bytes can silently mis-decode elsewhere.
 - **`fp8 fnuz` C1=1** — not a distinct IR type at all; it shares `i8` storage
   with OCP fp8 and is distinguished only by an arch-dependent decode dialect.
-  CK's separate `f8_fnuz_t` / `f8_ocp_t` types are the contrast that makes this
-  a 1 rather than a 3. FNUZ is a gfx942-only encoding; gfx950 and gfx1250 both
-  use OCP fp8 (§4E).
+  The CK ecosystem shows **both** designs, and it is worth being precise about
+  which one rocKE resembles. Classic CK uses four distinct types
+  (`include/ck/utility/amd_ck_fp8.hpp:35,48,331,377` — `f8_fnuz_t`, `bf8_fnuz_t`,
+  `f8_ocp_t`, `bf8_ocp_t`). CK-Tile uses a single pair
+  (`include/ck_tile/core/numeric/float8.hpp:130,188` — `fp8_t = float8_e4m3_t`,
+  `bf8_t = float8_e5m2_t`) plus an explicit `enum class fp8_interpretation`
+  (`:39`) and a compile-time `is_fnuz` predicate (`:269,:507`). rocKE matches
+  CK-Tile's *storage* choice, which is a defensible design — but it has neither
+  CK's distinct types nor CK-Tile's explicit selector: the dialect is implicit in
+  the lowering target and a caller cannot name it or assert on it. **That missing
+  selector, not the absence of separate types, is what makes this a 1.**
+  FNUZ is a gfx942-only encoding; gfx950 and gfx1250 both use OCP fp8 (§4E).
+  **C4=1** for the same reason as OCP fp8: fnuz shares the `i8` storage and the
+  same `pack_quant_chunk_f32` path, whose `qdtype` distinguishes `fp8`/`bf8`/`i8`
+  but not the dialect.
 - **`i8` C2=2** — full integer arithmetic and an `iu8` WMMA atom exists on
   gfx1151, but no CDNA integer MFMA path is wired *in rocKE*. Note the ceiling is
   software, not silicon: `V_MFMA_I32_*_I8` ships on every CDNA generation
@@ -242,18 +274,50 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
   atom and packed-input builders; universal/MFMA GEMM and attention do not
   expose i8. The score remains Partial, but is not an assertion that integer
   GEMM is absent.
+  **C6=2 — `i8` is the one integer row where C6 applies.** Unlike `i32`/`i16`/
+  `i64`, `i8` here is a *quantized* type with a real numeric contract: rounding
+  is RNE and saturation is a symmetric ±127 clamp (`quant.py:66-70,141-204`), and
+  it sits in the same `QDType` union as `fp8e4m3`/`bf8e5m2` (`io.py:58`). It is 2
+  rather than 3 because the scale semantics are not part of the contract — the
+  helpers take a scale operand but neither document nor enforce per-tensor vs
+  per-channel, so two callers can disagree about what a scale means.
 - **`i4` C1=0 / C3=3** — the inverse of the fp8 profile: not a `Type` at all,
   yet its conversion coverage is the *best* of any quantized type
   (`i4_dequant.py` targets i32, f32, f16, fp8, bf8). C2=1: `iu4` WMMA on RDNA
   only. No native INT4 matrix instruction is present on the MFMA targets in §4A;
   software dequantization remains possible on gfx950. No gfx1250 `iu4` opcode
   was located in the public XML (§4A †), which is why C2 stays at 1.
-- **`fp4` / `fp6` C5=0** — the widest silicon-to-software gap in the matrix. The
-  gfx950 atoms exist (`mfma_f32_16x16x128_fp4`, `mfma_f32_16x16x96_fp6`) and the
-  hipBLASLt provider already maps `FP4_E2M1`→`HIP_R_4F_E2M1` and
-  `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and the silicon are both ready —
-  but **no rocKE kernel instance ships**. C3=1: codebook `unpack_fp4_*` /
-  `unpack_fp6_*` to f32 only, no scalar `cvt`.
+- **`fp4` / `fp6` / `bf6` C5=0** — the widest silicon-to-software gap in the
+  matrix. The gfx950 atoms exist (`mfma_f32_16x16x128_fp4`,
+  `mfma_f32_16x16x96_fp6`) and the hipBLASLt provider already maps
+  `FP4_E2M1`→`HIP_R_4F_E2M1` and `FP6_E3M2`→`HIP_R_6F_E3M2`, so the interface and
+  the silicon are both ready — but **no rocKE kernel instance ships**.
+- **`fp4` C3=1** — `unpack_fp4_byte_to_pair_f32` (`i4_dequant.py:251`) decodes a
+  packed byte to two f32 via a hand-written 16-entry codebook
+  (`_FP4_CODEBOOK`, `:214-232`) that matches OCP E2M1
+  (`±{0, 0.5, 1, 1.5, 2, 3, 4, 6}`). Partial rather than Full because there is no
+  scalar `cvt` primitive and no f32→fp4 direction.
+- **`fp6` (E2M3) C3=0 — there is no E2M3 decoder at all.** Despite the name,
+  `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:308`) does not implement E2M3;
+  see the next entry.
+- **`bf6` (E3M2) C3=0 — a decoder exists but is defective and must not be used.**
+  `_FP6_CODEBOOK` (`i4_dequant.py:276-287`) is built as
+  `2^(e-3) × (1 + m/4)` over a 3-bit exponent (bias 3) and a 2-bit mantissa, which
+  is **E3M2 — i.e. `bf6`, not `fp6`** (CK-Tile is explicit about the split:
+  `pk_fp6_t = pk_float6_e2m3_t` and `pk_bf6_t = pk_float6_e3m2_t`,
+  `include/ck_tile/core/numeric/pk_f6.hpp:294-295,300-323`). It carries three
+  independent defects and is scored 0 for that reason:
+  1. **Width.** The entry point takes two `i8` operands = 16 bits, but four
+     6-bit values need 24. `v2` is silently truncated (its top two bits read as
+     zero) and `v3` is always code 0.
+  2. **Zero encoding.** Code 0 maps to `±1.0` instead of `±0.0` — the
+     subnormal branch returns 1.0 whenever the exponent field is zero, so the
+     single most common value in a sparse tensor decodes wrong.
+  3. **Naming.** The public symbol says `fp6` while the layout is `bf6`, so a
+     caller following OCP naming gets the other format with no error.
+  Fixing this needs a signature change (three `i8`, or one `i32`), a corrected
+  codebook, a rename to `unpack_bf6_*`, and a genuine `unpack_fp6_*` for E2M3.
+  Tracked outside this document; until then neither format has a usable decode.
 - **`e8m0` C1=0 / C6=2** — a scale operand rather than a type, and
   `cvt_scalef32_pk_*` restricts scales to powers of two; arbitrary scaling needs
   an unscaled cvt plus an explicit `fmul`.
@@ -291,10 +355,11 @@ is bf16-accurate and must be documented as such rather than as TF32 (§1).
 
 ### 2.6 Source anchors for the scores
 
-Every score above is traceable to: compiler `ir.py:44-53`,
-`lower_llvm.py:1024-1060`,
-FP-op guards `lower_llvm.py:1992-2057` (FMA/FABS/FMAX3 accept only f32/f16/bf16);
-helpers `ir.py:849-1139` (casts), `helpers/io.py:48-211`,
+Every score above is traceable to: compiler `ir.py:43-52`,
+`lower_llvm.py:1093-1129`,
+FP-op guards `lower_llvm.py:2068-2150` (FMA/FABS/FMAX3 accept only f32/f16/bf16;
+the dtype rejection is at `:2122`);
+helpers `ir.py:838-1170` (casts), `helpers/io.py:48-211,260-315`,
 `helpers/quant.py:58-357`, `helpers/i4_dequant.py`, `helpers/mx_scale.py`;
 families `instances/common/gemm_universal.py:43,643-659`,
 `instances/common/mfma_gemm.py:62-65,192-195`,
@@ -304,7 +369,7 @@ families `instances/common/gemm_universal.py:43,643-659`,
 `library/kernels/common/attention_unified.py` (`UNIFIED_DTYPES=("fp16","bf16")`),
 `library/kernels/common/fmha_fwd_fp8.py`; atoms
 `core/arch/data/arch_specs.json`, `helpers/atoms.py:302`,
-`cpp/core/lower_llvm/mma.cpp:571` (scalar f32 MFMA);
+`cpp/core/lower_llvm/mma.cpp:659-670` (scalar f32 MFMA);
 **hardware ceiling**
 [`matrix_instructions_summary.md`](./matrix_instructions_summary.md)
 (per-arch VOP3P opcode tables transcribed from the official AMD ISA documentation —
@@ -330,7 +395,8 @@ bucket the ticket calls out):
 | `sitofp_f32` primitive from `i8/i16` | Primitive accepts i32 only. For signed i8, use [quant.py](../../python/rocke/helpers/quant.py) `dequantize_scalar_to_f32(b, x, scale=b.const_f32(1.0))`; it emits sext + sitofp internally. For signed i16, explicitly sext to i32 first. | [P] |
 | MX scaled cvt (`cvt_scalef32_pk_*`) | E8M0 scale only → **power-of-two scales**; arbitrary scale needs unscaled cvt + `fmul` | [P] |
 | packed store `store_packed_chunk_local` | `n∈{4,8}` only (no `n=2`); `load_vec`/`store_vec` `n∈{2,4,8}` | [P] |
-| scalar `cvt_fp4_to_f32` / `cvt_fp6_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) provides `unpack_fp4_byte_to_pair_f32` and `unpack_fp6_bytes_to_quad_f32`, which decode packed codebook values to f32 without MFMA. | [P] |
+| scalar `cvt_fp4_to_f32` | No dedicated scalar cvt primitive. [i4_dequant.py](../../python/rocke/helpers/i4_dequant.py) `unpack_fp4_byte_to_pair_f32` (`:251`) decodes E2M1 from a 16-entry codebook (`:214-232`) without MFMA, and is correct. | [P] |
+| scalar `cvt_fp6_to_f32` / `cvt_bf6_to_f32` | **No usable decoder.** `unpack_fp6_bytes_to_quad_f32` (`i4_dequant.py:308`) is named `fp6` but builds an **E3M2 (`bf6`)** codebook (`:276-287`), consumes only 16 of the 24 bits a 4×6-bit group needs (so `v2` is truncated and `v3` is always code 0), and maps code 0 to `±1.0` instead of `±0.0`. Do not use it for either format. | [P][C] |
 | stochastic rounding (any quant) | not implemented ("v2 follow-on") | [M] |
 
 Rounding/saturation that **is** present: round-to-nearest-even + saturating
@@ -361,11 +427,15 @@ corresponding architecture.
 | gfx950 | CDNA4 | MFMA + SMFMAC | ✅ | ✅ (+K-packed) | ✅ (+K-packed) | ✅ **OCP** | ✅ (+K64) | ❌ | ✅ `F8F6F4` | ✅ | ✅ | ❌ removed | ✅ |
 | gfx1151 | RDNA3.5 | WMMA | ❌ | ✅ | ✅ | ❌ | ✅ `iu8` | ✅ `iu4` | ❌ | ❌ | ❌ | ❌ | ❌ |
 | gfx1201 | RDNA4 | WMMA + SWMMAC | ❌ | ✅ | ✅ | ✅ | ✅ `iu8` | ✅ `iu4` (+K32) | ❌ | ❌ | ❌ | ❌ | ✅ |
-| gfx1250 | CDNA5 | WMMA + SWMMAC | ✅ | ✅ | ✅ | ✅ (K64/K128) | ✅ `iu8` | ❓ † | ✅ `F8F6F4` + `F4` | ✅ (+block-16) | ❌ | ❌ | ✅ |
+| gfx1250 | CDNA5 | WMMA + SWMMAC | ✅ | ✅ | ✅ | ✅ (K64/K128) | ✅ `iu8` | ❌ † | ✅ `F8F6F4` + `F4` | ✅ (+block-16) | ❌ | ❌ | ✅ |
 
-† The gfx1250 integer matrix entries enumerate `V_WMMA_I32_16X16X64_IU8` /
-`V_SWMMAC_I32_16X16X128_IU8` — no `IU4` form was located. Treat i4-on-gfx1250 as
-**unconfirmed** and check the official ISA document before relying on it.
+† Integer matrix on gfx1250 is **`iu8`-only**: `V_WMMA_I32_16X16X64_IU8` and
+`V_SWMMAC_I32_16X16X128_IU8`. Two independent complete enumerations agree that no
+`IU4` form exists there — the ISA document's dense opcode table, and LLVM's
+contiguous gfx1250 real-instruction block (`0x033`, `0x05b`–`0x088`), which carries
+`IU8` at `0x072`/`0x07b` while every `IU4` definition in LLVM is gated to the
+RDNA3/RDNA3.5/RDNA4 classes. gfx1201 is the last architecture in this table with
+i4 matrix support.
 
 The ISA labels and instruction evidence follow the public AMD XML files linked
 in [the ISA reference](./matrix_instructions_summary.md#sources-and-reproduction).
@@ -402,8 +472,9 @@ Two points worth stating, because they are the ones most often mis-stated:
 
 ### 4C. Deltas — silicon capability vs. rocKE's declared atoms
 
-The following gaps compare §4A with §4B. The first four concern atom declarations;
-f64 also lacks an IR type. The gfx942 XF32 declaration gap is covered in §4D.
+The following gaps compare §4A with §4B. The first five concern atom declarations
+only; f64 (4C.6) also lacks an IR type. The gfx942 XF32 declaration gap is covered
+separately in §4D.
 
 #### 4C.1 gfx1250 — fp4/fp6/bf6 block-scaled atoms are omitted (deliberately)
 The part carries `V_WMMA_F32_16X16X128_F8F6F4`, a dedicated
@@ -423,12 +494,21 @@ undeclared rather than unavailable.
 `V_MFMA_I32_16X16X64_I8` / `V_MFMA_I32_32X32X32_I8` forms. rocKE declares none of
 them on any CDNA arch. This is why `i8` scores C2=2 and C5=1 (§2.5).
 
-#### 4C.4 Sparse (SMFMAC / SWMMAC) is entirely undeclared
+#### 4C.4 RDNA4 / CDNA5 — integer WMMA is in silicon but undeclared
+The same gap exists on the WMMA side, and §4C.3 alone would understate it.
+gfx1201 provides `V_WMMA_I32_16X16X16_IU8` and `V_WMMA_I32_16X16X16_IU4` (plus a
+K32 `IU4` form and the matching `V_SWMMAC_*` sparse variants); gfx1250 provides
+`V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. rocKE declares no
+integer atom on either arch. Combined with §4C.3, **no integer matrix atom is
+declared on any of the seven architectures** — which is the single fact behind
+`i8`'s C5=1 score, not a CDNA-specific limitation.
+
+#### 4C.5 Sparse (SMFMAC / SWMMAC) is entirely undeclared
 Structured sparsity is available on gfx942, gfx950, gfx1201 and gfx1250. The
 catalog declares no sparse atom on any arch, and no family requests one. No dtype
 in §2.4 is blocked on it.
 
-#### 4C.5 f64 matrix is in silicon but undeclared
+#### 4C.6 f64 matrix is in silicon but undeclared
 `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950. `f64` is not an IR type
 at all (§1), so those targets have a vocabulary gap as well as missing atoms.
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
@@ -461,9 +541,16 @@ Same 8 bits, two incompatible interpretations of the exponent bias:
 | gfx1201, gfx1250 | **OCP** |
 
 rocKE carries one `fp8e4m3` / `bf8e5m2` IR type per §1, with the dialect resolved
-by target arch at lowering time rather than by the type. CK takes the opposite
-approach (`f8_fnuz_t` vs `f8_ocp_t` as distinct types), which is the contrast
-behind the `fp8*` C6=1 score (§2.5).
+by target arch at lowering time rather than by the type. Both CK vocabularies make
+the dialect explicit instead, by different means: **classic CK** gives each dialect
+its own type — `f8_fnuz_t` / `bf8_fnuz_t` at
+`include/ck/utility/amd_ck_fp8.hpp:35,48` and `f8_ocp_t` / `bf8_ocp_t` at `:331,377`,
+four distinct structs — while **CK-Tile**
+keeps a single `fp8_t` / `bf8_t` pair and threads an `fp8_interpretation` enum
+through conversion (`include/ck_tile/core/numeric/float8.hpp:39,130,188`, applied at
+`:269,507`). The rocKE/CK contrast is therefore not "one type vs two types" — it is
+that neither CK design lets a conversion site stay silent about which dialect it
+means. That is the contrast behind the `fp8*` C6=1 score (§2.5).
 
 The failure mode is silence: the same byte pattern decodes to values a power of two
 apart with no error raised anywhere. Today the FNUZ/OCP selection is guarded only
@@ -480,7 +567,7 @@ scheduled to gain.
 | Family | Supported | Not supported |
 |---|---|---|
 | Universal GEMM (`gemm_universal.py`) | f16, bf16 (A/B/C homogeneous, f32 accum) | **fp8/bf8** — `NotImplementedError` at `:659` for any dtype that is not `F16`/`BF16` |
-| MFMA GEMM (`mfma_gemm.py`) | f16, bf16 | **fp8/bf8** — `:62-65` records that lane-decode and byte-wise A/B loads are absent |
+| MFMA GEMM (`mfma_gemm.py`) | f16, bf16 (`_SUPPORTED_DTYPES`, `:178`) | **fp8/bf8** — rejected at `:192-195`; `:62-65` records the missing lane-decode and byte-wise A/B loads, but that docstring is itself stale (it still calls `f16` "the only shipped option" after bf16 landed) |
 | Integer WMMA GEMM ([wmma_gemm_iu8.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8.py)) | Signed int8 A/B packed four values per i32 → i32 accumulation/output; gfx1151 and gfx11-generic (`iu8` WMMA atom) | Raw byte-pointer inputs; targets without this atom; requires complete 16×16 tiles and K a multiple of 16 |
 | Integer WMMA GEMM with dequantization ([wmma_gemm_iu8_dequant.py](../../python/rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py)) | Same packed int8 input and i32 accumulation, runtime per-tensor scales → f16 output | Same target and packing constraints; no arbitrary output dtype selector |
 | Block-scale GEMM ([block_scale_gemm.py](../../python/rocke/instances/common/block_scale_gemm.py)) | `abquant`, FP8/BF8 A/B → **f32** out on gfx942/gfx950 | `aquant`/`bquant`; `i4_fp8`/`i4_bf8`; non-f32 output; WMMA targets including gfx1250 |
