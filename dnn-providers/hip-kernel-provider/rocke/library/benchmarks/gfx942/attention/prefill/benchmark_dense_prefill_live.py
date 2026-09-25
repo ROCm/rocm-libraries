@@ -35,7 +35,9 @@ Concretely: at the default ``--dtype bf16 --d 64`` the shipped ``waves_per_eu`` 
 
 Scope: dense self-attention (uniform batch via the ``[B, S, H, d]`` grid), causal +
 full + sliding-window (``--mode swa``), bf16/fp16, D64/D128, MHA + GQA (incl.
-non-pow-2), default AND persistent grid. varlen is still a follow-up: its ``--mode``
+non-pow-2), default AND persistent grid. ``--use-sinks`` adds attention sinks to
+any mode and checks against a manual sink reference instead of SDPA. varlen is
+still a follow-up: its ``--mode``
 value exits with the distinct skip code 3 (never 0 — a gate must not report success
 for no work).
 
@@ -75,9 +77,11 @@ import torch  # noqa: E402
 # harnesses drift apart from dispatch in the first place.
 from builders.gfx942.attention.prefill.attention_dense_prefill import (  # noqa: E402
     add_dense_tuning_args,
+    dense_reference,
     dense_request,
     dense_spec_overrides,
     describe_dense_spec,
+    make_sinks,
     resolve_dense_spec,
 )
 from kernels.gfx942.attention_dense import (  # noqa: E402
@@ -195,6 +199,7 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     k = (torch.randn(B, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     v = (torch.randn(B, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
     out = torch.zeros(B, S, Hq, D, dtype=dt, device=dev)
+    sinks = make_sinks(spec, dev)
 
     lch = _dense_launcher(spec)
     cfg = LaunchConfig(
@@ -210,6 +215,8 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
 
     def call():
         lch(vals, config=cfg)
@@ -217,24 +224,9 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     call()
     torch.cuda.synchronize()
 
-    # correctness vs SDPA (batched, causal/full/SWA, GQA repeat).
+    # correctness vs the fp32 reference (SDPA, or the manual sink softmax).
     W = spec.sliding_window
-    rep = Hq // Hkv
-    qh = q.transpose(1, 2).float()
-    kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-    vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-    if W and W > 0:
-        # banded causal: key j allowed for query i iff i-W < j <= i.
-        qi = torch.arange(S, device=dev).view(-1, 1)
-        ki = torch.arange(S, device=dev).view(1, -1)
-        m = (ki <= qi) & (ki > qi - W)
-        ref = torch.nn.functional.scaled_dot_product_attention(
-            qh, kh, vh, attn_mask=m
-        ).transpose(1, 2)
-    else:
-        ref = torch.nn.functional.scaled_dot_product_attention(
-            qh, kh, vh, is_causal=causal
-        ).transpose(1, 2)
+    ref = dense_reference(q, k, v, spec, sinks)
     max_err = (out.float() - ref).abs().max().item()
 
     ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
@@ -316,6 +308,7 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
         "D": D,
         "causal": causal,
         "sliding_window": None if spec is None else spec.sliding_window,
+        "use_sinks": None if spec is None else spec.use_sinks,
         # The tuning actually built, so a report can never be read as if it
         # described a different config than the one that was timed.
         "block_n": None if spec is None else spec.block_n,
@@ -370,7 +363,8 @@ def main() -> int:
     )
     ap.add_argument("--output-csv", type=str, default=None)
     # --bn / --wpe / --persistent / --np / --persist-decode / --interleave /
-    # --kpad / --sw, all defaulting to None = "whatever dispatch ships".
+    # --kpad / --sw, all defaulting to None = "whatever dispatch ships", plus the
+    # --use-sinks request flag (off by default).
     add_dense_tuning_args(ap)
     args = ap.parse_args()
 

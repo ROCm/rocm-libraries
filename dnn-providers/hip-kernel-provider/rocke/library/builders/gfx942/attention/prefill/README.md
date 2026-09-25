@@ -32,9 +32,12 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged,
-sliding-window. The deferred-findings backlog lives in the optimization plan for this
-port, which is kept outside the repo.
+Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged.
+Sliding-window and attention sinks are supported, alone or combined. Sinks seed the
+online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
+loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
+deferred-findings backlog lives in the optimization plan for this port, which is kept
+outside the repo.
 
 ### Gain over the unified-attention baseline
 
@@ -81,7 +84,8 @@ named follow-up, now as upside rather than as a fix for a deficit.
 
 ## Scope
 
-gfx942 only · forward-inference prefill · dense causal (no paging / bias / SWA / sinks)
+gfx942 only · forward-inference prefill · dense causal or full, optional SWA and sinks
+(no paging / bias)
 · bf16 + fp16 · head dims **D64 & D128** · MHA + GQA incl. non-power-of-2 (40/8, 28/4)
 · default **and** persistent grids. D256 is out of scope — it is served by its own
 wide-atom candidates.
@@ -172,6 +176,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 python attention_dense_prefill.py                        # parity + bench, default shapes
 python attention_dense_prefill.py --dtype fp16 --d 64
 python attention_dense_prefill.py --persistent --np 304  # persistent grid
+python attention_dense_prefill.py --use-sinks --sw 256   # SWA + sinks
 ```
 
 Full-cohort parity and perf are driven by the live harness at

@@ -23,7 +23,7 @@ from dispatch.attention.common import ATTENTION_FEATURES
 _GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
 _GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
 EXPECTED_FEATURES = {
-    "attention_gfx942_dense": {"causal", "sliding_window"},
+    "attention_gfx942_dense": {"causal", "sinks", "sliding_window"},
     "attention_gfx950_dense": set(_GFX950_DENSE_FEATURES),
     "attention_gfx950_dense_grid_default": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_persist_default": set(_GFX950_DENSE_FEATURES),
