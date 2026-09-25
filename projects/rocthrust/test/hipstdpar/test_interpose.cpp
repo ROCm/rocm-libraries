@@ -301,8 +301,8 @@ int main()
 
     // A MAP_FIXED mapping that the interposer rejects must leave the range
     // mapped. The reservation bypasses interposition through the raw syscall,
-    // and is large enough that hipMemAdvise may refuse to advise it.
-    constexpr std::size_t reservation_size = std::size_t{64} << 30;
+    // and exceeds system memory so that hipMemAdvise refuses to advise it.
+    constexpr std::size_t reservation_size = std::size_t{1} << 44;
     const auto reservation                 = reinterpret_cast<void*>(
       syscall(SYS_mmap, nullptr, reservation_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0));
     if (reservation != MAP_FAILED)
