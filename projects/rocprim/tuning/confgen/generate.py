@@ -78,7 +78,6 @@ def make_config(
     type_hash = frozenset(type_info.items())
     return (type_hash, {"type": type_details, "config": type_info | config_data})
 
-
 def derive_gen(arch: str) -> str:
     """Derives the hardware generation from a given architecture."""
     arch_mapping = {

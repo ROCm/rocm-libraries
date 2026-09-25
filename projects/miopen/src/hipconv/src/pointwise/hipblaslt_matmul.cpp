@@ -186,7 +186,7 @@ void run_matmul(hipblasOperation_t trans_a,
 
 } // namespace
 
-void launch_pointwise_gemm(const Conv2dParams& par,
+void launch_pointwise_gemm(const ConvParams& par,
                            const void* in,
                            const void* wei,
                            void* out,

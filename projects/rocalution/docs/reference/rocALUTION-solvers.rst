@@ -277,7 +277,7 @@ The Smoothed Aggregation Algebraic MultiGrid method is based on smoothed aggrega
 Ruge-stueben AMG
 ================
 
-The Ruge-Stueben Algebraic MultiGrid method is based on the classic Ruge-Stueben coarsening with direct interpolation. The solver provides high-efficiency in terms of complexity of the solver (i.e. number of iterations). However, most of the time it has a higher building step and requires higher memory usage.
+The Ruge-Stueben Algebraic MultiGrid method is based on the classic Ruge-Stueben coarsening. Direct, extended+i and extended+e interpolation are available. The resulting interpolation operator can optionally be truncated. The solver provides high-efficiency in terms of complexity of the solver (i.e. number of iterations). However, most of the time it has a higher building step and requires higher memory usage.
 
 :cpp:class:`rocalution::RugeStuebenAMG`
 

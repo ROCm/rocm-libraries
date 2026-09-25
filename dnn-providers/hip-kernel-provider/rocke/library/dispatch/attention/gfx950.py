@@ -19,9 +19,11 @@ from rocke.dispatch.core import (
 from .common import (
     ATTENTION_ABI_VERSION,
     UNIFIED_BLOCK_SIZES,
+    AttentionMaskType,
     AttentionRequest,
     AttentionSpec,
     FAMILY,
+    _parse_attention_mask_type,
     _problem,
     _request_errors,
     _selector_matches,
@@ -61,19 +63,30 @@ def _dense_spec(req: OperatorRequest):
     bm = int(geometry["block_m"])
     bn = int(geometry["block_n"])
     decode = req.dense_persist_decode.strip().lower()
-    # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
-    # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    mask_type = _parse_attention_mask_type(req.mask_type)
+    causal = mask_type != AttentionMaskType.NO_MASK
+    moving_bottom_right = (
+        mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL and sq != sk
+    )
+    # Cross-length ragged attention is valid only when bottom-right supplies the
+    # shifted diagonal. Equal-length bottom-right is ordinary causal attention.
+    ragged = (sq == sk or moving_bottom_right) and ((sq % bm != 0) or (sk % bn != 0))
     nqb = (sq + bm - 1) // bm
     work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
     mode = req.dense_persistent.strip().lower()
     if mode == "on":
+        if moving_bottom_right:
+            raise ValueError(
+                "dense_persistent='on' is not supported with moving "
+                "bottom-right causal attention"
+            )
         persistent = True
     elif mode == "off":
         persistent = False
     elif mode == "auto":
-        persistent = work >= np  # enough work to fill the persistent grid
+        # The persistent builder has no shifted-diagonal implementation.
+        persistent = False if moving_bottom_right else work >= np
     else:
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
@@ -87,10 +100,11 @@ def _dense_spec(req: OperatorRequest):
         and int(req.hdim_q) == 128
         and int(req.hdim_v) == 128
         and req.dtype.lower() in ("fp16", "bf16")
-        and int(req.mask_type) != 0
+        and causal
         and sw == 0
         and not use_sinks
         and not ragged
+        and not moving_bottom_right
     )
     return Gfx950AttentionDenseSpec(
         batch=int(req.batch),
@@ -99,7 +113,7 @@ def _dense_spec(req: OperatorRequest):
         num_query_heads=int(req.nhead_q),
         num_kv_heads=int(req.nhead_k),
         head_size=int(req.hdim_q),
-        causal=(int(req.mask_type) != 0),
+        causal=causal,
         dtype=req.dtype.lower(),
         block_m=bm,
         block_n=bn,
@@ -111,6 +125,7 @@ def _dense_spec(req: OperatorRequest):
         sliding_window=sw,
         use_sinks=use_sinks,
         wide_lds_dma=wide_lds_dma,
+        causal_bottom_right=moving_bottom_right,
     )
 
 
@@ -191,7 +206,9 @@ def _make_gfx950_attention_dense_candidate() -> KernelCandidate:
             arches=("gfx950",),
             dtypes=("bf16", "fp16"),
             # Dense: Causal is a mask, not a feature this path turns down.
-            supports_features=frozenset({"causal", "sliding_window", "sinks"}),
+            supports_features=frozenset(
+                {"causal", "causal_bottom_right", "sliding_window", "sinks"}
+            ),
         ),
         _supports=support,
         select_spec=select,
@@ -275,7 +292,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=(256,)),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "causal_bottom_right"}),
         ),
         _supports=support,
         select_spec=select,

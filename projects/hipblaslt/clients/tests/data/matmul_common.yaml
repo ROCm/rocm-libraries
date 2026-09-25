@@ -103,6 +103,22 @@ Definitions:
   - &size_t_output_overflow
     - { M: 2048, N: 2048, K: 256, lda: 2048, ldb: 2048, ldc: 1049100, ldd: 1049100 }
 
+  # Oversized A leading dimension driving the unroll-increment overflow ROCM-31230.
+  # GlobalReadIncsA is a signed 32-bit SGPR holding lda * DepthU * bpe, the bytes one
+  # unroll iteration advances the A global-read pointer. At lda = 2^26 the kernel the
+  # heuristic selects here (MT256x128x8, DepthU 8) makes that 2^26 * 8 * 4 = 2^31
+  # exactly, so bit 31 is set and the signed widen in calculateStagger sign-extends it.
+  # lda = 2^26 - 1 is the largest value that stays below the boundary and is the
+  # passing case the ticket reports.
+  #
+  # Unlike the cases above, this one cannot keep its allocation small: the A span is
+  # (K-1)*lda + M elements whatever M is, so A is 8.6 GiB. M only needs to be large
+  # enough for a second workgroup in dimension 0, since the selected kernel takes its
+  # stagger input from WorkGroup0 and a single workgroup zeroes it; M = 2048 clears
+  # that (MT0 = 256) and N = 1 keeps B, C and D negligible.
+  - &size_t_stagger_incs_overflow
+    - { M: 2048, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 2048, ldd: 2048 }
+
 
   - &deepbench_sizes
     - { M: 192, N: 64, K: 784 }
