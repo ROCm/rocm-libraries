@@ -14,6 +14,7 @@ graph while the suite stays green. Applicability in the real engine is
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ _TOOL = _TOOLS / "variant_reachability.py"
 sys.path.insert(0, str(_TOOLS))
 
 import variant_reachability  # noqa: E402
+from launch_surface import find_repo_root  # noqa: E402
 
 # One KMD, shared by every test: a `dtype` field compared by equality and a `block_n`
 # tile compared by divisibility (via --divides), mirroring the real engine's split.
@@ -268,3 +270,169 @@ class TestTheSchemaIsReachedByReference:
         result = env.run(kdp, shapes)
         assert result.returncode == 2
         assert "engine" in result.stdout + result.stderr
+
+
+class TestGfx950RealBundle:
+    """The shipped gfx950 bundle against the shipped shape corpus. Needs no device and no
+    build, and every expectation is derived from the bundle rather than written down, so
+    resizing the catalog cannot make it stale.
+
+    This asserts tile REACHABILITY, not cold-selection wins. `scoreKernel` ranks an
+    applicable (256, 64) first and the engine exposes `block_m`/`block_n` as knobs, so the
+    other tiles are auto-tune inventory and are *expected* never to win the cold path.
+    `APPLICABLE-BUT-NEVER-WINS == 0` described a single-tile engine and is not the property
+    to hold here. A tile applicable to NO corpus shape is still dead weight, and that is
+    what this catches.
+
+    How much this discriminates depends on the corpus, and on the present one it is loose
+    on six tiles and tight on the seventh. Every sequence length here is a power of two,
+    so each tile up to (256, 128) is applicable to the same broad majority of shapes and
+    any power-of-two tile that size would pass; against those six the gate catches only a
+    tile dividing NOTHING, not one that is merely rare. Sharpening that half needs a
+    corpus carrying a non-power-of-two sequence length rather than a different control
+    value -- 384, 192 and 96 each divide zero shapes here, exactly like the prime the
+    control below uses.
+
+    (256, 256) is the exception and the reason this is load-bearing. It ships at
+    head_size 64 alone, and one cohort reaches it: bf16, 64 query heads, 8 KV heads. Drop
+    that single model family from the corpus and the descriptors carrying that tile are
+    provably selectable by nothing, and this fails. The gate is tightest exactly where the
+    catalog is thinnest.
+    """
+
+    _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)
+    _KDP = (
+        _REPO_ROOT
+        / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine"
+        / "descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json"
+    )
+
+    #: The request corpus is an author's input that this repository does not ship: the
+    #: workflow mines it to a path of the operator's choosing, so there is no in-tree
+    #: location for it and a hard-coded one would be a private convention. Name it here
+    #: and this class runs; leave it unset and it skips, saying which variable to set.
+    _SHAPES_VAR = "HIPDNN_INGESTOR_SHAPES"
+
+    #: Corpus vocabulary -> matcher vocabulary. `seqlen_q`/`seqlen_k` are deliberately
+    #: renamed to names no metadata field carries: the KDP records a canonical
+    #: `seqlen_q`/`seqlen_kv` that `kernelMatches` never reads (the shape is a runtime
+    #: kernarg), so leaving them under their own names would compare them by equality and
+    #: report the whole catalog unreachable.
+    _FIELD_MAP = {
+        "nhead_q": "num_query_heads",
+        "nhead_k": "num_kv_heads",
+        "hdim_q": "head_size",
+        "seqlen_q": "sq",
+        "seqlen_k": "skv",
+    }
+    #: A tile is legal for a shape when it divides it -- `Sq % block_m` and
+    #: `Skv % block_n`, per Gfx950AttentionDenseNative.cpp.
+    _DIVIDES = {"block_m": "sq", "block_n": "skv"}
+
+    #: mask_type 2 is windowed. No windowed variant ships, so those shapes are out of
+    #: scope rather than uncovered, and counting them would understate coverage.
+    _WINDOWED = 2
+
+    @classmethod
+    def _shapes_path(cls) -> Path:
+        """The corpus named by `_SHAPES_VAR`. Skips when unset, and FAILS when set to
+        something that is not a file: a typo'd path is an operator error, and reporting
+        it as a skip would read as "this class is opt-in and you opted out"."""
+        raw = os.environ.get(cls._SHAPES_VAR)
+        if not raw:
+            pytest.skip(
+                f"{cls._SHAPES_VAR} is unset, so there is no request corpus to check "
+                f"the shipped bundle against. Mine one with tools/mine_shapes.py and "
+                f"point this variable at it to run this class."
+            )
+        path = Path(raw)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"{cls._SHAPES_VAR} is set to {raw!r}, which is not an existing file. "
+                f"Unset it to skip this class, or point it at a mined corpus."
+            )
+        return path
+
+    @classmethod
+    def _require_assets(cls):
+        if not cls._KDP.exists():
+            pytest.skip(f"gfx950 bundle not present in this checkout: {cls._KDP}")
+
+    @classmethod
+    def _corpus(cls, head_sizes):
+        """In-scope corpus shapes in matcher vocabulary.
+
+        Two families are excluded because the catalog ships nothing that could serve
+        them, and counting them would make the denominator describe the corpus rather
+        than the engine's scope: windowed shapes, since no windowed variant ships, and
+        head sizes the catalog does not carry. `batch` is dropped because the metadata
+        carries a canonical batch the matcher never compares; left in, it would
+        equality-match and reject every multi-batch graph the engine actually serves."""
+        shapes = []
+        for raw in json.loads(cls._shapes_path().read_text()):
+            if raw.get("mask_type") == cls._WINDOWED:
+                continue
+            if raw.get("hdim_q") not in head_sizes:
+                continue
+            shape = variant_reachability._remap(raw, cls._FIELD_MAP)
+            shape["causal"] = 1 if shape.pop("mask_type") == 1 else 0
+            for vestigial in ("batch", "hdim_v", "_provenance"):
+                shape.pop(vestigial, None)
+            shapes.append(shape)
+        return shapes
+
+    @classmethod
+    def _metas(cls):
+        defaults, descriptors = variant_reachability.load_bundle(str(cls._KDP))
+        return [
+            variant_reachability._resolved_metadata(d, defaults) for d in descriptors
+        ]
+
+    @staticmethod
+    def _tile(meta):
+        return (meta["block_m"], meta["block_n"])
+
+    def test_every_shipped_tile_is_reachable_by_some_corpus_shape(self):
+        """A tile no corpus shape admits cannot be cold-selected OR auto-tuned onto, so
+        it is dead weight however the ranking is spelled."""
+        self._require_assets()
+        metas = self._metas()
+        corpus = self._corpus({m["head_size"] for m in metas})
+        assert metas and corpus, "empty bundle or corpus proves nothing"
+
+        reachable, matched_shapes = set(), 0
+        for shape in corpus:
+            hit = False
+            for meta in metas:
+                if variant_reachability.applicable(meta, shape, self._DIVIDES):
+                    reachable.add(self._tile(meta))
+                    hit = True
+            matched_shapes += hit
+
+        # Without this the assertion below passes vacuously on a broken field map:
+        # zero applicable pairs means zero shipped tiles AND zero unreachable ones.
+        assert matched_shapes, (
+            "no corpus shape matched ANY variant -- the field map or the bundle is "
+            "wrong, so this test proved nothing"
+        )
+        shipped = {self._tile(m) for m in metas}
+        assert shipped - reachable == set(), (
+            f"{len(shipped - reachable)} shipped tile(s) are applicable to no corpus "
+            f"shape at all: {sorted(shipped - reachable)}. Either the corpus is missing "
+            f"a shape family or these tiles should not be built."
+        )
+
+    def test_a_tile_the_corpus_cannot_admit_is_reported_unreachable(self):
+        """The control for the case above. A tile that divides no corpus sequence length
+        must be caught -- without this, 'every shipped tile is reachable' could be true
+        because the check never rejects anything."""
+        self._require_assets()
+        metas = self._metas()
+        corpus = self._corpus({m["head_size"] for m in metas})
+        impossible = dict(metas[0])
+        # 2^31-1 is prime, so it divides no sequence length any corpus carries.
+        impossible["block_m"] = 2147483647
+        assert not any(
+            variant_reachability.applicable(impossible, shape, self._DIVIDES)
+            for shape in corpus
+        ), "an undividable tile was reported applicable; the divides rule is not firing"
