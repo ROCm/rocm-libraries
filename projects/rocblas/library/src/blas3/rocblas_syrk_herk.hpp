@@ -64,6 +64,27 @@ inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_
 // large-n shapes that cannot run at all today.
 constexpr size_t c_syrk_herk_workspace_max_bytes = size_t(1024) * 1024 * 1024;
 
+// The budget in effect, with a test-only override.
+//
+// The override exists because the default is deliberately large, so every shape
+// a test can afford to allocate fits in a single chunk: C is on the order of
+// twice the unchunked workspace, so forcing a split at the default needs several
+// GB of C. Without a way to lower the budget the whole chunk loop is unreachable
+// from a test.
+//
+// Read on each call rather than cached, so a test can vary it between cases. The
+// cost is one getenv against a call that already requires k >= 500.
+inline size_t rocblas_syrk_herk_workspace_budget()
+{
+    if(const char* env = std::getenv("ROCBLAS_INTERNAL_SYRK_HERK_WORKSPACE_MAX_BYTES"))
+    {
+        const long long requested = std::atoll(env);
+        if(requested > 0)
+            return size_t(requested);
+    }
+    return c_syrk_herk_workspace_max_bytes;
+}
+
 // Batches processed per chunk by the gemm-path launcher.
 //
 // Both rocblas_internal_syrk_herk_workspace and the launcher in
@@ -86,7 +107,7 @@ inline rocblas_int
     if(!per_batch)
         return batch_count;
 
-    size_t chunk = c_syrk_herk_workspace_max_bytes / per_batch;
+    size_t chunk = rocblas_syrk_herk_workspace_budget() / per_batch;
     if(chunk < 1)
         chunk = 1; // a single batch always has to fit
     if(chunk > size_t(batch_count))

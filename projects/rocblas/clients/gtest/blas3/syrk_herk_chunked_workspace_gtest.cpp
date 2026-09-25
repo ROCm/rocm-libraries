@@ -52,6 +52,8 @@
 #include "rocblas.hpp"
 #include "rocblas_test.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -72,24 +74,7 @@ namespace
         herk
     };
 
-    template <typename T>
-    struct real_of
-    {
-        using type = T;
-    };
-    template <>
-    struct real_of<rocblas_float_complex>
-    {
-        using type = float;
-    };
-    template <>
-    struct real_of<rocblas_double_complex>
-    {
-        using type = double;
-    };
-
-    template <typename T>
-    using real_t = typename real_of<T>::type;
+    // real_t<T> comes from the library via client_utility.hpp.
 
     // Scalar type of alpha/beta for operation K on element type T.
     template <typename T, op_kind K>
@@ -137,7 +122,65 @@ namespace
     // multiple of 16, the stride rocblas_internal_gemm_64 uses for its own batch
     // loop; c_budget is the workspace byte cap.
     constexpr rocblas_int c_gemm_stride = ((1 << 16) - 1) & ~0xf; // 65520
-    constexpr size_t      c_budget      = size_t(1024) * 1024 * 1024;
+
+    // Lowers the library's workspace budget for the duration of a test.
+    //
+    // At the shipped budget every shape a test can afford fits in one chunk, so
+    // the chunk loop body would run exactly once and none of the multi-chunk
+    // indexing would be exercised. Forcing a split by growing the problem instead
+    // would need several GB of C.
+    class scoped_workspace_budget
+    {
+    public:
+        explicit scoped_workspace_budget(size_t bytes)
+        {
+            const char* current = std::getenv(c_env);
+            m_had_previous      = current != nullptr;
+            if(m_had_previous)
+                m_previous = current;
+
+            set_env(std::to_string(bytes).c_str());
+        }
+
+        ~scoped_workspace_budget()
+        {
+            if(m_had_previous)
+                set_env(m_previous.c_str());
+            else
+                unset_env();
+        }
+
+        scoped_workspace_budget(const scoped_workspace_budget&) = delete;
+        scoped_workspace_budget& operator=(const scoped_workspace_budget&) = delete;
+
+    private:
+        static constexpr const char* c_env = "ROCBLAS_INTERNAL_SYRK_HERK_WORKSPACE_MAX_BYTES";
+
+        static void set_env(const char* value)
+        {
+#ifdef _WIN32
+            _putenv_s(c_env, value);
+#else
+            setenv(c_env, value, 1);
+#endif
+        }
+
+        static void unset_env()
+        {
+#ifdef _WIN32
+            _putenv_s(c_env, "");
+#else
+            unsetenv(c_env);
+#endif
+        }
+
+        bool        m_had_previous = false;
+        std::string m_previous;
+    };
+
+    // Budget used by the tests: small enough that the affordable shapes below
+    // genuinely split into several chunks.
+    constexpr size_t c_budget = 4096;
 
     // Port of rocblas_syrk_herk_chunk_size. Kept deliberately literal so a change
     // to the production rule shows up here as a test failure rather than silently
@@ -346,16 +389,21 @@ namespace
     {
     public:
         aliased_ptr_array(T* base, rocblas_int batch_count)
+            : aliased_ptr_array(std::vector<T*>(size_t(batch_count), base))
         {
-            std::vector<T*> host(size_t(batch_count), base);
-            if((hipMalloc)(&m_device, sizeof(T*) * size_t(batch_count)) != hipSuccess)
+        }
+
+        // Caller-supplied mapping, so a batch can be pointed at one of several
+        // buffers rather than all sharing one.
+        explicit aliased_ptr_array(const std::vector<T*>& host)
+        {
+            const size_t bytes = sizeof(T*) * host.size();
+            if((hipMalloc)(&m_device, bytes) != hipSuccess)
             {
                 m_device = nullptr;
                 return;
             }
-            if(hipMemcpy(
-                   m_device, host.data(), sizeof(T*) * size_t(batch_count), hipMemcpyHostToDevice)
-               != hipSuccess)
+            if(hipMemcpy(m_device, host.data(), bytes, hipMemcpyHostToDevice) != hipSuccess)
             {
                 (void)(hipFree)(m_device);
                 m_device = nullptr;
@@ -402,6 +450,8 @@ namespace
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_size_queries(StridedFn strided_api, BatchedFn batched_api)
     {
+        scoped_workspace_budget budget_guard(c_budget);
+
         rocblas_local_handle handle;
         const rocblas_int    k = c_k;
 
@@ -459,6 +509,8 @@ namespace
     static void run_strided_canary(ApiFunc api, rocblas_int batch_count, rocblas_fill uplo)
     {
         using S = scalar_t<T, K>;
+
+        scoped_workspace_budget budget_guard(c_budget);
 
         rocblas_local_handle handle;
         const rocblas_int    n = c_n, k = c_k;
@@ -523,6 +575,8 @@ namespace
     static void run_batched_canary(ApiFunc api, rocblas_int batch_count, rocblas_fill uplo)
     {
         using S = scalar_t<T, K>;
+
+        scoped_workspace_budget budget_guard(c_budget);
 
         rocblas_local_handle handle;
         const rocblas_int    n = c_n, k = c_k;
@@ -627,23 +681,74 @@ namespace
         EXPECT_EQ(im_of(got), im_of(want)) << what << " imaginary part, batch " << b;
     }
 
-    // Fills one column-major n x n C block: real diagonal, zero lower
+    // Every A element. Complex A carries a non-zero imaginary part so that
+    // A*A^T and A*A^H differ: an all-real A makes syrk and herk produce the
+    // same numbers, and the expectations below would hold even if the library
+    // confused the two.
+    template <typename T>
+    static T a_value(int scale)
+    {
+        return make_val<T>(double(scale), rocblas_is_complex<T> ? double(scale) : 0.0);
+    }
+
+    // One element of the GEMM contribution, summed over k terms of a_value.
+    //   real:    1 * 1        =  1     -> k
+    //   syrk:    (s+si)^2     =  2s^2 i  (purely imaginary)
+    //   herk:    (s+si)(s-si) =  2s^2    (purely real)
+    template <typename T, op_kind K>
+    static T gemm_term(rocblas_int k, int scale)
+    {
+        const double s2 = 2.0 * double(scale) * double(scale) * double(k);
+
+        if constexpr(!rocblas_is_complex<T>)
+            return make_val<T>(double(scale) * double(scale) * double(k), 0.0);
+        else if constexpr(K == op_kind::herk)
+            return make_val<T>(s2, 0.0);
+        else
+            return make_val<T>(0.0, s2);
+    }
+
+    // Diagonal seed. The imaginary part is non-zero for complex types so that
+    // herk's rule that the diagonal is real on output is actually exercised;
+    // syrk has no such rule and must leave it alone.
+    template <typename T>
+    static T diag_seed()
+    {
+        return make_val<T>(1.0, rocblas_is_complex<T> ? 7.0 : 0.0);
+    }
+
+    // Fills one column-major n x n C block: seeded diagonal, zero lower
     // off-diagonal (the GEMM overwrites it), distinct upper off-diagonal.
     template <typename T>
     static void seed_c_block(T* C, rocblas_int n, rocblas_int b)
     {
-        C[0 + 0 * n] = make_val<T>(1.0, 0.0);
-        C[1 + 1 * n] = make_val<T>(1.0, 0.0);
+        C[0 + 0 * n] = diag_seed<T>();
+        C[1 + 1 * n] = diag_seed<T>();
         C[1 + 0 * n] = make_val<T>(0.0, 0.0);
         C[0 + 1 * n] = expected_upper<T>(b);
     }
 
-    template <typename T>
-    static void check_c_block(const T* C, rocblas_int n, rocblas_int k, rocblas_int b)
+    // alpha = beta = 1, so the diagonal is the GEMM term plus its seed, with
+    // herk forcing the imaginary part to zero and syrk leaving it alone.
+    template <typename T, op_kind K>
+    static T expected_diag(rocblas_int k, int scale)
     {
-        expect_val_eq(C[0 + 0 * n], make_val<T>(double(k) + 1.0, 0.0), "C[0,0]", b);
-        expect_val_eq(C[1 + 0 * n], make_val<T>(double(k), 0.0), "C[1,0]", b);
-        expect_val_eq(C[1 + 1 * n], make_val<T>(double(k) + 1.0, 0.0), "C[1,1]", b);
+        const T g = gemm_term<T, K>(k, scale);
+        return make_val<T>(double(re_of(g)) + double(re_of(diag_seed<T>())),
+                           K == op_kind::herk ? 0.0
+                                              : double(im_of(g)) + double(im_of(diag_seed<T>())));
+    }
+
+    // scale selects which A buffer this batch used; see run_batched_numerical.
+    template <typename T, op_kind K>
+    static void check_c_block(const T* C, rocblas_int n, rocblas_int k, rocblas_int b, int scale)
+    {
+        const T g         = gemm_term<T, K>(k, scale);
+        const T want_diag = expected_diag<T, K>(k, scale);
+
+        expect_val_eq(C[0 + 0 * n], want_diag, "C[0,0] diagonal", b);
+        expect_val_eq(C[1 + 1 * n], want_diag, "C[1,1] diagonal", b);
+        expect_val_eq(C[1 + 0 * n], g, "C[1,0] lower (GEMM result)", b);
         expect_val_eq(C[0 + 1 * n], expected_upper<T>(b), "C[0,1] (upper triangle preserved)", b);
     }
 
@@ -652,13 +757,17 @@ namespace
     {
         using S = scalar_t<T, K>;
 
+        scoped_workspace_budget budget_guard(c_budget);
+
         rocblas_local_handle handle;
-        const rocblas_int    n = c_n, k = 64;
+        // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
+        // is false and the call never reaches the chunked workspace path at all.
+        const rocblas_int n = c_n, k = c_k;
 
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
 
-        std::vector<T> h_A(a_elems, make_val<T>(1.0, 0.0));
+        std::vector<T> h_A(a_elems, a_value<T>(1));
         std::vector<T> h_C(c_elems * size_t(batch_count));
         for(rocblas_int b = 0; b < batch_count; ++b)
             seed_c_block(h_C.data() + size_t(b) * c_elems, n, b);
@@ -701,8 +810,9 @@ namespace
                             hipMemcpyDeviceToHost),
                   hipSuccess);
 
+        // stride_A = 0 aliases A, so every batch used the same buffer: scale 1.
         for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
-            check_c_block(h_result.data() + size_t(b) * c_elems, n, k, b);
+            check_c_block<T, K>(h_result.data() + size_t(b) * c_elems, n, k, b, 1);
     }
 
     template <typename T, op_kind K, typename ApiFunc>
@@ -710,25 +820,42 @@ namespace
     {
         using S = scalar_t<T, K>;
 
+        scoped_workspace_budget budget_guard(c_budget);
+
         rocblas_local_handle handle;
-        const rocblas_int    n = c_n, k = 64;
+        // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
+        // is false and the call never reaches the chunked workspace path at all.
+        const rocblas_int n = c_n, k = c_k;
 
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
 
-        std::vector<T> h_A(a_elems, make_val<T>(1.0, 0.0));
+        // Two A buffers, alternating by batch parity. Pointing every batch at one
+        // buffer would make the A-side chunk advance untestable: all slots would
+        // hold the same address, so dropping it would change nothing. With
+        // alternating buffers any off-by-one or off-by-a-chunk in the pointer
+        // array flips parity, because the chunk size is even and 65535 is odd.
+        std::vector<T> h_A(a_elems * 2);
+        std::fill(h_A.begin(), h_A.begin() + a_elems, a_value<T>(1));
+        std::fill(h_A.begin() + a_elems, h_A.end(), a_value<T>(2));
+
+        auto scale_of = [](rocblas_int b) { return (b % 2) ? 2 : 1; };
 
         host_batch_vector<T> h_C(c_elems, 1, batch_count);
         ASSERT_EQ(h_C.memcheck(), hipSuccess);
         for(rocblas_int b = 0; b < batch_count; ++b)
             seed_c_block(h_C[b], n, b);
 
-        device_vector<T> dA(a_elems);
+        device_vector<T> dA(a_elems * 2);
         ASSERT_EQ(dA.memcheck(), hipSuccess);
-        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * sizeof(T), hipMemcpyHostToDevice),
+        ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * 2 * sizeof(T), hipMemcpyHostToDevice),
                   hipSuccess);
 
-        aliased_ptr_array<T> dA_ptrs((T*)dA, batch_count);
+        std::vector<T*> a_ptrs(size_t(batch_count), nullptr);
+        for(rocblas_int b = 0; b < batch_count; ++b)
+            a_ptrs[size_t(b)] = (T*)dA + (scale_of(b) == 2 ? a_elems : 0);
+
+        aliased_ptr_array<T> dA_ptrs(a_ptrs);
         ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
 
         device_batch_vector<T> dC(c_elems, 1, batch_count);
@@ -757,16 +884,21 @@ namespace
         ASSERT_EQ(h_result.transfer_from(dC), hipSuccess);
 
         for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
-            check_c_block(h_result[b], n, k, b);
+            check_c_block<T, K>(h_result[b], n, k, b, scale_of(b));
     }
 
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_numerical(StridedFn strided_api, BatchedFn batched_api)
     {
-        // Just above the chunk limit so the workspace path runs two chunks.
-        constexpr rocblas_int bc = 65536;
-        run_strided_numerical<T, K>(strided_api, bc);
-        run_batched_numerical<T, K>(batched_api, bc);
+        // 65536 puts a single batch in the second chunk, so its local index is
+        // always 0 and a local/absolute mix-up there is invisible. 131070 gives a
+        // second chunk with a full set of live slots and a non-zero batch offset,
+        // which is the only shape where both indices are simultaneously non-trivial.
+        for(rocblas_int bc : {65536, 131070})
+        {
+            run_strided_numerical<T, K>(strided_api, bc);
+            run_batched_numerical<T, K>(batched_api, bc);
+        }
     }
 
     // n=1 makes tri(n) zero, so no workspace is needed at any batch count.
@@ -776,12 +908,16 @@ namespace
     {
         using S = scalar_t<T, K>;
 
-        rocblas_local_handle handle;
-        const rocblas_int    n = 1, k = 64;
-        const rocblas_int    batch_count = 65536;
+        scoped_workspace_budget budget_guard(c_budget);
 
-        std::vector<T> h_A(size_t(k), make_val<T>(1.0, 0.0));
-        std::vector<T> h_C(size_t(batch_count), make_val<T>(1.0, 0.0));
+        rocblas_local_handle handle;
+        // k must stay at or above syrk_k_lower_threshold, or rocblas_use_only_gemm
+        // is false and the call never reaches the chunked workspace path at all.
+        const rocblas_int n = 1, k = c_k;
+        const rocblas_int batch_count = 65536;
+
+        std::vector<T> h_A(size_t(k), a_value<T>(1));
+        std::vector<T> h_C(size_t(batch_count), diag_seed<T>());
 
         // Braces, not parens: device_vector<T> dA(size_t(k)) declares a function.
         device_vector<T> dA{size_t(k)};
@@ -819,7 +955,7 @@ namespace
                 h_result.data(), (T*)dC, size_t(batch_count) * sizeof(T), hipMemcpyDeviceToHost),
             hipSuccess);
 
-        const T want = make_val<T>(double(k) + 1.0, 0.0);
+        const T want = expected_diag<T, K>(k, 1);
         for(rocblas_int b : chunk_probe_batches<T>(n, batch_count))
             expect_val_eq(h_result[b], want, "C[0,0]", b);
     }
