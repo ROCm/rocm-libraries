@@ -12,7 +12,8 @@ classified these checkout dependencies here:
   `test_precommit_affected_tests.py`;
 - source/AST and cross-component inspection: `test_canonical_imports.py`,
   `test_client_header_resolution.py`, `test_EnableESM2TrackValuVsrc.py`,
-  `test_PlaceholderMerge.py`, and `test_specs_amdsmi.py`.
+  `test_PlaceholderMerge.py`, `test_specs_amdsmi.py`, and
+  `test_therock_rocm_identity.py`.
 
 Production-behavior tests remain in the parent unit directory. Their
 installed-artifact adaptations land with the corresponding artifact behavior
