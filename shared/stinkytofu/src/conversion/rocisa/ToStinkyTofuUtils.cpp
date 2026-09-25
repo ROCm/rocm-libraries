@@ -1597,7 +1597,7 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinels: DsReadPerWmma / DsReadOrder / throttle / Rule3 lead default to -1
+            // Sentinels: DsReadPerCap / DsReadOrder / throttle / Rule3 lead default to -1
             // (= unset) via ModuleOptions; Gfx1250Backend resolves unset knobs through
             // SchedulingKnobHeuristics. DsReadOrder keeps an explicit -1 here because 0 is
             // a valid enumerator (ProgramOrder) and must not mean "not provided".

@@ -27,10 +27,13 @@
 #include "rocblas_test.hpp"
 #include "singletons.hpp"
 
-#if __GLIBC__ < 3 && __GLIBC__MINOR__ < 39
+#if defined(__GLIBC__) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 39))
 #undef _GLIBCXX_USE_C99_INTTYPES_TR1
 #endif
 #include <cinttypes>
+#include <memory>
+#include <mutex>
+#include <new>
 
 #define MEM_MAX_GUARD_PAD 8192
 
@@ -64,23 +67,28 @@ template <typename T>
 class d_vector
 {
 private:
-    size_t m_size;
-    size_t m_pad, m_guard_len;
-    size_t m_bytes;
+    const size_t m_size;
+    const size_t m_pad;
+    const size_t m_guard_len;
+    const size_t m_bytes;
+    bool         m_guard_written;
 
-    static bool m_init_guard;
-
-public:
-    inline size_t nmemb() const noexcept
-    {
-        return m_size;
-    }
+    static std::once_flag m_init_flag;
 
 public:
     bool use_HMM = false;
 
-public:
     static T m_guard[MEM_MAX_GUARD_PAD];
+
+    d_vector(const d_vector&) = delete;
+    d_vector& operator=(const d_vector&) = delete;
+    d_vector(d_vector&&)                 = delete;
+    d_vector& operator=(d_vector&&) = delete;
+
+    inline size_t nmemb() const noexcept
+    {
+        return m_size;
+    }
 
     // One constructor for every configuration. Whether the guard regions exist is decided
     // by g_DVEC_PAD, a single global defined in singletons.cpp, and not by GOOGLE_TEST.
@@ -99,19 +107,16 @@ public:
         // a failed allocation. Only an empty vector with no pad reaches the clamp; any pad
         // at all already makes the allocation non-empty.
         , m_bytes(std::max(s + m_pad * 2, size_t(1)) * sizeof(T))
+        , m_guard_written(false)
         , use_HMM(HMM)
     {
         // Filled on first construction whatever the pad currently is. Keying this off
         // m_pad would leave m_guard zero for a type whose first d_vector happened to be
         // built while the pad was zero, and the pad is now a run-time setting, so a later
         // guarded allocation of that same type would compare against zeros. The fill is
-        // bounded and happens once per type.
-        if(!m_init_guard)
-        {
-            // Initialize m_guard with random data
-            rocblas_init_nan(m_guard, MEM_MAX_GUARD_PAD);
-            m_init_guard = true;
-        }
+        // bounded and happens once per type, even if multiple d_vector<T> objects are
+        // constructed concurrently.
+        std::call_once(m_init_flag, [] { rocblas_init_nan(m_guard, MEM_MAX_GUARD_PAD); });
     }
 
     T* device_vector_setup()
@@ -126,7 +131,7 @@ public:
             }
         }
 
-        if(use_HMM ? hipMallocManaged(&d, m_bytes) : (hipMalloc)(&d, m_bytes) != hipSuccess)
+        if((use_HMM ? hipMallocManaged(&d, m_bytes) : (hipMalloc)(&d, m_bytes)) != hipSuccess)
         {
             rocblas_cerr << "Warning: hip can't allocate " << m_bytes << " bytes ("
                          << (m_bytes >> 30) << " GB)" << std::endl;
@@ -135,47 +140,72 @@ public:
         }
         else if(m_guard_len > 0)
         {
-            // Copy m_guard to device memory before allocated memory
-            if(hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
+            hipError_t status = hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault);
+            if(status != hipSuccess)
+                d_vector_report_failure(std::string("cannot write the guard before the allocation: ")
+                                        + hipGetErrorName(status));
 
             // Point to allocated block
             d += m_pad;
 
-            // Copy m_guard to device memory after allocated memory
-            if(hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
+            if(status == hipSuccess)
+            {
+                status = hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault);
+                if(status != hipSuccess)
+                    d_vector_report_failure(std::string("cannot write the guard after the allocation: ")
+                                            + hipGetErrorName(status));
+            }
+
+            m_guard_written = (status == hipSuccess);
         }
 
         if(use_HMM)
-            alloc_ptr_use(d, m_bytes); // count the same as host memory
+            alloc_ptr_use(d, m_bytes);
 
         return d;
     }
 
+    // Reads both guard regions back from the device and reports any mismatch through
+    // d_vector_report_failure. Called from device_vector_teardown, so it must not rely on
+    // destructor-unsafe fatal assertions.
     void device_vector_check(T* d)
     {
+        if(!m_guard_written)
+            return;
+
         if(m_pad > 0)
         {
-            std::vector<T> host(m_pad);
+            std::unique_ptr<unsigned char[]> host_guard(new(std::nothrow) unsigned char[m_guard_len]);
+            if(!host_guard)
+            {
+                d_vector_report_failure("cannot allocate " + std::to_string(m_guard_len)
+                                        + " bytes to read the guards back; corruption would go unreported");
+                return;
+            }
 
             // Copy device memory after allocated memory to host
-            if(hipMemcpy(host.data(), d + m_size, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
+            const auto* reference = reinterpret_cast<const unsigned char*>(m_guard);
+            hipError_t   status
+                = hipMemcpy(host_guard.get(), d + m_size, m_guard_len, hipMemcpyDefault);
+            if(status != hipSuccess)
+                d_vector_report_failure(std::string("cannot read the guard after the allocation: ")
+                                        + hipGetErrorName(status));
 
             // Make sure no corruption has occurred
-            if(memcmp(host.data(), m_guard, m_guard_len) != 0)
+            if(status == hipSuccess && memcmp(host_guard.get(), reference, m_guard_len) != 0)
                 d_vector_report_failure("post-guard overwritten");
 
             // Point to m_guard before allocated memory
             d -= m_pad;
 
             // Copy device memory after allocated memory to host
-            if(hipMemcpy(host.data(), d, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
+            status = hipMemcpy(host_guard.get(), d, m_guard_len, hipMemcpyDefault);
+            if(status != hipSuccess)
+                d_vector_report_failure(std::string("cannot read the guard before the allocation: ")
+                                        + hipGetErrorName(status));
 
             // Make sure no corruption has occurred
-            if(memcmp(host.data(), m_guard, m_guard_len) != 0)
+            if(status == hipSuccess && memcmp(host_guard.get(), reference, m_guard_len) != 0)
                 d_vector_report_failure("pre-guard overwritten");
         }
     }
@@ -186,11 +216,11 @@ public:
         {
             device_vector_check(d);
 
+            if(use_HMM)
+                free_ptr_use(d);
+
             if(m_pad > 0)
                 d -= m_pad; // restore to start of alloc
-
-            if(use_HMM)
-                free_ptr_use(d); // release count
 
             // Free device memory. Reported rather than asserted: CHECK_HIP_ERROR expands to
             // a Google Test assertion only under GOOGLE_TEST, which would make this body
@@ -208,6 +238,6 @@ template <typename T>
 T d_vector<T>::m_guard[MEM_MAX_GUARD_PAD] = {};
 
 template <typename T>
-bool d_vector<T>::m_init_guard = false;
+std::once_flag d_vector<T>::m_init_flag;
 
 #undef MEM_MAX_GUARD_PAD

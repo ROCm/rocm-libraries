@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 #include <limits>
 
 namespace hipconv::cdna5::direct
@@ -30,6 +30,9 @@ struct Config
     int max_px = std::numeric_limits<int>::max(); // Maximum allowed padding in x direction; INT_MAX
                                                   // means unlimited
     bool aligned = true; // True if fastest varying output mode is divible by 16 / sizeof(T)
+    // Element width the LDS layout is sized for: 2 for fp16/bf16, 4 for tf32. The tile sizes are
+    // picked per width (tf32 halves tile_size_c and tile_size_k), so a config serves one width.
+    int elem_bytes = 2;
     constexpr auto tiles() const { return tiles_j * tiles_k; }
 };
 

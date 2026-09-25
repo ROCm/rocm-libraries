@@ -95,20 +95,28 @@ enum TensorOrder
     NHWC
 };
 
-// Define the parameters for a conv2d layer.
-struct Conv2dParams
+// Define the parameters for a conv1d, conv2d, or conv3d layer.
+//
+// One struct serves all three; `dims` says which. The axes a layer does not use
+// hold canonical values rather than junk -- see normalize_unused_axes and
+// docs/convolution-dimensionality.md.
+struct ConvParams
 {
+    int dims = 2; // spatial dimensions: 1, 2, or 3
+
     Direction direction = Direction::Fprop;
-    int n;                              // batch size
-    int h, w;                           // input size
-    int c;                              // input channels
-    int k;                              // output channels
-    int kh, kw;                         // filter size
-    int pad_h = 1, pad_w = 1;           // padding
-    int stride_h = 1, stride_w = 1;     // stride
-    int dilation_h = 1, dilation_w = 1; // dilation
-    int p = -1, q = -1;                 // output size
-    int groups = 1;                     // number of channel groups
+    int n;                                              // batch size
+    int h, w;                                           // input size
+    int d = 1;                                          // input depth
+    int c;                                              // input channels
+    int k;                                              // output channels
+    int kh, kw;                                         // filter size
+    int kd    = 1;                                      // filter depth
+    int pad_h = 1, pad_w = 1, pad_d = 1;                // padding
+    int stride_h = 1, stride_w = 1, stride_d = 1;       // stride
+    int dilation_h = 1, dilation_w = 1, dilation_d = 1; // dilation
+    int p = -1, q = -1, e = -1;                         // output size
+    int groups = 1;                                     // number of channel groups
 
     DataType input_type       = DataType::fp16; // X
     DataType weight_type      = DataType::fp16; // W
@@ -117,33 +125,85 @@ struct Conv2dParams
 
     TensorOrder order = TensorOrder::NHWC;
 
-    // Overwrite (p, q) with output size derived from input size, padding, and stride.
-    void compute_output_size()
+    // Give the axes this layer does not use their canonical values.
+    //
+    // Not cosmetic: pad_h and pad_d default to 1 to match a used axis, and an
+    // unnormalized conv1d would compute p = (1 + 2 - 1) / 1 + 1 = 3 rather than 1.
+    // Depth is the odd axis out for conv2d and height for conv1d, which is why
+    // conv1d convolves along w -- w is the contiguous spatial axis under NHWC.
+    void normalize_unused_axes()
     {
-        p = (h + 2 * pad_h - kh) / stride_h + 1;
-        q = (w + 2 * pad_w - kw) / stride_w + 1;
+        if(dims < 3)
+        {
+            d = kd   = 1;
+            pad_d    = 0;
+            stride_d = dilation_d = 1;
+        }
+        if(dims < 2)
+        {
+            h = kh   = 1;
+            pad_h    = 0;
+            stride_h = dilation_h = 1;
+        }
     }
 
-    // Same as compute_output_size with additionally returning true if both p and q were originally
-    // either
+    // Overwrite (p, q, e) with the output size implied by the input size, filter,
+    // padding, stride, and dilation.
+    void compute_output_size()
+    {
+        normalize_unused_axes();
+        p = (h + 2 * pad_h - dilation_h * (kh - 1) - 1) / stride_h + 1;
+        q = (w + 2 * pad_w - dilation_w * (kw - 1) - 1) / stride_w + 1;
+        e = (d + 2 * pad_d - dilation_d * (kd - 1) - 1) / stride_d + 1;
+    }
+
+    // Same as compute_output_size with additionally returning true if p, q, and e
+    // were each originally either
     // 1) unset (== -1)
     // 2) or match the computed value
     auto compute_output_size_checked() -> bool
     {
-        const int p_original = p, q_original = q;
+        const int p_original = p, q_original = q, e_original = e;
         compute_output_size();
-        return (p_original == -1 || p == p_original) && (q_original == -1 || q == q_original);
+        return (p_original == -1 || p == p_original) && (q_original == -1 || q == q_original) &&
+               (e_original == -1 || e == e_original);
     }
 
     bool is_valid() const
     {
-        if(n <= 0 || h <= 0 || w <= 0 || c <= 0 || k <= 0 || kh <= 0 || kw <= 0)
+        if(dims < 1 || dims > 3)
+        {
+            return false;
+        }
+        if(n <= 0 || c <= 0 || k <= 0)
         {
             return false;
         }
         // stride and dilation are divisors in compute_output_size; a zero or
-        // negative value is not a valid layer and would divide by zero.
-        if(stride_h <= 0 || stride_w <= 0 || dilation_h <= 0 || dilation_w <= 0)
+        // negative value is not a valid layer and would divide by zero. Negative
+        // padding crops the input, which no kernel here implements.
+        if(w <= 0 || kw <= 0 || stride_w <= 0 || dilation_w <= 0 || pad_w < 0)
+        {
+            return false;
+        }
+        // An unused axis must already hold its normalized value. is_valid runs
+        // before compute_output_size in the driver, so rejecting here is what
+        // turns "--h 5 on a conv1d" into an error instead of a silent overwrite.
+        if(dims >= 2)
+        {
+            if(h <= 0 || kh <= 0 || stride_h <= 0 || dilation_h <= 0 || pad_h < 0)
+                return false;
+        }
+        else if(h != 1 || kh != 1 || stride_h != 1 || dilation_h != 1)
+        {
+            return false;
+        }
+        if(dims >= 3)
+        {
+            if(d <= 0 || kd <= 0 || stride_d <= 0 || dilation_d <= 0 || pad_d < 0)
+                return false;
+        }
+        else if(d != 1 || kd != 1 || stride_d != 1 || dilation_d != 1)
         {
             return false;
         }
@@ -152,6 +212,30 @@ struct Conv2dParams
             return false;
         }
         return true;
+    }
+
+    // The conv2d layer this one is equivalent to, or a copy when there is none.
+    //
+    // A conv1d, a conv3d whose depth is not convolved, and a spatially pointwise
+    // conv3d each reduce to a conv2d by reshaping alone. Total rather than
+    // partial so a dispatch site can apply it unconditionally: a layer that does
+    // not reduce comes back unchanged, and since every kernel in the tree serves
+    // two-dimensional layers only, it goes on to match nothing, exactly as it
+    // would have without the call. See docs/unfolded-conv3d.md.
+    ConvParams unfolded() const;
+
+    // The operator name implied by dims, for display and for spec cross-checks.
+    const char* op_name() const
+    {
+        switch(dims)
+        {
+        case 1:
+            return "conv1d";
+        case 3:
+            return "conv3d";
+        default:
+            return "conv2d";
+        }
     }
 
     int channels_per_group() const { return c / groups; }
@@ -180,21 +264,28 @@ struct Conv2dParams
 //
 // All methods return the number of elements in the tensor. Multiply sizeof_data_type
 // to convert the size to the number of bytes.
-class Conv2dSize
+class ConvSize
 {
 public:
-    Conv2dSize(const Conv2dParams& par) : par_(par) {}
+    ConvSize(const ConvParams& par) : par_(par) {}
 
-    size_t input_size() const { return static_cast<size_t>(par_.n) * par_.h * par_.w * par_.c; }
+    size_t input_size() const
+    {
+        return static_cast<size_t>(par_.n) * par_.d * par_.h * par_.w * par_.c;
+    }
 
-    size_t output_size() const { return static_cast<size_t>(par_.n) * par_.p * par_.q * par_.k; }
+    size_t output_size() const
+    {
+        return static_cast<size_t>(par_.n) * par_.e * par_.p * par_.q * par_.k;
+    }
 
     size_t weight_size() const
     {
-        return static_cast<size_t>(par_.k) * par_.channels_per_group() * par_.kh * par_.kw;
+        return static_cast<size_t>(par_.k) * par_.channels_per_group() * par_.kd * par_.kh *
+               par_.kw;
     }
 
-    // dX has the same shape as X (n * h * w * c).
+    // dX has the same shape as X (n * d * h * w * c).
     size_t input_grad_size() const { return input_size(); }
 
     size_t input_bytes() const { return input_size() * sizeof_data_type(par_.input_type); }
@@ -219,19 +310,32 @@ public:
     }
 
 private:
-    const Conv2dParams& par_;
+    const ConvParams& par_;
 };
 
 
+// A layer's geometry as the kernel for direction D sees it.
+//
+// Fprop reads the parameters as written. Dgrad is a fractionally-strided
+// convolution over the output gradient, so the same kernel serves it by reading
+// a transposed problem: the spatial extents swap (h with p, w with q, d with e),
+// the padding becomes (k - 1) * dilation - pad, and **stride and dilation trade
+// places** -- the forward stride is the transposed convolution's dilation and
+// the forward dilation is its stride.
+//
+// That last swap is deliberate wherever it appears, here and in the kernels'
+// is_valid_config. conv_ref encodes the same identity a different way: its Dgrad
+// path passes stride and dilation straight through and sets DivStride, which
+// makes the stride a divisor instead.
 template <hipconv::Direction D>
 struct SizeView
 {
     static_assert(D == Direction::Fprop || D == Direction::Dgrad,
                   "SizeView does not support Wgrad");
 
-    const hipconv::Conv2dParams& par;
+    const hipconv::ConvParams& par;
 
-    SizeView(const hipconv::Conv2dParams& par_in) : par(par_in) {}
+    SizeView(const hipconv::ConvParams& par_in) : par(par_in) {}
 
     int h() const
     {
@@ -328,6 +432,49 @@ struct SizeView
         else
             return par.stride_w;
     }
+
+    int d() const
+    {
+        if constexpr(D == hipconv::Direction::Fprop)
+            return par.d;
+        else
+            return par.e;
+    }
+
+    int e() const
+    {
+        if constexpr(D == hipconv::Direction::Fprop)
+            return par.e;
+        else
+            return par.d;
+    }
+
+    int pad_d() const
+    {
+        if constexpr(D == hipconv::Direction::Fprop)
+            return par.pad_d;
+        else
+            return (par.kd - 1) * par.dilation_d - par.pad_d;
+    }
+
+    int stride_d() const
+    {
+        if constexpr(D == hipconv::Direction::Fprop)
+            return par.stride_d;
+        else
+            return par.dilation_d;
+    }
+
+    int dilation_d() const
+    {
+        if constexpr(D == hipconv::Direction::Fprop)
+            return par.dilation_d;
+        else
+            return par.stride_d;
+    }
+
+    // Direction-independent; here so a kernel can read everything off the view.
+    int dims() const { return par.dims; }
 };
 
 
