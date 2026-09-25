@@ -39,6 +39,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
 include(GNUInstallDirs)
 include(add_subdirectory_with_message)
 include(fetch_rocm_cmake)
+include(hipccl_finalize_package)
 # NOTE(hipccl3): shared_third_party.cmake (copied alongside for parity with
 # rocm-libraries) declares rocm_libs_declare_shared_deps() for hipdnn/miopen's
 # nlohmann_json/GTest fetches. None of rocprim/hipcub/rocthrust/libhipcxx use
@@ -182,65 +183,16 @@ endif()
 #
 # NOT YET DONE / needs real review before treating this as more than a
 # starting point:
-#  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ./LICENSE) is a
+#  - License aggregation (MIT + BSD-3-Clause + Apache-2.0, see ../LICENSE) is a
 #    best-effort placeholder, not a verified legal/compliance declaration.
 #  - libhipcxx isn't part of this package yet (not wired into the build at
 #    all - see HIPCCL_BUILD_LIBHIPCXX above).
 #  - Maintainer email is a placeholder, not a real assigned address/alias.
-set(HIP_RUNTIME_MINIMUM 4.5.0)
-rocm_package_add_dependencies(SHARED_DEPENDS "hip-runtime-amd >= ${HIP_RUNTIME_MINIMUM}")
-rocm_package_add_deb_dependencies(STATIC_DEPENDS "hip-static-dev >= ${HIP_RUNTIME_MINIMUM}")
-rocm_package_add_rpm_dependencies(STATIC_DEPENDS "hip-static-devel >= ${HIP_RUNTIME_MINIMUM}")
-
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
-set(CPACK_RPM_PACKAGE_LICENSE "MIT and BSD and ASL 2.0")
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
-
-rocm_create_package(
-    NAME hipccl
-    DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package"
-    MAINTAINER "hipccl-maintainer@amd.com"
-    HEADER_ONLY
-)
-
-# --- Unified CMake package config (find_package(hipccl)) ---
-# NOTE(hipccl3): mirrors NVIDIA CCCL's find_package(CCCL COMPONENTS [Thrust]
-# [CUB] [libcudacxx]) entry point. This is a *separate* mechanism from the
-# CPack packaging above - it controls what `find_package(hipccl)` resolves to
-# (installed under ${CMAKE_INSTALL_LIBDIR}/cmake/hipccl/), not what `make
-# package` produces. rocprim/hipcub/rocthrust's own rocm_export_targets()
-# calls are untouched and keep installing their own independent
-# <name>-config.cmake files (lib/cmake/rocprim/, lib/cmake/hipcub/,
-# lib/cmake/rocthrust/) unconditionally, same as before - find_package(rocprim)
-# etc. keep working standalone, exactly like CCCL keeps find_package(Thrust)
-# etc. working. See cmake/package/hipccl-config.cmake.in for the delegation
-# logic (find_dependency() into each component's own config) and the
-# hipccl::hipccl umbrella target.
 #
-# NOTE(hipccl3): unconditional for the same reason as the packaging block
-# above - this file is never "just a sub-component", so find_package(hipccl)
-# support should always be generated whenever this CMakeLists.txt runs.
-include(CMakePackageConfigHelpers)
-
-set(HIPCCL_PACKAGE_CONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/hipccl")
-
-configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/package/hipccl-config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
-    INSTALL_DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
-)
-
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
-    VERSION "${HIPCCL_VERSION}"
-    COMPATIBILITY AnyNewerVersion
-    ARCH_INDEPENDENT
-)
-
-install(
-    FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/hipccl-config-version.cmake"
-    DESTINATION "${HIPCCL_PACKAGE_CONFIG_INSTALL_DIR}"
-    COMPONENT devel
+# NOTE(hipccl3): the mechanical CPack + find_package(hipccl) config calls
+# (identical between hipccl2 and hipccl3 other than the DESCRIPTION string)
+# are consolidated in cmake/modules/hipccl_finalize_package.cmake, shared
+# with hipccl2/CMakeLists.txt.
+hipccl_finalize_package(
+    DESCRIPTION "hipCCL: unified rocPRIM, hipCUB, and rocThrust package"
 )
