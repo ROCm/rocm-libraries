@@ -7,15 +7,9 @@ histogram_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} },
                         {1024, 4}}
 {%- endblock %}
 
-{% block target_tparams -%}
-template<class Target, class value_type, unsigned int channels, unsigned int active_channels>
+{% block tparams -%}
+class value_type, unsigned int channels, unsigned int active_channels
 {%- endblock %}
-
-{% block target_tparams_generic -%}
-template<class Target, class value_type, unsigned int channels, unsigned int active_channels>
-{%- endblock %}
-
-{% block generic_forwarding -%}, value_type, channels, active_channels>();{% endblock -%}
 
 {% block config_guard scoped %}
     ({% if not type.value_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<value_type>::value)
