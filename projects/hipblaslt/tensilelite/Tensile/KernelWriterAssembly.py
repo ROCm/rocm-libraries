@@ -2341,6 +2341,9 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.invalidLSUCode:
       self.states.overflowedResources = 7
 
+    if self.states.mxScaleVgprBankMsg:
+      self.states.overflowedResources = 13
+
     self.vgprPool.checkFinalState()
 
     if self.states.overflowedResources:
@@ -2372,6 +2375,8 @@ class KernelWriterAssembly(KernelWriter):
         msg = "decoupled PGR thick-wait not covered in the emitted assembly"
       elif self.states.overflowedResources == 12:
         msg = "tail LDS reset has one block stride and a divergent pair has two"
+      elif self.states.overflowedResources == 13:
+        msg = self.states.mxScaleVgprBankMsg
       else:
         msg = "unknown"
 

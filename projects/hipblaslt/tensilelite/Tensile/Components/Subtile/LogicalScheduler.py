@@ -3847,10 +3847,15 @@ class LogicalScheduler:
                                        _tile_vgpr_count(tileInfoB, cfg.lrB))
 
         if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
+            # A/B were placed while the reservation was still held, so freeing
+            # it here leaves the scale tiles a bank-0 hole to first-fit into.
+            writer.releaseMxScaleVgprs()
             self.vgprTilesSA = _alloc_tiles(self.tile_peaks.get('SA', 0),
                                             _tile_vgpr_count(scaleTileInfoA, cfg.lrSA))
             self.vgprTilesSB = _alloc_tiles(self.tile_peaks.get('SB', 0),
                                             _tile_vgpr_count(scaleTileInfoB, cfg.lrSB))
+            writer.checkMxScaleVgprBank(self.vgprTilesSA + self.vgprTilesSB,
+                                        "main loop")
         else:
             self.vgprTilesSA = []
             self.vgprTilesSB = []
@@ -4005,12 +4010,8 @@ class LogicalScheduler:
         _dealloc_all(self.vgprTilesSA)
         _dealloc_all(self.vgprTilesSB)
 
-        _swap(self.vgprTilesA,
-              _alloc_tiles(peaks.get('A', 0),
-                           _tile_vgpr_count(info['tileInfoA'], cfg.lrA)))
-        _swap(self.vgprTilesB,
-              _alloc_tiles(peaks.get('B', 0),
-                           _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
+        # Scales go first: the deallocs above reopened the bank-0 hole the
+        # mainloop's scale tiles held, and only the scales are restricted to it.
         if cfg.hasScale and info['scaleTileInfoA'] and info['scaleTileInfoB']:
             _swap(self.vgprTilesSA,
                   _alloc_tiles(peaks.get('SA', 0),
@@ -4018,9 +4019,18 @@ class LogicalScheduler:
             _swap(self.vgprTilesSB,
                   _alloc_tiles(peaks.get('SB', 0),
                                _tile_vgpr_count(info['scaleTileInfoB'], cfg.lrSB)))
+            writer.checkMxScaleVgprBank(self.vgprTilesSA + self.vgprTilesSB,
+                                        "tail loop")
         else:
             _swap(self.vgprTilesSA, [])
             _swap(self.vgprTilesSB, [])
+
+        _swap(self.vgprTilesA,
+              _alloc_tiles(peaks.get('A', 0),
+                           _tile_vgpr_count(info['tileInfoA'], cfg.lrA)))
+        _swap(self.vgprTilesB,
+              _alloc_tiles(peaks.get('B', 0),
+                           _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
 
         # Flat tiles are freed wholesale by deallocVgprTiles at kernel end;
         # there are no pre-freed tids to skip.

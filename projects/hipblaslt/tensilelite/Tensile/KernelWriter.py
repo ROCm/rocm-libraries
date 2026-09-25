@@ -250,6 +250,11 @@ class StateValues:
   rapInPapNextTilePrefetch: bool         = False
   # Diagnostic carried alongside overflowedResources == 9.
   rapStoreNeutralityMsg: str             = ""
+  # Base of the bank-0 block held for the subtile MX scale tiles across the D
+  # checkout, None once allocVgprTiles has taken it over.
+  mxScaleVgprReserve: Optional[int]      = None
+  # Diagnostic carried alongside overflowedResources == 13.
+  mxScaleVgprBankMsg: str                = ""
   numVgprBufferPackA: int                = 0
   numVgprBufferPackB: int                = 0
   numVgprBufferPackMXSA: int             = 0
@@ -5486,6 +5491,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockB"] and "MX" in tensorParametersB:
         module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB["MX"]))
 
+    # Claim the scale tiles' bank-0 registers before D takes the low range.
+    self.reserveMxScaleVgprs([mxsatileInfo, mxsbtileInfo])
+
     dtileInfo.allocVgprTileRegisters_legacy(self, kernel)
 
     if dtileInfo.vgprTiles:
@@ -5499,6 +5507,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.functionEnd(kernel, addLabel=False))
 
     module.add(mainLoop(self, kernel))
+
+    # No-op once allocVgprTiles has spent the reservation on the scale tiles.
+    self.releaseMxScaleVgprs()
 
     # Deallocate offset registers
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
@@ -11806,6 +11817,63 @@ class KernelWriter(metaclass=abc.ABCMeta):
     start = (self.states.mxsa.startVgprValu + self.states.mxsa.numVgprValu) \
             if kernel["ReuseAcrossPersistent"] else 0
     return start, self.states.lastValuMXSAB - start
+
+  ##############################################################################
+  # Subtile MX scale VGPR bank
+  ##############################################################################
+
+  # s_set_vgpr_msb carries no field for the WMMA scale operands, so a scale
+  # source only addresses the first bank.
+  MX_SCALE_VGPR_BANK = 256
+
+  @staticmethod
+  def numScaleTileVgprs(tileInfo):
+    """VGPRs one scale tensor needs for its whole local MMA tile grid."""
+    numMmaTiles = int(tileInfo.localMMATileGrid[0] * tileInfo.localMMATileGrid[1])
+    regCount    = tileInfo.mmaTileRegCount
+    tilesPerReg = max(1, int(round(1 / regCount))) if regCount else 1
+    return int(ceil(numMmaTiles / tilesPerReg)) * int(ceil(regCount))
+
+  def reserveMxScaleVgprs(self, scaleTileInfos):
+    """Hold a bank-0 block for the subtile scheduler's MX scale tiles.
+
+    The D tile is checked out before the scheduler allocates its operand tiles
+    and is large enough on wide macro-tiles to push every later first-fit past
+    v255, where a scale operand can no longer be encoded. Holding the block
+    here keeps the hole alive across the D checkout; allocVgprTiles releases it
+    and immediately spends it on the scale tiles.
+    """
+    if self.states.mxScaleVgprReserve is not None:
+      return
+    if not self.states.asmCaps["HasVgprMSB"]:
+      return
+    numRegs = sum(self.numScaleTileVgprs(ti) for ti in scaleTileInfos if ti is not None)
+    if numRegs == 0:
+      return
+    self.states.mxScaleVgprReserve = self.vgprPool.checkOut(numRegs, tag="mxScaleVgprReserve")
+
+  def releaseMxScaleVgprs(self):
+    """Return the reserved block so the scale tiles can be carved out of it."""
+    if self.states.mxScaleVgprReserve is None:
+      return
+    self.vgprPool.checkIn(self.states.mxScaleVgprReserve)
+    self.states.mxScaleVgprReserve = None
+
+  def checkMxScaleVgprBank(self, tiles, site):
+    """Reject the kernel when a scale tile landed outside the first bank.
+
+    Nothing downstream can fix this up: the WMMA would silently read whatever
+    low register shares the index, so the kernel has to be rejected rather than
+    emitted.
+    """
+    if not self.states.asmCaps["HasVgprMSB"]:
+      return
+    highest = max((idx for tile in tiles for idx in tile.regList.indices), default=-1)
+    if highest < self.MX_SCALE_VGPR_BANK:
+      return
+    self.states.mxScaleVgprBankMsg = \
+        "%s: MX scale tile at v%u is outside the first vgpr bank (v0-v%u)" \
+        % (site, highest, self.MX_SCALE_VGPR_BANK - 1)
 
   ##############################################################################
   # Function End
