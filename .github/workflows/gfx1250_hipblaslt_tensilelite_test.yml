@@ -208,10 +208,11 @@ jobs:
             export Tensile_ASM_COMPILER_LAUNCHER=ccache Tensile_CXX_COMPILER_LAUNCHER=ccache
             ccache -z >/dev/null 2>&1 || true
           fi
+          python -m tensilelite_configure_client \
+            --ensure-client "$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client"
           pytest -p no:cacheprovider tensilelite/Tests/common \
             -m "gfx1250 and not skip-gfx1250" "${K_ARG[@]}" --timeout=5400 -n 1 -v -rfxX \
             --gpu-targets "$TL_TARGET" \
-            --prebuilt-client="$ROCM/libexec/hipblaslt/tensilelite/tensilelite-client" \
             --global-parameters="LibraryFormat='msgpack'" \
             --tensile-options=--cxx-compiler,"$ROCM/bin/amdclang++" 2>&1 \
             | tee "$GITHUB_WORKSPACE/tensilelite_test_results/common_test.log"
