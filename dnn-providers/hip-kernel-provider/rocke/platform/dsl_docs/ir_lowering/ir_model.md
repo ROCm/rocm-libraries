@@ -126,7 +126,7 @@ LLVM target intrinsics; lowering is f32-centric.
 exp2(v)        # llvm.exp2.f32
 sqrt(v)        # llvm.sqrt.f32
 rsqrt(v)       # llvm.amdgcn.rsq.f32 (single hardware reciprocal-sqrt)
-tanh(v)        # llvm.tanh.f32
+tanh(v)        # OCML-style piecewise f32 expansion (polynomial below |v| < 0.625, exp2/rcp otherwise)
 rcp(v)         # 1/v, lowered to hardware reciprocal
 ```
 
