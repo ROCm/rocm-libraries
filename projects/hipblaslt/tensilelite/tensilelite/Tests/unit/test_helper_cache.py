@@ -35,6 +35,12 @@ from pathlib import Path
 MockVersion = namedtuple("MockVersion", ["major", "minor", "patch"])
 
 
+def test_default_cache_directory_uses_tensilelite_home():
+    from tensilelite.Toolchain.HelperKernelCache import HelperKernelCache
+
+    assert HelperKernelCache._DEFAULT_DIR == Path.home() / ".tensilelite" / "helper_cache"
+
+
 class MockCompiler:
     def __init__(self, version=(6, 0, 0), rocm_version=(6, 0, 0), asan=False):
         self.version = MockVersion(*version)

@@ -4,7 +4,6 @@
 # Characterization tests for the GenerateSummations create-library dispatch.
 # CSV parsing behavior is covered separately by the focused csv/NumPy unit test.
 ################################################################################
-import importlib
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -14,22 +13,12 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-# Import the real production module; it has no optional dataframe dependency.
-try:
-    M = importlib.import_module("tensilelite.GenerateSummations")
-    _PANDAS_AVAILABLE = True
-except ImportError as e:
-    if "numpy" in str(e):
-        M = None
-        _PANDAS_AVAILABLE = False
-    else:
-        raise
+from tensilelite import GenerateSummations as M
 
 
 # ---------------------------------------------------------------------------
 # Test: createLibraryForBenchmark in-process dispatch
 # ---------------------------------------------------------------------------
-@pytest.mark.skipif(M is None, reason="Module import failed")
 def test_create_library_for_benchmark_success():
     """
     Pin that createLibraryForBenchmark constructs the canonical argument list
@@ -58,7 +47,6 @@ def test_create_library_for_benchmark_success():
 # ---------------------------------------------------------------------------
 # Test: createLibraryForBenchmark API error handling
 # ---------------------------------------------------------------------------
-@pytest.mark.skipif(M is None, reason="Module import failed")
 def test_create_library_for_benchmark_error_handling():
     """
     Pin that create-library errors are caught and handled.
