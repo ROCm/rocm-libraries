@@ -21,8 +21,7 @@ unsigned int checkedNarrowToUInt(int64_t value, const char* what = "value");
 // Launches a kernel compiled by GpuRefKernelCompiler with an explicit 3D geometry.
 //
 // The kernel arguments are passed through the HIP_LAUNCH_PARAM_* buffer protocol, the grid
-// dimensions are validated against the device limits (each dimension limit is divided by the
-// matching entry of gridSizeDivisor) and the device is synchronized before returning.
+// dimensions are validated against the device limits and the device is synchronized before returning.
 void launchKernel(hipFunction_t function,
                   std::array<int64_t, 3> gridSize,
                   std::array<int64_t, 3> blockSize,
