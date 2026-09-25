@@ -22,7 +22,6 @@
 
 #include <miopen/miopen.h>
 
-#include <cmath>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -113,30 +112,41 @@ void InitConvDescriptor(OwnedConvDescriptor& conv)
 // Takes its tensors by non-const reference because the C entry point spells its descriptor
 // parameters `const miopenTensorDescriptor_t` — a const pointer to a non-const descriptor —
 // so a descriptor reached through a const tensor does not convert.
-std::vector<std::size_t>
-OutputLengths(miopenConvolutionDescriptor_t conv_desc, tensor<float>& x, tensor<float>& w)
+// Fatal on failure, like InitConvDescriptor: a failed query leaves an empty output, and an
+// empty output compares equal to an empty reference.
+void OutputLengths(miopenConvolutionDescriptor_t conv_desc,
+                   tensor<float>& x,
+                   tensor<float>& w,
+                   std::vector<std::size_t>& out_lengths)
 {
     int out_dim_count = 0;
     std::vector<int> out_dims(4);
-    EXPECT_EQ(miopenGetConvolutionNdForwardOutputDim(
+    ASSERT_EQ(miopenGetConvolutionNdForwardOutputDim(
                   conv_desc, &x.desc, &w.desc, &out_dim_count, out_dims.data()),
               miopenStatusSuccess);
-    EXPECT_EQ(out_dim_count, 4);
-    return std::vector<std::size_t>(out_dims.begin(), out_dims.end());
+    ASSERT_EQ(out_dim_count, 4);
+    out_lengths.assign(out_dims.begin(), out_dims.end());
 }
 
 // Scaffolding, not code under test, so internal helpers are fine here; what matters is that
 // the reference is not another MIOpen solver.
-void ExpectMatchesCpuReference(const tensor<float>& x, const tensor<float>& w, tensor<float>& y)
+void CheckMatchesCpuReference(const tensor<float>& x, const tensor<float>& w, tensor<float>& y)
 {
     tensor<float> ref_y{y.desc.GetLengths()};
     cpu_convolution_forward(pads.size(), x, w, ref_y, pads, strides, dilations, group_count);
+
+    // rms_range() is 0 for two empty or two all-zero ranges, so without these a run that
+    // produced nothing would pass.
+    ASSERT_FALSE(miopen::range_zero(ref_y)) << "CPU reference is all zeros";
+    ASSERT_FALSE(miopen::range_zero(y)) << "GPU result is all zeros";
+    ASSERT_EQ(miopen::range_distance(ref_y), miopen::range_distance(y));
+    ASSERT_LT(miopen::find_idx(ref_y, miopen::not_finite), 0)
+        << "non-finite value in the CPU reference";
 
     // Cross-implementation comparison, not bit-reproducibility: same tolerance used by
     // ConvFwdSolverTestBase::ThresholdChecks() for FP32.
     const double tolerance = std::numeric_limits<float>::epsilon() * 80;
     const double error     = miopen::rms_range(ref_y, y);
-    EXPECT_TRUE(std::isfinite(error));
     EXPECT_LT(error, tolerance) << "convolution result beyond cross-implementation tolerance";
 }
 
@@ -153,7 +163,8 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
     auto w = MakeWeights();
     OwnedConvDescriptor conv;
     ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
-    const auto out_lengths = OutputLengths(conv.handle, x, w);
+    std::vector<std::size_t> out_lengths;
+    ASSERT_NO_FATAL_FAILURE(OutputLengths(conv.handle, x, w, out_lengths));
     tensor<float> y{out_lengths};
 
     auto x_dev = handle_deref.Write(x.data);
@@ -204,7 +215,7 @@ TEST(GPU_HipdnnShimConvFwdApi_FP32, FindAndForwardMatchCpuReference)
 
     y.data = handle_deref.Read<float>(y_dev, y.data.size());
 
-    ExpectMatchesCpuReference(x, w, y);
+    CheckMatchesCpuReference(x, w, y);
 }
 
 // The Problem/Solution path reaches the same convolution through different public entry
@@ -218,7 +229,8 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     auto w = MakeWeights();
     OwnedConvDescriptor conv;
     ASSERT_NO_FATAL_FAILURE(InitConvDescriptor(conv));
-    const auto out_lengths = OutputLengths(conv.handle, x, w);
+    std::vector<std::size_t> out_lengths;
+    ASSERT_NO_FATAL_FAILURE(OutputLengths(conv.handle, x, w, out_lengths));
     tensor<float> y{out_lengths};
 
     auto x_dev = handle_deref.Write(x.data);
@@ -267,5 +279,5 @@ TEST(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
 
     y.data = handle_deref.Read<float>(y_dev, y.data.size());
 
-    ExpectMatchesCpuReference(x, w, y);
+    CheckMatchesCpuReference(x, w, y);
 }

@@ -587,8 +587,12 @@ endif()
 # mirror above: the installed CTestTestfile.cmake only comes from test_categories.yaml, so
 # this add_test() call is invisible to it too.
 #
-# No GPU condition: the check only reads the two libraries. No MIOPEN_TEST_DISCRETE
-# condition either, because a discrete build installs nothing from this directory.
+# No GPU condition: the check only reads the two libraries. No MIOPEN_TEST_DISCRETE condition
+# either: a discrete build adds this directory EXCLUDE_FROM_ALL, so it installs nothing from
+# here, this list included.
+#
+# No --public-header: that check compares the exclusion list against miopen.h, two source
+# files the build-tree entry already checks. Only the libraries can differ once packaged.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(wrapper_abi_check \"../check_wrapper_abi.py\" \"--baseline\" \"../public_symbols.baseline\" \"--excluded\" \"../wrapper_excluded_symbols.txt\")
@@ -609,6 +613,12 @@ if( NOT ENABLE_ASAN_PACKAGING )
   # Dependencies of the wrapper_abi_check and forwarding-parity mirrors above.
   # check_public_abi.py holds the ABI logic; miopen_wrapper_libs.py is the helper both
   # check_wrapper_abi.py and run_forwarding_parity.py import.
+  #
+  # The NOT MIOPEN_TEST_DISCRETE here only matters to the parity mirror, which runs
+  # miopen_gtest, the binary only the single-binary build produces. The ABI check does not
+  # need it, but it changes nothing for the ABI check either: a discrete build adds this
+  # directory EXCLUDE_FROM_ALL, so it installs nothing from here. Neither packaged check
+  # ships from a discrete build.
   if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
     install(
         PROGRAMS

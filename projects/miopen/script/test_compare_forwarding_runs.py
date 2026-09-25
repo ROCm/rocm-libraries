@@ -94,6 +94,20 @@ class ComparatorTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("disabled=passed enabled=failed", err)
 
+    def test_test_only_in_disabled_run_is_reported(self):
+        rc, _, err = self.compare(
+            suite(("A", "passed"), ("B", "passed")), suite(("A", "passed"))
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("only in disabled run: Shim.B", err)
+
+    def test_test_only_in_enabled_run_is_reported(self):
+        rc, _, err = self.compare(
+            suite(("A", "passed")), suite(("A", "passed"), ("B", "passed"))
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("only in enabled run: Shim.B", err)
+
     def test_duplicate_name_divergence_is_not_collapsed(self):
         # Same name twice in each run, disagreeing on one of the two. Keyed by name
         # alone, the second entry would overwrite the first and the two runs would

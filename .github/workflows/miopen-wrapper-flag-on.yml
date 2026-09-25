@@ -89,9 +89,11 @@ jobs:
       # stub links fine and fails only when a caller reaches that entry point.
       # Runs through the same wrapper_abi_check ctest entry TheRock's test job uses,
       # rather than a bespoke glob-and-invoke here, so the two paths cannot drift apart.
+      # --no-tests=error: ctest exits 0 when -R matches nothing, so a renamed or
+      # unregistered entry would otherwise pass having checked nothing.
       - name: Wrapper ABI check
         run: |
-          ctest --test-dir build -R '^wrapper_abi_check$' --output-on-failure
+          ctest --test-dir build -R '^wrapper_abi_check$' --no-tests=error --output-on-failure
 
       # The rename is a compile-time trick, so a staged header spelling an entry
       # point by its private name would hand that name to consumers as public API.
