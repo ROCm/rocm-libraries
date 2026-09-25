@@ -407,6 +407,18 @@ class TestI64KvAddr(unittest.TestCase):
                 _au._tiled_cache_key(small), _au._tiled_cache_key(large)
             )
 
+    def test_i64_threshold_splits_3d_cache_key(self):
+        # The 3D split-KV path keys its launcher on _tiled_3d_cache_key, which
+        # also folds in _enable_i64_kv_addr. The harness fix sets num_kv_blocks
+        # for every path, so the same collision guard must hold on the decode
+        # path: straddling the 2 GiB threshold splits the 3D key too.
+        small = _combo_prob(num_kv_blocks=65536)
+        large = _combo_prob(num_kv_blocks=65537)
+        with _patch_arch("gfx950"):
+            self.assertNotEqual(
+                _au._tiled_3d_cache_key(small), _au._tiled_3d_cache_key(large)
+            )
+
     def test_num_kv_blocks_only_affects_key_via_i64(self):
         # "key === built kernel": num_kv_blocks must reach the cache key ONLY
         # through the i64 decision -- keying the raw count would over-split the
