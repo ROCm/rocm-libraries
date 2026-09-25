@@ -15,6 +15,7 @@ import pytest
 pytestmark = pytest.mark.unit
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
 _INSTALLER = _SOURCE_ROOT / "scripts/install_release_wheels.py"
+_STAGER = _SOURCE_ROOT / "scripts/stage_release_source.py"
 _VALIDATOR = _SOURCE_ROOT / "scripts/check_release_wheel_contents.py"
 
 
@@ -47,6 +48,24 @@ def _write_minimal_wheel(path, *, name, package_root, scripts, requirements=()):
         archive.writestr(f"{dist_info}/METADATA", "\n".join(metadata) + "\n")
         archive.writestr(f"{dist_info}/WHEEL", "Tag: py3-none-any\n")
         archive.writestr(f"{dist_info}/entry_points.txt", "\n".join(entry_points) + "\n")
+
+
+def test_release_source_staging_excludes_shared_build_state(tmp_path):
+    source = tmp_path / "input"
+    destination = tmp_path / "staged"
+    (source / "package").mkdir(parents=True)
+    (source / "package/module.py").write_text("kept", encoding="utf-8")
+    (source / "build/lib").mkdir(parents=True)
+    (source / "build/lib/stale.py").write_text("stale", encoding="utf-8")
+    (source / "package/__pycache__").mkdir()
+    (source / "package/__pycache__/module.pyc").write_bytes(b"stale")
+
+    stager = runpy.run_path(str(_STAGER))
+    stager["stage_source"](source, destination)
+
+    assert (destination / "package/module.py").read_text(encoding="utf-8") == "kept"
+    assert not (destination / "build").exists()
+    assert not (destination / "package/__pycache__").exists()
 
 
 def test_canonical_and_compatibility_release_wheels_validate_independently(tmp_path):
@@ -252,6 +271,7 @@ def test_validator_rejects_cross_package_leaks_and_missing_runtime_dependencies(
         name="tensilelite",
         package_root="tensilelite",
         scripts=canonical_scripts,
+        requirements=("filelock", "joblib", "msgpack", "numpy", "packaging", "pyyaml"),
     )
     with zipfile.ZipFile(canonical, "a") as archive:
         archive.writestr("tensilelite_tensile_compat/leak.py", "")
