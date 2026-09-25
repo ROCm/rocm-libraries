@@ -132,8 +132,61 @@ WT_PAD = 4
 # 8 B-aligned and the promise would be a lie. 8 keeps every row start at 16 B.
 V8_PAD = 8
 
+# Width, in bf16 elements, of one lane's slice when staging ``c_kv`` into
+# ``kv_lds``. This is 4, not 8, and the narrower store is what lets ``kv_lds``
+# carry ``WT_PAD`` instead of ``V8_PAD`` -- which is the whole point.
+#
+# ``kv_lds`` is the B operand of the score GEMM, and that read is the hottest
+# LDS access in the kernel (``SCORE_K_ITERS * K_TILES`` of them per k-tile).
+# Lane ``l`` of a 16-lane group reads row ``a = l % 16``, so the bank it lands
+# on is ``(stride_dwords * a + const) % 32``. With ``V8_PAD`` the stride is 292
+# dwords == 4 mod 32, whose period over ``a`` is only 8: lanes ``a`` and
+# ``a + 8`` collide on every read, 2-way, for the whole loop. ``WT_PAD`` puts
+# the stride at 290 == 2 mod 32, period 16, so all sixteen lanes land on
+# distinct banks and the read goes conflict-free.
+#
+# The pad cannot simply be lowered on its own: a 4-element pad leaves odd rows
+# at 8 mod 16 B, and an 8-wide store's ``align = 16`` declaration would become
+# a lie -- a silent miscompile, not an assert. So the store width has to come
+# down with it. An XOR swizzle was considered instead and is structurally
+# blocked: a column bit XORed at bit ``k`` displaces the bank by ``2**(k-1)``
+# dwords, and only a displacement of 2 mod 4 breaks a stride of 4 mod 32, which
+# pins ``k == 2`` -- exactly the column bit an 8-wide store must preserve.
+# Either route therefore requires the narrower store, and given that, the pad
+# is the simpler of the two and costs no swizzle arithmetic.
+#
+# Narrowing is not a concession on either side of the copy. The global load
+# stays fully coalesced (lanes read 8 B at an 8 B stride == contiguous), and
+# the ``kv_lds`` *store* improves too: at width 8 its column term is ``4a``,
+# the same 2-way pattern as the read, while at width 4 it is ``2a`` and goes
+# conflict-free as well.
+C_STAGE_W = 4
+
 # LDS available to one workgroup on gfx942, in bytes.
 LDS_BYTES_PER_WORKGROUP = 64 * 1024
+
+# AMDGPU ``sched.group.barrier`` instruction-class mask bits.
+_SGB_MFMA = 0x008  # MFMA / WMMA
+_SGB_DS_READ = 0x100  # ds_read (LDS load)
+
+# k-steps per scheduler-ordered block in the score GEMM.
+#
+# That GEMM is LDS-read-bound, not MFMA-bound: at BQ == BK == MFMA_M == MFMA_N
+# there is one M tile and one K tile, so each of its ``SCORE_K_ITERS`` steps is
+# two ``ds_read``s feeding a single MFMA -- and every MFMA accumulates into the
+# *same* register, so the MFMA chain is serial. Covering that chain needs the
+# reads to run well ahead of it.
+#
+# Emitting a (DS_READ x 2G, MFMA x G) pair every G steps asks the post-RA
+# scheduler for exactly that: a block of reads hoisted above the MFMAs they
+# feed, G steps deep. G must divide ``SCORE_K_ITERS`` evenly -- a remainder
+# leaves the tail steps unhinted and measured worse than any dividing value.
+# G = 12 (three blocks of 36) was the best of the divisors swept; it is a
+# scheduling hint only, so a wrong value costs speed and never correctness.
+#
+# This is mutually exclusive with ``iglp_opt``, which owns the whole-loop
+# schedule. Both of its canned patterns were measured here and both regressed.
+SCORE_SGB_GROUP = 12
 
 _C16_DIST = make_static_tile_distribution(
     make_c_warp_dstr_encoding(MfmaAtom.bf16_16x16x16())
@@ -355,7 +408,7 @@ def _fwd_lds_bytes(spec: MlaPrefillSpec) -> int:
     wq_lds = elem * spec.r_kv_tile * (spec.d_nope + V8_PAD)
     qa_lds = elem * spec.block_q * (qa_cols + WT_PAD)
     loop = (
-        elem * spec.block_k * (qa_cols + V8_PAD),  # kv_lds
+        elem * spec.block_k * (qa_cols + WT_PAD),  # kv_lds
         elem * spec.r_kv * (spec.block_k + WT_PAD),  # ct_lds
         elem * spec.block_q * spec.block_k,  # p_lds
     )
@@ -428,7 +481,7 @@ def supports_mla_prefill(spec: MlaPrefillSpec, *, arch: str) -> Tuple[bool, str]
     stages = {
         "q tile": (spec.block_q * spec.head_dim_qk, 4),
         "Q_rope copy": (spec.block_q * spec.d_rope, 4),
-        "c_kv tile": (spec.block_k * spec.r_kv, 8),
+        "c_kv tile": (spec.block_k * spec.r_kv, C_STAGE_W),
         "k_rope tile": (spec.block_k * spec.d_rope, 4),
         "W_UK absorb slice": (spec.r_kv_tile * spec.d_nope, 8),
         "W_UV epilogue slice": (spec.r_kv_tile * spec.d_v, 8),
@@ -1178,14 +1231,16 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # three phases below never overlap, and the loop phase is the peak:
     #
     #   prologue  q_lds  + wq_lds + qa_lds            (BQ=BK=16:  42112 B)
-    #   loop      qa_lds + kv_lds + ct_lds + p_lds    (BQ=BK=16:  58240 B)
+    #   loop      qa_lds + kv_lds + ct_lds + p_lds    (BQ=BK=16:  58112 B)
     #   epilogue  accl_lds + wt_lds                   (BQ=BK=16:  33920 B)
     #
-    # The pool actually emitted is 63104 B, ~4.9 KB above that loop-phase ideal.
+    # The pool actually emitted is 63104 B, ~5.0 KB above that loop-phase ideal.
     # The packer is greedy first-fit in allocation order, so qa_lds is placed
     # above wq_lds (at 23552) while still live across the loop; kv_lds then
-    # reuses the q_lds/wq_lds bytes from 0 but only reaches 18688, leaving
-    # [18688, 23552) stranded for the whole loop. Achieved layout:
+    # reuses the q_lds/wq_lds bytes from 0 but only reaches 18560, leaving
+    # [18560, 23552) stranded for the whole loop. Shrinking kv_lds therefore
+    # does not shrink the pool -- it only widens that stranded hole. Achieved
+    # layout:
     #
     #   0      q_lds / kv_lds / accl_lds   (three phases share the base)
     #   6144   wq_lds
@@ -1216,13 +1271,19 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # steps ``b_row`` by one per lane -- so without the pad each collapses onto
     # a handful of banks.
     #
-    # ``V8_PAD`` is an *alignment* requirement, not a tuning knob. ``wq_lds``
-    # and ``kv_lds`` are filled with 8-wide bf16 vector stores, and
-    # ``smem_store_vN`` declares ``align = n * elem_bytes`` == 16 B. A row
-    # stride that is not a multiple of 8 bf16 elements would put odd rows at
-    # 8 mod 16 and make that declaration a lie. V8_PAD == 8 keeps the stride
-    # 16 B-aligned and still lands both buffers off bank 0 (292 and 68 dwords,
-    # both 4 mod 32).
+    # ``V8_PAD`` is an *alignment* requirement, not a tuning knob. ``wq_lds`` is
+    # filled with 8-wide bf16 vector stores, and ``smem_store_vN`` declares
+    # ``align = n * elem_bytes`` == 16 B. A row stride that is not a multiple of
+    # 8 bf16 elements would put odd rows at 8 mod 16 and make that declaration a
+    # lie. V8_PAD == 8 keeps the stride 16 B-aligned and lands the buffer off
+    # bank 0 (68 dwords, 4 mod 32).
+    #
+    # ``kv_lds`` used to take ``V8_PAD`` for the same reason and no longer does.
+    # Off bank 0 is necessary but not sufficient: a stride of 4 mod 32 has
+    # period 8 over the row index, so the score GEMM's 16-lane B read collided
+    # 2-way on every issue. It now stages at ``C_STAGE_W`` == 4 and carries
+    # ``WT_PAD``, putting the stride at 2 mod 32 -- period 16, conflict-free.
+    # See the ``C_STAGE_W`` comment for why the pad could not move on its own.
     #
     # ``ct_lds`` takes ``WT_PAD`` for the same reason, and the arithmetic is
     # worth spelling out because the two accesses want different things. Write
@@ -1334,9 +1395,88 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
     # Loop-phase buffers: allocated here so they pool onto q_lds / wq_lds, whose
     # last readers are the absorb above and are fenced by the loop's opening
     # barrier.
-    kv_lds = b.smem_alloc(dtype, [BK, QA_COLS + V8_PAD], name_hint="kv_lds")  # 18688 B
+    kv_lds = b.smem_alloc(dtype, [BK, QA_COLS + WT_PAD], name_hint="kv_lds")  # 18560 B
     ct_lds = b.smem_alloc(dtype, [R_KV, BK + WT_PAD], name_hint="ct_lds")  # 20480 B
     p_lds = b.smem_alloc(dtype, [BQ, BK], name_hint="p_lds")  # 512 B
+
+    # ---- k-loop staging, split so the loads can run ahead ------------------
+    # Splitting the stage into a load half and a store half lets tile ``i+1``'s
+    # global loads issue before tile ``i``'s compute and retire under it,
+    # instead of sitting exposed between the two barriers. One stage is in
+    # flight: ``c_chunks`` vectors of ``C_STAGE_W`` plus ``kr_chunks`` of 4 --
+    # 18 VGPR at BK=16, against 160 of 256 in use.
+    #
+    # The equivalent pipeline in ``attention_tiled_2d`` hides the same latency
+    # with a two-slot LDS double buffer, so its staged registers never cross an
+    # iteration boundary. That is not available here: the pool is already at
+    # 63104 of 65536 B and a second kv_lds/ct_lds slot needs ~38 KB more. The
+    # stage is therefore carried in ``iter_args``. Registers are the only
+    # resource this kernel still has spare, which is what makes the swap work.
+    c_chunks = (BK * R_KV) // (THREADS * C_STAGE_W)
+    c_chunks_per_row = R_KV // C_STAGE_W
+    kr_chunks = (BK * D_ROPE) // (THREADS * 4)
+    kr_chunks_per_row = D_ROPE // 4
+
+    def _stage_loads(tile, *, guard=None):
+        """Issue one tile's global loads into registers. Touches no LDS."""
+        page = b.global_load_i32(block_table, b.add(b.mul(seq_idx, bt_stride_p), tile))
+        if guard is not None:
+            # Zero-trip loop: the block-table slot may be uninitialised. Page 0
+            # is always mapped, so the load stays in bounds; a zero-trip loop
+            # never consumes the value.
+            page = b.select(guard, page, b.const_i32(0))
+        c_base = b.mul(page, b.const_i32(PAGE * R_KV))
+        kr_base = b.mul(page, b.const_i32(PAGE * D_ROPE))
+        staged = []
+        for j in range(c_chunks):
+            c = b.add(tid, b.const_i32(j * THREADS))
+            m = b.div(c, b.const_i32(c_chunks_per_row))
+            r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
+            idx = b.add(b.add(c_base, b.mul(m, b.const_i32(R_KV))), r0)
+            staged.append(b.global_load_vN(c_kv, idx, dtype, C_STAGE_W))
+        for j in range(kr_chunks):
+            c = b.add(tid, b.const_i32(j * THREADS))
+            m = b.div(c, b.const_i32(kr_chunks_per_row))
+            d0 = b.mul(b.mod(c, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
+            idx = b.add(b.add(kr_base, b.mul(m, b.const_i32(D_ROPE))), d0)
+            staged.append(b.global_load_vN(k_rope, idx, dtype, 4))
+        return staged
+
+    def _stage_store(staged):
+        """Drain a staged tile into both LDS orientations.
+
+        ``kv_lds`` is the B operand of the score GEMM, read as [key][r] -- the
+        natural layout. ``ct_lds`` is the B operand of the latent PV, read as
+        [r][key] -- the transpose. gfx942 has no ``ds_read_tr``, so the
+        transpose happens on the store path; both copies come off the same
+        staged register.
+        """
+        for j in range(c_chunks):
+            c = b.add(tid, b.const_i32(j * THREADS))
+            m = b.div(c, b.const_i32(c_chunks_per_row))
+            r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(C_STAGE_W))
+            v8 = staged[j]
+            b.smem_store_vN(kv_lds, [m, r0], v8, C_STAGE_W)
+            for e in range(C_STAGE_W):
+                ct_row = _shift(b, e, r0)
+                b.smem_store_vN(
+                    ct_lds,
+                    [ct_row, _ct_swizzle(b, ct_row, m)],
+                    b.vec_extract(v8, e),
+                    1,
+                )
+        for j in range(kr_chunks):
+            c = b.add(tid, b.const_i32(j * THREADS))
+            m = b.div(c, b.const_i32(kr_chunks_per_row))
+            d0 = b.mul(b.mod(c, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
+            b.smem_store_vN(
+                kv_lds, [m, b.add(d0, b.const_i32(R_KV))], staged[c_chunks + j], 4
+            )
+
+    # Prime the pipeline with tile 0.
+    prologue = _stage_loads(b.const_i32(0), guard=b.cmp_gt(n_k_tiles, b.const_i32(0)))
+    n_stage = len(prologue)
+    iter_args += [(f"stg{j}", v) for j, v in enumerate(prologue)]
 
     k_loop = b.scf_for_iter(
         b.const_i32(0), n_k_tiles, b.const_i32(1), iter_args=iter_args, iv_name="k_tile"
@@ -1356,55 +1496,31 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
             )
             for mt in range(M_TILES)
         ]
+        staged = list(state[-n_stage:])
         kb_start = b.mul(k_tile, b.const_i32(BK))
 
         # WAR: the previous iteration's readers of kv_lds / ct_lds must retire
         # before this iteration overwrites them.
         b.sync()
 
-        # ---- stage one page of compressed KV, in both orientations --------
-        # ``kv_lds`` is the B operand of the score GEMM, read as [key][r] --
-        # the natural layout. ``ct_lds`` is the B operand of the latent PV,
-        # read as [r][key] -- the transpose. gfx942 has no ``ds_read_tr``, so
-        # the transpose has to happen on the store path; both copies come off
-        # the same global load.
-        page = b.global_load_i32(
-            block_table, b.add(b.mul(seq_idx, bt_stride_p), k_tile)
-        )
-        c_base = b.mul(page, b.const_i32(PAGE * R_KV))
-        c_chunks = (BK * R_KV) // (THREADS * 8)
-        c_chunks_per_row = R_KV // 8
-        for j in range(c_chunks):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            m = b.div(c, b.const_i32(c_chunks_per_row))
-            r0 = b.mul(b.mod(c, b.const_i32(c_chunks_per_row)), b.const_i32(8))
-            idx = b.add(b.add(c_base, b.mul(m, b.const_i32(R_KV))), r0)
-            v8 = b.global_load_vN(c_kv, idx, dtype, 8)
-            b.smem_store_vN(kv_lds, [m, r0], v8, 8)
-            for e in range(8):
-                ct_row = _shift(b, e, r0)
-                b.smem_store_vN(
-                    ct_lds,
-                    [ct_row, _ct_swizzle(b, ct_row, m)],
-                    b.vec_extract(v8, e),
-                    1,
-                )
-
-        kr_base = b.mul(page, b.const_i32(PAGE * D_ROPE))
-        kr_chunks = (BK * D_ROPE) // (THREADS * 4)
-        kr_chunks_per_row = D_ROPE // 4
-        for j in range(kr_chunks):
-            c = b.add(tid, b.const_i32(j * THREADS))
-            m = b.div(c, b.const_i32(kr_chunks_per_row))
-            d0 = b.mul(b.mod(c, b.const_i32(kr_chunks_per_row)), b.const_i32(4))
-            idx = b.add(b.add(kr_base, b.mul(m, b.const_i32(D_ROPE))), d0)
-            b.smem_store_vN(
-                kv_lds,
-                [m, b.add(d0, b.const_i32(R_KV))],
-                b.global_load_vN(k_rope, idx, dtype, 4),
-                4,
-            )
+        # ---- drain this tile's stage into LDS, in both orientations --------
+        # The data is already in registers: it was loaded either by the
+        # prologue (tile 0) or by the previous iteration, under that
+        # iteration's compute.
+        _stage_store(staged)
         b.sync()
+
+        # ---- run ahead: issue the next tile's global loads -----------------
+        # These retire under the score GEMM below rather than sitting exposed
+        # between the two barriers. The index is clamped rather than
+        # predicated: on the final iteration it re-reads the current tile,
+        # a page already known to be mapped, and the value is never consumed.
+        nxt = b.select(
+            b.cmp_lt(b.add(k_tile, b.const_i32(1)), n_k_tiles),
+            b.add(k_tile, b.const_i32(1)),
+            k_tile,
+        )
+        staged_next = _stage_loads(nxt)
 
         # ---- S = scale * (Qa @ [C | K_rope]ᵀ); C decodes as (query, key) ---
         s_acc = [[b.zero_vec_f32(4) for _ in range(K_TILES)] for _ in range(M_TILES)]
@@ -1424,6 +1540,14 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
                     s_acc[mt][kt] = _mfma_16x16x16(
                         b, dtype, a_vs[mt], b_v, s_acc[mt][kt]
                     )
+            # Hoist the next ``SCORE_SGB_GROUP`` steps' LDS reads above the
+            # MFMAs they feed. Skipped when the group does not divide the trip
+            # count -- a partial trailing block measured worse than no hint.
+            if SCORE_K_ITERS % SCORE_SGB_GROUP == 0 and (kk + 1) % SCORE_SGB_GROUP == 0:
+                b.sched_group_barrier(
+                    _SGB_DS_READ, SCORE_SGB_GROUP * (M_TILES + K_TILES), 0
+                )
+                b.sched_group_barrier(_SGB_MFMA, SCORE_SGB_GROUP * M_TILES * K_TILES, 0)
 
         # ---- online softmax, one row slot at a time ------------------------
         # Two bounds, and both land on ``p`` rather than only on ``s``: the
@@ -1506,7 +1630,7 @@ def build_mla_prefill_fwd(spec: MlaPrefillSpec, *, arch: str = "gfx942") -> Kern
                     accs[mt][t] = _mfma_16x16x16(b, dtype, a_vs[mt], b_v, accs[mt][t])
 
         flat_acc = [accs[mt][t] for mt in range(M_TILES) for t in range(N_R_PER_WAVE)]
-        b.scf_yield(*new_ms, *new_ls, *flat_acc)
+        b.scf_yield(*new_ms, *new_ls, *flat_acc, *staged_next)
 
     # ---- epilogue: normalize, then project the latent out with W_UV -------
     res = k_loop.results
