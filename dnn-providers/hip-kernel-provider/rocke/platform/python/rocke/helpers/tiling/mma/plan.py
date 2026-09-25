@@ -50,10 +50,18 @@ class Tiling:
     * ``order`` -- the M/N/K subtile loop-nest order (a permutation of ``"MNK"``). Stride
       convention: the RIGHT-MOST axis varies fastest (innermost); ``"MNK"`` runs K innermost.
       Iterated inside one ``TileMmaDriver`` call.
+    * ``mac_prio`` -- ``s_setprio`` level (``0..3``): a PERFORMANCE-TUNING knob raised for the
+      matrix-dense body of the wave-tile cluster (MFMA or WMMA -- the driver is instruction-agnostic).
+      The driver issues the first atom at normal priority, raises to ``mac_prio`` for the rest, and
+      drops back to ``0`` after the last. Like ``order`` this reorders ISSUE, not the math (bit-exact),
+      so it is a schedule knob, not a correctness one -- worth sweeping per arch/shape. ``0`` (the
+      default) emits nothing, keeping the recording byte-identical; a single-atom cluster emits nothing
+      regardless -- there is no dense body to protect.
     """
 
     atom_shape: Optional[tuple[int, int, int] | str] = None
     order: str = "MNK"
+    mac_prio: int = 0
 
     def __post_init__(self) -> None:
         atom = self.atom_shape
@@ -68,6 +76,9 @@ class Tiling:
                 f"unknown subtile order -- order={self.order!r}, "
                 f"expected one of {list(_SUBTILE_ORDERS)}"
             )
+        if (not isinstance(self.mac_prio, int) or isinstance(self.mac_prio, bool)
+                or not 0 <= self.mac_prio <= 3):
+            raise ValueError(f"mac_prio must be an int in 0..3 -- mac_prio={self.mac_prio!r}")
 
 
 class TileMmaPlan:

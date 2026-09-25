@@ -176,10 +176,15 @@ class TileMmaDriver:
                 )
             a_atom = fragment_length(a_fragment.tile_desc.layout) // k_sub
             b_atom = fragment_length(b_fragment.tile_desc.layout) // k_sub
+            mac_prio = plan.tiling.mac_prio          # raise AFTER the first atom (see grid-branch note below)
             for ki in range(k_sub):
                 a_sub = self._read_subvector(b, a_fragment.value, ki * a_atom, a_atom, a_fragment.dtype)
                 b_sub = self._read_subvector(b, b_fragment.value, ki * b_atom, b_atom, b_fragment.dtype)
                 acc_value = b.mma(op, a_sub, b_sub, acc_value)
+                if mac_prio and ki == 0:
+                    b.s_setprio(mac_prio)
+            if mac_prio:
+                b.s_setprio(0)
             return Fragment(accumulator.tile_desc, accumulator.dtype, acc_value)
 
         # Subtiled M/N grid. Carry a PER-ATOM accumulator SSA for each (mi, nj) C subtile so
@@ -196,7 +201,14 @@ class TileMmaDriver:
             self._read_subvector(b, accumulator.value, idx * c_atom, c_atom, accumulator.dtype)
             for idx in range(m_sub * n_sub)
         ]
-        for mi, nj, ki in self._subtile_triples():
+        # `mac_prio` raises wave issue priority for the matrix-dense body (MFMA or WMMA -- the driver is
+        # instruction-agnostic): the FIRST atom issues at normal priority, then `s_setprio(mac_prio)` for
+        # the remaining atoms, dropping to 0 after the last. Raising BEFORE the first atom instead
+        # perturbs regalloc and can cost a wave of occupancy; raising after the first is the stable
+        # placement. Reorders issue, not the math -- bit-exact. This branch always has >= 2 atoms (the
+        # 1-atom case returns above), so the elevated window is non-empty; `mac_prio=0` emits nothing.
+        mac_prio = plan.tiling.mac_prio
+        for i, (mi, nj, ki) in enumerate(self._subtile_triples()):
             idx = mi * n_sub + nj
             a_sub = self._read_subvector(
                 b, a_fragment.value, (mi * k_sub + ki) * a_atom, a_atom, a_fragment.dtype
@@ -205,6 +217,10 @@ class TileMmaDriver:
                 b, b_fragment.value, (nj * k_sub + ki) * b_atom, b_atom, b_fragment.dtype
             )
             accs[idx] = b.mma(op, a_sub, b_sub, accs[idx])
+            if mac_prio and i == 0:
+                b.s_setprio(mac_prio)
+        if mac_prio:
+            b.s_setprio(0)
         result = accumulator.value
         for idx in range(m_sub * n_sub):
             result = self._write_subvector(b, result, accs[idx], idx * c_atom, c_atom)
