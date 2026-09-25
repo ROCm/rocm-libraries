@@ -157,22 +157,27 @@ block()
     set(_stinkytofu_from_subdirectory OFF)
 
     if(ROCISA_STANDALONE)
-        set(STINKYTOFU_ENABLE_WERROR ON)
-        # gfx1250 codegen imports this module. TheRock publishes one generic
-        # artifact shared by every GPU family, so a gfx942-only build that
-        # skips it removes the module from the tree FFM actually runs.
-        set(STINKYTOFU_BUILD_PYTHON ON)
-        add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
-        set(_stinkytofu_from_subdirectory TRUE)
-    else()
-        block(SCOPE_FOR VARIABLES)
-            set(BUILD_SHARED_LIBS OFF)
-            set(CMAKE_SKIP_INSTALL_RULES ON)
+        find_package(stinkytofu CONFIG QUIET)
+    endif()
+
+    if(NOT TARGET stinkytofu::stinkytofu)
+        if(ROCISA_STANDALONE)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            # See the standalone branch: every family build has to ship the module.
+            # gfx1250 codegen imports this module. TheRock publishes one generic
+            # artifact shared by every GPU family, so a gfx942-only build that
+            # skips it removes the module from the tree FFM actually runs.
             set(STINKYTOFU_BUILD_PYTHON ON)
             add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
-        endblock()
+        else()
+            block(SCOPE_FOR VARIABLES)
+                set(BUILD_SHARED_LIBS OFF)
+                set(CMAKE_SKIP_INSTALL_RULES ON)
+                set(STINKYTOFU_ENABLE_WERROR ON)
+                # See the standalone branch: every family build has to ship the module.
+                set(STINKYTOFU_BUILD_PYTHON ON)
+                add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
+            endblock()
+        endif()
         set(_stinkytofu_from_subdirectory TRUE)
     endif()
 
@@ -356,9 +361,9 @@ block()
         # rocisa/ package directory in the wheel.
         install(TARGETS _rocisa DESTINATION rocisa)
         if(_stinkytofu_shared)
-            # Source-built: vendor libstinkytofu into the wheel — no installed copy exists.
-            # A static stinkytofu is already inside _rocisa, and TARGET_SONAME_FILE below
-            # is only valid for SHARED targets.
+            # Vendor the private development installation into the rocisa wheel.
+            # A static stinkytofu is already inside _rocisa, and
+            # TARGET_SONAME_FILE below is only valid for SHARED targets.
             install(FILES $<TARGET_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
             if(NOT WIN32)
                 install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu> DESTINATION rocisa)
