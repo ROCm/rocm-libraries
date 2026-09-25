@@ -5,6 +5,7 @@
 
 import configparser
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -31,8 +32,27 @@ def test_ci_bootstrap_requirements_include_invoke():
     ), "Math CI's source-build bootstrap must install Invoke unconditionally"
 
 
+def _isolated_source(tmp_path):
+    return Path(
+        shutil.copytree(
+            _PROJECT_ROOT,
+            tmp_path / "source",
+            ignore=shutil.ignore_patterns(
+                ".pytest_cache",
+                ".tox",
+                "__pycache__",
+                "*.egg-info",
+                "build",
+                "build_tmp",
+                "build-adaptor",
+            ),
+        )
+    )
+
+
 def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatch):
     """rocisa is currently provisioned from source, not resolved by pip."""
+    source_root = _isolated_source(tmp_path)
     # The build reads no ROCm installation; these must not change the version.
     monkeypatch.setenv("ROCM_VERSION", "7.2.4")
     monkeypatch.setenv("ROCM_PATH", str(tmp_path / "no-rocm-here"))
@@ -50,7 +70,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             str(tmp_path),
             ".",
         ],
-        cwd=_PROJECT_ROOT,
+        cwd=source_root,
         check=True,
         capture_output=True,
         text=True,
@@ -66,7 +86,7 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
             next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))
         ).decode("utf-8")
 
-    component_version = (_PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    component_version = (source_root / "VERSION").read_text(encoding="utf-8").strip()
     version = re.search(r"^Version: (.+)$", metadata, re.MULTILINE).group(1)
     # A source build is a development build: labelled with the commit when git
     # knows it, unlabelled otherwise. It never claims a ROCm release.
@@ -86,16 +106,17 @@ def test_wheel_metadata_does_not_require_unpublished_rocisa(tmp_path, monkeypatc
     parsed_entry_points.read_string(entry_points)
     assert dict(parsed_entry_points["console_scripts"]) == {
         "tensilelite": "tensilelite.cli:main",
-        "Tensile": "tensilelite.run:main",
-        "TensileCreateLibrary": "tensilelite.create_library:main",
-        "TensileVerifyStinkyElfText": "tensilelite.verify_stinky_comment_vs_elf_text:main",
-        "TensileGetPath": "tensilelite:PrintTensileRoot",
-        "TensileBenchmarkCluster": "tensilelite.benchmark_cluster:main",
-        "TensileRetuneLibrary": "tensilelite.retune_library:main",
         "tensilelite-configure-client": "tensilelite_configure_client:main",
     }
     assert "_tensilelite_client_binding.py" in archived_names
     assert "tensilelite_configure_client.py" in archived_names
+
+
+def test_wheel_rebuild_depends_on_top_level_runtime_modules():
+    cmake = (_PROJECT_ROOT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert '"${_tensilelite_src}/_tensilelite_client_binding.py"' in cmake
+    assert '"${_tensilelite_src}/tensilelite_configure_client.py"' in cmake
 
 
 def test_removed_source_autobuild_option_is_not_referenced():
