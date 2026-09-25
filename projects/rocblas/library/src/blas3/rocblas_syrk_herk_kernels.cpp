@@ -102,9 +102,9 @@ rocblas_status rocblas_internal_syrk_herk_template(rocblas_handle    handle,
                   ? (HERM ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose)
                   : rocblas_operation_none;
 
-        // Process batches in chunks derived from the workspace actually allocated:
-        // the whole batch count when the triangles fit, a smaller gemm_64-aligned
-        // count when they do not.  The workspace
+        // Process batches in chunks of rocblas_syrk_herk_chunk_size -- the same
+        // function the size query above used, which is what makes the buffer big
+        // enough.  The workspace
         // is sized for one chunk, so each iteration reuses the same buffer.  Within
         // a chunk the kernel uses blockIdx.z (0..chunk_size-1) to index W_C and
         // (batch_offset + blockIdx.z) to load/store d_C.  Stream ordering serialises

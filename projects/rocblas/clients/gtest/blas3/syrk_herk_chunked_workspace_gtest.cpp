@@ -337,22 +337,23 @@ namespace
             << workspace_bytes << "-byte workspace";
     }
 
-    // Owns a device array of batch_count pointers all aliasing one buffer.
+    // Owns a device array of batch_count pointers, either all aliasing one
+    // buffer or one per batch.
     // A is read-only, so sharing it keeps the A allocation independent of
     // batch_count; a distinct A per batch would cost gigabytes at the
     // >65535 batch counts these tests need for 16-byte types.
     template <typename T>
-    class aliased_ptr_array
+    class device_ptr_array
     {
     public:
-        aliased_ptr_array(T* base, rocblas_int batch_count)
-            : aliased_ptr_array(std::vector<T*>(size_t(batch_count), base))
+        device_ptr_array(T* base, rocblas_int batch_count)
+            : device_ptr_array(std::vector<T*>(size_t(batch_count), base))
         {
         }
 
         // Caller-supplied mapping, so a batch can be pointed at one of several
         // buffers rather than all sharing one.
-        explicit aliased_ptr_array(const std::vector<T*>& host)
+        explicit device_ptr_array(const std::vector<T*>& host)
         {
             const size_t bytes = sizeof(T*) * host.size();
             if((hipMalloc)(&m_device, bytes) != hipSuccess)
@@ -367,14 +368,14 @@ namespace
             }
         }
 
-        ~aliased_ptr_array()
+        ~device_ptr_array()
         {
             if(m_device)
                 (void)(hipFree)(m_device);
         }
 
-        aliased_ptr_array(const aliased_ptr_array&) = delete;
-        aliased_ptr_array& operator=(const aliased_ptr_array&) = delete;
+        device_ptr_array(const device_ptr_array&) = delete;
+        device_ptr_array& operator=(const device_ptr_array&) = delete;
 
         bool valid() const
         {
@@ -427,7 +428,7 @@ namespace
             {32, 131070},
             {2, 131070}, // smallest triangle: the budget never binds
             {256, 100000}, // budget binds: tens of chunks
-            {1024, 50000}, // budget binds hard: hundreds of chunks
+            {1024, 50000}, // budget binds hard: dozens to hundreds of chunks
         };
 
         for(const auto& c : cases)
@@ -569,7 +570,7 @@ namespace
         ASSERT_EQ(dA.memcheck(), hipSuccess);
         ASSERT_EQ(hipMemset((T*)dA, 0, size_t(n) * size_t(k) * sizeof(T)), hipSuccess);
 
-        aliased_ptr_array<T> dA_ptrs((T*)dA, run_bc);
+        device_ptr_array<T> dA_ptrs((T*)dA, run_bc);
         ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
 
         device_batch_vector<T> dC(size_t(n) * size_t(n), 1, run_bc);
@@ -605,7 +606,8 @@ namespace
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_canaries(StridedFn strided_api, BatchedFn batched_api)
     {
-        // Several chunks, a single chunk, and the degenerate single-batch case.
+        // All single-chunk at the shipped budget; they differ in how far the
+        // kernel sweeps, and the last is the degenerate single-batch case.
         for(rocblas_int bc : {600000, 65539, 1})
         {
             run_strided_canary<T, K>(strided_api, bc, rocblas_fill_lower);
@@ -812,7 +814,7 @@ namespace
         ASSERT_EQ(hipMemcpy((T*)dA, h_A.data(), a_elems * sizeof(T), hipMemcpyHostToDevice),
                   hipSuccess);
 
-        aliased_ptr_array<T> dA_ptrs((T*)dA, batch_count);
+        device_ptr_array<T> dA_ptrs((T*)dA, batch_count);
         ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
 
         device_batch_vector<T> dC(c_elems, 1, batch_count);
@@ -849,9 +851,10 @@ namespace
     {
         // 65536 fits one chunk at the test budget, so it covers the single-pass
         // case where the arguments are identical to the unchunked code, while
-        // still being large enough that the kernel sweeps. 600000 splits into
-        // several chunks for every element type, so the host loop, a non-zero
-        // batch_offset and the sweep are all live at once.
+        // still being large enough that the kernel sweeps. 600000 is also a
+        // single chunk at the shipped budget, but sweeps roughly ten times per
+        // block, so a wrong absolute batch index has far more chances to show.
+        // The host chunk loop itself is covered by the nightly battery.
         for(rocblas_int bc : {65536, 600000})
         {
             run_strided_numerical<T, K>(strided_api, bc);
@@ -976,6 +979,37 @@ namespace
             }
     }
 
+    // Proves the library -- not the test's model -- is on the chunked path and
+    // split this shape. ASSERT_LT against model_chunk alone cannot do that: the
+    // model would still report a split on an architecture where
+    // rocblas_use_only_gemm is false and no chunking happens at all, and the
+    // values would still come out right, so all four nightly tests would pass
+    // green after allocating 4GB apiece while testing nothing.
+    //
+    // Returns the workspace the library asked for, or 0 when the path is
+    // inactive and the caller should skip.
+    template <typename T, op_kind K, typename QueryFn>
+    static size_t require_library_split(
+        QueryFn query, rocblas_int n, rocblas_int k, rocblas_int batch_count, rocblas_handle handle)
+    {
+        size_t queried = 0;
+        if(!query(handle, n, k, batch_count, &queried))
+            return 0;
+
+        if(!queried)
+            return 0; // gemm-only workspace path not active on this device
+
+        EXPECT_EQ(queried, rounded(chunked_workspace_bytes<T>(n, batch_count)))
+            << "library disagrees with the test's chunk model";
+
+        // A single-chunk library would size the buffer for every batch. Strictly
+        // less is the proof that it split.
+        EXPECT_LT(queried, rounded(tri_n(n) * sizeof(T) * size_t(batch_count)))
+            << "library did not split this shape; the multi-chunk probes cannot fail";
+
+        return queried;
+    }
+
     template <typename T, op_kind K, typename ApiFunc>
     static void run_multichunk_strided(ApiFunc api)
     {
@@ -987,6 +1021,22 @@ namespace
         const rocblas_int    chunk       = model_chunk<T>(n, batch_count);
 
         ASSERT_LT(chunk, batch_count) << "shape does not split; the battery would test nothing";
+
+        auto query =
+            [api](rocblas_handle h, rocblas_int nn, rocblas_int kk, rocblas_int bc, size_t* bytes) {
+                return query_strided_workspace<T, K>(h, api, nn, kk, nn, nn, bc, bytes);
+            };
+        const size_t queried = require_library_split<T, K>(query, n, k, batch_count, handle);
+        if(!queried)
+            GTEST_SKIP() << "gemm-only workspace path not active on this device";
+
+        // Exact-sized workspace plus a guard. The defect this PR fixes is an
+        // out-of-bounds workspace write, and this is the only multi-chunk
+        // coverage, so the bound is checked here too.
+        void* d_ws = nullptr;
+        ASSERT_EQ((hipMalloc)(&d_ws, queried + c_canary_bytes), hipSuccess);
+        ASSERT_TRUE(fill_canary(d_ws, queried));
+        ASSERT_EQ(rocblas_set_workspace(handle, d_ws, queried), rocblas_status_success);
 
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
@@ -1055,6 +1105,43 @@ namespace
             expect_val_eq(corner[3], expected_diag<T, K>(k, 1), "C[1,1] diagonal", b);
             expect_val_eq(corner[2], expected_upper<T>(b), "C[0,1] (upper preserved)", b);
         }
+
+        // Everywhere else in this file n is 2, so tri(n) is 1 and the triangle
+        // packing is only ever evaluated at index 0. Read back one full
+        // strictly-upper triangle so the index arithmetic is exercised across
+        // its whole range: save and restore share the formula, so any entry
+        // landing on the wrong slot shows up as a value that was not restored.
+        {
+            const rocblas_int b = batch_count - 1;
+
+            std::vector<T> block(c_elems);
+            ASSERT_EQ(hipMemcpy(block.data(),
+                                (T*)dC + size_t(b) * c_elems,
+                                c_elems * sizeof(T),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+
+            size_t mismatches = 0;
+            for(rocblas_int col = 1; col < n; ++col)
+                for(rocblas_int row = 0; row < col; ++row)
+                {
+                    // Only (0,1) carries the per-batch value; the rest of the
+                    // triangle was seeded uniformly.
+                    const T want
+                        = (row == 0 && col == 1) ? expected_upper<T>(b) : expected_upper<T>(0);
+                    const T got = block[size_t(row) + size_t(col) * size_t(n)];
+                    if(re_of(got) != re_of(want) || im_of(got) != im_of(want))
+                        ++mismatches;
+                }
+
+            EXPECT_EQ(mismatches, size_t(0))
+                << mismatches << " of " << tri_n(n)
+                << " strictly-upper entries were not restored, batch " << b;
+        }
+
+        expect_canary_clean(handle, d_ws, queried);
+        ASSERT_EQ(rocblas_set_workspace(handle, nullptr, 0), rocblas_status_success);
+        ASSERT_EQ((hipFree)(d_ws), hipSuccess);
     }
 
     // Batched form of the multi-chunk battery.  This is the only place the
@@ -1075,6 +1162,19 @@ namespace
         const rocblas_int    chunk       = model_chunk<T>(n, batch_count);
 
         ASSERT_LT(chunk, batch_count) << "shape does not split; the battery would test nothing";
+
+        auto query =
+            [api](rocblas_handle h, rocblas_int nn, rocblas_int kk, rocblas_int bc, size_t* bytes) {
+                return query_batched_workspace<T, K>(h, api, nn, kk, nn, nn, bc, bytes);
+            };
+        const size_t queried = require_library_split<T, K>(query, n, k, batch_count, handle);
+        if(!queried)
+            GTEST_SKIP() << "gemm-only workspace path not active on this device";
+
+        void* d_ws = nullptr;
+        ASSERT_EQ((hipMalloc)(&d_ws, queried + c_canary_bytes), hipSuccess);
+        ASSERT_TRUE(fill_canary(d_ws, queried));
+        ASSERT_EQ(rocblas_set_workspace(handle, d_ws, queried), rocblas_status_success);
 
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
@@ -1115,8 +1215,8 @@ namespace
                       hipSuccess);
         }
 
-        aliased_ptr_array<T> dA_ptrs(a_ptrs);
-        aliased_ptr_array<T> dC_ptrs(c_ptrs);
+        device_ptr_array<T> dA_ptrs(a_ptrs);
+        device_ptr_array<T> dC_ptrs(c_ptrs);
         ASSERT_TRUE(dA_ptrs.valid()) << "failed to allocate A pointer array";
         ASSERT_TRUE(dC_ptrs.valid()) << "failed to allocate C pointer array";
 
@@ -1154,6 +1254,10 @@ namespace
             expect_val_eq(corner[3], expected_diag<T, K>(k, scale), "C[1,1] diagonal", b);
             expect_val_eq(corner[2], expected_upper<T>(b), "C[0,1] (upper preserved)", b);
         }
+
+        expect_canary_clean(handle, d_ws, queried);
+        ASSERT_EQ(rocblas_set_workspace(handle, nullptr, 0), rocblas_status_success);
+        ASSERT_EQ((hipFree)(d_ws), hipSuccess);
     }
 
     // -----------------------------------------------------------------------
