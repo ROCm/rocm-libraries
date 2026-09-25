@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <vector>
 
 namespace stinkytofu {
 
@@ -102,6 +103,16 @@ class InFlightQueue {
         nextIssueTick_ = -1.0;
     }
 
+    // Seed with each entry's own residual (as captured by residuals()), so a
+    // predecessor's occupancy carries over without collapsing every entry to
+    // one worst-case value. Same throttle-clock caveat as the (count, residual)
+    // overload above.
+    void seed(const std::vector<int>& residuals) {
+        expiries_.clear();
+        for (int r : residuals) expiries_.push_back(currentTime_ + r);
+        nextIssueTick_ = -1.0;
+    }
+
     // Wait cycles to satisfy the active saturated-queue pacing interval.
     // Returns 0 below queue depth or when the interval is invalid.
     int throttleWait() const {
@@ -135,6 +146,17 @@ class InFlightQueue {
         evict();
         if (expiries_.empty()) return 0;
         return std::max(0, *std::max_element(expiries_.begin(), expiries_.end()) - currentTime_);
+    }
+
+    // Remaining cycles until each currently in-flight entry expires, oldest
+    // first (the order push() built them in). Pairs with seed(vector<int>) to
+    // carry occupancy across a BB boundary without collapsing to one value.
+    std::vector<int> residuals() const {
+        evict();
+        std::vector<int> out;
+        out.reserve(expiries_.size());
+        for (int e : expiries_) out.push_back(std::max(0, e - currentTime_));
+        return out;
     }
 
    private:
