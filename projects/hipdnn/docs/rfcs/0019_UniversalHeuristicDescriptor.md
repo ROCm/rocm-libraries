@@ -59,9 +59,10 @@ This RFC defines:
 3. **Selection flow** — how a UHD ranks matched kernels ([Section 5](#5-selection-flow))
 4. **Engine integration** — matcher applicability bubbles up before engines are ranked, and the UHD runs
    only after that, on demand. The generation tooling produces an engine-level estimate
-   (`predict_engine_tflops`) and the catalog ranker (`sort_kernel_catalog`); two engine-selection
-   policies (quick and thorough) consume them, with a rank-ordering fallback
-   ([Section 10–11](#10-applicability-flow)). The policies remain a
+   (`predict_engine`) and the catalog ranker (`sort_kernel_catalog`), one of each per **ranking metric**
+   (throughput, time, and future metrics, [Section 4.4](#44-ranking-metrics)); two engine-selection
+   policies (quick and thorough) consume them in the metric a request names, with a rank-ordering
+   fallback ([Section 10–11](#10-applicability-flow)). The policies remain a
    [RFC 0007](0007_EngineSelectionHeuristicsFramework.md) follow-up; this RFC supplies the heuristics and
    keeps the schema from foreclosing cross-engine comparison.
 5. **Generation pipeline** — automated benchmarking and model export ([Section 13](#13-model-generation-pipeline))
@@ -76,7 +77,7 @@ This RFC defines:
 | **Kernel selection** | Which kernel within the engine? | **UHD** (this RFC) |
 
 The UHD's central role, `sort_kernel_catalog`, is the kernel-selection heuristic, and it is what this
-RFC is mostly about. The other two roles sit either side of it: `predict_engine_tflops` supplies an
+RFC is mostly about. The other two roles sit either side of it: `predict_engine` supplies an
 input to engine selection, and `predict_applicable_kernels` produces the candidate set
 ([Section 3.1](#31-descriptor-relationships)). All three are part of the generic provider that
 [RFC 0017](0017_UniversalKernelDescriptor.md) introduces — not a new host interface, not a policy
@@ -119,8 +120,8 @@ matcher and launch machinery ([RFC 0017 §5–6](0017_UniversalKernelDescriptor.
 
 ```
 UED (engine)
- ├── sort_kernel_catalog:       {arch → UHD id}   ← kernel-selection heuristic (the main UHD)
- ├── predict_engine_tflops:     {arch → UHD id}   ← optional: cheap engine-level estimate
+ ├── sort_kernel_catalog:       {arch → [UHD id]} ← kernel-selection heuristics (the main UHD), one per metric
+ ├── predict_engine:            {arch → [UHD id]} ← optional: cheap engine-level estimates, one per metric
  ├── predict_applicable_kernels:{arch → UHD id}   ← optional, future: candidate generator
  ├── metadata:  KMD id          ← one metadata schema per engine
  └── knobs: [...]               ← user-facing runtime parameters (= sort_kernel_catalog's $kernel.* axes)
@@ -143,11 +144,11 @@ In JSON form:
 {
   "schema": "hipdnn.ued/v1",
   "id":       "efc9eae4-…",              // engine identity
-  "sort_kernel_catalog": {              // UHD: ranks this engine's kernels  <-- membership
-    "gfx950":  "ae896b07-…",
-    "default": "c93e17aa-…"
+  "sort_kernel_catalog": {              // UHDs: rank this engine's kernels  <-- membership
+    "gfx950":  ["ae896b07-…", "3d0c52e1-…"],   // e.g. a tflops ranker and a time ranker (Section 4.4)
+    "default": "c93e17aa-…"                    // a single id is a one-element list
   },
-  "predict_engine_tflops": {"gfx950": "7b1e9c40-…"},  // optional (Section 11)
+  "predict_engine": {"gfx950": ["7b1e9c40-…", "e4a17f02-…"]},  // optional, one per metric (Section 11)
   "metadata": "9ae0b215-…",             // KMD: the variant-field schema this engine's kernels fill
   "knobs":    ["split_k", "tile_m"]     // KMD fields this engine exposes (Section 3.2)
 }
@@ -171,7 +172,7 @@ In JSON form:
 | UED field | Role | When it runs | This RFC |
 |---|---|---|---|
 | `sort_kernel_catalog` | Ranks the catalog, picks the winning kernel | Kernel selection, after applicability | the main subject — the "config UHD" throughout |
-| `predict_engine_tflops` | Cheap `f(graph) → expected perf` estimate | Engine selection, before any catalog is built | [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)'s engine estimate |
+| `predict_engine` | Cheap `f(graph) → expected perf` estimate | Engine selection, before any catalog is built | [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)'s engine estimate |
 | `predict_applicable_kernels` | Generates the candidate set to be ranked | During applicability, combinatorial/JIT case | [Section 4.3](#43-future-predict_applicable_kernels-when-there-is-no-catalog-to-rank)'s candidate generator |
 
 The roles run in pipeline order, which follows the applicability boundary rather than the table order
@@ -179,23 +180,47 @@ above:
 
 1. `predict_applicable_kernels` — **during** applicability, producing the candidate set for an engine
    whose catalog is not enumerable ([Section 4.3](#43-future-predict_applicable_kernels-when-there-is-no-catalog-to-rank));
-2. `predict_engine_tflops` — at **engine selection**, which runs only over engines already found
+2. `predict_engine` — at **engine selection**, which runs only over engines already found
    applicable, so a policy can rank them by predicted performance;
 3. `sort_kernel_catalog` — at **kernel selection**, ranking the surviving catalog and picking a winner.
 
 Only the first runs before applicability is settled; the other two run after it
 ([Section 10](#10-applicability-flow)). Each role is **independently optional**, and each value is an
-**arch → UHD id** map resolved by exact `gcnArchName`, then a `default` entry, then unavailable
+**arch → UHD ids** map resolved by exact `gcnArchName`, then a `default` entry, then unavailable
 ([Section 8.3](#83-out-of-distribution-inputs)). Almost everything in this RFC
 concerns `sort_kernel_catalog`; where a statement is specific to another role it says so. `knobs` derives
 from `sort_kernel_catalog`'s `$kernel.*` feature axes and no other ([Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)).
 
 Three named fields, rather than a single id or an ordered list, keep each role independently optional
 and independently versioned, let a loader resolve exactly the role a request needs without walking a
-list, and give the two secondary roles (`predict_engine_tflops`, `predict_applicable_kernels`) a defined
+list, and give the two secondary roles (`predict_engine`, `predict_applicable_kernels`) a defined
 home. `predict_applicable_kernels` runs *during* applicability, ahead of the
 [Section 10](#10-applicability-flow) rule that the UHD runs strictly after it; that section records it as
 the one exception.
+
+**Several UHDs per role, one per ranking metric.** An engine may be ranked by more than one quantity —
+throughput, time, accuracy, and metrics not yet defined ([Section 4.4](#44-ranking-metrics)) — and a
+model trained on one says nothing about another. So `sort_kernel_catalog` and `predict_engine` map each
+architecture to a **list** of UHD ids rather than one, and the loader indexes the list by the metric
+each UHD declares in its own `score.metric`:
+
+- **The metric lives in the UHD, never in the UED.** A model's metric is what it was trained on, a fact
+  about the artifact; restating it in the role map would be a second copy that can disagree with the
+  first. The UED says *which* models the engine binds; each model says what it measures.
+- **One UHD per (role, architecture key, metric).** Two UHDs in one list declaring the same metric are a
+  load error for that architecture key: there is no rule that could choose between them, and picking
+  either silently would make the ranking depend on list order.
+- **Arch fallback is per metric.** A `(gfx942, time)` lookup falls back to `(default, time)`, never to
+  `(gfx942, tflops)`. Crossing metrics would substitute a number in the wrong units.
+- **A single id is a one-element list.** An existing role map needs no rewrite.
+- **A catalog ranker need not declare a metric.** A `sort_kernel_catalog` UHD with no `score.metric`
+  (a `native` comparator, a `static_order`) orders its catalog but produces no comparable number. It is
+  the engine's **default ranker**, used when no metric is requested or the requested one has no ranker;
+  at most one per architecture key. Every `predict_engine` UHD must declare a metric
+  ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
+
+`predict_applicable_kernels` stays single-valued: it generates the candidate set rather than scoring
+it, so it has no metric to key on.
 
 ### 3.2 KMD Fields, and Knobs as the Heuristic's Feature Axes
 
@@ -302,7 +327,7 @@ applicable catalog, before any filter narrows it ([Section 5](#5-selection-flow)
 chosen per subset would let the same inputs produce different winners depending on whether the filter or
 the ranking ran first. Both the scoring rule and the fallback's granularity are part of the contract.
 
-The constraint is scoped to that role deliberately. `predict_engine_tflops` takes no candidate at all, and
+The constraint is scoped to that role deliberately. `predict_engine` takes no candidate at all, and
 `predict_applicable_kernels` *produces* a candidate set rather than scoring one
 ([Section 4.3](#43-future-predict_applicable_kernels-when-there-is-no-catalog-to-rank)); neither is a
 per-candidate scorer, so neither is bound by the commuting requirement.
@@ -319,7 +344,7 @@ KMD field, as `metadata`) versus the user (the exposed subset — which is the h
 ### 3.3 Coupling Rules
 
 **The KMD is the schema for `$kernel.*`, and the UED owns both it and the UHD.** The UED references one
-KMD and one `sort_kernel_catalog` UHD, and every child UKD's `metadata` fills the KMD's fields, validated
+KMD and, per architecture and metric, one `sort_kernel_catalog` UHD ([Section 3.1](#31-descriptor-relationships)), and every child UKD's `metadata` fills the KMD's fields, validated
 at load. The KMD is the feature space the UHD ranks over, so the two are coupled. The coupling is
 conditional, matching [RFC 0017](0017_UniversalKernelDescriptor.md):
 
@@ -407,7 +432,7 @@ identity, versioning, and the feature contract without understanding the ranking
   },
 
   "objective": "max",                                  // higher predicted score wins
-  "score": {"units": "tflops", "calibrated": true, "transform": "log1p"},  // recover TFLOPS → Section 12
+  "score": {"metric": "tflops", "calibrated": true, "transform": "log1p"},  // recover TFLOPS → Sections 4.4, 12
 
   // ── adapter-scoped body: key MUST equal the `adapter` value ──────────────────
   "tree_data": {
@@ -459,7 +484,7 @@ The normative header. A loader can validate every row here without instantiating
 | `features_hash` | if `features_signature` | `sha256:` + 16 hex | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding`, truncated to 64 bits ([Section 6.3](#63-contract-enforcement)). |
 | `trained_against` | if the adapter features | descriptor refs, or `selector_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, or — for an engine that has no descriptor set — the opaque provider revision whose behaviour was measured ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
-| `score` | no | object | `units`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover real TFLOPS ([Section 11.3](#113-cross-engine-comparison)). A `calibrated` score requires `objective: max`: a calibrated number is a throughput, and throughput is maximized. |
+| `score` | no | object | `metric`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover the metric's value in its registered units ([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)). `metric` names a registered ranking metric and fixes the units and the winning direction, so `objective` must agree with it. A `calibrated` score requires a `metric`. |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file may also carry that file's `hash` ([Section 7.2](#72-default-tree_data)). |
 | `x-…`, `_…` | no | any | Author-reserved extension namespaces, ignored by the loader ([Section 4.1](#41-field-reference-normative)). |
 
@@ -567,7 +592,7 @@ file drives both the build-time and runtime checks.
       "additionalProperties": false,
       "patternProperties": { "^(x-|_)": {} },
       "properties": {
-        "units":      { "type": "string", "minLength": 1 },
+        "metric":     { "enum": ["tflops", "time"] },
         "calibrated": { "type": "boolean" },
         "transform":  { "enum": ["identity", "log1p", "log", "exp", "sqrt"] }
       }
@@ -629,7 +654,15 @@ file drives both the build-time and runtime checks.
     { "if":   { "properties": { "score": { "required": ["calibrated"],
                                            "properties": { "calibrated": { "const": true } } } },
                 "required": ["score"] },
-      "then": { "properties": { "objective": { "const": "max" } }, "required": ["objective"] } }
+      "then": { "properties": { "score": { "required": ["metric"] } }, "required": ["objective"] } },
+    { "if":   { "properties": { "score": { "required": ["metric"],
+                                           "properties": { "metric": { "const": "tflops" } } } },
+                "required": ["score"] },
+      "then": { "properties": { "objective": { "const": "max" } }, "required": ["objective"] } },
+    { "if":   { "properties": { "score": { "required": ["metric"],
+                                           "properties": { "metric": { "const": "time" } } } },
+                "required": ["score"] },
+      "then": { "properties": { "objective": { "const": "min" } }, "required": ["objective"] } }
   ]
 }
 ```
@@ -656,10 +689,12 @@ naming, because each needs an explicit construct rather than falling out of the 
   others are all rejected at the point they would otherwise pass as "present". An empty `umd` **array**
   is accepted, because it is a claim rather than an omission
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
-- **Calibration is tied to direction.** A `score` declaring `calibrated: true` requires
-  `objective: "max"`. A calibrated score is a throughput in declared units, and a throughput is
-  maximized; the pairing is checked here rather than discovered when an engine's estimate sorts
-  backwards ([Section 11.3](#113-cross-engine-comparison)).
+- **Direction is the metric's, not the author's.** A `score` naming a `metric` requires the
+  `objective` that metric's registry entry fixes ([Section 4.4](#44-ranking-metrics)) — `max` for
+  `tflops`, `min` for `time` — and a `calibrated` score must name its metric. The pairing is checked
+  here rather than discovered when an engine's estimate sorts backwards
+  ([Section 11.3](#113-cross-engine-comparison)). The `metric` enum and these conditionals are generated
+  from the registry, one conditional per metric, so adding a metric adds a row rather than a hand edit.
 - **`transform` is a closed, invertible vocabulary.** A consumer recovering real TFLOPS has to invert
   whatever the trainer applied, so the set is the one the runtime can invert rather than free text. An
   unrecognised transform is refused at load rather than silently treated as `identity`.
@@ -680,10 +715,13 @@ tree — `native` selectors, `tree_data` catalog rankers, and `tree_data` engine
 without `categorical_encoding`, under both provenance forms — and rejects each malformed shape the
 header rules describe: a missing or duplicated adapter body, a model adapter with no `objective` or
 `trained_against`, an empty or partial `trained_against`, a mixture of the two provenance forms, a
-scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score with
-`objective: min`, and an untruncated digest. Descriptors at earlier versions, such as the `0.1`
+scalar `umd`, a `umd` entry carrying no revision, an unrecognised transform, a calibrated score naming
+no metric, an `objective` that contradicts its metric's direction, and an untruncated digest. Descriptors at earlier versions, such as the `0.1`
 packaging-test fixtures with placeholder ids, are rejected by the `version` constraint, which is the
-accept rule working as intended rather than a gap.
+accept rule working as intended rather than a gap. The shipping descriptors predate `score.metric` and
+spell the same fact `score.units: "tflops"`; they migrate to `metric` with the implementation of
+[Section 4.4](#44-ranking-metrics), in one cutover rather than behind an accepted alias, and this
+validation claim is re-established against the migrated tree.
 
 **OPEN — remaining schema work.** The block above covers the header and the adapter bodies as they exist
 today. Still outstanding: publishing it as the standalone per-version `uhd/1.0.json` file with the CI
@@ -757,6 +795,44 @@ unset until the JIT path is real. What is *not* settled, and is deferred to
   strictly after applicability" rule of [Section 10](#10-applicability-flow). That rule is a property of
   the AOT v1 pipeline, not an invariant, and this role is the anticipated exception.
 
+### 4.4 Ranking Metrics
+
+A score is only comparable with another score in the same quantity. Throughput is the quantity engine
+selection has used so far, but a caller may equally want the fastest wall time or the most accurate
+result, and an engine may ship a model for each. The **ranking metric** is what `score.metric` names: the
+quantity a UHD's score estimates, and therefore the key by which a request selects a UHD
+([Section 3.1](#31-descriptor-relationships), [Section 11.4](#114-selecting-a-uhd-by-metric)).
+
+**The metrics are a closed registry, owned by hipDNN.** The backend orders engines by these numbers, so
+it has to know each metric's direction and units; a free-text name would leave it guessing. The registry
+lives beside the policy names in the data SDK, and each entry fixes three things:
+
+| Metric | Units | Better | Status |
+|---|---|---|---|
+| `tflops` | TFLOPS (10^12 FLOP/s, FLOPs taken from the binding layer) | higher | Defined. The default metric, and the only one before this section. |
+| `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput. |
+| `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
+
+- **The metric fixes units and direction; the UHD only names it.** `objective` must equal the registered
+  direction and `score.transform` must invert back into the registered units
+  ([Section 4.1](#41-field-reference-normative)). There is no per-UHD unit conversion: two models of the
+  same metric are comparable by construction or are rejected at load.
+- **Adding a metric is a registry row, not an ABI change.** Requests and predictions carry the metric by
+  name ([Section 11.4](#114-selecting-a-uhd-by-metric)); a name the backend's registry does not know is
+  refused where the request is made, not discovered while sorting.
+- **Metrics do not substitute for one another.** A request for `time` is never answered by a `tflops`
+  model, even where one could be converted into the other for a fixed graph: the conversion would be
+  the runtime inventing a number no model predicted. An engine with no model for the requested metric
+  is *unscored* for that request ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)).
+- **`tflops` is the default.** A request that names no metric behaves exactly as engine selection did
+  before metrics existed.
+
+**Only a calibrated score takes part in cross-engine comparison.** A metric value is compared across
+engines, and across the two levels of [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker),
+only when the UHD declares `calibrated: true`. An uncalibrated model may still rank its own catalog under
+a metric — a `time` ranker trained as a ranker orders kernels by expected time without predicting a
+comparable number — but it answers no prediction and is invisible to engine selection.
+
 ---
 
 ## 5. Selection Flow
@@ -819,7 +895,7 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
    - **Broken feature contract** — `features_hash` disagrees, a `$kernel.*` reference is dangling, or the
      KMD pairing is incompatible ([Section 6.3](#63-contract-enforcement)) → the model is not used (its
      inputs are not the ones it was trained on, so its scores would be wrong), an **error** is logged,
-     ranking falls back to `static_order`, and the engine reports an estimated throughput of 0 so any
+     ranking falls back to `static_order`, and the engine reports its estimate as *invalid* so any
      engine with a real estimate outranks it in engine selection. The engine still answers, still
      dispatches, and loses on merit rather than by exception.
 
@@ -872,10 +948,13 @@ the model is trained to rank exactly that catalog. Kernel selection then proceed
 
    **The engine's figure of merit follows the order source.** Engine selection reads the top of the
    ranked list as the engine's estimate ([Section 11](#11-engine-selection-integration)). When a record
-   ordered the catalog, the engine reports the **measured** throughput of that top candidate, in the
-   same calibrated TFLOPS a model would have reported; a measurement and an estimate are comparable
-   because they are the same quantity, obtained differently. An engine with a record therefore competes
-   on evidence rather than on prediction, which is the outcome this rule exists to produce.
+   ordered the catalog, the engine reports the **measured** value of that top candidate in the requested
+   metric ([Section 4.4](#44-ranking-metrics)) — the measured time, or the throughput derived from it —
+   in the same units a calibrated model would have reported; a measurement and an estimate are
+   comparable because they are the same quantity, obtained differently. A metric the record does not
+   measure (accuracy, for a timing record) is answered by the model, not by the record. An engine with a
+   record therefore competes on evidence rather than on prediction, which is the outcome this rule
+   exists to produce.
 
 **The output is the ranked catalog, not just a winner.** Selection returns the candidates in score order;
 the winner is simply its first element. Callers need the ordering, not only the argmax — a knob query
@@ -1179,7 +1258,7 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
 A failed check disables the model rather than failing the request. These run at load, so a violation
 means a mis-built or mismatched descriptor set, and the model's scores would be wrong rather than missing.
 The response is the one [Section 5](#5-selection-flow) step 8 defines: the model is not used, an error is
-logged, ranking falls back to `static_order`, and the engine reports an estimated throughput of 0. Because
+logged, ranking falls back to `static_order`, and the engine reports its estimate as *invalid*. Because
 descriptor sets are drop-in and may be third-party, the loader handles this without taking down the
 provider and without failing after the engine has claimed applicability. The error is logged and gated in
 CI ([Open Question 14](#operational)); excluding the malformed engine from selection entirely is a
@@ -1738,7 +1817,7 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
      ([Section 10](#10-applicability-flow)). No UHD is loaded, parsed, or evaluated until the engine has
      been found applicable for the graph.
   2. After that, it loads only when something asks for what it produces. There is no eager ranking and no
-     speculative load. The demand triggers are a policy requesting an estimated throughput to rank
+     speculative load. The demand triggers are a policy requesting an estimate in its ranking metric to rank
      engines, a **knob query** (the reported default is the UHD's top-ranked value,
      [Section 3.2](#32-kmd-fields-and-knobs-as-the-heuristics-feature-axes)), and kernel selection. A
      policy that ranks by explicit user choice or fixed criteria asks for none of these and loads no UHD.
@@ -1782,14 +1861,17 @@ Selection runs on the plan-build path, so its cost must be small and paid at mos
   to the key would multiply entries by the knob cross-product to store orders that are already
   derivable.
 
-- **In-memory: the UHD needs no place in the key.** A heuristic can be replaced independently of the
+- **In-memory: the metric is in the key; the UHD beyond it is not.** A heuristic can be replaced independently of the
   kernels it ranks ([Section 8.2](#82-model-updates)), which raises the obvious worry that a cached
   ranking outlives the model that produced it. In process, it cannot: the cache is a sibling of the
-  heuristic on the engine, both fixed for that engine's lifetime, so **a swap means new descriptors,
-  a new engine, and a new empty cache.** The UHD's identity is implicit in the cache's *location*,
-  exactly as the engine id is. Should hipDNN ever re-scan descriptors in-process without rebuilding
-  engines, the **descriptor-set version** already in the key covers that case too — a re-scan that
-  brings a new UHD brings a new version with it. Nothing UHD-specific is needed.
+  heuristics on the engine, all fixed for that engine's lifetime, so **a swap means new descriptors,
+  a new engine, and a new empty cache.** What the location does not identify is *which* of the engine's
+  rankers produced an order, because an engine holds one per metric
+  ([Section 3.1](#31-descriptor-relationships)); so the **ranking metric** is part of the key, and a
+  `time` request is never served an order computed for `tflops`. Given the metric, the UHD's identity is
+  implicit in the cache's *location*, exactly as the engine id is. Should hipDNN ever re-scan
+  descriptors in-process without rebuilding engines, the **descriptor-set version** already in the key
+  covers that case too — a re-scan that brings a new UHD brings a new version with it.
 
 - **Persistent: the UHD identity has to be in the path, because nothing else survives a restart.** The
   moment rankings outlive the process, the argument above evaporates — generation counters are
@@ -1936,51 +2018,57 @@ they consult.
 ### 11.1 The Engine Estimate and the Kernel-Catalog Ranker
 
 Two of the engine's three UHD roles ([Section 3.1](#31-descriptor-relationships)) participate in
-engine selection, both predicting absolute performance so they are comparable across engines:
+engine selection, both predicting an absolute value of a ranking metric
+([Section 4.4](#44-ranking-metrics)) so they are comparable across engines:
 
 | UED field | Signature | Cost | Role |
 |-------|-----------|------|------|
-| **`predict_engine_tflops`** | `f(graph) → expected perf` | Cheap (no catalog enumeration) | Quick-policy engine ranking |
-| **`sort_kernel_catalog`** | `f(graph) → best kernel + perf` | Full per-candidate | Kernel selection + accurate cross-engine score |
+| **`predict_engine`** (L1) | `f(graph) → expected metric value` | Cheap (no catalog enumeration) | Quick-policy engine ranking |
+| **`sort_kernel_catalog`** (L2) | `f(graph) → best kernel + its metric value` | Full per-candidate | Kernel selection + accurate cross-engine score |
 
-`predict_engine_tflops` is the coarse proxy; `sort_kernel_catalog` both selects the kernel and yields the
+Each role holds at most one UHD per metric per architecture key, so an engine answers a request for a
+given metric at L1, at L2, at both, or not at all; which levels answer is a property of that engine for
+that metric ([Section 11.4](#114-selecting-a-uhd-by-metric)).
+
+`predict_engine` is the coarse proxy; `sort_kernel_catalog` both selects the kernel and yields the
 better figure of merit. (The third role, `predict_applicable_kernels`, precedes both when present — it
 produces the candidate set the ranker then sorts — but is not itself a performance estimate.)
 
-**`predict_engine_tflops` is not needed for v1.** With a single descriptor engine there is nothing to
+**`predict_engine` is not needed for v1.** With a single descriptor engine there is nothing to
 rank *against*, so the cheap estimate buys nothing — `sort_kernel_catalog`'s top score answers "how fast
 would this engine be?" adequately. It becomes necessary when there are **competing engines** to order,
-and for **opaque engines** that cannot expose a per-candidate catalog to rank at all. Until it exists,
-**the full ranking is the stopgap**: an engine reports `sort_kernel_catalog`'s best predicted score as
-its estimate, accepting the enumeration cost.
+and for **opaque engines** that cannot expose a per-candidate catalog to rank at all.
 
-**Distinct model and derived stopgap, in that order of preference.** Both forms exist, and which one an
-engine uses is a property of that engine rather than a decision this format makes. A distinct
-`predict_engine_tflops` model is what gives the quick policy its value: only the winning engine runs the
-full `sort_kernel_catalog`, and losers never enumerate candidates. Where an engine ships no such model,
-the ranker's top calibrated score stands in, at the cost of enumerating that engine's catalog to produce
-it. The "cheap (no catalog enumeration)" property belongs to the distinct model alone, and it holds only
-because that model is trained on `f(graph)`.
+**Distinct model and derived estimate serve different policies.** A distinct `predict_engine` model is
+what gives the quick policy its value: it answers from the graph alone, so losers never enumerate
+candidates. The ranker's top calibrated score is a second estimate of the same quantity, obtained by
+enumerating the catalog; the thorough policy consults it first and falls back to the distinct model
+([Section 11.2](#112-two-engine-selection-policies-rfc-0007)). The quick policy never substitutes it: an
+engine with no L1 model for the requested metric is unscored under that policy rather than enumerated,
+because paying the enumeration is exactly the cost the quick policy exists to avoid. The "cheap (no
+catalog enumeration)" property belongs to the distinct model alone, and it holds only because that
+model is trained on `f(graph)`.
 
-**An estimate model may not read the catalog.** A UHD bound to `predict_engine_tflops` is refused if its
+**An estimate model may not read the catalog.** A UHD bound to `predict_engine` is refused if its
 `features_signature` reaches any `$kernel.*` field, or if its `categorical_encoding` encodes one. The
 role's whole value is answering before candidates are enumerated; a kernel feature would make that
 impossible while leaving the descriptor superficially valid.
 
 **An estimate must be comparable, not merely ordered.** Engine selection compares these numbers across
-engines, so a UHD in this role is bound only when it declares `units: "tflops"`, `calibrated: true`,
-`objective: "max"`, and a transform this runtime can invert ([Section 11.3](#113-cross-engine-comparison)).
+engines, so a UHD in this role is bound only when it declares a registered `metric`, `calibrated: true`,
+the `objective` that metric fixes, and a transform this runtime can invert
+([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)).
 A within-engine ranker that happens to be accurate is not admissible here: its score orders one catalog
 correctly and says nothing about another engine. The adapter set is correspondingly narrower than the
 ranker's — an estimate is served by a compiled scorer or a trained model, not by a bucketed table, whose
 resolution is chosen for separating candidates rather than for absolute accuracy.
 
-**A model that binds is not the same as a model that answers.** Binding resolves to one of three
-outcomes, and consumers distinguish them: *available* (an estimate this request can use), *unavailable*
-(the engine declares no estimate for this architecture — absence, ordered by the static rules), and
-*invalid* (an estimate was declared and could not be trusted — the zero-claim of
-[Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Collapsing the last two loses exactly the
-distinction that section depends on.
+**A model that binds is not the same as a model that answers.** Binding resolves, per metric, to one of
+three outcomes, and consumers distinguish them: *available* (an estimate this request can use),
+*unavailable* (the engine declares no estimate of this metric for this architecture — absence, ordered
+by the static rules), and *invalid* (an estimate was declared and could not be trusted — the
+distrusted claim of [Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Collapsing the last
+two loses exactly the distinction that section depends on.
 
 **An estimate is attached by the engine, never claimed by the descriptor.** The engine, role, and
 architecture a UHD serves come from the UED's role map; a document that names them itself is checked
@@ -1989,45 +2077,66 @@ descriptor could attach itself to an engine that never referenced it.
 
 ### 11.2 Two Engine-Selection Policies (RFC 0007)
 
-Shorthand in this section: **A** = `predict_engine_tflops`, **B** = `sort_kernel_catalog`
-([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
+Shorthand in this section: **A** (L1) = the engine's `predict_engine` UHD for the requested metric, **B**
+(L2) = its `sort_kernel_catalog` UHD for that metric
+([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). Every request names one
+ranking metric, `tflops` when the caller names none ([Section 11.4](#114-selecting-a-uhd-by-metric)), and
+both policies compare engines only in that metric, ordered in its registered direction.
 
-- **Quick policy.** Rank applicable engines by A (expected performance); pick the winner; if the winner
-  has a config UHD (B), run it to pick the kernel. Only the winner drills down, so losers are never
-  scored at the kernel level. Engines with no descriptor layer (e.g. MIOpen) contribute their high-level
-  estimate for the ranking and, if they win, use their own internal kernel selection.
+- **Quick policy (L1 only).** Rank applicable engines by A. An engine with no A for the metric is not
+  scored — B is never evaluated under this policy, for any engine, because the policy's purpose is a
+  fast answer and B's cost is a catalog enumeration per engine. Engines with no descriptor layer (e.g.
+  MIOpen) contribute their A like any other engine and, if they win, use their own internal kernel
+  selection. Whether the *winner's* configuration is then filled in from its B inside the policy, or left
+  to plan build, is [Open Question 21](#ranking-metrics).
   **OPEN:** See [Open Question 7](#structural) (non-descriptor engine estimates).
-- **Thorough policy.** Run B for every applicable engine that has it (best config + its predicted perf),
-  fall back to A for engines that don't, then compare the predicted performance across engines and pick
-  the global best (engine + config). More work, more accurate.
+- **Thorough policy (L2 first, then L1).** Run B for every applicable engine that has it (best
+  configuration + its predicted value), fall back to A for engines that do not, then compare across
+  engines and pick the global best (engine + configuration). More work, more accurate.
 
 ```
-Quick:     applicable → rank by A → winner → (B? kernel : own selection) → dispatch
-Thorough:  applicable → run B (or A) for each → compare perf → best (engine, config) → dispatch
+Quick:     applicable → A(metric) per engine → rank by metric → winner → dispatch (kernel chosen at plan build)
+Thorough:  applicable → B(metric), else A(metric), per engine → rank by metric → best (engine, config) → dispatch
 ```
 
-**Both estimates are exposed through the plugin API, and both are optional.** The query surface must
-carry A and B separately — they have different costs, and the quick policy's entire value is being able
-to ask for A *without* paying for B. Neither is guaranteed to exist: an engine may have B but not A
-(the v1 case), A but not B (an opaque engine like MIOpen reporting a coarse estimate), or neither. The
-policy therefore has to treat a missing estimate as a normal outcome rather than an error:
+**Both estimates are exposed through the plugin API, per metric, and both are optional.** The query
+surface carries A and B separately — they have different costs, and the quick policy's entire value is
+being able to ask for A *without* paying for B. Neither is guaranteed to exist for a given metric: an
+engine may have B but not A (the v1 case), A but not B (an opaque engine like MIOpen reporting a coarse
+estimate), or neither. The policy therefore treats a missing estimate as a normal outcome rather than an
+error:
 
-| Engine has | Quick policy | Thorough policy |
+| Engine has, for the requested metric | Quick policy | Thorough policy |
 |---|---|---|
-| A and B | Rank by A; winner runs B | Run B; compare its top score |
-| B only | Rank by B's top score (pays enumeration) | Run B; compare its top score |
+| A and B | Rank by A | Run B; compare its top score |
+| B only | Unscored: static-order tail | Run B; compare its top score |
 | A only (opaque) | Rank by A; engine does its own kernel selection | Compare A against others' B |
-| Neither | Falls back to static ordering; contributes no score | Same |
+| Neither | Unscored: static-order tail | Same |
+
+Scored engines sort first, by value in the metric's direction, with ties broken by the static order;
+unscored engines follow in static order, named in one warning that also names the metric. **If no
+engine is scored, the policy declines** — the next policy in the configured order runs, normally static
+ordering — and says why: "no engine serves `<metric>` at L1" for the quick policy, "at L1 or L2" for
+the thorough one. Declining rather than returning an all-unscored list keeps the trace honest: a list in
+static order is not a ranking by the requested metric, and must not be reported as one.
+
+**Mixing levels is sound only because both are calibrated.** The thorough policy may compare one
+engine's A with another's B. That is admissible only because both are calibrated estimates of the same
+registered metric, in the same units ([Section 4.4](#44-ranking-metrics)); the policy records which
+level answered for each engine, so a trace shows when a ranking crossed levels.
 
 **A missing estimate and a distrusted one are different signals.** An engine that supplies no estimate
-reports nothing and is ordered by the existing static rules; an engine whose heuristic failed its
-contract reports an estimated throughput of **0** ([Section 5](#5-selection-flow) step 8), which is a
-claim rather than a silence — it says *do not pick me* and lets any engine with a real estimate outrank
-it. Absence means "I do not answer this question"; zero means "I answer, and the answer is bad."
+reports nothing and is ordered by the existing static rules. An engine whose heuristic failed its
+contract ([Section 5](#5-selection-flow) step 8) reports the *invalid* outcome of
+[Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker), which is a claim rather than a
+silence — it says *do not pick me*, and the policy places it after every engine with a usable estimate.
+It is not encoded as a value: "zero" is the worst throughput but the best time, so no single number
+means *bad* in every metric. Absence means "I do not answer this question"; invalid means "I answer, and
+the answer is not to be trusted."
 
 An engine that supplies no estimate is ordered by the existing static rules and simply does not
-participate in performance-based comparison — the mixed case has to work, since it is the near-term
-reality for every non-descriptor engine.
+participate in metric-based comparison — the mixed case has to work, since it is the near-term reality
+for every non-descriptor engine.
 
 ### 11.3 Cross-Engine Comparison
 
@@ -2044,8 +2153,9 @@ that existing slot, not a new arbitration surface. Auto-tuning remains the groun
 approximate, and the substrate that trains them ([Section 13](#13-model-generation-pipeline)).
 
 The mechanism is an absolute, cross-comparable figure of merit. Candidates are scored cardinally, on an
-absolute metric (calibrated TFLOPS) rather than a within-group rank. When a UHD is a calibrated TFLOPS
-regressor, its best-candidate score is a predicted figure of merit for what the engine would run,
+absolute metric (calibrated TFLOPS by default, or another registered metric,
+[Section 4.4](#44-ranking-metrics)) rather than a within-group rank. When a UHD is a calibrated
+regressor of a metric, its best-candidate score is a predicted figure of merit for what the engine would run,
 expressed on a scale that means the same thing across engines. This lets each engine run its own heuristic
 per package, independently, while the results remain comparable across engines: hipDNN compares engines by
 predicted performance rather than a fixed order (for example, rocKE predicting 310 TFLOPS for its best
@@ -2063,26 +2173,68 @@ static/rank ordering, and each UHD continues ranking within its engine without c
 absolute score. Rank-ordering is the defined backstop; the design does not depend on calibration
 succeeding.
 
-**What this RFC commits to:** the UHD schema declares `score` (`units`/`calibrated`/`transform`,
-[Section 4](#4-uhd-schema)) so a consumer can invert the training transform and recover real TFLOPS, and
-supports a score-only evaluation mode (rank and return the best score without selecting for launch).
+**What this RFC commits to:** the UHD schema declares `score` (`metric`/`calibrated`/`transform`,
+[Section 4](#4-uhd-schema)) so a consumer can invert the training transform and recover the metric's
+value in its registered units; the metric registry ([Section 4.4](#44-ranking-metrics)); metric-keyed
+role maps ([Section 3.1](#31-descriptor-relationships)); and a score-only evaluation mode (rank and return
+the best score without selecting for launch).
 
 **What is deferred:** Delivering cross-engine comparison requires changes outside the UHD:
 
 1. **A plugin-query surface** for the per-graph figure of merit — both the cheap **A** (engine
-   performance estimate) and the accurate **B** (config UHD run in a "score only, don't launch" mode).
-   This is an engine-plugin ABI addition, owned by the plugin SDK, not this RFC; it must also let a
-   non-descriptor engine (MIOpen) report an A-level estimate through the same surface, or the policy
-   falls back to today's static ordering for it.
+   estimate) and the accurate **B** (config UHD run in a "score only, don't launch" mode), each asked
+   for one named metric ([Section 11.4](#114-selecting-a-uhd-by-metric)). This is an engine-plugin ABI
+   addition, owned by the plugin SDK, not this RFC; it must also let a non-descriptor engine (MIOpen)
+   report an A-level estimate through the same surface, or the policy falls back to today's static
+   ordering for it.
 2. **The two engine-selection policies** that consume it ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)) —
-   the quick policy (rank by A, drill into the winner's B) and the thorough policy (run every B, compare
-   across engines). Both are squarely [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory.
-3. **Cross-engine calibration.** Comparing estimates across engines only works if the units are
-   comparable and each model (A and B) is calibrated to real TFLOPS (not just monotonic for argmax).
-   This is a real modeling requirement, not just plumbing — and the one most likely to force the
-   rank-ordering fallback if it does not hold up.
+   the quick policy (rank by A only) and the thorough policy (B, else A, for every engine) — and the
+   request surface that names the metric. Both are squarely
+   [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s territory.
+3. **Cross-engine calibration.** Comparing estimates across engines only works if each model (A and B)
+   is calibrated to the metric's real units (not just monotonic for argmax). This is a real modeling
+   requirement, not just plumbing — and the one most likely to force the rank-ordering fallback if it
+   does not hold up, separately for each metric.
 
 This is a dedicated follow-up co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md).
+
+### 11.4 Selecting a UHD by Metric
+
+A request names the metric it ranks by; everything between the request and the UHD that answers it
+carries that name. This section fixes what each seam carries. The ABI and API spellings are the plugin
+SDK's and [RFC 0007](0007_EngineSelectionHeuristicsFramework.md)'s to settle; what is normative here is
+what must reach each seam.
+
+**Request.** The engine-heuristic descriptor carries a **ranking metric** beside its policy order, set
+by the caller, overridable by environment with the same precedence as the policy order (environment,
+then attribute, then default), and defaulting to `tflops`. An unregistered name is rejected when it is
+set. The per-engine and per-configuration prediction queries carry the metric the same way.
+
+**Plugin query.** A prediction request names `(engine, kind, metric)`, where *kind* is A (engine) or B
+(configuration). The engine answers from its UHD for that metric at that level, for the device's
+architecture, or reports the metric unavailable; it never answers in a different metric. The answer
+carries the **metric name and value** rather than a field named for one metric, and the host checks
+that the returned metric is the requested one — a mismatch is *invalid*, not a conversion. Validity
+of the value is the metric's: non-negative throughput, positive time.
+
+**Capability query.** A caller can ask an engine which metrics it serves at which level, for the
+current device, without evaluating any model: a list of `(kind, metric, UHD id)`. It reads bindings only,
+so it is cheap, and it lets a caller fail fast — "no applicable engine serves `time` at L1" — before
+paying for a ranking that would decline. The same answer drives the policy's decline reason in
+[Section 11.2](#112-two-engine-selection-policies-rfc-0007).
+
+**Kernel choice at plan build follows the metric.** A policy picks an engine, and under the thorough
+policy also its configuration; but an engine that picks its own kernel at plan build ranks its catalog
+with a `sort_kernel_catalog` UHD ([Section 5](#5-selection-flow)). That ranking uses the UHD for the
+request's metric when the engine has one, and the engine's default ranker
+([Section 3.1](#31-descriptor-relationships)) otherwise, recording which in the trace. The metric
+therefore travels with the chosen engine configuration from the policy to plan build. Every cache of a
+ranked order is keyed by metric as well as by model ([Section 9.2](#92-loading-and-caching)); otherwise
+a `time` request could be served an order computed for `tflops`.
+
+**Engines without a descriptor set** bind their L1 models in provider code
+([Open Question 7](#structural)). That declaration becomes a list of UHD ids per architecture, like the
+UED role map, and the metric of each comes from the UHD it names — never from the provider table.
 
 ---
 
@@ -2184,7 +2336,7 @@ What changed?
 Two properties of this table are worth stating directly, because they are what make regeneration cheap.
 **Narrowing never needs new data:** pruning knobs refits from timings already collected, and dropping
 kernels needs no refit of the per-candidate ranker at all. The engine estimate is the exception, and
-scopes that claim: `predict_engine_tflops` predicts the engine's achievable throughput rather than any
+scopes that claim: `predict_engine` predicts the engine's achievable throughput rather than any
 one candidate's, so removing the kernel that *was* the winner for a cohort invalidates it even though
 `sort_kernel_catalog` still ranks the survivors correctly
 ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). **Widening always does:** a
@@ -2335,7 +2487,7 @@ The tool freezes and emits two contracts:
 ### 13.4 New Stage: Package (Stage P)
 
 From one timing run ([Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli)) the tool trains the catalog ranker
-(`sort_kernel_catalog`) and, when needed, the engine estimate (`predict_engine_tflops`)
+(`sort_kernel_catalog`) and, when needed, the engine estimate (`predict_engine`)
 ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). A package stage then emits (or
 updates) the engine's descriptor set:
 
@@ -2343,10 +2495,15 @@ updates) the engine's descriptor set:
   `adapter: tree_data`, carrying the `features_signature` (referencing `$kernel.*` KMD fields and
   `$device.*` for arch-awareness), `features_hash`, `objective`/`score`, and the adapter-scoped
   `tree_data` body ([Section 4](#4-uhd-schema)); per engine and arch-keyed, so no artifact table;
-- **`predict_engine_tflops`** — the coarse `f(graph) → expected perf` model the quick policy ranks engines
-  by ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)), emitted as data on the UED when the
-  engine needs it (whether it is a distinct model or derived from the ranker is the OPEN in
-  [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker));
+- **`predict_engine`** — the coarse `f(graph) → expected metric value` model the quick policy ranks
+  engines by ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)), emitted as data on the UED
+  when the engine needs it;
+- **one UHD per requested metric, at each level** — a run names the metrics it trains
+  ([Section 4.4](#44-ranking-metrics)); each metric fixes its label (`tflops` from the binding layer's
+  FLOPs over `avgTimeMs`, `time` from `avgTimeMs` directly), its `objective`, and its `score` block, so
+  a trainer cannot pair a label with the wrong direction. One timing run feeds both `tflops` and `time`.
+  Emission **adds** each UHD to the role list under its architecture key, replacing only a UHD of the same
+  metric ([Section 3.1](#31-descriptor-relationships));
 - **the model files** — the trained boosters exported to the `tree_data` format read by the in-tree
   walker ([Section 7](#7-model-adapters)), each embedding the `features_hash` it was trained against,
   shipped with the engine descriptors rather than compiled in;
@@ -2679,6 +2836,7 @@ pipeline built on top of it.
 | 5 | Generation tool | Standalone tool wrapping hipDNN: enumerates each graph's applicable catalog, times every enrolled candidate, logs results, trains, and emits an updated UHD + model alongside the engine's UED role map. |
 | 6 | `table` | Cheap bucketed heuristics for ops that don't warrant a model. |
 | 7 | Engine-selection integration | Score-only mode, the A/B plugin-query surface, engine-selection policies. Introduces the engine estimate (A) — not needed before competing or opaque engines exist ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). Co-owned with [RFC 0007](0007_EngineSelectionHeuristicsFramework.md). |
+| 7a | Ranking metrics ([Section 4.4](#44-ranking-metrics), [Section 11.4](#114-selecting-a-uhd-by-metric)) | Lands in four independently shippable steps, each keeping `tflops` the default so no step changes a request that names no metric: (1) the metric registry, `score.metric`, list-valued role maps and the loader's `(role, arch, metric)` index; (2) the metric on the plugin query, the metric-carrying answer and the capability query; (3) the request's ranking metric, direction-aware policies, and the quick policy's L1-only rule; (4) the metric carried to plan build and into every ranking cache key. Generation emits several metrics from one timing run alongside step 1. |
 | 8 | `custom_library` | Author-shipped scorer `.so` for models the in-tree walker doesn't cover. Dependency + trust audit gated ([Open Question 11](#operational)). |
 | 9 | AOT selection ([Section 14.2](#142-pipeline-aot-selection)) | Benchmark an all-knobs KDP, prioritize by frequency / cost-of-poor-selection, emit the AOT kernel set. Needed first for **non-JIT** engines (rocKE today, CK), where it is filtering rather than selection. Depends on phase 5. |
 | 10 | Knob reduction loop ([Section 14.4](#144-pipeline-knob-reduction-hipdnn-jit-case)) | Backwards-evaluate a generated heuristic for weak knobs, regenerate the UED with a reduced knob set, then regenerate AOT kernels. Requires an engine that can **JIT in hipDNN**; depends on phases 5 and 9. |
@@ -2774,12 +2932,13 @@ dependency-gated and land only when a concrete need appears.
    *(Impacts [Section 5](#5-selection-flow), [Section 8.2](#82-model-updates), [Section 16](#16-risks).)*
 
 6. **Engine estimate (A) vs. config UHD (B) — RESOLVED.** Both forms exist and are not alternatives:
-   an engine that ships a distinct `predict_engine_tflops` model answers the quick policy without
-   enumerating its catalog, and one that does not falls back to B's top calibrated score and pays the
-   enumeration ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)). What the format
-   fixes is the contract a distinct model must meet — graph-only features, calibrated TFLOPS, an
-   invertible transform, and a binding the engine grants rather than the descriptor claims — so that the
-   two forms produce numbers that mean the same thing to a consumer.
+   an engine that ships a distinct `predict_engine` model answers the quick policy without
+   enumerating its catalog; B's top calibrated score is a second estimate of the same metric, which the
+   thorough policy prefers and the quick policy never consults
+   ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)). What the format fixes is the contract a
+   distinct model must meet — graph-only features, a calibrated registered metric, an invertible
+   transform, and a binding the engine grants rather than the descriptor claims — so that the two forms
+   produce numbers that mean the same thing to a consumer.
    *(Impacts [Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker).)*
 
 7. **Non-descriptor engine estimates.** How does a non-descriptor engine (e.g. MIOpen) report an
@@ -2903,16 +3062,51 @@ dependency-gated and land only when a concrete need appears.
     narrow" needs a definition of expected coverage this RFC does not have.
     *(Impacts [Section 13.2](#132-benchmarking-via-the-hipdnn-bench-cli), [Section 13.3](#133-one-source-of-truth-translated-once).)*
 
+### Ranking Metrics
+
+20. **What an accuracy metric measures.** Accuracy is comparable across engines only when two engines
+    are measured against the same reference with the same statistic: maximum relative error, ULP
+    distance, or a pass rate at a stated tolerance are three different quantities. The registry therefore
+    reserves `accuracy.*` and registers each definition by name ([Section 4.4](#44-ranking-metrics)).
+    Open: which definitions, against which reference — the same question as
+    [Open Question 19](#operational)(a), and settled with it — and whether one reference serves every op.
+    *(Impacts [Section 4.4](#44-ranking-metrics).)*
+
+21. **The quick policy's winner configuration.** The quick policy never evaluates B to *rank*
+    ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)). Before metrics, it did evaluate the
+    **winner's** B once, to report that engine's configuration in the heuristic result. The options:
+    (a) keep that single evaluation, so the result names a tuned configuration at the cost of one B per
+    selection; (b) drop it, so the quick policy never evaluates B at all and the kernel is chosen at plan
+    build by the metric's ranker ([Section 11.4](#114-selecting-a-uhd-by-metric)) — paid once, for the
+    engine actually built. Recommendation: (b). It keeps the policy's cost bounded by the L1 models alone,
+    and the choice is not lost but moved to where it is needed; it makes carrying the metric to plan build
+    a requirement rather than a refinement.
+    *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007), [Section 11.4](#114-selecting-a-uhd-by-metric).)*
+
+22. **Constraints alongside the ranking metric.** A request ranks by one metric. A common need is a
+    ranking in one metric subject to a bound in another — the fastest engine whose error is at most
+    `1e-3`. The request surface names a single metric today; growing it into `{objective metric,
+    constraints[]}` is additive, and a constraint would be answered by the same per-metric queries,
+    with an engine unable to answer a constraint treated as unscored. Deferred until an accuracy metric is
+    registered ([Open Question 20](#ranking-metrics)).
+    *(Impacts [Section 11.2](#112-two-engine-selection-policies-rfc-0007), [Section 11.4](#114-selecting-a-uhd-by-metric).)*
+
 ---
 
 ## 18. Glossary
 
-- **UHD (Universal Heuristic Descriptor):** A kernel-selection model. An engine names up to three by
-  role, arch-keyed ([Section 3.1](#31-descriptor-relationships)): `sort_kernel_catalog` (ranks the
-  catalog — the main one, and what unqualified "UHD" means here), `predict_engine_tflops` (a cheap
+- **UHD (Universal Heuristic Descriptor):** A kernel-selection model. An engine names UHDs in up to three
+  roles, arch-keyed and — for the two scoring roles — one per ranking metric
+  ([Section 3.1](#31-descriptor-relationships)): `sort_kernel_catalog` (ranks the
+  catalog — the main one, and what unqualified "UHD" means here), `predict_engine` (a cheap
   engine-level estimate), and the future `predict_applicable_kernels` (candidate generator). Each is
   per-engine and arch-aware (takes `$device.*`), composed of a **universal header** (identity, feature
   contract, objective) and an **adapter-scoped body** ([Section 4.1](#41-field-reference-normative)).
+
+- **Ranking metric:** The quantity a UHD's score estimates and a request ranks by — `tflops` by default,
+  `time`, and reserved `accuracy.*` definitions. A closed registry fixes each metric's units and winning
+  direction; a UHD names its metric in `score.metric`, and a request names the metric it wants
+  ([Section 4.4](#44-ranking-metrics), [Section 11.4](#114-selecting-a-uhd-by-metric)).
 
 - **Catalog:** The set of an engine's kernels that pass every matcher for one graph — engine-scoped, the
   union across every KDP joining that engine ([RFC 0017](0017_UniversalKernelDescriptor.md)). The
@@ -3031,15 +3225,18 @@ dependency-gated and land only when a concrete need appears.
   drop-in shipping mechanism.
 
 - **Score-only mode:** Running a UHD to obtain the best predicted score without selecting for launch;
-  the hook for surfacing estimated TFLOPS to engine selection.
+  the hook for surfacing an estimate in the requested ranking metric to engine selection.
 
 - **Stage P (package):** The pipeline stage that emits the engine descriptor set (UED/UHD/KMD +
   tree-table) from the same sweep that trained the model, enforcing the feature and kernel-identity
   contracts ([Section 13](#13-model-generation-pipeline)).
 
-- **Engine estimate (A):** Cheap `f(graph) → expected performance` model for quick-policy engine ranking.
-  Not required for v1; it applies once there are competing engines to order, or opaque engines with no
-  catalog to rank ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
+- **Engine estimate (A, L1):** Cheap `f(graph) → expected metric value` model, one per ranking metric,
+  and the only estimate the quick policy consults. Not required for v1; it applies once there are
+  competing engines to order, or opaque engines with no catalog to rank
+  ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
-- **Config UHD (B):** Full `f(graph) → best kernel + predicted performance` model for kernel selection
-  and accurate cross-engine comparison. Doubles as the stopgap engine estimate until A exists.
+- **Config UHD (B, L2):** Full `f(graph) → best kernel + predicted metric value` model, one per ranking
+  metric, for kernel selection and accurate cross-engine comparison. The thorough policy's first choice,
+  falling back to A; never consulted by the quick policy
+  ([Section 11.2](#112-two-engine-selection-policies-rfc-0007)).

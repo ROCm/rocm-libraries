@@ -88,7 +88,7 @@ a follow-up, filling 0017's deferred scope is expected and is not itself a diver
 - **Duplicate detection (§ 13.2.1).** An independent descriptor-`id` check; drop all UEDs in a
   genuine collision, but accept content-identical `id` duplicates, loading them as one.
 - **Role-scoped, arch-keyed heuristics (§ 4.6).** RFC 0017 shows a single `heuristic` id; this RFC
-  replaces it with three optional, arch-keyed maps — `sort_kernel_catalog`, `predict_engine_tflops`,
+  replaces it with three optional, arch-keyed maps — `sort_kernel_catalog`, `predict_engine`,
   and `predict_applicable_kernels` — so an engine's distinct selection jobs, and per-architecture
   model choice, are expressible without a later schema change. Consumed by
   [RFC 0019](0019_UniversalHeuristicDescriptor.md).
@@ -178,7 +178,7 @@ to be a UED.
   // optional, arch-keyed heuristic roles (§ 4.6); each maps a gfx target or "default" to a UHD
   "sort_kernel_catalog":   {"gfx950": "ae896b07-80cd-473c-b3f4-6a8892998519",
                             "default": "c93e17aa-2d6b-4f10-8e75-3a9c04b6f2e1"},
-  "predict_engine_tflops": {"gfx950": "7b1e9c40-5a2f-4d8b-91c6-0e3d7a2f6b58"},
+  "predict_engine": {"gfx950": "7b1e9c40-5a2f-4d8b-91c6-0e3d7a2f6b58"},
   "metadata":        "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD id (required)
   "graph_match": {                                 // stage one: how this engine matches and binds
     "nodes": [                                     // declarative arm: the graph shape served (§ 4.3)
@@ -222,8 +222,8 @@ two arms (§ 4.3, § 4.5) this engine matches with.
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
 | `sdk_version` | no | string | `<major>.<minor>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0` when omitted. Compared numerically by `(major, minor)`: refused at load when newer than the runtime's own graph schema, and at match time the whole engine declines a graph whose reported floor is above it, before binding and taking every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
-| `sort_kernel_catalog` | no | object (arch → UUID) | The **kernel-selection heuristic** map (§ 4.6): each key a gfx target or the literal `default`, each value a UHD UUID that must resolve at load (§ 13.2). Absent => the engine ships no kernel-selection heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). An empty map, or a key naming nothing, is an error. |
-| `predict_engine_tflops` | no | object (arch → UUID) | Optional **engine-estimate** map (§ 4.6): a cheap `f(graph) → expected performance` UHD consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution. |
+| `sort_kernel_catalog` | no | object (arch → UUID or [UUID]) | The **kernel-selection heuristic** map (§ 4.6): each key a gfx target or the literal `default`, each value a UHD UUID, or a list of them — at most one per ranking metric (RFC 0019 § 3.1, § 4.4) — each of which must resolve at load (§ 13.2). Absent => the engine ships no kernel-selection heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). An empty map, an empty list, or a key naming nothing, is an error. |
+| `predict_engine` | no | object (arch → UUID or [UUID]) | Optional **engine-estimate** map (§ 4.6): cheap `f(graph) → expected metric value` UHDs, one per ranking metric, consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution. |
 | `predict_applicable_kernels` | no | object (arch → UUID) | Optional, **future** **candidate-generator** map (§ 4.6): a UHD producing the applicable candidate set for a combinatorial/JIT space, which `sort_kernel_catalog` then ranks. Same arch-key form and resolution. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3**, or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
@@ -265,6 +265,19 @@ provider's native registry (is this symbol registered) is semantic and runs in �
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name", "metadata"],
+  "definitions": {
+    "uhd_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "uhd_ids": {
+      "description": "One UHD id, or a non-empty list of distinct ids with at most one per ranking metric (the metric rule is semantic; see RFC 0019 section 3.1).",
+      "oneOf": [
+        { "$ref": "#/definitions/uhd_id" },
+        { "type": "array", "items": { "$ref": "#/definitions/uhd_id" }, "minItems": 1, "uniqueItems": true }
+      ]
+    }
+  },
   "properties": {
     "version": {
       "type": "string",
@@ -289,24 +302,18 @@ provider's native registry (is this symbol registered) is semantic and runs in �
       "addedInVersion": "1.0"
     },
     "sort_kernel_catalog": {
-      "description": "Arch -> UHD id. Kernel-selection heuristic; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+      "description": "Arch -> UHD id, or a list of UHD ids with at most one per ranking metric (RFC 0019 section 3.1). Kernel-selection heuristics; each id MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
       "type": "object",
       "propertyNames": { "type": "string", "minLength": 1 },
-      "additionalProperties": {
-        "type": "string",
-        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-      },
+      "additionalProperties": { "$ref": "#/definitions/uhd_ids" },
       "minProperties": 1,
       "addedInVersion": "1.0"
     },
-    "predict_engine_tflops": {
-      "description": "Arch -> UHD id. Optional engine-level estimate; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+    "predict_engine": {
+      "description": "Arch -> UHD id, or a list of UHD ids with at most one per ranking metric (RFC 0019 section 3.1). Optional engine-level estimates; each id MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
       "type": "object",
       "propertyNames": { "type": "string", "minLength": 1 },
-      "additionalProperties": {
-        "type": "string",
-        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-      },
+      "additionalProperties": { "$ref": "#/definitions/uhd_ids" },
       "minProperties": 1,
       "addedInVersion": "1.0"
     },
@@ -627,13 +634,13 @@ selection job and they run at different points in the pipeline:
 
 | Field | Role | When it runs | RFC 0019 |
 |---|---|---|---|
-| `predict_engine_tflops` | Cheap engine-level performance estimate | Engine selection, before any catalog is built | the engine estimate |
+| `predict_engine` | Cheap engine-level performance estimate | Engine selection, before any catalog is built | the engine estimate |
 | `sort_kernel_catalog` | Ranks the catalog and picks the winning kernel | Kernel selection, after applicability | the catalog ranker, and the main subject of RFC 0019 |
 | `predict_applicable_kernels` | Generates the candidate set to be ranked | During applicability, for a combinatorial/JIT space | the future candidate generator |
 
 The roles run in pipeline order, which follows the applicability boundary rather than the table order
 above: `predict_applicable_kernels` runs **during** applicability, producing the candidate set for an
-engine whose catalog is not enumerable; `predict_engine_tflops` runs at **engine selection**, over
+engine whose catalog is not enumerable; `predict_engine` runs at **engine selection**, over
 engines already found applicable; and `sort_kernel_catalog` runs at **kernel selection**, ranking the
 surviving catalog. Only the first runs before applicability is settled. Every role is **optional**,
 including `sort_kernel_catalog`: an engine naming none orders its catalog by the declared fallback,
@@ -653,7 +660,16 @@ mapped model still generalizes across a family of SKUs through its device featur
 splits only where architectures genuinely diverge in metadata or heuristic behavior. One `default`
 entry covering every arch is the degenerate, fully device-feature-driven case.
 
-An empty map is a load error: a role is either absent or names at least one arch (§ 13.2).
+**Several models per key, one per ranking metric.** For `sort_kernel_catalog` and `predict_engine`, a
+key's value may be a list of UHD ids; a single id is a one-element list. The loader indexes the list by
+the metric each UHD declares in its own `score.metric` (RFC 0019 § 4.4), so resolution above runs per
+metric: a lookup of `(gfx942, time)` falls back to `(default, time)`, never to a `gfx942` model of
+another metric. Two ids under one key declaring the same metric are a load error for that key. The UED
+never names a metric itself; RFC 0019 § 3.1 gives the full rules. `predict_applicable_kernels` stays
+single-valued.
+
+An empty map, or an empty list, is a load error: a role is either absent or names at least one model
+for at least one arch (§ 13.2).
 
 ## 5. The Graph Model the Pattern Matches
 
@@ -1091,9 +1107,14 @@ These cannot be expressed in JSON Schema because they depend on other descriptor
 performed at build time and run time alike:
 
 - **Reference resolution.** A UED's `metadata` (KMD) and, when present, every UHD id in its heuristic
-  maps (`sort_kernel_catalog`, `predict_engine_tflops`, `predict_applicable_kernels`; § 4.6) must
+  maps (`sort_kernel_catalog`, `predict_engine`, `predict_applicable_kernels`; § 4.6) must
   each resolve to a loadable descriptor of the correct kind; a dangling reference is an error. This
   is an *existence* condition: the referent must be resolvable, not necessarily parsed.
+- **One model per metric per key.** Within one arch key of `sort_kernel_catalog` or `predict_engine`,
+  no two UHDs may declare the same `score.metric`, and at most one `sort_kernel_catalog` UHD may declare
+  none (the default ranker); every `predict_engine` UHD must declare one (RFC 0019 § 3.1, § 4.4). This
+  reads each UHD's `score` block, so those referents must be parsed, not merely resolvable. A violation
+  disables that role for that key and is reported, as any other unusable model is.
 - **`knobs` must be a subset of KMD field names.** A knob name no KMD field matches is an error
   (RFC 0017 § 4). Unlike reference resolution, this reads the KMD's declared field set, so the
   referenced KMD must be resolvable **to its field set**, more than existence.
