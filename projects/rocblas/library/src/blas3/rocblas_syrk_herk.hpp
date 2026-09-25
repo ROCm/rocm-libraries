@@ -27,6 +27,8 @@
 #include "int64_helpers.hpp" // c_i64_grid_YZ_chunk
 #include "rocblas_gemm.hpp"
 #include "rocblas_level3_threshold.hpp"
+#include <cstdlib>
+#include <limits>
 
 template <typename T>
 inline bool rocblas_use_only_gemm(rocblas_handle handle, rocblas_int n, rocblas_int k)
@@ -115,6 +117,11 @@ inline rocblas_int
 
     if(chunk < size_t(batch_count) && chunk > size_t(c_i64_grid_YZ_chunk))
         chunk = (chunk / size_t(c_i64_grid_YZ_chunk)) * size_t(c_i64_grid_YZ_chunk);
+
+    // chunk is already <= batch_count, so it fits; the clamp only guards an
+    // absurd budget override truncating on the cast.
+    if(chunk > size_t(std::numeric_limits<rocblas_int>::max()))
+        chunk = size_t(std::numeric_limits<rocblas_int>::max());
 
     return rocblas_int(chunk);
 }

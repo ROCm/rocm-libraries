@@ -25,11 +25,14 @@
 //
 // Tests for chunked workspace allocation in batched syrk/herk.
 //
-// The fix changes peak workspace from batch_count * tri(n) * sizeof(T) to
-// min(batch_count, 65535) * tri(n) * sizeof(T).  The host-side launcher
-// processes at most c_YZ_grid_launch_limit (65535) batches per iteration and
-// reuses the same workspace buffer, so only one chunk's worth of triangle
-// slots must be live at once.
+// The fix caps peak workspace at one chunk's worth of triangle slots rather
+// than batch_count * tri(n) * sizeof(T).  The chunk is whatever fits a byte
+// budget, so a problem already under the budget runs in a single pass, and the
+// launcher reuses the one buffer for every chunk otherwise.
+//
+// The batteries below override that budget (see scoped_workspace_budget): at
+// the shipped value every shape a test can afford fits in one chunk, which
+// would leave the multi-chunk path unreachable.
 //
 // Scope: int32 strided-batched and batched (pointer-array) syrk/herk, over
 // every type the two operations instantiate -- s/d/c/z syrk and c/z herk.
@@ -479,9 +482,9 @@ namespace
             {32, c_gemm_stride + 1},
             {32, 65536},
             {32, 131070},
-            {2, 131070}, // tiny triangle: budget never binds, single chunk
-            {256, 100000}, // budget binds well below the grid stride
-            {1024, 50000}, // budget binds hard; chunk is only a few hundred
+            {2, 131070}, // smallest triangle: many batches fit one chunk
+            {256, 100000}, // one triangle already exceeds the test budget
+            {1024, 50000}, // triangle is megabytes; the chunk clamps to one batch
         };
 
         for(const auto& c : cases)
@@ -659,8 +662,8 @@ namespace
     template <typename T, op_kind K, typename StridedFn, typename BatchedFn>
     static void run_canaries(StridedFn strided_api, BatchedFn batched_api)
     {
-        // 131070 = two full chunks, 65539 = one full chunk plus a short one,
-        // 1 = the degenerate single-batch case.
+        // Several chunks, several chunks plus a short tail, and the degenerate
+        // single-batch case.
         for(rocblas_int bc : {131070, 65539, 1})
         {
             run_strided_canary<T, K>(strided_api, bc, rocblas_fill_lower);
@@ -674,8 +677,12 @@ namespace
     // -----------------------------------------------------------------------
     // Numerical battery
     //
-    // A is all ones, so alpha*A*A^T (or A*A^H) is the constant k in every
-    // element.  Each batch starts with a distinct value in the upper triangle,
+    // Every A element is s+si (s for real types), so alpha*A*A^T and
+    // alpha*A*A^H are constant across the matrix but differ from each other:
+    // 2s^2*k imaginary for syrk against 2s^2*k real for herk.  An all-real A
+    // would make the two indistinguishable.
+    //
+    // Each batch starts with a distinct value in the upper triangle,
     // which a lower-fill syrk/herk must leave untouched: on the workspace path
     // it is saved to W_C before the GEMM overwrites all of C and restored
     // afterwards.  Zero-filled data would hide a chunk loop that failed to
@@ -851,16 +858,19 @@ namespace
         const size_t a_elems = size_t(n) * size_t(k);
         const size_t c_elems = size_t(n) * size_t(n);
 
-        // Two A buffers, alternating by batch parity. Pointing every batch at one
-        // buffer would make the A-side chunk advance untestable: all slots would
-        // hold the same address, so dropping it would change nothing. With
-        // alternating buffers any off-by-one or off-by-a-chunk in the pointer
-        // array flips parity, because the chunk size is even and 65535 is odd.
+        // Two A buffers, selected by which chunk a batch falls in. Pointing every
+        // batch at one buffer would leave the A-side chunk advance untestable,
+        // since dropping it would then change nothing. Alternating by batch
+        // parity does not work either: chunk sizes here are even, so a batch and
+        // the one a chunk away share a parity and the advance is still
+        // invisible. Keyed on the chunk index, omitting the advance feeds chunk
+        // 0's A to every chunk, which the probes on later chunks catch.
         std::vector<T> h_A(a_elems * 2);
         std::fill(h_A.begin(), h_A.begin() + a_elems, a_value<T>(1));
         std::fill(h_A.begin() + a_elems, h_A.end(), a_value<T>(2));
 
-        auto scale_of = [](rocblas_int b) { return (b % 2) ? 2 : 1; };
+        const rocblas_int chunk    = model_chunk<T>(n, batch_count);
+        auto              scale_of = [chunk](rocblas_int b) { return ((b / chunk) % 2) ? 2 : 1; };
 
         host_batch_vector<T> h_C(c_elems, 1, batch_count);
         ASSERT_EQ(h_C.memcheck(), hipSuccess);
