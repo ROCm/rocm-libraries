@@ -217,7 +217,12 @@ namespace rocsparse
                 mul,
                 add);
 
-            if constexpr(!GRID_STRIDE)
+            if constexpr(GRID_STRIDE)
+            {
+                // The next row re-initialises the shared hash table read above
+                __syncthreads();
+            }
+            else
             {
                 break;
             }
@@ -299,7 +304,17 @@ namespace rocsparse
                     mul,
                     add);
 
-            if constexpr(!GRID_STRIDE)
+            if constexpr(GRID_STRIDE)
+            {
+                // The next row re-initialises the shared hash table read above, which a
+                // 64-lane (sub)wavefront shares across hardware wavefronts on wave32. Skipped
+                // on the last row, where out-of-range wavefronts have already returned.
+                if(block_offset + static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WF_SIZE) < mb)
+                {
+                    __syncthreads();
+                }
+            }
+            else
             {
                 break;
             }
@@ -377,7 +392,12 @@ namespace rocsparse
                 mul,
                 add);
 
-            if constexpr(!GRID_STRIDE)
+            if constexpr(GRID_STRIDE)
+            {
+                // The next row re-initialises the shared hash table read above
+                __syncthreads();
+            }
+            else
             {
                 break;
             }

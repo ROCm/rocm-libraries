@@ -210,7 +210,12 @@ namespace rocsparse
                                                                            mul,
                                                                            add);
 
-            if constexpr(!GRID_STRIDE)
+            if constexpr(GRID_STRIDE)
+            {
+                // The next row re-initialises the shared hash table read above
+                __syncthreads();
+            }
+            else
             {
                 break;
             }
