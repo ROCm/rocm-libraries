@@ -29,6 +29,21 @@ struct b_contiguous_items_per_access<GemmConfig,
     // PackedSize specified
     static constexpr int value = GemmConfig::BContiguousItemsPerAccess;
 };
+
+// gfx12 shuffle_b layout selector. False (default): K accesses of at most 16
+// bytes are ordered outside the wave lanes. True: each lane owns one contiguous
+// K_Warp_Tile / 2 run of K.
+template <typename GemmConfig, typename = void>
+struct b_preshuffle_lane_contiguous_k : std::false_type
+{
+};
+
+template <typename GemmConfig>
+struct b_preshuffle_lane_contiguous_k<GemmConfig,
+                                      std::void_t<decltype(GemmConfig::BPreshuffleLaneContiguousK)>>
+    : std::bool_constant<GemmConfig::BPreshuffleLaneContiguousK>
+{
+};
 } // namespace detail
 
 template <typename T>
@@ -103,10 +118,14 @@ auto shuffle_b(const ck_tile::HostTensor<T>& t, const GemmConfig& gemmConfig)
     if(ck_tile::is_gfx12_supported())
     {
         constexpr int divisor = 2;
-        // Match MakeBFlatDramTileDistribution: each access loads at most
-        // 16 bytes per lane, with additional accesses outside the wave lanes.
+        // Default: match MakeBFlatDramTileDistribution, where each access loads at
+        // most 16 bytes per lane and additional accesses sit outside the wave lanes.
+        // Pipelines whose lanes own a contiguous K_Warp_Tile / divisor run (the MX
+        // weight-preshuffle pipeline) opt in with BPreshuffleLaneContiguousK.
         const int kABK1PerLane =
-            std::min(16 / static_cast<int>(sizeof(T)), gemmConfig.K_Warp_Tile / divisor);
+            detail::b_preshuffle_lane_contiguous_k<GemmConfig>::value
+                ? gemmConfig.K_Warp_Tile / divisor
+                : std::min(16 / static_cast<int>(sizeof(T)), gemmConfig.K_Warp_Tile / divisor);
         int kABK0PerLane = gemmConfig.K_Warp_Tile / divisor / kABK1PerLane;
         ck_tile::HostTensor<T> t_view({n_ / gemmConfig.N_Warp_Tile,
                                        gemmConfig.N_Warp_Tile,

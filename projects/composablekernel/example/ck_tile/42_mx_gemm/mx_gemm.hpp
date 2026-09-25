@@ -40,6 +40,8 @@ struct MxGemmConfig
     static constexpr bool DoubleSmemBuffer          = true; // comp_async uses double buffer
     static constexpr bool Preshuffle                = false;
     static constexpr ck_tile::index_t BContiguousItemsPerAccess = 16;
+    // gfx12 shuffle_b: the MX weight-preshuffle lanes own contiguous K runs.
+    static constexpr bool BPreshuffleLaneContiguousK = true;
 
     static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
     static constexpr bool TiledMMAPermuteN = false;

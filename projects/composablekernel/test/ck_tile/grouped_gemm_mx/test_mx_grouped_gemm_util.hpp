@@ -152,6 +152,8 @@ struct Config
     static constexpr ck_tile::index_t N_Warp      = N_Warp_;
     static constexpr ck_tile::index_t BContiguousItemsPerAccess =
         std::is_same_v<BDataType_, ck_tile::pk_fp4_t> ? 32 : 16;
+    // gfx12 shuffle_b: the MX weight-preshuffle lanes own contiguous K runs.
+    static constexpr bool BPreshuffleLaneContiguousK = true;
 };
 
 // Deterministic per-element hash RNG for GPU data init. Returns a float in [-3, 3).
