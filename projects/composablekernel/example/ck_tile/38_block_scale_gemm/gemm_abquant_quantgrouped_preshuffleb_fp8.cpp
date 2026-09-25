@@ -5,7 +5,7 @@
 #include "gemm_abquant_quantgrouped.h"
 
 static auto _ = []() {
-    auto& lut                               = get_kernel_lut();
+    auto& lut                                 = get_kernel_lut();
     lut[hash_multiple_strings({"fp8",
                                "abquant",
                                "preshuffleb",
