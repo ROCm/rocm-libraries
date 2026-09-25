@@ -466,14 +466,14 @@ private:
         }
 
         state.set_items(items);
-
-        for(auto& data : cases_data)
-        {
-            T* d_input = data.get_d_input(bytes);
-
-            state.run(
-                [&]
+        state.add_reads<T>(items * Channels * cases_data.size());
+        state.run(
+            [&]
+            {
+                for(auto& data : cases_data)
                 {
+                    T* d_input = data.get_d_input(bytes);
+
                     HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                         d_temporary_storage.get(),
                         temporary_storage_bytes,
@@ -485,10 +485,8 @@ private:
                         data.upper_level,
                         stream,
                         false)));
-                });
-
-            state.add_reads<T>(items * Channels);
-        }
+                }
+            });
 
         for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
         {

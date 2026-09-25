@@ -112,7 +112,7 @@ from rocke.instances.common.gemm_policy import GemmPipelinePolicy
 There are no `rocke.instances.<flat>` (e.g. `rocke.instances.gemm_universal`,
 `rocke.instances.gemm`) modules and no `DeprecationWarning` shims at the old
 flat paths — those import targets do **not** exist. In-tree callers, tests, and
-harnesses (`rocke.examples.common.bake_off_implicit_gemm`,
+harnesses (`builders.common.bake_off_implicit_gemm`,
 `rocke.examples.common.universal_gemm_verify`) import via the package or the
 fully-qualified `common/` path.
 

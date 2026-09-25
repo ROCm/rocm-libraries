@@ -265,24 +265,42 @@ namespace TensileLite
 
                     auto ctx
                         = static_cast<LibraryIOContext<ContractionSolution>*>(iot::getContext(io));
-                    if(ctx == nullptr || ctx->solutions == nullptr)
+                    if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
                     {
                         iot::setError(io,
                                       "SingleSolutionLibrary requires that context be set to "
                                       "a SolutionMap.");
                     }
-
-                    auto iter = ctx->solutions->find(index);
-                    if(iter == ctx->solutions->end())
+                    else if(ctx->blobCache)
                     {
-                        std::ostringstream msg;
-                        msg << "[MatchingLibrary] Invalid solution index: " << index;
-                        iot::setError(io, msg.str());
+                        // Indexed file: hand the leaf the index and the cache
+                        // and let it parse on first use. Several rows commonly
+                        // name the same index; the cache dedupes.
+                        if(!ctx->blobCache->contains(index))
+                        {
+                            iot::setError(
+                                io,
+                                concatenate("[MatchingLibrary] Invalid solution index: ", index));
+                        }
+                        else
+                        {
+                            entry.value = std::make_shared<SSLibrary>(index, ctx->blobCache);
+                        }
                     }
                     else
                     {
-                        std::shared_ptr<ContractionSolution> solution = iter->second;
-                        entry.value = std::make_shared<SSLibrary>(solution);
+                        auto iter = ctx->solutions->find(index);
+                        if(iter == ctx->solutions->end())
+                        {
+                            std::ostringstream msg;
+                            msg << "[MatchingLibrary] Invalid solution index: " << index;
+                            iot::setError(io, msg.str());
+                        }
+                        else
+                        {
+                            std::shared_ptr<ContractionSolution> solution = iter->second;
+                            entry.value = std::make_shared<SSLibrary>(solution);
+                        }
                     }
                 }
                 else

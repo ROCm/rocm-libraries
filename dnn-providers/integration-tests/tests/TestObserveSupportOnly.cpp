@@ -217,7 +217,8 @@ protected:
     void SetUp() override
     {
         ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("skips_before_observation_"));
+        _scopedDir.emplace(
+            hipdnn_test_sdk::utilities::claimScratchDirectory("skips_before_observation_"));
         _tempDir = _scopedDir->path();
         SupportObservationLog::get().reset();
     }

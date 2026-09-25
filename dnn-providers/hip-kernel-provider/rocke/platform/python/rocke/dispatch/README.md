@@ -198,7 +198,7 @@ rocke/dispatch/gemm/
 Reuse:
 
 - `GemmRequest` from `gemm/common.py` if the request shape is compatible;
-- `selector_matches` for `algorithm` / `spec_id` filtering;
+- `selector_matches` from `dispatch/core.py` for `algorithm` / `spec_id` filtering;
 - `GemmSupportQuery`, `gemm_config_supported`, and `request_shape_supported`
   from `gemm/support.py` when the support model matches UniversalGemm.
 

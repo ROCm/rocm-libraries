@@ -31,12 +31,8 @@ static constexpr std::size_t countof2(T (&)[N])
 }
 
 // clang-format off
-#ifdef ROCSPARSE_WITH_ILDLT0
 #define ROCSPARSE_FOREACH_TEST_ENUM_ILDLT0    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spildlt0)
-#else
-#define ROCSPARSE_FOREACH_TEST_ENUM_ILDLT0
-#endif
 
 #ifdef ROCSPARSE_WITH_ELL_TRSV
 #define ROCSPARSE_FOREACH_TEST_ENUM_ELL_TRSV    \

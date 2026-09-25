@@ -104,44 +104,12 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormBwdParams
 LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
     : _params(std::move(params))
 {
-    // Extract dimensions from x tensor
-    const auto* xDims = _params.x()->dims();
-    const auto* xStrides = _params.x()->strides();
-    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
-        std::vector<int64_t>(xStrides->begin(), xStrides->end()));
-
-    const size_t normalizedDim
-        = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
-    int64_t outerSize = 1;
-    int64_t innerSize = 1;
-    int64_t stride = 1;
-    const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
-    const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
-
-    if(normalizedDim > 1
-       && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
-    {
-        stride = static_cast<int64_t>(xDims->Get(1));
-    }
-
-    for(unsigned int i = 0; i < xDims->size(); ++i)
-    {
-        if(i < normalizedDim)
-        {
-            if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
-            {
-                outerSize *= static_cast<int64_t>(xDims->Get(i));
-            }
-        }
-        else
-        {
-            innerSize *= static_cast<int64_t>(xDims->Get(i));
-        }
-    }
-
-    _outerSize = outerSize;
-    _innerSize = innerSize;
-    _stride = stride;
+    const auto statAttr
+        = _params.mean() == nullptr ? std::nullopt : std::make_optional(_params.mean());
+    const ProblemDescription problem(_params.x(), _params.scale(), statAttr, Direction::BACKWARD);
+    _outerSize = problem.outerSize();
+    _innerSize = problem.innerSize();
+    _stride = problem.stride();
     _localSize = LayernormBwdParams::MAX_LOCAL_SIZE;
 }
 

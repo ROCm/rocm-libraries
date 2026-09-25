@@ -212,7 +212,7 @@ class GemmType:
         m = GemmType._TENSILE_LETTER_TO_HIPBLASLT
 
         if dt == "X" and dd == "S" and cd == "S":
-            return "xf32_r", "f32_r", "f32_r", "xf32_r"
+            return "f32_r", "f32_r", "f32_r", "xf32_r"
 
         if dt in m:
             try:

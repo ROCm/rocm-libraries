@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, bool STRIDED, typename T, typename S, typename U>
 void syev_heev_checkBadArgs(const hipsolverHandle_t   handle,
@@ -511,13 +512,13 @@ void syev_heev_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         syev_heev_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_syev_heev(API,
                             STRIDED,
                             handle,
@@ -534,9 +535,9 @@ void syev_heev_getPerfData(const hipsolverHandle_t   handle,
                             lworkOnHost,
                             dinfo.data(),
                             bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API,
@@ -673,7 +674,7 @@ void testing_syev_heev(Arguments& argus)
     }
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
     {
         syev_heev_getPerfData<API, STRIDED, T>(handle,
                                                params,

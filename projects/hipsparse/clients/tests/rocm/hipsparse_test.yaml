@@ -140,6 +140,7 @@ include: test_spsv_csr_reuse_descr.yaml
 include: test_spsm_coo.yaml
 include: test_spsm_csc.yaml
 include: test_spsm_csr.yaml
+include: test_spsm_csr_reuse_descr.yaml
 include: test_spsm_ex_coo.yaml
 include: test_spsm_ex_csr.yaml
 include: test_spvv.yaml
