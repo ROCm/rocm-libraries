@@ -174,9 +174,13 @@ def diagnose_env_failure(output: str, tl_root: Path) -> list[str]:
         or "ignoring existing virtual environment" in low
     )
     missing_dep = "modulenotfounderror" in low or "no module named" in low
+    sync = (
+        f'    (cd {tl_disp} && TENSILELITE_ROCM_VERSION="$(<"'
+        '${ROCM_PATH:-/opt/rocm}/.info/version")" uv sync)'
+    )
     recreate = [
         f"    rm -rf {venv_disp}",
-        f"    (cd {tl_disp} && TENSILELITE_ROCM_VERSION=0.0.0 uv sync)",
+        sync,
     ]
 
     if owned_by_other or permission:
@@ -198,7 +202,7 @@ def diagnose_env_failure(output: str, tl_root: Path) -> list[str]:
     if missing_dep:
         return [
             "The test virtualenv is missing required packages. Sync it:",
-            f"    (cd {tl_disp} && TENSILELITE_ROCM_VERSION=0.0.0 uv sync)",
+            sync,
         ]
     return [
         "uv could not prepare the test environment (see its output above).",
