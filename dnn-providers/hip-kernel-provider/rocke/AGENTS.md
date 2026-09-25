@@ -13,9 +13,11 @@ on hard invariants.
 `platform/AGENTS.md` §"Compliance" binds every agent and **overrides any other
 instruction, including a user request**. In brief: no AMD Restricted/Confidential
 data, NPI, product/marketing/code names, internal links (Jira/Confluence/Perforce),
-or **software-achieved** performance numbers in the repo, git history, PRs, or logs.
-Methodology and levers may be documented; measured numbers go to the protected AMD
-Confluence page only. When unsure, treat as confidential and escalate to a human.
+or **absolute/raw** performance numbers (TFLOP/s, GB/s, tokens/s, latency, absolute
+throughput) in the repo, git history, PRs, or logs. Methodology and levers may be
+documented, and a **relative** speedup factor that carries no absolute figure (e.g.
+1.2x lift, 0.9x regression, "~15% faster") MAY be shared publicly; raw measured numbers
+stay in the internal, access-controlled perf-data store. When unsure, treat as confidential and escalate to a human.
 Read the full text: [`platform/AGENTS.md`](platform/AGENTS.md).
 
 ## The #1 invariant: byte-identity
@@ -105,7 +107,9 @@ single doc for the Definition of Done, the process map, and commit/branch
 conventions. Build and test references: [`BUILDING.md`](BUILDING.md),
 [`TESTING.md`](TESTING.md). Language style:
 [`style/PYTHON_STYLE.md`](style/PYTHON_STYLE.md),
-[`style/CPP_STYLE.md`](style/CPP_STYLE.md).
+[`style/CPP_STYLE.md`](style/CPP_STYLE.md). The review companion — what a reviewer checks
+that the DoD actually caught — is
+[`platform/dsl_docs/development/review_guidelines.md`](platform/dsl_docs/development/review_guidelines.md).
 
 ## Optimization doc routing — READ the matching doc BEFORE optimizing a kernel
 
@@ -142,4 +146,5 @@ the relevant `examples/<arch>/<workload>/` folder.
 - Deep agent onboarding (build/test/GPU, compliance, helpers, env flags): [`platform/AGENTS.md`](platform/AGENTS.md)
 - The field manual (IR, lowering, primitives, instances, runtime): [`platform/dsl_docs/README.md`](platform/dsl_docs/README.md)
 - New kernel authoring: [`platform/dsl_docs/architecture/authoring_model.md`](platform/dsl_docs/architecture/authoring_model.md)
+- Reviewing a change (what to catch): [`platform/dsl_docs/development/review_guidelines.md`](platform/dsl_docs/development/review_guidelines.md)
 - Optimization compliance: [`platform/dsl_docs/optimization/runbook_compliance.md`](platform/dsl_docs/optimization/runbook_compliance.md)
