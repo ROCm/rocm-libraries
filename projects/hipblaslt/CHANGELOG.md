@@ -14,6 +14,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Complex CGEMM/ZGEMM support for gfx1250.
 * `TENSILE_FIXED_WGMXCCSPLITK` environment variable to override the split-K work-group XCC mapping factor for StreamK GEMMs.
 * `HIPBLASLT_MATRIX_LAYOUT_OFFSET` matrix-layout attribute for 64-bit element offsets into sub-matrices in General Batched GEMM (`batch_mode=1`), along with `hipblaslt-bench` `batch_offset_a/b/c/d` arguments; nonzero offsets require `HIPBLASLT_BATCH_MODE_POINTER_ARRAY` and are rejected for sub-byte MX types (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`, `HIP_R_4F_E2M1`) with `HIPBLAS_STATUS_NOT_SUPPORTED`.
+* Opt-in runtime tuning cache, off by default. `HIPBLASLT_TUNING_MODE=off|cache|tune` and `HIPBLASLT_TUNING_CACHE_PATH=<file>` let the library benchmark candidate kernels for an unseen problem at its first `hipblasLtMatmul`, record the winner, and replay it afterwards. `tune` measures candidates the way `hipblaslt-bench` does (warm-up and timed launches over rotating buffers, with an instruction-cache flush), serialises tuning within a process, and bounds each shape's search to five minutes by default (`HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`). A search the budget stops records its best candidate as incomplete, which is never slower than the untuned kernel because that kernel is measured first, and tune mode revisits it when a later run can finish or widen the search. `cache` only replays, validating each entry as `HIPBLASLT_TUNING_OVERRIDE_FILE` does, and also serves `hipblasLtMatmul` calls that pass no `algo`. An explicit `algo` always launches as given. Both modes report what they loaded, each tuned shape's start and result, and a closing summary without needing a log level. With a tuning mode set, `HIPBLASLT_TUNING_OVERRIDE_FILE` is ignored, and a process in a secure execution context ignores every tuning variable.
 
 ### Changed
 
@@ -23,6 +24,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Stream-K flags are now per-stream: a handle reserves an extra fixed 8 MiB at creation and serves at most 64 distinct streams for Stream-K matmuls (claimed on a stream's first use, held until the handle is destroyed); beyond that the matmul returns `HIPBLAS_STATUS_INTERNAL_ERROR`.
 * Stream-K workspace size reported by the heuristic APIs is now smaller, and the SK grid is bounded, so `TENSILE_STREAMK_GRID_MULTIPLIER` values past that bound no longer take effect.
 * Solution cache key now includes `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` and the StreamK tile scheduling mode, so the same problem can select a different kernel than before.
+* A tuning file is now trusted one entry at a time instead of all or nothing. `HIPBLASLT_TUNING_OVERRIDE_FILE` records solution indices, which are positions in one build's kernel library. Previously the C API ignored the whole file when its build-version line did not match the running build, while the C++ API applied it regardless and could run kernels it was never tuned on. `hipblaslt-bench` now records a `kernel_name` beside each `solution_index` in `HIPBLASLT_TUNING_FILE`, and on both APIs a row that records a name is checked at replay and dropped only if its index no longer names that kernel. A row without a name is used only when the file's `Git Version` line matches the running build; a build made outside a git checkout has no version, so it uses no such rows. Problems whose rows are dropped fall back to normal kernel selection.
 
 ### Removed
 
@@ -65,6 +67,16 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Corrected `PhysicalMaxVgprCU` for gfx1102 and gfx1103, where gfx1103 was reported with a 1536-VGPR per-SIMD file instead of 1024 and gfx1102 omitted the two-SIMDs-per-CU factor, both affecting occupancy and kernel selection.
 * Fixed a StreamK per-XCD work-queue counter that failed to reset between launches when the StreamK grid size was not a multiple of the XCD count, causing progressively slower execution on repeated GEMM launches (`WorkGroupMappingXCC == -1` and `StreamKXCCMapping` chiplet-remap paths).
 * Fixed out-of-bounds stores in subtile GEMM kernels on gfx950 and gfx1250 when the `M` dimension does not evenly fill the macro tile (for example `M=8` with a 32-row tile).
+* When a tuning file held several entries for one problem and the first could not be used, the later entries were never used either. The replay loop reused a single vector across entries and always read element `[0]`, so each later entry was checked against the first entry's solution instead of its own.
+* Solution index `0` in a tuning file was rejected outright, despite being a valid index that is present in the shipped logic.
+* A grouped GEMM heuristic query crashed when `HIPBLASLT_TUNING_OVERRIDE_FILE` held any entry, because the override lookup read the grouped problem as a single GEMM. Grouped GEMMs now use default selection.
+* `hipblaslt-bench` recorded grouped GEMM winners in `HIPBLASLT_TUNING_FILE`, where a single-group winner read back as a single GEMM of the same shape. Grouped runs no longer write to the file.
+* An XF32 problem on the C++ extension API could fall back to FP32 kernels. When a tuning file entry failed both the XF32 check and its FP32 fallback check, the problem was left in FP32 mode for the remaining entries and for default kernel selection.
+* `*returnAlgoCount` was read uninitialised when an override satisfied a single-algo request, and then used to scan one element past the end of the caller's array.
+* A tuning file that yielded no usable rows was re-read and re-parsed on every heuristic query instead of once.
+* `GemmInstance::getSolutionName()` in `hipblaslt_ext` crashed for a RocRoller solution. It looked the encoded RocRoller index up in the Tensile library and dereferenced the null result. It now returns the RocRoller short name, as `hipblaslt_ext::getSolutionNameFromAlgo()` already did.
+* The logger's destructor called `close()` on the log file, which throws out of a destructor and terminates the process at exit when the log file has failed, for example on a full disk. Reproducible with `HIPBLASLT_LOG_LEVEL=4` and a failing `HIPBLASLT_LOG_FILE`.
+* `hipblasLtMatmul` with no `algo` could return success for a GEMM that never launched. Its status already held the result of choosing the algorithm, and an exception thrown after that returned it unchanged instead of an error.
 
 ## hipBLASLt 1.4.1 for ROCm 7.14
 
