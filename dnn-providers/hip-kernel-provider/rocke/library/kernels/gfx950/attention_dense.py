@@ -130,6 +130,12 @@ _GRID_ORDERS = frozenset({
     # Fusing (hkv, hql) onto the head axis -- both radices BAKED -- is what frees
     # the x-axis for batch without emitting a runtime-radix division.
     "bt_hkv_minor", "bt_hkv_minor_rev",
+    # grid=(Hq, B, nqb): digit order VGBQ -- the hkv_minor head swizzle, but
+    # with batch BETWEEN the head and the query block instead of above it.
+    # Named form of the generic kv-phase split "xGyQ" with the V-minor fusion,
+    # which it reproduces exactly when Hkv == num_xcds, without that path's
+    # fused reconstruction and without forcing runtime_shape off.
+    "named_xgyq", "named_xgyq_rev",
 })
 
 
@@ -301,6 +307,14 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             # for every permutation and radix set. xcd_partitionable is a
             # PREDICTOR for the heuristic here, not a gate.
 
+        if (self.default_grid_order.startswith("named_xgyq")
+                and (self.batch * self.num_kv_heads) % KV_SPLIT_MODULUS):
+            raise ValueError(
+                f"default_grid_order={self.default_grid_order!r} needs "
+                f"batch*num_kv_heads ({self.batch * self.num_kv_heads}) "
+                f"divisible by {KV_SPLIT_MODULUS}; otherwise the phase axis "
+                "does not tile the fused (batch, kv-head) space"
+            )
         if self.default_grid_order not in _GRID_ORDERS:
             raise ValueError(
                 f"default_grid_order must be one of {sorted(_GRID_ORDERS)}, "
@@ -458,6 +472,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 "hkv_minor_rev": "gridkvminrev",
                 "bt_hkv_minor": "gridbtkv",
                 "bt_hkv_minor_rev": "gridbtkvrev",
+                "named_xgyq": "gridxgyq",
+                "named_xgyq_rev": "gridxgyqrev",
             }[self.default_grid_order])
         # Tagged here rather than in _persist_decode_name_part because that hook
         # is only reached under `if self.persistent` in the base kernel_name();
@@ -716,6 +732,32 @@ def build_attention_dense(
     elif _order == "qb_major":
         qb = b.block_id_x()
         hq = b.block_id_y()
+    elif _order.startswith("named_xgyq"):
+        # kv-phase split "xGyQ" with the V-minor fusion, as a 3-D grid.
+        #   F = bt*Hkv + hkv,  x = F % M,  y = F // M      (M = num_xcds)
+        # x-axis carries (x, hql) fused; y-axis carries the phase y. Every
+        # radix used here -- M, gqa, Hkv -- is a compile-time constant, and the
+        # BATCH extent never appears, so runtime_shape stays ON: one binary
+        # still serves a whole shape family, which the generic digit_order
+        # path cannot do because its decode bakes every radix.
+        _a = b.block_id_x()
+        _x = b.mod(_a, b.const_i32(KV_SPLIT_MODULUS))
+        _hql = b.div(_a, b.const_i32(KV_SPLIT_MODULUS))
+        _F = b.add(_x, b.mul(b.block_id_y(), b.const_i32(KV_SPLIT_MODULUS)))
+        _xgyq_bt = b.div(_F, b.const_i32(Hkv))
+        hq = b.add(b.mul(b.mod(_F, b.const_i32(Hkv)), b.const_i32(gqa)), _hql)
+        _bz = b.block_id_z()
+        if _order.endswith("_rev") and causal:
+            # NQB from the RUNTIME seqlen_q: this order keeps runtime_shape ON,
+            # so baking it would reverse against the wrong extent for every
+            # other seqlen sharing the symbol.
+            _nqbv = b.div(
+                b.add(seqlen_q_p, b.const_i32(BLOCK_M - 1)),
+                b.const_i32(BLOCK_M),
+            )
+            qb = b.sub(b.sub(_nqbv, b.const_i32(1)), _bz)
+        else:
+            qb = _bz
     else:
         # grid=(Hq, nqb, B): x is the head axis, y the query-block axis.
         _bx, _by = b.block_id_x(), b.block_id_y()
@@ -758,6 +800,8 @@ def build_attention_dense(
         bt = _digit_bt
     elif _order.startswith("bt_hkv_minor"):
         bt = b.block_id_x()
+    elif _order.startswith("named_xgyq"):
+        bt = _xgyq_bt
     else:
         bt = b.block_id_z()
     # The generic decode already produced hkv as a digit; re-deriving it from hq
@@ -2606,6 +2650,12 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     if _order.startswith("bt_hkv_minor"):
         # x = batch, y = head axis (kv-head low), z = query block.
         return (spec.batch, spec.num_query_heads, nqb)
+    if _order.startswith("named_xgyq"):
+        # kv-phase split "xGyQ" / V-minor as a 3-D grid; see the gfx942 sibling.
+        #   x = num_xcds*gqa, y = B*Hkv/num_xcds, z = nqb
+        _gqa = spec.num_query_heads // spec.num_kv_heads
+        return (KV_SPLIT_MODULUS * _gqa,
+                spec.batch * spec.num_kv_heads // KV_SPLIT_MODULUS, nqb)
     if _order == "qb_major":
         return (nqb, spec.num_query_heads, spec.batch)
     # Head axis on x. Grid shape and body MUST agree: a mismatch writes some

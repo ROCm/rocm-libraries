@@ -1337,6 +1337,150 @@ class TestAttentionHelpers(unittest.TestCase):
             self.assertIn(req, names)
         self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
 
+    def test_named_grid_orders_linearize_to_their_documented_digit_order(self):
+        """Each named grid order must produce the digit order it is named for.
+
+        A GPU correctness check cannot catch this: any bijection onto the work
+        space computes the right answer, so an order that silently linearizes to
+        a DIFFERENT permutation still passes every numerical test and every
+        sweep reports it under the wrong label. This replays the real
+        arithmetic -- the grid shape from ``attention_dense_grid`` plus the
+        body's head swizzle -- against the shared oracle.
+
+        HIP linearizes workgroup ids x-fastest, ``wi = bx + gx*(by + gy*bz)``,
+        and the ``hkv_minor`` swizzle ``hq = gqa*(bx % Hkv) + bx // Hkv`` means
+        ``bx == hkv + Hkv*hql``, i.e. the kv head is the FAST half of the head
+        axis. Those two facts are what the table below encodes.
+        """
+        from kernels.common.attention_dense_spec import (
+            decode_reference, digit_radices)
+        from kernels.gfx942.attention_dense import (
+            Gfx942AttentionDenseSpec, attention_dense_grid)
+
+        # order -> (digit string, head axis carries hkv in its low half)
+        EXPECTED = {
+            "qb_major": ("QGVB", False),
+            "hq_major": ("GVQB", False),
+            "hkv_minor": ("VGQB", True),
+            "bt_hkv_minor": ("BVGQ", True),
+        }
+        base = dict(batch=4, seqlen_q=2048, seqlen_kv=2048,
+                    num_query_heads=32, num_kv_heads=8, head_size=128,
+                    causal=True, dtype="fp16", block_n=64)
+        Hq, Hkv = base["num_query_heads"], base["num_kv_heads"]
+        gqa = Hq // Hkv
+        for order, (digits, swizzled) in EXPECTED.items():
+            with self.subTest(order=order):
+                spec = Gfx942AttentionDenseSpec(**base,
+                                                default_grid_order=order)
+                gx, gy, gz = attention_dense_grid(spec)
+                nqb = base["seqlen_q"] // spec.block_m
+                rad = digit_radices(nqb, base["batch"], Hkv, gqa)
+                W = nqb * base["batch"] * Hq
+                seen = {}
+                for bz in range(gz):
+                    for by in range(gy):
+                        for bx in range(gx):
+                            wi = bx + gx * (by + gy * bz)
+                            # which axis holds what, per the body
+                            if order.startswith("bt_hkv_minor"):
+                                bt, head, blk = bx, by, bz
+                            elif order.startswith("named_xgyq"):
+                                head, bt, blk = bx, by, bz
+                            elif order == "qb_major":
+                                blk, head, bt = bx, by, bz
+                            else:
+                                head, blk, bt = bx, by, bz
+                            hq = (gqa * (head % Hkv) + head // Hkv
+                                  if swizzled else head)
+                            seen[wi] = {"Q": blk, "B": bt,
+                                        "V": hq // gqa, "G": hq % gqa}
+                self.assertEqual(len(seen), W,
+                                 f"{order}: grid does not cover the work space")
+                mismatch = next(
+                    (wi for wi in range(W)
+                     if seen[wi] != decode_reference(wi, digits, rad)), None)
+                self.assertIsNone(
+                    mismatch,
+                    f"{order}: grid {(gx, gy, gz)} does not linearize to "
+                    f"{digits}; first disagreement at work item {mismatch}",
+                )
+
+        # named_xgyq is not a digit PERMUTATION -- it is the kv-phase split,
+        # so it is checked against the split oracle instead, over shapes where
+        # Hkv does and does NOT divide num_xcds. Those are the cases where a
+        # permutation-based stand-in silently diverges: an earlier version of
+        # this order was VGBQ, which matches only at Hkv == num_xcds and was
+        # measured up to ~5% slower elsewhere.
+        from kernels.common.attention_dense_spec import KV_SPLIT_MODULUS as _M
+        for Hq_, Hkv_, B_ in ((32, 8, 4), (28, 4, 4), (40, 10, 4),
+                              (16, 2, 4), (80, 40, 2)):
+            with self.subTest(order="named_xgyq", shape=f"{Hq_}/{Hkv_} B={B_}"):
+                gqa_ = Hq_ // Hkv_
+                spec = Gfx942AttentionDenseSpec(
+                    **{**base, "batch": B_, "num_query_heads": Hq_,
+                       "num_kv_heads": Hkv_},
+                    default_grid_order="named_xgyq")
+                gx, gy, gz = attention_dense_grid(spec)
+                nqb = 2048 // spec.block_m
+                rad = digit_radices(nqb, B_, Hkv_, gqa_)
+                W = nqb * B_ * Hkv_ * gqa_
+                seen = {}
+                for bz in range(gz):
+                    for by in range(gy):
+                        for bx in range(gx):
+                            wi = bx + gx * (by + gy * bz)
+                            F = (bx % _M) + _M * by
+                            seen[wi] = {"Q": bz, "B": F // Hkv_,
+                                        "V": F % Hkv_, "G": bx // _M}
+                self.assertEqual(len(seen), W, "named_xgyq: grid miscovers")
+                self.assertTrue(
+                    all(seen[wi] == decode_reference(wi, "xGyQ", rad,
+                                                     False, False)
+                        for wi in range(W)),
+                    f"named_xgyq at {Hq_}/{Hkv_} B={B_} does not reproduce the "
+                    "generic xGyQ V-minor split",
+                )
+
+    def test_runtime_shape_grid_orders_do_not_bake_nqb(self):
+        """A runtime_shape body must emit the SAME IR for every seqlen.
+
+        Under runtime_shape the seqlen is dropped from both the cache key and
+        the symbol, so one binary serves a whole shape family. Any order that
+        bakes NQB then reverses or folds against the WRONG extent for every
+        other seqlen in that family: at NQB=8 baked and 16 live, `qb = 7 - id`
+        goes negative and the kernel reads out of bounds. That is not a
+        hypothetical -- it was hit on S=4096 reusing the S=2048 binary, as an
+        illegal memory access, and `hq_major_fold` carried the same latent bug
+        for orders nothing dispatches but a sweep can select.
+
+        Asserted over EVERY implemented grid order rather than the shipped one,
+        because the sweep-only orders are where a silently-wrong binary does
+        the most damage: it is read as a measurement.
+        """
+        from kernels.gfx942.attention_dense import (
+            Gfx942AttentionDenseSpec, _IMPLEMENTED_GRID_ORDERS,
+            build_attention_dense)
+
+        base = dict(batch=4, seqlen_kv=2048, num_query_heads=32,
+                    num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
+                    block_n=64)
+        for order in sorted(_IMPLEMENTED_GRID_ORDERS):
+            with self.subTest(order=order):
+                a = Gfx942AttentionDenseSpec(**base, seqlen_q=2048,
+                                             default_grid_order=order)
+                c = Gfx942AttentionDenseSpec(**base, seqlen_q=4096,
+                                             default_grid_order=order)
+                if a.kernel_name() != c.kernel_name():
+                    continue  # distinct symbols -> distinct binaries, safe
+                self.assertEqual(
+                    str(build_attention_dense(a, arch="gfx942").body),
+                    str(build_attention_dense(c, arch="gfx942").body),
+                    f"gfx942 {order!r}: two seqlens share a kernel name but "
+                    "lower to different IR -- the launcher cache would serve "
+                    "one shape's binary for the other",
+                )
+
     def test_persist_decodes_have_distinct_kernel_names_on_both_arches(self):
         """Every selectable persistent decode must own a distinct symbol.
 

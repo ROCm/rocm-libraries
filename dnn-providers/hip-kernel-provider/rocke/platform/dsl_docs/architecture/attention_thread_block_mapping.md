@@ -516,16 +516,41 @@ once — low `log2(num_xcds)` bits fastest, high bits slowest — which a permut
 digits cannot do. Implemented as a separate FAMILY (`x` + perm of `y`,`G`,`Q`, six
 members) plus an orthogonal **phase rotation** axis, `qb_phase_rotate`.
 
-Two degeneracy rules make most of the family a relabelling, and they decide where it can
-be tested at all:
+The two split digits, written out, with `M = num_xcds`:
 
-| fusion | `F` | collapses to a permutation when |
-|---|---|---|
-| V-minor (default) | `bt*Hkv + hkv` | `Hkv == num_xcds` |
-| B-minor | `hkv*B + bt` | `B == num_xcds` |
+```
+    x  =  F % M          the LOW part -- fastest digit, so xcd = wi % M == x
+    y  =  F // M         the HIGH part -- the phase index, radix B*Hkv/M
+    F  =  x + M*y        reconstructed in the decode, then split back to (bt, hkv)
+```
 
-`x` adjacent to `y` is always degenerate (it just reassembles `F` contiguously). So the
-common prod geometries, all `Hkv == 8`, are reachable only with the B-minor fusion.
+and `F` itself is one of two fusions, which is NOT a cosmetic choice:
+
+| fusion | `F` | `(bt, hkv)` recovered as | collapses to a permutation when |
+|---|---|---|---|
+| V-minor (default) | `bt*Hkv + hkv` | `bt = F // Hkv`, `hkv = F % Hkv` | `Hkv == num_xcds` |
+| B-minor | `hkv*B + bt` | `bt = F % B`, `hkv = F // B` | `B == num_xcds` |
+
+The collapse happens exactly when the fusion lines up with a digit boundary. At
+`Hkv == M` the V-minor split has `x == hkv` and `y == bt` identically, so it IS the
+digit pair in those slots; at `B == M` the B-minor split likewise has `x == bt`,
+`y == hkv`. Note `B % M == 0` is NOT sufficient: at `B = 16` or `32` the batch index is
+*split* across both halves (`x = bt % M`, `y = hkv*(B/M) + bt // M`), which is a new
+mapping.
+
+`x` adjacent to `y` is always degenerate whichever fusion is used -- adjacent halves
+just reassemble `F` contiguously, which is the `(V,B)` or `(B,V)` digit pair. That leaves
+four non-degenerate members of the six.
+
+So the common prod geometries, all `Hkv == 8 == num_xcds`, are reachable only with the
+B-minor fusion; V-minor there re-measures permutations the sweep already covered
+(`xGQy == VGQB`, `xQGy == VQGB`, `xGyQ == VGBQ`, `xQyG == VQBG`).
+
+Equal mapping is not equal kernel. The split decode reconstructs `F` and divides it
+back out, which the permutation never does -- measured at **+12 integer ops** in the
+emitted body. On the persistent path that is paid once per work item under grid-stride,
+so a V-minor split at `Hkv == 8` is the same MAPPING as its permutation twin but a
+strictly more expensive kernel. Compare them by measurement, not by the mapping proof.
 
 **The locality premise did not hold.** Ranked by K/V tensors per XCD, the best order
 (`VGQB`, a perfect 1.00) measured WORST, and the shipped-class `BVGQ` at 8–32× poorer

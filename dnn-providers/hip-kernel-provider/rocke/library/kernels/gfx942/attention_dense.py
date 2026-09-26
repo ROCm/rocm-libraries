@@ -762,6 +762,8 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
             "hq_major_fold": "gridhqfold", "hkv_minor": "gridkvmin",
             "hkv_minor_rev": "gridkvminrev",
             "bt_hkv_minor": "gridbtkv", "bt_hkv_minor_rev": "gridbtkvrev",
+            "named_xgyq": "gridxgyq",
+            "named_xgyq_rev": "gridxgyqrev",
         }[spec.default_grid_order])
     # Tagged UNCONDITIONALLY, on both paths. The base kernel_name() appends
     # _persist_decode_name_part only under `if self.persistent`, so a
@@ -825,6 +827,13 @@ _IMPLEMENTED_GRID_ORDERS = frozenset({
     # and fusing (hkv, hql) onto the head axis is what lifts that restriction,
     # and it costs nothing because both of THOSE radices are baked.
     "bt_hkv_minor", "bt_hkv_minor_rev",
+    # grid=(Hq, B, nqb): the hkv_minor head swizzle with batch BETWEEN the head
+    # and the query block -- digit order VGBQ. This is the named form of what
+    # the generic path reaches as the kv-phase split "xGyQ" with the V-minor
+    # fusion: identical mapping when Hkv == num_xcds, minus that path's fused
+    # reconstruction, and it keeps runtime_shape ON so one binary still serves a
+    # whole shape family.
+    "named_xgyq", "named_xgyq_rev",
 })
 
 # Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
@@ -1320,6 +1329,16 @@ def supports_attention_dense(
         # NO legality guard on the order itself: a mixed-radix decode is a
         # bijection for every permutation and every radix set, so there is
         # nothing to reject. xcd_partitionable is a PREDICTOR here, not a gate.
+    if (spec.default_grid_order.startswith("named_xgyq")
+            and (spec.batch * spec.num_kv_heads) % KV_SPLIT_MODULUS):
+        return False, (
+            f"gfx942 attention_dense: default_grid_order="
+            f"{spec.default_grid_order!r} needs batch*num_kv_heads "
+            f"({spec.batch * spec.num_kv_heads}) divisible by "
+            f"{KV_SPLIT_MODULUS}; otherwise the phase axis does not tile the "
+            "fused (batch, kv-head) space and the decode leaves batch indices "
+            "out of range"
+        )
     if spec.default_grid_order not in _IMPLEMENTED_GRID_ORDERS:
         return False, (
             f"gfx942 attention_dense: default_grid_order="
@@ -2462,25 +2481,76 @@ def _build_attention_dense_single_buffer(
         _nqb = Sq // BLOCK_M
         _order = spec.default_grid_order
         _bx, _by = b.block_id_x(), b.block_id_y()
-        if _order.startswith("hkv_minor"):
+        if _order.startswith("named_xgyq"):
+            # x-axis carries (F % M, hql) fused; y carries the phase F // M.
+            _x = b.mod(_bx, b.const_i32(KV_SPLIT_MODULUS))
+            _hql = b.div(_bx, b.const_i32(KV_SPLIT_MODULUS))
+            _F = b.add(_x, b.mul(_by, b.const_i32(KV_SPLIT_MODULUS)))
+            _hq = b.add(b.mul(b.mod(_F, b.const_i32(Hkv)), b.const_i32(gqa)),
+                        _hql)
+        elif _order.startswith("hkv_minor"):
             _hq = b.add(
                 b.mul(b.mod(_bx, b.const_i32(Hkv)), b.const_i32(gqa)),
                 b.div(_bx, b.const_i32(Hkv)),
             )
         else:
             _hq = _bx
-        if _order.endswith("_rev") and causal and _nqb > 1:
-            _qb = b.sub(b.const_i32(_nqb - 1), _by)
-        elif _order.endswith("_fold") and causal and _nqb > 1:
-            _h = _nqb // 2
-            _qb = b.select(
-                b.cmp_lt(_by, b.const_i32(_h)),
-                _by,
-                b.sub(b.const_i32(_nqb - 1 + _h), _by),
-            )
+        # named_xgyq puts BATCH on y and the query block on z; every other
+        # order here has the query block on y and batch on z. Branch FIRST and
+        # emit the qb map exactly once: the IR builder is side-effecting, so
+        # computing a _by-derived qb and then overwriting it still emits the
+        # dead ops -- which is how a baked NQB constant survived into a
+        # runtime_shape body and made two seqlens differ under one symbol.
+        if _order.startswith("named_xgyq"):
+            # batch comes out of the FUSED identity, not off an axis.
+            _axis, _bt = b.block_id_z(), b.div(_F, b.const_i32(Hkv))
         else:
-            _qb = _by
-        _run_work_item(_qb, _hq, b.block_id_z())
+            _axis, _bt = _by, b.block_id_z()
+        if _order.endswith("_rev") and causal:
+            if spec.runtime_shape:
+                # NQB from the RUNTIME seqlen_q, never baked. Under
+                # runtime_shape the seqlen is dropped from the cache key AND
+                # the symbol, so ONE binary serves every seqlen in the family;
+                # a baked NQB then reverses against the wrong extent, and at
+                # NQB=8 baked vs 16 live `qb = 7 - id` goes negative and reads
+                # out of bounds. Observed exactly that way on S=4096 reusing
+                # the S=2048 binary.
+                _nqbv = b.div(b.add(seqlen_q_p, b.const_i32(BLOCK_M - 1)),
+                              b.const_i32(BLOCK_M))
+                _qb = b.sub(b.sub(_nqbv, b.const_i32(1)), _axis)
+            elif _nqb > 1:
+                _qb = b.sub(b.const_i32(_nqb - 1), _axis)
+            else:
+                _qb = _axis
+        elif _order.endswith("_fold") and causal:
+            # Same runtime-vs-baked NQB rule as the _rev arm above. This one was
+            # baked unconditionally and is a PRE-EXISTING collision: under
+            # runtime_shape, hq_major_fold emitted different IR for two seqlens
+            # that share a symbol. No shipped path selects it (dispatch picks
+            # qb_major or bt_hkv_minor_rev), so it was only ever reachable from
+            # a sweep -- which is precisely where a silently-wrong binary does
+            # the most damage, because it is read as a measurement.
+            if spec.runtime_shape:
+                _nqbv = b.div(b.add(seqlen_q_p, b.const_i32(BLOCK_M - 1)),
+                              b.const_i32(BLOCK_M))
+                _hv = b.div(_nqbv, b.const_i32(2))
+                _qb = b.select(
+                    b.cmp_lt(_axis, _hv),
+                    _axis,
+                    b.sub(b.add(b.sub(_nqbv, b.const_i32(1)), _hv), _axis),
+                )
+            elif _nqb > 1:
+                _h = _nqb // 2
+                _qb = b.select(
+                    b.cmp_lt(_axis, b.const_i32(_h)),
+                    _axis,
+                    b.sub(b.const_i32(_nqb - 1 + _h), _axis),
+                )
+            else:
+                _qb = _axis
+        else:
+            _qb = _axis
+        _run_work_item(_qb, _hq, _bt)
     b.ret()
     return b.kernel
 
@@ -2518,6 +2588,20 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
         # onto one axis instead would divide by batch, which gfx950 takes as a
         # kernarg. Grid shape and body MUST agree.
         return (spec.batch, spec.num_query_heads, nqb)
+    if spec.default_grid_order.startswith("named_xgyq"):
+        # The kv-phase split "xGyQ" with the V-minor fusion, as a 3-D grid:
+        #   x = num_xcds*gqa   -- the fused (F%num_xcds, hql) pair
+        #   y = B*Hkv/num_xcds -- the phase, F//num_xcds
+        #   z = nqb            -- the query block
+        # Fusing (x, hql) onto ONE axis is what makes this expressible in three
+        # dimensions, and it costs nothing: both radices are compile-time
+        # constants, so the unpack is a div/mod by a baked value. Crucially the
+        # BATCH extent never enters the body -- only Hkv does -- so this keeps
+        # runtime_shape ON where the generic path must force it off.
+        _spec = _as_gfx942_spec(spec)
+        _gqa = _spec.num_query_heads // _spec.num_kv_heads
+        return (KV_SPLIT_MODULUS * _gqa,
+                _spec.batch * _spec.num_kv_heads // KV_SPLIT_MODULUS, nqb)
     if spec.default_grid_order == "qb_major":
         return (nqb, spec.num_query_heads, spec.batch)
     # hq_major / hkv_minor both put the head axis on x; they differ only in how
