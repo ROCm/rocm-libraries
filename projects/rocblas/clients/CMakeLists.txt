@@ -90,14 +90,25 @@ if ( BUILD_FORTRAN_CLIENTS )
   # Set Fortran module output directory
   set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/rocblas/internal)
 
-  # Create rocBLAS Fortran module
-  add_library(rocblas_fortran OBJECT ../library/include/rocblas_module.f90)
+  # The rocblas module is no longer built here from the hand-written
+  # ../library/include/rocblas_module.f90: it is generated from the C headers and
+  # built by ../fortran, which exports roc::rocblas_fortran. Building it twice
+  # would also collide, since both targets carry the same name.
+  if( NOT TARGET rocblas_fortran )
+    message(FATAL_ERROR
+      "BUILD_FORTRAN_CLIENTS is ON but the rocblas_fortran target is missing. "
+      "It is built by projects/rocblas/fortran; enable BUILD_FORTRAN_BINDINGS.")
+  endif()
 
   if( BUILD_WITH_TENSILE )
     list( APPEND rocblas_f90_source_clients include/rocblas_fortran_tensile.f90 )
   endif()
 
-  add_library(rocblas_fortran_client STATIC ${rocblas_f90_source_clients} $<TARGET_OBJECTS:rocblas_fortran>)
+  # Linking rather than absorbing $<TARGET_OBJECTS:rocblas_fortran>: the binding
+  # is a real library now, with its own .mod directory and link interface, and
+  # rocblas_fortran_client only needs to compile against it and carry it forward.
+  add_library(rocblas_fortran_client STATIC ${rocblas_f90_source_clients})
+  target_link_libraries(rocblas_fortran_client PUBLIC roc::rocblas_fortran)
 else()
   set( rocblas_fortran_client "")
 endif()

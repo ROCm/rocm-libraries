@@ -332,6 +332,18 @@ if( NOT SKIP_LIBRARY )
     add_subdirectory( library )
 endif()
 
+# Fortran bindings, generated from the headers above and committed next to them.
+# Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS is OFF
+# or when no Fortran compiler is available, so a C-only site is unaffected.
+#
+# Outside the SKIP_LIBRARY guard on purpose, and not merely for symmetry with the
+# other libraries. That guard decides whether librocblas is BUILT here; the
+# bindings need it linked, not built, and resolve it from the prefix path when
+# the in-tree target is absent. Inheriting the skip would be actively broken now
+# that clients consume this target rather than building their own from
+# rocblas_module.f90: BUILD_FORTRAN_CLIENTS would then find no rocblas_fortran.
+add_subdirectory(fortran)
+
 # Build clients of the library
 if( BUILD_CLIENTS )
   add_subdirectory( clients )

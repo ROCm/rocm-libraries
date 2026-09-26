@@ -106,14 +106,22 @@ target_link_libraries(rocblas PRIVATE rocblas-helper roc::tensile-host rocblas-i
 if(ROCBLAS_ENABLE_FORTRAN)
   add_library(rocblas-fortran-module OBJECT)
   add_library(rocblas::rocblas-fortran-module ALIAS rocblas-fortran-module)
+  # The hand-written include/rocblas_module.f90 was removed; this builds the
+  # generated binding instead. It is the same module name (rocblas), so the
+  # clients that `use rocblas` are unaffected, but the enum constants now come
+  # from it rather than from a separate rocblas_enums module.
   target_sources(
     rocblas-fortran-module
     PRIVATE
-      ${_CMAKE_CURRENT_SOURCE_DIR}/include/rocblas_module.f90
+      ${_CMAKE_CURRENT_SOURCE_DIR}/../fortran/rocblas.F90
   )
   set_target_properties(rocblas-fortran-module PROPERTIES
     Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/modules
+    # rocblas.F90 is uppercase: the array overloads sit behind preprocessor
+    # guards, so the source must go through the C preprocessor.
+    Fortran_PREPROCESS ON
     POSITION_INDEPENDENT_CODE ON)
+  target_compile_definitions(rocblas-fortran-module PRIVATE USE_FPOINTER_INTERFACES=1)
 
   target_include_directories(rocblas-fortran-module
     PUBLIC

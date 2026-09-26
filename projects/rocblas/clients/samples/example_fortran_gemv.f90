@@ -51,7 +51,6 @@ end subroutine ROCBLAS_CHECK
 program example_fortran_gemv
     use iso_c_binding
     use rocblas
-    use rocblas_enums
 
     implicit none
 
