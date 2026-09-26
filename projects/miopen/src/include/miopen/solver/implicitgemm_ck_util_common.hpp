@@ -91,12 +91,12 @@ inline bool NextLinear(int L, int H, int& v)
 
 struct ConvSolution;
 
-struct CKBWDWeightBufferDescriptor
+struct CKWorkspaceBufferDescriptor
 {
     size_t ck_size;
     size_t ck_offset;
 
-    CKBWDWeightBufferDescriptor(size_t _ck_size, size_t _ck_offset)
+    CKWorkspaceBufferDescriptor(size_t _ck_size, size_t _ck_offset)
         : ck_size(_ck_size), ck_offset(_ck_offset)
     {
     }
@@ -376,7 +376,7 @@ auto MakeTaggedTransposeInstances(ConvSolution& result,
                                   const Input1TposeOp& input1_op,
                                   const Input2TposeOp& input2_op,
                                   const OutputTposeOp& output_op,
-                                  std::optional<CKBWDWeightBufferDescriptor>& ck_buff_des)
+                                  std::optional<CKWorkspaceBufferDescriptor>& ck_buff_des)
 {
 
     auto input1_solver = input1_op.MakeTransposeSolver(ctx, problem, ck_args);
@@ -498,7 +498,8 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
         {
             return (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem);
         }
-        return 0;
+        // Only forward's selected candidate consumes native CK scratch here.
+        return problem.IsDirectionForward() ? ck_ws_size : 0;
     }
 
     assert(problem.IsLayoutDefault());
@@ -510,6 +511,15 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
              GetPackedSize(problem.GetWeights()),
              GetPackedSize(problem.GetOut()),
              (ck_ws_size > 0) ? ck_ws_size : GetCKAlphaBetaWorkspace(problem)});
+        return wt.GetSize();
+    }
+
+    if(problem.IsDirectionForward())
+    {
+        MultiBufferWorkspaceTraits wt({GetPackedSize(problem.GetIn()),
+                                       GetPackedSize(problem.GetWeights()),
+                                       GetPackedSize(problem.GetOut()),
+                                       ck_ws_size});
         return wt.GetSize();
     }
 

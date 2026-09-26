@@ -165,6 +165,15 @@ struct CKArgs
         return conv_ptr->IsSupportedArgument(arg_ptr.get());
     }
 
+    template <typename ConvPtr>
+    std::size_t GetCKWorkspaceSize(const ConvPtr& conv_ptr) const
+    {
+        // The narrowed bundle belongs to this CKArgs instance for the entire
+        // lifetime of the temporary CK argument used for the query.
+        auto arg_ptr = MakeArgPtr(conv_ptr, nullptr, nullptr, nullptr, 1.0f, 0.0f);
+        return conv_ptr->GetWorkSpaceSize(arg_ptr.get());
+    }
+
     // Length / stride arrays are stored as int64 (and dim members likewise) so
     // the NCHW stride builder above (e.g. Hi*Wi*G*C) does not silently overflow
     // on tensors whose contiguous stride exceeds INT_MAX. MakeArgPtr dispatches
@@ -242,6 +251,35 @@ bool CheckIsArgSupported(const ProblemDescription& problem,
         problem, kernel_id, use_tf32);
 }
 
+template <typename DataType, typename ComputeType>
+std::size_t GetMaxCKWorkspaceSizeForType(const ProblemDescription& problem)
+{
+    const CKArgs args{problem};
+    auto instances           = DeviceOpGFwdPtrs<DataType, ComputeType>::GetInstances();
+    const bool require_large = miopen::solver::RequiresLargeTensorCKInstance(problem);
+    std::size_t maximum      = 0;
+    for(const auto& op : instances)
+    {
+        if((!require_large || miopen::solver::IsLargeTensorCKInstance(op)) &&
+           args.IsSupportedBy(op))
+            maximum = std::max(maximum, args.GetCKWorkspaceSize(op));
+    }
+    return maximum;
+}
+
+template <typename DataType>
+std::size_t GetMaxCKWorkspaceSize(const ProblemDescription& problem, bool use_tf32)
+{
+    std::size_t maximum = GetMaxCKWorkspaceSizeForType<DataType, DataType>(problem);
+    if constexpr(std::is_same_v<DataType, float>)
+    {
+        if(use_tf32)
+            maximum =
+                std::max(maximum, GetMaxCKWorkspaceSizeForType<DataType, ck::tf32_t>(problem));
+    }
+    return maximum;
+}
+
 } // anonymous namespace
 
 // ===========================================================================
@@ -303,18 +341,19 @@ ck_impl_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
 }
 
 extern "C" ck_impl_status_t
-ck_impl_fwd_get_workspace_size(const miopen::conv::ProblemDescription* /*problem*/,
-                               miopenDataType_t /*data_type*/,
-                               bool /*use_tf32*/,
+ck_impl_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
+                               miopenDataType_t data_type,
+                               bool use_tf32,
                                size_t* out_size)
 {
-    // FWD grouped convolution CK kernels do not use split-k and never
-    // require CK-level workspace.  Layout transform workspace (NCHW to NHWC)
-    // is computed independently at the solver level via
-    // GetWorkspaceSizeLayoutTransformConv().
     return ck_impl_try_catch([&]() {
         CK_IMPL_THROW_IF_NULL(out_size, CK_IMPL_STATUS_BAD_PARAM, "Null out_size");
-        *out_size = 0;
+        CK_IMPL_THROW_IF_NULL(problem, CK_IMPL_STATUS_BAD_PARAM, "Null problem");
+        // The problem-level API has no kernel ID: cover every supported instance.
+        // The solution queries its selected argument independently at invocation.
+        *out_size = DispatchByDataType(data_type, [&](auto type_val) {
+            return GetMaxCKWorkspaceSize<decltype(type_val)>(*problem, use_tf32);
+        });
     });
 }
 
@@ -349,8 +388,8 @@ ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
                 return InitInvokerFactoryNHWC<false,
                                               DeviceOpGFwdPtrs<T, TCompute>,
                                               CKArgs,
-                                              miopen::conv::DataInvokeParams>(
-                    *ctx, *problem, std::string(kernel_id));
+                                              miopen::conv::DataInvokeParams,
+                                              true>(*ctx, *problem, std::string(kernel_id));
             },
             use_tf32);
         *out_solution = new miopen::solver::ConvSolution(std::move(solution));

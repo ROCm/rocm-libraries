@@ -2,20 +2,30 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <half/half.hpp>
+#include <miopen/errors.hpp>
 #include <miopen/env.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/solver/ck_impl_error.hpp>
 #include <miopen/solver/ck_impl_lib_loader.hpp>
-#include <miopen/conv/problem_description.hpp>
 #include <miopen/conv_solution.hpp>
+#include <miopen/solver/implicitgemm_ck_util_common.hpp>
+#include <miopen/conv/data_invoke_params.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/tensor.hpp>
 
+#include <algorithm>
+#include <cstdint>
+
+#include <vector>
 #include <thread>
 
 #if MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime.h>
+#include "get_handle.hpp"
+#include "../workspace.hpp"
 #endif
 
 using miopen::solver::CKSolverType;
@@ -82,7 +92,39 @@ miopen::conv::ProblemDescription MakeGroupedConvProblem()
         in_desc, wei_desc, out_desc, conv_desc, miopen::conv::Direction::Forward);
 }
 
+miopen::conv::ProblemDescription MakePackedForwardProblem(miopenTensorLayout_t layout)
+{
+    const miopen::TensorDescriptor in_desc(miopenHalf, layout, {64, 128, 28, 28});
+    const miopen::TensorDescriptor wei_desc(miopenHalf, layout, {128, 4, 3, 3});
+    const miopen::ConvolutionDescriptor conv_desc({1, 1}, {1, 1}, {1, 1}, {0, 0}, 32);
+    const auto out_desc = conv_desc.GetForwardOutputTensor(in_desc, wei_desc, miopenHalf);
+    return miopen::conv::ProblemDescription(
+        in_desc, wei_desc, out_desc, conv_desc, miopen::conv::Direction::Forward);
+}
+
 } // namespace
+
+TEST(CPU_CkImplLoader_NONE, ForwardCKScratchLayoutPartition)
+{
+    constexpr size_t packed_bytes = 32 * 4 * 9 * 4 * sizeof(uint16_t) * 4;
+    const auto nhwc               = MakePackedForwardProblem(miopenTensorNHWC);
+    const auto nchw               = MakePackedForwardProblem(miopenTensorNCHW);
+    EXPECT_EQ(miopen::solver::GetWorkspaceSizeLayoutTransformConv(nhwc), 0u);
+    EXPECT_EQ(miopen::solver::GetWorkspaceSizeLayoutTransformConv(nhwc, packed_bytes),
+              packed_bytes);
+
+    const miopen::MultiBufferWorkspaceTraits regions(
+        {miopen::solver::GetPackedSize(nchw.GetIn()),
+         miopen::solver::GetPackedSize(nchw.GetWeights()),
+         miopen::solver::GetPackedSize(nchw.GetOut()),
+         packed_bytes});
+    EXPECT_EQ(regions.GetOffset(3) % 256, 0u);
+    EXPECT_GE(regions.GetOffset(3),
+              regions.GetOffset(2) + miopen::solver::GetPackedSize(nchw.GetOut()));
+    EXPECT_GE(regions.GetSize(), regions.GetOffset(3) + packed_bytes);
+    EXPECT_EQ(miopen::solver::GetWorkspaceSizeLayoutTransformConv(nchw, packed_bytes),
+              regions.GetSize());
+}
 
 // -- GPU tests (require a HIP device) -----------------------------------------
 
@@ -123,6 +165,133 @@ TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernels)
 
     EXPECT_FALSE(kernels.empty()) << "Expected at least one valid CK grouped conv kernel for "
                                   << device_name;
+}
+
+TEST(GPU_CkImplLoader_FP16, PackedForwardSelectedWorkspace)
+{
+    const auto device_name = GetCurrentDeviceName();
+    if(device_name.find("gfx1250") != 0)
+        GTEST_SKIP() << "Packed forward candidate is registered only on gfx1250";
+
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
+    if(!loader.IsLoaded())
+        GTEST_SKIP() << "Matching CK grouped conv library not installed";
+
+    const auto nhwc    = MakePackedForwardProblem(miopenTensorNHWC);
+    const auto nchw    = MakePackedForwardProblem(miopenTensorNCHW);
+    const auto kernels = loader.FillValidKernels(CKSolverType::GrpConvFwd, nhwc, miopenHalf, false);
+    const auto packed  = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
+        return id.find("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3") != std::string::npos &&
+               id.size() >= 4 && id.compare(id.size() - 4, 4, ", 4>") == 0;
+    });
+    ASSERT_NE(packed, kernels.end());
+    constexpr size_t packed_bytes = 36864;
+    EXPECT_GE(loader.GetWorkspaceSize(CKSolverType::GrpConvFwd, nhwc, miopenHalf, false),
+              packed_bytes);
+    EXPECT_GE(loader.GetWorkspaceSize(CKSolverType::GrpConvFwd, nchw, miopenHalf, false),
+              packed_bytes);
+    const miopen::TensorDescriptor plain_in(miopenHalf, miopenTensorNHWC, {1, 12, 8, 8});
+    const miopen::TensorDescriptor plain_weight(miopenHalf, miopenTensorNHWC, {12, 4, 3, 3});
+    const miopen::ConvolutionDescriptor plain_conv({1, 1}, {1, 1}, {1, 1}, {0, 0}, 3);
+    const auto plain_out = plain_conv.GetForwardOutputTensor(plain_in, plain_weight, miopenHalf);
+    const miopen::conv::ProblemDescription plain(
+        plain_in, plain_weight, plain_out, plain_conv, miopen::conv::Direction::Forward);
+    EXPECT_EQ(loader.GetWorkspaceSize(CKSolverType::GrpConvFwd, plain, miopenHalf, false), 0u);
+    const auto plain_kernels =
+        loader.FillValidKernels(CKSolverType::GrpConvFwd, plain, miopenHalf, false);
+    ASSERT_FALSE(plain_kernels.empty());
+
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    nhwc.SetupFloats(ctx);
+    nhwc.SetupComputeType(ctx);
+    const auto plain_solution =
+        loader.GetSolution(CKSolverType::GrpConvFwd, ctx, plain, plain_kernels.front(), false);
+    ASSERT_EQ(plain_solution.status, miopenStatusSuccess);
+    EXPECT_EQ(plain_solution.workspace_sz, 0u);
+    const auto native_solution =
+        loader.GetSolution(CKSolverType::GrpConvFwd, ctx, nhwc, *packed, false);
+    ASSERT_EQ(native_solution.status, miopenStatusSuccess);
+    EXPECT_EQ(native_solution.workspace_sz, packed_bytes);
+    const auto transformed_solution =
+        loader.GetSolution(CKSolverType::GrpConvFwd, ctx, nchw, *packed, false);
+    ASSERT_EQ(transformed_solution.status, miopenStatusSuccess);
+    EXPECT_EQ(transformed_solution.workspace_sz,
+              miopen::solver::GetWorkspaceSizeLayoutTransformConv(nchw, packed_bytes));
+
+    const auto run_twice = [&](const auto& problem, const auto& solution) {
+        ASSERT_TRUE(solution.invoker_factory);
+        const auto& in_desc  = problem.GetIn();
+        const auto& wei_desc = problem.GetWeights();
+        const auto& out_desc = problem.GetOut();
+        using Half           = half_float::half;
+        const std::vector<Half> input(in_desc.GetElementSize(), Half{1.0f});
+        std::vector<Half> weights(wei_desc.GetElementSize(), Half{0.0f});
+        const std::vector<Half> output(out_desc.GetElementSize(), Half{0.0f});
+        auto in_dev  = handle.Write(input);
+        auto wei_dev = handle.Write(weights);
+        auto out_dev = handle.Write(output);
+        Workspace scratch(solution.workspace_sz);
+        ASSERT_NE(scratch.ptr(), nullptr);
+        const auto invoker =
+            handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+        const auto wei_strides = wei_desc.GetStrides();
+        const auto out_strides = out_desc.GetStrides();
+        const miopen::ConvFwdTensors tensors{
+            in_desc, in_dev.get(), wei_desc, wei_dev.get(), out_desc, out_dev.get()};
+        EXPECT_THROW(invoker(handle, miopen::conv::DataInvokeParams{tensors, nullptr, 0, false}),
+                     miopen::Exception);
+        EXPECT_THROW(invoker(handle,
+                             miopen::conv::DataInvokeParams{
+                                 tensors, scratch.ptr(), scratch.size() - 1, false}),
+                     miopen::Exception);
+
+        for(int weight_scale : {1, 2})
+        {
+            // Same GPU weight pointer on both runs: no cached packed copy may survive.
+            for(std::size_t k = 0; k < 128; ++k)
+                for(std::size_t c = 0; c < 4; ++c)
+                    for(std::size_t y = 0; y < 3; ++y)
+                        for(std::size_t x = 0; x < 3; ++x)
+                            weights[k * wei_strides[0] + c * wei_strides[1] + y * wei_strides[2] +
+                                    x * wei_strides[3]] =
+                                Half{static_cast<float>((k / 4 + 1) * weight_scale)};
+            handle.WriteTo(weights.data(), wei_dev, miopen::solver::GetPackedSize(wei_desc));
+            ASSERT_EQ(hipMemset(scratch.ptr(), 0xa5, scratch.size()), hipSuccess);
+            ASSERT_EQ(hipMemset(out_dev.get(), 0x7f, out_desc.GetNumBytes()), hipSuccess);
+
+            const miopen::conv::DataInvokeParams params{
+                tensors, scratch.ptr(), scratch.size(), false};
+            invoker(handle, params);
+            handle.Finish();
+
+            const auto actual = handle.Read<Half>(out_dev, out_desc.GetElementSize());
+            for(std::size_t n = 0; n < 64; ++n)
+                for(std::size_t k = 0; k < 128; ++k)
+                    for(std::size_t h = 0; h < 28; ++h)
+                        for(std::size_t w = 0; w < 28; ++w)
+                        {
+                            const auto index = n * out_strides[0] + k * out_strides[1] +
+                                               h * out_strides[2] + w * out_strides[3];
+                            const int taps =
+                                (h == 0 || h == 27 ? 2 : 3) * (w == 0 || w == 27 ? 2 : 3);
+                            const int expected =
+                                taps * 4 * static_cast<int>(k / 4 + 1) * weight_scale;
+                            if(static_cast<float>(actual[index]) != expected)
+                            {
+                                ADD_FAILURE() << "layout=" << in_desc.GetLayout_str()
+                                              << " pass=" << weight_scale << " n=" << n
+                                              << " k=" << k << " h=" << h << " w=" << w
+                                              << " actual=" << static_cast<float>(actual[index])
+                                              << " expected=" << expected;
+                                return;
+                            }
+                        }
+        }
+    };
+
+    run_twice(nhwc, native_solution);
+    run_twice(nchw, transformed_solution);
 }
 
 TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)

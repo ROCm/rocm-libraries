@@ -28,7 +28,7 @@ struct ConvSolution;
 
 /// API version constant. Bump when the set of extern "C" symbols or their
 /// semantics change.  The loader checks this at dlopen time.
-#define CK_IMPL_API_VERSION 5
+#define CK_IMPL_API_VERSION 6
 
 /// Opaque handle wrapping a list of valid kernel ID strings.
 /// Allocated by the impl library, freed by the caller via
@@ -101,6 +101,9 @@ ck_impl_fwd_is_args_supported(const miopen::conv::ProblemDescription* problem,
                               bool use_tf32,
                               bool* out_result);
 
+/// Maximum native CK scratch across all supported forward candidates for this
+/// problem (excluding any external NCHW layout-transform buffers). The selected
+/// solution separately queries its argument and installs that scratch pointer.
 CK_IMPL_NODISCARD CK_IMPL_API ck_impl_status_t
 ck_impl_fwd_get_workspace_size(const miopen::conv::ProblemDescription* problem,
                                miopenDataType_t data_type,

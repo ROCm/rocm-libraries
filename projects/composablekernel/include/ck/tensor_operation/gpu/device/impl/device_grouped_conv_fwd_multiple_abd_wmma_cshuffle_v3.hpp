@@ -1874,6 +1874,25 @@ struct DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3
                 }
                 return false;
             }
+            // The block-diagonal path is validated for four input and output
+            // channels per group; wider groups need separate tuning and proof.
+            if(C != 4 || K != 4)
+                return false;
+
+            // The packing prepass indexes the source as contiguous GKYXC.
+            // A strided weight tensor would silently read the wrong taps.
+            long_index_t packed_stride = C;
+            if(arg.b_g_k_c_xs_strides_[I2] != 1)
+                return false;
+            for(index_t d = NDimSpatial + 2; d >= 3; --d)
+            {
+                if(arg.b_g_k_c_xs_strides_[d] != packed_stride)
+                    return false;
+                packed_stride *= arg.b_g_k_c_xs_lengths_[d];
+            }
+            if(arg.b_g_k_c_xs_strides_[I1] != packed_stride ||
+               arg.b_g_k_c_xs_strides_[I0] != packed_stride * K)
+                return false;
         }
 
         // check vector access of A

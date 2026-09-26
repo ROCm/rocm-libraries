@@ -443,10 +443,16 @@ bool ConvHipImplicitGemmGroupFwdXdlops::IsValidPerformanceConfig(
     return config.IsValid(problem);
 }
 
-size_t ConvHipImplicitGemmGroupFwdXdlops::GetWorkspaceSize(const ExecutionContext&,
+size_t ConvHipImplicitGemmGroupFwdXdlops::GetWorkspaceSize(const ExecutionContext& ctx,
                                                            const ProblemDescription& problem) const
 {
-    return GetWorkspaceSizeLayoutTransformConv(problem);
+    const auto& loader   = CkImplLibLoader::Get(ctx.GetStream().GetDeviceName());
+    const auto data_type = problem.GetInDataType();
+    const auto ck_size   = loader.GetWorkspaceSize(CKSolverType::GrpConvFwd,
+                                                 problem,
+                                                 data_type,
+                                                 data_type == miopenFloat && problem.UseTF32());
+    return GetWorkspaceSizeLayoutTransformConv(problem, ck_size);
 }
 
 PerformanceConfigHipImplicitGemmGroupFwdXdlops

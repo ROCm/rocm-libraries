@@ -6,6 +6,7 @@
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 
+#include <cstdint>
 #include <limits>
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -936,7 +937,8 @@ template <bool ZeroOutputs,
           typename CastType,
           typename Input1TposeOp,
           typename Input2TposeOp,
-          typename OutputTposeOp>
+          typename OutputTposeOp,
+          bool NativeForwardWorkspace = false>
 ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const miopen::conv::ProblemDescription& problem,
                                     const std::string& kernel_id,
@@ -961,7 +963,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         id_string = kernel_id.substr(0, pos);
     }
 
-    std::optional<CKBWDWeightBufferDescriptor> _ck_buff_des;
+    std::optional<CKWorkspaceBufferDescriptor> _ck_buff_des;
 
     auto ptr_iter = FindConvPtrByID(conv_ptrs, id_string);
     if(ptr_iter == conv_ptrs.end())
@@ -986,6 +988,14 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         _ck_buff_des.emplace(ck_ws_size, 0);
         result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
     }
+    else if constexpr(NativeForwardWorkspace)
+    {
+        // Only the 2D default forward path has packed-weight CK scratch.
+        const auto ck_ws_size = ck_args.GetCKWorkspaceSize(*ptr_iter);
+        if(ck_ws_size != 0)
+            _ck_buff_des.emplace(ck_ws_size, 0);
+        result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem, ck_ws_size);
+    }
     else
     {
         result.workspace_sz = GetWorkspaceSizeLayoutTransformConv(problem);
@@ -1003,8 +1013,9 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               input2_tr_inst_      = std::move(_input2_tr_inst),
                               output_tr_inst_      = std::move(_output_tr_inst),
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
-                              ck_buff_des_ =
-                                  _ck_buff_des](const std::vector<Kernel>& kernels) mutable {
+                              ck_buff_des_         = _ck_buff_des,
+                              workspace_size_ =
+                                  result.workspace_sz](const std::vector<Kernel>& kernels) mutable {
         return [kernel_id2 = std::move(kernel_id_),
                 split_k2   = split_k_,
                 kernels,
@@ -1014,13 +1025,22 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 input2_tr_inst2      = std::move(input2_tr_inst_),
                 output_tr_inst2      = std::move(output_tr_inst_),
                 output_init_tr_inst2 = std::move(output_init_tr_inst_),
-                ck_buff_des2         = ck_buff_des_](const Handle& handle,
-                                             const AnyInvokeParams& primitive_parameters) mutable {
+                ck_buff_des2         = ck_buff_des_,
+                workspace_size2      = workspace_size_](
+                   const Handle& handle, const AnyInvokeParams& primitive_parameters) mutable {
             handle.ResetKernelTime();
 
             const auto& data_ctx = primitive_parameters.CastTo<CastType>();
             Data_t workspace_ptr = GetWorkspacePointer<CastType>(data_ctx);
             ValidateWorkspacePointer<CastType>(workspace_ptr);
+            if constexpr(NativeForwardWorkspace)
+            {
+                MIOPEN_THROW_IF(
+                    data_ctx.workSpaceSize < workspace_size2 ||
+                        (ck_buff_des2.has_value() &&
+                         reinterpret_cast<std::uintptr_t>(workspace_ptr) % 16 != 0),
+                    "Insufficient or misaligned forward layout-transform and CK workspace");
+            }
 
             input1_tr_inst2.AssignBuffer(handle, workspace_ptr);
             input2_tr_inst2.AssignBuffer(handle, workspace_ptr);
@@ -1071,11 +1091,17 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                  CastType>(ck_args2, sh_conv_ptr2, tr_ptrs, data_ctx, split_k2);
 
             shared<Data_t> buf_handle{};
-            if(ck_buff_des2.has_value() && ck_buff_des2->ck_size && workspace_ptr)
+            if(ck_buff_des2.has_value() && ck_buff_des2->ck_size)
             {
+                if constexpr(NativeForwardWorkspace)
+                {
+                    const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());
+                    MIOPEN_THROW_IF(actual_size > ck_buff_des2->ck_size,
+                                    "Selected forward CK scratch exceeds reserved workspace");
+                }
                 buf_handle = handle.CreateSubBuffer(
                     workspace_ptr, ck_buff_des2->ck_offset, ck_buff_des2->ck_size);
-                assert(buf_handle.get());
+                MIOPEN_THROW_IF(!buf_handle.get(), "Failed to create CK workspace sub-buffer");
                 sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), buf_handle.get());
             }
 
@@ -1118,6 +1144,7 @@ template <bool ZeroOutputs,
           typename DeviceOpType,
           typename CKArgsType,
           typename CastType,
+          bool NativeForwardWorkspace     = false,
           typename ProblemDescriptionType = miopen::conv::ProblemDescription>
 ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                     [[maybe_unused]] const ProblemDescriptionType& problem,
@@ -1231,14 +1258,20 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     else
     {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+        auto ck_args = CKArgsType{problem};
+        if constexpr(NativeForwardWorkspace)
+            result.workspace_sz = ck_args.GetCKWorkspaceSize(*ptr_iter);
+
         result.invoker_factory = [kernel_id_   = kernel_id,
                                   split_k_     = split_k,
-                                  ck_args_     = CKArgsType{problem},
+                                  ck_args_     = std::move(ck_args),
+                                  ck_ws_size_  = result.workspace_sz,
                                   sh_conv_ptr_ = std::shared_ptr{std::move(*ptr_iter)}](
                                      const std::vector<Kernel>&) mutable {
             return [kernel_id2   = kernel_id_,
                     split_k2     = split_k_,
                     ck_args2     = std::move(ck_args_),
+                    ck_ws_size2  = ck_ws_size_,
                     sh_conv_ptr2 = std::move(sh_conv_ptr_)](
                        const Handle& handle, const AnyInvokeParams& primitive_parameters) {
                 const auto& data_ctx = primitive_parameters.CastTo<CastType>();
@@ -1248,6 +1281,19 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                      std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
                                      CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
+                if constexpr(NativeForwardWorkspace)
+                {
+                    const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());
+                    MIOPEN_THROW_IF(
+                        actual_size > ck_ws_size2 ||
+                            (actual_size != 0 &&
+                             (data_ctx.workSpace == nullptr ||
+                              data_ctx.workSpaceSize < actual_size ||
+                              reinterpret_cast<std::uintptr_t>(data_ctx.workSpace) % 16 != 0)),
+                        "Insufficient or misaligned forward CK packed-weight workspace");
+                    if(actual_size != 0)
+                        sh_conv_ptr2->SetWorkSpacePointer(argument_ptr.get(), data_ctx.workSpace);
+                }
 
                 auto invoker_ptr = sh_conv_ptr2->MakeInvokerPointer();
 
@@ -1302,8 +1348,15 @@ ConvSolution InitInvokerFactoryFwdNCHW(const ExecutionContext& ctx,
     using Input1 = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Input>;
     using Input2 = internal::CKTransposeInputOp<ND, internal::ConvOperandTag::Weights>;
     using Output = internal::CKTransposeOutputOp<ND, internal::ConvOperandTag::Output>;
-
-    return InitInvokerFactoryNCHW<ZeroOutputs, DeviceOpType, CKArgsType, CastType>(
+    return InitInvokerFactoryNCHW<ZeroOutputs,
+                                  DeviceOpType,
+                                  CKArgsType,
+                                  CastType,
+                                  Input1,
+                                  Input2,
+                                  Output,
+                                  (ND == 2 &&
+                                   std::is_same_v<CastType, miopen::conv::DataInvokeParams>)>(
         ctx, problem, kernel_id, Input1{}, Input2{}, Output{});
 }
 
