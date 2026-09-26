@@ -67,8 +67,9 @@ Why it is set up this way:
 - **One bare entry plus one per `ex_gpu_*` label.** CI selects tests by a tier label combined
   with an architecture filter, either `-L ^ex_gpu_<arch>$` on an architecture that
   `test_categories.yaml` declares or `-LE ex_gpu` elsewhere. No single entry survives both, so
-  exactly one of these is selected under each. `ForwardingParityGpuLabels.cmake` reads the
-  labels from the YAML, and stops the configure if the YAML exists but has none.
+  exactly one of these is selected under each. `ForwardingParityGpuLabels.cmake` takes the
+  labels from the shared parser's output, so an architecture gets a parity entry exactly when
+  the parser registers an enabled test for it, and stops the configure if the parser fails.
   `forwarding_parity` goes on the bare entry only, so `ctest -L forwarding_parity` replays the
   surface once.
 - **Tier labels are `quick`, `standard`, `comprehensive` and `full`,** so the harness runs in

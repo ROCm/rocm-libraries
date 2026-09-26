@@ -420,6 +420,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   set(MIOPEN_FORWARDING_PARITY_TIER_LABELS "quick;standard;comprehensive;full")
 
   set(MIOPEN_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+  set(MIOPEN_TEST_CATEGORIES_PARSER "${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_test_categories.py")
   include(${CMAKE_CURRENT_SOURCE_DIR}/ForwardingParityGpuLabels.cmake)
 
   # ENVIRONMENT_MODIFICATION rather than ENVIRONMENT, so each directory is joined with the
