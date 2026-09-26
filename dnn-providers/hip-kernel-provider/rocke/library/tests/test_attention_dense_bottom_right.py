@@ -192,7 +192,7 @@ def test_equal_length_bottom_right_emits_no_add_zero(geometry):
 
 def test_equal_length_dispatch_normalizes_to_top_left_body():
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950 import dense_spec_for_request
+    from dispatch.attention.gfx950_dense import dense_spec_for_request
 
     def dispatched(mask_type):
         return dense_spec_for_request(

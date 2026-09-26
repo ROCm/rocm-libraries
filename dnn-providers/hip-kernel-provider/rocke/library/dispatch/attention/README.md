@@ -204,8 +204,12 @@ from the gfx942 spec rather than from a free field.
 - `__init__.py` — registry assembly and public entry points.
 - `common.py` — arch-neutral request/spec types and shared gates.
 - `generic.py` — candidates that cover more than one architecture.
-- `gfx942.py`, `gfx950.py`, `gfx1250.py` — architecture-owned candidates.
-- `gfx942_tuning.py`, `gfx950_tuning.py` — finite geometry catalogs.
+- `gfx942.py`, `gfx1250.py` — architecture-owned candidates.
+- `gfx950_dense.py` — gfx950 dense-kernel candidates (frozen tile × persist ×
+  wide-DMA variants and the dense ranker).
+- `gfx950_unified.py` — gfx950 unified-kernel candidates: the D256 prefill fast
+  path and the finite tuning geometry catalog.
+- `gfx942_tuning.py` — gfx942 finite geometry catalog.
 - `tuning_common.py` — candidate construction, the per-arch knob axes, the
   pruned depth-first enumeration and random sampler, support filtering,
   stable IDs, and sweep expansion.

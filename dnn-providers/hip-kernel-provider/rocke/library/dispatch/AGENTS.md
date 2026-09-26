@@ -18,7 +18,7 @@ passed from Python, it does not recompute it.
 
 **Standalone candidates are a bounded exception.** A candidate that owns its own
 kernel module builds that kernel's own spec here, tuning included:
-`gfx950.py::_dense_spec` resolves tile geometry from the frozen variant plus persist /
+`gfx950_dense.py::_dense_spec` resolves tile geometry from the frozen variant plus persist /
 wide-DMA, and `gfx942.py::_dense_spec` resolves those plus `waves_per_eu`. Those specs
 are consumed only by their own builder and never enter the C++ parity identity. One
 rule governs the exception: **any value the kernel bakes into its `kernel_name` must
@@ -40,19 +40,19 @@ params). Correctness rests entirely on the key.
 | priority | candidate | declared arches | module | scope |
 |---|---|---|---|---|
 | 3 | `attention_gfx942_dense` | gfx942 | `gfx942.py` | bf16/fp16 D64/D128 dense prefill, default **and** persistent grids (opt-in only) |
-| 3 | `attention_gfx950_dense` | gfx950 | `gfx950.py` | persist + wide-DMA, default 256×64 tile (opt-in; production name) |
-| 3 | `attention_gfx950_dense_grid_default` | gfx950 | `gfx950.py` | dense grid, default tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_default` | gfx950 | `gfx950.py` | dense persist, default tile, no wide-DMA (opt-in) |
-| 3 | `attention_gfx950_dense_grid_bm128` | gfx950 | `gfx950.py` | dense grid, 128×64 tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_bm128` | gfx950 | `gfx950.py` | dense persist, 128×64 tile (opt-in) |
-| 3 | `attention_gfx950_dense_persist_widedma_bm128` | gfx950 | `gfx950.py` | persist + wide-DMA, 128×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, default 256×64 tile (opt-in; production name) |
+| 3 | `attention_gfx950_dense_grid_default` | gfx950 | `gfx950_dense.py` | dense grid, default tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_default` | gfx950 | `gfx950_dense.py` | dense persist, default tile, no wide-DMA (opt-in) |
+| 3 | `attention_gfx950_dense_grid_bm128` | gfx950 | `gfx950_dense.py` | dense grid, 128×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_bm128` | gfx950 | `gfx950_dense.py` | dense persist, 128×64 tile (opt-in) |
+| 3 | `attention_gfx950_dense_persist_widedma_bm128` | gfx950 | `gfx950_dense.py` | persist + wide-DMA, 128×64 tile (opt-in) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942.py` | fp16 2D prefill flash |
-| 5 | `attention_gfx950_d256` | gfx950 | `gfx950.py` | bf16 D256 2D prefill |
+| 5 | `attention_gfx950_d256` | gfx950 | `gfx950_unified.py` | bf16 D256 2D prefill |
 | 5 | `attention_gfx1250_wmma` | gfx1250 | `gfx1250.py` | fp16 WMMA FMHA forward (opt-in only) |
 | 5 | `attention_d256_decode` | gfx942, gfx950 | `generic.py` | bf16 D256 3D decode |
 | 10 | `attention_unified_2d` | all | `generic.py` | generic 2D prefill fallback |
 | 10 | `attention_unified_3d` | all | `generic.py` | generic 3D decode fallback |
-| 30 | `attention_gfx{942,950}_u{2d,3d}_*` | one arch each | `gfx{942,950}_tuning.py` | explicit geometry/codepath candidates; sweep/opt-in only |
+| 30 | `attention_gfx{942,950}_u{2d,3d}_*` | one arch each | `gfx942_tuning.py`, `gfx950_unified.py` | explicit geometry/codepath candidates; sweep/opt-in only |
 
 Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.
@@ -102,6 +102,20 @@ policy (default tile, persist once `nqb*Hq*B >= num_persistent`, wide DMA on
 aligned causal D128) rather than always picking the production name. Pin
 `dense_tile` / `dense_persistent` / `dense_wide_lds_dma` on `AttentionRequest`
 to filter, and `dense_waves_per_eu=1..8` to override the shipped WPE policy.
+
+Each dense variant's `sweep_space` / `sample_space` walks the gfx950 dense knob
+space declared as `_GFX950_DENSE_AXES` in `tuning_common.py` (registered as
+`("gfx950", "dense")`): K/V LDS pads, lazy rescale and its threshold, the PV
+schedule (IGLP versus the manual fence / sched_group template, one combined
+axis because they are mutually exclusive), exp2 and PV-loop codegen, the O
+store width, `num_persistent` (symbolic policies such as `gqa_pair` resolved
+per problem), `persist_decode`, and `interleave`. `production` sets every
+applicable knob to each legal value one at a time from the shipped spec;
+`full` walks or samples the pruned product. An explicit value equal to its
+policy, or a knob the body does not read for that spec, re-emits the same IR
+under a new symbol, so `_dense_redundant_knob` prunes it. The field-coverage
+test in `test_tuning_space.py` classifies every `Gfx950AttentionDenseSpec`
+field as problem, variant, WPE loop, untunable (`lds_num_buffers`), or swept.
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each
 candidate's `sweep_space` (dense, WMMA, and unified tuning). Routing-only
@@ -118,7 +132,10 @@ candidate has to carry it.
 
 One module per architecture, each owning its candidates and exporting a
 `register(registry)`; `__init__.py` holds the request type, the registry
-assembly, and the entry points. `common.py` holds what every candidate shares
+assembly, and the entry points. gfx950 is split by kernel family:
+`gfx950_dense.py` owns the standalone dense kernel's candidates, and
+`gfx950_unified.py` owns every candidate that runs the unified tiled kernels
+(the D256 fast path and the priority-30 tuning catalog). `common.py` holds what every candidate shares
 (request, spec, gates) and imports none of the arch modules, so assembly order
 does not matter. `generic.py` is for candidates declaring more than one arch --
 the two unified paths and `d256_decode` -- which is not the same as portable:

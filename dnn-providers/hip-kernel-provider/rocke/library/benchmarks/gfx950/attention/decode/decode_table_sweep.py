@@ -437,14 +437,16 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks. full samples every kernel knob",
+        help="production walks the curated unified-tuning stacks and sets each "
+        "dense knob to every legal value one at a time from the shipped spec. "
+        "full samples every knob combination",
     )
     ap.add_argument(
         "--tuning-sample",
         type=int,
         default=256,
-        help="with --sweep-level full: random legal specs per tuning candidate, "
-        "seeded by --seed (0 = the full stream). Ignored for production",
+        help="with --sweep-level full: random legal specs per tuning or dense "
+        "candidate, seeded by --seed (0 = the full stream). Ignored for production",
     )
     ap.add_argument("--output-json", default="")
     ap.add_argument(

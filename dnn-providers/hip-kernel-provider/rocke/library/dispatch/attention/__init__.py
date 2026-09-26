@@ -33,7 +33,7 @@ from rocke.dispatch.core import (
     stable_json_hash,
 )
 
-from . import generic, gfx942, gfx942_tuning, gfx950, gfx950_tuning, gfx1250
+from . import generic, gfx942, gfx942_tuning, gfx950_dense, gfx950_unified, gfx1250
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_DIM_VOCABULARY,
@@ -65,15 +65,15 @@ ATTENTION_EXECUTION_REGISTRY = CandidateRegistry(
 )
 generic.register(ATTENTION_ROUTE_REGISTRY)
 gfx942.register_route(ATTENTION_ROUTE_REGISTRY)
-gfx950.register_route(ATTENTION_ROUTE_REGISTRY)
+gfx950_dense.register_route(ATTENTION_ROUTE_REGISTRY)
+gfx950_unified.register_route(ATTENTION_ROUTE_REGISTRY)
 gfx1250.register(ATTENTION_ROUTE_REGISTRY)
 gfx942_tuning.register(ATTENTION_ROUTE_REGISTRY)
-gfx950_tuning.register(ATTENTION_ROUTE_REGISTRY)
 gfx942.register_execution(ATTENTION_EXECUTION_REGISTRY)
-gfx950.register_execution(ATTENTION_EXECUTION_REGISTRY)
+gfx950_dense.register_route(ATTENTION_EXECUTION_REGISTRY)
+gfx950_unified.register_execution(ATTENTION_EXECUTION_REGISTRY)
 gfx1250.register(ATTENTION_EXECUTION_REGISTRY)
 gfx942_tuning.register(ATTENTION_EXECUTION_REGISTRY)
-gfx950_tuning.register(ATTENTION_EXECUTION_REGISTRY)
 # Compatibility alias: production auto-dispatch and candidate listing.
 ATTENTION_REGISTRY = ATTENTION_ROUTE_REGISTRY
 
@@ -97,7 +97,7 @@ def _gfx950_dense_family_alias(
     if not isinstance(req, AttentionRequest):
         return False
     return (
-        req.spec_id.strip().lower() == gfx950.GFX950_DENSE_FAMILY_SPEC_ID
+        req.spec_id.strip().lower() == gfx950_dense.GFX950_DENSE_FAMILY_SPEC_ID
         and candidate.algorithm == "attention_dense"
         and req.arch == "gfx950"
     )
@@ -233,7 +233,7 @@ def dense_spec_for_request(req: AttentionRequest):
 
     factories = {
         "gfx942": gfx942.dense_spec_for_request,
-        "gfx950": gfx950.dense_spec_for_request,
+        "gfx950": gfx950_dense.dense_spec_for_request,
     }
     try:
         factory = factories[gfx]
@@ -345,7 +345,7 @@ def attention_ranker(
     SWA. Prefer the auto-policy variant; every other candidate keeps registered
     ``(priority, name)`` order (same as :func:`priority_ranker` on gfx942).
     """
-    return gfx950.rank_dense_variants(request, candidates)
+    return gfx950_dense.rank_dense_variants(request, candidates)
 
 
 def dispatch_attention(

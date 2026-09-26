@@ -1,7 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx950 attention candidates (CDNA4, wave64, 32x32 MFMA + dense persistent).
+"""gfx950 dense attention candidates (CDNA4, wave64, 32x32 MFMA + dense persistent).
+
+Unified-kernel candidates for gfx950 live in :mod:`.gfx950_unified`.
 
 Dense prefill is registered as one candidate per frozen (tile x persist x
 wide-DMA) combo. ``dispatch_attention`` still picks a single winner; the
@@ -13,31 +15,25 @@ Benchmarking enumerates every registered combo via
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Sequence, Tuple
 
-from kernels.common.attention_unified import supports_native_unified_attention
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
     KernelCandidate,
     OperatorRequest,
-    ShapeRange,
 )
 
 from .common import (
     ATTENTION_ABI_VERSION,
-    UNIFIED_BLOCK_SIZES,
     AttentionMaskType,
     AttentionRequest,
-    AttentionSpec,
     FAMILY,
     _parse_attention_mask_type,
-    _problem,
     _request_errors,
     _resolve_dense_waves_per_eu,
-    _selector_matches,
 )
 
 # Family id shared by every gfx950 dense variant. Pinning this spec_id (with
@@ -429,18 +425,31 @@ def _make_gfx950_attention_dense_candidate(
 
         return bind_dense_attention_torch(request, spec, tensors, **kwargs)
 
+    def _tuning_kwargs(req: AttentionRequest) -> dict:
+        from kernels.gfx950.attention_dense import supports_attention_dense
+
+        return dict(
+            arch="gfx950",
+            supports=supports_attention_dense,
+            wpe_pinned=int(req.dense_waves_per_eu) != 0,
+        )
+
     def sweep(req: OperatorRequest):
         if not candidate.admits(req)[0]:
             return ()
-        spec = select(req)
         assert isinstance(req, AttentionRequest)
-        if int(req.dense_waves_per_eu) != 0:
-            return (spec,)
-        from .tuning_common import dense_waves_per_eu_sweep_values
+        from .tuning_common import iter_dense_tuning_specs
 
-        return tuple(
-            replace(spec, waves_per_eu=waves_per_eu)
-            for waves_per_eu in dense_waves_per_eu_sweep_values(spec.waves_per_eu)
+        return iter_dense_tuning_specs(select(req), **_tuning_kwargs(req))
+
+    def sample(req: OperatorRequest, n: int, seed: int):
+        if not candidate.admits(req)[0]:
+            return ()
+        assert isinstance(req, AttentionRequest)
+        from .tuning_common import sample_dense_tuning_specs
+
+        return sample_dense_tuning_specs(
+            select(req), n, seed, salt=name, **_tuning_kwargs(req)
         )
 
     candidate = KernelCandidate(
@@ -465,103 +474,14 @@ def _make_gfx950_attention_dense_candidate(
         grid=grid,
         block=block,
         sweep_space=sweep,
+        sample_space=sample,
         build=build,
         bind_torch=bind_torch,
     )
     return candidate
 
 
-def _make_gfx950_d256_candidate() -> KernelCandidate:
-    """Fast gfx950 bf16 head_size-256 prefill kernel — 32x32 transposed stack
-    with FA3-style softmax<->MFMA interleave (mode2/g4) + slab-padded K_lds.
-
-    Registered at priority 5 so it outranks the generic unified_2d candidate
-    (priority 10) for the gfx950 bf16 D256 prefill cohort. The registry sorts
-    ascending (lower = higher precedence); gfx950-only, so it never competes
-    with the gfx942 dense_pipe candidate. Callers can also force this path
-    explicitly via algorithm="d256_gfx950".
-
-    The cohort is the single source of truth
-    ``kernels.common.attention_unified._d256_gfx950_cohort`` — the same predicate
-    the orchestrator's ``_d256_gfx950_fast`` override uses — so dispatch selection
-    and the built spec cannot drift. Only the arch gate differs (request arch
-    here vs resolved device arch there).
-    """
-    spec_id = "gfx950_d256"
-    name = "attention_gfx950_d256"
-
-    def support(req: OperatorRequest) -> Tuple[bool, str]:
-        errors = _request_errors(req)
-        if errors:
-            return False, "; ".join(errors)
-        assert isinstance(req, AttentionRequest)
-        ok, why = _selector_matches(req, candidate)
-        if not ok:
-            return False, why
-        problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=req.arch)
-        if not ok:
-            return False, why
-        if problem.select_path() != "2d":
-            return False, "problem routes to 3D, not 2D"
-        from kernels.common.attention_unified import _d256_gfx950_cohort
-
-        if not _d256_gfx950_cohort(problem):
-            return False, "not the gfx950 bf16 D256 prefill fast-path cohort"
-        return True, "ok"
-
-    def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = candidate.admits(req)
-        if not ok:
-            raise ValueError(f"{name} does not support request: {why}")
-        assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
-        from kernels.common.attention_unified import _d256_gfx950_spec_overrides
-
-        return AttentionSpec(
-            path="2d",
-            head_size=problem.head_size,
-            block_size=problem.block_size,
-            dtype=problem.dtype,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            name="rocke_attention_gfx950_d256",
-            tiled_overrides=tuple(sorted(_d256_gfx950_spec_overrides().items())),
-        )
-
-    candidate = KernelCandidate(
-        name=name,
-        family=FAMILY,
-        algorithm="d256_gfx950",
-        spec_id=spec_id,
-        abi_version=ATTENTION_ABI_VERSION,
-        priority=5,
-        capability=Capability(
-            arches=("gfx950",),
-            dtypes=("bf16",),
-            shapes=(
-                ShapeRange("hdim_q", allowed=(256,)),
-                ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
-            ),
-            supports_features=frozenset({"causal", "causal_bottom_right"}),
-        ),
-        _supports=support,
-        select_spec=select,
-        signature=lambda _spec: (),
-        grid=lambda spec, req: (0, 0, 0),
-        block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
-    )
-    return candidate
-
-
 def register_route(registry: CandidateRegistry) -> None:
-    for variant in GFX950_DENSE_VARIANTS:
-        registry.register(_make_gfx950_attention_dense_candidate(variant))
-    registry.register(_make_gfx950_d256_candidate())
-
-
-def register_execution(registry: CandidateRegistry) -> None:
     for variant in GFX950_DENSE_VARIANTS:
         registry.register(_make_gfx950_attention_dense_candidate(variant))
 

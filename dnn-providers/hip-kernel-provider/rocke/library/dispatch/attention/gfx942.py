@@ -139,7 +139,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 def _dense_spec(req: OperatorRequest):
     """Build the gfx942 ``AttentionDenseSpec`` for ``req`` at its best config.
 
-    The gfx942 twin of :func:`dispatch.attention.gfx950._dense_spec`. Same shape
+    The gfx942 twin of :func:`dispatch.attention.gfx950_dense._dense_spec`. Same shape
     logic -- persistent ("auto") turns on the grid-stride variant once there is
     enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``, the
     large-Sq prefill regime), and non-tile-multiple self-attention lengths take the

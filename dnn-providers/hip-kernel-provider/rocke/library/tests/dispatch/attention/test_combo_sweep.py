@@ -75,6 +75,10 @@ def _args(**kw):
     return SimpleNamespace(**base)
 
 
+def replace_ns(ns: SimpleNamespace, **kw) -> SimpleNamespace:
+    return SimpleNamespace(**{**vars(ns), **kw})
+
+
 class TestComboSweepLifecycle(unittest.TestCase):
     def test_module_does_not_mutate_sys_path(self):
         source = inspect.getsource(sweep)
@@ -322,6 +326,101 @@ class TestComboSweepLifecycle(unittest.TestCase):
                     self.assertEqual(
                         json.loads(Path(path).read_text()), [{"i": 1}, {"i": 2}]
                     )
+
+    def test_rows_record_non_default_dense_knobs(self):
+        import json
+
+        req = _req(algorithm="attention_dense")
+        candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")
+        shipped = candidate.select_spec(req)
+        tuned = replace(shipped, pv_priority=2, o_store_width=2)
+        base_knobs = sweep._row_skeleton(req, candidate, shipped, 0)["knobs"]
+        knobs = sweep._row_skeleton(req, candidate, tuned, 0)["knobs"]
+        self.assertEqual(
+            {k: v for k, v in knobs.items() if k not in base_knobs},
+            {"pv_priority": 2, "o_store_width": 2},
+        )
+        self.assertNotIn("seqlen_q", knobs)
+        self.assertTrue(knobs["persistent"])
+        json.dumps(knobs)
+        unified = SimpleNamespace(tuning_id="t@abc", kernel_spec=SimpleNamespace())
+        self.assertEqual(sweep._spec_knobs(unified), {})
+
+    def test_run_spec_key_replays_a_full_level_sample(self):
+        from dispatch.attention import iter_registered_attention_combos
+
+        name = "attention_gfx950_dense_grid_default"
+        args = _args(
+            candidate_prefix=name,
+            sweep_level="full",
+            tuning_sample=4,
+            run_candidate=name,
+            run_tuning_id="",
+            run_pickle="",
+        )
+        req = next(sweep._requests(args))
+        offered = [
+            spec
+            for _c, spec in iter_registered_attention_combos(
+                req,
+                candidate_prefix=name,
+                tuning_sample=args.tuning_sample,
+                seed=args.seed,
+                sweep_level=args.sweep_level,
+            )
+        ]
+        self.assertEqual(len(offered), 4)
+        wanted = offered[-1]
+        args.run_spec_key = wanted.kernel_name()
+        _req_out, result = sweep._resolve_pinned(args)
+        self.assertEqual(result.spec, wanted)
+        with self.assertRaisesRegex(ValueError, "--sweep-level production"):
+            sweep._resolve_pinned(replace_ns(args, sweep_level="production"))
+
+    def test_dense_table_sweep_window_is_per_shape_and_absolute(self):
+        windowed = dense_prefill_table_sweep._windowed
+        args = SimpleNamespace(offset=1, limit=2)
+        self.assertEqual(list(windowed(range(5), args)), [(1, 1), (2, 2)])
+        self.assertEqual(
+            list(windowed(range(5), SimpleNamespace(offset=3, limit=0))),
+            [(3, 3), (4, 4)],
+        )
+        self.assertEqual(list(windowed((), args)), [(0, None)])
+        # Past the end of a non-empty shape is an empty window, not unsupported.
+        self.assertEqual(
+            list(windowed(range(2), SimpleNamespace(offset=5, limit=0))), []
+        )
+
+    def test_dense_table_sweep_skips_lowered_ir_duplicates(self):
+        req = _req(algorithm="attention_dense")
+        candidate = ATTENTION_EXECUTION_REGISTRY.get("attention_gfx950_dense")
+        shipped = candidate.select_spec(req)
+        results = [
+            attention_dispatch_result(req, candidate, shipped),
+            attention_dispatch_result(req, candidate, replace(shipped, pv_priority=2)),
+        ]
+        rows: list[dict] = []
+        shape = {"model": "m", "seqlen": 1024}
+        args = SimpleNamespace(dedupe=True, output_json="")
+        module = dense_prefill_table_sweep
+        with (
+            mock.patch.object(
+                module, "validate_config", return_value=sweep.Validation(None, "d")
+            ),
+            mock.patch.object(
+                module, "_run_result", return_value={"status": "ok"}
+            ) as run,
+        ):
+            first_by_ir: dict = {}
+            for index, result in enumerate(results):
+                module._sweep_one(
+                    req, result, index, shape, first_by_ir, rows, None, args
+                )
+        run.assert_called_once()
+        self.assertEqual([r["status"] for r in rows], ["ok", "duplicate"])
+        self.assertIn(shipped.kernel_name(), rows[1]["reason"])
+        self.assertEqual(rows[1]["knobs"].get("pv_priority"), 2)
+        self.assertEqual(module._rows_exit_code(rows), 0)
 
     def test_table_sweeps_fail_only_for_admitted_execution_failures(self):
         for module in (dense_prefill_table_sweep, decode_table_sweep):
