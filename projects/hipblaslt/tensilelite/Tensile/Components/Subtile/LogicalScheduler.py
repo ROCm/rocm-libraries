@@ -46,6 +46,25 @@ from rocisa.instruction import Instruction, SAddCU32, SSubBU32, SCSelectB32, SCS
 from ...Common.GlobalParameters import globalParameters
 from ...Common import plsinDebugEnv
 
+
+def plsinTailOwnTiles() -> bool:
+    """Whether the four-deep tail gets its own VGPR tile layout.
+
+    Merging the tail's peaks into the mainloop's takes a per-tensor maximum,
+    so the kernel pays for A at the tail's depth and B at the mainloop's width
+    at the same time even though the two bodies never run together. Giving the
+    tail its own layout lets it reuse the registers the mainloop held for B,
+    which is what makes an unpartitioned (baseline) mainloop affordable: the
+    mainloop needs A16/B16 and the tail A32/B4, so the larger body is 48 tiles
+    rather than the 64 the merged layout asks for.
+
+    On by default: the alternative spans in the parent, which partitions the
+    mainloop, and that measured a 1.7% geomean loss against baseline (down to
+    0.951x) on the swapAB-swizzleA shapes. Spanning only in the sub-scheduler
+    leaves the mainloop byte-identical to baseline and measured 1.0038x.
+    """
+    return plsinDebugEnv("TENSILE_PLSIN_TAIL_OWN_TILES", "1") != "0"
+
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
 
@@ -252,6 +271,16 @@ class SchedulerConfig:
     pgl: int = 0              # Prefetch GL2 (0=off, 1 or 2 tiles ahead)
     directToVgprB: bool = False  # Host-pre-swizzled B loads directly into MFMA VGPRs
     blockSched: bool = False  # Tile is scoped for block scheduling (see plsinBlockSchedTile)
+    # Forces spanNgllMerge instead of reading the environment. The four-deep
+    # tail is scheduled by its own LogicalScheduler, and under
+    # TENSILE_PLSIN_TAIL_OWN_TILES that sub-scheduler is the only one that spans
+    # -- the parent stays on the baseline schedule and allocation.
+    spanTailOverride: Optional[bool] = None
+    # Set by the kernel-level partition choice, not read from the environment
+    # here: only kernels whose store the tail can actually stage qualify, and
+    # that test needs the tile geometry.
+    tailOwnTiles: bool = False
+    tailPartitionSizeN: int = 0
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -373,7 +402,13 @@ class SchedulerConfig:
         environment separately with different defaults, and the build quietly
         reserved registers for a tail it then declined to emit.
         """
+        if self.spanTailOverride is not None:
+            return self.spanTailOverride
         if self.pgr < 2 or not self.blockSched:
+            return False
+        if self.tailOwnTiles:
+            # The parent keeps the baseline schedule and allocation; only the
+            # sub-scheduler built in _build_tail_merged spans.
             return False
         return plsinDebugEnv("TENSILE_PLSIN_SPAN_NGLL", "1") != "0"
 
@@ -767,6 +802,8 @@ class LogicalScheduler:
         # The four-deep tail (see build_tail_merged) and the scheduler that
         # produced it; the latter owns the tile maps the emitter needs.
         self._tail_merged_emitted: Optional[EmittedSchedule] = None
+        self._tail_own_peaks: Optional[dict] = None
+        self._tail_prime_emitted: Optional[list] = None
         self._tail_merged_scheduler: Optional['LogicalScheduler'] = None
         # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
@@ -3284,29 +3321,122 @@ class LogicalScheduler:
         surrounding kernel reserved and the second half has to cross over.
         """
         assert self._emitted is not None, "call build() first"
-        if self.config.pgr < 2 or not self._span_ngll_merge_enabled():
+        ownTiles = self.config.tailOwnTiles
+        if self.config.pgr < 2 or not (self._span_ngll_merge_enabled() or ownTiles):
             self._tail_merged_emitted = None
+            self._tail_prime_emitted = None
             return None
 
         cfg = copy.deepcopy(self.config)
         cfg.numSubIterK = self.config.numSubIterK * 2
+        if ownTiles:
+            # The parent is unpartitioned so its mainloop stays baseline; the
+            # split lives here, where it is what keeps B narrow enough for the
+            # four-deep body's doubled A to fit.
+            cfg.spanTailOverride = True
+            cfg.partitionSizeM = self.config.numMFMATilesM
+            cfg.partitionSizeN = self.config.tailPartitionSizeN
+            # The partition sizes above are inputs to the derived per-partition
+            # lists, and deepcopy carries the parent's derivation rather than
+            # redoing it, so the split only takes effect once post-init reruns.
+            # Post-init also rewrites numUnroll, so the pin has to follow it.
+            cfg.__post_init__()
         cfg.numUnroll = {t: 2 for t in self.config.numUnroll}
 
         sub = LogicalScheduler(cfg)
         sub.build()
+        # The fact these barriers assert is established on entry either way:
+        # the partitioned mainloop does it implicitly, and under tailOwnTiles
+        # the FourDeepTailEntry sequence does it explicitly with its own waitcnt
+        # and barrier. The body itself issues no global read, so nothing inside
+        # can recreate the hazard.
         sub.build_nll(dropRedundantSync=True)
+
+        _dumpDir = plsinDebugEnv("TENSILE_PLSIN_DUMP_TAIL", "")
+        if _dumpDir:
+            import os as _os
+            _os.makedirs(_dumpDir, exist_ok=True)
+            _sig = (f"M{cfg.numMFMATilesM}N{cfg.numMFMATilesN}K{cfg.numSubIterK}"
+                    f"_p{cfg.numPartitionsM}x{cfg.numPartitionsN}")
+            self._dump_call_no = getattr(self, '_dump_call_no', 0) + 1
+            _sig += f"_call{self._dump_call_no}"
+            with open(_os.path.join(_dumpDir, _sig + ".txt"), "w") as _f:
+                _f.write(f"ownTiles={ownTiles}\n")
+                _f.write(f"call#{self._dump_call_no} "
+                         f"vgpr_tiles_assigned={bool(getattr(self, 'vgprTilesA', None))} "
+                         f"parent_tile_peaks={dict(getattr(self, 'tile_peaks', {}))}\n")
+                _f.write(f"parent: M{self.config.numMFMATilesM} N{self.config.numMFMATilesN} "
+                         f"K{self.config.numSubIterK} parts={self.config.numPartitionsM}x"
+                         f"{self.config.numPartitionsN} offsetPartition={self.config.offsetPartition} "
+                         f"spanNgllMerge={self.config.spanNgllMerge}\n")
+                _f.write(f"sub:    parts={cfg.numPartitionsM}x{cfg.numPartitionsN} "
+                         f"offsetPartition={cfg.offsetPartition} plr={cfg.plr} "
+                         f"numUnroll={cfg.numUnroll} peaks={dict(sub.tile_peaks)}\n\n")
+                _maxId: dict = {}
+                for _part in sub._nll_emitted:
+                    for _emitted in _part:
+                        for _em in _emitted:
+                            _maps = getattr(_em.source, 'vgpr_tile_maps', None)
+                            if not _maps:
+                                continue
+                            for _t, _per_unroll in _maps.items():
+                                for _m in _per_unroll:
+                                    for _vid in (_m.values() if hasattr(_m, 'values') else _m):
+                                        _maxId[_t] = max(_maxId.get(_t, -1), _vid)
+                _f.write(f"max vgprTileId used by tail: {_maxId}\n")
+                _f.write(f"tiles allocated for tail:    "
+                         f"{{k: v for k, v in sub.tile_peaks.items()}}\n\n")
+                _f.write(sub.print_emit_dep_order(sub._nll_emitted))
 
         self._tail_merged_scheduler = sub
         self._tail_merged_emitted = sub._nll_emitted
+        self._tail_prime_emitted = sub._build_tail_prime() if ownTiles else None
         # Both bodies index the same physical tile lists, so the allocation has
         # to cover whichever of them needs more. The four-deep body trades here
         # rather than simply costing more: A doubles because it stays live
         # across all four k-steps, while B's peak drops, because a partition now
         # consumes its whole B slice in one go instead of holding it across the
         # round robin.
-        for tensor, peak in sub.tile_peaks.items():
-            self.tile_peaks[tensor] = max(self.tile_peaks.get(tensor, 0), peak)
+        if ownTiles:
+            self._tail_own_peaks = dict(sub.tile_peaks)
+        else:
+            for tensor, peak in sub.tile_peaks.items():
+                self.tile_peaks[tensor] = max(self.tile_peaks.get(tensor, 0), peak)
         return self._tail_merged_emitted
+
+    def _build_tail_prime(self) -> List[EmittedModule]:
+        """Prime this body's local-read pipeline the way the preloop primes the
+        mainloop's.
+
+        At plr=1 a body's opening MFMA consumes operands read by whatever ran
+        before it -- the mainloop's last iteration, out of the tile registers
+        the two bodies share. The four-deep tail under tailOwnTiles shares
+        neither: it reallocates at entry, so those registers are not the ones
+        the mainloop wrote. Reading them here instead makes the body depend on
+        LDS alone, which is what lets the mainloop stay unpartitioned.
+
+        This is the same set build_preloop issues before the mainloop, against
+        this scheduler's own partition 0, and _make_lr_all_tensors already
+        carries the right semantic: tiles for the first MFMA rather than for
+        the next subIterK.
+
+        Switching the body to plr=0 would also remove the dependency, but it
+        costs the cross-partition retention that keeps A read once instead of
+        once per partition -- 512 ds_reads against 260 for this tile.
+        """
+        cfg = self.config
+        part0 = self._partition_tile_range(0)
+        lr_tiles = {
+            'A': MFMATileRange(0, cfg.lrA.k, *part0['A']),
+            'B': MFMATileRange(0, cfg.lrB.k, *part0['B']),
+        }
+        if cfg.hasScale:
+            lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
+            lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
+        return self._to_emitted([
+            *self._make_lr_all_tensors(lr_tiles),
+            WaitLROp(),
+        ])
 
     def _tailEntryInflightBound(self) -> int:
         """How many mainloop loads may still be in flight when the tail starts.
@@ -4496,7 +4626,7 @@ class LogicalScheduler:
             return None, self._operandLendVgprs(None)
         return {}, []
 
-    def _plsinStagedStoreCount(self, weaveGroups, lendTiles):
+    def _plsinStagedStoreCount(self, weaveGroups, lendTiles, storeCfg=None):
         """Number of per-partition store stages for the fused arm (0 = monolithic).
 
         Staging only lines up with the store when the partitions split along N. The
@@ -4523,7 +4653,10 @@ class LogicalScheduler:
             return 0
         if weaveGroups != {} or lendTiles:
             return 0
-        cfg = self.config
+        # The stages cut the body being fused, so the split that matters is the
+        # one that body was scheduled with. They coincide except under
+        # TENSILE_PLSIN_TAIL_OWN_TILES, where only the four-deep tail is split.
+        cfg = storeCfg if storeCfg is not None else self.config
         if cfg.numPartitionsM != 1 or cfg.numPartitionsN < 2:
             return 0
         if len(set(cfg._partitionSizesN)) != 1:
@@ -4594,7 +4727,8 @@ class LogicalScheduler:
         return dict(enumerate(stages))
 
     def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None,
-                           unroll_iter=0):
+                           unroll_iter=0, storeCfg=None, fusedPrelude=None,
+                           plainOverride=None):
         """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
 
         Non-fused kernels: byte-identical to the stock single-NLL emission (early
@@ -4607,13 +4741,20 @@ class LogicalScheduler:
         arms fall through to the unchanged post-loop store, so GPU output is correct
         regardless of which arm runs — this just makes the FUSED block reachable so it
         is actually exercised. Step 4d-3a relocates the store into the FUSED copy and
-        adds the NonEdge condition + stored_flag dedup. FUSED/guard labels carry the
+        adds the NonEdge condition + stored_flag dedup.         FUSED/guard labels carry the
         site suffix so the two per-unroll emit sites never collide.
+
+        plainOverride/fusedPrelude let the two arms come from different bodies.
+        The four-deep tail needs that: it is the FUSED arm's schedule, and a wave
+        that fails the guard has to take the baseline NGLL/NLL pair instead.
+        fusedPrelude then holds the entry sync and local-read prime that only the
+        four-deep body needs, so the plain arm never runs them.
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import SBranch
 
-        plain = self._emitLoop(writer, kernel, label, emitted_3d)
+        plain = (plainOverride if plainOverride is not None
+                 else self._emitLoop(writer, kernel, label, emitted_3d))
         if not getattr(writer.states, "postLoopStoreInNll", False):
             return plain
 
@@ -4622,6 +4763,8 @@ class LogicalScheduler:
         plainLabel = Label(f"{label}_PlainNLL", "")
         # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
         module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        if fusedPrelude is not None:
+            module.add(fusedPrelude)
         # The woven store is generated in capture mode first. Its actual ACC-read
         # instructions and Phase1/Phase2 gaps then drive terminal-MFMA placement.
         fusedEmitted = copy.deepcopy(emitted_3d)
@@ -4639,7 +4782,7 @@ class LogicalScheduler:
         # stores are in flight across the whole of partition p+1's MFMAs. That makes
         # the weave redundant -- its job was to find a few instructions of cover for
         # the store inside 4-deep gaps -- so drop it and keep every MFMA in the loop.
-        stagedStores = self._plsinStagedStoreCount(weaveGroups, lendTiles)
+        stagedStores = self._plsinStagedStoreCount(weaveGroups, lendTiles, storeCfg)
         if stagedStores:
             weaveGroups, lendTiles = None, []
         writer.states.subtileStoreStages = stagedStores
@@ -6085,7 +6228,8 @@ class LogicalScheduler:
         # tail that was never emitted, so the kernel paid the VGPRs and kept the
         # split schedule.
         spanNgll = (hasNGLL and nll_ft != 0
-                    and self._span_ngll_merge_enabled()
+                    and (self._span_ngll_merge_enabled()
+                         or self._tail_own_peaks is not None)
                     and self._tail_merged_emitted is not None
                     # Diagnostic only, and the one case where the two are meant
                     # to disagree: it keeps the flag's allocation and emits the
@@ -6098,7 +6242,22 @@ class LogicalScheduler:
         # Kept separate from nll_ft, which still has to decide where the
         # SkipToNLL label goes -- overwriting it would emit that label twice.
         nll_ft_ui = nll_ft
+        tailPrelude = None
+        tailPlain = None
         if spanNgll:
+            # The four-deep body is the PLSIN arm's schedule and nothing else's.
+            # A wave that fails the fused guard runs the baseline NGLL/NLL pair,
+            # built here while nll_ft_3d still names it. Those bodies were
+            # populated before the tail reallocated the tile registers, so they
+            # still read the registers the mainloop's last iteration prefetched
+            # into; the two arms alias that space but never both run.
+            tailPlain = Module(f"NLL_C{last}_PlainSplit")
+            tailPlain.addComment0(f"NGLL_C{last} (non-PLSIN arm)")
+            tailPlain.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
+                                         self._ngll_per_unroll[(last + 1) % uf]))
+            tailPlain.addComment0(f"NLL_C{last} (non-PLSIN arm)")
+            tailPlain.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
+                                         inject_pap_after_nll_drain(nll_ft_3d)))
             nll_ft_ui = 0
             nll_ft_3d = self._tail_merged_emitted
         if hasNGLL and not spanNgll:
@@ -6123,15 +6282,35 @@ class LogicalScheduler:
             from rocisa.instruction import SWaitCnt, SBarrier
             entryVmcnt = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_ENTRY_VMCNT",
                                            str(self._tailEntryInflightBound())))
-            module.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
+            # Collected rather than emitted: this is the four-deep body's entry
+            # sequence, so it belongs behind the fused guard with the body it
+            # serves. The plain arm keeps the baseline pair's own sync.
+            tailPrelude = Module("FourDeepTailEntry")
+            tailPrelude.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
                                 comment="four-deep tail: retire the mainloop's"
                                         " loads before reading what they wrote"))
-            module.add(SBarrier(comment="four-deep tail entry"))
+            tailPrelude.add(SBarrier(comment="four-deep tail entry"))
+            if self._tail_prime_emitted is not None:
+                # Under tailOwnTiles the body reallocates its tiles, so the
+                # operands its first MFMA expects are not the ones the mainloop
+                # left behind. Read them here, after the barrier that makes the
+                # mainloop's writes visible, so the body starts from LDS.
+                tailPrelude.addComment0("four-deep tail: prime LR pipeline")
+                tailPrelude.add(self._emitLoop(writer, kernel, "TAILPRIME",
+                                          [[self._tail_prime_emitted]],
+                                          schedule=False))
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(nll_ft_3d),
                                   fusedExitLabel=(plsinFusedExitLabel if plsin else None),
-                                  unroll_iter=nll_ft_ui))
+                                  unroll_iter=nll_ft_ui,
+                                  storeCfg=(self._tail_merged_scheduler.config
+                                            if (self._tail_own_peaks is not None
+                                                and plsinDebugEnv(
+                                                    "TENSILE_PLSIN_TAIL_STAGE_STORE", "1") != "0")
+                                            else None),
+                                  fusedPrelude=tailPrelude,
+                                  plainOverride=tailPlain))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
         if plsin:
             with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
@@ -6234,7 +6413,16 @@ class LogicalScheduler:
         mainloop_total = _total_for(self.tile_peaks)
         _, flat_peaks = self._compute_flat_tail_tile_state()
         tail_total = _total_for(flat_peaks)
-        return max(mainloop_total, tail_total)
+        totals = [mainloop_total, tail_total]
+        if cfg.tailOwnTiles:
+            # The four-deep tail reallocates at entry like the tail loop does,
+            # so it is another body in the max rather than a term added to the
+            # mainloop's peaks.
+            if self._tail_own_peaks is None:
+                self.build_tail_merged()
+            if self._tail_own_peaks is not None:
+                totals.append(_total_for(self._tail_own_peaks))
+        return max(totals)
 
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
                        scaleTileInfoA=None, scaleTileInfoB=None):
@@ -6523,6 +6711,12 @@ class LogicalScheduler:
         # per-unroll copies: covering both DepthU is the whole point, so there
         # is no parity left to alternate and unroll_iter 0 is the only one.
         self.build_tail_merged()
+        if self._tail_own_peaks is not None:
+            # The mainloop is fully emitted by now, so its tile registers are
+            # dead and the four-deep body can have them back. Same trade the
+            # tail loop makes in _realloc_tail_tiles_flat: a second layout in
+            # the same registers rather than a wider one in more of them.
+            self._realloc_tail_tiles_flat(writer, self._tail_own_peaks)
         if self._tail_merged_emitted is not None:
             # Emitted through its own scheduler's config, not this one's. The
             # LDS offset a ds_read gets is k modulo numSubIterK/numUnroll, so
@@ -6530,8 +6724,13 @@ class LogicalScheduler:
             # last two k-steps off the end of the buffer instead of back to the
             # start of the other one. The physical tile lists are shared, so the
             # registers it names are still this kernel's.
-            make_emitter(self._tail_merged_scheduler.config).populate(
-                self._tail_merged_emitted, unroll_iter=0)
+            tailEmitter = make_emitter(self._tail_merged_scheduler.config)
+            tailEmitter.populate(self._tail_merged_emitted, unroll_iter=0)
+            if self._tail_prime_emitted is not None:
+                # Same emitter as the body it primes: the reads have to name the
+                # reallocated tiles, and resolve their LDS offsets against the
+                # four-deep config, exactly as the body's own reads do.
+                tailEmitter.populate([[self._tail_prime_emitted]], unroll_iter=0)
 
         self._emitter = emitter
 

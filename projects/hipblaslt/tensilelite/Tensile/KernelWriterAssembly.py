@@ -17894,7 +17894,13 @@ class KernelWriterAssembly(KernelWriter):
         # shifts store batching and drops the unpaired dwordx4 store).  Fold's dead-ValuC
         # repack never names the ring, so keep it off under the fold.
         pairQuads = 1
-        if kernel.get("UseSubtileImpl") and not isSubtileFold and col128Base < 0 and \
+        # plsinBlockSchedTile, not UseSubtileImpl alone: the ring is the only part
+        # of this store that spends registers, and permlane16 reaches every gfx950
+        # MI16 subtile kernel, including bf16-input ones whose accumulators already
+        # fill the VGPR file. Four more registers there push ValuC past the 256 cap
+        # and the kernel fails to assemble.  Fold's dead-ValuC repack never names the
+        # ring either, so keep it off under the fold as well (not isSubtileFold).
+        if kernel.get("UseSubtileImpl") and not isSubtileFold and col128Base < 0 and plsinBlockSchedTile(kernel) and \
            plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None):
           pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2")))
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
