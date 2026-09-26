@@ -27,6 +27,7 @@
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
 #include "hipblaslt_internal.hpp"
+#include "rocblaslt/src/include/rocblaslt_fp8_arch.hpp"
 #include <Debug.hpp>
 #include <algorithm>
 #include <hip/hip_runtime.h>
@@ -713,12 +714,7 @@ namespace hipblaslt_ext
 
     bool currentArchSupportsFp8()
     {
-        using std::begin;
-        using std::end;
-
-        static const std::string fp8Archs[] = {"gfx942", "gfx950"};
-        const auto               archName   = rocblaslt_internal_get_arch_name();
-        return std::find(begin(fp8Archs), end(fp8Archs), archName) != end(fp8Archs);
+        return rocblaslt_arch_supports_fp8(rocblaslt_internal_get_arch_name());
     }
 
     template <typename SrcType, typename DstType, typename ScaleType = float>
