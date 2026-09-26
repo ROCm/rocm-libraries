@@ -298,15 +298,34 @@ static bool IsSupportedProblem(const ProblemDescription& problem)
                                                   problem.GetOut().GetLengths());
 }
 
+static std::string HipConvKernelLabel(hipconv::ConvKernelHandle kernel);
+
+// Resolve `config.descriptor` (arch-neutral name) to `config.index` for this
+// build's config enumeration `cfgs`, by matching kernel labels. No-op when the
+// index is already set (search / heuristic path) or the descriptor is empty.
+static void ResolveIndexFromDescriptor(const std::vector<hipconv::ConvKernelHandle>& cfgs,
+                                       const PerformanceConfigConvHipConv& config)
+{
+    if(config.index >= 0 || config.descriptor.empty())
+        return;
+    for(int i = 0; i < static_cast<int>(cfgs.size()); ++i)
+    {
+        if(HipConvKernelLabel(cfgs[i]) == config.descriptor)
+        {
+            config.index = i;
+            return;
+        }
+    }
+}
+
 // Resolve the kernel handle a perf-config selected.
 static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
                                                const hipconv::ConvParams& par,
                                                const PerformanceConfigConvHipConv& config)
 {
-    if(config.index < 0)
-        return nullptr;
     const auto cfgs = hipconv::get_valid_configs(arch, par, MAX_CONFIGS);
-    if(config.index >= static_cast<int>(cfgs.size()))
+    ResolveIndexFromDescriptor(cfgs, config);
+    if(config.index < 0 || config.index >= static_cast<int>(cfgs.size()))
         return nullptr;
     return cfgs[config.index];
 }
@@ -390,6 +409,7 @@ void PerformanceConfigConvHipConv::InitFromArch(const void* arch, const ProblemD
         hipconv::get_valid_configs(static_cast<hipconv::ArchHandle>(arch), par, MAX_CONFIGS);
     config_count = static_cast<int>(cfgs.size());
     index        = cfgs.empty() ? -1 : 0;
+    descriptor   = cfgs.empty() ? std::string{} : HipConvKernelLabel(cfgs[0]);
 }
 
 void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext& ctx,
@@ -414,19 +434,25 @@ bool PerformanceConfigConvHipConv::IsValidValue() const { return index >= 0; }
 bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
                                            const ProblemDescription& problem) const
 {
-    // Size the config list here, on behalf of SetNextValue.
-    //
-    // ComputedIterator (generic_search.hpp) constructs a config, calls IsValid, and only
-    // then calls SetNextValue, which has no ExecutionContext to resolve the arch with.
-    if(config_count < 0)
-    {
-        const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-        if(!arch.has_value())
-            return false;
-        config_count = static_cast<int>(
-            hipconv::get_valid_configs(*arch, ToHipconvParams(problem), MAX_CONFIGS).size());
-    }
-    return IsValidValue() && index < config_count;
+    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
+    if(!arch.has_value())
+        return false;
+    const auto cfgs = hipconv::get_valid_configs(*arch, ToHipconvParams(problem), MAX_CONFIGS);
+    // Also sizes the config list on behalf of SetNextValue, which has no
+    // ExecutionContext to resolve the arch with. ComputedIterator
+    // (generic_search.hpp) calls IsValid before every SetNextValue.
+    config_count = static_cast<int>(cfgs.size());
+
+    // Perf-config-picker / db-load path: resolve the arch-neutral descriptor to
+    // this build's local index by matching kernel labels.
+    ResolveIndexFromDescriptor(cfgs, *this);
+
+    if(!IsValidValue() || index >= config_count)
+        return false;
+    // Search path: keep the serialized descriptor in sync with the index, so a
+    // benchmarked pick is stored (and transfers across arches) by name.
+    descriptor = HipConvKernelLabel(cfgs[index]);
+    return true;
 }
 
 bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv& other) const

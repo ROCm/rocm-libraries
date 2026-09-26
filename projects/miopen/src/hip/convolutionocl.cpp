@@ -939,7 +939,20 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::AI;
+        // NOTE: `arch` is a function-local static, initialized ONCE on the first
+        // call and reused for the process lifetime. On a multi-GPU / multi-arch
+        // host this can feed a stale arch to the predictor (e.g. the first conv
+        // ran on gfx1100, so a later gfx1201 conv is still predicted as gfx1100).
+        // Log both so a divergence between the cached arch and the live device is
+        // visible; a mismatch here is a prime suspect for per-SKU inconsistency.
         const static std::string arch = ctx.GetStream().GetDeviceName();
+        const std::string live_arch   = ctx.GetStream().GetDeviceName();
+        if(arch != live_arch)
+            MIOPEN_LOG_I2("AI fallback: STALE cached arch \"" << arch << "\" != live device \""
+                                                              << live_arch
+                                                              << "\" (static-init aliasing)");
+        else
+            MIOPEN_LOG_I2("AI fallback: predicting for arch \"" << arch << "\"");
         std::vector<uint64_t> solvers;
         try
         {
@@ -953,11 +966,12 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
 
         if(!solvers.empty())
         {
-            MIOPEN_LOG_I2("Using TunaNet Fallback");
+            MIOPEN_LOG_I2("Using AI Fallback (" << solvers.size() << " ranked candidates)");
             const auto ai_time = [](const int& idx) {
                 return 10.0f * static_cast<float>(idx); // Assume idx == 1 (best solver) is 10 ms.
             };
-            int idx = 1;
+            int idx                  = 1;
+            std::size_t inapplicable = 0;
             for(const auto kinder : solvers)
             {
                 const auto solver_id = solver::Id{kinder};
@@ -968,13 +982,31 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                 if(!sol.IsDynamic())
                     continue; // branch should never be taken
                 if(!sol.IsApplicable(ctx, problem))
+                {
+                    ++inapplicable;
                     continue;
+                }
                 const auto ws = sol.GetWorkspaceSize(ctx, problem);
                 interim.emplace_back(
                     miopenConvSolution_t{ai_time(idx), ws, solver_id.Value(), algo});
                 ++idx;
             }
+            // If every ranked candidate was inapplicable, interim stays empty and
+            // the code below drops to WTI -- i.e. the AI picker "fired" but had no
+            // usable pick for this shape. Surfacing the count distinguishes that
+            // from the picker never running.
+            MIOPEN_LOG_I2("AI Fallback: " << (idx - 1) << " applicable, " << inapplicable
+                                          << " inapplicable of " << solvers.size() << " ranked");
         }
+        else
+        {
+            MIOPEN_LOG_I2("AI Fallback produced no solvers; dropping to WTI");
+        }
+    }
+    else
+    {
+        MIOPEN_LOG_I2("AI immediate-mode fallback disabled via "
+                      "MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK; using WTI");
     }
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
