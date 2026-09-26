@@ -165,3 +165,29 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
             sizeof(float));
     }
 }
+
+// Persistent skinny-GEMM kernels stride by CU count; the launch grid and the
+// ComputeUnits kernarg have to be the same hardware value.
+TEST(CustomKernelTest, ComputeUnitsGridAndArgFollowHardware)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {CustomArgType::int32, CustomArgSemantic::ComputeUnits});
+    solution.customKernel.grid
+        = {CustomGridSize::ComputeUnits, CustomGridSize::One, CustomGridSize::One};
+
+    auto              problem = dummyProblem();
+    auto              device  = probeDevice();
+    ContractionInputs inputs;
+    StreamKSettings   sk;
+
+    auto invocation = solution.generateCustomCall<false>(problem, inputs, device, sk);
+
+    EXPECT_EQ(invocation.numWorkGroups.x, static_cast<size_t>(TensileLite::testing::_SPX_CU));
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+
+    ASSERT_EQ(invocation.args.size(), sizeof(int32_t));
+    int32_t cuCount = 0;
+    std::memcpy(&cuCount, invocation.args.data(), sizeof(cuCount));
+    EXPECT_EQ(cuCount, TensileLite::testing::_SPX_CU);
+}

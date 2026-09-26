@@ -438,13 +438,24 @@ class ProblemType:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
 
+# Dict-valued Assert* keys and the runtime predicate each one emits per index.
+ASSERT_DIM_MAP_PREDICATES = {
+    "AssertSizeEqual": "SizeEqual",
+    "AssertSizeGreaterThan": "SizeGreaterThan",
+    "AssertSizeLessThan": "SizeLessThan",
+    "AssertStrideAEqual": "StrideAEqual",
+    "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideCEqual": "StrideCEqual",
+    "AssertStrideDEqual": "StrideDEqual",
+}
+
 def extractDimPredicate(cls, key, value, predicateName):
     """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
+    Extract predicates for dict-valued Assert* maps (AssertSizeEqual, ...).
+    Value is a dictionary of {index: size}. A value of -1 skips that index.
     """
     predicates = []
-    for pos,val in value.items():
+    for pos, val in value.items():
         if val != -1:
             predicates.append(cls(predicateName, index=pos, value=val))
     if len(predicates) == 1:
@@ -487,6 +498,12 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key in ASSERT_DIM_MAP_PREDICATES:
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            return extractDimPredicate(cls, key, value, ASSERT_DIM_MAP_PREDICATES[key])
 
         if key.endswith('Multiple'):
             if value == 1:

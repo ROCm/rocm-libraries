@@ -656,6 +656,29 @@ validParameters = { # we need to make sure this matches develop
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32, 64, 128, 256],
+    # Exact size for one or more problem dimensions. Dict of {index: size}
+    # where index is a global assignment (0=M, 1=N, 2=batch, 3=K).
+    # Empty dict is unset. Fork YAML: AssertSizeEqual: [{0: 1}]  # M==1
+    # A value of -1 for a given index is ignored (classic Tensile).
+    "AssertSizeEqual": -1,
+    # Strict lower bound per dimension, same {index: size} form. The runtime
+    # predicate is size(index) > value, so a kernel whose tail handling needs
+    # at least one full tile declares the largest size it cannot handle.
+    # Fork YAML: AssertSizeGreaterThan: [{1: 8}]  # N > 8
+    "AssertSizeGreaterThan": -1,
+    # Strict upper bound per dimension; the predicate is size(index) < value.
+    # A kernel that stages an operand in LDS declares the first size that no
+    # longer fits. Fork YAML: AssertSizeLessThan: [{3: 16385}]  # K <= 16384
+    "AssertSizeLessThan": -1,
+    # Exact stride per tensor, same {index: value} form. Index 0 is the unit
+    # stride and index 1 the leading dimension, so for a column-major NN GEMM
+    # {0: 1, 1: 2} reads "elements contiguous, lda == 2". A kernel that indexes
+    # an operand with no stride argument declares the layout it hardcodes;
+    # strides that must equal a runtime size cannot be expressed this way.
+    "AssertStrideAEqual": -1,
+    "AssertStrideBEqual": -1,
+    "AssertStrideCEqual": -1,
+    "AssertStrideDEqual": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1372,6 +1395,35 @@ _skipTypeCheck = {
 }
 
 
+# Assert* parameters whose value is an {index: value} map instead of a scalar.
+ASSERT_DIM_MAP_PARAMETERS = (
+    "AssertSizeEqual",
+    "AssertSizeGreaterThan",
+    "AssertSizeLessThan",
+    "AssertStrideAEqual",
+    "AssertStrideBEqual",
+    "AssertStrideCEqual",
+    "AssertStrideDEqual",
+)
+
+
+def checkAssertSizeMapIsValid(name, value):
+    """AssertSize*/AssertStride* is a dict of {index: value}; both are int."""
+    if type(value) is not dict:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a dict of {{index: size}}"
+        raise Exception(msgBase.format(name, value))
+    for pos, val in value.items():
+        if type(pos) is not int:
+            msgBase = "Invalid parameter value: {} = {}\nIndex must be int, got {}"
+            raise Exception(msgBase.format(name, value, type(pos).__name__))
+        if pos < 0:
+            msgBase = "Invalid parameter value: {} = {}\nIndex must be >= 0"
+            raise Exception(msgBase.format(name, value))
+        if type(val) is not int:
+            msgBase = "Invalid parameter value: {} = {}\nSize must be int, got {}"
+            raise Exception(msgBase.format(name, value, type(val).__name__))
+
+
 def checkSpaceFillAlgoIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
@@ -1460,6 +1512,8 @@ def checkParametersAreValid(
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
+        elif name in ASSERT_DIM_MAP_PARAMETERS:
+            checkAssertSizeMapIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":

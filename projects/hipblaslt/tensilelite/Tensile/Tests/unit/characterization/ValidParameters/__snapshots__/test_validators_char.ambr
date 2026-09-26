@@ -1,4 +1,52 @@
 # serializer version: 1
+# name: test_assert_size_map_invalid_raises[bool_key]
+  '''
+  Invalid parameter value: AssertSizeEqual = {True: 1}
+  Index must be int, got bool
+  '''
+# ---
+# name: test_assert_size_map_invalid_raises[float_size]
+  '''
+  Invalid parameter value: AssertSizeEqual = {0: 1.5}
+  Size must be int, got float
+  '''
+# ---
+# name: test_assert_size_map_invalid_raises[int]
+  '''
+  Invalid parameter value: AssertSizeEqual = 1
+  Must be a dict of {index: size}
+  '''
+# ---
+# name: test_assert_size_map_invalid_raises[neg_index]
+  '''
+  Invalid parameter value: AssertSizeEqual = {-1: 1}
+  Index must be >= 0
+  '''
+# ---
+# name: test_assert_size_map_invalid_raises[str]
+  '''
+  Invalid parameter value: AssertSizeEqual = abc
+  Must be a dict of {index: size}
+  '''
+# ---
+# name: test_assert_size_map_invalid_raises[str_key]
+  '''
+  Invalid parameter value: AssertSizeEqual = {'0': 1}
+  Index must be int, got str
+  '''
+# ---
+# name: test_assert_size_map_invalid_raises[str_size]
+  '''
+  Invalid parameter value: AssertSizeEqual = {0: '1'}
+  Size must be int, got str
+  '''
+# ---
+# name: test_check_params_dispatch_assert_size_equal_invalid_propagates
+  '''
+  Invalid parameter value: AssertSizeEqual = 1
+  Must be a dict of {index: size}
+  '''
+# ---
 # name: test_check_params_dispatch_sfcwgm_invalid_propagates
   '''
   Invalid parameter value: SFCWGM = [[0, 999]]

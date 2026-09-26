@@ -57,7 +57,11 @@ import os
 import sys
 
 from Tensile.Common.Utilities import deriveWaveParams
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters
+from Tensile.Common.ValidParameters import (
+    ASSERT_DIM_MAP_PARAMETERS,
+    checkParametersAreValid,
+    validParameters,
+)
 
 
 FEATURE_FLAGS = [
@@ -72,7 +76,12 @@ PREDICATE_FORK_PARAMETER_KEYS = (
     "AssertFree0ElementMultiple",
     "AssertFree1ElementMultiple",
     "AssertSummationElementMultiple",
-)
+) + ASSERT_DIM_MAP_PARAMETERS
+
+# Single-valued ForkParameters frozen into custom.config. Predicates select
+# the solution; StaggerU is a solution knob (handwritten kernels declare 0
+# because they do not implement Tensile's in-loop wrap).
+CUSTOM_CONFIG_FORK_PARAMETER_KEYS = PREDICATE_FORK_PARAMETER_KEYS + ("StaggerU",)
 
 
 def _parse_tensile_yaml(path, kernel_name=None):
@@ -133,13 +142,13 @@ def _parse_tensile_yaml(path, kernel_name=None):
             if wf_list:
                 config["WavefrontSize"] = wf_list[0]
 
-        for pred_key in PREDICATE_FORK_PARAMETER_KEYS:
+        for pred_key in CUSTOM_CONFIG_FORK_PARAMETER_KEYS:
             if pred_key not in entry:
                 continue
             values = entry[pred_key]
             if not isinstance(values, list) or len(values) != 1:
                 raise RuntimeError(
-                    f"Custom kernel predicate '{pred_key}' must be a single-valued "
+                    f"Custom kernel parameter '{pred_key}' must be a single-valued "
                     f"ForkParameter (got {values!r}); a custom kernel must commit "
                     f"to one constraint, not a search space."
                 )
@@ -228,7 +237,8 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
     lines.append("  Source:")
     lines.append(f"    Origin: {origin}")
     if repository:
-        lines.append(f"    Repository: {repository}")
+        # Quote URLs: the AMDGPU metadata parser treats `https:` as a YAML key.
+        lines.append(f'    Repository: "{repository}"')
     lines.append(f"  Version: {version}")
     lines.append("  Features:")
     for flag in FEATURE_FLAGS:
@@ -265,7 +275,7 @@ def build_custom_config_yaml(origin, config, repository=None, version="1.0.0"):
             lines.append(f"  MIWaveTile: {_fmt_yaml_inline(mi_wave_tile)}")
 
     if config:
-        for pred_key in PREDICATE_FORK_PARAMETER_KEYS:
+        for pred_key in CUSTOM_CONFIG_FORK_PARAMETER_KEYS:
             if pred_key in config:
                 lines.append(f"  {pred_key}: {_fmt_yaml_inline(config[pred_key])}")
 
