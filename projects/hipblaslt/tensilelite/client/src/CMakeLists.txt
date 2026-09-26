@@ -13,6 +13,7 @@ target_sources(tensilelite-client-common
         "${CMAKE_CURRENT_SOURCE_DIR}/TimingEvents.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"
