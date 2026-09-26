@@ -83,6 +83,18 @@
 #   ``TEST_NAME_PREFIX``
 #     Optional prefix for generated category suite CTest names. Defaults to
 #     ``TARGET_NAME``.
+#
+#   Support-claim mode is not a per-target keyword. Every lane names
+#   ``--test-engine``, and the binary enforces support claims by default when an
+#   engine is named: the sidecar is queried against the engine under test, every
+#   verdict is printed in the summary, and a broken claim fails that bundle's test.
+#
+#   A claim only applies to the arch and platform the run is on, and a runner with
+#   no device reports no arch, so no claim applies and nothing is enforced. A GPU
+#   lane enforces the claims for its own arch; a CPU-only lane sees no change.
+#
+#   Sidecars are git-tracked, so enforcement does not wait on ``dvc pull``; DVC
+#   carries the tensor payloads, which claim checking never reads.
 
 # Builds the build-tree command for an external integration test.
 #

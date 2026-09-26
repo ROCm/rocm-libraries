@@ -4,6 +4,8 @@
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
+#include <initializer_list>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <sstream>
@@ -61,9 +63,9 @@ void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 // ---- support claims --------------------------------------------------------
 
 SupportObservation
-    IntegrationBundleVerificationHarness::checkSupportClaims(const GraphSession& session)
+    IntegrationBundleVerificationHarness::observeSupportClaims(const GraphSession& session)
 {
-    if(_bundle == nullptr || !shouldEnforceClaims())
+    if(_bundle == nullptr || !shouldObserveClaims())
     {
         return {};
     }
@@ -85,18 +87,36 @@ SupportObservation
                                         _deps.policy.platform);
 }
 
-void IntegrationBundleVerificationHarness::recordClaimCoverage(
-    const SupportObservation& observation)
+ClaimPhase IntegrationBundleVerificationHarness::observeClaims(const GraphSession& session)
 {
-    const CoverageUpdate update = coverageFor(observation, shouldEnforceClaims());
+    ClaimPhase phase;
+
+    phase.observation = observeSupportClaims(session);
+
+    // Everything from here down derives from the observation, so a throw above loses
+    // only facts that were not yet true. graphsReachedBody is the exception and is
+    // published from TestBody() instead, ahead of anything that can throw.
+    const CoverageUpdate update = coverageFor(phase.observation, shouldObserveClaims());
 
     _deps.reporter->recordCoverage(update);
 
-    if(update.missedQuery)
+    phase.complaint = missedQueryComplaint(update, _bundlePath.string());
+    return phase;
+}
+
+void IntegrationBundleVerificationHarness::raiseComplaints(
+    std::initializer_list<std::optional<HarnessComplaint>> complaints)
+{
+    for(const auto& complaint : complaints)
     {
-        ADD_FAILURE() << "support claims exist for " << _bundlePath
-                      << " but were never queried; enforcement would have passed "
-                         "without checking them";
+        if(!complaint.has_value())
+        {
+            continue;
+        }
+
+        // ADD_FAILURE() rather than FAIL(): FAIL() returns, and the caller still has
+        // an outcome to report and possibly a second complaint to raise.
+        ADD_FAILURE() << complaint->message;
     }
 }
 
@@ -118,9 +138,6 @@ void IntegrationBundleVerificationHarness::commitClaims(const std::vector<Suppor
     }
 }
 
-// The single place a test is marked passed, failed or skipped. Everything above
-// returns a value, which is what keeps the claim verdict and the test result read
-// off the same facts instead of off each other.
 void IntegrationBundleVerificationHarness::reportOutcome(const VerificationOutcome& outcome)
 {
     switch(outcome.status)

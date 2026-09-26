@@ -21,12 +21,15 @@
 #include <string>
 #include <vector>
 
+#include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
@@ -153,12 +156,29 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
+        // On by default so that a lane which forgets to ask for it still gets it: the
+        // failure this guards against is a sidecar quietly going stale, and a default
+        // of off means every new engine has to remember to opt in before it is
+        // protected. Passing it explicitly is still meaningful -- it is the difference
+        // between "check if you can" and "check, and say so if you cannot", which is
+        // what the --test-engine requirement below keys on.
+        //
+        // An optional value rather than a bare switch: a switch cannot be turned off,
+        // and one takes no value, so "=false" would be split off, handed to GTest as a
+        // stray argument, and leave enforcement on without a word.
         parser.add_argument("--enforce-support-claims")
-            .default_value(false)
-            .implicit_value(true)
-            .help("Enforce engine support claims from .support.json sidecars. "
+            .default_value(true)
+            .nargs(argparse::nargs_pattern::optional)
+            .metavar("true|false")
+            .action(hipdnn_integration_tests::bundle::parseEnforceClaimsValue)
+            .help("Enforce engine support claims from .support.json sidecars (default). "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
-                  "a test FAIL instead of a silent SKIP.");
+                  "a test FAIL instead of a silent SKIP. Passing this explicitly also "
+                  "makes a missing --test-engine an error rather than a quiet "
+                  "downgrade to reporting. Use --enforce-support-claims=false to "
+                  "turn enforcement off: claims are still read and the summary is "
+                  "still printed, but a broken claim is reported instead of failing "
+                  "the test.");
         parser.add_argument("--write-support-claims")
             .default_value(false)
             .implicit_value(true)
@@ -325,6 +345,46 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
+        const bool writeSupportClaims = parser.get<bool>("--write-support-claims");
+
+        hipdnn_integration_tests::bundle::ClaimModeRequest claimRequest;
+        // Enforcement defaults on, so the flag's value alone cannot tell a lane that
+        // typed it from one that inherited the default; only whether it was typed can,
+        // and resolveClaimMode() owes those two different answers.
+        if(parser.is_used("--enforce-support-claims"))
+        {
+            claimRequest.enforce = parser.get<bool>("--enforce-support-claims");
+        }
+        claimRequest.writing = writeSupportClaims;
+        claimRequest.hasEngine = engineName.has_value();
+
+        const auto claimMode = hipdnn_integration_tests::bundle::resolveClaimMode(claimRequest);
+        if(claimMode.error.has_value())
+        {
+            std::cerr << *claimMode.error;
+            return 1;
+        }
+
+        if(writeSupportClaims && !articlePath.has_value())
+        {
+            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
+                      << "Mode A (auto-select) cannot generate support claims.\n";
+            return 1;
+        }
+
+        // Only that a directory was named -- "is this the source tree" is not
+        // decidable, a build directory is just a directory. The env var is the
+        // documented alternative to the flag, so it satisfies this too.
+        if(writeSupportClaims && !goldenDataDir.has_value()
+           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
+        {
+            std::cerr << "--write-support-claims requires a bundle data directory: pass "
+                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
+                      << "Point it at the source tree -- sidecars written into a build "
+                      << "directory are lost on the next clean build.\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -337,35 +397,9 @@ int main(int argc, char** argv) noexcept
         opts.verificationMode = verificationMode;
         opts.validatorDevice = validator;
         opts.captureDir = std::move(captureDir);
-        opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
-        opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
-
-        if(opts.writeSupportClaims && !opts.articlePath.has_value())
-        {
-            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
-                      << "Mode A (auto-select) cannot generate support claims.\n";
-            return 1;
-        }
-
-        // Only that a directory was named -- "is this the source tree" is not
-        // decidable, a build directory is just a directory. The env var is the
-        // documented alternative to the flag, so it satisfies this too.
-        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
-           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
-        {
-            std::cerr << "--write-support-claims requires a bundle data directory: pass "
-                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
-                      << "Point it at the source tree -- sidecars written into a build "
-                      << "directory are lost on the next clean build.\n";
-            return 1;
-        }
-
-        if(opts.writeSupportClaims && opts.enforceSupportClaims)
-        {
-            std::cerr << "--write-support-claims and --enforce-support-claims are "
-                      << "mutually exclusive.\n";
-            return 1;
-        }
+        opts.writeSupportClaims = writeSupportClaims;
+        opts.enforceSupportClaims
+            = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
@@ -437,18 +471,6 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Enforcement checks a sidecar against a named engine. Without one there
-        // is nothing to check, and silently degrading to "enforced nothing, exit 0"
-        // is the exact failure --enforce-support-claims exists to prevent.
-        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
-           && !hipdnn_integration_tests::TestConfig::get().hasEngineName())
-        {
-            std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
-                         "engine to\n"
-                         "       check sidecar claims against.\n";
-            return 1;
-        }
-
         // Enumerated before any test records support data (see setEngineNames); the
         // vector keeps enumeration order for the table columns below.
         std::vector<std::string> loadedEngineNames;
@@ -478,9 +500,24 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
         if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
+            const auto& config = hipdnn_integration_tests::TestConfig::get();
+
+            // The same arch token and platform the verdicts were recorded under, so an
+            // entry only repeats them when it genuinely differs from the run.
+            hipdnn_integration_tests::bundle::SupportClaimRunContext run;
+            if(config.hasEngineName())
+            {
+                run.engine = std::string(config.getEngineName());
+            }
+            run.arch = hipdnn_integration_tests::bundle::baseArchToken(config.getCurrentArch());
+            run.platform = hipdnn_integration_tests::currentPlatform();
+            run.bundleRoot = hipdnn_integration_tests::bundle::resolveDataDir();
+
             hipdnn_integration_tests::bundle::printSupportClaimSummary(
                 hipdnn_integration_tests::bundle::supportClaimCoverage(),
                 hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
+                hipdnn_integration_tests::bundle::claimMode(),
+                run,
                 std::cerr);
         }
 
@@ -513,18 +550,25 @@ int main(int argc, char** argv) noexcept
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {
-            std::cerr
-                << "\nFATAL: --enforce-support-claims is active and "
-                << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsWithClaims
-                << " graph(s) carrying support\n"
-                   "       claims were discovered, but not one of them was ever queried. "
-                   "Enforcement\n"
-                   "       passed having verified nothing, so the run fails instead. Usual "
-                   "causes:\n"
-                   "         - no --test-engine was given, so there is no engine to check claims "
-                   "against\n"
-                   "         - the GPU or the engine plugin failed to load\n"
-                   "         - a --gtest_filter selected only graphs without claims\n";
+            std::cerr << "\nFATAL: --enforce-support-claims is active and "
+                      << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsReachedBody
+                      << " graph(s) carrying support\n"
+                         "       claims actually ran, but not one of them was ever queried. "
+                         "Enforcement\n"
+                         "       passed having verified nothing, so the run fails instead. The "
+                         "usual cause\n"
+                         "       is that every one of them failed to open, so the query was "
+                         "never\n"
+                         "       reachable; those tests are already red on their own account.\n"
+                         "\n"
+                         "       A missing GPU or an engine plugin that did not load is *not* a "
+                         "cause:\n"
+                         "       both exit non-zero long before any test body runs.\n"
+                         "\n"
+                         "       A --gtest_filter that selected only unclaimed graphs is *not* a "
+                         "cause:\n"
+                         "       the count above is seeded by the tests that ran, not by what was "
+                         "discovered.\n";
             exitCode = 1;
         }
 

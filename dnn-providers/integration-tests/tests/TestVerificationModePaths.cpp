@@ -375,7 +375,7 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
 // ── Enforcement-level gate ──────────────────────────────────────────────────
 // runComparison() routes on enforcement level alone: a non-FULL bundle reaches
 // enforceAtLevel() regardless of --enforce-support-claims, which only controls
-// what checkSupportClaims() does earlier in TestBody(). enforceAtLevel() is no
+// what observeSupportClaims() does earlier in TestBody(). enforceAtLevel() is no
 // longer stubbable, so these assert its real rung behaviour directly through the
 // engine-runner mock instead of an intercepted EnforcementLevel value.
 //

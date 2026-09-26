@@ -4,7 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "harness/BundleMetadata.hpp"
@@ -178,6 +180,38 @@ inline std::string describeOutcome(const VerificationOutcome& outcome, Verificat
 
     return std::string("engine in ranked list; reached ") + toString(outcome.depth)
            + ", bundle requires " + toString(required);
+}
+
+/// Something wrong with the *run*, as a value rather than an assertion. Distinct
+/// from VerificationOutcome: that is the engine's result and becomes the test's
+/// disposition, while this is the harness objecting to how the test was conducted.
+///
+/// Every complaint is a failure. A grievance the harness is willing to print and let
+/// the run stay green is a grievance nobody acts on, so the type carries no severity
+/// to get wrong -- producing one is the decision, and the raise site has none left.
+struct HarnessComplaint
+{
+    std::string message;
+};
+
+/// The complaint, if this outcome went green without reaching `required` -- every
+/// fallback in the chain can decline, and a bundle whose oracles all decline would
+/// otherwise report success having compared nothing.
+///
+/// Self-guarding, which is why the call site needs no surrounding condition: only a
+/// PASSED outcome can trip it, so a blocked claim or a thrown exception is silently
+/// nothing.
+inline std::optional<HarnessComplaint> shallowPassComplaint(const VerificationOutcome& outcome,
+                                                            VerificationDepth required,
+                                                            std::string_view bundlePath)
+{
+    if(outcome.status != OutcomeStatus::PASSED || outcome.depth >= required)
+    {
+        return std::nullopt;
+    }
+
+    return HarnessComplaint{std::string("test passed without reaching ") + toString(required)
+                            + " for " + std::string(bundlePath)};
 }
 
 } // namespace hipdnn_integration_tests::bundle

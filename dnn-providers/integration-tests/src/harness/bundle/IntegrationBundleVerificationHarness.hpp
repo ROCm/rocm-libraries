@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <initializer_list>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -55,6 +56,15 @@ inline bool noHipDevicesAvailable()
 
 // detail::buildVariantPack() lives in VariantPackBuilder.hpp -- both harnesses use
 // it, so it is not this one's to own.
+
+/// Everything the claim phase produced: the verdicts to publish once the run is
+/// over, and any grievance about the phase itself. Both outlive the phase -- they
+/// are used at the end of TestBody(), once the outcome is known.
+struct ClaimPhase
+{
+    SupportObservation observation;
+    std::optional<HarnessComplaint> complaint;
+};
 
 /// Runs one bundle against the engine under test and decides what that says.
 ///
@@ -106,6 +116,22 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
     {
+        // Before the first skip exit, so a bundle this SetUp() goes on to skip is still
+        // counted as selected. That is the whole point of the counter: the gap between it
+        // and the bodies that ran is exactly what SetUp() skipped, and the gap above it is
+        // --gtest_filter.
+        //
+        // shouldObserveClaims(), not a bare sidecar check, because registration seeds
+        // graphsWithClaims only when an engine was named (BundleRegistration.hpp) and the
+        // two counters have to nest or the subtraction above is arithmetic on unrelated
+        // sets. Keying this on the file alone made a run without --test-engine report 0
+        // with claims against a positive selected count -- a summary that blames the
+        // harness for a missing flag.
+        if(shouldObserveClaims())
+        {
+            _deps.reporter->recordSelectedWithClaims();
+        }
+
         if(_deps.policy.useDevice() && noHipDevicesAvailable())
         {
             noteSkipBeforeObservation();
@@ -130,6 +156,16 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
+        // First line of the body, ahead of everything that can throw. The fact is
+        // already true here, and both openGraph() below and the sidecar read inside
+        // the try can throw -- either would otherwise lose it and leave the summary
+        // blaming SetUp() for a skip that never happened. Same predicate as the
+        // selected counter above, so the two subtract cleanly.
+        if(shouldObserveClaims())
+        {
+            _deps.reporter->recordReachedBody();
+        }
+
         // One from_binary, one ranked query, one applicability answer. Everything
         // below takes the session as an argument, so nothing re-derives it and
         // nothing caches it on the harness.
@@ -141,45 +177,36 @@ public:
             GTEST_SKIP() << "support-claim authoring run (--write-support-claims)";
         }
 
-        // Enforcement + verification only below this point.
-        //
-        // Read the claim facts before anything can cut the test short: every mode
-        // has an early return that would otherwise leave the graph's claims
-        // undecided while the run exited 0.
-        const auto observation = checkSupportClaims(session);
-        recordClaimCoverage(observation);
+        // Declared out here so the tail below still sees it when the read throws: a
+        // default-constructed ClaimPhase commits nothing and complains about nothing.
+        ClaimPhase claims;
 
         VerificationOutcome outcome;
         try
         {
-            if(const auto blocked = claimBlocked(observation))
-            {
-                outcome = *blocked;
-            }
-            else
-            {
-                outcome = runComparison(session);
+            // Inside the try because a hand-edited sidecar that does not parse
+            // throws, and that is the class of fault the catch exists for.
+            claims = observeClaims(session);
 
-                // "the test did nothing and went green" is the failure this harness
-                // exists to catch. Only asked on this path: a blocked claim never
-                // reached the depth, and is already a failure.
-                const VerificationDepth required = bundleRequiredDepth();
-                EXPECT_FALSE(outcome.status == OutcomeStatus::PASSED && outcome.depth < required)
-                    << "test passed without reaching " << toString(required) << " for "
-                    << _bundlePath;
-            }
+            auto claimOutcome = enforcedClaimFailure(claims.observation);
+            outcome = claimOutcome ? *claimOutcome : runComparison(session);
         }
         catch(const std::exception& e)
         {
-            // This graph was already counted as queried, so a verdict that never
-            // lands leaves the summary short a row and reconciles against nothing.
-            // HARNESS at NOT_REACHED because a throw is our bug and proves nothing
-            // about the engine.
+            // Every throw still produces an outcome, or the summary is short a row
+            // and reconciles against nothing. A throw from the claim read lands here
+            // before the graph is counted as queried, keeping withClaims >= queried
+            // true. HARNESS at NOT_REACHED: a throw is our bug, not the engine's.
             outcome = VerificationOutcome::failed(
                 VerificationDepth::NOT_REACHED, FailureOrigin::HARNESS, e.what());
         }
 
-        commitClaims(observation.results, outcome);
+        commitClaims(claims.observation.results, outcome);
+        // Unconditional: both rules are self-guarding, so neither needs a surrounding
+        // condition here.
+        raiseComplaints(
+            {claims.complaint,
+             shallowPassComplaint(outcome, bundleRequiredDepth(), _bundlePath.string())});
         reportOutcome(outcome);
     }
 
@@ -215,22 +242,41 @@ private:
         SupportObservationLog::get().recordSkipBeforeObservation();
     }
 
-    SupportObservation checkSupportClaims(const GraphSession& session);
+    SupportObservation observeSupportClaims(const GraphSession& session);
+
+    // The one place the claim mode is read: whether a bad verdict costs anything. The
+    // verdict itself is recorded either way, which is what makes a warn-only run
+    // worth printing. Needs no shouldObserveClaims() guard on top -- an unqueried graph
+    // carries no results, so there is nothing to block on.
+    std::optional<VerificationOutcome>
+        enforcedClaimFailure(const SupportObservation& observation) const
+    {
+        if(_deps.policy.claims != ClaimMode::ENFORCE)
+        {
+            return std::nullopt;
+        }
+        return claimBlocked(observation);
+    }
 
     void observeAndRecordSupport(const GraphSession& session);
 
-    // Applies the coverage rules to the run counters, and fails this test if a
-    // sidecar exists that the query somehow did not reach.
-    void recordClaimCoverage(const SupportObservation& observation);
+    // Reads this graph's claims and applies the coverage rules to the run counters.
+    // Returns the complaint owed for an unreached sidecar rather than raising it, so
+    // the rule stays assertable on its own.
+    ClaimPhase observeClaims(const GraphSession& session);
+
+    // The one place a HarnessComplaint turns into a gtest failure. nullopts are
+    // skipped, which is what lets the call site pass every rule unconditionally.
+    static void raiseComplaints(std::initializer_list<std::optional<HarnessComplaint>> complaints);
 
     // Publishes every verdict, promoting the engine-under-test's accepted claim by
     // what the run actually achieved. Called exactly once per test.
     void commitClaims(const std::vector<SupportResult>& results,
                       const VerificationOutcome& outcome);
 
-    // The only place a gtest disposition is issued. Called exactly once per test,
-    // last, because GTEST_SKIP() and FAIL() both return. Static because the
-    // disposition is a pure function of the outcome.
+    // The only place a test's *disposition* is decided -- pass, skip or fail. Called
+    // last, because GTEST_SKIP() and FAIL() both return. raiseComplaints() above can
+    // add a non-terminal failure before it, but it never decides what the test is.
     static void reportOutcome(const VerificationOutcome& outcome);
 
     // Records the bundle as unverifiable and yields the skip outcome for TestBody()
@@ -238,15 +284,29 @@ private:
     VerificationOutcome unverifiable(const std::string& reason,
                                      VerificationDepth reached = VerificationDepth::NOT_REACHED);
 
-    // The single definition of "this graph's claims must be checked": a sidecar
-    // exists, enforcement is on, and an engine was named to check against. Checked
-    // in the same order everywhere so a harness with no injected engine never asks
-    // about the sidecar.
-    bool shouldEnforceClaims() const
+    // The single definition of "this graph's claims are this run's business": an engine
+    // was named to check against, this is not an authoring run, and a sidecar exists.
+    // Deliberately free of the claim mode -- what a broken claim costs is
+    // enforcedClaimFailure()'s question, and reading it here too would make a run that
+    // cannot fail also unable to report.
+    //
+    // An authoring run skips every body before the claim check, so counting it would
+    // leave bodies reached with none queried -- the shape the summary calls a harness
+    // defect. Excluded here rather than at each counter, so the counters cannot drift.
+    //
+    // Ordered cheapest-first on purpose: carriesSidecar() stats the filesystem on every
+    // call, a few times per test, and a run that named no engine must not pay.
+    bool shouldObserveClaims() const
     {
-        return _engineUnderTest.has_value() && !_claimLocator.sidecarPath.empty()
-               && std::filesystem::exists(_claimLocator.sidecarPath)
-               && _deps.policy.enforceSupportClaims;
+        return _engineUnderTest.has_value() && !TestConfig::get().writeSupportClaims()
+               && carriesSidecar();
+    }
+
+    // "There is a sidecar here", and nothing more -- no engine.
+    bool carriesSidecar() const
+    {
+        return !_claimLocator.sidecarPath.empty()
+               && std::filesystem::exists(_claimLocator.sidecarPath);
     }
 
     VerificationDepth bundleRequiredDepth() const
