@@ -3,7 +3,8 @@
 
 """CPU-only golden cases for the explicit gfx90a LDS profile."""
 
-import importlib
+import importlib.util
+import sys
 
 import pytest
 
@@ -253,16 +254,18 @@ def test_global_opcode_addition_does_not_expand_gfx90a_support(monkeypatch):
     monkeypatch.setitem(
         opcodes._OPCODE_SPECS, opcode, opcodes.OpcodeSpec(opcode, "read", 12)
     )
-    # Reload so the new opcode is present when the profile class is defined.
-    profile = importlib.reload(gfx90a).Gfx90aProfile()
+    # Re-evaluate the class with the new opcode without replacing live exports.
+    spec = importlib.util.spec_from_file_location(
+        f"{gfx90a.__name__}_test", gfx90a.__file__
+    )
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    profile = module.Gfx90aProfile()
     monkeypatch.setattr(profiles, "BUILTIN_PROFILES", (profile,))
-    try:
-        with pytest.raises(LdsPredictionError, match="not supported by gfx90a"):
-            _predict(opcode, [_access(0, 0, 0, width=12)])
-        with pytest.raises(ValueError, match="not supported by gfx90a"):
-            profile.phase_key(opcode, 0)
-        with pytest.raises(ValueError, match="not supported by gfx90a"):
-            profile.collision_key(opcode, 0)
-    finally:
-        monkeypatch.undo()
-        importlib.reload(gfx90a)
+    with pytest.raises(LdsPredictionError, match="not supported by gfx90a"):
+        _predict(opcode, [_access(0, 0, 0, width=12)])
+    with pytest.raises(ValueError, match="not supported by gfx90a"):
+        profile.phase_key(opcode, 0)
+    with pytest.raises(ValueError, match="not supported by gfx90a"):
+        profile.collision_key(opcode, 0)
