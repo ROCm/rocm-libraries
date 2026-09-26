@@ -36,4 +36,15 @@
 #define ROCSPARSE_VERSION_TWEAK     @rocsparse_VERSION_TWEAK@
 /* clang-format on */
 
+#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
+/* Feature flags baked in at build time. */
+#cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
+#cmakedefine ROCSPARSE_WITH_ILDLT0
+#cmakedefine ROCSPARSE_WITH_CSC_TRSV
+#cmakedefine ROCSPARSE_WITH_CSC_TRSM
+#cmakedefine ROCSPARSE_WITH_TRSM_REFACTORING
+/* When defined, the deprecated rocsparse_indextype_u16 index type is removed
+   from the public API, so consumer code referencing it fails to compile. */
+#cmakedefine ROCSPARSE_WITH_U16_REMOVED
+
 #endif /* ROCSPARSE_VERSION_H */
