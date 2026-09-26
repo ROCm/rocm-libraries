@@ -397,15 +397,10 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int crossBBGlobalReadResidual_ = 0;
 
     InFlightQueue dsReadInflight_;
-    int crossBBDsReadCount_ = 0;
-    int crossBBDsReadResidual_ = 0;
-    // TEMPORARILY DISABLED: measured ~4.7% real regression on mxf8_tn_medium
-    // (real gfx1250 hardware, reproduced twice). Isolated by bisection to just
-    // this seeding call; every other commit in this PR ruled out. The carry
-    // itself is believed correct in principle (mirrors globalReadInflight_'s
-    // existing cross-BB carry) -- needs re-validation against hardware before
-    // re-enabling.
-    static constexpr bool kEnableDsReadCrossBBCarry = false;
+    // Each ds_load credit's own remaining drain latency, carried whole from the
+    // predecessor BB (see BBScheduleState::dsReadResiduals). Not collapsed to a
+    // count/worst-case pair -- see InFlightQueue::seed(vector<int>).
+    std::vector<int> crossBBDsReadResiduals_;
 
     // Rule (4) ds_load issue cap (dagFeatures.dsReadPerCap), as a sliding
     // window on the real timeline: depth = the ceiling N, entry lifetime = the
@@ -2225,10 +2220,11 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
         globalReadInflight_.seed(crossBBGlobalReadCount_, crossBBGlobalReadResidual_);
     // Same credit-pool seeding for the ds_load (LDS return queue) pacer, so a
     // real loop re-entry doesn't model the queue as empty while hardware still
-    // has the prior iteration's tail draining (see crossBBDsReadCount_).
-    // kEnableDsReadCrossBBCarry: temporarily disabled, see its declaration.
-    if (kEnableDsReadCrossBBCarry && dsReadQueueDepth() > 0 && crossBBDsReadCount_ > 0)
-        dsReadInflight_.seed(crossBBDsReadCount_, crossBBDsReadResidual_);
+    // has the prior iteration's tail draining -- each credit keeps its own
+    // remaining drain latency (see crossBBDsReadResiduals_) rather than
+    // collapsing to one worst-case value.
+    if (dsReadQueueDepth() > 0 && !crossBBDsReadResiduals_.empty())
+        dsReadInflight_.seed(crossBBDsReadResiduals_);
 }
 
 // KNOWN LIMITATION: on the scheduler's single RPO pass this currently carries
@@ -2247,18 +2243,21 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
     crossBBDsResiduals_.clear();
     crossBBGlobalReadCount_ = 0;
     crossBBGlobalReadResidual_ = 0;
-    crossBBDsReadCount_ = 0;
-    crossBBDsReadResidual_ = 0;
+    crossBBDsReadResiduals_.clear();
     const Loop* loop = getLoop();
     if (!currentBB_ || !loop || !loop->contains(currentBB_) || !getAnalysisCache()) return;
 
     // Global-read credits: loop predecessors take priority over non-loop ones
     // (the loop body runs many iterations, so its carried state governs steady
-    // state). Take the max within the chosen group on BOTH axes — occupancy and
-    // residual drain — so no predecessor path is left over-issuing. ds_load
-    // credits follow the identical rule.
+    // state). Take the max within the chosen group on both axes — occupancy and
+    // residual drain — so no predecessor path is left over-issuing.
+    //
+    // ds_load credits follow the same loop-vs-non-loop priority, but keep each
+    // credit's own residual instead of collapsing to a count/worst-case pair:
+    // within the chosen group, the predecessor with more credits still in
+    // flight is the more-constrained one, so its whole residual list wins.
     int loopCount = 0, loopRes = 0, nonLoopCount = 0, nonLoopRes = 0;
-    int dsLoopCount = 0, dsLoopRes = 0, dsNonLoopCount = 0, dsNonLoopRes = 0;
+    std::vector<int> dsLoopResiduals, dsNonLoopResiduals;
     bool sawLoopPred = false;
 
     for (BasicBlock* pred : currentBB_->getPredecessors()) {
@@ -2271,19 +2270,18 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
             sawLoopPred = true;
             loopCount = std::max(loopCount, state->globalReadInflightCount);
             loopRes = std::max(loopRes, state->globalReadResidual);
-            dsLoopCount = std::max(dsLoopCount, state->dsReadInflightCount);
-            dsLoopRes = std::max(dsLoopRes, state->dsReadResidual);
+            if (state->dsReadResiduals.size() > dsLoopResiduals.size())
+                dsLoopResiduals = state->dsReadResiduals;
         } else {
             nonLoopCount = std::max(nonLoopCount, state->globalReadInflightCount);
             nonLoopRes = std::max(nonLoopRes, state->globalReadResidual);
-            dsNonLoopCount = std::max(dsNonLoopCount, state->dsReadInflightCount);
-            dsNonLoopRes = std::max(dsNonLoopRes, state->dsReadResidual);
+            if (state->dsReadResiduals.size() > dsNonLoopResiduals.size())
+                dsNonLoopResiduals = state->dsReadResiduals;
         }
     }
     crossBBGlobalReadCount_ = sawLoopPred ? loopCount : nonLoopCount;
     crossBBGlobalReadResidual_ = sawLoopPred ? loopRes : nonLoopRes;
-    crossBBDsReadCount_ = sawLoopPred ? dsLoopCount : dsNonLoopCount;
-    crossBBDsReadResidual_ = sawLoopPred ? dsLoopRes : dsNonLoopRes;
+    crossBBDsReadResiduals_ = sawLoopPred ? dsLoopResiduals : dsNonLoopResiduals;
 }
 
 void CDNA5ReadyQueue::onFinishBB() {
@@ -2302,9 +2300,9 @@ void CDNA5ReadyQueue::onFinishBB() {
     });
     dsBindNeither_ = dsBindCapOnly_ = dsBindQueueOnly_ = dsBindBoth_ = 0;
     if (!currentBB_ || !getAnalysisCache()) return;
-    getAnalysisCache()->store(currentBB_, {0, regDataReadyCounters, globalReadInflight_.size(),
-                                           globalReadInflight_.maxResidual(),
-                                           dsReadInflight_.size(), dsReadInflight_.maxResidual()});
+    getAnalysisCache()->store(currentBB_,
+                              {0, regDataReadyCounters, globalReadInflight_.size(),
+                               globalReadInflight_.maxResidual(), dsReadInflight_.residuals()});
 }
 
 // Per scheduling region. Rule (4): per-WMMA-window DS cap (computed in
