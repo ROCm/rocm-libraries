@@ -21,6 +21,7 @@
 #endif
 #ifdef CK_USE_WMMA
 #include "grouped_convolution_backward_weight_wmma.inc"
+#include "grouped_convolution_backward_weight_depthwise_bf16.inc"
 #include "grouped_convolution_backward_weight_explicit_wmma.inc"
 #endif
 namespace ck {
@@ -950,6 +951,8 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                              is_same_v<ComputeTypeB, ck::bhalf_t>)
                 {
                     add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_depthwise_nhwgc_gkyxc_nhwgk_bf16_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances_large_tiles(
                         op_ptrs);

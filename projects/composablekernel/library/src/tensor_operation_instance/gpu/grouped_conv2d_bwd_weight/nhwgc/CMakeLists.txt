@@ -4,6 +4,7 @@
 # NHWGC layout instances for grouped_conv2d_bwd_weight
 set(GROUPED_CONV2D_BWD_WEIGHT_NHWGC
    # wmma
+   wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_depthwise_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_pipev1_instance.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_f16_pipev1_instance.cpp
    wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instance.cpp

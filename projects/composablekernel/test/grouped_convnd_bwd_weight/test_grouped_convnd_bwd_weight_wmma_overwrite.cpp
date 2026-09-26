@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <type_traits>
@@ -48,11 +49,16 @@ using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvBwdWeight<NDimSp
 enum class Candidate
 {
     DirectScalar,
-    TwoStageScalar
+    TwoStageScalar,
+    Depthwise
 };
 
 bool IsCandidate(const std::string& name, Candidate candidate)
 {
+    if(candidate == Candidate::Depthwise)
+    {
+        return name.compare(0, 40, "DeviceGroupedConvBwdWeightDepthwiseBf16<") == 0;
+    }
     const std::string direct = "DeviceGroupedConvBwdWeight_Wmma_CShuffleV3<32, 16, 16, 32, Default";
     const std::string two_stage =
         "DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3<32, 16, 16, 32, Default";
@@ -163,6 +169,12 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
             ck::tensor_operation::device::instance::
                 add_device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instances(
                     instances);
+            if(candidate == Candidate::Depthwise)
+            {
+                ck::tensor_operation::device::instance::
+                    add_device_grouped_conv2d_bwd_weight_depthwise_nhwgc_gkyxc_nhwgk_bf16_instances(
+                        instances);
+            }
             ck::tensor_operation::device::instance::
                 add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_pipev1_instances(
                     instances);
@@ -212,11 +224,38 @@ void CheckCandidate(const ck::utils::conv::ConvParam& param,
         }
         const bool supported = op->IsSupportedArgument(arg.get());
         EXPECT_EQ(supported, expected_support) << name << " G=" << param.G_ << " split=" << split;
+        if(candidate == Candidate::Depthwise)
+        {
+            auto dry_arg = op->MakeArgumentPointer(nullptr,
+                                                   nullptr,
+                                                   nullptr,
+                                                   in_lengths,
+                                                   in_strides,
+                                                   wei_lengths,
+                                                   wei_strides,
+                                                   out_lengths,
+                                                   out_strides,
+                                                   filter_strides,
+                                                   filter_dilations,
+                                                   left_pads,
+                                                   right_pads,
+                                                   PassThrough{},
+                                                   PassThrough{},
+                                                   PassThrough{},
+                                                   split);
+            EXPECT_EQ(op->IsSupportedArgument(dry_arg.get()), expected_support);
+            if(expected_support)
+            {
+                EXPECT_THROW(
+                    op->MakeInvokerPointer()->Run(dry_arg.get(), StreamConfig{nullptr, false}),
+                    std::runtime_error);
+            }
+        }
         if(!supported || !expected_support)
         {
             continue;
         }
-        if(candidate != Candidate::DirectScalar)
+        if(candidate == Candidate::TwoStageScalar)
         {
             ASSERT_GT(workspace_bytes, 0u) << name << " must use its FP32 workspace";
         }
@@ -278,6 +317,39 @@ const ck::utils::conv::ConvParam odd_channels{
 
 const ck::utils::conv::ConvParam odd_channels_3d{
     3, 2, 1, 5, 3, {1, 1, 1}, {2, 3, 6}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}};
+
+// G256/450/512 generate 288/513/576 filter CTAs respectively. R<=G and
+// R<=512 keeps each of the 32 reduction lanes at 16 terms or fewer.
+const ck::utils::conv::ConvParam depthwise_g256_r256{
+    2, 256, 4, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g256_asym_r256{
+    2, 256, 4, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 0}, {1, 2}};
+const ck::utils::conv::ConvParam depthwise_g450_tail_r256{
+    2, 450, 4, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g512_stride2_r512{
+    2, 512, 8, 1, 1, {3, 3}, {16, 16}, {2, 2}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g256_r512{
+    2, 256, 8, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g512_r640{
+    2, 512, 10, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+
+TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16DepthwiseShortReduction)
+{
+    if(!ck::is_gfx125_supported())
+        GTEST_SKIP() << "gfx1250-only depthwise candidate";
+#ifdef CK_ENABLE_BF16
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, 1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_asym_r256, Candidate::Depthwise, 1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g450_tail_r256, Candidate::Depthwise, -1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g512_stride2_r512, Candidate::Depthwise, 0, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r512, Candidate::Depthwise, -1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g512_r640, Candidate::Depthwise, -1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, 2, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, -2, false);
+#else
+    GTEST_SKIP() << "BF16 instances disabled";
+#endif
+}
 
 TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Fp16ScalarOddChannels)
 {

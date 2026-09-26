@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <miopen/bfloat16.hpp>
 #include <half/half.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/env.hpp>
@@ -11,6 +12,7 @@
 #include <miopen/conv_solution.hpp>
 #include <miopen/solver/implicitgemm_ck_util_common.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
+#include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/execution_context.hpp>
@@ -292,6 +294,100 @@ TEST(GPU_CkImplLoader_FP16, PackedForwardSelectedWorkspace)
 
     run_twice(nhwc, native_solution);
     run_twice(nchw, transformed_solution);
+}
+
+TEST(GPU_CkImplLoader_BF16, DepthwiseWrwTailThroughPlugin)
+{
+    const auto device_name = GetCurrentDeviceName();
+    if(device_name.find("gfx1250") != 0)
+        GTEST_SKIP() << "BF16 group-local WRW candidate is registered only on gfx1250";
+
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
+    if(!loader.IsLoaded())
+    {
+        if(MIOPEN_CK_LIB_PATH)
+            FAIL() << "Explicit CK plugin could not load for " << device_name;
+        GTEST_SKIP() << "CK grouped conv library not installed";
+    }
+
+    constexpr std::size_t G = 450;
+    const miopen::TensorDescriptor x_desc(miopenBFloat16, miopenTensorNHWC, {4, G, 8, 8});
+    const miopen::TensorDescriptor wei_desc(miopenBFloat16, miopenTensorNHWC, {G, 1, 3, 3});
+    const miopen::ConvolutionDescriptor conv_desc({1, 1}, {1, 1}, {1, 1}, {0, 0}, G);
+    const auto dy_desc = conv_desc.GetForwardOutputTensor(x_desc, wei_desc, miopenBFloat16);
+    const miopen::conv::ProblemDescription problem(
+        dy_desc, wei_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardWeights);
+
+    const auto kernels =
+        loader.FillValidKernels(CKSolverType::GrpConvWrw, problem, miopenBFloat16, false);
+    const auto selected = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
+        return id.find("DeviceGroupedConvBwdWeightDepthwiseBf16<") == 0;
+    });
+    ASSERT_NE(selected, kernels.end()) << "CK BF16 depthwise row missing from MIOpen WRW";
+    const auto selected_id = *selected + "+1";
+    ASSERT_TRUE(loader.IsArgsSupported(
+        CKSolverType::GrpConvWrw, problem, selected_id, miopenBFloat16, false));
+
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
+    const auto solution =
+        loader.GetSolution(CKSolverType::GrpConvWrw, ctx, problem, selected_id, false);
+    ASSERT_EQ(solution.status, miopenStatusSuccess);
+    ASSERT_EQ(solution.workspace_sz,
+              miopen::solver::GetWorkspaceSizeLayoutTransformConv(problem, 0));
+    ASSERT_TRUE(solution.invoker_factory);
+    const auto invoker =
+        handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    Workspace scratch(solution.workspace_sz);
+    ASSERT_NE(scratch.ptr(), nullptr);
+
+    std::vector<bfloat16> x(x_desc.GetElementSize(), bfloat16{0.0f});
+    const std::vector<bfloat16> dy(dy_desc.GetElementSize(), bfloat16{1.0f});
+    const auto x_strides   = x_desc.GetStrides();
+    const auto wei_strides = wei_desc.GetStrides();
+    std::vector<bfloat16> wei(wei_desc.GetElementSize(), bfloat16{0.0f});
+    auto x_dev   = handle.Write(x);
+    auto dy_dev  = handle.Write(dy);
+    auto wei_dev = handle.Write(wei);
+    const miopen::ConvWrwTensors tensors{
+        dy_desc, dy_dev.get(), x_desc, x_dev.get(), wei_desc, wei_dev.get()};
+
+    for(int scale : {1, 2})
+    {
+        for(std::size_t n = 0; n < 4; ++n)
+            for(std::size_t h = 0; h < 8; ++h)
+                for(std::size_t w = 0; w < 8; ++w)
+                    for(std::size_t g = 0; g < G; ++g)
+                        x[n * x_strides[0] + g * x_strides[1] + h * x_strides[2] +
+                          w * x_strides[3]] =
+                            bfloat16{static_cast<float>((g % 2 == 0 ? 1 : -1) * scale)};
+        // Keep the same device pointers; the second invocation must use new input.
+        handle.WriteTo(x.data(), x_dev, x_desc.GetNumBytes());
+        ASSERT_EQ(hipMemset(wei_dev.get(), 0xff, wei_desc.GetNumBytes()), hipSuccess);
+        ASSERT_EQ(hipMemset(scratch.ptr(), 0xa5, scratch.size()), hipSuccess);
+        invoker(handle,
+                miopen::conv::WrWInvokeParams{tensors, scratch.ptr(), scratch.size(), false});
+        handle.Finish();
+
+        const auto actual = handle.Read<bfloat16>(wei_dev, wei_desc.GetElementSize());
+        ASSERT_EQ(actual.size(), wei_desc.GetElementSize());
+        for(std::size_t g = 0; g < G; ++g)
+            for(std::size_t y = 0; y < 3; ++y)
+                for(std::size_t filter_x = 0; filter_x < 3; ++filter_x)
+                {
+                    const auto offset =
+                        g * wei_strides[0] + y * wei_strides[2] + filter_x * wei_strides[3];
+                    const int overlap_h = y == 1 ? 8 : 7;
+                    const int overlap_w = filter_x == 1 ? 8 : 7;
+                    // Both passes are BF16-exact: 4*{7,8}*{7,8} is integral,
+                    // and doubling gives even values where BF16 spacing is two.
+                    const int want = (g % 2 == 0 ? 1 : -1) * scale * 4 * overlap_h * overlap_w;
+                    EXPECT_EQ(static_cast<float>(actual[offset]), static_cast<float>(want))
+                        << "group=" << g << " y=" << y << " x=" << filter_x << " pass=" << scale;
+                }
+    }
 }
 
 TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)
