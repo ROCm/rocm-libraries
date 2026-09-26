@@ -162,7 +162,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # Causal only: unmasked body over below-diagonal KV tiles plus a masked
     # diagonal tail, versus masking every tile. Sliding window keeps its phases.
     causal_diag_split: bool = field(default=True, kw_only=True)
-    # Output elements per global store; alignment follows the width.
+    # Output elements per global store; alignment follows the width. bf16 only
+    # below 4: narrower fp16 stores change which f32->f16 conversion the backend
+    # selects for some elements, moving them by one ulp, so fp16 is fixed at 4.
     o_store_width: int = field(default=4, kw_only=True)
 
     def resolved_exp_per_pv_step(self) -> int:
@@ -328,6 +330,11 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         if self.o_store_width not in (1, 2, 4):
             raise ValueError(
                 f"o_store_width must be 1, 2 or 4, got {self.o_store_width}"
+            )
+        if self.o_store_width != 4 and self.dtype == "fp16":
+            raise ValueError(
+                f"o_store_width={self.o_store_width} is bf16-only: narrower fp16 "
+                "stores are not bit-identical to the width-4 output"
             )
         if self.resolved_iglp_mode() != _IGLP_OFF and (
             self.resolved_pv_sched_fence() or self.resolved_pv_sched_group_template()
