@@ -40,6 +40,48 @@ static constexpr auto ConvBwdWeightDefault =
 static constexpr auto ConvBwdWeightFilter1x1Stride1Pad0 =
     ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Filter1x1Stride1Pad0;
 
+#if defined(CK_USE_GFX1250)
+// The direct low-precision scalar store is safe only for a single K batch. A split K
+// would use the packed half/bfloat16 atomic path, which requires paired output lanes.
+template <typename DeviceOp>
+struct DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1 : DeviceOp
+{
+    using Argument = typename DeviceOp::Argument;
+
+    static bool IsSupportedArgument(const Argument& arg)
+    {
+        return arg.k_batch_ == 1 && DeviceOp::IsSupportedArgument(arg);
+    }
+
+    bool IsSupportedArgument(const BaseArgument* p_arg) override
+    {
+        const auto* arg = dynamic_cast<const Argument*>(p_arg);
+        return arg != nullptr && IsSupportedArgument(*arg);
+    }
+
+    struct Invoker : DeviceOp::Invoker
+    {
+        float Run(const BaseArgument* p_arg,
+                  const StreamConfig& stream_config = StreamConfig{}) override
+        {
+            const auto* arg = dynamic_cast<const Argument*>(p_arg);
+            if(arg == nullptr || arg->k_batch_ != 1)
+            {
+                throw std::runtime_error("Scalar direct WRW requires a split-1 argument");
+            }
+            return DeviceOp::Invoker::Run(*arg, stream_config);
+        }
+    };
+
+    std::unique_ptr<BaseInvoker> MakeInvokerPointer() override
+    {
+        return std::make_unique<Invoker>();
+    }
+
+    std::string GetTypeString() const override { return DeviceOp::GetTypeString() + "_Split1"; }
+};
+#endif
+
 template <ck::index_t NDimSpatial,
           typename ALayout,
           typename BLayout,
@@ -54,6 +96,11 @@ using device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_f16_instances = std::tupl
     //#########################################|    Spatial|         |          |          |       |        |        |        |   Operation|   Operation|   Operation| Specialization|      |      |      |      |     |     |     |        |        | Lengths_AK0_M_AK1|     ArrangeOrder|               |               |      PerVector|  PerVector_AK1|          | Lengths_BK0_N_BK1|   ArrangeOrder|               |              |      PerVector|  PerVector_BK1|          |  PerShuffle|  PerShuffle|      MBlock_MPerBlock|             _NPerBlock| Scheduler|         Version|
     //#########################################|           |         |          |          |       |        |        |        |            |            |            |               |      |      |      |      |     |     |     |        |        |                  |                 |               |               |               |               |          |                  |               |               |              |               |               |          |            |            |      NBlock_NPerBlock|                       |          |                |
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    64,    32,    32,    32,    8,   16,   16,       2,       1,        S<4, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              2,              2,         0,       S<4, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              2,              2,         0,           1,           1,         S<1, 8, 1, 8>,                      2, Scheduler, PipelineVersion>,
+#if defined(CK_USE_GFX1250)
+    // Scalar source/store permits odd per-group K/C; only the single-batch Set epilogue is safe.
+    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1<
+    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    32,    16,    16,    32,    8,   16,   16,       1,       1,        S<4, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              1,              4,         0,        S<4, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              1,              4,         0,           1,           1,         S<1, 4, 1, 8>,                      1, Scheduler, PipelineVersion>>,
+#endif
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   128,   128,   128,    32,    8,   16,   16,       8,       2,       S<4, 32, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              4,              8,         0,       S<4, 32, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              4,              8,         0,           1,           1,        S<1, 16, 1, 8>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   128,   128,   128,    32,    8,   16,   16,       8,       2,       S<4, 32, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              4,              8,         1,       S<4, 32, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              4,              8,         0,           1,           1,        S<1, 16, 1, 8>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,    F16,     F16,     F16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    64,    64,    64,    64,    8,   16,   16,       4,       2,        S<8, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         0,        S<8, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,        S<1, 16, 1, 4>,                      8, Scheduler, PipelineVersion>,
@@ -81,6 +128,10 @@ using device_grouped_conv_bwd_weight_v3_wmma_c_shuffle_bf16_instances = std::tup
     //#########################################|    Spatial|         |          |          |       |        |        |        |   Operation|   Operation|   Operation| Specialization|      |      |      |      |     |     |     |        |        | Lengths_AK0_M_AK1|     ArrangeOrder|               |               |      PerVector|  PerVector_AK1|          | Lengths_BK0_N_BK1|   ArrangeOrder|               |              |      PerVector|  PerVector_BK1|          |  PerShuffle|  PerShuffle|      MBlock_MPerBlock|             _NPerBlock| Scheduler|         Version|
     //#########################################|           |         |          |          |       |        |        |        |            |            |            |               |      |      |      |      |     |     |     |        |        |                  |                 |               |               |               |               |          |                  |               |               |              |               |               |          |            |            |      NBlock_NPerBlock|                       |          |                |
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    64,    32,    32,    32,    8,   16,   16,       2,       1,        S<4, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              2,              2,         0,       S<4, 16, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              2,              2,         0,           1,           1,         S<1, 8, 1, 8>,                      2, Scheduler, PipelineVersion>,
+#if defined(CK_USE_GFX1250)
+    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3_Split1<
+    DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    32,    16,    16,    32,    8,   16,   16,       1,       1,        S<4, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              1,              4,         0,        S<4, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              1,              4,         0,           1,           1,         S<1, 4, 1, 8>,                      1, Scheduler, PipelineVersion>>,
+#endif
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   128,   128,   128,    32,    8,   16,   16,       8,       2,       S<4, 32, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              4,              8,         0,       S<4, 32, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              4,              8,         0,           1,           1,        S<1, 16, 1, 8>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,   128,   128,   128,    32,    8,   16,   16,       8,       2,       S<4, 32, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              4,              8,         1,       S<4, 32, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              4,              8,         0,           1,           1,        S<1, 16, 1, 8>,                      8, Scheduler, PipelineVersion>,
     DeviceGroupedConvBwdWeight_Wmma_CShuffleV3< NDimSpatial,  ALayout,   BLayout,   ELayout,   BF16,    BF16,    BF16,     F32, PassThrough, PassThrough, PassThrough,       ConvSpec,    64,    64,    64,    64,    8,   16,   16,       4,       2,        S<8, 8, 1>,       S<2, 0, 1>,     S<1, 0, 2>,              1,              8,              8,         0,        S<8, 8, 1>,     S<2, 0, 1>,     S<1, 0, 2>,             1,              8,              8,         0,           1,           1,        S<1, 16, 1, 4>,                      8, Scheduler, PipelineVersion>,

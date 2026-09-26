@@ -549,6 +549,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
               ce_grid_desc_m_n_{},
               c_grid_desc_mblock_mperblock_nblock_nperblock_{},
               compute_ptr_offset_of_batch_{},
+              is_packed_weight_{false},
               M01_{M01},
               N01_{N01},
               a_element_op_{out_element_op},
@@ -588,6 +589,20 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_strides_transposed =
                 conv_ngchw_to_nhwgc_transformer.TransposeWeiStrides(e_g_k_c_xs_lengths,
                                                                     e_g_k_c_xs_strides);
+            // The FP32 workspace uses the same flattened (K, filter..., C) weight
+            // addressing as the GEMM output. A packed descriptor makes all groups
+            // disjoint and makes the later conversion read only Set-written elements.
+            long_index_t packed_weight_stride = Conv_C_;
+            is_packed_weight_                 = e_g_k_c_xs_lengths[0] == Conv_G_ &&
+                                e_g_k_c_xs_lengths[2] == Conv_C_ &&
+                                e_g_k_c_xs_strides_transposed[2] == 1;
+            for(index_t i = NDimSpatial + 2; i >= 3; --i)
+            {
+                is_packed_weight_ &= e_g_k_c_xs_strides_transposed[i] == packed_weight_stride;
+                packed_weight_stride *= e_g_k_c_xs_lengths[i];
+            }
+            is_packed_weight_ &= e_g_k_c_xs_strides_transposed[1] == packed_weight_stride &&
+                                 e_g_k_c_xs_strides_transposed[0] == packed_weight_stride * Conv_K_;
 
             if(split_k < 0)
             {
@@ -814,6 +829,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
 
         // for computing batch offset
         ComputePtrOffsetOfStridedBatch<I1, I1, I0> compute_ptr_offset_of_batch_;
+        bool is_packed_weight_;
 
         index_t M01_;
         index_t N01_;
@@ -908,11 +924,27 @@ struct DeviceGroupedConvBwdWeightTwoStage_Wmma_CShuffleV3
             const auto num_k_per_block =
                 arg.a_grid_desc_k0_m_k1_.GetLength(Number<0>{}) / gemm_arg.KBatch;
 
+            // The split-1 Set GEMM writes every valid M/N coordinate (including
+            // partial tiles) into the packed FP32 workspace; the cast reads those
+            // same coordinates per group. Its trailing 128B alignment is not read.
+            // Keep initialization for merged groups, transposed layouts, irregular
+            // strides, and every split > 1 AtomicAdd launch.
+            constexpr bool direct_packed_weight_layout =
+                is_NHWGC_GKYXC_NHWGK<InLayout, WeiLayout, OutLayout>() ||
+                is_NDHWGC_GKZYXC_NDHWGK<InLayout, WeiLayout, OutLayout>();
+            const bool skip_clear =
+                direct_packed_weight_layout && NumGroupsToMerge == 1 && arg.is_packed_weight_ &&
+                gemm_arg.KBatch == 1 &&
+                (BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ||
+                 (BlkGemmPipelineVer == BlockGemmPipelineVersion::v3 && has_main_k_block_loop));
             const auto clear_workspace = [&]() {
-                hip_check_error(hipMemsetAsync(gemm_arg.p_e_grid,
-                                               0,
-                                               arg.GetWorkspaceETensorSizeBytes(),
-                                               stream_config.stream_id_));
+                if(!skip_clear)
+                {
+                    hip_check_error(hipMemsetAsync(gemm_arg.p_e_grid,
+                                                   0,
+                                                   arg.GetWorkspaceETensorSizeBytes(),
+                                                   stream_config.stream_id_));
+                }
             };
 
             const auto Run = [&](const auto& kernel) {
