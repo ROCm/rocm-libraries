@@ -27,26 +27,53 @@ govern what you commit and how you describe it.
 - **No NPI.** Never report or record New Product Introduction information — unreleased /
   pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
   internal codenames — in any artifact (code, comments, docs, commits, PRs).
-- **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
-  `gfx950`, …) only. No customers or related data shall ever be mentioned (e.g., model architectures, operator shapes, labeling or codenames, IP, confidential data).
-- **No public software-performance data.** No **software-achieved** performance —
-  benchmarks, achieved TFLOP/s, MFU, latencies, or throughputs — in the repo, git
-  history, PRs, or anything that can become public. While in development these numbers
-  are volatile and are **not** guidance, so keep them internal: present them in-session
-  and record them only in a **protected, access-controlled AMD Confluence page**; never
-  paste numbers into the repo, and if asked to, refuse and redirect there. (Published
-  **hardware** spec numbers — e.g. theoretical peak — are governed by AMD marketing, not
-  this rule.)
-- **No legal or marketing claims or comparisons** about AMD or competitor
-  products/software (performance, superiority, availability, roadmap). No marketing
-  language. **Protect AMD.**
+- **Public hardware, model, and workload references.** Refer to AMD hardware targets by
+  device identifier (`gfx942`, `gfx950`, …), not by product or marketing name. Names of
+  publicly released models, public benchmarks/datasets/workloads, public operators, and
+  their publicly documented architecture, tensor-shape, or configuration parameters may
+  appear in code, documentation, and PRs when they explain functional support, test
+  coverage, or benchmark scope. The information must be independently verifiable from a
+  public source. Never identify or imply a customer, deployment, or private workload; never
+  disclose non-public model data, internal codenames, AMD Restricted/Confidential data, or
+  unreleased-product details. When public status is uncertain, treat the information as
+  confidential and escalate.
+- **Public software-performance evidence.** Measured relative results — ratios or percentage
+  changes — may appear only in PR descriptions and qualifying benchmark/result locations.
+  A qualifying location is either (a) a Markdown file whose case-insensitive basename
+  contains `benchmark`, `result`, or `case_study`, and whose title and opening paragraph
+  identify its measured scope; or (b) a `Performance` or `Results` section in a
+  workload-specific README whose opening identifies its measured scope. In either case,
+  recording benchmark methodology or results must be the document's or section's primary
+  purpose.
+  Every compared kernel arm must pass an on-silicon numeric gate in the measured run:
+  outputs and any mutated state against an independent reference, at a declared input
+  dtype and tolerance. Byte-identity, compilation, or successful launch alone is not a
+  correctness gate. State the result, workload and relevant axes, baseline implementation
+  and version, hardware target, measurement method, reproducible provenance, and material
+  caveats. Compare equivalent work or label the mismatch; label diagnostic and
+  non-production configurations; and use bounded statements such as "faster at these
+  measured configurations", never a general superiority claim.
+  **Do not add or update absolute software-achieved benchmark or performance results** in
+  public artifacts, including but not limited to latency, throughput, TFLOP/s, MFU, and
+  bandwidth. Store them only in an approved, access-controlled internal record. This
+  prospective rule supersedes conflicting legacy guidance. Existing public records with
+  absolute values are frozen migration debt, not precedent: do not extend, update, or copy
+  their measurements; migrate them only in a separately reviewed remediation. Source
+  comments and commit messages remain qualitative because measured claims there become
+  stale and are difficult to review in context.
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority,
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority, performance,
+  rule above are permitted; marketing language is not. **Protect AMD.**
 - **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
   external Git issue links are OK.
 
 **Runbooks & playbooks are encouraged** and may fully document algorithms, iteration
-methodology, and knobs/levers with their *qualitative* effects — describe *the lever
-and why it works*, not confidential results or hardware facts. Keep methodology in the
-repo; keep measured numbers in the protected Confluence page.
+methodology, and knobs/levers with their qualitative effects. Qualifying benchmark/result
+documents, as defined above, may also contain relative evidence that meets the policy. Keep
+all absolute software measurements and any restricted data in the approved access-controlled
+record.
 
 Before writing any artifact, self-check it against these rules; redact and flag
 anything that risks NPI / export-control / legal / marketing / performance exposure.

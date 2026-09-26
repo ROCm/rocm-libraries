@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Sampling primitive - reduce K single-run records to one aggregate (pure).
 
-A single profiled run is noisy even with the clock-invariant cycle metric (cache
+A single profiled run is noisy even with a cycle-based metric (cache
 state, scheduling, and contention still vary run to run). So the honest unit of
 comparison is *several* runs of the same kernel reduced to a median plus a spread,
 not one shot.
@@ -29,6 +29,8 @@ import copy
 import statistics
 from typing import Any, Mapping, Optional, Sequence
 
+from . import counters as _counters
+from . import report as _report
 from . import schema as _schema
 
 
@@ -89,17 +91,12 @@ def _median_timing(records: Sequence[Mapping[str, Any]], section: str) -> dict:
 
 
 def _derived(counters: Mapping[str, Any]) -> dict:
-    """Recompute derived ratios from median counters (same defs as the harness)."""
-    d: dict = {}
-    busy = counters.get("busy_cycles")
-    total = counters.get("total_clocks")
-    if busy is not None and total:
-        d["busy_fraction"] = busy / total
-    hits = counters.get("l2_hit")
-    misses = counters.get("l2_miss")
-    if hits is not None and misses is not None and (hits + misses) > 0:
-        d["l2_hit_rate"] = hits / (hits + misses)
-    return d
+    """Recompute ratio metrics from median counters.
+
+    Delegates to `counters.derive` so a single record and an aggregate of records
+    always agree on the definitions.
+    """
+    return _counters.derive(dict(counters))
 
 
 def _all_counter_samples(records: Sequence[Mapping[str, Any]]) -> list[dict]:
@@ -133,17 +130,24 @@ def _aggregate_verification(records: Sequence[Mapping[str, Any]]) -> dict:
 
 
 def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
-    """Reduce K same-identity records to one median+spread record.
+    """Reduce K same-identity, same-timing-source records to one median+spread.
 
-    Raises ValueError on an empty input or on mixed identities (aggregating across
-    kernels/shapes/arches is always a caller bug). The run/kernel metadata is taken
-    from the first record (identical by construction).
+    Raises ValueError on an empty input, mixed identities, or mixed timing sources.
+    Averaging unlike timing sources (launcher-reported time vs profiler dispatch
+    duration) would manufacture a meaningless median. The run/kernel metadata is
+    taken from the first record (identical by construction).
     """
     if not records:
         raise ValueError("aggregate() needs at least one record")
     ids = {_schema.identity(r) for r in records}
     if len(ids) != 1:
         raise ValueError(f"records span multiple identities: {sorted(ids)}")
+    timing_sources = {_report._profiled_source(r) for r in records}
+    if len(timing_sources) != 1:
+        raise ValueError(
+            f"records span multiple timing sources: {sorted(timing_sources)}"
+        )
+    timing_source = next(iter(timing_sources))
 
     base = records[0]
     counters = _median_counters(records)
@@ -165,6 +169,10 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
         )
 
     out = copy.deepcopy(dict(base))
+    # Upgrade compatible pre-v1 PerfJSON records to explicit provenance. Leave
+    # profiled-only legacy records unlabelled: their original source is unknowable.
+    if timing_source != "legacy_unknown":
+        out["timing_source"] = timing_source
     out["wall"] = wall
     out["profiled"] = profiled
     out["counters"] = counters
