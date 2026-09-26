@@ -7,13 +7,17 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -28,6 +32,8 @@
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -47,13 +53,15 @@ using namespace hip_kernel_provider::test_utilities;
  *        kernel launches with its own geometry and computes what the CPU reference
  *        computes, and a knob pair no kernel has is refused before any plan exists.
  *
- * Each expected kernel id is the kdp `id` of the catalog row in
- * descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json whose dtype,
- * head_size, num_query_heads, num_kv_heads, causal, block_m and block_n match the case.
- * Every forced tile except the 256/64 baseline is paired with a shape whose no-knob
- * winner is a different tile, so a knob that failed to reach the plugin would select that
- * winner and fail the id check. The baseline always wins where it fits, so its two cases
- * select the no-knob winner by design.
+ * Each expected kernel id is resolved at run time from the production descriptors
+ * HIPDNN_DESCRIPTOR_RUNTIME_DIR names, the tree the engine itself loads them from: the one
+ * kernel of this engine's gfx950 packs whose dtype, head_size, num_query_heads,
+ * num_kv_heads, causal, ragged, sliding_window, block_m and block_n equal the case's
+ * semantic fields and expected tile. Every forced tile except the 256/64 baseline is
+ * paired with a shape whose no-knob winner is a different tile, so a knob that failed to
+ * reach the plugin would select that winner and fail the id check. The baseline always
+ * wins where it fits, so its two cases select the no-knob winner by design. A cold case
+ * sets no knob, and its tile is the one the engine's own ranking picks for the shape.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -109,14 +117,15 @@ struct Tile
     int64_t blockN;
 };
 
-/// One graph and the kernel the engine must serve it with. No forced tile is a cold
-/// case: no knob is set and the engine's own ranking decides.
+/// One graph and the tile the engine must serve it with. A forced case sets block_m and
+/// block_n to the tile; a cold case sets no knob, and the tile is the one the engine's own
+/// ranking picks.
 struct KnobCase
 {
     const char* name;
     GraphShape shape;
-    std::optional<Tile> forcedTile;
-    const char* expectedKernelId;
+    bool forced;
+    Tile tile;
 };
 
 /// One graph and a knob pair whose values the engine advertises for it one by one while
@@ -151,89 +160,91 @@ constexpr GraphShape makeShape(DataType dataType,
     return {dataType, headSize, queryHeads, kvHeads, mask, mmaCoreMode, batch, seqQ, seqKv};
 }
 
-/// Thirteen forced (tile, head size) pairs, then four cold cases whose id is the kdp row
-/// of the tile the engine's own ranking picks for the shape. Within them: bounds on both
-/// corners and both deprecated flags, fp16 and bf16, MHA, GQA and MQA, and four forced
-/// cases with B > 1 and Sq != Skv.
+/// Thirteen forced (tile, head size) pairs, then four cold cases whose tile is the one the
+/// engine's own ranking picks for the shape. Within them: bounds on both corners and both
+/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and four forced cases with B > 1 and
+/// Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
     constexpr auto BF16 = DataType::BFLOAT16;
     constexpr auto MMA_UNSET = DataType::NOT_SET;
+    constexpr bool FORCED = true;
+    constexpr bool COLD = false;
     return {
         // D64: all seven legal tiles.
         {"D64_Bm128Bn32",
          makeShape(BF16, 64, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
-         Tile{128, 32},
-         "f5de4107-b6bb-4ed2-b5f7-97c01ded9ca1"},
+         FORCED,
+         Tile{128, 32}},
         {"D64_Bm128Bn64",
          makeShape(FP16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 128, 256),
-         Tile{128, 64},
-         "9f1ed64a-1607-4bf2-9a20-bb317ec28d38"},
+         FORCED,
+         Tile{128, 64}},
         {"D64_Bm128Bn128",
          makeShape(BF16, 64, 8, 1, Mask::NO_MASK, MMA_UNSET, 2, 384, 128),
-         Tile{128, 128},
-         "85e207d0-b2c3-4ad4-9c08-69bcf5b11e2b"},
+         FORCED,
+         Tile{128, 128}},
         {"D64_Bm256Bn32",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
-         Tile{256, 32},
-         "f78bab4e-82ba-4417-9a08-9e8eda571426"},
+         FORCED,
+         Tile{256, 32}},
         {"D64_Bm256Bn128",
          makeShape(BF16, 64, 16, 16, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
-         Tile{256, 128},
-         "ff210741-69b8-49f5-8282-0bb062c3e487"},
+         FORCED,
+         Tile{256, 128}},
         {"D64_Bm256Bn256",
          makeShape(FP16, 64, 12, 12, Mask::NO_MASK, MMA_UNSET, 1, 512, 256),
-         Tile{256, 256},
-         "2d1e42af-3559-417a-812f-8d318ca65872"},
+         FORCED,
+         Tile{256, 256}},
         // The baseline tile: forced and cold select the same kernel.
         {"D64_Bm256Bn64",
          makeShape(BF16, 64, 10, 10, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
-         Tile{256, 64},
-         "b7697d0f-6a63-4ebe-91ab-839dac35128a"},
+         FORCED,
+         Tile{256, 64}},
         // D128: all six legal tiles.
         {"D128_Bm128Bn32",
          makeShape(FP16, 128, 8, 2, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
-         Tile{128, 32},
-         "3c1927b3-ce3e-44ce-a621-b5fd777c4752"},
+         FORCED,
+         Tile{128, 32}},
         {"D128_Bm128Bn64",
          makeShape(BF16, 128, 8, 1, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 128, 128),
-         Tile{128, 64},
-         "19b74331-a5c4-4981-a8c0-5a9f597fb21e"},
+         FORCED,
+         Tile{128, 64}},
         {"D128_Bm128Bn128",
          makeShape(FP16, 128, 4, 4, Mask::NO_MASK, MMA_UNSET, 3, 128, 384),
-         Tile{128, 128},
-         "6263a9d3-aa8b-42e1-8e61-5c9ecc5b719a"},
+         FORCED,
+         Tile{128, 128}},
         {"D128_Bm256Bn32",
          makeShape(BF16, 128, 16, 2, Mask::NO_MASK, MMA_UNSET, 2, 256, 480),
-         Tile{256, 32},
-         "545e6b54-fe0b-4c17-a04c-390b0138d95b"},
+         FORCED,
+         Tile{256, 32}},
         {"D128_Bm256Bn128",
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
-         Tile{256, 128},
-         "fdbf347a-8cbf-41a6-bcaa-c69e7038c17c"},
+         FORCED,
+         Tile{256, 128}},
         // The baseline tile: forced and cold select the same kernel.
         {"D128_Bm256Bn64",
          makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
-         Tile{256, 64},
-         "d1f63599-da2a-4c43-a655-8619b6b534ff"},
+         FORCED,
+         Tile{256, 64}},
         // Cold: no knob set.
         {"Cold_MmaHalf",
          makeShape(BF16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
-         std::nullopt,
-         "1a1c41ba-a165-480b-a356-55558f9151fc"},
+         COLD,
+         Tile{256, 64}},
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
-         std::nullopt,
-         "a3fb6c5a-f503-4503-b0f8-a7083b9bd4f2"},
+         COLD,
+         Tile{128, 32}},
         {"Cold_CausalBottomRightFlag",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 2, 512, 512),
-         std::nullopt,
-         "ae0a3dab-bb41-4744-8075-472b4df37ea5"},
+         COLD,
+         Tile{256, 64}},
         {"Cold_D128Heads9",
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 2, 256, 256),
-         std::nullopt,
-         "7215c5c7-14a9-4f93-8e45-c66cfb345cb5"},
+         COLD,
+         Tile{256, 64}},
     };
 }
 
@@ -353,6 +364,103 @@ std::vector<KnobSetting> knobSettingsFor(const Tile& tile)
     settings.emplace_back(BLOCK_M_KNOB, tile.blockM);
     settings.emplace_back(BLOCK_N_KNOB, tile.blockN);
     return settings;
+}
+
+/// A kernel metadata field and the value a case expects it to carry.
+using MetadataKey = std::vector<std::pair<std::string, hipdnn_plugin_sdk::ingestor::MetadataValue>>;
+
+std::string describeKey(const MetadataKey& key)
+{
+    std::string text;
+    for(const auto& [field, value] : key)
+    {
+        text += (text.empty() ? "" : " ") + field + "=";
+        std::visit(
+            [&text](const auto& alternative) {
+                using Alternative = std::decay_t<decltype(alternative)>;
+                if constexpr(std::is_same_v<Alternative, std::string>)
+                {
+                    text += alternative;
+                }
+                else if constexpr(std::is_arithmetic_v<Alternative>)
+                {
+                    text += std::to_string(alternative);
+                }
+            },
+            value);
+    }
+    return text;
+}
+
+/// The production descriptors HIPDNN_DESCRIPTOR_RUNTIME_DIR names, loaded once: every case
+/// reads the same root, which main() sets before any case runs.
+const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& runtimeCatalog()
+{
+    static const auto s_catalog = hipdnn_plugin_sdk::ingestor::loadDescriptorCatalog(
+        std::filesystem::path(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR")));
+    return s_catalog;
+}
+
+/// The id of the one kernel this engine's gfx950 packs carry for @p shape's semantic fields
+/// and @p tile, as the selection line spells it. Records a failure naming the key and the
+/// number of kernels carrying it, and returns nullopt, when that is not exactly one.
+std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile& tile)
+{
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        ADD_FAILURE() << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production "
+                         "descriptors to read the expected kernel id from";
+        return std::nullopt;
+    }
+
+    const MetadataKey key{
+        {"dtype", std::string(shape.dataType == DataType::HALF ? "FP16" : "BF16")},
+        {"head_size", shape.headSize},
+        {"num_query_heads", shape.queryHeads},
+        {"num_kv_heads", shape.kvHeads},
+        {"causal", int64_t{shape.mask == Mask::NO_MASK ? 0 : 1}},
+        {"ragged", int64_t{0}},
+        {"sliding_window", int64_t{0}},
+        {"block_m", tile.blockM},
+        {"block_n", tile.blockN},
+    };
+
+    const auto& catalog = runtimeCatalog();
+    std::vector<std::string> ids;
+    for(const auto& entry : catalog.packs)
+    {
+        const auto& pack = entry.second;
+        const auto& arch = pack.descriptor.arch;
+        const auto engine = catalog.engines.find(pack.descriptor.engineId);
+        if(pack.conflicted || engine == catalog.engines.end()
+           || engine->second.descriptor.name != ENGINE_NAME
+           || std::find(arch.begin(), arch.end(), SERVED_ARCH) == arch.end())
+        {
+            continue;
+        }
+        for(const auto& kernel : pack.descriptor.kernels)
+        {
+            const bool carriesKey
+                = std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
+                      const auto value = kernel.metadata.find(field.first);
+                      return value != kernel.metadata.end() && value->second == field.second;
+                  });
+            if(carriesKey)
+            {
+                ids.push_back(hipdnn_plugin_sdk::ingestor::toString(kernel.id));
+            }
+        }
+    }
+
+    if(ids.size() != 1)
+    {
+        ADD_FAILURE() << ids.size() << " " << ENGINE_NAME << " kernel(s) for " << SERVED_ARCH
+                      << " carry " << describeKey(key) << " under HIPDNN_DESCRIPTOR_RUNTIME_DIR='"
+                      << hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR")
+                      << "'; exactly one must";
+        return std::nullopt;
+    }
+    return ids.front();
 }
 
 /// The kernel id the plugin's selection line names, or nullopt when no plan was built.
@@ -505,8 +613,8 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     auto sdpa = buildSdpaGraph(testCase.name, testCase.shape);
     ASSERT_NO_FATAL_FAILURE(buildOperationGraphTheEngineOffersToServe(*sdpa.graph));
 
-    const auto settings = testCase.forcedTile.has_value() ? knobSettingsFor(*testCase.forcedTile)
-                                                          : std::vector<KnobSetting>{};
+    const auto settings
+        = testCase.forced ? knobSettingsFor(testCase.tile) : std::vector<KnobSetting>{};
     auto result = sdpa.graph->create_execution_plan_ext(engineId(), settings);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -521,14 +629,17 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     ASSERT_TRUE(selected.has_value())
         << "no selection line from " << ENGINE_NAME << ". Captured logs:\n"
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(*selected, testCase.expectedKernelId) << "Captured logs:\n"
-                                                    << recorder.getRecordedLogsAsString();
+
+    // Resolved after the plan is built, so a lookup failure still leaves the selected
+    // kernel in the KNOB_SELECTED line.
+    const auto expectedId = expectedKernelId(testCase.shape, testCase.tile);
+    ASSERT_TRUE(expectedId.has_value());
+    EXPECT_EQ(*selected, *expectedId) << "Captured logs:\n" << recorder.getRecordedLogsAsString();
 
     // Rank 0: a cold case serves the heuristic's front rather than a fallback past a
     // kernel that failed to load, and a forced case filters to its one kernel.
-    auto selectionLine
-        = std::string(SELECTED_KERNEL_MARKER) + testCase.expectedKernelId + " at rank 0";
-    if(testCase.forcedTile.has_value())
+    auto selectionLine = std::string(SELECTED_KERNEL_MARKER) + *expectedId + " at rank 0";
+    if(testCase.forced)
     {
         selectionLine += " from 1 candidate(s)";
     }

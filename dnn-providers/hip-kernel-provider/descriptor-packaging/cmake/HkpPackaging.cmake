@@ -2026,7 +2026,10 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_finalize_census_install(COMMON_TEST_FILE <file> BINDIR <dir> PLUGIN_ENGINE_DIR <dir>)
 #   Materialise the installed census: one CTest file per architecture that actually has
-#   entries, plus the stub in the common entrypoint that finds them.
+#   entries, plus the stub in the common entrypoint that finds them. The stub is written
+#   even when this configuration has no shard architecture at all: it is arch-neutral, and
+#   an install may pair this build's common CTest file with shards another build produced,
+#   so the common file must not depend on this build's GPU targets.
 #
 #   Call once, AFTER every hkp_register_census_tests() has run and after <file> exists.
 #   The registrations happen in a test subdirectory that is added before the common file
@@ -2061,18 +2064,17 @@ function(hkp_finalize_census_install)
         file(REMOVE_RECURSE "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/census")
     endif()
 
-    get_property(_arches GLOBAL PROPERTY HKP_CENSUS_SHARD_ARCHES)
-    if(NOT _arches)
-        return()
-    endif()
-    list(REMOVE_DUPLICATES _arches)
-
     # A prefix that cannot exist, so every offset below is arithmetic on the install
     # layout alone and nothing resolves against this machine. The same device the
     # external integration staging uses.
     set(_synthetic "/__hipdnn_install_root__")
     set(_census_root
         "${_synthetic}/${ARG_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/census")
+
+    get_property(_arches GLOBAL PROPERTY HKP_CENSUS_SHARD_ARCHES)
+    if(_arches)
+        list(REMOVE_DUPLICATES _arches)
+    endif()
 
     foreach(_arch IN LISTS _arches)
         # A reserved architecture need not hold anything: hkp_reserve_census_shard() is

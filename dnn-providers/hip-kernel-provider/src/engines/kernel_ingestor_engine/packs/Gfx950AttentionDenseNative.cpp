@@ -570,8 +570,11 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     }
     // mma_core_mode is the MMA operand precision. This kernel's MFMA operands are the
     // graph's own fp16/bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
-    // describe what it runs. FLOAT and every FP8 mode ask for operands it never forms, so
-    // they decline. An allow-list, so an enum value added later declines until judged.
+    // describe what it runs. The mode is not compared with the graph dtype: HALF is
+    // accepted on bf16 graphs too, because the cuDNN-compat shim writes HALF whenever the
+    // caller leaves the field unset. FLOAT and every FP8 mode ask for operands it never
+    // forms, so they decline. An allow-list, so an enum value added later declines until
+    // judged.
     const auto mmaCoreMode = attributes.mma_core_mode();
     if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
        && mmaCoreMode != data_objects::DataType::BFLOAT16)

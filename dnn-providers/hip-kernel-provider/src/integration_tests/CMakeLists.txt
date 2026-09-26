@@ -100,16 +100,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
-    # The production descriptor tree, when this configuration packs one. main() adds it
-    # beside the integration set through HIPDNN_DESCRIPTOR_RUNTIME_DIR, so the shipped
+    # The production descriptor tree, loaded beside the integration set so the shipped
     # engines load in this binary too; the gfx950 dense attention knob suite needs its
-    # engine. The same kind of binary-relative offset as the set above, so it holds in the
-    # build and the install tree alike. hkp_packaging_product exists exactly when the
-    # production packer writes (the top-level install rule keys on it too).
+    # engine. A fixed binary-relative offset like the set above, so it holds in the build
+    # and the install tree alike, and main() uses it only when the directory exists at run
+    # time. The definition must not depend on this build's GPU targets: a multi-arch
+    # install pairs this binary with another build's device content, so a build that packs
+    # no production tree still names where one would be. The dependency applies only when
+    # this configuration packs one (the top-level install rule keys on the same target).
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
+    )
     if(TARGET hkp_packaging_product)
-        target_compile_definitions(hip_kernel_provider_integration_tests
-            PRIVATE HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
-        )
         add_dependencies(hip_kernel_provider_integration_tests hkp_packaging_product)
     endif()
     # The shared descriptor-root resolver lives with the unit tests

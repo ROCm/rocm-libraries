@@ -69,8 +69,7 @@ def census_keyword_values(fragment: str, keyword: str):
 
 def census_inline_values(fragment: str, keyword: str) -> list[str]:
     """The tokens following a keyword written on the same line as its value, such as
-    ``TARGET`` (on the call's opening line) and ``SUITES``. Exactly one line of the call
-    must lead with the keyword."""
+    ``SUITES``. Exactly one line of the call must lead with the keyword."""
     leading = []
     for line in census_call_lines(fragment):
         tokens = line.replace(CENSUS_CALL, "", 1).split()

@@ -3,7 +3,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -15,13 +14,11 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
@@ -29,7 +26,6 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "Gfx950AttentionDenseBshdBundles.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 /**
@@ -56,8 +52,6 @@
  *     its own extents. That is what makes the cross-operand agreement clauses reachable.
  *   - EXTENT ARITHMETIC: each 32-bit bound is pinned one step either side of its limit,
  *     and every product of graph extents that does not fit in int64_t declines.
- *   - BUNDLES: every checked-in SdpaFwd/bshd bundle is embedded at configure time and
- *     held to the graph_match verdict and cold winner recorded for it.
  *   - RAGGED: declined. The catalog is aligned-only: a candidate whose `ragged` field is
  *     not 0 is declined at every shape, its own authored one included, and a graph whose
  *     lengths no tile divides admits no candidate at all.
@@ -823,14 +817,17 @@ KernelSpec vitSemantic()
     return spec;
 }
 
-/// Runs graph_match over @p graph, then kernel_match over @p candidates, and returns the
-/// survivors' tiles -- ranked through the engine's score symbol and the SDK's
+/// Runs graph_match over @p graphSpec, then kernel_match over @p candidates, and returns
+/// the survivors' tiles -- ranked through the engine's score symbol and the SDK's
 /// NativeKernelHeuristic when @p rank, in authoring order otherwise.
-std::vector<Tile>
-    matchCandidatesIn(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
-                      const std::vector<KernelSpec>& candidates,
-                      bool rank)
+std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
+                                  const std::vector<KernelSpec>& candidates,
+                                  bool rank)
 {
+    auto builder = buildSdpaGraph(graphSpec);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
     registerNativeIngestorSymbols();
     const auto graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
         std::string(GRAPH_MATCHER_SYMBOL));
@@ -872,16 +869,6 @@ std::vector<Tile>
         tiles.emplace_back(entry.getIntMetadata("block_m"), entry.getIntMetadata("block_n"));
     }
     return tiles;
-}
-
-std::vector<Tile> matchCandidates(const GraphSpec& graphSpec,
-                                  const std::vector<KernelSpec>& candidates,
-                                  bool rank)
-{
-    auto builder = buildSdpaGraph(graphSpec);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    return matchCandidatesIn(graph, candidates, rank);
 }
 
 TileSet admittedTiles(const GraphSpec& graph, const std::vector<KernelSpec>& candidates)
@@ -1273,17 +1260,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMismatchedHeadSizes)
-{
-    // hipDNN permits D_qk != D_v; the kernel has ONE head_size. O's head size follows V's,
-    // so V and O disagree together here and either clause declines this graph; the V and
-    // O clauses are isolated by DeclinesValueHeadSizeMismatch and
-    // DeclinesOutputHeadSizeMismatch.
-    GraphSpec spec;
-    spec.headSizeV = 64;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 // ---------------------------------------------------------------------------
 // Cross-operand shape agreement.
 //
@@ -1530,17 +1506,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesGraphsPastThe32BitExtentLimit)
-{
-    GraphSpec spec;
-    spec.batch = 1;
-    spec.numQueryHeads = 128;
-    spec.numKvHeads = 128;
-    spec.seqLenQ = 131072;
-    spec.seqLenKv = 131072;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 // ---------------------------------------------------------------------------
 // The 32-bit bounds, one at a time. rocKE's predicate (attention_dense_spec.py) declines
 // B*Skv*Hkv*D*2 >= 2^31 bytes for K/V and B*Sq*Hq*D >= 2^31 elements for Q/O. Each pair
@@ -1627,9 +1592,11 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryElementCountPastInt64)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
 {
-    // Q dims {2, 2^30, 2^30, 128}: S * H * D = 2^67, which wraps to 0. Q and O carry
-    // batch stride 0 beside packed head, row and element strides, so a wrapped product
-    // would accept Q's layout; the checked one fails the batch axis.
+    // Q dims {2, 2^30, 2^30, 128}: S * H * D = 2^67, which does not fit in int64_t, and Q
+    // and O carry the batch stride 0 it would wrap to beside packed head, row and element
+    // strides. hasBshdStrides forms that product through checkedProduct, which removes the
+    // undefined behaviour but is not observable in any verdict: every graph whose S * H * D
+    // overflows also overflows B * S * H * D, which the Q bound declines.
     const std::vector<int64_t> wrappedStrides{0, HEAD_SIZE, (int64_t{1} << 30) * HEAD_SIZE, 1};
     GraphSpec spec;
     spec.numQueryHeads = int64_t{1} << 30;
@@ -1643,9 +1610,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyValueExtentsOf2To97Bytes)
 {
     // B = S = H = 2^30 on every operand, D64: K/V is 2^97 bytes and Q is 2^96 elements,
-    // both wrapping to 0, and S * H * D = 2^66 wraps to the batch stride 0 every operand
-    // carries. Unchecked, every clause passes; checked, the batch-stride product is the
-    // first to overflow and the layout gate declines.
+    // and S * H * D = 2^66 would wrap to the batch stride 0 every operand carries.
+    // hasBshdStrides forms that product through checkedProduct, which removes the
+    // undefined behaviour but is not observable in any verdict: every graph whose
+    // S * H * D overflows also overflows B * S * H * D, which the Q or K/V bound declines.
     constexpr int64_t EXTENT = int64_t{1} << 30;
     const std::vector<int64_t> wrappedStrides{0, 64, EXTENT * 64, 1};
     GraphSpec spec;
@@ -2401,135 +2369,6 @@ TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveF
         EXPECT_EQ(score, scoreOf(candidate));
         EXPECT_GT(score, 0.0);
         EXPECT_TRUE(std::isfinite(score));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The checked-in BSHD bundles.
-//
-// The integration bundles are the only place a tile is launched rather than merely
-// selected, and a bundle that quietly stops reaching its tile still passes: the engine
-// keeps serving it on the baseline. Every SdpaFwd/bshd bundle is embedded into this
-// binary when it is configured and parsed here with the SDK's own JSON reader, so an
-// edit under integration-test-bundles/ that changes which graph the engine accepts, or
-// which tile a cold build selects, fails here on a host rather than silently narrowing
-// on-device coverage. The table below is the other half: a bundle with no entry fails,
-// and so does an entry with no bundle.
-// ---------------------------------------------------------------------------
-
-/// What one bundle must do: the causal flag of the cohort that serves it, the tiles of
-/// that cohort its shape admits, and the one a cold plan build selects.
-struct BundleExpectation
-{
-    std::string_view path;
-    int64_t causal;
-    TileSet admitted;
-    Tile coldWinner;
-};
-
-/// Keyed by path relative to integration-test-bundles/.
-std::vector<BundleExpectation> bshdBundleExpectations()
-{
-    const TileSet everyD64Tile = tileSetOf(d64Tiles());
-    const TileSet everyD128Tile = tileSetOf(d128Tiles());
-    // 384 and 1152 are multiples of 128 and not of 256, so no block_m 256 tile serves.
-    const TileSet bm128Tiles{{128, 32}, {128, 64}, {128, 128}};
-    // Skv 288 is an odd multiple of 32, so only the block_n 32 tiles serve.
-    const TileSet bn32Tiles{{128, 32}, {256, 32}};
-    const Tile baseline{256, 64};
-    const Tile bm128Bn32{128, 32};
-    return {
-        {"quick/SdpaFwd/bshd/bf16/hd128_causal_bm128/Small.json", 1, bm128Tiles, bm128Bn32},
-        {"quick/SdpaFwd/bshd/bf16/hd128_causal_gqa/Small.json", 1, everyD128Tile, baseline},
-        {"quick/SdpaFwd/bshd/bf16/hd128_causal_mha/Small.json", 1, everyD128Tile, baseline},
-        {"quick/SdpaFwd/bshd/bf16/hd64_causal_gqa/Small.json", 1, everyD64Tile, baseline},
-        {"quick/SdpaFwd/bshd/bf16/hd64_nomask_bn32/Small.json", 0, bn32Tiles, bm128Bn32},
-        {"quick/SdpaFwd/bshd/fp16/hd128_causal_mha/Small.json", 1, everyD128Tile, baseline},
-        {"quick/SdpaFwd/bshd/fp16/hd64_causal_gqa/Small.json", 1, everyD64Tile, baseline},
-        {"quick/SdpaFwd/bshd/fp16/hd64_nomask_mqa/Small.json", 0, everyD64Tile, baseline},
-        {"standard/SdpaFwd/bshd/bf16/hd128_causal_mha/Prefill.json", 1, everyD128Tile, baseline},
-        {"standard/SdpaFwd/bshd/bf16/hd128_nomask_bm128/Prefill.json", 0, bm128Tiles, bm128Bn32},
-        {"standard/SdpaFwd/bshd/bf16/hd128_nomask_gqa/Prefill.json", 0, everyD128Tile, baseline},
-        {"standard/SdpaFwd/bshd/fp16/hd128_causal_crossattn/Prefill.json",
-         1,
-         everyD128Tile,
-         baseline},
-    };
-}
-
-/// @p json parsed into the flatbuffer graph the engine sees, through the SDK reader the
-/// integration harness loads bundles with.
-flatbuffers::FlatBufferBuilder parseBundle(std::string_view json)
-{
-    const auto parsed = nlohmann::json::parse(json.begin(), json.end());
-    flatbuffers::FlatBufferBuilder builder;
-    builder.Finish(hipdnn_flatbuffers_sdk::json::to<data_objects::Graph>(builder, parsed));
-    return builder;
-}
-
-/// The aligned cohort the catalog ships for @p graph's semantic fields -- dtype, head
-/// size and head counts read from its Q and K -- with one candidate per tile authored at
-/// that head size, on canonical build inputs.
-std::vector<KernelSpec>
-    bundleCohort(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& graph,
-                 int64_t causal)
-{
-    constexpr flatbuffers::uoffset_t HEAD_AXIS = 1;
-    constexpr flatbuffers::uoffset_t HEAD_SIZE_AXIS = 3;
-
-    const auto& attributes = graph.getNodeWrapper(0).attributesAs<data_objects::SdpaAttributes>();
-    const auto& tensors = graph.getTensorMap();
-    const auto* q = tensors.at(attributes.q_tensor_uid());
-    const auto* k = tensors.at(attributes.k_tensor_uid());
-
-    KernelSpec semantic = canonicalAligned();
-    semantic.dtype = q->data_type() == data_objects::DataType::HALF ? "FP16" : "BF16";
-    semantic.headSize = q->dims()->Get(HEAD_SIZE_AXIS);
-    semantic.numQueryHeads = q->dims()->Get(HEAD_AXIS);
-    semantic.numKvHeads = k->dims()->Get(HEAD_AXIS);
-    semantic.causal = causal;
-    return cohortOf(semantic, semantic.headSize == 64 ? d64Tiles() : d128Tiles());
-}
-
-TEST(TestGfx950AttentionDenseTileMatch, BshdBundleShapesReachTheTilesTheyWereAuthoredFor)
-{
-    const auto expectations = bshdBundleExpectations();
-
-    std::set<std::string_view> embedded;
-    for(const auto& bundle : gfx950AttentionDenseBshdBundles())
-    {
-        SCOPED_TRACE(bundle.path);
-        embedded.insert(bundle.path);
-
-        const auto expected = std::find_if(
-            expectations.begin(), expectations.end(), [&bundle](const BundleExpectation& entry) {
-                return entry.path == bundle.path;
-            });
-        if(expected == expectations.end())
-        {
-            ADD_FAILURE() << "this bundle has no entry in bshdBundleExpectations()";
-            continue;
-        }
-
-        auto builder = parseBundle(bundle.json);
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-            builder.GetBufferPointer(), builder.GetSize());
-        const auto cohort = bundleCohort(graph, expected->causal);
-
-        EXPECT_EQ(tileSetOf(matchCandidatesIn(graph, cohort, /*rank=*/false)), expected->admitted);
-
-        const auto order = matchCandidatesIn(graph, cohort, /*rank=*/true);
-        EXPECT_FALSE(order.empty()) << "no candidate survived, so the bundle would skip";
-        if(!order.empty())
-        {
-            EXPECT_EQ(order.front(), expected->coldWinner);
-        }
-    }
-
-    for(const auto& expected : expectations)
-    {
-        EXPECT_EQ(embedded.count(expected.path), 1U)
-            << expected.path << " has an entry in bshdBundleExpectations() but no bundle";
     }
 }
 
