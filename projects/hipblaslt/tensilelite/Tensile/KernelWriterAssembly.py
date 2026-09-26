@@ -17901,11 +17901,11 @@ class KernelWriterAssembly(KernelWriter):
         # and the kernel fails to assemble.  Fold's dead-ValuC repack never names the
         # ring either, so keep it off under the fold as well (not isSubtileFold).
         permForRing = plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None)
-        # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the ring buffers the two
-        # M-adjacent pairs the DPP repack already blends (batchA in the cvt quad, batchB
-        # in ring slot 1), so the fold can source batchB from the ring instead of the
-        # dead-ValuC slots -- letting batchA's pack spread to the first pair. Needs one
-        # extra quad, so gate it on the same block-sched-tile budget as the paired ring.
+        # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the ring quad is the store-
+        # shadow double-buffer, so the fold pre-packs batchA into it one pair-iteration
+        # early (its converts land in the shadow) and the second pair blends the two live
+        # quads without re-packing batchA. Needs the one ring quad, so gate it on the same
+        # block-sched-tile budget as the paired ring.
         _foldRing = (isSubtileFold and col128Base < 0 and permForRing
                      and plsinBlockSchedTile(kernel)
                      and plsinDebugEnv("TENSILE_PLSIN_FOLD_RING", "0") != "0")

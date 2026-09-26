@@ -4497,10 +4497,19 @@ class GlobalWriteBatchWriter:
                           and _samePairInterior(elementIdx + 1, elementIdx + 2, tt0 + 1, blockIdxN))
           isFoldSecond = (foldableInterior and pairIdx % 2 == 1
                           and _samePairInterior(elementIdx - 3, elementIdx - 2, tt0 - 3, blockIdxN))
+          # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the pair-pack ring quad is
+          # the double-buffer that already holds two M-adjacent pairs alive at once. Pack
+          # batchA into it at the first pair (converts land in the store shadow), then at
+          # the second pair pack only batchB and blend the two live quads -> coalesced
+          # stores. Off (ring quad = -1) -> defer at the first pair and re-pack batchA at
+          # the second, exactly as before.
+          _foldRingQuad = (self.cvtVgprStruct.vgprPairPackRing
+                           if plsinDebugEnv("TENSILE_PLSIN_FOLD_RING", "0") != "0" else -1)
           if isFoldFirst:
-            # First of a fold pair-of-pairs: the coalesced store is emitted at the
-            # second pair below.  Its accumulators stay live until then (reused as the
-            # repack's batchA), so there is nothing to store here.
+            if _foldRingQuad >= 0:
+              mod.add(self._emitSubtilePackPairInto(_foldRingQuad,
+                        self.ss.elementSumIdx[partnerElementIdx], self.ss.elementSumIdx[elementIdx],
+                        prefixOffset, tt0=tt0 - 1))
             continue
           if isFoldSecond:
             # Second pair: fold prev pair (batchA, m-lower) + this pair (batchB, m-upper).
@@ -4514,7 +4523,8 @@ class GlobalWriteBatchWriter:
             lowBlockM = tt0 - 3
             mod.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
                       bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
-                      weavePairA=None, weavePairB=None, forceSlc=forceSlc))
+                      weavePairA=None, weavePairB=None, forceSlc=forceSlc,
+                      vPackAPrepacked=_foldRingQuad))
             continue
           partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
@@ -4968,10 +4978,33 @@ class GlobalWriteBatchWriter:
       "PostLoopStoreInNll Phase2 must be barrier-free (no s_barrier in the MFMA-interleaved store)"
     return module
 
+  def _emitSubtilePackPairInto(self, quadBase: int, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0) -> Module:
+    """Pack one (sba=0, sba=1) subtile pair's 8 f32 accumulators into 4 dwords at quadBase.
+
+    Layout matches the paired store and the DPP-fold batch pack exactly:
+    sba0[0:1]->+0, sba0[2:3]->+1, sba1[0:1]->+2, sba1[2:3]->+3.  The fold<->ring
+    composition calls this at the first pair of a fold to spread batchA's four converts
+    one pair-iteration early -- into the pair-pack ring quad, in the store shadow -- so
+    the coalescing blend at the second pair reads them without re-packing.
+    """
+    module = Module("16bitSubtilePackPairInto")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    typeStr = "fp16" if isFp16 else "bf16"
+    def vc(sumIdx, vi):
+      return vgpr("ValuC+" + str(sumIdx + vi - prefixOffset))
+    module.addComment1(f"fold ring: pre-pack batchA pair tt0={tt0} -> v[{quadBase}:{quadBase+3}] (spread into store shadow)")
+    module.add(VCvtPkF32to16(dst=vgpr(quadBase+0), src0=vc(sumIdx0, 0), src1=vc(sumIdx0, 1), comment=f"sba=0[0:1] -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(quadBase+1), src0=vc(sumIdx0, 2), src1=vc(sumIdx0, 3), comment=f"sba=0[2:3] -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(quadBase+2), src0=vc(sumIdx1, 0), src1=vc(sumIdx1, 1), comment=f"sba=1[0:1] -> {typeStr}"))
+    module.add(VCvtPkF32to16(dst=vgpr(quadBase+3), src0=vc(sumIdx1, 2), src1=vc(sumIdx1, 3), comment=f"sba=1[2:3] -> {typeStr}"))
+    return module
+
   def _emit16bitSubtilePairedStoreRepack(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int,
                                          partnerSumIdx0: int, partnerSumIdx1: int, partnerAddrCalc,
                                          tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0,
-                                         weavePairA=None, weavePairB=None, forceSlc: bool = False) -> Module:
+                                         weavePairA=None, weavePairB=None, forceSlc: bool = False,
+                                         vPackAPrepacked: int = -1) -> Module:
     """DPP store-repack (SubtileStoreCachelineFill) on the Phase1/Phase2 PLSIN path.
 
     Folds this paired store (batchA = sumIdx0/1 at addrCalc, m-rows 0-31) with the
@@ -5019,7 +5052,9 @@ class GlobalWriteBatchWriter:
     isSlc = bool((ntd & 0x2) or forceSlc)   # forceSlc: FusedGemmA2A PUSH pass must bypass L2 -> HBM
     isNT  = bool(ntd & 0x4)
 
-    vPack        = self.cvtVgprStruct.vgprBf16Temp    # +0..3  batchA packed/assembled dwords (2-aligned, cvt)
+    # batchA lives in the ring quad when it was pre-packed one pair-iteration early
+    # (fold<->ring composition, vPackAPrepacked); otherwise it packs into the cvt quad here.
+    vPack        = vPackAPrepacked if vPackAPrepacked >= 0 else self.cvtVgprStruct.vgprBf16Temp
     vVoff        = self.cvtVgprStruct.vgprVoff        # per-store voffset (cndmask result, cvt)
     vBlend       = self.cvtVgprStruct.vgprBlendTmp    # shared temp: odd-data / store-2 even-addr (cvt)
     vPermAddr    = self.cvtVgprStruct.vgprPermAddr
@@ -5040,15 +5075,7 @@ class GlobalWriteBatchWriter:
     # and never grows the high-water past ValuC, which is what lets near-cap tiles host the fold.
     assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0, \
       f"ValuC reuse needs 2-aligned batchA element windows (sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
-    # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the pair-pack ring buffers the
-    # two M-adjacent pairs this DPP swap blends, so when it is allocated under the fold
-    # batchB packs into the ring quad (slot 1, alongside batchA in the cvt quad = slot 0)
-    # and the blend runs over the two ring-buffered pairs directly. The ring quad is a
-    # 2-aligned dwordx4 window, same shape as the dead-ValuC window it replaces. Off by
-    # default -> batchB reuses batchA sba0's now-dead ValuC slots exactly as before.
-    _foldRing = (self.cvtVgprStruct.vgprPairPackRing >= 0
-                 and plsinDebugEnv("TENSILE_PLSIN_FOLD_RING", "0") != "0")
-    vPack2       = self.cvtVgprStruct.vgprPairPackRing if _foldRing else sumIdx0
+    vPack2       = sumIdx0   # batchA sba0's 4 dead ValuC slots  -> batchB packed data
     vSD          = sumIdx1   # batchA sba1's 4 dead ValuC slots  -> blended store src
 
     permlane16 = getattr(self, "_permlane16Active", False)
@@ -5061,7 +5088,10 @@ class GlobalWriteBatchWriter:
     # phase1Mod == phase2Mod == module, so the store is emitted monolithically in the SAME
     # order as before -- byte-identical.  (An empty convert-gap is likewise byte-identical:
     # phase1[converts] + <empty gap> + phase2[assembly...] flattens to the monolithic order.)
-    foldCvtInterleave = (permlane16 and weavePairB is not None and PLSIN_FOLD_CVT_INTERLEAVE)
+    # When batchA is pre-packed (ring composition), its converts were already spread to
+    # the previous pair-iteration, so the convert-gap that would spread them here is moot.
+    foldCvtInterleave = (permlane16 and weavePairB is not None and PLSIN_FOLD_CVT_INTERLEAVE
+                         and vPackAPrepacked < 0)
     if foldCvtInterleave:
       phase1Mod = Module("16bitSubtileRepackPhase1")
       phase2Mod = Module("16bitSubtileRepackPhase2")
@@ -5077,10 +5107,13 @@ class GlobalWriteBatchWriter:
 
     partnerTt0 = tt0 + 2
     phase1Mod.addComment1(f"DPP repack tt0={tt0}+{partnerTt0}: pack batchA -> v[{vPack}:{vPack+3}], batchB -> v[{vPack2}:{vPack2+3}]")
-    packPair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"batchA sba=0 tt0={tt0}[0:1]")
-    packPair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"batchA sba=0 tt0={tt0}[2:3]")
-    packPair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"batchA sba=1 tt0={tt0}[0:1]")
-    packPair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"batchA sba=1 tt0={tt0}[2:3]")
+    if vPackAPrepacked < 0:
+      # batchA packs here; when pre-packed in the ring quad its 4 converts already ran
+      # one pair-iteration earlier (the pair-pack ring's store shadow), so skip them.
+      packPair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"batchA sba=0 tt0={tt0}[0:1]")
+      packPair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"batchA sba=0 tt0={tt0}[2:3]")
+      packPair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"batchA sba=1 tt0={tt0}[0:1]")
+      packPair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"batchA sba=1 tt0={tt0}[2:3]")
     packPair(vPack2+0, vc(partnerSumIdx0, 0), vc(partnerSumIdx0, 1), f"batchB sba=0 tt0={partnerTt0}[0:1]")
     packPair(vPack2+1, vc(partnerSumIdx0, 2), vc(partnerSumIdx0, 3), f"batchB sba=0 tt0={partnerTt0}[2:3]")
     packPair(vPack2+2, vc(partnerSumIdx1, 0), vc(partnerSumIdx1, 1), f"batchB sba=1 tt0={partnerTt0}[0:1]")
