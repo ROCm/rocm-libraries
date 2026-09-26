@@ -854,15 +854,24 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 
 // After a picked instruction: advance the co-issue timeline. Barriers use
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
-// progress; others use issueCycles.
+// progress; others (including ds_read) use issueCycles.
+//
+// ds_read deliberately does NOT use dsIssueCost() here. dsIssueCost()'s
+// wave-sharing multiplier models cross-wave contention for the shared ds
+// issue pipe -- how long THIS wave must wait before its NEXT ds_load can
+// issue -- which is already tracked separately via dsReadThrottleWait() /
+// dsIssueCap_ / dsReadInflight_. This timeline instead gates whether a VALU
+// can co-issue into the active WMMA window at the current position; a wave
+// still issues one instruction per cycle from its own stream regardless of
+// contention on the (shared, cross-wave) ds pipe, so charging the doubled
+// cost here would incorrectly consume a co-issue slot that a same-wave VALU
+// could otherwise still fill one cycle later.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
     int elapsedCycles = node->inst->issueCycles;
     if (isBarrier(*node->inst))
         elapsedCycles = node->inst->latencyCycles;
     else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
         elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
-    else if (isDSRead(*node->inst))
-        elapsedCycles = dsIssueCost(*node->inst);
     advanceTime(elapsedCycles);
 }
 
