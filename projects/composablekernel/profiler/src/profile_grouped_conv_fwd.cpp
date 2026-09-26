@@ -69,7 +69,8 @@ static void print_helper_msg()
         << ck::utils::conv::get_conv_param_parser_helper_msg() << std::endl
         << "\nOptional arguments:\n"
         << "  --instance <id>      Run only the specified instance (0-indexed among valid instances)\n"
-        << "  --list-instances     List all valid instances without running\n";
+        << "  --list-instances     List all valid instances without running\n"
+        << "  --raw-invocation     Also measure complete untimed invocations (hot reuse)\n";
     // clang-format on
 }
 
@@ -432,8 +433,9 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
     // Parse optional named arguments first
     ck::index_t instance_index = -1;
     bool list_instances        = false;
-    ck::profiler::parse_named_args(argc, argv, instance_index, list_instances);
-    const int named_arg_count = ck::profiler::count_named_args(argc, argv);
+    bool raw_invocation        = false;
+    ck::profiler::parse_named_args(argc, argv, instance_index, list_instances, &raw_invocation);
+    const int named_arg_count = ck::profiler::count_named_args(argc, argv, true);
 
     // Adjust argc for positional argument checking
     const int positional_argc = argc - named_arg_count;
@@ -567,7 +569,8 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
                 params,
                 ck::tensor_operation::element_wise::PassThrough{},
                 instance_index,
-                list_instances);
+                list_instances,
+                raw_invocation);
 
             return pass ? 0 : 1;
         }
@@ -590,7 +593,8 @@ int profile_grouped_conv_fwd(int argc, char* argv[])
                 params,
                 ck::tensor_operation::element_wise::PassThrough{},
                 instance_index,
-                list_instances);
+                list_instances,
+                raw_invocation);
 
             return pass ? 0 : 1;
         }

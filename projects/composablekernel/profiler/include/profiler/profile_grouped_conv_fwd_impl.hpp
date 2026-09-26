@@ -26,6 +26,7 @@
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_fwd.hpp"
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_fwd_gpu.hpp"
 #include "ck/library/utility/gpu_verification.hpp"
+#include "profiler/raw_invocation.hpp"
 
 namespace ck {
 namespace profiler {
@@ -100,7 +101,8 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
                                    const ck::utils::conv::ConvParam& conv_param,
                                    const OutElementOp out_element_op = OutElementOp{},
                                    index_t instance_index            = -1,
-                                   bool list_instances               = false)
+                                   bool list_instances               = false,
+                                   bool raw_invocation               = false)
 {
     using InElementOp  = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
@@ -326,8 +328,10 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
             // List instances mode - just print and continue
             if(list_instances)
             {
-                std::cout << "[" << (num_kernel - 1) << "] " << op_ptr->GetTypeString()
-                          << std::endl;
+                std::cout << "[" << (num_kernel - 1) << "] " << op_ptr->GetTypeString();
+                if(raw_invocation)
+                    std::cout << " (requested_split=1, effective_split=1)";
+                std::cout << std::endl;
                 return;
             }
 
@@ -357,31 +361,42 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
                 dummy_run_executed = true;
             }
 
-            float avg_time = invoker_ptr->Run(argument_ptr.get(),
-                                              StreamConfig{nullptr,
-                                                           time_kernel,
-                                                           0 /*log_level*/,
-                                                           5 /*cold_iters*/,
-                                                           50 /*nrepeat_*/,
-                                                           time_kernel /*flush_cache*/});
-
-            std::size_t flop      = conv_param.GetFlops();
-            std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
-
-            float tflops = static_cast<float>(flop) / 1.E9 / avg_time;
-
-            float gb_per_sec = num_btype / 1.E6 / avg_time;
-
-            std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops << " TFlops, "
-                      << gb_per_sec << " GB/s, " << op_name << std::endl;
-
-            if(tflops > best_tflops)
+            if(!raw_invocation || time_kernel)
             {
-                best_op_name        = op_name;
-                best_tflops         = tflops;
-                best_avg_time       = avg_time;
-                best_gb_per_sec     = gb_per_sec;
-                best_instance_index = num_kernel - 1;
+                float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                                  StreamConfig{nullptr,
+                                                               time_kernel,
+                                                               0 /*log_level*/,
+                                                               5 /*cold_iters*/,
+                                                               50 /*nrepeat_*/,
+                                                               time_kernel /*flush_cache*/});
+
+                std::size_t flop      = conv_param.GetFlops();
+                std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
+
+                float tflops = static_cast<float>(flop) / 1.E9 / avg_time;
+
+                float gb_per_sec = num_btype / 1.E6 / avg_time;
+
+                std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                          << " TFlops, " << gb_per_sec << " GB/s, " << op_name << std::endl;
+
+                if(tflops > best_tflops)
+                {
+                    best_op_name        = op_name;
+                    best_tflops         = tflops;
+                    best_avg_time       = avg_time;
+                    best_gb_per_sec     = gb_per_sec;
+                    best_instance_index = num_kernel - 1;
+                }
+            }
+            if(raw_invocation)
+            {
+                const float raw_ms = measure_raw_invocation(*invoker_ptr, argument_ptr.get());
+                std::cout
+                    << "Raw invocation: " << raw_ms << " ms, instance " << (num_kernel - 1)
+                    << ", requested_split=1, effective_split=1, policy=hot-reuse, repeats=50, "
+                    << op_name << std::endl;
             }
 
             // Synchronize before verification to ensure kernel has completed
@@ -463,39 +478,10 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
         std::cout << "\nValid instances for this problem:" << std::endl;
     }
 
-    // Run first instance twice to get proper time
-    {
-        auto argument_ptr = op_ptrs[0]->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
-                                                            wei_device_buf.GetDeviceBuffer(),
-                                                            {},
-                                                            out_device_buf.GetDeviceBuffer(),
-                                                            a_g_n_c_wis_lengths,
-                                                            a_g_n_c_wis_strides,
-                                                            b_g_k_c_xs_lengths,
-                                                            b_g_k_c_xs_strides,
-                                                            {},
-                                                            {},
-                                                            e_g_n_k_wos_lengths,
-                                                            e_g_n_k_wos_strides,
-                                                            conv_filter_strides,
-                                                            conv_filter_dilations,
-                                                            input_left_pads,
-                                                            input_right_pads,
-                                                            in_element_op,
-                                                            wei_element_op,
-                                                            out_element_op);
-
-        run_impl(op_ptrs[0], argument_ptr);
-    }
     for(size_t i = 0; i < op_ptrs.size(); i++)
     {
-        // NOTE: instance_index (when set) selects the Nth *supported* instance, i.e. the same
-        // numbering --list-instances prints ("[N] ...") and the same numbering run_impl uses
-        // internally (num_kernel - 1). It is NOT a raw index into op_ptrs (which enumerates every
-        // registered instance for this op/dtype, most of them unsupported for any given problem
-        // shape) -- do not skip by raw i here, or --instance N silently targets the wrong kernel
-        // (or none at all). run_impl already skips the actual timing run for every non-target
-        // supported instance via its own num_kernel-based current_is_target check below.
+        // --instance selects the Nth supported factory entry, not its raw factory index.
+        // Unsupported entries do not consume list indices or run invocations.
         auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
                                                         wei_device_buf.GetDeviceBuffer(),
@@ -535,9 +521,12 @@ bool profile_grouped_conv_fwd_impl(int do_verification,
         return false;
     }
 
-    std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
-              << best_instance_index << ")" << "\navg_time: " << best_avg_time
-              << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << std::endl;
+    if(!raw_invocation || time_kernel)
+    {
+        std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
+                  << best_instance_index << ")" << "\navg_time: " << best_avg_time
+                  << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << std::endl;
+    }
     if(instance_index != -1)
     {
         std::cout << "grouped_conv_fwd_instance (" << instance_index << "/" << num_kernel

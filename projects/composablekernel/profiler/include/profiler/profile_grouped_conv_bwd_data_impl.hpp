@@ -21,6 +21,7 @@
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_bwd_data_gpu.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp"
 #include "ck/library/utility/gpu_verification.hpp"
+#include "profiler/raw_invocation.hpp"
 
 namespace ck {
 namespace profiler {
@@ -92,7 +93,8 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
                                         const ck::utils::conv::ConvParam& conv_param,
                                         ck::index_t split_k    = 1,
                                         index_t instance_index = -1,
-                                        bool list_instances    = false)
+                                        bool list_instances    = false,
+                                        bool raw_invocation    = false)
 {
     using OutElementOp = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
@@ -317,7 +319,11 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
             if(list_instances)
             {
                 std::cout << "[" << (num_kernel - 1) << "] " << op_ptr->GetTypeString()
-                          << " (SplitK=" << split_k_for_run << ")" << std::endl;
+                          << " (SplitK=" << split_k_for_run << ")";
+                if(raw_invocation)
+                    std::cout << " (requested_split=" << split_k
+                              << ", effective_split=" << split_k_for_run << ")";
+                std::cout << std::endl;
                 return;
             }
 
@@ -345,33 +351,44 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
                                               time_kernel /*flush_cache*/});
                 dummy_run_executed = true;
             }
-            float avg_time = invoker_ptr->Run(argument_ptr.get(),
-                                              StreamConfig{nullptr,
-                                                           time_kernel,
-                                                           0 /*log_level*/,
-                                                           5 /*cold_iters*/,
-                                                           50 /*nrepeat_*/,
-                                                           time_kernel /*flush_cache*/});
-
-            std::size_t flop      = conv_param.GetFlops();
-            std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
-
-            float tflops = static_cast<float>(flop) / 1.E9 / avg_time;
-
-            float gb_per_sec = num_btype / 1.E6 / avg_time;
-
-            std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops << " TFlops, "
-                      << gb_per_sec << " GB/s, " << op_name << ", SplitK " << split_k_for_run
-                      << std::endl;
-
-            if(tflops > best_tflops)
+            if(!raw_invocation || time_kernel)
             {
-                best_op_name        = op_name;
-                best_tflops         = tflops;
-                best_avg_time       = avg_time;
-                best_gb_per_sec     = gb_per_sec;
-                best_split_k        = split_k_for_run;
-                best_instance_index = num_kernel - 1;
+                float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                                  StreamConfig{nullptr,
+                                                               time_kernel,
+                                                               0 /*log_level*/,
+                                                               5 /*cold_iters*/,
+                                                               50 /*nrepeat_*/,
+                                                               time_kernel /*flush_cache*/});
+
+                std::size_t flop      = conv_param.GetFlops();
+                std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
+
+                float tflops = static_cast<float>(flop) / 1.E9 / avg_time;
+
+                float gb_per_sec = num_btype / 1.E6 / avg_time;
+
+                std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                          << " TFlops, " << gb_per_sec << " GB/s, " << op_name << ", SplitK "
+                          << split_k_for_run << std::endl;
+
+                if(tflops > best_tflops)
+                {
+                    best_op_name        = op_name;
+                    best_tflops         = tflops;
+                    best_avg_time       = avg_time;
+                    best_gb_per_sec     = gb_per_sec;
+                    best_split_k        = split_k_for_run;
+                    best_instance_index = num_kernel - 1;
+                }
+            }
+            if(raw_invocation)
+            {
+                const float raw_ms = measure_raw_invocation(*invoker_ptr, argument_ptr.get());
+                std::cout << "Raw invocation: " << raw_ms << " ms, instance " << (num_kernel - 1)
+                          << ", requested_split=" << split_k
+                          << ", effective_split=" << split_k_for_run
+                          << ", policy=hot-reuse, repeats=50, " << op_name << std::endl;
             }
 
             // Synchronize before verification to ensure kernel has completed
@@ -582,10 +599,13 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
         return false;
     }
 
-    std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
-              << best_instance_index << ")" << "\navg_time: " << best_avg_time
-              << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
-              << best_split_k << std::endl;
+    if(!raw_invocation || time_kernel)
+    {
+        std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
+                  << best_instance_index << ")" << "\navg_time: " << best_avg_time
+                  << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
+                  << best_split_k << std::endl;
+    }
 
     return pass;
 }

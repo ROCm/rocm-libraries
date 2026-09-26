@@ -25,6 +25,7 @@
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_weight.hpp"
 #include "ck/library/reference_tensor_operation/gpu/naive_conv_bwd_weight_gpu.hpp"
 #include "ck/library/utility/gpu_verification.hpp"
+#include "profiler/raw_invocation.hpp"
 
 namespace ck {
 namespace profiler {
@@ -95,7 +96,8 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                                           const ck::utils::conv::ConvParam& conv_param,
                                           const std::string& split_k,
                                           index_t instance_index = -1,
-                                          bool list_instances    = false)
+                                          bool list_instances    = false,
+                                          bool raw_invocation    = false)
 {
     using InElementOp  = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp = ck::tensor_operation::element_wise::PassThrough;
@@ -386,6 +388,12 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
             {
                 split_k_value = 1;
             }
+            // Unlike the requested split, the argument can clamp or auto-select its batch count.
+            auto effective_split = [&] {
+                const auto* arg = dynamic_cast<const ck::tensor_operation::device::ArgumentSplitK*>(
+                    argument_ptr.get());
+                return arg ? std::to_string(arg->k_batch_) : std::string("unknown");
+            };
 
             const std::size_t workspace_sz = op_ptr->GetWorkSpaceSize(argument_ptr.get());
             DeviceMem workspace_dev(0);
@@ -403,7 +411,11 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                 if(list_instances)
                 {
                     std::cout << "[" << (num_kernel - 1) << "] " << op_ptr->GetTypeString()
-                              << " (SplitK=" << split_k_param_str << ")" << std::endl;
+                              << " (SplitK=" << split_k_param_str << ")";
+                    if(raw_invocation)
+                        std::cout << " (requested_split=" << split_k_list[split_k_id]
+                                  << ", effective_split=" << effective_split() << ")";
+                    std::cout << std::endl;
                     continue;
                 }
 
@@ -432,32 +444,45 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
                                                   time_kernel /*flush_cache*/});
                     dummy_run_executed = true;
                 }
-                float avg_time = invoker_ptr->Run(argument_ptr.get(),
-                                                  StreamConfig{nullptr,
-                                                               time_kernel,
-                                                               0 /*log_level*/,
-                                                               5 /*cold_iters*/,
-                                                               50 /*nrepeat_*/,
-                                                               time_kernel /*flush_cache*/});
-
-                std::size_t flop      = conv_param.GetFlops();
-                std::size_t num_btype = conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
-
-                float tflops     = static_cast<float>(flop) / 1.E9 / avg_time;
-                float gb_per_sec = num_btype / 1.E6 / avg_time;
-
-                std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops
-                          << " TFlops, " << gb_per_sec << " GB/s, " << op_name << ", SplitK "
-                          << split_k_param_str << std::endl;
-
-                if(tflops > best_tflops)
+                if(!raw_invocation || time_kernel)
                 {
-                    best_op_name        = op_name;
-                    best_tflops         = tflops;
-                    best_avg_time       = avg_time;
-                    best_gb_per_sec     = gb_per_sec;
-                    best_split_k        = split_k_param_str;
-                    best_instance_index = num_kernel - 1;
+                    float avg_time = invoker_ptr->Run(argument_ptr.get(),
+                                                      StreamConfig{nullptr,
+                                                                   time_kernel,
+                                                                   0 /*log_level*/,
+                                                                   5 /*cold_iters*/,
+                                                                   50 /*nrepeat_*/,
+                                                                   time_kernel /*flush_cache*/});
+
+                    std::size_t flop = conv_param.GetFlops();
+                    std::size_t num_btype =
+                        conv_param.GetByte<InDataType, WeiDataType, OutDataType>();
+
+                    float tflops     = static_cast<float>(flop) / 1.E9 / avg_time;
+                    float gb_per_sec = num_btype / 1.E6 / avg_time;
+
+                    std::cout << "Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                              << " TFlops, " << gb_per_sec << " GB/s, " << op_name << ", SplitK "
+                              << split_k_param_str << std::endl;
+
+                    if(tflops > best_tflops)
+                    {
+                        best_op_name        = op_name;
+                        best_tflops         = tflops;
+                        best_avg_time       = avg_time;
+                        best_gb_per_sec     = gb_per_sec;
+                        best_split_k        = split_k_param_str;
+                        best_instance_index = num_kernel - 1;
+                    }
+                }
+                if(raw_invocation)
+                {
+                    const float raw_ms = measure_raw_invocation(*invoker_ptr, argument_ptr.get());
+                    std::cout << "Raw invocation: " << raw_ms << " ms, instance "
+                              << (num_kernel - 1)
+                              << ", requested_split=" << split_k_list[split_k_id]
+                              << ", effective_split=" << effective_split()
+                              << ", policy=hot-reuse, repeats=50, " << op_name << std::endl;
                 }
 
                 // Synchronize before verification to ensure kernel has completed
@@ -629,10 +654,13 @@ bool profile_grouped_conv_bwd_weight_impl(int do_verification,
         return false;
     }
 
-    std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
-              << best_instance_index << ")" << "\navg_time: " << best_avg_time
-              << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
-              << best_split_k << std::endl;
+    if(!raw_invocation || time_kernel)
+    {
+        std::cout << "Best configuration parameters:" << "\nname: " << best_op_name << " (instance "
+                  << best_instance_index << ")" << "\navg_time: " << best_avg_time
+                  << "\ntflops: " << best_tflops << "\nGB/s: " << best_gb_per_sec << ", SplitK "
+                  << best_split_k << std::endl;
+    }
 
     return all_pass;
 }
