@@ -113,6 +113,8 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     # the qr_tdm pipeline folds log2(e) into scale_s and has no exp() fallback
     target_compile_definitions(test_ck_tile_fmha_qr_tdm_progressive_k_lds
         PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
+    # The causal pipeline deliberately compares the masked-row -infinity sentinel.
+    target_compile_options(test_ck_tile_fmha_qr_tdm_progressive_k_lds PRIVATE -Wno-float-equal)
     set_tests_properties(test_ck_tile_fmha_qr_tdm_progressive_k_lds PROPERTIES
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 

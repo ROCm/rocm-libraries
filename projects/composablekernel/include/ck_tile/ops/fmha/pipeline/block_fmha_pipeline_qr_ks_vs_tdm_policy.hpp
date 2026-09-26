@@ -210,8 +210,17 @@ struct QrTdmPaddingSelection
 template <typename Problem>
 struct QrTdmPaddingSelection<Problem, true>
 {
-    // Measured production configuration for gfx1250 BF16/FP16 d=128 qr_tdm.
-    using Q = LdsPaddingConfig<false, 0, 0>;
+    // Q padding depends only on the LDS traversal selected for the progressive
+    // M128 path. Data types supported by this layout are already constrained by
+    // is_qr_tdm_padding_enabled_problem_v; attention features do not change the
+    // Q writer/reader address mapping.
+    static constexpr bool kPadProgressiveQ =
+        Problem::kUseDoubleKVLdsBuffer && Problem::kProgressiveDsLoadK &&
+        Problem::BlockFmhaShape::kM0 == 128;
+
+    using Q = std::conditional_t<kPadProgressiveQ,
+                                 LdsPaddingConfig<true, 256, 16>,
+                                 LdsPaddingConfig<false, 0, 0>>;
     using K = LdsPaddingConfig<true, 256, 16>;
     using V = LdsPaddingConfig<true, 256, 32>;
 };

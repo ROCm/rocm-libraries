@@ -78,7 +78,11 @@ using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
                                                false,
                                                ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>;
 
-template <typename DataType, ck_tile::index_t M, bool UseDoubleKVLdsBuffer = false>
+template <typename DataType,
+          ck_tile::index_t M,
+          bool UseDoubleKVLdsBuffer = false,
+          bool ProgressiveDsLoadK = false,
+          typename FmhaMask = ck_tile::SimplifiedGenericAttentionMask<false>>
 using TestFmhaProblem =
     ck_tile::BlockFmhaPipelineProblem<DataType,
                                       DataType,
@@ -94,10 +98,11 @@ using TestFmhaProblem =
                                       TestFmhaShape<M>,
                                       false,
                                       ck_tile::ComposedAttention<0>,
-                                      ck_tile::SimplifiedGenericAttentionMask<false>,
+                                      FmhaMask,
                                       false,
                                       TestFmhaTraits,
-                                      UseDoubleKVLdsBuffer>;
+                                      UseDoubleKVLdsBuffer,
+                                      ProgressiveDsLoadK>;
 
 template <typename BaseProblem, typename QDataType_, typename KDataType_, typename VDataType_>
 struct TestProblemWithDataTypes : BaseProblem
@@ -404,10 +409,15 @@ constexpr bool validate_arena_layouts()
 static_assert(validate_arena_layouts<ck_tile::bf16_t>());
 static_assert(validate_arena_layouts<ck_tile::half_t>());
 
-template <typename DataType, ck_tile::index_t M, bool UseDoubleKVLdsBuffer>
+template <typename DataType,
+          ck_tile::index_t M,
+          bool UseDoubleKVLdsBuffer,
+          bool ProgressiveDsLoadK = false,
+          bool ExpectedQPadding = false,
+          typename FmhaMask = ck_tile::SimplifiedGenericAttentionMask<false>>
 constexpr bool validate_policy_coupling()
 {
-    using Problem  = TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer>;
+    using Problem = TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer, ProgressiveDsLoadK, FmhaMask>;
     using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
     using QConfig  = typename Policy::template LdsPaddingConfigQ<Problem>;
     using KConfig  = typename Policy::template LdsPaddingConfigK<Problem>;
@@ -423,13 +433,23 @@ constexpr bool validate_policy_coupling()
         Policy::template MakeKLdsBlockDescriptor<Problem, UseDoubleKVLdsBuffer>();
     constexpr auto v_desc = Policy::template MakeVLdsBlockDescriptor<Problem>();
 
-    static_assert(std::is_same_v<QConfig, NoPad>);
+    if constexpr(ExpectedQPadding)
+    {
+        static_assert(std::is_same_v<QConfig, QKPad>);
+        static_assert(QRaw::kEnabled && QRaw::kPadInterval == 5 && QRaw::kPadAmount == 3);
+        static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 136);
+        static_assert(Layout::kQBytes == 34800);
+    }
+    else
+    {
+        static_assert(std::is_same_v<QConfig, NoPad>);
+        static_assert(!QRaw::kEnabled && QRaw::kPadInterval == 0 && QRaw::kPadAmount == 0);
+        static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 128);
+    }
     static_assert(std::is_same_v<KConfig, QKPad>);
     static_assert(std::is_same_v<VConfig, VPad>);
-    static_assert(!QRaw::kEnabled && QRaw::kPadInterval == 0 && QRaw::kPadAmount == 0);
     static_assert(KRaw::kEnabled && KRaw::kPadInterval == 5 && KRaw::kPadAmount == 3);
     static_assert(VRaw::kEnabled && VRaw::kPadInterval == 5 && VRaw::kPadAmount == 7);
-    static_assert(q_desc.calculate_offset(ck_tile::make_tuple(1, 0)) == 128);
     static_assert(k_desc.get_element_space_size() * sizeof(DataType) ==
                   (UseDoubleKVLdsBuffer ? 17392 : 4336));
     static_assert(v_desc.get_element_space_size() * sizeof(DataType) == 18400);
@@ -444,9 +464,18 @@ constexpr bool validate_policy_coupling()
     constexpr auto enabled_desc =
         ck_tile::detail::make_qr_tdm_row_major_lds_descriptor<DataType, M, 128, EnabledQ, 16>();
     static_assert(EnabledRaw::kPadInterval == 5 && EnabledRaw::kPadAmount == 3);
-    static_assert(enabled_desc.get_element_space_size() > q_desc.get_element_space_size());
-    static_assert(!std::is_same_v<ck_tile::remove_cvref_t<decltype(enabled_desc)>,
-                                  ck_tile::remove_cvref_t<decltype(q_desc)>>);
+    if constexpr(ExpectedQPadding)
+    {
+        static_assert(enabled_desc.get_element_space_size() == q_desc.get_element_space_size());
+        static_assert(std::is_same_v<ck_tile::remove_cvref_t<decltype(enabled_desc)>,
+                                    ck_tile::remove_cvref_t<decltype(q_desc)>>);
+    }
+    else
+    {
+        static_assert(enabled_desc.get_element_space_size() > q_desc.get_element_space_size());
+        static_assert(!std::is_same_v<ck_tile::remove_cvref_t<decltype(enabled_desc)>,
+                                      ck_tile::remove_cvref_t<decltype(q_desc)>>);
+    }
 
     return true;
 }
@@ -460,6 +489,34 @@ static_assert(validate_policy_coupling<ck_tile::half_t, 128, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, true>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 64, false>());
+// Explicit expected selections, independent of the production predicate.
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true, true, false>());
+static_assert(validate_policy_coupling<ck_tile::half_t, 128, true, true, true>());
+// The selector must reject this combination even though the pipeline itself
+// deliberately forbids progressive loading without double K/V buffers.
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<
+                                 TestFmhaProblem<ck_tile::bf16_t, 128, false, true>>::Q,
+                             NoPad>);
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true,
+                                      ck_tile::GenericAttentionMask<true, false>>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true,
+                                      ck_tile::GenericAttentionMask<true, true>>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true,
+                                      ck_tile::GenericAttentionMask<false, false>>());
+struct ProgressiveBiasProblem : TestFmhaProblem<ck_tile::bf16_t, 128, true, true>
+{
+    [[maybe_unused]] static constexpr auto BiasEnum =
+        ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+};
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveBiasProblem>::Q,
+                             QKPad>);
+struct ProgressiveTrLoadProblem : TestFmhaProblem<ck_tile::bf16_t, 128, true, true>
+{
+    [[maybe_unused]] static constexpr bool kUseTrLoad = true;
+};
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveTrLoadProblem>::Q,
+                             QKPad>);
 #else
 static_assert(
     is_disabled_selection<

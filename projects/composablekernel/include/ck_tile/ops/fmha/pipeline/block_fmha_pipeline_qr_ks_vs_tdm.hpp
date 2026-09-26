@@ -350,6 +350,40 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     static constexpr const char* name = "qr_tdm";
 
+    // The progressive M128 traversal has the fragment shape required by the
+    // staged hand-off below. Element types and attention features do not alter
+    // those LDS fragment lifetimes.
+    static constexpr bool kStagedKPairs =
+        Problem::kProgressiveDsLoadK && kM0 == 128;
+
+    // Unchecked TDM bounds need a stronger, independent range proof. Keep this
+    // separate from K staging so padded/group/sink/custom-mask configurations
+    // can use the staged traversal without inheriting the full-box shortcut.
+    static constexpr bool kTdmBoxesAlwaysInBounds =
+        kStagedKPairs && !kIsGroupMode && !kPadSeqLenK && !kPadHeadDimQ &&
+        !kPadHeadDimV && !kHasSink && !Problem::kSkipMinSeqlenQ &&
+        (!FmhaMask::IsMasking ||
+         std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>);
+
+    template <bool AllowDenseFullBox = false, typename LdsWindow, typename DramWindow>
+    CK_TILE_DEVICE static void LoadTdmFullTileOrPadded(const TDMConfig& config,
+                                                     LdsWindow& lds_window,
+                                                     const DramWindow& dram_window)
+    {
+        if constexpr(kTdmBoxesAlwaysInBounds && (FmhaMask::IsMasking || AllowDenseFullBox))
+        {
+            // K/V start on N64 boundaries. The dense/causal range never
+            // exceeds the nonzero, N64-aligned, unpadded K sequence,
+            // and tail prefetches repeat the final valid tile. Each warp's
+            // box is therefore full, even on the final loop iteration.
+            load_tile_tdm_full_tile(config, lds_window, dram_window);
+        }
+        else
+        {
+            load_tile_tdm(config, lds_window, dram_window);
+        }
+    }
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
@@ -1297,6 +1331,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeQRegTileDistribution<Problem>());
 
+        // qr_tdm permits a partial final Q tile even with kPadSeqLenQ=false.
+        // Preserve its zero-fill bounds; the full-tile shortcut is K/V-only.
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
         s_wait_tensorcnt_barrier<0>();
         auto q_tile = load_tile(q_lds_read_window);
@@ -1387,8 +1423,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k1_loops);
 
         block_sync_lds<0>();
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-        load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
 
         move_tile_window(k_dram_window, {num_total_loop > 1 ? kN0 : 0, 0});
         // The prologue issues two K prefetches: the first into ptrk0, which
@@ -1410,7 +1446,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
             static_cast<KDataType* __restrict__>(smem_ptrk1));
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+        LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
 
         constexpr index_t k_lds_insts = k_lds_read_window.get_num_of_access();
         constexpr index_t v_lds_insts = v_lds_read_window.get_num_of_access();
@@ -1445,12 +1481,96 @@ struct BlockFmhaPipelineQRKSVSTdm
             // valid tile instead of forming an unused out-of-allocation address.
             move_tile_window(v_dram_window, {i_total_loops + 1 < num_total_loop ? kN0 : 0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            LoadTdmFullTileOrPadded<true>(tdm_config_v, v_lds_write_window, v_dram_window);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
 
-            if constexpr(1 < k0_loops)
+            // Keep additional K pairs ahead of their consumers in the standard
+            // BF16 M128 path: four pairs for dense, six for dedicated causal.
+            if constexpr(kStagedKPairs)
+            {
+                using Gemm0  = remove_cvref_t<decltype(gemm_0)>;
+                using Window = remove_cvref_t<decltype(k_lds_read_window)>;
+                using Tile   = remove_cvref_t<decltype(k_tile)>;
+                using BDstr  = typename Gemm0::WarpGemm::BWarpDstr;
+                static_assert(Gemm0::MIterPerWarp == 2 && Gemm0::NIterPerWarp == 4 &&
+                              Gemm0::KIterPerWarp == 1 && k0_loops == 4);
+                static_assert(Window::Traits::NumAccess == 8 &&
+                              Window::Traits::ScalarPerVector == 8 &&
+                              sizeof(typename Window::Traits::vector_t) == 16 &&
+                              Tile::get_thread_buffer_size() == 64);
+                constexpr auto b_lengths =
+                    to_sequence(BDstr{}.get_ys_to_d_descriptor().get_lengths());
+                constexpr auto b_zeros = uniform_sequence_gen_t<BDstr::NDimY, 0>{};
+                constexpr unsigned kDsSchedMask =
+                    0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 | 0x800;
+
+                constexpr bool kSixPairs = FmhaMask::IsMasking;
+                // Two additional pairs for dense, four for causal. Each staged
+                // pair is handed off only after k_tile's prior pair is dead.
+                Tile k_stage;
+                Tile k_stage_far;
+                auto k_stage_window = k_lds_read_window;
+                move_tile_window(k_stage_window, {0, kK0});
+                k_stage_window.template load_access_range<0, 8>(k_stage); // P2/P3
+                move_tile_window(k_stage_window, {0, kK0});
+                if constexpr(kSixPairs)
+                {
+                    k_stage_window.template load_access_range<0, 8>(k_stage_far); // P4/P5
+                    move_tile_window(k_stage_window, {0, kK0});
+                }
+                __builtin_amdgcn_sched_barrier(kDsSchedMask);
+
+                static_for<0, k0_loops, 1>{}([&](auto i_k0) {
+                    gemm_0.template RunWithAfterWarp<true>(
+                        s_acc,
+                        get_slice_tile(q_tile,
+                                       sequence<0, i_k0 * kK0>{},
+                                       sequence<kM0, (i_k0 + 1) * kK0>{}),
+                        k_tile,
+                        [&](auto mIter, auto nIter, auto kIter) {
+                            if constexpr(mIter == 1 && kIter == 0 &&
+                                         decltype(nIter)::value % 2 == 1)
+                            {
+                                constexpr index_t pair = 2 * i_k0 + nIter / 2;
+                                if constexpr(pair < 6)
+                                {
+                                    __builtin_amdgcn_sched_barrier(kDsSchedMask);
+                                    // The consumed pair is dead. Hand off its already-prefetched
+                                    // successor (P2...P7), then reuse the staging slot.
+                                    auto& source = [&]() -> Tile& {
+                                        if constexpr(kSixPairs && decltype(i_k0)::value == 1)
+                                            return k_stage_far;
+                                        else
+                                            return k_stage;
+                                    }();
+                                    static_for<0, 2, 1>{}([&](auto j) {
+                                        constexpr auto origin = merge_sequences(
+                                            sequence<decltype(nIter)::value - 1 + j, 0>{},
+                                            b_zeros);
+                                        constexpr auto lengths =
+                                            merge_sequences(sequence<1, 1>{}, b_lengths);
+                                        k_tile.set_y_sliced_thread_data(
+                                            origin,
+                                            lengths,
+                                            source.get_y_sliced_thread_data(origin, lengths));
+                                    });
+                                    if constexpr(pair < (kSixPairs ? 2 : 4))
+                                    {
+                                        constexpr index_t begin = (pair % 2) * 4;
+                                        k_stage_window.template load_access_range<begin, begin + 4>(
+                                            k_stage);
+                                        if constexpr(!kSixPairs && pair == 1)
+                                            move_tile_window(k_stage_window, {0, kK0});
+                                    }
+                                    __builtin_amdgcn_sched_barrier(kDsSchedMask);
+                                }
+                            }
+                        });
+                });
+            }
+            else if constexpr(1 < k0_loops)
             {
                 static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
                     // loop over along the [K]ey head dimension
@@ -1513,7 +1633,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});
             }
 
-            if constexpr(Problem::kProgressiveDsLoadK)
+            if constexpr(!kStagedKPairs && Problem::kProgressiveDsLoadK)
             {
                 // Retain the reload-overlap traversal when consuming the final
                 // head-dimension slice, even though this slice has no reload.
@@ -1525,7 +1645,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                     k_tile,
                     [](auto, auto, auto) {});
             }
-            else
+            else if constexpr(!kStagedKPairs)
             {
                 gemm_0(s_acc,
                        get_slice_tile(q_tile,
@@ -1610,7 +1730,15 @@ struct BlockFmhaPipelineQRKSVSTdm
                         kN0 * (i_total_loops - num_sink_loop) + physical_seqlen_k_start, 0);
             }();
 
-            if constexpr(kHasUnevenSplits)
+            // Standard causal ranges round their end to N64
+            // (nonpositive ranges already returned above). With no sink/split,
+            // each processed score column is strictly below that physical end.
+            // Other mask types retain this independent tail clamp. Dense keeps
+            // its original control flow for the measured QK/PV loop scheduling.
+            constexpr bool kScoreTailClampRedundant =
+                kTdmBoxesAlwaysInBounds &&
+                std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>;
+            if constexpr(kHasUnevenSplits && !kScoreTailClampRedundant)
             {
                 if(i_total_loops == (num_total_loop - 1))
                 {
@@ -1741,10 +1869,24 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
-
-            ReduceRowSync(rowsum_p, f_sum);
+            // The current PV consumes P and corrected O, not the denominator.
+            // Keep whole-P production unchanged and defer only l's reduction
+            // in the guarded path. The original left-fold and row sync remain.
+            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking;
+            auto rowsum_p = [&]() {
+                if constexpr(kDeferDenominator)
+                {
+                    return m;
+                }
+                else
+                {
+                    auto sum = block_tile_reduce<SMPLComputeDataType>(
+                        p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+                    ReduceRowSync(sum, f_sum);
+                    return sum;
+                }
+            }();
+            auto l_correction = m;
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
@@ -1772,7 +1914,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                         }
                     }
                 }();
-                l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
+                if constexpr(kDeferDenominator)
+                {
+                    l_correction(i_idx) = tmp;
+                }
+                else
+                {
+                    l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
+                }
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 
@@ -1797,7 +1946,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
             move_tile_window(k_dram_window, {i_total_loops + 2 < num_total_loop ? kN0 : 0, 0});
             k_lds_write_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
-            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            LoadTdmFullTileOrPadded(tdm_config_k, k_lds_write_window, k_dram_window);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
@@ -1842,6 +1991,20 @@ struct BlockFmhaPipelineQRKSVSTdm
                    v_tile,
                    p_scale_arg,
                    v_scale(number<k1_loops - 1>{}));
+
+            if constexpr(kDeferDenominator)
+            {
+                rowsum_p = block_tile_reduce<SMPLComputeDataType>(
+                    p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+                ReduceRowSync(rowsum_p, f_sum);
+                tile_elementwise_inout(
+                    [](auto& sum, auto correction, auto row_sum) {
+                        sum = correction * sum + row_sum;
+                    },
+                    l,
+                    l_correction,
+                    rowsum_p);
+            }
 
             s_wait_tensorcnt_barrier<1>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);

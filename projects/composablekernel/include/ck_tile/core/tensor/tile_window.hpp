@@ -921,11 +921,13 @@ struct tile_window_with_static_distribution
     template <typename TDMConfig_,
               typename LdsTileWindow_,
               typename GatherIndexView_,
-              index_t i_access_ = -1>
+              index_t i_access_ = -1,
+              bool full_tile_  = false>
     CK_TILE_DEVICE auto tdm_load_to_lds(const TDMConfig_& tdm_config,
                                         LdsTileWindow_&& lds_tile,
                                         const GatherIndexView_& gather_index_view,
-                                        number<i_access_> = {}) const
+                                        number<i_access_> = {},
+                                        bool_constant<full_tile_> = {}) const
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
         using LdsDataType   = typename LdsTileWindow::DataType;
@@ -969,13 +971,29 @@ struct tile_window_with_static_distribution
             CK_TILE_LDS_ADDR LdsDataType* smem =
                 smem_base_ptr + lds_coord.get_offset() / Traits::PackedSize;
 
-            // Calculate remaining tensor dimensions, clamping negative values to 0
-            // This prevents out-of-bounds access when window_origin + bottom_index > tensor_length
-            auto&& tensor_dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
-                transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                 glb_tensor_descriptor.get_lengths() - this->get_window_origin() -
-                                     window_adaptor_thread_coord.get_bottom_index())));
-            tensor_dims[0] /= Traits::PackedSize;
+            auto tensor_dims = [&]() {
+                if constexpr(full_tile_)
+                {
+                    static_assert(is_null_tile_window_v<GatherIndexView_>,
+                                  "full-tile TDM does not support gather");
+                    static_assert(num_tensor_dims == box_dim.size());
+                    // The caller proves every box is in bounds. TDM bounds are
+                    // relative to the box's global address; strides are independent.
+                    return generate_array([&](auto i) { return index_t{box_dim.at(i)}; },
+                                          number<num_tensor_dims>{});
+                }
+                else
+                {
+                    // Clamp remaining dimensions so out-of-bounds boxes load zeros.
+                    auto dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
+                        transform_tuples([](auto x) { return max(index_t{0}, x); },
+                                         glb_tensor_descriptor.get_lengths() -
+                                             this->get_window_origin() -
+                                             window_adaptor_thread_coord.get_bottom_index())));
+                    dims[0] /= Traits::PackedSize;
+                    return dims;
+                }
+            }();
             // Assert that both window origins have the same dimensionality
             static_assert(
                 std::is_same<std::remove_cv_t<std::remove_reference_t<decltype(lds_window_origin)>>,

@@ -36,7 +36,8 @@ using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
 template <ck_tile::index_t M,
           bool UseDoubleKVLdsBuffer = false,
           bool ProgressiveDsLoadK   = false,
-          typename DataType         = ck_tile::half_t>
+          typename DataType         = ck_tile::half_t,
+          typename Mask             = ck_tile::SimplifiedGenericAttentionMask<false>>
 using TestFmhaProblem =
     ck_tile::BlockFmhaPipelineProblem<DataType,
                                       DataType,
@@ -52,7 +53,7 @@ using TestFmhaProblem =
                                       TestFmhaShape<M>,
                                       false,
                                       ck_tile::ComposedAttention<0>,
-                                      ck_tile::SimplifiedGenericAttentionMask<false>,
+                                      Mask,
                                       false,
                                       TestFmhaTraits,
                                       UseDoubleKVLdsBuffer,
@@ -83,6 +84,11 @@ static_assert(TestPipeline<DoubleBufferM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<DoubleBufferM128Problem>::kKLoadOnce);
 static_assert(TestPipeline<ProgressiveM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<ProgressiveM128Problem>::kKLoadOnce);
+static_assert(!TestPipeline<DoubleBufferM128Problem>::kStagedKPairs);
+static_assert(!TestPipeline<ProgressiveM64Problem>::kStagedKPairs);
+// K-pair staging is a traversal optimization; FP16/BF16 and attention
+// features do not change its LDS fragment lifetime contract.
+static_assert(TestPipeline<ProgressiveM128Problem>::kStagedKPairs);
 
 template <typename Problem>
 using TestGemm0 = ck_tile::remove_cvref_t<
@@ -130,7 +136,9 @@ std::vector<typename Problem::ODataType> run_kernel(const ck_tile::DeviceMem& q_
                                                     const ck_tile::DeviceMem& k_device,
                                                     const ck_tile::DeviceMem& v_device,
                                                     ck_tile::index_t seqlen_q,
-                                                    ck_tile::index_t seqlen_k = kSeqlenK)
+                                                    ck_tile::index_t seqlen_k = kSeqlenK,
+                                                    ck_tile::GenericAttentionMaskEnum mask_type =
+                                                        ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
 {
     using Kernel   = TestKernel<Problem>;
     using DataType = typename Problem::ODataType;
@@ -169,6 +177,13 @@ std::vector<typename Problem::ODataType> run_kernel(const ck_tile::DeviceMem& q_
     args.batch_stride_k   = kHeads * args.nhead_stride_k;
     args.batch_stride_v   = kHeads * args.nhead_stride_v;
     args.batch_stride_o   = kHeads * args.nhead_stride_o;
+
+    if constexpr(Problem::FmhaMask::IsMasking)
+    {
+        args.window_size_left  = -1;
+        args.window_size_right = 0;
+        args.mask_type         = mask_type;
+    }
 
     const ck_tile::stream_config stream{};
     ck_tile::launch_kernel(stream,
@@ -296,6 +311,252 @@ TYPED_TEST(QrTdmProgressiveKLdsM128, MultipleKBlocksProduceEquivalentOutput)
     expect_finite_nonzero(progressive);
     expect_close(
         progressive, baseline, "M128 multi-block progressive output differs from baseline");
+}
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, CausalKPairStagingPreservesOutputAcrossTileCounts)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    using Mask = ck_tile::GenericAttentionMask<true, false>;
+    // Different query tiles consume different numbers of KV blocks, including
+    // the short causal prefix and the final ping-pong buffer reuse. A staged
+    // pair overwritten before its last consumer must disagree with the
+    // non-progressive full-K reference below. FP16 exercises the same staged
+    // traversal rather than a data-type-selected fallback.
+    for(const ck_tile::index_t seqlen : {128, 256, 384})
+    {
+        SCOPED_TRACE(seqlen);
+        const auto q =
+            make_input<TypeParam>(kBatch * kHeads * seqlen * kHeadDim, 13, 29, 14, 0.03125f);
+        const auto k =
+            make_input<TypeParam>(kBatch * kHeads * seqlen * kHeadDim, 7, 31, 15, 0.025f);
+        const auto v =
+            make_input<TypeParam>(kBatch * kHeads * seqlen * kHeadDim, 11, 37, 18, 0.02f);
+        const ck_tile::DeviceMem q_device(q.size() * sizeof(TypeParam));
+        const ck_tile::DeviceMem k_device(k.size() * sizeof(TypeParam));
+        const ck_tile::DeviceMem v_device(v.size() * sizeof(TypeParam));
+        q_device.ToDevice(q.data());
+        k_device.ToDevice(k.data());
+        v_device.ToDevice(v.data());
+
+        const auto baseline = run_kernel<TestFmhaProblem<128, true, false, TypeParam, Mask>>(
+            q_device, k_device, v_device, seqlen, seqlen);
+        const auto progressive = run_kernel<TestFmhaProblem<128, true, true, TypeParam, Mask>>(
+            q_device, k_device, v_device, seqlen, seqlen);
+
+        expect_finite_nonzero(baseline);
+        expect_finite_nonzero(progressive);
+        expect_close(progressive, baseline, "M128 causal K staging differs from full-K output");
+    }
+}
+
+template <typename DataType, typename Mask>
+void check_long_sequence_sum(ck_tile::index_t seqlen, float input_scale)
+{
+    SCOPED_TRACE(Mask::IsMasking ? "causal" : "dense");
+    // Reference retains the original serial row sum through the non-progressive
+    // path. Long sequences exercise repeated l updates, not just one KV tile.
+    const auto count = kBatch * kHeads * seqlen * kHeadDim;
+    const auto q = make_input<DataType>(count, 13, 29, 14, input_scale);
+    auto k = make_input<DataType>(count, 7, 31, 15, input_scale);
+    // Periodic K alone reaches its dense row maxima in the first tile. Grow
+    // subsequent blocks so this also exercises non-unit online rescaling.
+    for(std::size_t i = 0; i < k.size(); ++i)
+    {
+        const auto block = (i / kHeadDim) / 64;
+        const float growth = 1.0f + static_cast<float>(block) / 64.0f;
+        k[i] = ck_tile::type_convert<DataType>(ck_tile::type_convert<float>(k[i]) * growth);
+    }
+    // Positive V avoids periodic cancellation toward zero on long sequences;
+    // a wrong denominator must remain visible at the existing output tolerance.
+    const auto v = make_input<DataType>(count, 11, 37, -7, 0.02f);
+    const ck_tile::DeviceMem q_device(q.size() * sizeof(DataType));
+    const ck_tile::DeviceMem k_device(k.size() * sizeof(DataType));
+    const ck_tile::DeviceMem v_device(v.size() * sizeof(DataType));
+    q_device.ToDevice(q.data());
+    k_device.ToDevice(k.data());
+    v_device.ToDevice(v.data());
+    const auto baseline = run_kernel<TestFmhaProblem<128, true, false, DataType, Mask>>(
+        q_device, k_device, v_device, seqlen, seqlen);
+    const auto candidate = run_kernel<TestFmhaProblem<128, true, true, DataType, Mask>>(
+        q_device, k_device, v_device, seqlen, seqlen);
+    expect_finite_nonzero(baseline);
+    expect_finite_nonzero(candidate);
+    expect_close(candidate, baseline, "long-sequence denominator differs from serial-sum path");
+}
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, LongSequencesPreserveDenominatorAccuracy)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+    for(const ck_tile::index_t seqlen : {4096, 8192, 16384, 32768})
+    {
+        SCOPED_TRACE(seqlen);
+        for(const float input_scale : {0.03125f, 0.25f})
+        {
+            SCOPED_TRACE(input_scale);
+            check_long_sequence_sum<TypeParam, ck_tile::SimplifiedGenericAttentionMask<false>>(
+                seqlen, input_scale);
+            check_long_sequence_sum<TypeParam, ck_tile::GenericAttentionMask<true, false>>(
+                seqlen, input_scale);
+        }
+    }
+}
+
+template <typename DataType, typename Mask>
+void check_mixed_row_rescaling()
+{
+    SCOPED_TRACE(Mask::IsMasking ? "causal" : "dense");
+    constexpr ck_tile::index_t seqlen = 256;
+    constexpr float levels[4][2] = {{4, 4}, {4, 8}, {8, 8}, {8, 16}};
+    constexpr float values[4] = {1, 0.5f, 0.25f, 0.125f};
+    std::vector<DataType> q(seqlen * kHeadDim, ck_tile::type_convert<DataType>(0));
+    std::vector<DataType> k(seqlen * kHeadDim, ck_tile::type_convert<DataType>(0));
+    std::vector<DataType> v(seqlen * kHeadDim);
+    for(ck_tile::index_t row = 0; row < seqlen; ++row)
+    {
+        // Even/odd query rows alternate unchanged/changing maxima in each
+        // tile. A first-lane-only skip decision or omitted O correction must
+        // disagree with the always-rescaling reference, within the same wave.
+        q[row * kHeadDim + row % 2] = ck_tile::type_convert<DataType>(4);
+        for(ck_tile::index_t col = 0; col < 2; ++col)
+            k[row * kHeadDim + col] = ck_tile::type_convert<DataType>(levels[row / 64][col]);
+        for(ck_tile::index_t col = 0; col < kHeadDim; ++col)
+            v[row * kHeadDim + col] =
+                ck_tile::type_convert<DataType>(values[row / 64] + col / 256.0f);
+    }
+    const ck_tile::DeviceMem q_device(q.size() * sizeof(DataType));
+    const ck_tile::DeviceMem k_device(k.size() * sizeof(DataType));
+    const ck_tile::DeviceMem v_device(v.size() * sizeof(DataType));
+    q_device.ToDevice(q.data());
+    k_device.ToDevice(k.data());
+    v_device.ToDevice(v.data());
+    const auto baseline = run_kernel<TestFmhaProblem<128, true, false, DataType, Mask>>(
+        q_device, k_device, v_device, seqlen, seqlen);
+    const auto candidate = run_kernel<TestFmhaProblem<128, true, true, DataType, Mask>>(
+        q_device, k_device, v_device, seqlen, seqlen);
+    expect_finite_nonzero(baseline);
+    expect_finite_nonzero(candidate);
+    expect_close(candidate, baseline, "mixed row maxima lost an O rescaling update");
+}
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, MixedRowMaximumChangesPreserveRescaling)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+    check_mixed_row_rescaling<TypeParam, ck_tile::SimplifiedGenericAttentionMask<false>>();
+    check_mixed_row_rescaling<TypeParam, ck_tile::GenericAttentionMask<true, false>>();
+}
+
+template <typename DataType, typename Mask>
+void compare_cross_attention(ck_tile::index_t seqlen_q,
+                             ck_tile::index_t seqlen_k,
+                             ck_tile::GenericAttentionMaskEnum mask_type,
+                             ck_tile::index_t empty_rows = 0)
+{
+    SCOPED_TRACE(seqlen_q);
+    SCOPED_TRACE(seqlen_k);
+    const auto q = make_input<DataType>(seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
+    const auto k = make_input<DataType>(seqlen_k * kHeadDim, 7, 31, 15, 0.025f);
+    const auto v = make_input<DataType>(seqlen_k * kHeadDim, 11, 37, 18, 0.02f);
+    const ck_tile::DeviceMem q_device(q.size() * sizeof(DataType));
+    const ck_tile::DeviceMem k_device(k.size() * sizeof(DataType));
+    const ck_tile::DeviceMem v_device(v.size() * sizeof(DataType));
+    q_device.ToDevice(q.data());
+    k_device.ToDevice(k.data());
+    v_device.ToDevice(v.data());
+
+    const auto baseline = run_kernel<TestFmhaProblem<128, true, false, DataType, Mask>>(
+        q_device, k_device, v_device, seqlen_q, seqlen_k, mask_type);
+    const auto progressive = run_kernel<TestFmhaProblem<128, true, true, DataType, Mask>>(
+        q_device, k_device, v_device, seqlen_q, seqlen_k, mask_type);
+    expect_finite_nonzero(baseline);
+    expect_finite_nonzero(progressive);
+    expect_close(progressive, baseline, "M128 cross-attention differs from full-K output");
+    for(ck_tile::index_t i = 0; i < empty_rows * kHeadDim; ++i)
+        EXPECT_EQ(ck_tile::type_convert<float>(progressive[i]), 0.0f);
+}
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, GenericDenseMaskPreservesQueryTail)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    compare_cross_attention<TypeParam, ck_tile::GenericAttentionMask<false, false>>(
+        129, 192, ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+}
+
+// A custom range can have a logical tail within a fully allocated K/V tile.
+// IsMasking=false alone must not disable the pipeline's score-tail clamp.
+struct PrefixDenseMask : ck_tile::SimplifiedGenericAttentionMask<false>
+{
+    using ck_tile::SimplifiedGenericAttentionMask<false>::SimplifiedGenericAttentionMask;
+
+    template <ck_tile::index_t YTile, ck_tile::index_t XTile>
+    CK_TILE_HOST_DEVICE constexpr auto GetTileRangeAlongX(
+        ck_tile::index_t row, ck_tile::number<YTile> height, ck_tile::number<XTile> width) const
+    {
+        const auto range = ck_tile::SimplifiedGenericAttentionMask<false>::GetTileRangeAlongX(
+            row, height, width);
+        return ck_tile::make_tuple(0, range.at(ck_tile::number<1>{}) - 1);
+    }
+};
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, CustomDenseSubrangeRetainsScoreTailMask)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    constexpr ck_tile::index_t seqlen_q = 129;
+    constexpr ck_tile::index_t seqlen_k = 192;
+    const std::vector<TypeParam> q(seqlen_q * kHeadDim, ck_tile::type_convert<TypeParam>(0));
+    const std::vector<TypeParam> k(seqlen_k * kHeadDim, ck_tile::type_convert<TypeParam>(0));
+    std::vector<TypeParam> v(seqlen_k * kHeadDim, ck_tile::type_convert<TypeParam>(1));
+    for(ck_tile::index_t col = 0; col < kHeadDim; ++col)
+        v[(seqlen_k - 1) * kHeadDim + col] = ck_tile::type_convert<TypeParam>(16);
+    const ck_tile::DeviceMem q_device(q.size() * sizeof(TypeParam));
+    const ck_tile::DeviceMem k_device(k.size() * sizeof(TypeParam));
+    const ck_tile::DeviceMem v_device(v.size() * sizeof(TypeParam));
+    q_device.ToDevice(q.data());
+    k_device.ToDevice(k.data());
+    v_device.ToDevice(v.data());
+    const auto output = run_kernel<TestFmhaProblem<128, true, true, TypeParam, PrefixDenseMask>>(
+        q_device, k_device, v_device, seqlen_q, seqlen_k);
+    // All 191 included rows have V=1; including the excluded V=16 gives 1.078125.
+    for(std::size_t i = 0; i < output.size(); ++i)
+        ASSERT_NEAR(ck_tile::type_convert<float>(output[i]), 1.0f, 1.0e-3f) << i;
+}
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, QueryTailsPreserveOutputWithThreeKBlocks)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    // Wrong K/V bounds or tail rotation can corrupt the last valid query rows.
+    // This output check alone cannot detect reads of unused out-of-bounds Q rows.
+    for(const ck_tile::index_t seqlen_q : {1, 127, 129, 193})
+    {
+        compare_cross_attention<TypeParam, ck_tile::SimplifiedGenericAttentionMask<false>>(
+            seqlen_q, 192, ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+        compare_cross_attention<TypeParam, ck_tile::GenericAttentionMask<true, false>>(
+            seqlen_q, 192, ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+    }
+}
+
+TYPED_TEST(QrTdmProgressiveKLdsM128, BottomRightCausalPreservesEmptyAndOddTilePrefixes)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    // Bottom-right alignment gives Q-K empty rows: 64 and 320 respectively.
+    // The first case reaches one- and three-KV-tile prefixes; the second also
+    // exercises entire query tiles that must return before issuing any TDM.
+    using Mask = ck_tile::GenericAttentionMask<true, false>;
+    compare_cross_attention<TypeParam, Mask>(
+        256, 192, ck_tile::GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT, 64);
+    compare_cross_attention<TypeParam, Mask>(
+        384, 64, ck_tile::GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT, 320);
 }
 
 } // namespace qr_tdm_progressive_k_lds_test
