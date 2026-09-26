@@ -49,19 +49,19 @@ typedef signed long long int64_t;
 
 #undef MIOPEN_HIP_RUNTIME_COMPILE
 
-TEST(MiopenCstdintLP64, Uint64TypeMatchesSystem)
+TEST(CPU_MiopenCstdintLP64_NONE, Uint64TypeMatchesSystem)
 {
     EXPECT_TRUE((std::is_same<::uint64_t, std::uint64_t>::value))
         << "miopen_cstdint.hpp uint64_t must be the same type as <cstdint> uint64_t";
 }
 
-TEST(MiopenCstdintLP64, Int64TypeMatchesSystem)
+TEST(CPU_MiopenCstdintLP64_NONE, Int64TypeMatchesSystem)
 {
     EXPECT_TRUE((std::is_same<::int64_t, std::int64_t>::value))
         << "miopen_cstdint.hpp int64_t must be the same type as <cstdint> int64_t";
 }
 
-TEST(MiopenCstdintLP64, SizesAre64Bit)
+TEST(CPU_MiopenCstdintLP64_NONE, SizesAre64Bit)
 {
     EXPECT_EQ(sizeof(::uint64_t), 8u);
     EXPECT_EQ(sizeof(::int64_t), 8u);
