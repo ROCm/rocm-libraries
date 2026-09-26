@@ -2728,12 +2728,12 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
                     "symbol name carries shape on the runtime path",
                 )
 
-        # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
-        # so the split above is attributable to waves_per_eu alone.
+        # The symbol splits too, for name-keyed AOT catalogs, while the shipped
+        # wpe=2 symbol keeps its historical spelling.
         self.assertEqual(
             specs[1].kernel_name(),
-            specs[2].kernel_name(),
-            "kernel_name() differed unexpectedly — test setup error",
+            specs[2].kernel_name() + "_wpe1",
+            "waves_per_eu must be the only symbol difference between the two",
         )
 
     def test_waves_per_eu_cache_isolation_artifacts(self):
@@ -2780,6 +2780,224 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
             "waves_per_eu is not reaching the emitted kernel, so the two "
             "cache slots would hold the same artifact",
         )
+
+
+# ---------------------------------------------------------------------
+# Gfx950AttentionDenseSpec — performance-only codegen knobs
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseGfx950CodegenKnobs(unittest.TestCase):
+    """Every performance knob on the gfx950 dense spec reaches the emitted IR.
+
+    Defaults must reproduce the shipped kernel (the representative-IR golden
+    guards the bytes); each non-default value must change the lowered IR, the
+    cache key and the symbol, and illegal values must be rejected at
+    construction. CPU-only: lowering needs no comgr.
+    """
+
+    _GRID = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=8,
+        num_kv_heads=1,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+    _WIDE = dict(
+        batch=1,
+        seqlen_q=512,
+        seqlen_kv=512,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="fp16",
+        persistent=True,
+        num_persistent=16,
+        persist_decode="gqa_pair",
+        wide_lds_dma=True,
+    )
+
+    @staticmethod
+    def _spec(base, **over):
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+        return Gfx950AttentionDenseSpec(**base, **over)
+
+    @staticmethod
+    def _lower(spec) -> str:
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import build_attention_dense
+
+        return lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+
+    def test_defaults_resolve_to_the_shipped_policy(self):
+        grid = self._spec(self._GRID)
+        persistent = self._spec(self._GRID, persistent=True, num_persistent=16)
+        wide = self._spec(self._WIDE)
+        self.assertEqual(grid.resolved_exp_per_pv_step(), 2)
+        self.assertEqual(persistent.resolved_exp_per_pv_step(), 1)
+        for spec in (grid, persistent):
+            self.assertTrue(spec.resolved_pv_sched_fence())
+            self.assertTrue(spec.resolved_pv_sched_group_template())
+            self.assertEqual(spec.resolved_iglp_mode(), -1)
+            self.assertEqual(spec.resolved_pv_loop_order(), "d_major")
+        self.assertFalse(wide.resolved_pv_sched_fence())
+        self.assertFalse(wide.resolved_pv_sched_group_template())
+        self.assertEqual(wide.resolved_iglp_mode(), 1)
+        self.assertEqual(wide.resolved_pv_loop_order(), "k_major")
+        for spec in (grid, persistent, wide):
+            self.assertNotRegex(spec.kernel_name(), r"_cg[0-9a-f]{8}")
+            self.assertNotIn("kpad", spec.kernel_name())
+
+    def test_illegal_values_are_rejected(self):
+        bad = (
+            ("lds_num_buffers", 3),
+            ("lazy_rescale_threshold", 0.0),
+            ("lazy_rescale_threshold", 8.5),
+            ("exp_per_pv_step", 0),
+            ("pv_priority", 4),
+            ("pv_priority", -1),
+            ("pv_sched_fence_mask", 0x800),
+            ("pv_sched_group_ds_read", 0),
+            ("iglp_mode", 2),
+            ("pv_loop_order", "row_major"),
+            ("o_store_width", 3),
+            ("o_store_width", 8),
+        )
+        for name, value in bad:
+            with self.subTest(**{name: value}):
+                with self.assertRaises(ValueError):
+                    self._spec(self._GRID, **{name: value})
+
+    def test_iglp_is_exclusive_with_manual_scheduling(self):
+        with self.assertRaisesRegex(ValueError, "iglp_mode"):
+            self._spec(self._GRID, iglp_mode=1)
+        self._spec(
+            self._GRID,
+            iglp_mode=1,
+            pv_sched_fence=False,
+            pv_sched_group_template=False,
+        )
+        with self.assertRaisesRegex(ValueError, "iglp_mode"):
+            self._spec(self._WIDE, pv_sched_fence=True)
+        self._spec(self._WIDE, iglp_mode=-1, pv_sched_fence=True)
+
+    def test_each_knob_changes_ir_cache_key_and_symbol(self):
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        no_manual = dict(pv_sched_fence=False, pv_sched_group_template=False)
+        cases = (
+            ("grid", self._GRID, dict(lazy_rescale_threshold=4.0), None),
+            ("grid", self._GRID, dict(use_exp2_fast=False), None),
+            ("grid", self._GRID, dict(exp_per_pv_step=1), None),
+            ("grid", self._GRID, dict(partial_vmcnt_prefetch=False), None),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_priority=0),
+                ("call void @llvm.amdgcn.s.setprio", False),
+            ),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_priority=2),
+                ("call void @llvm.amdgcn.s.setprio(i16 2)", True),
+            ),
+            ("grid", self._GRID, dict(pv_sched_fence=False), None),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_sched_fence_mask=0x008),
+                ("call void @llvm.amdgcn.sched.barrier(i32 8)", True),
+            ),
+            (
+                "grid",
+                self._GRID,
+                dict(pv_sched_group_template=False),
+                ("call void @llvm.amdgcn.sched.group.barrier", False),
+            ),
+            ("grid", self._GRID, dict(pv_sched_group_ds_read=4), None),
+            (
+                "grid",
+                self._GRID,
+                dict(iglp_mode=0, **no_manual),
+                ("call void @llvm.amdgcn.iglp.opt(i32 0)", True),
+            ),
+            ("grid", self._GRID, dict(pv_loop_order="k_major"), None),
+            ("grid", self._GRID, dict(causal_diag_split=False), None),
+            ("grid", self._GRID, dict(o_store_width=2), None),
+            ("grid", self._GRID, dict(o_store_width=1), None),
+            (
+                "persistent",
+                dict(self._GRID, persistent=True, num_persistent=16),
+                dict(exp_per_pv_step=2),
+                None,
+            ),
+            (
+                "persistent",
+                dict(self._GRID, persistent=True, num_persistent=16),
+                dict(causal_diag_split=False),
+                None,
+            ),
+            ("wide", self._WIDE, dict(pv_loop_order="d_major"), None),
+            (
+                "wide",
+                self._WIDE,
+                dict(iglp_mode=-1),
+                ("call void @llvm.amdgcn.iglp.opt", False),
+            ),
+        )
+        baselines = {}
+        for kind, base, over, marker in cases:
+            with self.subTest(kind=kind, **over):
+                if kind not in baselines:
+                    default = self._spec(base)
+                    baselines[kind] = (default, self._lower(default))
+                default, default_ir = baselines[kind]
+                tuned = self._spec(base, **over)
+                tuned_ir = self._lower(tuned)
+                self.assertNotEqual(tuned_ir, default_ir, "knob did not reach IR")
+                self.assertNotEqual(
+                    attention_dense_cache_key(tuned, arch="gfx950"),
+                    attention_dense_cache_key(default, arch="gfx950"),
+                )
+                self.assertNotEqual(tuned.kernel_name(), default.kernel_name())
+                self.assertRegex(tuned.kernel_name(), r"_cg[0-9a-f]{8}")
+                if marker is not None:
+                    text, present = marker
+                    if present:
+                        self.assertIn(text, tuned_ir)
+                    else:
+                        self.assertNotIn(text, tuned_ir)
+
+    def test_codegen_token_is_deterministic_per_setting(self):
+        first = self._spec(self._GRID, pv_priority=2, o_store_width=2)
+        again = self._spec(self._GRID, o_store_width=2, pv_priority=2)
+        other = self._spec(self._GRID, pv_priority=3, o_store_width=2)
+        self.assertEqual(first.kernel_name(), again.kernel_name())
+        self.assertNotEqual(first.kernel_name(), other.kernel_name())
+
+    def test_d128_k_row_pad_reaches_the_lds_layout(self):
+        """The D128 row pad is its own knob; the D64 group pad stays inert here
+        (test_attention_dense_d64_lds.py locks that side)."""
+        default = self._spec(self._GRID)
+        padded = self._spec(self._GRID, lds_k_row_pad=16)
+        self.assertNotEqual(self._lower(padded), self._lower(default))
+        self.assertIn("krpad16", padded.kernel_name())
+        self.assertNotIn("krpad", default.kernel_name())
+        d64 = dict(self._GRID, head_size=64)
+        self.assertEqual(
+            self._lower(self._spec(d64, lds_k_row_pad=16)),
+            self._lower(self._spec(d64)),
+        )
+        with self.assertRaises(ValueError):
+            self._spec(self._GRID, lds_k_row_pad=12)
+        with self.assertRaisesRegex(ValueError, "wide_lds_dma"):
+            self._spec(self._WIDE, lds_k_row_pad=16)
 
 
 # ---------------------------------------------------------------------
