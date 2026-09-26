@@ -4466,6 +4466,21 @@ class GlobalWriteBatchWriter:
           pendingInc = None
         prevN = blockIdxN
 
+    # DPP store-repack fold, interior body: coalesce two M-adjacent paired stores
+    # (pair P-1 = m-rows 0-31, pair P = m-rows 32-63, same 16 cache lines) into two
+    # all-lanes stores, exactly as the boundary body's isFoldSecond does.  The interior
+    # peel is only reached when every block is provably valid, so this uses the
+    # UNCONDITIONAL repack -- no SubtileMGuard both-blocks-valid branch.  Requires the
+    # 18-VGPR fold allocation (isSubtileFold -> vgprStoreData>=0) and the permlane16
+    # shuffle; without either, fall through to the plain paired store below.
+    foldableInterior = (usePermlane16 and self.cvtVgprStruct.vgprStoreData >= 0)
+    def _samePairInterior(i0, i1, ttlo, bN):
+      return (i0 >= 0 and i1 < len(self.batchElements)
+              and self.batchElements[i0][1] == ttlo
+              and self.batchElements[i1][1] == ttlo + 1
+              and self.batchElements[i0][0] == bN
+              and self.batchElements[i1][0] == bN)
+
     for elementIdx, element in enumerate(self.batchElements):
       tt0 = element[1]
       blockIdxN = element[0]
@@ -4477,6 +4492,30 @@ class GlobalWriteBatchWriter:
                          self.batchElements[partnerElementIdx][1] == tt0 - 1)
         if partnerExists:
           flushAtTransition(blockIdxN)
+          pairIdx = tt0 // 2
+          isFoldFirst  = (foldableInterior and pairIdx % 2 == 0
+                          and _samePairInterior(elementIdx + 1, elementIdx + 2, tt0 + 1, blockIdxN))
+          isFoldSecond = (foldableInterior and pairIdx % 2 == 1
+                          and _samePairInterior(elementIdx - 3, elementIdx - 2, tt0 - 3, blockIdxN))
+          if isFoldFirst:
+            # First of a fold pair-of-pairs: the coalesced store is emitted at the
+            # second pair below.  Its accumulators stay live until then (reused as the
+            # repack's batchA), so there is nothing to store here.
+            continue
+          if isFoldSecond:
+            # Second pair: fold prev pair (batchA, m-lower) + this pair (batchB, m-upper).
+            commitPending(dscnt=0)
+            aAddr = self.ss.elementAddr[elementIdx - 3]
+            aS0   = self.ss.elementSumIdx[elementIdx - 3]
+            aS1   = self.ss.elementSumIdx[elementIdx - 2]
+            bAddr = self.ss.elementAddr[partnerElementIdx]
+            bS0   = self.ss.elementSumIdx[partnerElementIdx]
+            bS1   = self.ss.elementSumIdx[elementIdx]
+            lowBlockM = tt0 - 3
+            mod.add(self._emit16bitSubtilePairedStoreRepack(aAddr, aS0, aS1, prefixOffset,
+                      bS0, bS1, bAddr, lowBlockM, blockIdxM=lowBlockM, blockIdxN=blockIdxN,
+                      weavePairA=None, weavePairB=None, forceSlc=forceSlc))
+            continue
           partnerAddrCalc = self.ss.elementAddr[partnerElementIdx]
           sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
           sumIdx1 = self.ss.elementSumIdx[elementIdx]
