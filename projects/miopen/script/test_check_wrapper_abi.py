@@ -160,32 +160,17 @@ class WrapperAbiCheckTest(unittest.TestCase):
         result = self.run_harness(self.tree)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_two_versioned_libraries_are_refused_rather_than_picked_between(self):
-        """One of them is an earlier build, and filename order is not version order."""
-        (self.tree / "lib" / "libMIOpen.so.10.0").touch()
-        result = self.run_harness(self.tree)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("more than one libMIOpen.so.*", result.stdout)
+    def test_a_library_problem_fails_the_run(self):
+        """Which files count is tested in test_miopen_wrapper_libs; this checks the
+        script stops on what it reports, using the default lib* search.
 
-    def test_a_pair_split_across_two_directories_is_refused(self):
-        """lib and lib64 both present, with one half of the pair in each.
-
-        Only one directory can go first when the pair is inspected, so a split pair
-        is not a build the check can trust -- what the co-versioning check exists
-        to catch.
+        Copied into bin/ so that search -- lib* beside its parent directory -- lands in
+        this tree. miopen_wrapper_libs.py comes with it since the script imports from
+        it and only its own directory is on sys.path.
         """
-        lib64 = self.tree / "lib64"
-        lib64.mkdir()
-        (self.tree / "lib" / "libMIOpen_private.so.1.0").rename(
-            lib64 / "libMIOpen_private.so.1.0"
-        )
-
-        # Copied in so the harness's default search -- lib* beside its parent directory --
-        # lands here. That search is the only way to reach a split pair; --lib-dir names
-        # one directory and cannot express one. miopen_wrapper_libs.py comes with it since
-        # the harness imports from it and only its own directory is on sys.path.
+        (self.tree / "lib" / "libMIOpen_private.so.1.0").unlink()
         bindir = self.tree / "bin"
-        bindir.mkdir(exist_ok=True)
+        bindir.mkdir()
         harness = bindir / HARNESS.name
         shutil.copy(HARNESS, harness)
         shutil.copy(HARNESS.parent / "miopen_wrapper_libs.py", bindir)
@@ -206,7 +191,10 @@ class WrapperAbiCheckTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("different directories", result.stdout)
+        self.assertIn(
+            f"no libMIOpen_private.so.* found under {self.tree / 'lib'}", result.stdout
+        )
+        self.assertFalse((self.tree / "fake_abi_check.argv").exists())
 
 
 if __name__ == "__main__":

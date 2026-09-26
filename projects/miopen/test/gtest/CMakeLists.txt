@@ -375,12 +375,12 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
       RUN_SERIAL TRUE
       LABELS "${LABELS}"
       TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT}
-      ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};${PARITY_ENVIRONMENT}"
+      ENVIRONMENT "${PARITY_ENVIRONMENT}"
     )
   elseif(MODE STREQUAL "INSTALL")
-    # No --output-dir, --lib-dir or MIOPEN_USER_DB_PATH: the script's defaults fit the
-    # installed layout, and the DB path names a build-tree directory. python3 because the
-    # configure machine's interpreter path need not exist where the package is tested.
+    # No --output-dir or --lib-dir: the script's defaults fit the installed layout. python3
+    # because the configure machine's interpreter path need not exist where the package is
+    # tested.
     file(APPEND "${INSTALL_TEST_FILE}"
 "add_test(${ENTRY_NAME} python3 \"../run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
 set_tests_properties(${ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${LABELS}\" ENVIRONMENT \"${PARITY_ENVIRONMENT}\")
@@ -431,6 +431,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
             test_run_forwarding_parity
             test_forwarding_parity_gpu_labels
             test_check_wrapper_abi
+            test_miopen_wrapper_libs
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   set_tests_properties(test_forwarding_parity_scripts PROPERTIES
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"

@@ -230,12 +230,12 @@ jobs:
       # Off has to mean invisible: a harness that leaked into the default build
       # would otherwise be noticed only once it started failing somewhere else.
       #
-      # The build above cannot show this. This runner has no GPU, so the configure
-      # probe drops the harness whatever the wrapper flag says, and a zero count
-      # there proves nothing. Two configure-only trees that differ in the wrapper
-      # flag alone can: with the test target pinned, the harness is registered
-      # unless the flag is off, and the wrapper-on tree checks the count is read
-      # correctly.
+      # The build above cannot show this. It names no test target, so whether the
+      # harness is registered there depends on what the configure-time GPU probe
+      # makes of this runner, not on the wrapper flag, and a zero count proves
+      # nothing. Two configure-only trees that pin the test target and differ in
+      # the wrapper flag alone can: the harness is registered unless the flag is
+      # off, and the wrapper-on tree checks the count is read correctly.
       - name: Forwarding parity harness is absent with the wrapper off
         if: matrix.job_id == 'no-ck-build'
         run: |

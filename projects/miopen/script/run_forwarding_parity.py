@@ -121,7 +121,16 @@ def main():
         # A replay that dies before writing must not leave an old report behind.
         report.unlink(missing_ok=True)
         reports.append(report)
-        env = dict(os.environ, MIOPEN_HIPDNN_FORWARDING=mode, LD_LIBRARY_PATH=ld_path)
+        # A database and kernel cache per mode, so the enabled replay cannot reuse
+        # what the disabled one found and compiled.
+        cache = output_dir / f"{mode}_cache"
+        env = dict(
+            os.environ,
+            MIOPEN_HIPDNN_FORWARDING=mode,
+            LD_LIBRARY_PATH=ld_path,
+            MIOPEN_USER_DB_PATH=str(cache),
+            MIOPEN_CUSTOM_CACHE_DIR=str(cache),
+        )
         ok = replay(
             [
                 gtest,

@@ -22,8 +22,8 @@
 
 #include <miopen/miopen.h>
 
+#include <array>
 #include <limits>
-#include <memory>
 #include <vector>
 
 namespace {
@@ -264,21 +264,16 @@ TEST_F(GPU_HipdnnShimConvSolutionApi_FP32, RunSolutionMatchesCpuReference)
     ASSERT_EQ(miopenGetSolutionWorkspaceSize(solutions[0], &workspace_size), miopenStatusSuccess);
     Workspace wspace{workspace_size};
 
-    miopenTensorArgumentId_t names[3] = {
-        miopenTensorConvolutionX, miopenTensorConvolutionW, miopenTensorConvolutionY};
-    void* buffers[3]                        = {x_dev.get(), w_dev.get(), y_dev.get()};
     miopenTensorDescriptor_t descriptors[3] = {&x.desc, &w.desc, &y.desc};
-
-    auto arguments = std::make_unique<miopenTensorArgument_t[]>(3);
-    for(auto i = 0; i < 3; ++i)
-    {
-        arguments[i].id         = names[i];
-        arguments[i].descriptor = &descriptors[i];
-        arguments[i].buffer     = buffers[i];
-    }
+    const std::array<miopenTensorArgument_t, 3> arguments{{
+        {miopenTensorConvolutionX, &descriptors[0], x_dev.get()},
+        {miopenTensorConvolutionW, &descriptors[1], w_dev.get()},
+        {miopenTensorConvolutionY, &descriptors[2], y_dev.get()},
+    }};
 
     ASSERT_EQ(
-        miopenRunSolution(handle, solutions[0], 3, arguments.get(), wspace.ptr(), wspace.size()),
+        miopenRunSolution(
+            handle, solutions[0], arguments.size(), arguments.data(), wspace.ptr(), wspace.size()),
         miopenStatusSuccess);
 
     ReadBackAndCheck();
