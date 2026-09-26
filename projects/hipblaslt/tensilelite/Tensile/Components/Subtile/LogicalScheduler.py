@@ -3345,12 +3345,12 @@ class LogicalScheduler:
 
         sub = LogicalScheduler(cfg)
         sub.build()
-        # Dropping the barriers off the zeroed WaitGRs is only sound when the
-        # fact they assert was established before the body was entered, which is
-        # the partitioned mainloop's doing. Under tailOwnTiles the mainloop is
-        # the baseline one and establishes nothing of the sort, so the tail has
-        # to keep its own.
-        sub.build_nll(dropRedundantSync=not ownTiles)
+        # The fact these barriers assert is established on entry either way:
+        # the partitioned mainloop does it implicitly, and under tailOwnTiles
+        # the FourDeepTailEntry sequence does it explicitly with its own waitcnt
+        # and barrier. The body itself issues no global read, so nothing inside
+        # can recreate the hazard.
+        sub.build_nll(dropRedundantSync=True)
 
         _dumpDir = plsinDebugEnv("TENSILE_PLSIN_DUMP_TAIL", "")
         if _dumpDir:
