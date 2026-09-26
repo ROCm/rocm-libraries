@@ -53,7 +53,8 @@ using BQuantFp8Rcr = std::tuple<RowMajor,
                                 Config,
                                 GroupSize1D_128>;
 
-using BQuantPipelines = ::testing::Types<BQuantFp8Rcr<GemmConfigCompAsync>>;
+using BQuantPipelines =
+    ::testing::Types<BQuantFp8Rcr<GemmConfigCompV3>, BQuantFp8Rcr<GemmConfigCompAsync>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmBQuant, BQuantPipelines);
 TYPED_TEST(TestCkTileGemmBQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
@@ -71,7 +72,8 @@ using AQuantFp8Rcr = std::tuple<RowMajor,
                                 Config,
                                 GroupSize1D_128>;
 
-using AQuantPipelines = ::testing::Types<AQuantFp8Rcr<GemmConfigCompAsync>>;
+using AQuantPipelines =
+    ::testing::Types<AQuantFp8Rcr<GemmConfigCompV3>, AQuantFp8Rcr<GemmConfigCompAsync>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmAQuant, AQuantPipelines);
 TYPED_TEST(TestCkTileGemmAQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
@@ -92,7 +94,8 @@ using ABQuantFp8Rcr = std::tuple<RowMajor,
                                  GroupSize1D_128,
                                  ColumnMajor>;
 
-using ABQuantPipelines = ::testing::Types<ABQuantFp8Rcr<GemmConfigCompAsync>>;
+using ABQuantPipelines =
+    ::testing::Types<ABQuantFp8Rcr<GemmConfigCompV3>, ABQuantFp8Rcr<GemmConfigCompAsync>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmABQuant, ABQuantPipelines);
 TYPED_TEST(TestCkTileGemmABQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
