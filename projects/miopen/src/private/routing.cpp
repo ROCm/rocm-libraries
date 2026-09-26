@@ -29,13 +29,9 @@ const char* const kForwardingEnvVar = "MIOPEN_HIPDNN_FORWARDING";
 //         "miopenConvolutionForward",
 //     };
 //
-// This array is where the forwarding parity harness gets its signal. That harness
-// (the *_forwarding_parity ctest entry, driven by script/run_forwarding_parity.py)
-// runs the shim tests twice, once with MIOPEN_HIPDNN_FORWARDING=disabled and once
-// with =enabled, and requires the two runs to agree. While the array is empty both
-// runs execute the same code and the entry cannot fail; the first name added here
-// is what turns it into a real check. The harness is in place first so that the
-// first forwarded entry point is tested by something already known to work.
+// While this is empty, the forwarding parity tests (script/run_forwarding_parity.py)
+// run the same code twice and cannot fail. The first name added here makes them a
+// real check.
 //
 // constexpr so it lands in .rodata: no initialization order or exit-time
 // destructor to worry about.
