@@ -336,13 +336,15 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
         "int32" if dtype == "int8" else "fp32"
     )
     dtype_key = f"{dtype}_{dtype_b}_{dtype_acc}"
-    # Preshuffle consults its own (smaller) whitelist; other variants use the
-    # standard GEMM warp-tile table.
-    table_key = (
-        "preshuffle_warp_tile_combos"
-        if variant == "preshuffle"
-        else "warp_tile_combos"
-    )
+    # Packed-B preshuffle pipelines consult their own (smaller) whitelist; the
+    # ordinary-B gfx1250 compute pipelines and other variants use the standard
+    # GEMM warp-tile table.
+    packed_b = False
+    if variant == "preshuffle":
+        from codegen_common import PACKED_B_PIPELINES
+
+        packed_b = pipeline in PACKED_B_PIPELINES
+    table_key = "preshuffle_warp_tile_combos" if packed_b else "warp_tile_combos"
     warp_tile_combos = (
         arch_data.get(table_key, {})
         .get(arch, {})
@@ -662,7 +664,8 @@ class DispatcherLib:
         Run GEMM operation
 
         Returns: (status, time_ms)
-            status: 0 = success, -1 = error, -2 = no suitable kernel
+            status: 0 = success, -1 = error, -2 = no suitable kernel,
+                    -3 = kernel rejected the arguments
         """
         time_ms = ctypes.c_float(0.0)
 

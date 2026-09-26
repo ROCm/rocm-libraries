@@ -4,7 +4,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-09-23T18:13:45.332270
+Generated at: 2026-09-26T04:33:52.804774
 
 To update this file:
 1. Edit arch_specs.json
@@ -160,8 +160,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
-        "comp_tdm": 32768,
-        "comp_tdm_v2": 32768,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -178,8 +176,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
-        "comp_tdm": 32768,
-        "comp_tdm_v2": 32768,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -196,8 +192,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
-        "comp_tdm": 32768,
-        "comp_tdm_v2": 32768,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -214,8 +208,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 81920,
         "preshuffle_tdm": 81920,
         "comp_async": 81920,
-        "comp_tdm": 81920,
-        "comp_tdm_v2": 81920,
         "wavelet": 163840,
         "compv6": 81920,
         "preshufflev1": 81920,
@@ -232,8 +224,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
-        "comp_tdm": 32768,
-        "comp_tdm_v2": 32768,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -250,8 +240,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
-        "comp_tdm": 32768,
-        "comp_tdm_v2": 32768,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -268,8 +256,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
-        "comp_tdm": 32768,
-        "comp_tdm_v2": 32768,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -286,8 +272,6 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshufflev2": 163840,
         "preshuffle_tdm": 163840,
         "comp_async": 163840,
-        "comp_tdm": 163840,
-        "comp_tdm_v2": 163840,
         "wavelet": 327680,
         "compv6": 163840,
         "preshufflev1": 163840,
@@ -327,6 +311,12 @@ TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {
     ("compv6", "default", "interwave"),
     ("comp_async", "cshuffle", "interwave"),
     ("comp_async", "default", "interwave"),
+    ("comp_tdm", "cshuffle", "interwave"),
+    ("comp_tdm", "default", "interwave"),
+    ("comp_tdm", "tdm", "interwave"),
+    ("comp_tdm_v2", "cshuffle", "interwave"),
+    ("comp_tdm_v2", "default", "interwave"),
+    ("comp_tdm_v2", "tdm", "interwave"),
 }
 
 # Valid dtype combinations: (A_dtype, B_dtype) -> acc_dtype and notes
@@ -372,6 +362,16 @@ def get_warp_tile_combos(gpu_arch: str, dtype_key: str) -> List[List[int]]:
     return gpu_combos.get(dtype_key.lower(), [])
 
 
+# Pipelines that stage LDS exactly like another pipeline and therefore share its
+# budget. The TDM pipelines always allocate two LDS buffers, as comp_async does.
+# Kept as an alias rather than as extra per-architecture keys so the budget
+# tables above stay uniform across architectures.
+LDS_PIPELINE_BUDGET_ALIASES: Dict[str, str] = {
+    "comp_tdm": "comp_async",
+    "comp_tdm_v2": "comp_async",
+}
+
+
 def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False) -> int:
     """Get the LDS staging budget in bytes for an architecture and pipeline.
 
@@ -389,7 +389,8 @@ def get_lds_limit(gpu_arch: str, pipeline: str, double_smem_buffer: bool = False
         # that cannot launch.
         per_pipeline = _SMALLEST_LDS_BUDGET
 
-    budget = per_pipeline.get(pipeline.lower(), per_pipeline["default"])
+    pipeline_key = LDS_PIPELINE_BUDGET_ALIASES.get(pipeline.lower(), pipeline.lower())
+    budget = per_pipeline.get(pipeline_key, per_pipeline["default"])
 
     if double_smem_buffer:
         capacity = LDS_TOTAL_CAPACITY_BY_ARCH.get(arch, _SMALLEST_LDS_CAPACITY)

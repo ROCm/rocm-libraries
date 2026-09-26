@@ -33,32 +33,81 @@ def _base_gfx_arch(gpu_target: str) -> str:
 
 GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
-GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
-
-# gfx1250 pipelines. They are opt-in per op and per arch, so the pipeline sets
-# (and therefore the generated kernels) of every other arch are unchanged.
+# gfx1250 pipelines for the non-MX GEMM ops. They are opt-in per arch so
+# the pipeline sets (and therefore generated kernels) of every other arch stay
+# exactly GEMM_PIPELINES.
 GEMM_TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2"]
 GEMM_ASYNC_PIPELINES = ["comp_async"]
-# Exact arch required by the TDM / async pipelines. Off this arch the TDM path
-# compiles to a no-op and produces an all-zero C.
+GEMM_PIPELINES_BY_ARCH = {
+    "gfx1250": GEMM_PIPELINES + GEMM_ASYNC_PIPELINES + GEMM_TDM_PIPELINES,
+}
+# Exact arch required by the TDM / async pipelines outside mx_gemm. Off this
+# arch the TDM path compiles to a no-op and produces an all-zero C.
 GFX1250_ONLY_PIPELINE_ARCH = "gfx1250"
+
 TDM_PAD_REJECT_REASON = (
     "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
     "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
 )
-# The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
-# packed buffer and a partial K tile packs the wrong elements.
-PRESHUFFLE_PAD_NK_REJECT_REASON = (
-    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
+GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON = (
+    "comp_async on gfx1250 requires A row-major and B col-major (transpose-load "
+    "path incompatible with WMMA 16x16x32 K distribution)"
+)
+GFX1250_COMP_ASYNC_PAD_REJECT_REASON = (
+    "comp_async on gfx1250 unpadded: the async K-prefetch reads past the A/B "
+    "extent and the TailNumber::Two path lacks an LDS fence, so comp_async "
+    "requires pad_m=pad_n=pad_k=True"
+)
+# Non-MX comp_async on gfx1250 with 8-bit A/B (fp8/bf8, the XOR-swizzled async
+# load path) gives wrong results with warp_tile_k 32 or 64 at any tile_k
+# (on-device verified); warp_tile_k=128 is correct. Same rule and text as the
+# dispatcher codegen_common.
+GFX1250_COMP_ASYNC_8BIT_DTYPES = ("fp8", "bf8")
+GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K = 128
+GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON = (
+    "comp_async on gfx1250 with fp8/bf8 A/B gives wrong results below "
+    "warp_tile_k=128 (XOR-swizzled 8-bit async load), so it requires "
+    "warp_tile_k >= 128"
 )
 
-# Weight-preshuffle GEMM on gfx1250 (rcr only). preshuffle_tdm is the TDM
-# variant of preshufflev2.
-GEMM_PRESHUFFLE_TDM_PIPELINES = ["preshuffle_tdm"] + GEMM_TDM_PIPELINES
-GEMM_PRESHUFFLE_GFX1250_PIPELINES = GEMM_PRESHUFFLE_TDM_PIPELINES + GEMM_ASYNC_PIPELINES
-# comp_async has no working 8-bit async B load on gfx1250 yet.
-PRESHUFFLE_ASYNC_REJECT_DTYPES = frozenset({"fp8", "bf8"})
-PRESHUFFLE_GFX1250_LAYOUT = "rcr"
+
+# Ops whose kernels have no async (comp_async) or TDM (comp_tdm, comp_tdm_v2 +
+# tdm epilogue) path (grouped quant GEMM, GEMM multi-ABD) reject these traits on
+# every arch instead of silently emitting a kernel of another pipeline/epilogue.
+UNSUPPORTED_ASYNC_TDM_PIPELINES = tuple(GEMM_ASYNC_PIPELINES + GEMM_TDM_PIPELINES)
+UNSUPPORTED_ASYNC_TDM_EPILOGUES = ("tdm",)
+
+
+def reject_async_tdm_traits(op_name, pipeline, epilogue):
+    """Raise ValueError if pipeline/epilogue is an async/TDM-only trait."""
+    if pipeline in UNSUPPORTED_ASYNC_TDM_PIPELINES:
+        raise ValueError(f"{op_name} does not support the {pipeline} pipeline")
+    if epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        raise ValueError(f"{op_name} does not support the {epilogue} epilogue")
+
+
+def reject_async_tdm_trait_string(op_name, trait_combo):
+    """Same check on a raw '_'-joined trait string (before it is split).
+
+    comp_async/comp_tdm/comp_tdm_v2 contain '_', so a plain split would parse
+    them as pipeline 'comp' and mis-assign every following field.
+    """
+    # Longest first so comp_tdm_v2 is not reported as comp_tdm.
+    for pipeline in sorted(UNSUPPORTED_ASYNC_TDM_PIPELINES, key=len, reverse=True):
+        if trait_combo == pipeline or trait_combo.startswith(pipeline + "_"):
+            reject_async_tdm_traits(op_name, pipeline, None)
+    for epilogue in UNSUPPORTED_ASYNC_TDM_EPILOGUES:
+        if epilogue in trait_combo.split("_"):
+            reject_async_tdm_traits(op_name, None, epilogue)
+
+
+def reject_async_tdm_config(op_name, config):
+    """Reject async/TDM values listed in a trait_config before enumeration."""
+    trait_config = config.get("trait_config", {})
+    for pipeline in trait_config.get("pipeline", {}).get("values", []):
+        reject_async_tdm_traits(op_name, pipeline, None)
+    for epilogue in trait_config.get("epilogue", {}).get("values", []):
+        reject_async_tdm_traits(op_name, None, epilogue)
 
 
 def _is_true(value) -> bool:
@@ -66,37 +115,110 @@ def _is_true(value) -> bool:
     return value is True or str(value).lower() == "true"
 
 
+def tdm_pad_reject_reason(pipeline, epilogue, pad_m=False, pad_n=False, pad_k=False):
+    """Reason string if a TDM pipeline / tdm epilogue is padded, else ""."""
+    if pipeline not in GEMM_TDM_PIPELINES and epilogue != "tdm":
+        return ""
+    if _is_true(pad_m) or _is_true(pad_n) or _is_true(pad_k):
+        return TDM_PAD_REJECT_REASON
+    return ""
+
+
+def gfx1250_comp_async_pad_reject_reason(pipeline, pad_m=True, pad_n=True, pad_k=True):
+    """Reason string if non-MX comp_async is not padded in M, N and K, else "".
+
+    Only for the non-MX GEMM ops; mx_gemm comp_async is not subject to it.
+    """
+    if pipeline not in GEMM_ASYNC_PIPELINES:
+        return ""
+    if not (_is_true(pad_m) and _is_true(pad_n) and _is_true(pad_k)):
+        return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
+    return ""
+
+
+def gfx1250_comp_async_layout_reject_reason(pipeline, layout):
+    """Reason string if non-MX comp_async on gfx1250 gets a non-"rc" A/B layout.
+
+    An empty layout means the caller did not provide one and is not checked.
+    """
+    if pipeline not in GEMM_ASYNC_PIPELINES or not layout:
+        return ""
+    if layout[:2] != "rc":
+        return GFX1250_COMP_ASYNC_LAYOUT_REJECT_REASON
+    return ""
+
+
+def gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+    pipeline, a_datatype, b_datatype, warp_tile_k
+):
+    """Reason string if non-MX comp_async has fp8/bf8 A or B and
+    warp_tile_k < 128, else ""."""
+    if pipeline not in GEMM_ASYNC_PIPELINES:
+        return ""
+    is_8bit = (
+        a_datatype in GFX1250_COMP_ASYNC_8BIT_DTYPES
+        or b_datatype in GFX1250_COMP_ASYNC_8BIT_DTYPES
+    )
+    if is_8bit and warp_tile_k < GFX1250_COMP_ASYNC_8BIT_MIN_WARP_TILE_K:
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+    return ""
+
+
+def get_pipelines_for_arch(gpu_target: str) -> List[str]:
+    """Return the non-MX GEMM pipelines valid on ``gpu_target``."""
+    return list(GEMM_PIPELINES_BY_ARCH.get(_base_gfx_arch(gpu_target), GEMM_PIPELINES))
+
+
+GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
+
+# preshufflev2 / preshuffle_tdm read B packed by the host shuffle_b_v0; the
+# gfx1250 compute pipelines read ordinary B (Preshuffle=false) and follow the
+# plain GEMM gfx1250 rules above. Same rules and text as
+# preshuffle_pipeline_reject_reason in dispatcher/codegen/codegen_common.py.
+GEMM_PACKED_B_PIPELINES = ["preshufflev2", "preshuffle_tdm"]
+GEMM_PRESHUFFLE_GFX1250_PIPELINES = (
+    ["preshuffle_tdm"] + GEMM_ASYNC_PIPELINES + GEMM_TDM_PIPELINES
+)
+PRESHUFFLE_GFX1250_LAYOUT = "rcr"
+# The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
+# packed buffer and a partial K tile packs the wrong elements.
+PRESHUFFLE_PAD_NK_REJECT_REASON = (
+    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
+)
+
+
 def preshuffle_pipeline_reject_reason(
     pipeline,
     gpu_target="",
     layout="",
-    pad_m=False,
-    pad_n=False,
-    pad_k=False,
+    pad_m=None,
+    pad_n=None,
+    pad_k=None,
     num_waves=None,
     dtype="",
     scheduler="",
     epilogue="",
     persistent=False,
+    warp_tile_k=None,
 ) -> str:
-    """Reason string if a gfx1250 preshuffle pipeline is not allowed, else "".
+    """Reason string if a gemm_preshuffle pipeline config is not allowed, else "".
 
     Pipelines outside GEMM_PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only
     get the scheduler and tdm-epilogue checks, plus the pad_n/pad_k check on
-    gfx1250. Empty gpu_target / layout / dtype / scheduler / epilogue and
-    num_waves=None mean "not known yet" and are not checked, so the helper can
-    run at trait level and at tile level.
+    gfx1250. Empty gpu_target / layout / dtype / scheduler / epilogue and None
+    pads / num_waves / warp_tile_k mean "not known yet" and are not checked,
+    so the helper can run at trait level and at tile level.
     """
     # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
     want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
     if scheduler and scheduler != want_scheduler:
         return f"preshuffle {pipeline} requires scheduler {want_scheduler!r}, got {scheduler!r}"
-    # Only the comp_tdm* pipelines drive the TDM epilogue.
-    if epilogue == "tdm" and not pipeline.startswith("comp_tdm"):
+    if epilogue == "tdm" and pipeline not in GEMM_TDM_PIPELINES:
         return f"preshuffle {pipeline} cannot use the tdm epilogue"
     arch = _base_gfx_arch(gpu_target)
-    pad_nk = _is_true(pad_n) or _is_true(pad_k)
+    pads = (pad_m, pad_n, pad_k)
     if pipeline not in GEMM_PRESHUFFLE_GFX1250_PIPELINES:
+        pad_nk = _is_true(pad_n) or _is_true(pad_k)
         on_gfx1250 = arch == GFX1250_ONLY_PIPELINE_ARCH
         return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and on_gfx1250 else ""
     if arch and arch != GFX1250_ONLY_PIPELINE_ARCH:
@@ -106,19 +228,19 @@ def preshuffle_pipeline_reject_reason(
         return f"preshuffle {pipeline} requires layout {PRESHUFFLE_GFX1250_LAYOUT!r}, got {layout!r}"
     if persistent:
         return f"preshuffle {pipeline} has no persistent kernel"
-    # comp_tdm* store through the TDM epilogue, comp_async and preshuffle_tdm
-    # through CShuffle.
-    want_epilogue = "tdm" if pipeline.startswith("comp_tdm") else "cshuffle"
+    want_epilogue = "tdm" if pipeline in GEMM_TDM_PIPELINES else "cshuffle"
     if epilogue and epilogue != want_epilogue:
         return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
-    if pipeline in GEMM_PRESHUFFLE_TDM_PIPELINES and (_is_true(pad_m) or pad_nk):
+    if pipeline != "comp_async" and any(_is_true(p) for p in pads):
         return TDM_PAD_REJECT_REASON
-    if pad_nk:
-        return PRESHUFFLE_PAD_NK_REJECT_REASON
+    if pipeline == "comp_async" and None not in pads and not all(_is_true(p) for p in pads):
+        return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
-    if pipeline == "comp_async" and dtype in PRESHUFFLE_ASYNC_REJECT_DTYPES:
-        return f"preshuffle comp_async does not support {dtype}"
+    if pipeline == "comp_async" and warp_tile_k is not None:
+        return gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+            pipeline, dtype, dtype, warp_tile_k
+        )
     return ""
 
 
@@ -416,12 +538,16 @@ def is_trait_combination_valid(
     persistent_or_preshuffle_quant=None,
     kernel_name_prefix: str = "",
     layout: str = "",
-    pad_m=False,
-    pad_n=False,
-    pad_k=False,
+    pad_m=None,
+    pad_n=None,
+    pad_k=None,
     gpu_target: str = "",
 ) -> bool:
-    """Check if a trait combination is valid."""
+    """Check if a trait combination is valid.
+
+    pad_m/pad_n/pad_k are optional: None means the caller did not provide the
+    padding, so the padding rules are not checked for it.
+    """
     if kernel_name_prefix == "mx_gemm":
         return scheduler == "intrawave" and (
             (pipeline in GEMM_MX_PIPELINES_BY_ARCH["gfx950"] and epilogue == "cshuffle")
@@ -445,6 +571,10 @@ def is_trait_combination_valid(
         return False
     if kernel_name_prefix == "gemm_aquant":
         if (pipeline, epilogue, scheduler) in AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
+            return False
+        # The quant pipeline problem has no TDM variant. comp_async is rejected
+        # in is_tile_config_valid (arch-scoped) so legacy trait results hold.
+        if pipeline in GEMM_TDM_PIPELINES or epilogue == "tdm":
             return False
         # mem pipeline does not support preshuffle
         if pipeline == "mem" and persistent_or_preshuffle_quant is True:
@@ -488,6 +618,30 @@ def is_trait_combination_valid(
             return False
         return True
     else:
+        if kernel_name_prefix != "mx_gemm":
+            if pipeline in GEMM_TDM_PIPELINES:
+                # TDM: intrawave only, TdmEpilogue only, no persistent kernel
+                # (TdmEpilogue has no split-K / persistent write path), and no
+                # padding (see TDM_PAD_REJECT_REASON).
+                if tdm_pad_reject_reason(pipeline, epilogue, pad_m, pad_n, pad_k):
+                    logging.debug(f"{pipeline}: {TDM_PAD_REJECT_REASON}")
+                    return False
+                return (
+                    scheduler == "intrawave"
+                    and epilogue == "tdm"
+                    and persistent_or_preshuffle_quant not in (True, "true")
+                )
+            if epilogue == "tdm":
+                return False
+            # Non-MX comp_async (gfx1250) must be fully padded (see
+            # GFX1250_COMP_ASYNC_PAD_REJECT_REASON). Skipped when the caller
+            # passed no padding at all.
+            pads_given = not (pad_m is None and pad_n is None and pad_k is None)
+            if pads_given and gfx1250_comp_async_pad_reject_reason(
+                pipeline, pad_m, pad_n, pad_k
+            ):
+                logging.debug(f"{pipeline}: {GFX1250_COMP_ASYNC_PAD_REJECT_REASON}")
+                return False
         return (pipeline, epilogue, scheduler) not in TRAIT_UNSUPPORTED_COMBINATIONS
 
 
@@ -591,8 +745,13 @@ def validate_lds_capacity(
     b_datatype: str,
     pipeline: str,
     gpu_target: str = "",
+    gfx1250_gemm_pipeline: bool = False,
 ) -> Tuple[bool, str]:
-    """Validate LDS capacity requirements."""
+    """Validate LDS capacity requirements.
+
+    gfx1250_gemm_pipeline marks a non-MX comp_async / comp_tdm* op (see
+    _uses_gfx1250_gemm_pipeline); MX comp_async keeps its own descriptor rule.
+    """
     matrix_a_size = (tile_m * tile_k) * element_size(a_datatype)
     matrix_b_size = (tile_n * tile_k) * element_size(b_datatype)
     if pipeline == "weight_preshuffle":
@@ -600,11 +759,12 @@ def validate_lds_capacity(
         matrix_b_size = 0
     elif (
         pipeline in ("comp_tdm", "comp_tdm_v2")
-        and _base_gfx_arch(gpu_target) == "gfx1250"
-    ):
-        # MX RCR uses TDM's non-transposed LDS descriptors. Each group of
-        # rows spanning at least 256 bytes is separated by 16 padding bytes.
-        # GetSmemSizeA/B round to 16 bytes; valid MX K tiles are already aligned.
+        or (pipeline == "comp_async" and gfx1250_gemm_pipeline)
+    ) and _base_gfx_arch(gpu_target) == "gfx1250":
+        # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
+        # descriptors. Each group of rows spanning at least 256 bytes is
+        # separated by 16 padding bytes.
+        # GetSmemSizeA/B round to 16 bytes; valid K tiles are already aligned.
         a_lds_layer = max(1, 256 // (tile_k * element_size(a_datatype)))
         b_lds_layer = max(1, 256 // (tile_k * element_size(b_datatype)))
         matrix_a_size += max(0, tile_m // a_lds_layer - 1) * 16
@@ -780,6 +940,57 @@ def validate_gemm_mx_warp_tile_combination(
     return True, ""
 
 
+def _uses_gfx1250_gemm_pipeline(pipeline: str, kernel_name_prefix: str) -> bool:
+    """True for comp_tdm* / comp_async on a non-MX GEMM op.
+
+    An empty prefix keeps the legacy routing of comp_async (MX validation) for
+    callers that do not name the op.
+    """
+    if kernel_name_prefix == "mx_gemm":
+        return False
+    if pipeline in GEMM_TDM_PIPELINES:
+        return True
+    return pipeline in GEMM_ASYNC_PIPELINES and kernel_name_prefix != ""
+
+
+def validate_gemm_gfx1250_pipeline(
+    tile_m: int,
+    tile_n: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    c_datatype: str,
+    pipeline: str,
+    gpu_target: str,
+    layout: str = "",
+) -> Tuple[bool, str]:
+    """Arch, layout and wave-layout rules for the non-MX comp_async / comp_tdm*
+    pipelines."""
+    arch = _base_gfx_arch(gpu_target)
+    if arch != GFX1250_ONLY_PIPELINE_ARCH:
+        return (
+            False,
+            f"pipeline {pipeline!r} requires {GFX1250_ONLY_PIPELINE_ARCH}, got {arch!r}",
+        )
+    layout_reason = gfx1250_comp_async_layout_reject_reason(pipeline, layout)
+    if layout_reason:
+        return False, layout_reason
+    if pipeline == "comp_tdm_v2" and warp_m * warp_n * warp_k != 4:
+        return (
+            False,
+            f"comp_tdm_v2 requires exactly 4 waves, got {warp_m}x{warp_n}x{warp_k}",
+        )
+    if pipeline in GEMM_TDM_PIPELINES:
+        # TdmEpilogue stages the full output tile in the shared LDS allocation.
+        c_tile_bytes = tile_m * tile_n * element_size(c_datatype)
+        if c_tile_bytes > LDS_SIZE_MAP[arch]:
+            return (
+                False,
+                "TDM epilogue output tile exceeds the architecture LDS capacity",
+            )
+    return True, ""
+
+
 def is_tile_config_valid(
     tile_m: int,
     tile_n: int,
@@ -863,12 +1074,16 @@ def is_tile_config_valid(
         b_datatype,
         pipeline,
         gpu_target,
+        _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix),
     )
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")
         return False
 
     # The preshuffle op owns its pipelines (comp_async here is NOT the MX one).
+    # Its gfx1250 compute pipelines read ordinary B, so after the preshuffle
+    # rules they take the plain GEMM gfx1250 path below; only the packed-B
+    # pipelines use validate_gemm_preshuffle.
     is_preshuffle = (
         pipeline in GEMM_PRESHUFFLE_PIPELINES or kernel_name_prefix == "gemm_preshuffle"
     )
@@ -879,12 +1094,81 @@ def is_tile_config_valid(
             layout,
             num_waves=warp_m * warp_n * warp_k,
             dtype=b_datatype,
+            warp_tile_k=warp_tile_k,
         )
         if reason:
             logging.debug(f"GEMM Preshuffle validation failed: {reason}")
             return False
 
-    if pipeline in GEMM_PIPELINES and not is_preshuffle:
+    if _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix):
+        # Non-MX comp_async / comp_tdm*: route on the op, not on the pipeline
+        # string, so these never reach the MX-only validate_gemm_mx rules.
+        if kernel_name_prefix == "gemm_aquant":
+            # The quant pipeline problem has no async / TDM variant.
+            logging.debug(f"gemm_aquant does not support pipeline {pipeline!r}")
+            return False
+        gfx1250_valid, gfx1250_error = validate_gemm_gfx1250_pipeline(
+            tile_m,
+            tile_n,
+            warp_m,
+            warp_n,
+            warp_k,
+            c_datatype,
+            pipeline,
+            gpu_target,
+            layout,
+        )
+        if not gfx1250_valid:
+            logging.debug(f"gfx1250 pipeline validation failed: {gfx1250_error}")
+            return False
+        warp_tile_k_reason = gfx1250_comp_async_8bit_warp_tile_k_reject_reason(
+            pipeline, a_datatype, b_datatype, warp_tile_k
+        )
+        if warp_tile_k_reason:
+            logging.debug(f"gfx1250 pipeline validation failed: {warp_tile_k_reason}")
+            return False
+
+        gemm_valid, gemm_valid_error = validate_gemm(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            pipeline,
+            layout,
+            gpu_target,
+        )
+        if not gemm_valid:
+            logging.debug(f"GEMM validation failed: {gemm_valid_error}")
+            return False
+
+        # The plain table has no gfx1250 entry; preshuffle uses its own.
+        validate_warp_tile = (
+            validate_gemm_preshuffle_warp_tile_combination
+            if is_preshuffle
+            else validate_gemm_warp_tile_combination
+        )
+        warp_tile_valid, warp_tile_error = validate_warp_tile(
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            gpu_target,
+        )
+        if not warp_tile_valid:
+            logging.debug(f"Warp tile validation failed: {warp_tile_error}")
+            return False
+
+    elif pipeline in GEMM_PIPELINES and not is_preshuffle:
         gemm_valid, gemm_valid_error = validate_gemm(
             tile_m,
             tile_n,

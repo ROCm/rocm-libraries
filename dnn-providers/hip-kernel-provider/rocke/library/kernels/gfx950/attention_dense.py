@@ -280,6 +280,10 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         parts = list(super()._algorithm_name_parts())
         if self.wide_lds_dma:
             parts.append("wdma")
+        # Preserve shipped symbols at the default while keeping explicitly
+        # swept WPE binaries distinct for AOT packaging and name-based tools.
+        if self.waves_per_eu != 2:
+            parts.append(f"wpe{self.waves_per_eu}")
         return tuple(parts)
 
     def _persist_decode_name_part(self) -> str:

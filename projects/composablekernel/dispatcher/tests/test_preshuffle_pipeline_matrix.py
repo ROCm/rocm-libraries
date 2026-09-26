@@ -25,7 +25,8 @@ from gemm_full_benchmark import resolve_configs
 from gemm_validation_utils import validate_gemm_preshuffle_warp_tile_combination
 
 CONFIG = CK_ROOT / 'tile_engine/ops/gemm/gemm_preshuffle/configs/default_config_gfx1250.json'
-# Every pipeline reads shuffle_b_v0-packed B and gets one kernel per tile_k.
+# Only the preshuffle pipelines read shuffle_b_v0-packed B; the compute ones read ordinary B.
+PACKED_B = ('preshufflev2', 'preshuffle_tdm')
 PIPELINES = {
     'preshufflev2': 'WeightPreshufflePipelineAGmemBGmemCRegV2',
     'comp_tdm': 'GemmPipelineAgBgCrCompTDMV1',
@@ -33,8 +34,9 @@ PIPELINES = {
     'preshuffle_tdm': 'WeightPreshufflePipelineAGmemBGmemCRegTDM',
     'comp_async': 'GemmPipelineAgBgCrCompAsync',
 }
-# comp_async rejects fp8/bf8 on gfx1250.
-EXPECTED = {d: {p: 2 for p in PIPELINES if d in ('fp16', 'bf16') or p != 'comp_async'}
+# One kernel per tile_k; preshufflev2 adds a pad_m variant; comp_async needs 8-bit wtk>=128.
+EXPECTED = {d: {p: 4 if p == 'preshufflev2' else 2 for p in PIPELINES
+                if d in ('fp16', 'bf16') or p != 'comp_async'}
             for d in ('fp16', 'bf16', 'fp8', 'bf8')}
 
 
@@ -58,12 +60,13 @@ def test_complete_sweep_reaches_both_generators(tmp_path, dtype):
         kernel = kernels[0]
         assert KernelNaming.generate(kernel, dtype, 'rcr') == cfg.name
         impl = PIPELINES[cfg.pipeline]
-        assert kernel.preshuffle
+        packed = cfg.pipeline in PACKED_B
+        assert kernel.preshuffle == packed
         assert kernel.block_size == 128
         source = CKTileKernelGenerator(dtype, 'rcr').generate(kernel)
         assert f'using GemmPipeline = {impl}<UniversalGemmProblem>;' in source
         assert f'#define GEMM_KEY_PIPELINE "{cfg.pipeline}"' in source
-        assert '#define GEMM_KEY_PRESHUFFLE 1' in source
+        assert f'#define GEMM_KEY_PRESHUFFLE {int(packed)}' in source
         assert '#define GEMM_KEY_DOUBLE_BUFFER 1' in source
         assert ('TdmEpilogue<EpilogueProblem>' in source) == (cfg.epilogue == 'tdm')
         metadata = _parse_gemm_header_metadata(Path(cfg.name + '.hpp'))
@@ -74,7 +77,7 @@ def test_complete_sweep_reaches_both_generators(tmp_path, dtype):
         _, te_source = legacy._generate_kernel_instance(te_tile, (
             cfg.pipeline, cfg.epilogue, cfg.scheduler, cfg.pad_m, cfg.pad_n, cfg.pad_k, cfg.persistent))
         assert f'using GemmPipeline = ck_tile::{impl}<UniversalGemmProblem>;' in te_source
-        assert 'Preshuffle = true;' in te_source
+        assert f'Preshuffle = {str(packed).lower()};' in te_source
         assert ('TdmEpilogue<EpilogueProblem>' in te_source) == (cfg.epilogue == 'tdm')
 
 
@@ -119,11 +122,14 @@ def test_arch_default_and_explicit_config_selection():
 @pytest.mark.parametrize('pipeline', ['comp_tdm', 'comp_tdm_v2', 'preshuffle_tdm', 'comp_async'])
 def test_legacy_single_instance_cli_keeps_full_pipeline_name(tmp_path, pipeline):
     cfg = next(c for c in configs() if c.pipeline == pipeline)
-    trait = '_'.join([cfg.pipeline, cfg.epilogue, cfg.scheduler, 'True', 'True', 'True', 'False'])
+    trait = '_'.join(map(str, [cfg.pipeline, cfg.epilogue, cfg.scheduler, cfg.pad_m, cfg.pad_n, cfg.pad_k,
+                               cfg.persistent]))
+    tile = (f'{cfg.tile_m}x{cfg.tile_n}x{cfg.tile_k}_{cfg.wave_m}x{cfg.wave_n}x{cfg.wave_k}_'
+            f'{cfg.warp_tile_m}x{cfg.warp_tile_n}x{cfg.warp_tile_k}')
     script = CK_ROOT / 'tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_instance_builder.py'
     subprocess.run([sys.executable, str(script), '--working_path', str(tmp_path), '--datatype', 'fp16',
                     '--layout', 'rcr', '--config_json', str(CONFIG), '--gen_single', '--kernel_name', 'probe',
-                    '--tile_config', '128x128x64_2x2x1_16x16x32', '--trait_combo', trait,
+                    '--tile_config', tile, '--trait_combo', trait,
                     '--gpu_target', 'gfx1250'], check=True, capture_output=True, text=True)
     headers = list(tmp_path.glob('*.hpp'))
     assert len(headers) == 1

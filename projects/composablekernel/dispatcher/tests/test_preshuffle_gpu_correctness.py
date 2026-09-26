@@ -13,9 +13,10 @@ persistent modes, short and hot loops, odd and even K tails, multiple output
 tiles, and changing B values against an fp32 NumPy reference. Returns 77 when
 the GPU or dispatcher build is unavailable.
 
-The preshuffle kernel pre-permutes the B (weight) operand into a packed layout
-before the main loop; that shuffle is done HOST-SIDE inside the ctypes .so
-(ck_tile::shuffle_b_v0, selected by kernel metadata), so the caller still hands
+The packed-B pipelines (preshufflev2, preshuffle_tdm) read the B (weight)
+operand in a packed layout; that shuffle is done HOST-SIDE inside the ctypes .so
+(ck_tile::shuffle_b_v0, selected by the kernel's Preshuffle trait; the gfx1250
+compute pipelines read ordinary B and skip it), so the caller still hands
 the runner logical row-major A (M x K) and logical B (K x N) — identical to the
 plain-GEMM path. The result must therefore match the ordinary C = A @ B.
 

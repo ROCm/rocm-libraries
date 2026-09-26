@@ -4,8 +4,8 @@
 """Unit tests for the gfx1250 pipelines of the gemm_preshuffle Tile Engine op.
 
 preshuffle_tdm, comp_tdm, comp_tdm_v2 and comp_async are emitted on gfx1250
-for rcr only (the TDM ones unpadded, comp_async not for fp8/bf8). gfx942 /
-gfx950 keep only preshufflev2. On gfx1250 no preshuffle pipeline pads N or K.
+for rcr only (the TDM ones unpadded, comp_async fully padded). gfx942 /
+gfx950 keep only preshufflev2, which cannot pad N or K on gfx1250.
 """
 
 import os
@@ -54,14 +54,15 @@ class TestTraitRules(unittest.TestCase):
         self.assertFalse(_trait_ok("preshuffle_tdm", layout="rrr"))
         self.assertFalse(_trait_ok("preshuffle_tdm", pad=True))
 
-    def test_comp_pipelines_gfx1250_rcr_unpadded_only(self):
+    def test_comp_pipelines_gfx1250_rcr_only(self):
         for pipeline in COMP:
-            self.assertTrue(_trait_ok(pipeline), pipeline)
-            self.assertFalse(_trait_ok(pipeline, gpu_target="gfx950"), pipeline)
-            self.assertFalse(_trait_ok(pipeline, layout="rrr"), pipeline)
-            self.assertFalse(_trait_ok(pipeline, pad=True), pipeline)
-            # Only the TDM pipelines also require an unpadded M.
-            self.assertEqual(_trait_ok(pipeline, pad_m=True), pipeline == "comp_async", pipeline)
+            # The TDM pipelines must be unpadded, comp_async padded in M, N and K.
+            pad = pipeline == "comp_async"
+            self.assertTrue(_trait_ok(pipeline, pad=pad), pipeline)
+            self.assertFalse(_trait_ok(pipeline, gpu_target="gfx950", pad=pad), pipeline)
+            self.assertFalse(_trait_ok(pipeline, layout="rrr", pad=pad), pipeline)
+            self.assertFalse(_trait_ok(pipeline, pad=not pad), pipeline)
+            self.assertFalse(_trait_ok(pipeline, pad=pad, pad_m=not pad), pipeline)
 
     def test_preshufflev2_unchanged(self):
         for arch in ("gfx942", "gfx950", "gfx1250"):

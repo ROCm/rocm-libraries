@@ -55,10 +55,15 @@ def _traits(pipeline):
     return ("intrawave" if pipeline.startswith("comp_") else "default"), "cshuffle"
 
 
-def _single_config_json(pipeline, pad=False):
+def _full_pads(pipeline):
+    """comp_async on gfx1250 is emitted only fully padded, the rest unpadded."""
+    return pipeline == "comp_async"
+
+
+def _single_config_json(pipeline, pad=False, warp_tile_k=32):
     scheduler, epilogue = _traits(pipeline)
     return {
-        "tile_config": {k: [v] for k, v in TILE.items()},
+        "tile_config": {k: [v] for k, v in {**TILE, "warp_tile_k": warp_tile_k}.items()},
         "trait_config": {
             "pipeline": [pipeline], "scheduler": [scheduler], "epilogue": [epilogue],
             "pad_m": [pad], "pad_n": [pad], "pad_k": [pad], "persistent": [False],
@@ -66,11 +71,12 @@ def _single_config_json(pipeline, pad=False):
     }
 
 
-def _generate(pipeline, gpu_target, layout="rcr", pad=False, datatype="fp16"):
+def _generate(pipeline, gpu_target, layout="rcr", pad=None, datatype="fp16", warp_tile_k=32):
+    pad = _full_pads(pipeline) if pad is None else pad
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         cfg = root / "cfg.json"
-        cfg.write_text(json.dumps(_single_config_json(pipeline, pad)))
+        cfg.write_text(json.dumps(_single_config_json(pipeline, pad, warp_tile_k)))
         gen = UnifiedGemmCodegen(
             root / "out", datatype=datatype, layout=layout, gpu_target=gpu_target,
             config_file=cfg, variants=[GemmVariant.PRESHUFFLE],
@@ -87,9 +93,7 @@ class TestRejectHelperParity(unittest.TestCase):
         self.assertEqual(cc.PRESHUFFLE_PAD_NK_REJECT_REASON, TE.PRESHUFFLE_PAD_NK_REJECT_REASON)
         self.assertEqual(set(cc.PRESHUFFLE_GFX1250_PIPELINES),
                          set(TE.GEMM_PRESHUFFLE_GFX1250_PIPELINES))
-        self.assertEqual(set(cc.PRESHUFFLE_TDM_PIPELINES),
-                         set(TE.GEMM_PRESHUFFLE_TDM_PIPELINES))
-        self.assertEqual(cc.PRESHUFFLE_ASYNC_REJECT_DTYPES, TE.PRESHUFFLE_ASYNC_REJECT_DTYPES)
+        self.assertEqual(set(cc.PACKED_B_PIPELINES), set(TE.GEMM_PACKED_B_PIPELINES))
 
     def test_helpers_agree_on_full_grid(self):
         grid = itertools.product(
@@ -102,9 +106,10 @@ class TestRejectHelperParity(unittest.TestCase):
             ("", "default", "intrawave"),
             ("", "default", "cshuffle", "tdm"),
             (False, True),
+            (None, 32, 128),
         )
-        for pipeline, arch, layout, pads, waves, dtype, sched, epi, persistent in grid:
-            args = (pipeline, arch, layout, *pads, waves, dtype, sched, epi, persistent)
+        for pipeline, arch, layout, pads, waves, dtype, sched, epi, persistent, wtk in grid:
+            args = (pipeline, arch, layout, *pads, waves, dtype, sched, epi, persistent, wtk)
             self.assertEqual(cc.preshuffle_pipeline_reject_reason(*args),
                              TE.preshuffle_pipeline_reject_reason(*args), args)
 
@@ -114,11 +119,13 @@ class TestRejectRules(unittest.TestCase):
 
     def _ok(self, pipeline, **kw):
         scheduler, epilogue = _traits(pipeline)
+        pad = _full_pads(pipeline)
         kw = {"gpu_target": "gfx1250", "layout": "rcr", "num_waves": 4,
-              "scheduler": scheduler, "epilogue": epilogue, **kw}
+              "scheduler": scheduler, "epilogue": epilogue,
+              "pad_m": pad, "pad_n": pad, "pad_k": pad, **kw}
         return self.reject(pipeline, **kw)
 
-    def test_accepted_on_gfx1250_rcr_unpadded(self):
+    def test_accepted_on_gfx1250_rcr(self):
         for pipeline, dtype in itertools.product(cc.PRESHUFFLE_GFX1250_PIPELINES,
                                                  ("fp16", "bf16")):
             self.assertEqual(self._ok(pipeline, dtype=dtype), "", pipeline)
@@ -144,22 +151,21 @@ class TestRejectRules(unittest.TestCase):
             self.assertIn("persistent", self._ok(pipeline, persistent=True))
 
     def test_tdm_requires_no_padding(self):
-        for pipeline in cc.PRESHUFFLE_TDM_PIPELINES:
+        for pipeline in ("preshuffle_tdm",) + cc.TDM_PIPELINES:
             for pads in ((True, False, False), (False, True, False), (False, False, True)):
                 self.assertEqual(self._ok(pipeline, pad_m=pads[0], pad_n=pads[1], pad_k=pads[2]),
                                  cc.TDM_PAD_REJECT_REASON)
 
     def test_string_pad_flags(self):
-        for pipeline in cc.PRESHUFFLE_TDM_PIPELINES:
+        for pipeline in ("preshuffle_tdm",) + cc.TDM_PIPELINES:
             self.assertEqual(self._ok(pipeline, pad_m="false", pad_n="False", pad_k="false"), "")
             self.assertEqual(self._ok(pipeline, pad_m="true"), cc.TDM_PAD_REJECT_REASON)
 
-    def test_gfx1250_rejects_pad_n_pad_k(self):
-        for pipeline in ("preshufflev2", "comp_async"):
-            self.assertEqual(self._ok(pipeline, pad_m=True), "", pipeline)
-            for pads in ({"pad_n": True}, {"pad_k": True}, {"pad_k": "true"}):
-                self.assertEqual(self._ok(pipeline, **pads),
-                                 cc.PRESHUFFLE_PAD_NK_REJECT_REASON, (pipeline, pads))
+    def test_gfx1250_packed_b_rejects_pad_n_pad_k(self):
+        self.assertEqual(self._ok("preshufflev2", pad_m=True), "")
+        for pads in ({"pad_n": True}, {"pad_k": True}, {"pad_k": "true"}):
+            self.assertEqual(self._ok("preshufflev2", **pads),
+                             cc.PRESHUFFLE_PAD_NK_REJECT_REASON, pads)
         # Off gfx1250 and at trait level without an arch, preshufflev2 pads stay allowed.
         for arch in ("", "gfx942", "gfx950"):
             self.assertEqual(self._ok("preshufflev2", gpu_target=arch, pad_n=True), "", arch)
@@ -167,10 +173,18 @@ class TestRejectRules(unittest.TestCase):
     def test_comp_tdm_v2_requires_four_waves(self):
         self.assertIn("4 waves", self._ok("comp_tdm_v2", num_waves=2))
 
-    def test_comp_async_rejects_8bit(self):
-        for dtype in cc.PRESHUFFLE_ASYNC_REJECT_DTYPES:
-            self.assertIn(dtype, self._ok("comp_async", dtype=dtype))
-            self.assertEqual(self._ok("comp_tdm", dtype=dtype), "")
+    def test_comp_async_requires_full_padding(self):
+        for pads in ({"pad_m": False}, {"pad_n": False}, {"pad_k": "false"}):
+            self.assertEqual(self._ok("comp_async", **pads),
+                             cc.GFX1250_COMP_ASYNC_PAD_REJECT_REASON, pads)
+
+    def test_comp_async_8bit_warp_tile_k(self):
+        for dtype in cc.GFX1250_COMP_ASYNC_8BIT_DTYPES:
+            self.assertEqual(self._ok("comp_async", dtype=dtype, warp_tile_k=64),
+                             cc.GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON)
+            self.assertEqual(self._ok("comp_async", dtype=dtype, warp_tile_k=128), "")
+            self.assertEqual(self._ok("comp_tdm", dtype=dtype, warp_tile_k=64), "")
+        self.assertEqual(self._ok("comp_async", dtype="fp16", warp_tile_k=32), "")
 
 
 class TestCodegen(unittest.TestCase):
@@ -181,19 +195,24 @@ class TestCodegen(unittest.TestCase):
                  ("comp_tdm", "gfx942", "rcr", False),
                  ("comp_async", "gfx1250", "rrr", False),
                  ("comp_tdm_v2", "gfx1250", "rcr", True),
-                 ("comp_async", "gfx1250", "rcr", True),
+                 ("comp_async", "gfx1250", "rcr", False),
                  ("preshufflev2", "gfx1250", "rcr", True)]
         for pipeline, arch, layout, pad in cases:
             with self.subTest(pipeline=pipeline, arch=arch, layout=layout, pad=pad):
                 self.assertEqual(_generate(pipeline, arch, layout, pad), [])
-        for dtype in cc.PRESHUFFLE_ASYNC_REJECT_DTYPES:
+        for dtype in cc.GFX1250_COMP_ASYNC_8BIT_DTYPES:
             with self.subTest(pipeline="comp_async", dtype=dtype):
-                self.assertEqual(_generate("comp_async", "gfx1250", datatype=dtype), [])
+                self.assertEqual(_generate("comp_async", "gfx1250", datatype=dtype,
+                                           warp_tile_k=64), [])
 
     def test_accepted_configs_emit_one_kernel(self):
+        # Only preshufflev2 / preshuffle_tdm read host-packed B.
         for pipeline in cc.PRESHUFFLE_GFX1250_PIPELINES:
             with self.subTest(pipeline=pipeline):
-                self.assertEqual(len(_generate(pipeline, "gfx1250")), 1)
+                kernels = _generate(pipeline, "gfx1250")
+                self.assertEqual(len(kernels), 1)
+                packed = str(pipeline in cc.PACKED_B_PIPELINES).lower()
+                self.assertIn(f"static constexpr bool Preshuffle = {packed};", kernels[0])
 
 
 if __name__ == "__main__":

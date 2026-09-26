@@ -68,8 +68,6 @@ GFX942_FROZEN = {
     # comp_async allocates two LDS buffers unconditionally. It previously had no
     # entry and inherited the 64 KB default, which is twice what it can use.
     "comp_async": 32768,
-    "comp_tdm": 32768,
-    "comp_tdm_v2": 32768,
     "wavelet": 65536,
     "default": 65536,
 }
@@ -85,8 +83,6 @@ HALF_CAPACITY_PIPELINES = (
     "preshufflev2",
     "preshuffle_tdm",
     "comp_async",
-    "comp_tdm",
-    "comp_tdm_v2",
 )
 
 # Every pipeline the validators can encounter must have a deliberate entry.

@@ -329,11 +329,11 @@
         "Mandatory double buffering, no configuration choice:",
         "GemmPipelineAgBgCrCompAsync::GetSmemSize() returns",
         "num_lds_buffers * smem_size with num_lds_buffers = 2.",
-        "The dispatcher emits the same budget for Python and C++."
+        "Emitted to C++ as Pipeline::CompAsync. The gfx1250 TDM pipelines",
+        "(comp_tdm, comp_tdm_v2) share this budget through",
+        "pipeline_lds_budget_aliases."
       ]
     },
-    "comp_tdm": { "basis": "fraction", "value": 0.5 },
-    "comp_tdm_v2": { "basis": "fraction", "value": 0.5 },
     "wavelet": {
       "basis": "fraction",
       "value": 1.0,
@@ -367,6 +367,16 @@
 
     "default": { "basis": "fraction", "value": 1.0 }
   },
+
+  "pipeline_lds_budget_aliases": {
+    "_comment": [
+      "Pipelines that stage LDS exactly like another pipeline and therefore",
+      "share its budget. The gfx1250 TDM pipelines always allocate two LDS",
+      "buffers, as comp_async does."
+    ],
+    "comp_tdm": "comp_async",
+    "comp_tdm_v2": "comp_async"
+  },
   
   "unsupported_trait_combos": {
     "_comment": "Only 'mem' pipeline supports interwave scheduler. All compute pipelines only support intrawave.",
@@ -380,7 +390,13 @@
       ["compv6", "cshuffle", "interwave"],
       ["compv6", "default", "interwave"],
       ["comp_async", "cshuffle", "interwave"],
-      ["comp_async", "default", "interwave"]
+      ["comp_async", "default", "interwave"],
+      ["comp_tdm", "cshuffle", "interwave"],
+      ["comp_tdm", "default", "interwave"],
+      ["comp_tdm", "tdm", "interwave"],
+      ["comp_tdm_v2", "cshuffle", "interwave"],
+      ["comp_tdm_v2", "default", "interwave"],
+      ["comp_tdm_v2", "tdm", "interwave"]
     ]
   },
   

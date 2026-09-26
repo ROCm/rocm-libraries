@@ -750,7 +750,7 @@ This matrix shows all CK Tile operations with per-data-type, per-layout, and per
 
 **Notes:**
 
-- [1] **gemm_preshuffle:** Supports only `rcr` layout. Supports `preshufflev2` with `default`/`cshuffle` epilogues. On gfx1250, the fp16/bf16 bridge also exposes compute TDM V1/V2, preshuffle TDM, and compute async; see the [pipeline configuration](../tile_engine/ops/gemm/gemm_preshuffle/README.md).
+- [1] **gemm_preshuffle:** Supports only `rcr` layout. Supports `preshufflev2` with `default`/`cshuffle` epilogues. On gfx1250, the bridge also exposes preshuffle TDM (packed B) and compute TDM V1/V2 and compute async (ordinary B); see the [pipeline configuration](../tile_engine/ops/gemm/gemm_preshuffle/README.md).
 - [2] **gemm_preshuffle:** `int8` preshuffle support is limited to gfx942 and gfx950 (entries in `preshuffle_warp_tile_combos`).
 - [3] **gemm_universal:** `fp4` (pk_fp4) support is only available on gfx950.
 - [4] **gemm_universal:** `fp32` GEMM is supported by the dispatcher (`fp32_fp32_fp32` warp tile combos exist) but is omitted from matrix columns for consistency with the tile engine matrix format.
