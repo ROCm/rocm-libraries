@@ -242,6 +242,7 @@ class TransposeInstance
     size_t kern_idx   = std::numeric_limits<size_t>::max();
     size_t buf_offset = 0;
     shared<Data_t> buf_handle{};
+    bool skippable = false;
 
 public:
     template <typename TransSolnType>
@@ -252,9 +253,12 @@ public:
         : tensor_sz(trans_sol.GetOutputTensorSize()),
           kern_args(trans_sol.GetKernelArg()),
           kern_idx(k_idx),
-          buf_offset(wt.GetOffset(wspace_index))
+          buf_offset(wt.GetOffset(wspace_index)),
+          skippable(trans_sol.IsSkippable())
     {
     }
+
+    bool IsSkippable() const noexcept { return skippable; }
 
     void AssignBuffer(const Handle& handle, Data_t workSpace)
     {
@@ -332,6 +336,18 @@ public:
     {
         using IntType = std::underlying_type_t<ConvOperandTag>;
         return static_cast<IntType>(GetConvOperandTag());
+    }
+    Data_t GetTensorPtr(const ConvTensors& tensors) const { return pickTensorPtr(tensors); }
+
+    const TensorDescriptor& GetTensorDesc(const ConvTensors& tensors) const
+    {
+        switch(conv_op_tag_)
+        {
+        case ConvOperandTag::Input: return tensors.xDesc;
+        case ConvOperandTag::Weights: return tensors.wDesc;
+        case ConvOperandTag::Output: return tensors.yDesc;
+        }
+        MIOPEN_THROW(miopenStatusInternalError, "Unknown CK convolution operand tag");
     }
 
     void ConvertFrom(const Handle& handle,

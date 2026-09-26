@@ -8,6 +8,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Changed
 * [Conv] Provision selected CK grouped-forward packed-weight scratch for native NHWC and transformed NCHW layouts, rejecting missing or undersized workspace. The internal CK plugin interface is version 6; rebuild the loader and plugin together.
 * [Conv] Exposed a bounded gfx1250 BF16 group-local depthwise CK backward-weights candidate for packed 2D channels-last short-reduction problems; selected BF16 plugin execution requires the usual WRW alpha/beta workspace contract.
+* [Conv] Elided four grouped-CK NCHW staging transposes for packed BF16 2D G1 unit-spatial pointwise invocations when the caller tensors and reserved workspace are disjoint; overlapping or nonqualifying calls retain the original staging path and workspace size.
 
 ## MIOpen 3.6.1 for ROCm 10.1.0
 

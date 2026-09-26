@@ -49,6 +49,55 @@ void DebugPrintCKArgPtrs(
 #undef DEBUG_PRINT_VEC
 
 #endif // NDEBUG
+// Use actual invocation descriptors and byte ranges, not equality of NCHW and NHWC
+// descriptors: singleton spatial dimensions only make their reachable offsets equal.
+inline bool MatchesPackedOperand(const TensorDescriptor& actual, const TensorDescriptor& expected)
+{
+    return actual.IsPacked() && actual.GetType() == expected.GetType() &&
+           actual.GetLayout_str() == expected.GetLayout_str() &&
+           actual.GetLengths() == expected.GetLengths() &&
+           actual.GetStrides() == expected.GetStrides();
+}
+
+inline bool
+DisjointByteRanges(ConstData_t left, size_t left_bytes, ConstData_t right, size_t right_bytes)
+{
+    const auto a   = reinterpret_cast<std::uintptr_t>(left);
+    const auto b   = reinterpret_cast<std::uintptr_t>(right);
+    const auto max = std::numeric_limits<std::uintptr_t>::max();
+    return a != 0 && b != 0 && left_bytes != 0 && right_bytes != 0 && left_bytes <= max - a &&
+           right_bytes <= max - b && (a + left_bytes <= b || b + right_bytes <= a);
+}
+
+inline bool CanBorrowNCHWOperands(const ConvTensors& tensors,
+                                  const TensorDescriptor& x_desc,
+                                  const TensorDescriptor& w_desc,
+                                  const TensorDescriptor& y_desc,
+                                  Data_t workspace,
+                                  size_t workspace_bytes)
+{
+    if(!MatchesPackedOperand(tensors.xDesc, x_desc) ||
+       !MatchesPackedOperand(tensors.wDesc, w_desc) || !MatchesPackedOperand(tensors.yDesc, y_desc))
+        return false;
+
+    const auto x_bytes                 = GetPackedSize(x_desc);
+    const auto w_bytes                 = GetPackedSize(w_desc);
+    const auto y_bytes                 = GetPackedSize(y_desc);
+    constexpr std::uintptr_t alignment = 16;
+    if(reinterpret_cast<std::uintptr_t>(tensors.x) % alignment != 0 ||
+       reinterpret_cast<std::uintptr_t>(tensors.w) % alignment != 0 ||
+       reinterpret_cast<std::uintptr_t>(tensors.y) % alignment != 0 ||
+       reinterpret_cast<std::uintptr_t>(workspace) % alignment != 0)
+        return false;
+
+    return DisjointByteRanges(tensors.x, x_bytes, tensors.w, w_bytes) &&
+           DisjointByteRanges(tensors.x, x_bytes, tensors.y, y_bytes) &&
+           DisjointByteRanges(tensors.w, w_bytes, tensors.y, y_bytes) &&
+           DisjointByteRanges(tensors.x, x_bytes, workspace, workspace_bytes) &&
+           DisjointByteRanges(tensors.w, w_bytes, workspace, workspace_bytes) &&
+           DisjointByteRanges(tensors.y, y_bytes, workspace, workspace_bytes);
+}
+
 } // namespace internal
 
 namespace conv {
@@ -757,9 +806,14 @@ std::unique_ptr<ck::tensor_operation::device::BaseArgument>
 MakeNCHWCKArgPtr(const CKArgsType& ck_args,
                  const std::shared_ptr<DeviceOpType>& sh_conv_ptr,
                  const std::array<internal::TransposeInstanceTagged*, 3>& tr_ptrs,
+                 const std::array<Data_t, 3>* borrowed_ptrs,
                  const CastType& data_ctx,
                  const std::optional<int>& split_k)
 {
+    const auto buffer = [&](size_t index) {
+        return borrowed_ptrs ? (*borrowed_ptrs)[index] : tr_ptrs[index]->GetBufferPtr();
+    };
+
     std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr;
 
     if constexpr(std::is_same_v<CastType, miopen::fusion::FusionInvokeParams>)
@@ -797,10 +851,10 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
 
         argument_ptr = ck_args.MakeArgPtr(
             sh_conv_ptr,
-            tr_ptrs[0]->GetBufferPtr(),
-            tr_ptrs[1]->GetBufferPtr(),
+            buffer(0),
+            buffer(1),
             bias_buf,
-            tr_ptrs[2]->GetBufferPtr(),
+            buffer(2),
             conv_param.alpha,
             conv_param.beta,
             GetOutElementOp<typename CKArgsType::OutputDataType,
@@ -813,9 +867,9 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
             if(split_k.has_value())
             {
                 argument_ptr = ck_args.MakeArgPtr(sh_conv_ptr,
-                                                  tr_ptrs[0]->GetBufferPtr(),
-                                                  tr_ptrs[1]->GetBufferPtr(),
-                                                  tr_ptrs[2]->GetBufferPtr(),
+                                                  buffer(0),
+                                                  buffer(1),
+                                                  buffer(2),
                                                   data_ctx.alpha.GetAsFloat(),
                                                   data_ctx.beta.GetAsFloat(),
                                                   split_k.value());
@@ -828,9 +882,9 @@ MakeNCHWCKArgPtr(const CKArgsType& ck_args,
         else
         {
             argument_ptr = ck_args.MakeArgPtr(sh_conv_ptr,
-                                              tr_ptrs[0]->GetBufferPtr(),
-                                              tr_ptrs[1]->GetBufferPtr(),
-                                              tr_ptrs[2]->GetBufferPtr(),
+                                              buffer(0),
+                                              buffer(1),
+                                              buffer(2),
                                               data_ctx.alpha.GetAsFloat(),
                                               data_ctx.beta.GetAsFloat());
         }
@@ -1005,6 +1059,23 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         internal::MakeTaggedTransposeInstances<CKArgsType>(
             result, ctx, problem, ck_args, input1_op, input2_op, output_op, _ck_buff_des);
 
+    const bool borrowable_shape =
+        problem.Is2d() && problem.IsLayoutDefault() &&
+        problem.GetConv().mode == miopenConvolution &&
+        problem.GetConv().trans_output_pads.size() == 2 &&
+        problem.GetConv().trans_output_pads[0] == 0 &&
+        problem.GetConv().trans_output_pads[1] == 0 && problem.IsBfp16() &&
+        !problem.HasNonPackedTensors() && problem.GetGroupCount() == 1 &&
+        problem.GetInHeight() == 1 && problem.GetInWidth() == 1 && problem.GetOutHeight() == 1 &&
+        problem.GetOutWidth() == 1 && problem.GetWeightsHeight() == 1 &&
+        problem.GetWeightsWidth() == 1 && problem.GetKernelStrideH() == 1 &&
+        problem.GetKernelStrideW() == 1 && problem.GetDilationH() == 1 &&
+        problem.GetDilationW() == 1 && problem.GetPadH() == 0 && problem.GetPadW() == 0 &&
+        problem.GetAlpha().GetAsFloat() == 1.0f && problem.GetBeta().GetAsFloat() == 0.0f &&
+        problem.GetAlphaBetaCase() == DEFAULT && _input1_tr_inst.IsSkippable() &&
+        _input2_tr_inst.IsSkippable() && _output_tr_inst.IsSkippable() &&
+        _output_init_tr_inst.IsSkippable();
+
     result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
@@ -1013,7 +1084,13 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               input2_tr_inst_      = std::move(_input2_tr_inst),
                               output_tr_inst_      = std::move(_output_tr_inst),
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
-                              ck_buff_des_         = _ck_buff_des,
+                              borrowable_shape_    = borrowable_shape,
+                              x_desc_ =
+                                  problem.IsDirectionForward() ? problem.GetIn() : problem.GetOut(),
+                              w_desc_ = problem.GetWeights(),
+                              y_desc_ =
+                                  problem.IsDirectionForward() ? problem.GetOut() : problem.GetIn(),
+                              ck_buff_des_ = _ck_buff_des,
                               workspace_size_ =
                                   result.workspace_sz](const std::vector<Kernel>& kernels) mutable {
         return [kernel_id2 = std::move(kernel_id_),
@@ -1025,6 +1102,10 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 input2_tr_inst2      = std::move(input2_tr_inst_),
                 output_tr_inst2      = std::move(output_tr_inst_),
                 output_init_tr_inst2 = std::move(output_init_tr_inst_),
+                borrowable_shape2    = borrowable_shape_,
+                x_desc2              = std::move(x_desc_),
+                w_desc2              = std::move(w_desc_),
+                y_desc2              = std::move(y_desc_),
                 ck_buff_des2         = ck_buff_des_,
                 workspace_size2      = workspace_size_](
                    const Handle& handle, const AnyInvokeParams& primitive_parameters) mutable {
@@ -1042,11 +1123,6 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                     "Insufficient or misaligned forward layout-transform and CK workspace");
             }
 
-            input1_tr_inst2.AssignBuffer(handle, workspace_ptr);
-            input2_tr_inst2.AssignBuffer(handle, workspace_ptr);
-            output_tr_inst2.AssignBuffer(handle, workspace_ptr);
-            output_init_tr_inst2.AssignBuffer(handle, workspace_ptr);
-
             // if FusionInvokeParams extract tensors from the params
             // conversion operator applied here to convert to ConvTensors
             auto conv_tensors = GetTensors(data_ctx);
@@ -1062,16 +1138,43 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
 
             float elapsed = 0.0f;
 
-            // ConvertFrom automatically keeps kernel time and accumulates
-            input1_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-            input2_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-            output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-            elapsed = handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
+            bool borrow = false;
+            if constexpr(std::is_same_v<CastType, miopen::conv::DataInvokeParams> ||
+                         std::is_same_v<CastType, miopen::conv::WrWInvokeParams>)
+            {
+                borrow =
+                    borrowable_shape2 && data_ctx.alpha.GetAsFloat() == 1.0f &&
+                    data_ctx.beta.GetAsFloat() == 0.0f &&
+                    data_ctx.workSpaceSize >= workspace_size2 &&
+                    internal::CanBorrowNCHWOperands(
+                        conv_tensors, x_desc2, w_desc2, y_desc2, workspace_ptr, workspace_size2);
+            }
 
+            if(!borrow)
+            {
+                input1_tr_inst2.AssignBuffer(handle, workspace_ptr);
+                input2_tr_inst2.AssignBuffer(handle, workspace_ptr);
+                output_tr_inst2.AssignBuffer(handle, workspace_ptr);
+                output_init_tr_inst2.AssignBuffer(handle, workspace_ptr);
+            }
+
+            if(!borrow)
+            {
+                // ConvertFrom automatically keeps kernel time and accumulates.
+                input1_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+                input2_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+                output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+            }
+            elapsed = handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
             if constexpr(ZeroOutputs)
             {
-                /// Note: Need to clear buffer memory for output since all values may not be set.
-                output_tr_inst2.ZeroOutBuffer(handle);
+                // Preserve the kernel's incomplete-output initialization in either path.
+                if(borrow)
+                    ZeroOutTensor(handle,
+                                  output_tr_inst2.GetTensorDesc(conv_tensors),
+                                  output_tr_inst2.GetTensorPtr(conv_tensors));
+                else
+                    output_tr_inst2.ZeroOutBuffer(handle);
                 if(handle.IsProfilingEnabled())
                     elapsed += handle.GetKernelTime();
             }
@@ -1084,11 +1187,21 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 return left->GetConvOperandTagAsInt() < right->GetConvOperandTagAsInt();
             });
 
+            std::array<Data_t, 3> borrowed_ptrs{};
+            if(borrow)
+                for(size_t i = 0; i < tr_ptrs.size(); ++i)
+                    borrowed_ptrs[i] = tr_ptrs[i]->GetTensorPtr(conv_tensors);
+
             std::unique_ptr<ck::tensor_operation::device::BaseArgument> argument_ptr =
                 MakeNCHWCKArgPtr<IsSplitKNeeded<DeviceOpType>(),
                                  std::decay_t<decltype(*sh_conv_ptr2)>,
                                  CKArgsType,
-                                 CastType>(ck_args2, sh_conv_ptr2, tr_ptrs, data_ctx, split_k2);
+                                 CastType>(ck_args2,
+                                           sh_conv_ptr2,
+                                           tr_ptrs,
+                                           borrow ? &borrowed_ptrs : nullptr,
+                                           data_ctx,
+                                           split_k2);
 
             shared<Data_t> buf_handle{};
             if(ck_buff_des2.has_value() && ck_buff_des2->ck_size)
@@ -1126,11 +1239,11 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
             }
 
             // ConvertTo automatically keeps kernel time and accumulates
-            output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
+            if(!borrow)
+                output_tr_inst2.ConvertTo(handle, kernels, conv_tensors);
         };
     };
 #else
-    (void)ctx;
     (void)problem;
     (void)kernel_id;
     (void)input1_op;
