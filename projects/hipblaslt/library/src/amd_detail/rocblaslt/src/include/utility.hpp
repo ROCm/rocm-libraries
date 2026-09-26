@@ -201,6 +201,46 @@ void log_info(const char* func, H head, Ts&&... xs)
     log_base(rocblaslt_layer_mode_log_info, func, head, std::forward<Ts>(xs)...);
 }
 
+/**
+ * A tuning notice that stays visible without a log level.
+ *
+ * With the info bit set it goes through log_info like any other diagnostic, so
+ * a level-4 run never prints it twice. Otherwise it is written bare to the
+ * stream logging already opened, so levels 1 to 3 still honour
+ * HIPBLASLT_LOG_FILE, or to stderr when logging is off. It never opens the log
+ * file itself, which would create and truncate it for a process that asked for
+ * tuning but not for logging.
+ *
+ * Callers check the tuning mode: reading it here would make this header, which
+ * most of the library includes, depend on Tensile.
+ *
+ * Sink failures are swallowed. open_log_stream arms the log file to throw, and
+ * these notices are written from destructors, where an escaping exception
+ * terminates the process, and from inside hipBLASLt calls, where it would turn
+ * a logging problem into a failed call.
+ */
+inline void log_tuning_lifecycle(const char* func, const std::string& body)
+{
+    try
+    {
+        const std::string full = "tuning-cache: " + body;
+
+        // Outside the lock: log_base takes log_mutex itself.
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            log_info(func, full);
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(log_mutex);
+        std::ostream*               os = get_logger_os();
+        *(os ? os : &std::cerr) << full << std::endl;
+    }
+    catch(...)
+    {
+    }
+}
+
 // if trace logging is turned on with
 // (handle->layer_mode & rocblaslt_layer_mode_log_api) == true
 // then

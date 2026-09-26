@@ -70,8 +70,8 @@ To find and use the best GEMM kernel for a problem, follow these steps:
       ./hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method index --solution_index 56073
 
       Winner:
-      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,soulution_index
-      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,66613.8,363.509,16.1189,56537
+      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name
+      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,66613.8,363.509,16.1189,56537,<kernel_name>
 
 
 #. Set the environment variable ``HIPBLASLT_TUNING_OVERRIDE_FILE=<file_name>`` to load the tuning file and override
@@ -90,6 +90,236 @@ To find and use the best GEMM kernel for a problem, follow these steps:
 
       ./hipblaslt-bench --api_method c -m 1024 -n 512 -k 1024 --lda 1024 --ldb 1024 --ldc 1024 --ldd 1024  --stride_a 0 --stride_b 0 --stride_c 0 --stride_d 0  --alpha 1.000000 --beta 1.000000 --transA N --transB N --batch_count 1  --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --scale_type f32_r --bias_type f32_r   --compute_type f32_r --algo_method heuristic --requested_solution 1 --print_kernel_info
 
-      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,soulution_index
+      transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,hipblaslt-Gflops,hipblaslt-GB/s,us,solution_index,kernel_name
       [0]:
-      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537
+      N,N,0,1,1024,512,1024,1,1024,1048576,1,1024,524288,1024,524288,1024,524288,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f32_r,512,37575.2,205.047,28.5758,56537,<kernel_name>
+
+How tuned entries are validated
+===============================
+
+A tuning file records a ``kernel_name`` next to each ``solution_index``. When the file is replayed,
+the index is treated as a lookup hint: hipBLASLt resolves it in the current library and uses it only
+if it still names the same kernel. If it does not, that entry is rejected and the problem falls back
+to normal heuristic selection.
+
+Validation is per entry, so upgrading hipBLASLt thins a tuning file rather than discarding it, and
+only the shapes that failed need re-tuning. A row that carries a ``solution_name`` instead is
+validated the same way. Files written by an older hipBLASLt carry no name at all, and those are used
+only when the file's ``Git Version`` line matches the running build. A build made outside a git
+checkout has no version to match, so it uses none of them.
+
+``kernel_name`` names the compiled kernel, not the whole solution. The index still selects the
+solution, including its GSU, WGM and StaggerU defaults, and several solutions can share one compiled
+kernel, which is why the name is paired with the index rather than used on its own. What validation
+guarantees is that the index resolves to the same compiled kernel as when the row was written. It
+does not detect a rebuild that changes only that solution's defaults, whose row is used with the new
+defaults, and it cannot find a kernel that moved to a different index: that row is rejected and the
+shape falls back to heuristic selection.
+
+Runtime tuning
+==============
+
+Instead of tuning offline with ``hipblaslt-bench``, hipBLASLt can benchmark candidate kernels itself
+the first time an application runs a GEMM shape and remember the winner. Runtime tuning is off until
+you ask for it, with two environment variables:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_MODE=<off|cache|tune>
+   export HIPBLASLT_TUNING_CACHE_PATH=<file_name>
+
+``tune`` benchmarks supported candidates for each shape it has not seen before, at that shape's first
+matmul, and appends the winner to the cache file. ``cache`` only replays what the file already
+contains, validating each entry as described above. ``off`` is the default and changes nothing.
+Either mode can also read a file written by ``hipblaslt-bench``.
+
+Which kernel a matmul launches depends on whether it passes an algorithm. A call to
+``hipblasLtMatmul`` with an explicit ``algo`` always launches that algorithm: the cache serves such a
+caller through ``hipblasLtMatmulAlgoGetHeuristic``, which returns the cached winner as its first
+result. A call with ``algo=nullptr`` leaves the choice to the library and launches the cached entry
+when there is a usable one. In ``tune`` mode the call that benchmarks a shape records the winner
+either way, but only a call with ``algo=nullptr`` launches it straight away. A caller that queried the
+heuristic before the shape was tuned, and reuses that algorithm, keeps launching it until it queries
+the heuristic again.
+
+Rows written by tune mode carry a schema version and the complete problem key, and every column of
+such a row is required: a row with a missing or malformed value, including one a crash cut short, is
+ignored. Strides a problem does not use, such as the batch strides of a single batch or the E strides
+of an epilogue without an E tensor, are recorded as zero, and so is a scalar or vector scaling format
+when neither ``A`` nor ``B`` is scaled, so a problem matches its own entry whether it arrives through
+the C API or the C++ extension. Rows without a schema version, written by ``hipblaslt-bench`` or by
+hand, keep the historical matching: they distinguish transpose, shape and the principal datatypes,
+but not leading dimensions, batch strides, epilogue details or device identity. Do not put problems
+that differ only in one of those omitted fields in such a file.
+
+``HIPBLASLT_TUNING_CACHE_PATH`` and ``HIPBLASLT_TUNING_OVERRIDE_FILE`` are mutually exclusive. With a
+tuning mode set, only the cache is consulted and the override file is ignored.
+
+Tuning is serialised within a process. A thread that meets an untuned shape while another thread is
+tuning waits for it, so every shape ``tune`` mode meets is tuned, whatever the thread timing. Work
+that other threads or processes run on the same GPU during a search still shares the device with it
+and can shift the timings, so tune in a run whose GPU is otherwise quiet.
+
+A process running in a secure execution context (set-user-ID, set-group-ID, or another
+credential-changing exec such as file capabilities) ignores every ``HIPBLASLT_TUNING_*`` variable,
+so tuning stays off in it.
+
+Only one process at a time may write a given cache file. Nothing coordinates separate processes, so
+the ranks of a multi-process job such as MPI would each benchmark the same shapes and append to the
+same file unsynchronised. Tune once in a single-rank warm-up run, then start the job with
+``HIPBLASLT_TUNING_MODE=cache``, which only reads:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_CACHE_PATH=tuning.txt
+   HIPBLASLT_TUNING_MODE=tune ./your_application          # one rank, once
+   mpirun -n 8 env HIPBLASLT_TUNING_MODE=cache ./your_application
+
+A typical run writes the cache once and reuses it afterwards:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_CACHE_PATH=tuning.txt
+   HIPBLASLT_TUNING_MODE=tune ./your_application    # benchmark and record
+   HIPBLASLT_TUNING_MODE=cache ./your_application   # replay only
+
+The fastest measured candidate wins outright, with no minimum improvement over the default choice,
+matching how ``hipblaslt-bench`` selects. The benchmarking effort can be adjusted:
+
+.. code-block:: bash
+
+   export HIPBLASLT_TUNING_ALL_KERNELS=<0|1>            (Default value is: 1)
+   export HIPBLASLT_TUNING_MAX_CANDIDATES=<value>       (Default value is: 128)
+   export HIPBLASLT_TUNING_COLD_ITERS=<value>           (Default value is: 1000)
+   export HIPBLASLT_TUNING_HOT_ITERS=<value>            (Default value is: 1000)
+   export HIPBLASLT_TUNING_ROTATING_MB=<value>          (Default value is: 512)
+   export HIPBLASLT_TUNING_FLUSH_ICACHE=<0|1>           (Default value is: 1)
+   export HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE=<value>  (Default value is: 300000, five minutes)
+
+Each candidate is measured the way ``hipblaslt-bench`` measures one: ``HIPBLASLT_TUNING_COLD_ITERS``
+untimed launches, then ``HIPBLASLT_TUNING_HOT_ITERS`` launches timed as a single span and reported as
+the per-launch mean. Every candidate gets the full measurement, so there is no cheap ranking round
+that could discard the real winner before it has been timed properly.
+
+Candidates are measured against rotating copies of the tensors, so that successive launches do not
+read and write the same cache lines. Without this every candidate is timed with its inputs already
+resident, which is not how a production GEMM runs and which measurably changes which kernel appears
+fastest. ``HIPBLASLT_TUNING_ROTATING_MB`` is the memory the rotation may use, and 0 disables it.
+
+Rotation is declined for problems whose buffer sizes cannot be established from the problem
+description alone, such as broadcast inputs with a zero batch stride and swizzled ``A`` or ``B``.
+Those shapes are still tuned, just with their inputs cache-resident. Very small problems rotate over
+fewer blocks than the memory budget would allow, since each block costs setup work per candidate.
+
+The instruction cache is invalidated between timed launches, the same way and with the same kernel
+the bench client uses, so a candidate is not timed with its own code already resident. It costs
+roughly 5% of tuning time and measurably improves agreement with ``hipblaslt-bench``.
+``HIPBLASLT_TUNING_FLUSH_ICACHE=0`` turns it off. The per-flush cost is measured once per device and
+subtracted, so the recorded time stays the GEMM time.
+
+Where a shape's leading kernels are separated by more than measurement noise, this is enough to make
+tuning land on the same kernel run after run. Where they are within a couple of percent of each
+other, the choice stays unstable and tuning may pick a kernel marginally slower than the heuristic
+default; that is a property of the measurement, not of the cache, and ``hipblaslt-bench`` behaves the
+same way on those shapes.
+
+By default every kernel that can run the problem is measured, not just the ones the selection
+heuristic ranks highest, because the fastest kernel is not always inside that ranked prefix. Setting
+``HIPBLASLT_TUNING_ALL_KERNELS`` to 0 restricts the search to the top ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+ranked kernels instead, which is faster but can miss the best one.
+
+Tuning one shape this thoroughly takes time. An exhaustive search over several hundred candidates
+takes minutes, and it is paid once per shape in the first process that runs with ``tune``.
+``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` puts a wall-clock ceiling on one shape, covering enumeration
+and setup as well as the timed measurements. It defaults to five minutes, so that a first matmul
+cannot block a live application indefinitely, and 0 removes the ceiling entirely.
+
+A search the ceiling cuts short records nothing: candidates are not measured in order of expected
+performance, so the best of the ones it reached is usually not the shape's best kernel. The shape is
+not searched again in the same process, and runs on default selection. To tune it, raise or clear
+``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE`` and run it in tune mode again; as a rough guide a
+2048x1024x2048 FP16 shape takes about 146 seconds on MI300X, and the cost grows with the problem.
+Within a single process a shape is benchmarked at most once in any case, including when an attempt
+fails after ``tuning-start``.
+
+The ceiling is checked between candidates, since a batch of launches already submitted cannot be
+recalled. One candidate may therefore overrun it by as much as its own measurement takes.
+
+The time ``hipblaslt-bench`` prints for a kernel is its own benchmark, separate from the tuner's
+measurement, so the two can disagree between kernels that are within noise of each other. The tuner
+caps how many rotation blocks it uses, leaves the scale vectors and a forward bias unrotated, and
+always times with HIP events; ``hipblaslt-bench`` times with HIP events only with
+``--use_gpu_timer`` and otherwise uses a synchronized CPU timer. Treat ``hipblaslt-bench``'s benchmark
+as the reference when a shape matters enough to check by hand.
+
+Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
+the purpose, and only the winner runs on the real output.
+
+Reading the tuning output
+-------------------------
+
+Because the first call on a new shape can block for minutes, ``cache`` and ``tune`` mode report what
+they are doing without needing any logging variable. A first ``tune`` run looks like this:
+
+.. code-block:: none
+
+   tuning-cache: mode=tune path=tuning.txt load=not-found loaded=0
+   tuning-cache: tuning-start m=2048 n=1024 k=2048 batch=1 trans=TN types=f16_r/f16_r; this call will block until it finishes
+   tuning-cache: tuning-done winner=247670 elapsed=145.7s persisted=yes
+   tuning-cache: summary shapes=1 matched=1 fellback=0 tuned=1 invalidated=0
+
+Replaying that cache prints only the first and last lines, since a cache hit says nothing per call:
+
+.. code-block:: none
+
+   tuning-cache: mode=cache path=tuning.txt load=ok loaded=1
+   tuning-cache: summary shapes=1 matched=1 fellback=0 tuned=0 invalidated=0
+
+``load`` is ``ok``, ``not-found``, ``read-error`` or ``no-path``, the last meaning
+``HIPBLASLT_TUNING_CACHE_PATH`` is unset and tuning does nothing.
+
+The summary is how you confirm a deployed cache is actually being used. ``shapes`` counts distinct
+problems the process looked up, not calls, so it stays comparable with ``loaded``. ``matched`` is how
+many of them a cache entry served and ``fellback`` how many fell through to default selection; those
+are the shapes still worth tuning. ``tuned`` counts distinct shapes this run benchmarked, whether or
+not their winners reached the file; ``persisted`` on each ``tuning-done`` line is what tells you that.
+``invalidated`` counts entries rejected because a rebuild moved the kernel they named. The summary is
+written as the process exits normally, so a run that is killed or aborts does not produce one, and it
+is left out entirely when a process loaded no entries and looked nothing up.
+
+The output is bounded. A shape that cannot be tuned reports its reason once rather than once per
+call, and shapes are announced at most once each. A shape declined for one call can still be tuned
+on a later one, and that tune is reported:
+
+.. code-block:: none
+
+   tuning-cache: tuning-skipped in-place C==D with nonzero beta cannot be measured without mutating its input; using default selection
+
+``tuning-skipped`` means the tuner understood the problem and declined it, which is expected for
+some shapes forever. ``tuning-fallback`` means an attempt failed and is worth investigating; an
+attempt that failed after ``tuning-start`` is not retried in the same process.
+
+Setting ``HIPBLASLT_LOG_LEVEL=4`` keeps all of the above, timestamps it like the rest of the library
+log, and adds per-problem cache hit, miss and invalidation lines, the scratch and candidate setup,
+a progress heartbeat every ten seconds during a long search, and the winner's measured time against
+the baseline. At that level nothing is collapsed, so every attempt is reported. See
+:ref:`environment-variables` for where each of these is written.
+
+Limitations
+-----------
+
+* Tuning happens on the C API execution path. Callers of the C++ extension API can replay a cache but
+  do not tune.
+* Grouped GEMM is not served from the cache, and neither is a pointer-array batch called with
+  ``algo=nullptr``. Grouped GEMM, pointer-array batch, RocRoller and HIP graph capture are excluded
+  from tuning.
+* An uncached in-place problem where ``C`` and ``D`` alias and ``beta`` is nonzero runs with normal
+  selection instead of being tuned. Repeated benchmark launches would otherwise overwrite and reuse C
+  rather than measuring the caller's input.
+* One process should write a given cache file at a time. Multi-process jobs should tune in a
+  single-rank warm-up and then run in ``cache`` mode; see above.
+* ``alpha``, ``beta`` and whether ``C`` and ``D`` alias are not part of the lookup key, so an entry
+  tuned at one value of ``beta`` can serve a caller using another.
+* An explicit ``algo`` passed to ``hipblasLtMatmul`` always launches as given. A caller that reuses an
+  algorithm it queried before its shape was tuned does not pick up the winner until it queries the
+  heuristic again.
