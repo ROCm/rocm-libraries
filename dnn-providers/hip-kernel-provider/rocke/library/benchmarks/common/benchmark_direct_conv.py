@@ -1134,14 +1134,16 @@ def _run_wgrad_sweep(
 # MIOpen -F flag → direction string
 # ---------------------------------------------------------------------------
 
-# MIOpen -F bitmask: 1=fwd, 4=wgrad.
-# When multiple bits are set the benchmark picks the highest-priority supported
-# direction (fwd > wgrad) so a single command maps to one sweep.
+# MIOpen -F bitmask: 1=fwd, 2=dgrad, 4=wgrad.
+# When multiple bits are set the benchmark picks the highest-priority direction
+# (wgrad > dgrad > fwd) so a single command maps to one sweep.
 _FORW_TO_DIR = {
     1: "fwd",
+    2: "dgrad",
+    3: "dgrad",  # fwd+dgrad → dgrad
     4: "wgrad",
     5: "wgrad",  # fwd+wgrad → wgrad
-    6: "wgrad",  # bits 2+4 → wgrad
+    6: "wgrad",  # dgrad+wgrad → wgrad
     7: "wgrad",  # all → wgrad
 }
 
