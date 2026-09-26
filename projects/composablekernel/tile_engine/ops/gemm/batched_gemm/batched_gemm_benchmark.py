@@ -10,6 +10,9 @@ import time
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from trait_parse import split_trait  # noqa: E402
+
 
 class GemmBenchmark:
     def __init__(self, build_dir: str, verbose: bool = False):
@@ -50,15 +53,16 @@ class GemmBenchmark:
 
         # Parse the kernel name pattern:
         # benchmark_batched_gemm_fp16_rcr_compv4_cshuffle_intrawave_False_False_False_256x256x32_2x2x1_32x32x16
+        # Pipeline names may contain "_" (comp_async, comp_tdm_v2), so the
+        # trait part is split with the shared trait parser.
         parts = name.split("_")
 
         if len(parts) >= 8 and parts[0] == "benchmark" and parts[1] == "batched" and parts[2] == "gemm":
-            # Extract datatype/layout/pipeline/epilogue/scheduler
             info["data_type"] = parts[3]
             info["layout"] = parts[4]
-            info["pipeline"] = parts[5]
-            info["epilogue"] = parts[6]
-            info["scheduler"] = parts[7]
+            info["pipeline"], info["epilogue"], info["scheduler"] = split_trait(
+                "_".join(parts[5:])
+            )[:3]
 
         # Extract detailed configuration from the end of the name
         config_info = self.parse_detailed_config(name)

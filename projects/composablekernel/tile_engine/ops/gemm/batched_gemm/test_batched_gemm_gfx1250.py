@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _GEMM_DIR = os.path.dirname(_HERE)
@@ -24,6 +25,7 @@ from batched_gemm_instance_builder import (  # noqa: E402
     check_batched_gemm_pipelines,
     split_trait,
 )
+from batched_gemm_benchmark import GemmBenchmark  # noqa: E402
 
 _CONFIG_DIR = os.path.join(_HERE, "configs")
 _FULL_CONFIG = os.path.join(_CONFIG_DIR, "default_config_gfx1250.json")
@@ -84,6 +86,28 @@ class TestTraitParsing(unittest.TestCase):
             split_trait("comp_async_cshuffle_intrawave_false_false_false")[1],
             "cshuffle",
         )
+
+
+    def test_benchmark_driver_labels(self):
+        """The benchmark driver must not truncate multi-token pipeline names."""
+        driver = GemmBenchmark(".")
+        for pipeline, epilogue in (
+            ("compv4", "cshuffle"),
+            ("comp_async", "cshuffle"),
+            ("comp_tdm", "tdm"),
+            ("comp_tdm_v2", "tdm"),
+        ):
+            name = (
+                f"benchmark_batched_gemm_fp16_rcr_{pipeline}_{epilogue}_intrawave"
+                "_False_False_False_256x256x64_2x2x1_16x16x32"
+            )
+            info = driver.extract_kernel_info(Path(name))
+            self.assertEqual(
+                (info["pipeline"], info["epilogue"], info["scheduler"]),
+                (pipeline, epilogue, "intrawave"),
+                name,
+            )
+            self.assertIn(pipeline, info["config_id"])
 
 
 class TestPreshuffleRejection(unittest.TestCase):
