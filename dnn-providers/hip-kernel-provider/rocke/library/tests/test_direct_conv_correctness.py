@@ -984,5 +984,258 @@ class TestDirectConvValidation(unittest.TestCase):
             spec.validate()
 
 
+# ---------------------------------------------------------------------------
+# Wgrad shapes
+# ---------------------------------------------------------------------------
+
+_WGRAD_SHAPES: List[_Shape] = [
+    # Grouped, symmetric channels -- the baseline case.
+    _Shape("wg_16c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=16),
+    # groups=1 with cpg != kpg: the shape the direct wgrad dispatch actually
+    # sees, and the only entry spanning several k AND c tiles at once.
+    _Shape("wg_g1_c48k192", N=2, H=8, W=8, groups=1, cpg=48, kpg=192),
+    # W is not a multiple of the MFMA spatial block, so the last wo tile is
+    # partially masked and the S strip runs off the right edge.
+    _Shape("wg_oddW37", N=2, H=8, W=37, groups=1, cpg=32, kpg=32),
+    # 1x1: no halo at all -- STRIP_COLS collapses onto the MFMA block.
+    _Shape("wg_1x1", N=2, H=8, W=8, groups=1, cpg=16, kpg=32, KH=1, KW=1, PAD=0),
+    # 5x5: a halo wider than one tap on each side.
+    _Shape("wg_5x5", N=2, H=8, W=8, groups=1, cpg=16, kpg=32, KH=5, KW=5, PAD=2),
+]
+
+# (waves_k, waves_c, waves_q, mfma_k, ho_per_block).
+#
+# The wave spread is what the single-wave default never reaches: waves_k > 1
+# splits the S-strip loader across waves (so one wave reads LDS that another
+# wave wrote), waves_c > 1 gives each c-wave its own strip partition while the
+# dY tile stays shared, and mfma_k=16 takes the narrow atom with one transpose
+# read per fragment instead of two.
+_WGRAD_CONFIGS = [
+    (1, 1, 1, 32, 4),  # default
+    (2, 1, 1, 32, 4),  # K split -> STRIP_GROUPS=2, cross-wave strip
+    (1, 2, 1, 32, 4),  # C split -> per-c strip partitions, shared dY
+    (2, 2, 1, 32, 3),  # both, with ho_per_block not dividing H
+    (1, 1, 2, 32, 4),  # spatial split
+    (1, 1, 1, 16, 2),  # narrow MFMA atom
+]
+
+
+def _run_wgrad_one(
+    arch: str,
+    shape: _Shape,
+    dtype: str = "fp16",
+    cfg: Tuple[int, int, int, int, int] = (1, 1, 1, 32, 4),
+) -> Tuple[bool, str]:
+    """Build, compile, launch, and verify the direct wgrad kernel.
+
+    ``cfg`` is (waves_k, waves_c, waves_q, mfma_k, ho_per_block).
+
+    Returns ``(passed, reason)``.
+    """
+    import torch
+
+    from rocke import compile_kernel
+    from kernels.common.conv_direct_grouped import (
+        DirectConvWgradSpec,
+        DirectConvProblem,
+        build_direct_conv_wgrad,
+        is_valid_wgrad_spec,
+    )
+    from rocke.runtime import synchronize_and_release
+    from rocke.runtime.hip_module import HipError, Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    waves_k, waves_c, waves_q, mfma_k, hpb = cfg
+    kpg = shape.kpg or shape.cpg
+    p = DirectConvProblem(
+        N=shape.N,
+        H=shape.H,
+        W=shape.W,
+        groups=shape.groups,
+        cpg=shape.cpg,
+        kpg=kpg,
+        KH=shape.KH,
+        KW=shape.KW,
+        PAD=shape.PAD,
+        stride=shape.stride,
+        dtype=dtype,
+    )
+    # Every knob lands in kernel_name() (bk/bc/hpb/mk plus the wq and bf16
+    # flags), so each case here compiles to a distinct symbol.
+    spec = DirectConvWgradSpec(
+        problem=p,
+        name=f"test_wgrad_{shape.id}",
+        waves_k=waves_k,
+        waves_c=waves_c,
+        waves_q=waves_q,
+        mfma_k=mfma_k,
+        ho_per_block=hpb,
+    )
+
+    ok, reason = is_valid_wgrad_spec(spec, arch=arch)
+    if not ok:
+        return False, f"skip invalid spec: {reason}"
+
+    try:
+        kernel = build_direct_conv_wgrad(spec, arch=arch)
+    except ValueError as e:
+        return False, f"build failed: {e}"
+
+    try:
+        artifact = compile_kernel(kernel, arch=arch)
+    except Exception as e:
+        return False, f"compile failed: {e}"
+
+    torch.manual_seed(42)
+    total_c = shape.groups * shape.cpg
+    total_k = shape.groups * kpg
+
+    _td = torch.bfloat16 if dtype == "bf16" else torch.float16
+    # X:  input          [N, H, W, C]
+    X = torch.empty(p.N, p.H, p.W, total_c, dtype=_td).uniform_(-0.5, 0.5)
+    # dY: output gradient [N, Ho, Wo, K]
+    dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=_td).uniform_(-0.5, 0.5)
+    # dW: weight gradient [K, KH, KW, cpg] fp32 — zeroed before launch
+    dW = torch.zeros(total_k, p.KH, p.KW, shape.cpg, dtype=torch.float32)
+
+    # Reference: dW = conv2d wgrad via torch autograd
+    X_t = X.float().cuda().requires_grad_(False)
+    W_ref = torch.zeros(
+        total_k, shape.cpg, p.KH, p.KW, dtype=torch.float32, device="cuda"
+    )
+    W_ref.requires_grad_(True)
+    X_nchw = X_t.permute(0, 3, 1, 2)
+    out_ref = torch.nn.functional.conv2d(
+        X_nchw, W_ref, padding=p.PAD, stride=p.stride, groups=p.groups
+    )
+    dY_nchw = dY.float().cuda().permute(0, 3, 1, 2)
+    out_ref.backward(dY_nchw)
+    ref_dw = W_ref.grad  # [K, cpg, KH, KW]
+    # Convert to [K, KH, KW, cpg] layout to match dW
+    ref_dw_krsc = ref_dw.permute(0, 2, 3, 1).contiguous().cpu()
+
+    rt = Runtime()
+    X_dev = rt.alloc(X.nbytes)
+    dY_dev = rt.alloc(dY.nbytes)
+    dW_dev = rt.alloc(dW.nbytes)
+    rt.memcpy_h2d(X_dev, _u8(X), X.nbytes)
+    rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
+    rt.memset(dW_dev, 0, dW.nbytes)  # caller must zero dW
+
+    # dW uses fp32 — need a different signature
+    import ctypes as _ct
+
+    sig_wg = {
+        "A": _ct.c_void_p,
+        "B": _ct.c_void_p,
+        "D": _ct.c_void_p,
+        "A_bytes": _ct.c_int,
+        "B_bytes": _ct.c_int,
+        "D_bytes": _ct.c_int,
+    }
+    try:
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=sig_wg,
+        )
+    except HipError as e:
+        rt.free(X_dev)
+        rt.free(dY_dev)
+        rt.free(dW_dev)
+        return False, f"kernel load failed: {e}"
+
+    # Grid, matching build_direct_conv_wgrad's decode:
+    #   bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+    #   by = hi_block  (input-row block)
+    #   bz = n * n_q_blocks + q_block
+    n_k_tiles = (p.kpg + spec.block_k - 1) // spec.block_k
+    n_c_tiles = (p.cpg + spec.block_c - 1) // spec.block_c
+    n_hi_blocks = (p.H + spec.ho_per_block - 1) // spec.ho_per_block
+    grid = (
+        p.groups * n_k_tiles * n_c_tiles,
+        n_hi_blocks,
+        p.N * spec.n_q_blocks(),
+    )
+    block = (spec.threads_per_block, 1, 1)
+
+    values = {
+        "A": dY_dev,
+        "B": X_dev,
+        "D": dW_dev,
+        "A_bytes": dY.nbytes,
+        "B_bytes": X.nbytes,
+        "D_bytes": dW.nbytes,
+    }
+    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+
+    dW_cpu = torch.empty_like(dW)
+    rt.memcpy_d2h(_u8(dW_cpu), dW_dev, dW.nbytes)
+    rt.free(X_dev)
+    rt.free(dY_dev)
+    rt.free(dW_dev)
+    synchronize_and_release(0)
+
+    out_f32 = dW_cpu.float()
+    ref_f32 = ref_dw_krsc.float()
+    abs_diff = (out_f32 - ref_f32).abs()
+    ref_scale = ref_f32.abs().max().clamp(min=1.0)
+    rel_err = float(abs_diff.max() / ref_scale)
+    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    passed = rel_err < tol
+    if not passed:
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    print(
+        f"  PASS  {shape.id}  {arch}  {dtype}  "
+        f"wk={waves_k} wc={waves_c} wq={waves_q} mk={mfma_k} hpb={hpb}  "
+        f"rel_err={rel_err:.2e}",
+        flush=True,
+    )
+    return True, ""
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestDirectConvWgradCorrectness(unittest.TestCase):
+    """Correctness tests for direct conv backward weights (wgrad)."""
+
+    def _run_wgrad(self, shape: _Shape, dtype: str = "fp16", cfg=None) -> None:
+        kwargs = {"dtype": dtype}
+        if cfg is not None:
+            kwargs["cfg"] = cfg
+        passed, reason = _run_wgrad_one(GPU_ARCH, shape, **kwargs)
+        if reason.startswith("skip"):
+            self.skipTest(reason)
+        self.assertTrue(
+            passed,
+            f"FAIL wgrad {shape.id} {dtype} cfg={cfg} on {GPU_ARCH}: {reason}",
+        )
+
+    def test_wgrad(self):
+        """Every shape on the default single-wave spread."""
+        for s in _WGRAD_SHAPES:
+            with self.subTest(shape=s.id):
+                self._run_wgrad(s)
+
+    def test_wgrad_bf16(self):
+        """Same shapes on the bf16 MFMA atom and bf16 LDS staging."""
+        for s in _WGRAD_SHAPES:
+            with self.subTest(shape=s.id):
+                self._run_wgrad(s, dtype="bf16")
+
+    def test_wgrad_wave_configs(self):
+        """The wave spread, on the shapes with channels enough to split.
+
+        This is the coverage the default-only tests miss: the cross-wave S-strip
+        split, the per-c strip partitions, the spatial split and the narrow MFMA
+        atom. A spread the shape cannot afford is rejected by the validator and
+        skipped, not failed.
+        """
+        shapes = [s for s in _WGRAD_SHAPES if s.id in ("wg_g1_c48k192", "wg_oddW37")]
+        for s in shapes:
+            for cfg in _WGRAD_CONFIGS:
+                with self.subTest(shape=s.id, cfg=cfg):
+                    self._run_wgrad(s, cfg=cfg)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

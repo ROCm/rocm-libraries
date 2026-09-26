@@ -441,6 +441,84 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
                                                 size_t reason_cap);
 
 /* ===================================================================== *
+ *  DirectConvWgradSpec  (backward-weights, dW = dY^T * X)
+ *
+ *  @dataclass(frozen=True)
+ *  class DirectConvWgradSpec:
+ *      problem: DirectConvProblem
+ *      name: str = "direct_conv_wgrad"
+ *      wave_tile_k: int = 16
+ *      wave_tile_c: int = 16
+ *      waves_k: int = 1
+ *      waves_c: int = 1
+ *      waves_q: int = 1
+ *      wave_size: int = 64
+ *      ho_per_block: int = 4
+ *      mfma_k: int = 32
+ *
+ *  Computes dW[k, r, s, c] = sum_{n,ho,wo} dY[n,ho,wo,k] * X[n,hi,wi,c] with
+ *  one block owning every (r, s) filter tap: the dY row ring is reused KH times
+ *  and one LDS S-row strip serves all KW s-taps. dW is fp32 and reached by
+ *  global_atomic_add, so the caller must zero it before launch.
+ *
+ *  ABI note: D is a `ptr<f32, global>` here (the other five variants take
+ *  `ptr<f16, global>`), so rocke_direct_conv_signature() does NOT describe this
+ *  kernel.
+ * ===================================================================== */
+typedef struct rocke_direct_conv_wgrad_spec
+{
+    rocke_direct_conv_problem_t problem;
+    const char* name; /* default "direct_conv_wgrad" */
+    int wave_tile_k; /* default 16 -- K output channels per wave (MFMA M) */
+    int wave_tile_c; /* default 16 -- C input channels per wave (MFMA N)  */
+    int waves_k; /* default 1  -- waves along K                       */
+    int waves_c; /* default 1  -- waves along C                       */
+    int waves_q; /* default 1  -- waves along Q (one wo_tile each)    */
+    int wave_size; /* default 64 */
+    int ho_per_block; /* default 4  -- output rows per block               */
+    int mfma_k; /* default 32 -- MFMA K-inner: 16 or 32             */
+} rocke_direct_conv_wgrad_spec_t;
+
+rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void);
+
+/* @property block_k -> waves_k * wave_tile_k. */
+int rocke_direct_conv_wgrad_block_k(const rocke_direct_conv_wgrad_spec_t* spec);
+/* @property block_c -> waves_c * wave_tile_c. */
+int rocke_direct_conv_wgrad_block_c(const rocke_direct_conv_wgrad_spec_t* spec);
+/* @property threads_per_block -> waves_k * waves_c * waves_q * wave_size. */
+int rocke_direct_conv_wgrad_threads_per_block(const rocke_direct_conv_wgrad_spec_t* spec);
+/* @property wo_block -> mfma_k (output columns per MFMA chunk). */
+int rocke_direct_conv_wgrad_wo_block(const rocke_direct_conv_wgrad_spec_t* spec);
+/* n_ho_blocks() -> ceil(Ho / ho_per_block). */
+int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* spec);
+/* n_wo_tiles() -> ceil(Wo / wo_block). */
+int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spec);
+/* n_q_blocks() -> ceil(n_wo_tiles / waves_q). */
+int rocke_direct_conv_wgrad_n_q_blocks(const rocke_direct_conv_wgrad_spec_t* spec);
+
+/* kernel_name():
+ *   kernel_name_join(name, problem.short(), f"bk{block_k}", f"bc{block_c}",
+ *                    f"hpb{ho_per_block}", f"mk{mfma_k}",
+ *                    flags={"wq": waves_q} if waves_q > 1 else {}) */
+rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                   char* out,
+                                                   size_t out_cap);
+
+/* validate(): the hard assertions of DirectConvWgradSpec.validate. */
+rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                char* reason,
+                                                size_t reason_cap);
+
+/* is_valid_wgrad_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
+ * Adds to validate()'s checks: the arch resolves, the 16x16x16 f16 MFMA atom is
+ * present, the 16x16x32 f16 atom is present when mfma_k == 32, and the target
+ * has ds_read_tr16_b64 (gfx950+) for the LDS transpose staging. */
+bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t* spec,
+                                           const char* arch,
+                                           char* reason,
+                                           size_t reason_cap);
+
+/* ===================================================================== *
  *  BUILD ENTRIES
  * ===================================================================== */
 
@@ -521,6 +599,15 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad(
 rocke_kernel_def_t* rocke_build_direct_depthwise_dgrad_new(
     rocke_ir_builder_t* b, const rocke_direct_depthwise_dgrad_spec_t* spec, const char* arch);
 
+/* build_direct_conv_wgrad(spec, arch). Same contract as the 16c entry for the
+ * backward-weights kernel (delta register ring + S-row strip, fp32 atomic dW). */
+rocke_kernel_def_t* rocke_build_direct_conv_wgrad(rocke_ir_builder_t* b,
+                                                  const rocke_direct_conv_wgrad_spec_t* spec,
+                                                  const char* arch);
+rocke_kernel_def_t* rocke_build_direct_conv_wgrad_new(rocke_ir_builder_t* b,
+                                                      const rocke_direct_conv_wgrad_spec_t* spec,
+                                                      const char* arch);
+
 /* ===================================================================== *
  *  SIGNATURE (manifest)  --  all kernels share the 6-entry ABI:
  *    ptr A:{dtype}, ptr B:{dtype}, ptr D:{dtype}, scalar A_bytes:i32,
@@ -599,6 +686,13 @@ rocke_status_t
                                                char** out_ll,
                                                char* err,
                                                size_t err_cap);
+
+rocke_status_t rocke_direct_conv_wgrad_lower_to_llvm(const rocke_direct_conv_wgrad_spec_t* spec,
+                                                     const char* arch,
+                                                     rocke_llvm_flavor_t flavor,
+                                                     char** out_ll,
+                                                     char* err,
+                                                     size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */
