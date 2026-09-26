@@ -16,6 +16,7 @@ it via ``-m "not gpu"``. Run standalone:
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -203,6 +204,36 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,persistent,width",
+        [(128, False, 1), (128, True, 2), (64, False, 2), (64, True, 1)],
+    )
+    def test_bf16_narrow_output_store_is_bit_identical(self, d, persistent, width):
+        """bf16 o_store_width 1/2 must write the same bits as the width-4 store
+        (fp16 is rejected below 4 because it does not)."""
+        import torch
+
+        hq, hkv, B, S = 16, 4, 1, 512
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.bfloat16)
+        base = _spec("bf16", d, hq, hkv, persistent, batch=B, sq=S)
+
+        outs = []
+        for spec in (base, dataclasses.replace(base, o_store_width=width)):
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.bfloat16)
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            outs.append(out)
+        torch.cuda.synchronize()
+        assert torch.equal(outs[0], outs[1]), (
+            f"bf16 D{d} {'persist' if persistent else 'default'} "
+            f"o_store_width={width} diverged from width 4"
         )
 
     @requires_gfx950_gpu

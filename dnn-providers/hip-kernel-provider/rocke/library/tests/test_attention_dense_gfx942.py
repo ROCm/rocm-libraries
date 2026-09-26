@@ -32,6 +32,7 @@ what keeps the gfx950 goldens untouched by anything in this file.
 import dataclasses
 import hashlib
 import inspect
+import re
 
 import pytest
 
@@ -255,6 +256,7 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
         "num_kv_blocks",
         "use_sinks",
         "causal_bottom_right",
+        "lds_num_buffers",
     }
 )
 
@@ -311,6 +313,13 @@ _PRIVATE_PERTURBATIONS = {
     "use_v_swizzle": (False, True),
     "use_exp2_fast": (False, True),
     "iglp": (True, False),
+    "lds_num_buffers": (2,),  # unbuildable: only NBUF=1 is implemented
+    "iglp_mode": (1,),  # legal only with iglp=True -> the *_iglp base
+    "pv_loop_order": ("k_major",),
+    "o_store_width": (1, 2),
+    "pv_priority": (1, 3),
+    "pv_sched_fence_mask": (0, 0x108),
+    "causal_diag_split": (True,),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -320,8 +329,10 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # cfvst off at D128 (bf16, exp2_fast), both D64 dtypes (packed 2-rows-per-DMA + the
 # K row-group pad + the wpe=4 tune), and the P4 persistent grid -- without which
 # num_persistent / interleave / persist_decode are inert and their coverage vacuous.
+# The iglp base is what makes iglp_mode (read only under iglp=True) reachable.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
+    "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
     "d128_bf16_naive": dict(head_size=128, dtype="bf16"),
     "d64_fp16": dict(head_size=64, dtype="fp16"),
     "d64_bf16": dict(head_size=64, dtype="bf16"),
@@ -742,9 +753,7 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #   use_exp2_fast: numerically safe in both directions here (both softmax args are
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
-#   iglp: a compile-time scheduler directive (llvm.amdgcn.iglp.opt) that leaves no
-#     runtime instruction and is legal on every config.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "iglp"})
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast"})
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -802,9 +811,27 @@ _CONTRACT_GRID = [
     # --- private: use_exp2_fast (no rejected region -- see the comment above) ---
     dict(use_exp2_fast=False),
     dict(use_exp2_fast=True),  # accepted: policy is True for every config
-    # --- private: iglp (no rejected region -- see the comment above) ---
+    # --- private: iglp (rejected only alongside a PV sched fence) ---
     dict(iglp=False),
     dict(dtype="fp16", iglp=True),
+    dict(iglp=True, pv_sched_fence_mask=0),  # REJECTED: iglp owns the schedule
+    # --- private: performance-only codegen knobs ---
+    dict(lds_num_buffers=1),  # accepted: the only implemented depth
+    dict(lds_num_buffers=2),  # REJECTED: NBUF=2 is not implemented
+    dict(iglp=True, iglp_mode=1),  # accepted
+    dict(iglp_mode=1),  # REJECTED: needs iglp=True
+    dict(pv_loop_order="k_major"),  # accepted
+    dict(pv_loop_order="n_major"),  # REJECTED: unknown order
+    dict(o_store_width=2),  # accepted (bf16 base)
+    dict(o_store_width=3),  # REJECTED: not 1, 2 or 4
+    dict(dtype="fp16", o_store_width=2),  # REJECTED: bf16-only below 4
+    dict(pv_priority=3),  # accepted
+    dict(pv_priority=4),  # REJECTED: s_setprio is 0..3
+    dict(pv_sched_fence_mask=0),  # accepted
+    dict(pv_sched_fence_mask=0x800),  # REJECTED: past the 11 mask bits
+    dict(causal_diag_split=True),  # accepted
+    dict(causal=False, causal_diag_split=True),  # REJECTED: causal only
+    dict(sliding_window=64, causal_diag_split=True),  # REJECTED: no window
 ]
 
 
@@ -1531,6 +1558,158 @@ def test_iglp_true_builds_lowers_and_emits_the_intrinsic(dtype, d):
     assert kd_on.name == gfx942_kernel_name(on)
     assert kd_on.name.endswith("_iglp1")
     assert _ir_body_sha(on) != _ir_body_sha(off)
+
+
+# --------------------------------------------------------------------------- #
+# Performance-only codegen knobs (keyword-only, default = shipped kernel)
+# --------------------------------------------------------------------------- #
+_CODEGEN_KNOB_DEFAULTS = {
+    "lds_num_buffers": 1,
+    "iglp_mode": 0,
+    "pv_loop_order": "d_major",
+    "o_store_width": 4,
+    "pv_priority": 0,
+    "pv_sched_fence_mask": None,
+    "causal_diag_split": False,
+}
+_CODEGEN_KNOB_TOKENS = ("_iglpm", "_pvkmaj", "_osw", "_prio", "_fence", "_dsplit")
+
+
+def _mfma_calls(ir: str) -> int:
+    return len(re.findall(r"call <\d+ x float> @llvm\.amdgcn\.mfma", ir))
+
+
+def _global_stores(ir: str) -> list:
+    return [ln for ln in ir.splitlines() if "store" in ln and "addrspace(1)" in ln]
+
+
+def test_codegen_knobs_are_keyword_only_with_shipped_defaults():
+    params = inspect.signature(Gfx942AttentionDenseSpec).parameters
+    for name, default in _CODEGEN_KNOB_DEFAULTS.items():
+        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY, name
+        assert params[name].default == default, name
+    name = gfx942_kernel_name(_spec())
+    assert not any(tok in name for tok in _CODEGEN_KNOB_TOKENS), name
+
+
+@pytest.mark.parametrize(
+    "overrides, token, marker",
+    [
+        (
+            dict(iglp=True, iglp_mode=1),
+            "_iglp1_iglpm1",
+            "call void @llvm.amdgcn.iglp.opt(i32 1)",
+        ),
+        (dict(pv_loop_order="k_major"), "_pvkmaj", None),
+        (dict(o_store_width=2), "_osw2", "store <2 x bfloat>"),
+        (dict(o_store_width=1), "_osw1", "store <1 x bfloat>"),
+        (dict(pv_priority=2), "_prio2", "call void @llvm.amdgcn.s.setprio(i16 2)"),
+        (
+            dict(pv_sched_fence_mask=0x8),
+            "_fence8",
+            "call void @llvm.amdgcn.sched.barrier(i32 8)",
+        ),
+        (dict(pv_sched_fence_mask=0x108), "_fence108", None),
+        (dict(causal_diag_split=True), "_dsplit", None),
+    ],
+    ids=lambda v: v if isinstance(v, str) else None,
+)
+def test_codegen_knob_moves_ir_and_name_together(overrides, token, marker):
+    base = _spec()
+    alt = _spec(**overrides)
+    ok, why = supports_attention_dense(alt, arch="gfx942")
+    assert ok, why
+
+    kd = build_attention_dense(alt, arch="gfx942")
+    assert kd.name == gfx942_kernel_name(alt)
+    assert kd.name.endswith(token), kd.name
+    assert _ir_body_sha(alt) != _ir_body_sha(base)
+    if marker is not None:
+        assert marker in _lower(kd)
+        assert marker not in _lower(build_attention_dense(base, arch="gfx942"))
+
+
+def test_o_store_width_splits_every_store():
+    base_ir = _lower(build_attention_dense(_spec(), arch="gfx942"))
+    n4 = len(_global_stores(base_ir))
+    assert n4 == 4 * 4  # D_TILES * groups at D128
+    for width, align in ((2, 4), (1, 2)):
+        ir = _lower(build_attention_dense(_spec(o_store_width=width), arch="gfx942"))
+        stores = _global_stores(ir)
+        assert len(stores) == n4 * 4 // width
+        assert all(f"align {align}" in ln for ln in stores)
+
+
+def test_pv_loop_order_only_reorders_the_pv_mfmas():
+    base_ir = _lower(build_attention_dense(_spec(), arch="gfx942"))
+    kmaj_ir = _lower(
+        build_attention_dense(_spec(pv_loop_order="k_major"), arch="gfx942")
+    )
+    assert _mfma_calls(kmaj_ir) == _mfma_calls(base_ir)
+    assert _global_stores(kmaj_ir) == _global_stores(base_ir)
+
+
+def test_pv_priority_brackets_the_pv_mfmas():
+    ir = _lower(build_attention_dense(_spec(pv_priority=3), arch="gfx942"))
+    raise_at = ir.index("call void @llvm.amdgcn.s.setprio(i16 3)")
+    drop_at = ir.index("call void @llvm.amdgcn.s.setprio(i16 0)")
+    assert ir.count("call void @llvm.amdgcn.s.setprio(i16 3)") == 1
+    assert ir.count("call void @llvm.amdgcn.s.setprio(i16 0)") == 1
+    assert raise_at < drop_at
+    assert _mfma_calls(ir[raise_at:drop_at]) == 4 * 8  # D_TILES * KK_STEPS
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [dict(), dict(persistent=True, num_persistent=228, seqlen_q=4096, seqlen_kv=4096)],
+    ids=["grid", "persistent"],
+)
+def test_causal_diag_split_emits_an_unmasked_body_and_a_masked_tail(extra):
+    base = _spec(dtype="fp16", num_query_heads=32, **extra)
+    split = dataclasses.replace(base, causal_diag_split=True)
+    base_ir = _lower(build_attention_dense(base, arch="gfx942"))
+    split_ir = _lower(build_attention_dense(split, arch="gfx942"))
+    assert _mfma_calls(split_ir) == 2 * _mfma_calls(base_ir)
+    # One causal-mask compare per S element (N_SUB * 16), in the masked tail only.
+    assert split_ir.count("icmp sle") == base_ir.count("icmp sle") == 2 * 16
+
+
+def test_lazy_rescale_is_inert_on_gfx942():
+    """This body always rescales; only the shared kernel_name() reads the field."""
+    on, off = _spec(lazy_rescale=True), _spec(lazy_rescale=False)
+    assert _ir_body_sha(on) == _ir_body_sha(off)
+    assert gfx942_kernel_name(on).replace("_lazyrs", "") == gfx942_kernel_name(off)
+    assert gfx942_kernel_name(on) != gfx942_kernel_name(off)
+
+
+@pytest.mark.parametrize(
+    "overrides, reason",
+    [
+        (dict(lds_num_buffers=2), "lds_num_buffers"),
+        (dict(lds_num_buffers=0), "lds_num_buffers"),
+        (dict(iglp_mode=1), "iglp_mode only applies with iglp=True"),
+        (dict(iglp=True, iglp_mode=2), "iglp_mode must be 0 or 1"),
+        (dict(pv_loop_order="n_major"), "pv_loop_order"),
+        (dict(o_store_width=3), "o_store_width"),
+        (dict(o_store_width=8), "o_store_width"),
+        (dict(dtype="fp16", o_store_width=1), "bf16-only"),
+        (dict(dtype="fp16", o_store_width=2), "bf16-only"),
+        (dict(pv_priority=4), "pv_priority"),
+        (dict(pv_priority=-1), "pv_priority"),
+        (dict(pv_sched_fence_mask=0x800), "pv_sched_fence_mask"),
+        (dict(pv_sched_fence_mask=-1), "pv_sched_fence_mask"),
+        (dict(iglp=True, pv_sched_fence_mask=0), "exclusive"),
+        (dict(causal=False, causal_diag_split=True), "causal_diag_split"),
+        (dict(sliding_window=128, causal_diag_split=True), "causal_diag_split"),
+    ],
+)
+def test_codegen_knob_rejections(overrides, reason):
+    spec = _spec(**overrides)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert not ok
+    assert reason in why
+    with pytest.raises(ValueError, match="unsupported gfx942 attention_dense spec"):
+        build_attention_dense(spec, arch="gfx942")
 
 
 # --------------------------------------------------------------------------- #

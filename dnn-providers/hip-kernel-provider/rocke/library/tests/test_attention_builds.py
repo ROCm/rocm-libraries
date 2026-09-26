@@ -2875,6 +2875,15 @@ class TestAttentionDenseGfx950CodegenKnobs(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self._spec(self._GRID, **{name: value})
 
+    def test_narrow_output_stores_are_bf16_only(self):
+        fp16 = dict(self._GRID, dtype="fp16")
+        for width in (1, 2):
+            with self.subTest(o_store_width=width):
+                with self.assertRaisesRegex(ValueError, "bf16-only"):
+                    self._spec(fp16, o_store_width=width)
+                self._spec(self._GRID, o_store_width=width)
+        self._spec(fp16, o_store_width=4)
+
     def test_iglp_is_exclusive_with_manual_scheduling(self):
         with self.assertRaisesRegex(ValueError, "iglp_mode"):
             self._spec(self._GRID, iglp_mode=1)
