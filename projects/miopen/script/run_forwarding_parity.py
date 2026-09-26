@@ -20,12 +20,51 @@ from miopen_wrapper_libs import resolve_pair
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
+# Printed by the library when forwarding is enabled; the only outside sign of
+# which mode a replay actually ran in.
+ENABLED_BANNER = "[MIOpen] MIOPEN_HIPDNN_FORWARDING="
+
+
 def run(argv, what, env=None):
     print(f"+ {' '.join(str(a) for a in argv)}", flush=True)
     code = subprocess.run([str(a) for a in argv], env=env).returncode
     if code != 0:
         print(f"FAIL: {what} exited {code}", flush=True)
     return code == 0
+
+
+def replay(argv, mode, env):
+    what = f"forwarding={mode} replay"
+    print(f"+ {' '.join(str(a) for a in argv)}", flush=True)
+    result = subprocess.run(
+        [str(a) for a in argv],
+        env=env,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+    )
+    sys.stderr.write(result.stderr)
+    sys.stderr.flush()
+    if result.returncode != 0:
+        print(f"FAIL: {what} exited {result.returncode}", flush=True)
+        return False
+
+    announced = ENABLED_BANNER in result.stderr
+    if mode == "enabled" and not announced:
+        print(
+            f"FAIL: {what} never printed '{ENABLED_BANNER}...', so it ran with "
+            "forwarding disabled.",
+            flush=True,
+        )
+        return False
+    if mode == "disabled" and announced:
+        print(
+            f"FAIL: {what} printed '{ENABLED_BANNER}...', so it ran with "
+            "forwarding enabled.",
+            flush=True,
+        )
+        return False
+    return True
 
 
 def main():
@@ -83,14 +122,14 @@ def main():
         report.unlink(missing_ok=True)
         reports.append(report)
         env = dict(os.environ, MIOPEN_HIPDNN_FORWARDING=mode, LD_LIBRARY_PATH=ld_path)
-        ok = run(
+        ok = replay(
             [
                 gtest,
                 f"--gtest_filter={args.filter}",
                 f"--gtest_output=xml:{report}",
             ],
-            f"forwarding={mode} replay",
-            env=env,
+            mode,
+            env,
         )
         if not ok:
             # Comparing a partial report would bury the failure that caused it.

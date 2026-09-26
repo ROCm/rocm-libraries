@@ -13,8 +13,9 @@ holds the comparison to this run's binary. That last one is the harness's side o
 guard against two leftover reports comparing cleanly, and it is invisible from the
 comparator's own tests.
 
-The replays are stood in for by a script that writes a well-formed report, the
-comparison by one that records how it was called.
+The replays are stood in for by a script that writes a well-formed report and prints
+the library's banner when forwarding is enabled, the comparison by one that records
+how it was called.
 
 Written against the standard library's unittest rather than pytest: this runs as a
 ctest entry in a wrapper-enabled build, and nothing provisions pytest for a machine
@@ -23,6 +24,7 @@ that builds MIOpen.
     python3 -m unittest test_run_forwarding_parity
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -33,8 +35,18 @@ from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parent / "run_forwarding_parity.py"
 
-FAKE_GTEST = """#!/usr/bin/env python3
-import sys
+FAKE_GTEST_TEMPLATE = """#!/usr/bin/env python3
+import json, os, pathlib, sys
+mode = os.environ.get("MIOPEN_HIPDNN_FORWARDING")
+pathlib.Path(__file__).with_name("env_%s.json" % mode).write_text(json.dumps({{
+    "MIOPEN_HIPDNN_FORWARDING": mode,
+    "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH"),
+}}))
+if {announce}:
+    sys.stderr.write(
+        "[MIOpen] MIOPEN_HIPDNN_FORWARDING=%s: entry points in the forwarding set "
+        "are redirected to hipDNN\\n" % mode
+    )
 out = [a.split("xml:", 1)[1] for a in sys.argv if a.startswith("--gtest_output=")][0]
 open(out, "w").write(
     '<?xml version="1.0"?><testsuites tests="1" failures="0" disabled="0" errors="0">'
@@ -42,6 +54,13 @@ open(out, "w").write(
     "</testsuites>"
 )
 """
+
+FAKE_GTEST = FAKE_GTEST_TEMPLATE.format(announce='mode == "enabled"')
+
+# A test binary that clears the variable before the library reads it.
+LOSES_THE_SETTING = FAKE_GTEST_TEMPLATE.format(announce="False")
+
+ALWAYS_FORWARDS = FAKE_GTEST_TEMPLATE.format(announce="True")
 
 # Passes, and leaves behind what it was called with, so the harness's own wiring can
 # be checked rather than assumed.
@@ -72,6 +91,8 @@ class ParityRunnerTest(unittest.TestCase):
         (lib / "libMIOpen_private.so.1.0").touch()
         for name, body in (
             ("fake_gtest.py", FAKE_GTEST),
+            ("loses_the_setting.py", LOSES_THE_SETTING),
+            ("always_forwards.py", ALWAYS_FORWARDS),
             ("fake_compare.py", RECORDS_ARGV),
             ("failing_compare.py", FAILS),
         ):
@@ -84,13 +105,13 @@ class ParityRunnerTest(unittest.TestCase):
         self.tmp = self.tree / "tmp"
         self.tmp.mkdir()
 
-    def run_harness(self, cwd, *extra):
+    def run_harness(self, cwd, *extra, gtest="fake_gtest.py", env=None):
         return subprocess.run(
             [
                 sys.executable,
                 str(HARNESS),
                 "--gtest",
-                str(self.tree / "fake_gtest.py"),
+                str(self.tree / gtest),
                 "--filter",
                 "*",
                 "--lib-dir",
@@ -100,10 +121,20 @@ class ParityRunnerTest(unittest.TestCase):
                 *extra,
             ],
             cwd=str(cwd),
-            env=dict(os.environ, TMPDIR=str(self.tmp)),
+            env=dict(os.environ, TMPDIR=str(self.tmp), **(env or {})),
             capture_output=True,
             text=True,
         )
+
+    def test_each_replay_gets_its_mode_and_the_libraries_under_test(self):
+        result = self.run_harness(self.tree, env={"LD_LIBRARY_PATH": "/already/set"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for mode in ("disabled", "enabled"):
+            recorded = json.loads((self.tree / f"env_{mode}.json").read_text())
+            self.assertEqual(recorded["MIOPEN_HIPDNN_FORWARDING"], mode)
+            first, *rest = recorded["LD_LIBRARY_PATH"].split(os.pathsep)
+            self.assertEqual(Path(first).resolve(), (self.tree / "lib").resolve())
+            self.assertEqual(rest, ["/already/set"])
 
     def test_nothing_is_written_into_the_working_directory(self):
         workdir = self.tree / "bin" / "MIOpen"
@@ -175,6 +206,23 @@ class ParityRunnerTest(unittest.TestCase):
         self.assertEqual(
             argv[argv.index("--newer-than") + 1], str(self.tree / "fake_gtest.py")
         )
+
+    def test_an_enabled_replay_that_never_forwarded_fails(self):
+        result = self.run_harness(self.tree, gtest="loses_the_setting.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("forwarding=enabled replay never printed", result.stdout)
+        self.assertFalse((self.tree / "fake_compare.argv").exists())
+
+    def test_a_disabled_replay_that_forwarded_fails(self):
+        result = self.run_harness(self.tree, gtest="always_forwards.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("forwarding=disabled replay printed", result.stdout)
+        self.assertFalse((self.tree / "fake_compare.argv").exists())
+
+    def test_the_replay_s_stderr_is_passed_through(self):
+        result = self.run_harness(self.tree)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("MIOPEN_HIPDNN_FORWARDING=enabled:", result.stderr)
 
     def test_helpers_run_without_their_exec_bit(self):
         """They are launched through this interpreter, not their shebang lines."""
