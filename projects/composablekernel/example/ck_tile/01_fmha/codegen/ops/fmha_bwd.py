@@ -35,6 +35,7 @@ FMHA_BWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 #undef CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
 #define CK_TILE_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT 1
 #endif
+
 #include "fmha_bwd.hpp"
 
 """
@@ -104,7 +105,61 @@ using fmha_bwd_pipeline_problem_{F_idx} = ck_tile::BlockFmhaBwdPipelineProblem<
     {F_trload},
     fmha_bwd_trait_{F_idx}>;
 
-using fmha_bwd_pipeline_{F_idx} = ck_tile::BlockFmhaBwdDQDKDVPipeline<fmha_bwd_pipeline_problem_{F_idx}>;
+// FMHA_PRODUCT_DUAL_DISPATCH
+using fmha_bwd_pipeline_default_{F_idx} =
+    ck_tile::BlockFmhaBwdDQDKDVPipeline<fmha_bwd_pipeline_problem_{F_idx}>;
+
+static constexpr bool fmha_bwd_product_dual_{F_idx} =
+    std::is_same_v<fmha_dtype_{F_idx}, FmhaBwdBf16> &&
+    !({F_mode}) &&
+    !({F_deterministic}) &&
+    !({F_trload}) &&
+    ({F_maxq} == 0) &&
+    ({F_bm0} == 32) &&
+    ({F_bn0} == 32) &&
+    ({F_bhdq} == 128) &&
+    ({F_bhdv} == 128) &&
+    ({F_dpad} == 0) &&
+    ({F_dvpad} == 0) &&
+    !({F_dbias}) &&
+    ({F_bias} == ck_tile::BlockAttentionBiasEnum::NO_BIAS) &&
+    !fmha_dropout_{F_idx}::IsDropout;
+
+template <bool Enable, typename Problem, typename DefaultPipeline>
+struct fmha_bwd_product_pipeline_pair_{F_idx}
+{{
+    using dq    = DefaultPipeline;
+    using dkdv  = DefaultPipeline;
+}};
+
+template <typename Problem, typename DefaultPipeline>
+struct fmha_bwd_product_pipeline_pair_{F_idx}<true, Problem, DefaultPipeline>
+{{
+    using dq   = ck_tile::BlockFmhaBwdDQOnlyQMajor<Problem>;
+    using dkdv = ck_tile::BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt<Problem>;
+
+    // PRODUCT-DUAL-SANITY:
+    // Keep the assertion dependent so non-product generated variants
+    // do not fail semantic checking in concrete function specializations.
+    static_assert(ck_tile::fmha_bwd_qmajor_dq_pipeline<dq>::value);
+    static_assert(!ck_tile::fmha_bwd_qmajor_dq_pipeline<dkdv>::value);
+}};
+
+using fmha_bwd_product_pipelines_{F_idx} =
+    fmha_bwd_product_pipeline_pair_{F_idx}<
+        fmha_bwd_product_dual_{F_idx},
+        fmha_bwd_pipeline_problem_{F_idx},
+        fmha_bwd_pipeline_default_{F_idx}>;
+
+using fmha_bwd_pipeline_dq_{F_idx} =
+    typename fmha_bwd_product_pipelines_{F_idx}::dq;
+
+using fmha_bwd_pipeline_dkdv_{F_idx} =
+    typename fmha_bwd_product_pipelines_{F_idx}::dkdv;
+
+// Keep the historical alias bound to the DKDV/default side so workspace
+// helpers retain their previous ABI and sizing behavior.
+using fmha_bwd_pipeline_{F_idx} = fmha_bwd_pipeline_dkdv_{F_idx};
 
 using fmha_bwd_dk_epilogue_{F_idx} = ck_tile::Default2DEpilogue<
     ck_tile::Default2DEpilogueProblem<typename FmhaBwdTypeConfig<{F_dtype}>::AccDataType,
@@ -124,11 +179,20 @@ using fmha_bwd_dq_epilogue_{F_idx} = ck_tile::Default2DEpilogue<
                                       false,
                                       ({F_dpad} > 0)>>;
 
-using fmha_bwd_dq_dk_dv_kernel_{F_idx} =
-    ck_tile::FmhaBwdDQDKDVKernel<fmha_bwd_pipeline_{F_idx},
+using fmha_bwd_dq_kernel_{F_idx} =
+    ck_tile::FmhaBwdDQDKDVKernel<fmha_bwd_pipeline_dq_{F_idx},
                                  fmha_bwd_dk_epilogue_{F_idx},
                                  fmha_bwd_dv_epilogue_{F_idx},
                                  fmha_bwd_dq_epilogue_{F_idx}>;
+
+using fmha_bwd_dkdv_kernel_{F_idx} =
+    ck_tile::FmhaBwdDQDKDVKernel<fmha_bwd_pipeline_dkdv_{F_idx},
+                                 fmha_bwd_dk_epilogue_{F_idx},
+                                 fmha_bwd_dv_epilogue_{F_idx},
+                                 fmha_bwd_dq_epilogue_{F_idx}>;
+
+using fmha_bwd_dq_dk_dv_kernel_{F_idx} =
+    fmha_bwd_dkdv_kernel_{F_idx};
 
 using dq_dk_dv_trait_{F_idx} = fmha_bwd_dq_dk_dv_traits_<{F_hdim},
                                                          {F_dtype},
@@ -147,12 +211,38 @@ using dq_dk_dv_trait_{F_idx} = fmha_bwd_dq_dk_dv_traits_<{F_hdim},
 template <>
 float fmha_bwd_dq_dk_dv_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_bwd_args a)
 {{
+    if constexpr(fmha_bwd_product_dual_{F_idx})
+    {{
+        using qk_  = fmha_bwd_dq_kernel_{F_idx};
+        using kvk_ = fmha_bwd_dkdv_kernel_{F_idx};
+
+
+        if(s.log_level_ > 0)
+            std::cout << ", product_dual@" << qk_::GetName()
+                      << "@" << kvk_::GetName() << std::flush;
+
+        auto [qargs, qgrids] =
+            fmha_bwd_dq_dk_dv_create_kargs_and_grids<qk_>(a);
+        auto [kvargs, kvgrids] =
+            fmha_bwd_dq_dk_dv_create_kargs_and_grids<kvk_>(a);
+
+        return ck_tile::launch_kernel(
+            s,
+            ck_tile::make_kernel<qk_::kBlockPerCu, {F_arch.tag}>(
+                qk_{{}}, qgrids, qk_::BlockSize(), 0, qargs),
+            ck_tile::make_kernel<kvk_::kBlockPerCu, {F_arch.tag}>(
+                kvk_{{}}, kvgrids, kvk_::BlockSize(), 0, kvargs));
+    }}
+
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     if(s.log_level_ > 0)
         std::cout << ", " << k_::GetName() << std::flush;
-    auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
+
+    auto [kargs, grids]                    =
+        fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+
     if constexpr(k_::kNeedsKernelPrezeroDqAcc)
     {{
         using pk_ = typename k_::DqAccPrezeroKernel;
@@ -161,29 +251,60 @@ float fmha_bwd_dq_dk_dv_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const ck_tile::st
             ck_tile::make_kernel<pk_::kBlockPerCu, {F_arch.tag}>(
                 pk_{{}}, pk_::GridSize(), pk_::BlockSize(), 0,
                 k_::MakeDqAccPrezeroKargs(a.workspace_ptr, a.batch)),
-            ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));
+            ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(
+                k_{{}}, grids, blocks, 0, kargs));
     }}
+
     return ck_tile::launch_kernel(
-        s, ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));
+        s,
+        ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(
+            k_{{}}, grids, blocks, 0, kargs));
 }}
 
 template <>
 void fmha_bwd_dq_dk_dv_oneshot_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_bwd_args a)
 {{
+    if constexpr(fmha_bwd_product_dual_{F_idx})
+    {{
+        using qk_  = fmha_bwd_dq_kernel_{F_idx};
+        using kvk_ = fmha_bwd_dkdv_kernel_{F_idx};
+
+
+        auto [qargs, qgrids] =
+            fmha_bwd_dq_dk_dv_create_kargs_and_grids<qk_>(a);
+
+        ck_tile::make_kernel<qk_::kBlockPerCu, {F_arch.tag}>(
+            qk_{{}}, qgrids, qk_::BlockSize(), 0, qargs)(
+                ck_tile::stream_config{{s.stream_id_}});
+
+        auto [kvargs, kvgrids] =
+            fmha_bwd_dq_dk_dv_create_kargs_and_grids<kvk_>(a);
+
+        ck_tile::make_kernel<kvk_::kBlockPerCu, {F_arch.tag}>(
+            kvk_{{}}, kvgrids, kvk_::BlockSize(), 0, kvargs)(
+                ck_tile::stream_config{{s.stream_id_}});
+
+        return;
+    }}
+
     using k_                               = fmha_bwd_dq_dk_dv_kernel_{F_idx};
-    auto [kargs, grids]                    = fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
+    auto [kargs, grids]                    =
+        fmha_bwd_dq_dk_dv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+
     if constexpr(k_::kNeedsKernelPrezeroDqAcc)
     {{
         using pk_ = typename k_::DqAccPrezeroKernel;
         ck_tile::make_kernel<pk_::kBlockPerCu, {F_arch.tag}>(
             pk_{{}}, pk_::GridSize(), pk_::BlockSize(), 0,
             k_::MakeDqAccPrezeroKargs(a.workspace_ptr, a.batch))(
-            ck_tile::stream_config{{s.stream_id_}});
+                ck_tile::stream_config{{s.stream_id_}});
     }}
-    ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs)(
-        ck_tile::stream_config{{s.stream_id_}});
+
+    ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(
+        k_{{}}, grids, blocks, 0, kargs)(
+            ck_tile::stream_config{{s.stream_id_}});
 }}
 
 template <>
@@ -224,6 +345,9 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
 template <>
 bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 {{
+    if constexpr(fmha_bwd_product_dual_{F_idx})
+        return false;
+
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     return k_::NeedsZeroDqAcc();
 }}
@@ -231,6 +355,14 @@ bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>(
 template <>
 std::string fmha_bwd_dq_dk_dv_get_name_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
 {{
+    if constexpr(fmha_bwd_product_dual_{F_idx})
+    {{
+        using qk_  = fmha_bwd_dq_kernel_{F_idx};
+        using kvk_ = fmha_bwd_dkdv_kernel_{F_idx};
+        return std::string("product_dual@") +
+               qk_::GetName() + "@" + kvk_::GetName();
+    }}
+
     using k_ = fmha_bwd_dq_dk_dv_kernel_{F_idx};
     return k_::GetName();
 }}
@@ -272,14 +404,33 @@ FMHA_BWD_API_INNER_DISPATCH_COMMON = """{F_if}((t.is_group_mode == {F_mode}) && 
     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dvpad} > 0)>;
     using dq_dk_dv_trait_ = fmha_bwd_dq_dk_dv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_mask}, {F_dropout}, {F_bias}, {F_dbias}, {F_dpad}, {F_dvpad}, {F_deterministic}, {F_trload}, {F_maxq}, {F_bn0}>;
     using convert_dq_trait_ = fmha_bwd_convert_dq_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_spad1d}, ({F_dpad} > 0), {F_deterministic}>;
+
+    static constexpr bool product_dual_dispatch_ =
+        std::is_same_v<{F_dtype}, FmhaBwdBf16> &&
+        !({F_mode}) &&
+        !({F_deterministic}) &&
+        !({F_trload}) &&
+        ({F_maxq} == 0) &&
+        ({F_bm0} == 32) &&
+        ({F_bn0} == 32) &&
+        ({F_bhdq} == 128) &&
+        ({F_bhdv} == 128) &&
+        ({F_dpad} == 0) &&
+        ({F_dvpad} == 0) &&
+        !({F_dbias}) &&
+        ({F_bias} == ck_tile::BlockAttentionBiasEnum::NO_BIAS) &&
+        !{F_dropout}::IsDropout;
+
+    using convert_dq_trait_product_ =
+        std::conditional_t<product_dual_dispatch_, void, convert_dq_trait_>;
 """
 FMHA_BWD_API_INNER_DISPATCH_RUN = """
-    r = fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(s, a);
+    r = fmha_bwd_<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_product_, void>, {F_arch.tag}>(s, a);
     return r;
 }}
 """
 FMHA_BWD_API_INNER_DISPATCH_LAUNCHER = """
-    this->init<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_, void>, {F_arch.tag}>(t);
+    this->init<dot_do_o_trait_, dq_dk_dv_trait_, std::conditional_t<{F_convert_dq_enabled}, convert_dq_trait_product_, void>, {F_arch.tag}>(t);
     return;
 }}
 """
@@ -536,7 +687,7 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
                 #                     bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv,
                 FmhaBwdDQDKDVTileSize( 32,  64,  32,  32,  32,  32,  64,   32,   32,  1, 4, 1,  4, 1, 1,  2, 2, 1,  16, 16, 16,  16, 16, 16, -1),
                 FmhaBwdDQDKDVTileSize( 32,  64,  64,  32,  64,  32,  32,   64,   64,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
-                FmhaBwdDQDKDVTileSize( 16,  64, 128,  16, 128,  16,  32,  128,  128,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
+                FmhaBwdDQDKDVTileSize( 32, 32, 128, 32, 128, 32, 16, 128, 128, 2, 2, 1, 2, 2, 1, 1, 4, 1, 16, 16, 16, 16, 16, 16, -1),
                 FmhaBwdDQDKDVTileSize( 16,  64, 256,  16, 256,  16,  32,  256,  256,  1, 4, 1,  4, 1, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16, -1),
             ]  # fmt: skip
         return []
@@ -891,7 +1042,12 @@ class FmhaBwdApiTrait:
 
     @property
     def extra_cond(self) -> str:
-        if self.tr_load == "t" and self.tile.max_seq_q == 0 and self.tile.F_bn0 == 128 and self.tile.F_bhdq == 128:
+        if (
+            self.tr_load == "t"
+            and self.tile.max_seq_q == 0
+            and self.tile.F_bn0 == 128
+            and self.tile.F_bhdq == 128
+        ):
             if self.mode == "group":
                 return " && (t.max_seqlen_k <= 256)"
             else:
@@ -912,7 +1068,7 @@ class FmhaBwdApiTrait:
             F_idx=self.idx,
             F_hdim=self.hdim,
             F_dtype=self.dtype,
-            F_bm0=M0_1D,
+            F_bm0=256,
             F_spad=self.spad1d,
             F_dvpad=F_dvpad,
             F_mode=self.mode,
@@ -958,7 +1114,10 @@ class FmhaBwdApiTrait:
             F_mode=self.mode,
             F_occupancy=get_occupancy(self.dtype, self.hdim),
             F_deterministic=self.deterministic,
-            disabled=self.tile.max_seq_q != 0,
+            # Generic backward writes FP32 dq_acc and requires conversion.
+            # Tile shape alone does not imply a direct-dQ implementation.
+            # Product-dual skips this stage via product_dual_dispatch_ in C++.
+            disabled=(self.tile.max_seq_q != 0 and self.tr_load == "t"),
         )
 
 
@@ -1005,14 +1164,20 @@ class FmhaBwdApiPool:
                 F_max_seq_q_cond=trait.max_seq_q_cond,
                 F_cond_extra=trait.extra_cond,
                 F_bn0=trait.tile.F_bn0,
+                F_bm0=trait.tile.F_bm0,
+                F_bhdq=trait.tile.F_bhdq,
+                F_bhdv=trait.tile.F_bhdv,
             )
             inners += inners_common + FMHA_BWD_API_INNER_DISPATCH_RUN.format(
                 F_arch=trait.arch,
                 F_convert_dq_enabled=BOOL_MAP[not trait.convert_dq_kernel.disabled],
             )
-            inners_launcher += inners_common + FMHA_BWD_API_INNER_DISPATCH_LAUNCHER.format(
-                F_arch=trait.arch,
-                F_convert_dq_enabled=BOOL_MAP[not trait.convert_dq_kernel.disabled],
+            inners_launcher += (
+                inners_common
+                + FMHA_BWD_API_INNER_DISPATCH_LAUNCHER.format(
+                    F_arch=trait.arch,
+                    F_convert_dq_enabled=BOOL_MAP[not trait.convert_dq_kernel.disabled],
+                )
             )
         return inners, inners_launcher
 
@@ -1052,6 +1217,7 @@ class FmhaBwdApiPool:
             # empty string we add some ignore to suppress warning in api
             per_arch = ("(void)t; (void)s; (void)a;", "(void)t;")[variant]
         return per_arch
+
     @property
     def api(self) -> str:
         result = FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(
