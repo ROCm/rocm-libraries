@@ -51,12 +51,10 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
@@ -128,12 +126,10 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
@@ -205,12 +201,10 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
@@ -282,12 +276,10 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
@@ -359,16 +351,14 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - DepthU: [32,64]
+        - DepthU: [32]
         - BufferLoad: [False]
         - BufferStore: [True]
       BenchmarkForkParameters:
@@ -436,16 +426,14 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - DepthU: [32,64]
+        - DepthU: [32]
         - BufferLoad: [False]
         - BufferStore: [True]
       BenchmarkForkParameters:
@@ -513,16 +501,14 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - DepthU: [32,64]
+        - DepthU: [32]
         - BufferLoad: [False]
         - BufferStore: [True]
       BenchmarkForkParameters:
@@ -590,16 +576,14 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16,16, 1,  1,  15, 4,  1,4 ]
-          - [32, 32, 8, 1,  1,   2, 8,  4,1 ]
+          - [16, 16,16, 1,  1,   1, 1,  4,1 ]
         - ScheduleIterAlg: [3]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - LocalReadVectorWidth: [8]
         - ExpandPointerSwap: [false]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - DepthU: [32,64]
+        - DepthU: [32]
         - BufferLoad: [False]
         - BufferStore: [True]
       BenchmarkForkParameters:
