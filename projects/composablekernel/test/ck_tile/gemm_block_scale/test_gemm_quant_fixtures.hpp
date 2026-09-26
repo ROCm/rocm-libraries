@@ -107,6 +107,20 @@ using GemmConfigCompTDMV2 = GemmConfigPipeline<ck_tile::BaseGemmPipelineAgBgCrCo
                                                ck_tile::GemmPipelineAgBgCrCompTDMV2,
                                                true>;
 
+// Group-quant pipeline for GemmConfig: QuantPipeline itself under the default CompV3 config,
+// otherwise QuantPipeline running on GemmConfig's plain pipeline.
+template <typename GemmConfig,
+          ck_tile::QuantType QT,
+          typename QuantPipeline,
+          typename Problem = typename ck_tile::rebind_policy<QuantPipeline, void>::problem>
+using QuantPipelineFor = std::conditional_t<
+    std::is_same_v<typename GemmConfig::template Pipeline<Problem>,
+                   ck_tile::GemmPipelineAgBgCrCompV3<Problem>>,
+    QuantPipeline,
+    ck_tile::GemmQuantOnBasePipeline<QT,
+                                     QuantPipeline,
+                                     typename GemmConfig::template Pipeline<Problem>>>;
+
 // Enables the large-tensor (64-bit global load/store) code path. Same tile shape as the
 // base config; only the LargeTensors opt-in differs.
 struct GemmConfigLargeTensor : public GemmConfigBase
@@ -1144,7 +1158,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
 
         using BaseGemmPipeline = std::conditional_t<
             PreshuffleB == false,
-            ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>,
+            typename GemmConfig::template BasePipeline<GemmPipelineProblem>,
             ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>>;
 
         constexpr auto K1 = CodegenGemmShape::WarpTile::at(ck_tile::number<2>{});
@@ -1178,9 +1192,12 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
 
             using GemmPipeline = std::conditional_t<
                 PreshuffleB == false,
-                std::conditional_t<std::is_same_v<QDataType, ck_tile::e8m0_t>,
-                                   ck_tile::MicroscaleGemmPipelineAgBgCrCompV3<PipelineProblem>,
-                                   ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>,
+                std::conditional_t<
+                    std::is_same_v<QDataType, ck_tile::e8m0_t>,
+                    ck_tile::MicroscaleGemmPipelineAgBgCrCompV3<PipelineProblem>,
+                    QuantPipelineFor<GemmConfig,
+                                     ck_tile::QuantType::BQuantGrouped,
+                                     ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>,
                 ck_tile::WPQuantBPipelineAgBgCrV2<PipelineProblem>>;
 
             // clang-format off

@@ -38,3 +38,22 @@ TYPED_TEST(TestCkTileGemmTensorQuant, AllPipelines)
 {
     this->run_test_with_validation(1024, 1024, 1024);
 }
+
+// Group-quant ops on the gfx1250 pipelines. Tuple format as above; the quant layout is B's.
+template <typename Config>
+using BQuantFp8Rcr = std::tuple<RowMajor,
+                                ColumnMajor,
+                                RowMajor,
+                                ColumnMajor,
+                                FP8,
+                                FP8,
+                                float,
+                                Half,
+                                BQuantGrouped,
+                                Config,
+                                GroupSize1D_128>;
+
+using BQuantPipelines = ::testing::Types<BQuantFp8Rcr<GemmConfigCompAsync>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmBQuant, BQuantPipelines);
+TYPED_TEST(TestCkTileGemmBQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
