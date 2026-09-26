@@ -18,6 +18,29 @@ To find the complete list of operations, run the following command:
 ```bash
 find profiler/src -name "profile_*.cpp" | sed 's|profiler/src/profile_||' | sed 's|.cpp||' | sort
 ```
+
+### gfx1250 MIOpen-facing convolution subset
+
+Build `ckProfiler` without `MIOPEN_REQ_LIBS_ONLY`: that option disables the profiler target. The
+profiler-only `CK_PROFILER_MIOPEN_LAYOUTS_ONLY` option instead links the required 2D NHWGC and
+3D NDHWGC grouped forward, backward-data, and backward-weight instance libraries, plus the
+explicit-GEMM backward-weight competitors. It accepts FP32, FP16, and BF16 in this example.
+Set `ROCM_PATH` to the desired ROCm installation before configuring.
+
+```bash
+cmake -S . -B build/gfx1250-miopen-profiler -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_COMPILER="$ROCM_PATH/bin/hipcc" -DCMAKE_PREFIX_PATH="$ROCM_PATH" \
+  -DGPU_TARGETS=gfx1250 '-DDTYPES=fp16;bf16;fp32' \
+  -DMIOPEN_REQ_LIBS_ONLY=OFF -DCK_PROFILER_MIOPEN_LAYOUTS_ONLY=ON \
+  -DBUILD_CK_PROFILER=ON -DBUILD_CK_EXAMPLES=OFF -DBUILD_TESTING=OFF
+cmake --build build/gfx1250-miopen-profiler --target ckProfiler -j 24
+```
+
+Only `grouped_conv_fwd`, `grouped_conv_bwd_data`, and `grouped_conv_bwd_weight` are available in
+this build. Enumerate candidates with `--list-instances`; `--instance` indexes the supported
+candidates for that shape, not a stable factory index. Use the operation's time flag `1` when
+comparing complete invocation latency. This mode builds CK candidates, not a MIOpen plugin.
+
 ## Profiler GEMM UNIVERSAL kernels
 ```bash
 # arg1: tensor operation (gemm_universal: Universal GEMM)

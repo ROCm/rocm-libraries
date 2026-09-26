@@ -37,12 +37,17 @@ static void print_helper_msg()
         << "arg1: tensor operation (" OP_NAME ": " OP_DESC ")\n"
         << "arg2: data type (0: Output fp32, Weight fp32, Input fp32\n"
         << "                 1: Output fp16, Weight fp16, Input fp16\n"
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         << "                 2: Output bf16, Weight bf16, Input bf16\n"
         << "                 3: Output fp32, Weight fp32, Input fp32, Compute tf32)\n"
         << "arg3: tensor layout (0: Output[G, N, Ho, Wo, C], Weight[G, K, Y, X, C], Input[G, N, Hi, Wi, K]\n"
         << "                     1: Output[N, Ho, Wo, G, C], Weight[G, K, Y, X, C], Input[N, Hi, Wi, G, K])\n"
         << "                     2: Output[N, G, C, Ho, Wo], Weight[G, K, Y, X, C], Input[N, G, K, Hi, Wi])\n"
         << "                     3: Output[N, G, C, Ho, Wo], Weight[G, K, C, Y, X], Input[N, G, K, Hi, Wi])\n"
+#else
+        << "                 2: Output bf16, Weight bf16, Input bf16)\n"
+        << "arg3: tensor layout (1: Output[N, Ho, Wo, G, C], Weight[G, K, Y, X, C], Input[N, Hi, Wi, G, K])\n"
+#endif
         << "arg4: verification (0: no, 1: yes)\n"
         << "arg5: initialization (0: no init, 1: integer value, 2: decimal value)\n"
         << "arg6: print tensor value (0: no; 1: yes)\n"
@@ -55,7 +60,7 @@ static void print_helper_msg()
     // clang-format on
 }
 
-void print_bwd_data_instances(ConvDataType data_type,
+bool print_bwd_data_instances(ConvDataType data_type,
                               ConvLayout layout,
                               ck::index_t num_dim_spatial)
 {
@@ -92,6 +97,7 @@ void print_bwd_data_instances(ConvDataType data_type,
                                                 PassThrough,
                                                 PassThrough,
                                                 ComputeType>();
+        return true;
     };
 
     constexpr auto I2 = ck::Number<2>{};
@@ -100,13 +106,16 @@ void print_bwd_data_instances(ConvDataType data_type,
     using F32  = float;
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     using TF32 = ck::tf32_t;
+#endif
 
     using namespace ck::tensor_layout::convolution;
     using namespace ck::profiler;
 
     if(num_dim_spatial == 2)
     {
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(layout == ConvLayout::GNHWC_GKYXC_GNHWK)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -131,6 +140,9 @@ void print_bwd_data_instances(ConvDataType data_type,
             }
         }
         else if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#else
+        if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#endif
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
@@ -147,12 +159,15 @@ void print_bwd_data_instances(ConvDataType data_type,
                 return print_available_instances(
                     I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
                 return print_available_instances(
                     I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, TF32{});
             }
+#endif
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -199,9 +214,11 @@ void print_bwd_data_instances(ConvDataType data_type,
                     I2, NGCHW{}, GKCYX{}, NGKHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
+#endif
     }
     else if(num_dim_spatial == 3)
     {
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(layout == ConvLayout::GNHWC_GKYXC_GNHWK)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -226,6 +243,9 @@ void print_bwd_data_instances(ConvDataType data_type,
             }
         }
         else if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#else
+        if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#endif
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
@@ -242,12 +262,15 @@ void print_bwd_data_instances(ConvDataType data_type,
                 return print_available_instances(
                     I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
                 return print_available_instances(
                     I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, TF32{});
             }
+#endif
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -294,9 +317,11 @@ void print_bwd_data_instances(ConvDataType data_type,
                     I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
+#endif
     }
 
     std::cout << "[CK_PROFILER] This data_type & layout is not implemented" << std::endl;
+    return false;
 }
 
 } // namespace
@@ -309,8 +334,12 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
         const auto layout                 = static_cast<ConvLayout>(std::stoi(argv[3]));
         const ck::index_t num_dim_spatial = static_cast<ck::index_t>(std::stoi(argv[4]));
 
+#ifdef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
+        return print_bwd_data_instances(data_type, layout, num_dim_spatial) ? 0 : 1;
+#else
         print_bwd_data_instances(data_type, layout, num_dim_spatial);
         return 0;
+#endif
     }
     // Parse optional named arguments first
     ck::index_t instance_index = -1;
@@ -350,7 +379,9 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
     using F32  = float;
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     using TF32 = ck::tf32_t;
+#endif
 
     using namespace ck::tensor_layout::convolution;
 
@@ -398,6 +429,7 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
 
     if(num_dim_spatial == 2)
     {
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(layout == ConvLayout::GNHWC_GKYXC_GNHWK)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -418,6 +450,9 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
             }
         }
         else if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#else
+        if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#endif
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
@@ -431,11 +466,14 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
             {
                 return profile(I2, NHWGK{}, GKYXC{}, NHWGC{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
                 return profile(I2, NHWGK{}, GKYXC{}, NHWGC{}, F32{}, F32{}, F32{}, TF32{});
             }
+#endif
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -474,9 +512,11 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
                 return profile(I2, NGKHW{}, GKCYX{}, NGCHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
+#endif
     }
     else if(num_dim_spatial == 3)
     {
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(layout == ConvLayout::GNHWC_GKYXC_GNHWK)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -497,6 +537,9 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
             }
         }
         else if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#else
+        if(layout == ConvLayout::NHWGC_GKYXC_NHWGK)
+#endif
         {
             if(data_type == ConvDataType::F32_F32_F32)
             {
@@ -510,11 +553,14 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
             {
                 return profile(I3, NDHWGK{}, GKZYXC{}, NDHWGC{}, BF16{}, BF16{}, BF16{}, BF16{});
             }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
             else if(data_type == ConvDataType::F32_F32_F32_TF32)
             {
                 return profile(I3, NDHWGK{}, GKZYXC{}, NDHWGC{}, F32{}, F32{}, F32{}, TF32{});
             }
+#endif
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         else if(layout == ConvLayout::NGCHW_GKYXC_NGKHW)
         {
             if(data_type == ConvDataType::F32_F32_F32)
@@ -553,6 +599,7 @@ int profile_grouped_conv_bwd_data(int argc, char* argv[])
                 return profile(I3, NGKDHW{}, GKCZYX{}, NGCDHW{}, F32{}, F32{}, F32{}, TF32{});
             }
         }
+#endif
     }
 
     std::cout << "this data_type & layout is not implemented" << std::endl;

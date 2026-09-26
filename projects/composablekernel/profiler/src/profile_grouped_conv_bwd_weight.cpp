@@ -112,19 +112,24 @@ void print_bwd_weight_instances(ConvDataType data_type,
                                                   ComputeTypeB>();
     };
 
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     constexpr auto I1 = ck::Number<1>{};
+#endif
     constexpr auto I2 = ck::Number<2>{};
     constexpr auto I3 = ck::Number<3>{};
 
     using F32  = float;
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     using F8   = ck::f8_t;
     using BF8  = ck::bf8_t;
     using TF32 = ck::tf32_t;
+#endif
 
     using namespace ck::tensor_layout::convolution;
 
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     if(num_dim_spatial == 1 && layout == ConvLayout::GNHWC_GKYXC_GNHWK)
     {
         if(data_type == ConvDataType::F32_F32_F32)
@@ -173,6 +178,7 @@ void print_bwd_weight_instances(ConvDataType data_type,
                 I2, GNHWC{}, GKYXC{}, GNHWK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
     }
+#endif
     if(num_dim_spatial == 2 && layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
         if(data_type == ConvDataType::F32_F32_F32)
@@ -185,23 +191,28 @@ void print_bwd_weight_instances(ConvDataType data_type,
             return print_available_instances(
                 I2, NHWGC{}, GKYXC{}, NHWGK{}, F16{}, F16{}, F16{}, F16{}, F16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(data_type == ConvDataType::BF16_F32_BF16)
         {
             // fp32 atomic add is used for weight tensor in bf16 kernel
             return print_available_instances(
                 I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, F32{}, BF16{}, BF16{}, BF16{});
         }
+#endif
         if(data_type == ConvDataType::BF16_BF16_BF16)
         {
             return print_available_instances(
                 I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, BF16{}, BF16{}, BF16{}, BF16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         else if(data_type == ConvDataType::F32_F32_F32_TF32)
         {
             return print_available_instances(
                 I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
+#endif
     }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     else if(num_dim_spatial == 2 && layout == ConvLayout::NGCHW_GKYXC_NGKHW)
     {
         if(data_type == ConvDataType::F16_F16_F16)
@@ -268,6 +279,7 @@ void print_bwd_weight_instances(ConvDataType data_type,
                 I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
     }
+#endif
     if(num_dim_spatial == 3 && layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
         if(data_type == ConvDataType::F32_F32_F32)
@@ -280,17 +292,20 @@ void print_bwd_weight_instances(ConvDataType data_type,
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F16{}, F16{}, F16{}, F16{}, F16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(data_type == ConvDataType::BF16_F32_BF16)
         {
             // fp32 atomic add is used for weight tensor in bf16 kernel
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, F32{}, BF16{}, BF16{}, BF16{});
         }
+#endif
         if(data_type == ConvDataType::BF16_BF16_BF16)
         {
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, BF16{}, BF16{}, BF16{}, BF16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(data_type == ConvDataType::F16_F16_F16_BF8_F8)
         {
             return print_available_instances(
@@ -306,7 +321,9 @@ void print_bwd_weight_instances(ConvDataType data_type,
             return print_available_instances(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
+#endif
     }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     else if(num_dim_spatial == 3 && layout == ConvLayout::NGCHW_GKYXC_NGKHW)
     {
         if(data_type == ConvDataType::F16_F16_F16)
@@ -343,6 +360,7 @@ void print_bwd_weight_instances(ConvDataType data_type,
                 I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
     }
+#endif
 
     std::cout << "[CK_PROFILER] This data_type & layout is not implemented." << std::endl;
 }
@@ -356,6 +374,16 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
         const auto data_type              = static_cast<ConvDataType>(std::stoi(argv[2]));
         const auto layout                 = static_cast<ConvLayout>(std::stoi(argv[3]));
         const ck::index_t num_dim_spatial = static_cast<ck::index_t>(std::stoi(argv[4]));
+#ifdef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
+        if((num_dim_spatial != 2 && num_dim_spatial != 3) ||
+           layout != ConvLayout::NHWGC_GKYXC_NHWGK ||
+           (data_type != ConvDataType::F32_F32_F32 && data_type != ConvDataType::F16_F16_F16 &&
+            data_type != ConvDataType::BF16_BF16_BF16))
+        {
+            std::cout << "[CK_PROFILER] This data_type & layout is not implemented." << std::endl;
+            return 1;
+        }
+#endif
 
         print_bwd_weight_instances(data_type, layout, num_dim_spatial);
         return 0;
@@ -398,13 +426,17 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
     using F32  = float;
     using F16  = ck::half_t;
     using BF16 = ck::bhalf_t;
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     using F8   = ck::f8_t;
     using BF8  = ck::bf8_t;
     using TF32 = ck::tf32_t;
+#endif
 
     using namespace ck::tensor_layout::convolution;
 
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     constexpr auto I1 = ck::Number<1>{};
+#endif
     constexpr auto I2 = ck::Number<2>{};
     constexpr auto I3 = ck::Number<3>{};
 
@@ -451,6 +483,7 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
         return pass ? 0 : 1;
     };
 
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     if(num_dim_spatial == 1 && layout == ConvLayout::GNHWC_GKYXC_GNHWK)
     {
         if(data_type == ConvDataType::F32_F32_F32)
@@ -491,6 +524,7 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
             return profile(I2, GNHWC{}, GKYXC{}, GNHWK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
     }
+#endif
     if(num_dim_spatial == 2 && layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
         if(data_type == ConvDataType::F32_F32_F32)
@@ -501,20 +535,25 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
         {
             return profile(I2, NHWGC{}, GKYXC{}, NHWGK{}, F16{}, F16{}, F16{}, F16{}, F16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(data_type == ConvDataType::BF16_F32_BF16)
         {
             // fp32 atomic add is used for weight tensor in bf16 kernel
             return profile(I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, F32{}, BF16{}, BF16{}, BF16{});
         }
+#endif
         if(data_type == ConvDataType::BF16_BF16_BF16)
         {
             return profile(I2, NHWGC{}, GKYXC{}, NHWGK{}, BF16{}, BF16{}, BF16{}, BF16{}, BF16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         else if(data_type == ConvDataType::F32_F32_F32_TF32)
         {
             return profile(I2, NHWGC{}, GKYXC{}, NHWGK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
+#endif
     }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     else if(num_dim_spatial == 2 && layout == ConvLayout::NGCHW_GKYXC_NGKHW)
     {
         if(data_type == ConvDataType::F16_F16_F16)
@@ -571,6 +610,7 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
             return profile(I3, GNDHWC{}, GKZYXC{}, GNDHWK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
     }
+#endif
     if(num_dim_spatial == 3 && layout == ConvLayout::NHWGC_GKYXC_NHWGK)
     {
         if(data_type == ConvDataType::F32_F32_F32)
@@ -581,16 +621,19 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
         {
             return profile(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F16{}, F16{}, F16{}, F16{}, F16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(data_type == ConvDataType::BF16_F32_BF16)
         {
             // fp32 atomic add is used for weight tensor in bf16 kernel
             return profile(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, F32{}, BF16{}, BF16{}, BF16{});
         }
+#endif
         if(data_type == ConvDataType::BF16_BF16_BF16)
         {
             return profile(
                 I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, BF16{}, BF16{}, BF16{}, BF16{}, BF16{});
         }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
         if(data_type == ConvDataType::F16_F16_F16_BF8_F8)
         {
             return profile(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F16{}, F16{}, F16{}, BF8{}, F8{});
@@ -604,7 +647,9 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
         {
             return profile(I3, NDHWGC{}, GKZYXC{}, NDHWGK{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
+#endif
     }
+#ifndef CK_PROFILER_MIOPEN_LAYOUTS_ONLY
     else if(num_dim_spatial == 3 && layout == ConvLayout::NGCHW_GKYXC_NGKHW)
     {
         if(data_type == ConvDataType::F16_F16_F16)
@@ -637,6 +682,7 @@ int profile_grouped_conv_bwd_weight(int argc, char* argv[])
             return profile(I3, NGCDHW{}, GKCZYX{}, NGKDHW{}, F32{}, F32{}, F32{}, TF32{}, TF32{});
         }
     }
+#endif
 
     std::cout << "this data_type & layout is not implemented" << std::endl;
 
