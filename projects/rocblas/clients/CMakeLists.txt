@@ -238,6 +238,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
           
           if(SYSTEM_BLAS_LIB)
             set(BLAS_LIBRARY ${SYSTEM_BLAS_LIB})
+            # Distro BLAS packages are LP64. Without this the flag stays false from the
+            # reset above and the 64-bit reference warning is never emitted, so the
+            # ILP64 stress tests fail as silent numeric mismatches.
+            set(WARN_NOT_ILP64_PREFERRED true)
             message(STATUS "Found system BLAS library at: ${SYSTEM_BLAS_LIB}")
             
             # Try to get include dirs from pkg-config if available
@@ -286,8 +290,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       endif()
       set( ROCBLAS_REFERENCE_BLAS_DEFINES "LAPACK_ILP64" "USE64BITINT" "OPENBLAS_USE64BITINT" )
     else()
+      # Generic find_package(BLAS) with no BLA_SIZEOF_INTEGER, i.e. LP64.
       find_package( BLAS REQUIRED )
       set( BLAS_LIBRARY "${BLAS_LIBRARIES}" )
+      set( WARN_NOT_ILP64_PREFERRED true )
     endif()
   else() # WIN32
     unset( ROCBLAS_REFERENCE_BLAS_DEFINES )
@@ -362,7 +368,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   message(STATUS "Linking reference BLAS LIB: ${BLAS_LIBRARY}")
 
   if ( WARN_NOT_ILP64_PREFERRED )
-    message( WARNING "Using ${BLAS_LIBRARY} as reference library, 64-bit tests may fail. Test suite should be run with --gtest_filter=-*stress*")
+    message( WARNING "Using ${BLAS_LIBRARY} as reference library, 64-bit tests may fail. Test suite should be run with --gtest_filter=-*stress*ILP64*")
   endif()
 
   # Find the package AMD SMI

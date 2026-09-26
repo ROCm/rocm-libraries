@@ -140,7 +140,7 @@ If you download and run the full Windows AOCL installer into the default locatio
    If you use OpenBLAS with the ``vcpkg`` version
    from ``rdeps.py`` instead of the AOCL reference library, you might experience ``rocblas-test`` stress test failures due to 32-bit integer overflow
    on the host reference code. If this occurs, exclude the ILP64 stress tests
-   using the command line argument ``--gtest_filter=-*stress*``.
+   using the command line argument ``--gtest_filter=-*stress*ILP64*``.
 
 
 Building the library dependencies and library

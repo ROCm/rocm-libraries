@@ -166,8 +166,11 @@ to specify a custom AOCL location, or manually install AOCL from
 
 .. note::
 
-   If using a BLAS library without ILP64 support, some stress tests might fail.
-   To exclude these tests, use the ``--gtest_filter=-*stress*`` option.
+   If using a BLAS library without ILP64 support, the ILP64 stress tests might fail, because
+   the reference BLAS narrows their 64-bit sizes and increments to 32 bits and so computes a
+   different operation. To exclude those tests, use the ``--gtest_filter=-*stress*ILP64*``
+   option. Prefer ``-*stress*ILP64*`` over ``-*stress*``, which also drops stress tests that
+   do not depend on the reference integer width.
 
 Building the library dependencies and library
 ---------------------------------------------

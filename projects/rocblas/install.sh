@@ -634,7 +634,7 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
     - CI/Docker: Pre-install AOCL 5.2+ for faster builds, or let install.sh build it automatically.
     - CMake is automatically installed when needed - no --cmake_install flag required!
     - AOCL build takes ~5-10 minutes on first run; subsequent builds reuse existing build.
-    - Without ILP64 support, stress tests may fail: use --gtest_filter=-*stress* when testing.
+    - Without ILP64 support, stress tests may fail: use --gtest_filter=-*stress*ILP64* when testing.
 
 EOF
 }
