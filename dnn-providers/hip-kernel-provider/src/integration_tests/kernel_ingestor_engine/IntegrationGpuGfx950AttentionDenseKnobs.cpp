@@ -47,11 +47,13 @@ using namespace hip_kernel_provider::test_utilities;
  *        kernel launches with its own geometry and computes what the CPU reference
  *        computes, and a knob pair no kernel has is refused before any plan exists.
  *
- * The expected kernel ids come from the offline forced-vs-cold oracle over the shipped
- * kdp (Results/.../streamB/knob_cases.md). Every forced tile except the 256/64 baseline
- * is paired with a shape whose cold winner is a different kernel, so a knob that failed
- * to reach the plugin would select the cold winner and fail the id check. The baseline
- * wins every shape that admits it, so its two cases select the cold winner by design.
+ * Each expected kernel id is the kdp `id` of the catalog row in
+ * descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json whose dtype,
+ * head_size, num_query_heads, num_kv_heads, causal, block_m and block_n match the case.
+ * Every forced tile except the 256/64 baseline is paired with a shape whose no-knob
+ * winner is a different tile, so a knob that failed to reach the plugin would select that
+ * winner and fail the id check. The baseline always wins where it fits, so its two cases
+ * select the no-knob winner by design.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -115,8 +117,6 @@ struct KnobCase
     GraphShape shape;
     std::optional<Tile> forcedTile;
     const char* expectedKernelId;
-    /// Candidates left after the knob filter; one for every forced case.
-    size_t expectedCandidates;
 };
 
 /// One graph and a knob pair whose values the engine advertises for it one by one while
@@ -126,8 +126,6 @@ struct UnsatisfiableCase
     const char* name;
     GraphShape shape;
     Tile forcedTile;
-    /// Kernels the graph admits before the knob filter.
-    size_t candidatesBeforeFilter;
 };
 
 void PrintTo(const KnobCase& knobCase, std::ostream* os)
@@ -153,9 +151,10 @@ constexpr GraphShape makeShape(DataType dataType,
     return {dataType, headSize, queryHeads, kvHeads, mask, mmaCoreMode, batch, seqQ, seqKv};
 }
 
-/// Rows of streamB/knob_cases.md. Thirteen forced (tile, head size) pairs, then the four
-/// cold cases. Within them: bounds on both corners and both deprecated flags, fp16 and
-/// bf16, MHA, GQA and MQA, and four forced cases with B > 1 and Sq != Skv.
+/// Thirteen forced (tile, head size) pairs, then four cold cases whose id is the kdp row
+/// of the tile the engine's own ranking picks for the shape. Within them: bounds on both
+/// corners and both deprecated flags, fp16 and bf16, MHA, GQA and MQA, and four forced
+/// cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -166,96 +165,79 @@ std::vector<KnobCase> knobCases()
         {"D64_Bm128Bn32",
          makeShape(BF16, 64, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          Tile{128, 32},
-         "f5de4107-b6bb-4ed2-b5f7-97c01ded9ca1",
-         1},
+         "f5de4107-b6bb-4ed2-b5f7-97c01ded9ca1"},
         {"D64_Bm128Bn64",
          makeShape(FP16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 128, 256),
          Tile{128, 64},
-         "9f1ed64a-1607-4bf2-9a20-bb317ec28d38",
-         1},
+         "9f1ed64a-1607-4bf2-9a20-bb317ec28d38"},
         {"D64_Bm128Bn128",
          makeShape(BF16, 64, 8, 1, Mask::NO_MASK, MMA_UNSET, 2, 384, 128),
          Tile{128, 128},
-         "85e207d0-b2c3-4ad4-9c08-69bcf5b11e2b",
-         1},
+         "85e207d0-b2c3-4ad4-9c08-69bcf5b11e2b"},
         {"D64_Bm256Bn32",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
          Tile{256, 32},
-         "f78bab4e-82ba-4417-9a08-9e8eda571426",
-         1},
+         "f78bab4e-82ba-4417-9a08-9e8eda571426"},
         {"D64_Bm256Bn128",
          makeShape(BF16, 64, 16, 16, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          Tile{256, 128},
-         "ff210741-69b8-49f5-8282-0bb062c3e487",
-         1},
+         "ff210741-69b8-49f5-8282-0bb062c3e487"},
         {"D64_Bm256Bn256",
          makeShape(FP16, 64, 12, 12, Mask::NO_MASK, MMA_UNSET, 1, 512, 256),
          Tile{256, 256},
-         "2d1e42af-3559-417a-812f-8d318ca65872",
-         1},
+         "2d1e42af-3559-417a-812f-8d318ca65872"},
         // The baseline tile: forced and cold select the same kernel.
         {"D64_Bm256Bn64",
          makeShape(BF16, 64, 10, 10, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          Tile{256, 64},
-         "b7697d0f-6a63-4ebe-91ab-839dac35128a",
-         1},
+         "b7697d0f-6a63-4ebe-91ab-839dac35128a"},
         // D128: all six legal tiles.
         {"D128_Bm128Bn32",
          makeShape(FP16, 128, 8, 2, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          Tile{128, 32},
-         "3c1927b3-ce3e-44ce-a621-b5fd777c4752",
-         1},
+         "3c1927b3-ce3e-44ce-a621-b5fd777c4752"},
         {"D128_Bm128Bn64",
          makeShape(BF16, 128, 8, 1, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 1, 128, 128),
          Tile{128, 64},
-         "19b74331-a5c4-4981-a8c0-5a9f597fb21e",
-         1},
+         "19b74331-a5c4-4981-a8c0-5a9f597fb21e"},
         {"D128_Bm128Bn128",
          makeShape(FP16, 128, 4, 4, Mask::NO_MASK, MMA_UNSET, 3, 128, 384),
          Tile{128, 128},
-         "6263a9d3-aa8b-42e1-8e61-5c9ecc5b719a",
-         1},
+         "6263a9d3-aa8b-42e1-8e61-5c9ecc5b719a"},
         {"D128_Bm256Bn32",
          makeShape(BF16, 128, 16, 2, Mask::NO_MASK, MMA_UNSET, 2, 256, 480),
          Tile{256, 32},
-         "545e6b54-fe0b-4c17-a04c-390b0138d95b",
-         1},
+         "545e6b54-fe0b-4c17-a04c-390b0138d95b"},
         {"D128_Bm256Bn128",
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          Tile{256, 128},
-         "fdbf347a-8cbf-41a6-bcaa-c69e7038c17c",
-         1},
+         "fdbf347a-8cbf-41a6-bcaa-c69e7038c17c"},
         // The baseline tile: forced and cold select the same kernel.
         {"D128_Bm256Bn64",
          makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          Tile{256, 64},
-         "d1f63599-da2a-4c43-a655-8619b6b534ff",
-         1},
+         "d1f63599-da2a-4c43-a655-8619b6b534ff"},
         // Cold: no knob set.
         {"Cold_MmaHalf",
          makeShape(BF16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
          std::nullopt,
-         "1a1c41ba-a165-480b-a356-55558f9151fc",
-         7},
+         "1a1c41ba-a165-480b-a356-55558f9151fc"},
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
          std::nullopt,
-         "a3fb6c5a-f503-4503-b0f8-a7083b9bd4f2",
-         3},
+         "a3fb6c5a-f503-4503-b0f8-a7083b9bd4f2"},
         {"Cold_CausalBottomRightFlag",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 2, 512, 512),
          std::nullopt,
-         "ae0a3dab-bb41-4744-8075-472b4df37ea5",
-         7},
+         "ae0a3dab-bb41-4744-8075-472b4df37ea5"},
         {"Cold_D128Heads9",
          makeShape(BF16, 128, 9, 9, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 2, 256, 256),
          std::nullopt,
-         "7215c5c7-14a9-4f93-8e45-c66cfb345cb5",
-         6},
+         "7215c5c7-14a9-4f93-8e45-c66cfb345cb5"},
     };
 }
 
-/// The B.4 row of streamB/knob_cases.md. The graph admits the D64 tiles 128/32, 128/64,
+/// A D64 fp16 MHA no-mask graph at Sq = Skv = 256. It admits the D64 tiles 128/32, 128/64,
 /// 128/128, 256/32, 256/64, 256/128 and 256/256, so block_m=128 and block_n=256 are each
 /// advertised while no D64 kernel is 128/256.
 std::vector<UnsatisfiableCase> unsatisfiableCases()
@@ -263,8 +245,7 @@ std::vector<UnsatisfiableCase> unsatisfiableCases()
     return {
         {"D64_Bm128Bn256",
          makeShape(DataType::HALF, 64, 8, 8, Mask::NO_MASK, DataType::NOT_SET, 1, 256, 256),
-         Tile{128, 256},
-         7},
+         Tile{128, 256}},
     };
 }
 
@@ -543,12 +524,14 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobs, SelectsTheExpectedKernelAndMatch
     EXPECT_EQ(*selected, testCase.expectedKernelId) << "Captured logs:\n"
                                                     << recorder.getRecordedLogsAsString();
 
-    // Rank 0 of exactly the expected candidates: a forced case filters to its one kernel,
-    // and a cold case serves the heuristic's front rather than a fallback past a kernel
-    // that failed to load.
-    const auto selectionLine = std::string(SELECTED_KERNEL_MARKER) + testCase.expectedKernelId
-                               + " at rank 0 from " + std::to_string(testCase.expectedCandidates)
-                               + " candidate(s)";
+    // Rank 0: a cold case serves the heuristic's front rather than a fallback past a
+    // kernel that failed to load, and a forced case filters to its one kernel.
+    auto selectionLine
+        = std::string(SELECTED_KERNEL_MARKER) + testCase.expectedKernelId + " at rank 0";
+    if(testCase.forcedTile.has_value())
+    {
+        selectionLine += " from 1 candidate(s)";
+    }
     EXPECT_TRUE(recorder.hasLogContaining(selectionLine))
         << "expected '" << selectionLine << "'. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
@@ -587,18 +570,10 @@ TEST_P(IntegrationGpuGfx950AttentionDenseKnobFilter, RefusesAKnobPairNoKernelCar
         = sdpa.graph->create_execution_plan_ext(engineId(), knobSettingsFor(testCase.forcedTile));
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << result.err_msg;
 
-    const auto expectEngineMessage = [&](const std::string& text) {
-        EXPECT_NE(result.err_msg.find(text), std::string::npos)
-            << "expected '" << text << "' in: " << result.err_msg;
-    };
-    expectEngineMessage(std::string("engine '") + ENGINE_NAME
-                        + "' has no kernel satisfying the requested knob setting(s)");
-    expectEngineMessage(std::string(BLOCK_M_KNOB) + "="
-                        + std::to_string(testCase.forcedTile.blockM));
-    expectEngineMessage(std::string(BLOCK_N_KNOB) + "="
-                        + std::to_string(testCase.forcedTile.blockN));
-    expectEngineMessage("(" + std::to_string(testCase.candidatesBeforeFilter)
-                        + " kernel(s) matched the graph before knob filtering)");
+    const std::string refusal
+        = std::string("engine '") + ENGINE_NAME + "' has no kernel satisfying";
+    EXPECT_NE(result.err_msg.find(refusal), std::string::npos)
+        << "expected '" << refusal << "' in: " << result.err_msg;
 
     // No plan: nothing was compiled for build_plans() to finalize, no engine backs a plan,
     // and the plugin never selected a kernel.

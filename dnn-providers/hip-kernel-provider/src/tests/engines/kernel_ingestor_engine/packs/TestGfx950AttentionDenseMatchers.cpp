@@ -1665,10 +1665,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyValueExtentsOf2To97Bytes)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesTheGraphMatchGateCounterexample)
 {
-    // The review's counterexample: packed BSHD, bf16, H8, D128, unmasked, Q {2^20, 8,
-    // 2^34, 128} and K/V {2^20, 8, 2^33, 128}. Every stride fits, and both bound
-    // products are exactly 2^64, which wraps to 0. Every length is a multiple of every
-    // tile, so unchecked the whole catalog would admit it.
+    // A graph whose bound products wrap to 0 is declined. Packed BSHD, bf16, H8, D128,
+    // unmasked, Q {2^20, 8, 2^34, 128} and K/V {2^20, 8, 2^33, 128}: every stride fits,
+    // and both bound products are exactly 2^64, which wraps to 0. Every length is a
+    // multiple of every tile, so unchecked the whole catalog would admit it.
     GraphSpec spec;
     spec.batch = int64_t{1} << 20;
     spec.numQueryHeads = 8;
@@ -1915,7 +1915,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
     // A graph with both left_bound and a non-zero right_bound is a bidirectional
     // window. The gfx950 kernel is hard-causal (upper mask only) and has no
     // right-bound field, so serving it would produce silent wrong numerics.
-    // The review's scenario: left=127, right=64. No windowed variant ships.
+    // Here left=127, right=64; no windowed variant ships, so every kernel declines it.
     GraphSpec spec;
     spec.leftBound = 127;
     spec.rightBound = 64;
