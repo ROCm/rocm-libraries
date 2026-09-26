@@ -10,7 +10,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity, GRPlacementStrategy)
+      ReadGranularity, GRPlacementStrategy, plsinTailOwnTiles)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, ceilDivide, plsinDebugEnv, plsinStagingEligible
@@ -1404,11 +1404,46 @@ def mainLoop(writer, kernel):
   # blocks rather than accepting the one-partition candidate that always fits.
   minParts = max(1, int(plsinDebugEnv(
       "TENSILE_PLSIN_MIN_PARTITIONS", "4" if plsinStagingEligible(kernel) else "1")))
+  wider = []
   if minParts > 1 and pgr != 0 and plsinStagingEligible(kernel):
     def _stageable(sizeM, sizeN):
       return sizeM == M and N % sizeN == 0 and ceilDivide(N, sizeN) >= minParts
     wider = [c for c in candidates if _stageable(*c)]
-    if wider:
+  # TENSILE_PLSIN_TAIL_OWN_TILES moves the split off the mainloop and onto the
+  # four-deep tail, which is the only body that stores. The mainloop then takes
+  # the one-partition candidate and comes out identical to baseline. Confined to
+  # kernels the staged store could actually cut: elsewhere there is no tail to
+  # carry the split, and forcing one costs registers for nothing.
+  # A stageable candidate is not enough on its own. Tiles above 256 take the
+  # Lend path, and _plsinStagedStoreCount returns 0 for any lending store, so
+  # those kernels would give up the mainloop split without staging anything.
+  lendStore = (kernel["MacroTile0"] > 256 or kernel["MacroTile1"] > 256
+               or kernel.get("PLSINStoreMode", "Weave") == "Lend"
+               or plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0")
+  tailOwnTiles = plsinTailOwnTiles() and bool(wider) and not lendStore
+  tailPartitionSizeN = wider[0][1] if tailOwnTiles else 0
+  # The N split floors at 4 partitions: the MX scale read granularity forbids a
+  # partition narrower than 2 MFMA tiles, and N is 8. Splitting M as well is the
+  # only way to stage the store any finer, and it is what pulls the first store
+  # forward from 72 of the arm's 256 MFMAs to 40. It is not free -- an M split
+  # makes A and scale-A partition-varying, so their LDS reads are re-issued per
+  # partition.
+  #
+  # On at 4 M tiles per partition -- a 2x4 grid on MT256x256 -- for the tiles
+  # block scheduling is scoped to, and off everywhere else, so a geometry it has
+  # not been measured on keeps its shipped schedule. TENSILE_PLSIN_TAIL_PARTM
+  # overrides it; 0 restores the N-only split. 2 (a 4x4 grid) does not assemble:
+  # vgpr tile assignment stops converging.
+  _defaultPartM = "4" if plsinStagingEligible(kernel) else "0"
+  tailPartitionSizeM = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_PARTM", _defaultPartM)) \
+      if tailOwnTiles else 0
+  # Only split M when it divides evenly. An uneven split -- M=6 against a size of
+  # 4 gives [4,2] -- is worse than not splitting at all: _plsinStagedStoreCount
+  # requires uniform partition sizes, so the kernel would lose the N-only staging
+  # it has today and get nothing back. Silently dropping to no M split keeps it.
+  if tailPartitionSizeM and M % tailPartitionSizeM != 0:
+      tailPartitionSizeM = 0
+  if wider and not tailOwnTiles:
       candidates = wider
   for partSizeM, partSizeN in candidates:
       hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
@@ -1433,6 +1468,9 @@ def mainLoop(writer, kernel):
           pgl=kernel.get("PrefetchGL2", 0),
           directToVgprB=directToVgprB,
           blockSched=plsinStagingEligible(kernel),
+          tailOwnTiles=tailOwnTiles,
+          tailPartitionSizeN=tailPartitionSizeN,
+          tailPartitionSizeM=tailPartitionSizeM,
       )
 
       scheduler = LogicalScheduler(cfg)

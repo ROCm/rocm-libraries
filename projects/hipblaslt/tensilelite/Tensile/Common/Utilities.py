@@ -116,11 +116,28 @@ def plsinEarlyStoreTile(kernel) -> bool:
     """
     if not kernel.get("UseSubtileImpl"):
         return False
+    if not plsinSubtileTypes(kernel):
+        return False
     if kernel.get("PLSINStoreMode", "Weave") == "Lend":
         return False
     if plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0":
         return False
     return kernel["MacroTile0"] <= 256 and kernel["MacroTile1"] <= 256
+
+
+def plsinSubtileTypes(kernel) -> bool:
+    """Whether this kernel has the operand types the PLSIN store work was built for.
+
+    MXF4 in, bf16 out. The store reshaping reasons about a specific accumulator
+    and pack layout, and the register budget it spends is only available at this
+    combination: a bf16-input kernel of the same tile fills the VGPR file with
+    accumulators, so the same pack ring overflows it and the kernel cannot be
+    assembled. Tile scope alone does not separate the two, since both reach
+    MT256x256, so the types are checked as well.
+    """
+    pt = kernel["ProblemType"]
+    return pt["DataTypeA"].isFloat4() and pt["DataTypeB"].isFloat4() \
+        and pt["DestDataType"].isBFloat16()
 
 
 def plsinBlockSchedTile(kernel) -> bool:

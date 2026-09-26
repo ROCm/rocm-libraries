@@ -629,19 +629,32 @@ class GlobalWriteBatchWriter:
     needsBiasSavDrain = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
-    # SBarrier is only needed for multi-DU paths where ds_bpermute from one
-    # sub-iteration can alias LDS banks still being read by bias/SAV loads in
-    # a sibling wave. Single-DU paths (incl. the gfx950 permlane16 store) use
-    # per-element dscnt tracking in globalStoreWait() instead.
-    needsCrossWaveBarrier = needsBiasSavDrain and isMultiDU
+    # The store path can alias LDS banks a sibling wave is still reading for its
+    # bias/SAV loads. dscnt is per-wave, so globalStoreWait() cannot order that:
+    # single-DU paths need the barrier just as much as multi-DU ones.
+    #
+    # Every LDS op a store batch issues is a load: the bias/SAV staging is written
+    # before the store loop, never inside it. Readers cannot race readers, so the
+    # batches do not need fencing from each other. What needs fencing is the end
+    # of the store against whatever rewrites LDS next -- under StreamK the same
+    # workgroup goes back to the mainloop and restages A/B into that LDS while a
+    # sibling wave may still be reading bias/SAV -- so one barrier on the last
+    # batch covers it. Multi-DU emits its stores after the barrier and keeps the
+    # per-batch placement. The assert below holds the "loads only" premise.
+    isLastBatch = (self.batchIdx == self.numBatches - 1)
+    needsCrossWaveBarrier = needsBiasSavDrain and (isMultiDU or isLastBatch)
     if not isMultiDU:
       self._emitAdd(module)
     if needsCrossWaveBarrier:
-      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads (multi-DU only)"))
-      module.add(SBarrier(comment="sync waves before subtile paired stores (multi-DU only)"))
+      module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
+    if needsBiasSavDrain and not needsCrossWaveBarrier:
+      assert not any(type(i).__name__.startswith(("DSStore", "DsStore"))
+                     for i in module.flatitems()), \
+        "store batch wrote LDS; batches can no longer share one end-of-store barrier"
     # A WG computes its whole tile across all batches, so the last batch is where
     # the tile is done and every PUSH store of this WG has been issued.
     if self.kernel["ProblemType"]["FusedGemmA2A"] and self.batchIdx == self.numBatches - 1:
@@ -5329,14 +5342,16 @@ class GlobalWriteBatchWriter:
     return module
 
   def _emitPlsinStageBoundary(self, module: Module, element):
-    """Mark where this element's N group crosses into the next compute partition.
+    """Mark where this element crosses into the next compute partition.
 
     The marker is an empty Module that emits nothing; the scheduler cuts the
     finished store on it to build the per-partition stages.
     """
     tt1PerStage = getattr(self.parentWriter.states, "subtileStoreTt1PerStage", 0)
-    if not tt1PerStage:
+    tt0PerStage = getattr(self.parentWriter.states, "subtileStoreTt0PerStage", 0)
+    if not tt1PerStage or not tt0PerStage:
       return
+    numStagesM = max(1, getattr(self.parentWriter.states, "subtileStoreStagesM", 1))
     # The stage index may only advance. A cut is a relocation, so the pieces have to
     # stay in program order, and the element N groups are not globally monotone --
     # they run 0,1,..,7 and then restart, both within the batch sequence and across
@@ -5346,7 +5361,12 @@ class GlobalWriteBatchWriter:
     # accumulators, so the high-water mark lives on the writer state to survive the
     # per-batch rebuild of this object. Suppressed markers simply leave their stores
     # in the latest stage, which is always late enough to be correct.
-    stage = element[0] // tt1PerStage
+    #
+    # M fastest, matching _partition_tile_range's pi = piM + piN * numPartitionsM,
+    # because the stages are injected into the loop keyed by that pi. Under an
+    # M split the elements arrive p0,p1,p0,p1 within each N group and the second
+    # visit to p0 is the suppressed case above.
+    stage = element[1] // tt0PerStage + (element[0] // tt1PerStage) * numStagesM
     if stage <= self.parentWriter.states.subtileStoreStageHighWater:
       return
     self.parentWriter.states.subtileStoreStageHighWater = stage

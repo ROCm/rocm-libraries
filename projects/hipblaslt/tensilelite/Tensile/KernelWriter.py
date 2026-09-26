@@ -457,7 +457,9 @@ class StateValues:
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
   subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
   subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
+  subtileStoreStagesM: int               = 1       # of those, how many split M (1 = N-only split)
   subtileStoreTt1PerStage: int           = 0       # element-space N groups per stage (0 = not staging)
+  subtileStoreTt0PerStage: int           = 0       # element-space M groups per stage
   subtileStagedStoreSeam: Optional[int]  = None    # index of the store body within the fused-store module
   subtileStoreStageHighWater: int        = 0       # highest stage opened so far (survives per-batch writer rebuild)
   subtileScalarPackSlot: int             = 0       # rotating index into the unpaired-store pack ring
