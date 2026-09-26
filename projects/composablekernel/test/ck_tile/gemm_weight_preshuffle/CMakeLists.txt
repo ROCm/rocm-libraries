@@ -69,6 +69,6 @@ if(GPU_TARGETS MATCHES "gfx125")
         TestCkTileGemmPipelineWeightPreshuffleCompAsync
         KernelTypesWeightPreshuffleCompAsync
         wp_comp_async
-        -mllvm -enable-noalias-to-md-conversion=0
+        ${EXAMPLE_GEMM_COMPILE_COMPUTE_V4_OPTIONS}
     )
 endif()
