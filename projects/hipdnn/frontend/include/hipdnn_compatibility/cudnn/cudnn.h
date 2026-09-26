@@ -1,7 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN, used under the MIT license.
+// Declares identifiers matching the NVIDIA cuDNN C API, for source compatibility.
+//
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   samples/cpp/utils/helpers.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file cudnn.h

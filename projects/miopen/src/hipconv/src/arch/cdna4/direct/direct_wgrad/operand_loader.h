@@ -13,7 +13,7 @@
 #include "lds_layout.h"
 #include "types.h"
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv::cdna4::direct_wgrad
 {

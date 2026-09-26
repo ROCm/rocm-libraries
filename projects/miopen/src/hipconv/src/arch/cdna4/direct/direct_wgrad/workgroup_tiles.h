@@ -10,7 +10,7 @@
 #include "row_loader.h"
 #include "types.h"
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv::cdna4::direct_wgrad
 {
@@ -60,11 +60,19 @@ using DeltaRowLayout = RowLayout<buffer_cols(MFMA_K, cfg.block_k(), DELTA_LANE_B
                                  0>;
 
 template <Config cfg, hipconv::DataType DT>
-using SRowLoader =
-    RowLoader<SRowLayout<cfg>, ToType<DT>, cfg.waves_per_item(), cfg.waves_q, S_LANE_BYTES>;
+using SRowLoader = RowLoader<SRowLayout<cfg>,
+                             ToType<DT>,
+                             cfg.waves_per_item(),
+                             cfg.waves_q,
+                             S_LANE_BYTES,
+                             (cfg.rows_per_tile > 0)>;
 template <Config cfg, hipconv::DataType DT>
-using DeltaRowLoader =
-    RowLoader<DeltaRowLayout<cfg>, ToType<DT>, cfg.waves_per_item(), cfg.waves_q, DELTA_LANE_BYTES>;
+using DeltaRowLoader = RowLoader<DeltaRowLayout<cfg>,
+                                 ToType<DT>,
+                                 cfg.waves_per_item(),
+                                 cfg.waves_q,
+                                 DELTA_LANE_BYTES,
+                                 (cfg.rows_per_tile > 0)>;
 
 template <Config cfg, hipconv::DataType DT>
 using SRing = RowRing<ToType<DT>, cfg.row_buffers()>;
