@@ -57,8 +57,13 @@ def plsinTailOwnTiles() -> bool:
     which is what makes an unpartitioned (baseline) mainloop affordable: the
     mainloop needs A16/B16 and the tail A32/B4, so the larger body is 48 tiles
     rather than the 64 the merged layout asks for.
+
+    On by default: the alternative spans in the parent, which partitions the
+    mainloop, and that measured a 1.7% geomean loss against baseline (down to
+    0.951x) on the swapAB-swizzleA shapes. Spanning only in the sub-scheduler
+    leaves the mainloop byte-identical to baseline and measured 1.0038x.
     """
-    return plsinDebugEnv("TENSILE_PLSIN_TAIL_OWN_TILES", "0") != "0"
+    return plsinDebugEnv("TENSILE_PLSIN_TAIL_OWN_TILES", "1") != "0"
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
