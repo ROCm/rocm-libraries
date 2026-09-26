@@ -50,10 +50,10 @@ enum class Pipeline : std::uint8_t
     PreShuffleV1, // Weight preshuffle pipeline v1
     PreShuffleV2, // Weight preshuffle pipeline v2 (optimized)
     Wavelet,      // Wavelet pipeline (specialized math + load waves)
-    CompTdmV1,
-    CompTdmV2,
-    PreShuffleTdm,
-    CompAsync
+    CompAsync,    // Async global->LDS compute pipeline (always double-buffered)
+    CompTDMV1,    // Tensor Data Mover compute pipeline v1 (gfx1250 only)
+    CompTDMV2,    // Tensor Data Mover compute pipeline v2 (gfx1250 only, 4 waves)
+    PreShuffleTDM // Weight preshuffle pipeline, Tensor Data Mover (gfx1250 only)
 };
 
 /// Epilogue strategies for output processing
@@ -66,7 +66,7 @@ enum class Epilogue : std::uint8_t
     Bias,           // Bias addition
     Activation,     // Fused activation
     BiasActivation, // Fused bias + activation
-    Tdm             // TdmEpilogue
+    Tdm             // TdmEpilogue (Tensor Data Mover store, gfx1250 only)
 };
 
 /// Scheduler types for wave coordination
@@ -333,10 +333,10 @@ inline std::string to_string(Pipeline pipeline)
     case Pipeline::PreShuffleV1: return "preshufflev1";
     case Pipeline::PreShuffleV2: return "preshufflev2";
     case Pipeline::Wavelet: return "wavelet";
-    case Pipeline::CompTdmV1: return "comp_tdm_v1";
-    case Pipeline::CompTdmV2: return "comp_tdm_v2";
-    case Pipeline::PreShuffleTdm: return "preshuffle_tdm";
     case Pipeline::CompAsync: return "comp_async";
+    case Pipeline::CompTDMV1: return "comp_tdm";
+    case Pipeline::CompTDMV2: return "comp_tdm_v2";
+    case Pipeline::PreShuffleTDM: return "preshuffle_tdm";
     default: return "unknown";
     }
 }
@@ -364,14 +364,14 @@ inline Pipeline string_to_pipeline(const std::string& str)
         return Pipeline::PreShuffleV2;
     if(str == "wavelet")
         return Pipeline::Wavelet;
-    if(str == "comp_tdm_v1")
-        return Pipeline::CompTdmV1;
-    if(str == "comp_tdm_v2")
-        return Pipeline::CompTdmV2;
-    if(str == "preshuffle_tdm")
-        return Pipeline::PreShuffleTdm;
     if(str == "comp_async")
         return Pipeline::CompAsync;
+    if(str == "comp_tdm")
+        return Pipeline::CompTDMV1;
+    if(str == "comp_tdm_v2")
+        return Pipeline::CompTDMV2;
+    if(str == "preshuffle_tdm")
+        return Pipeline::PreShuffleTDM;
     return Pipeline::Mem; // Default
 }
 

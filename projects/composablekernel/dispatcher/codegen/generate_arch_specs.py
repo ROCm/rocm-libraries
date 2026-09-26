@@ -384,9 +384,9 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         "preshufflev2": "PreShuffleV2",
         "wavelet": "Wavelet",
         "comp_async": "CompAsync",
-        "comp_tdm_v1": "CompTdmV1",
-        "comp_tdm_v2": "CompTdmV2",
-        "preshuffle_tdm": "PreShuffleTdm",
+        "comp_tdm": "CompTDMV1",
+        "comp_tdm_v2": "CompTDMV2",
+        "preshuffle_tdm": "PreShuffleTDM",
     }
 
     def _lds_pipeline_switch(per_pipeline: Dict[str, int], indent: str) -> list:

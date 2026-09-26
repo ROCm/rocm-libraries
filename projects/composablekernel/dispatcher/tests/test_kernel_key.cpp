@@ -160,9 +160,9 @@ TEST(KernelKeyTest, Gfx1250PipelineIdentity)
 {
     const std::array<std::pair<const char*, Pipeline>, 5> pipelines = {{
         {"preshufflev2", Pipeline::PreShuffleV2},
-        {"comp_tdm_v1", Pipeline::CompTdmV1},
-        {"comp_tdm_v2", Pipeline::CompTdmV2},
-        {"preshuffle_tdm", Pipeline::PreShuffleTdm},
+        {"comp_tdm", Pipeline::CompTDMV1},
+        {"comp_tdm_v2", Pipeline::CompTDMV2},
+        {"preshuffle_tdm", Pipeline::PreShuffleTDM},
         {"comp_async", Pipeline::CompAsync},
     }};
     for(const auto& [name, pipeline] : pipelines)

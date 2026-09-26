@@ -184,9 +184,10 @@ class CommonTypeMappings:
         "compv4": "GemmPipelineAgBgCrCompV4",
         "compv5": "GemmPipelineAgBgCrCompV5",
         "preshufflev2": "WeightPreshufflePipelineAGmemBGmemCRegV2",
-        "comp_tdm_v1": "GemmPipelineAgBgCrCompTDMV1",
-        "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+        # gfx1250 only (Tensor Data Mover weight preshuffle).
         "preshuffle_tdm": "WeightPreshufflePipelineAGmemBGmemCRegTDM",
+        "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
+        "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
         "comp_async": "GemmPipelineAgBgCrCompAsync",
     }
 
@@ -196,9 +197,9 @@ class CommonTypeMappings:
         "compv4": "BaseGemmPipelineAgBgCrCompV4",
         "compv5": "BaseGemmPipelineAgBgCrCompV5",
         "preshufflev2": "BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
-        "comp_tdm_v1": "BaseGemmPipelineAgBgCrCompTDM",
-        "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
         "preshuffle_tdm": "BaseWeightPreshufflePipelineAGmemBGmemCRegTDM",
+        "comp_tdm": "BaseGemmPipelineAgBgCrCompTDM",
+        "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
         "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
     }
 
@@ -208,17 +209,15 @@ class CommonTypeMappings:
         "compv4": "Pipeline::CompV4",
         "compv5": "Pipeline::CompV5",
         "preshufflev2": "Pipeline::PreShuffleV2",
-        "comp_tdm_v1": "Pipeline::CompTdmV1",
-        "comp_tdm_v2": "Pipeline::CompTdmV2",
-        "preshuffle_tdm": "Pipeline::PreShuffleTdm",
+        "preshuffle_tdm": "Pipeline::PreShuffleTDM",
+        "comp_tdm": "Pipeline::CompTDMV1",
+        "comp_tdm_v2": "Pipeline::CompTDMV2",
         "comp_async": "Pipeline::CompAsync",
     }
 
     DOUBLE_BUFFER_PIPELINES = frozenset(
-        ("compv4", "preshufflev2", "comp_tdm_v1", "comp_tdm_v2", "preshuffle_tdm", "comp_async")
+        ("compv4", "preshufflev2", "comp_tdm", "comp_tdm_v2", "preshuffle_tdm", "comp_async")
     )
-
-    PACKED_B_PIPELINES = frozenset(("preshufflev2", "preshuffle_tdm"))
 
     SCHEDULER_TO_CK = {
         "intrawave": "GemmPipelineScheduler::Intrawave",
@@ -754,6 +753,76 @@ def rcr_only_layout_guard(layout: str) -> Optional[str]:
     if layout != "rcr":
         return f"Unsupported layout {layout} (only rcr) -- skipping"
     return None
+
+
+# ============================================================================
+# gfx1250 preshuffle pipelines
+# ============================================================================
+# Mirrors preshuffle_pipeline_reject_reason in
+# tile_engine/ops/gemm/gemm_validation_utils.py (tile_engine cannot be imported
+# here, see normalize_gfx_arch); tests/test_preshuffle_gfx1250_pipelines.py
+# pins the two copies to identical behaviour.
+GFX1250_ARCH = "gfx1250"
+TDM_PAD_REJECT_REASON = (
+    "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
+    "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
+)
+PRESHUFFLE_TDM_PIPELINES = ("preshuffle_tdm", "comp_tdm", "comp_tdm_v2")
+PRESHUFFLE_GFX1250_PIPELINES = PRESHUFFLE_TDM_PIPELINES + ("comp_async",)
+# comp_async has no working 8-bit async B load on gfx1250 yet.
+PRESHUFFLE_ASYNC_REJECT_DTYPES = frozenset({"fp8", "bf8"})
+PRESHUFFLE_GFX1250_LAYOUT = "rcr"
+
+
+def preshuffle_pipeline_reject_reason(
+    pipeline: str,
+    gpu_target: str = "",
+    layout: str = "",
+    pad_m: bool = False,
+    pad_n: bool = False,
+    pad_k: bool = False,
+    num_waves: Optional[int] = None,
+    dtype: str = "",
+    scheduler: str = "",
+    epilogue: str = "",
+    persistent: bool = False,
+) -> str:
+    """Reason string if a gfx1250 preshuffle pipeline is not allowed, else "".
+
+    Pipelines outside PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only get the
+    scheduler and tdm-epilogue checks. Empty gpu_target / layout / dtype /
+    scheduler / epilogue and num_waves=None mean "not known yet" and are not
+    checked, so the helper can run at trait level and at tile level.
+    """
+    # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
+    want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
+    if scheduler and scheduler != want_scheduler:
+        return f"preshuffle {pipeline} requires scheduler {want_scheduler!r}, got {scheduler!r}"
+    # Only the comp_tdm* pipelines drive the TDM epilogue.
+    if epilogue == "tdm" and not pipeline.startswith("comp_tdm"):
+        return f"preshuffle {pipeline} cannot use the tdm epilogue"
+    if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
+        return ""
+    arch = normalize_gfx_arch(gpu_target)
+    if arch and arch != GFX1250_ARCH:
+        return f"pipeline {pipeline!r} requires {GFX1250_ARCH}, got {arch!r}"
+    # rcr also covers the comp_async A row-major / B col-major requirement.
+    if layout and layout != PRESHUFFLE_GFX1250_LAYOUT:
+        return f"preshuffle {pipeline} requires layout {PRESHUFFLE_GFX1250_LAYOUT!r}, got {layout!r}"
+    if persistent:
+        return f"preshuffle {pipeline} has no persistent kernel"
+    # comp_tdm* store through the TDM epilogue, comp_async and preshuffle_tdm
+    # through CShuffle.
+    want_epilogue = "tdm" if pipeline.startswith("comp_tdm") else "cshuffle"
+    if epilogue and epilogue != want_epilogue:
+        return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
+    if pipeline in PRESHUFFLE_TDM_PIPELINES and (pad_m or pad_n or pad_k):
+        return TDM_PAD_REJECT_REASON
+    if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
+        return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
+    if pipeline == "comp_async" and dtype in PRESHUFFLE_ASYNC_REJECT_DTYPES:
+        return f"preshuffle comp_async does not support {dtype}"
+    return ""
 
 
 def iter_quant_axes(

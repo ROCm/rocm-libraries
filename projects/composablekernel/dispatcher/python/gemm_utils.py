@@ -53,9 +53,8 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 # Supported GPU architectures for the bridge (single source of truth).
 _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
-# Packed-B pipelines (preshufflev2 and preshuffle_tdm) use shuffle_b_v0.
-# The compute TDM/async pipelines leave B in its ordinary layout. PermuteN is
-# not bridged; preserve the existing non-permuteN contract for packed B.
+# Every preshuffle pipeline reads B packed with shuffle_b_v0. PermuteN is not
+# bridged; preserve the existing non-permuteN contract for packed B.
 BRIDGE_PERMUTE_N = False
 
 
@@ -2662,6 +2661,18 @@ def expand_sweep(
                 val = _cu.validate_kernel_config(c.to_ctypes_config())
                 if not val.is_valid:
                     continue
+                # gfx1250 preshuffle pipelines (arch/layout/pad/wave/dtype
+                # rules): same helper the
+                # codegen applies, so the sweep never hands back a config whose
+                # header is never emitted. validate_kernel_config() above has
+                # put the codegen dir on sys.path.
+                if variant == "preshuffle":
+                    from codegen_common import preshuffle_pipeline_reject_reason
+
+                    if preshuffle_pipeline_reject_reason(
+                        pipe, arch, layout[:3], pm, pn, pk, wm * wn * wk, dtype
+                    ):
+                        continue
                 seen.add(c.name)
                 configs.append(c)
 

@@ -67,7 +67,7 @@ gemm/
 The other variants keep their own per-variant `configs/` directories; the driver
 selects them with `--variant`. For `gemm_preshuffle` on gfx1250, the default is
 [`default_config_gfx1250.json`](gemm_preshuffle/configs/default_config_gfx1250.json),
-covering [five pipelines](gemm_preshuffle/README.md) for fp16/bf16. An explicit
+covering [five pipelines](gemm_preshuffle/README.md) for fp16/bf16/fp8/bf8. An explicit
 positional config always takes precedence.
 
 ### Running

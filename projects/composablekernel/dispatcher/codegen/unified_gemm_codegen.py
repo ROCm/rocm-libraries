@@ -29,7 +29,13 @@ from codegen_common import (
     TileConfig,
     TraitConfigBase,
     CommonTypeMappings as TypeMappings,
+    PRESHUFFLE_GFX1250_PIPELINES,
+    preshuffle_pipeline_reject_reason,
 )
+
+# Pipelines a preshuffle config may name explicitly; anything else is a
+# swept (non-preshuffle) pipeline that collapses onto preshufflev2.
+PRESHUFFLE_PIPELINE_CHOICES = ("preshufflev2",) + PRESHUFFLE_GFX1250_PIPELINES
 
 # Import architecture filter for GPU-specific validation
 try:
@@ -1031,7 +1037,7 @@ using CLayout = {ns_name}::CLayout;
     def _launch_function_preshuffle(self, config: KernelConfig) -> str:
         """Launch the selected native pipeline; its Preshuffle trait controls B packing."""
         shape_check = ""
-        if config.trait.pipeline in ("comp_tdm_v1", "comp_tdm_v2"):
+        if config.trait.pipeline in ("comp_tdm", "comp_tdm_v2"):
             shape_check = """
         // Native compute TDM currently miscomputes partial N/K tiles on gfx1250.
         if (args.k_batch != 1 || args.N % TileN != 0 || args.K % TileK != 0) {
@@ -1578,7 +1584,6 @@ class UnifiedGemmCodegen:
 
         # Load configuration
         self.config = self._load_config(config_file)
-        self._using_default_config = config_file is None
 
         # Initialize architecture filter for GPU-specific validation
         self.arch_filter = None
@@ -1767,13 +1772,17 @@ class UnifiedGemmCodegen:
         # Get base configs
         tile_configs = self._get_tile_configs()
         trait_configs = self._get_trait_configs()
-        if variant == GemmVariant.PRESHUFFLE and self._using_default_config:
-            # The built-in mixed-variant sweep has standard GEMM traits. Preserve
-            # its V2 default, while explicit JSON pipeline choices pass through.
+        if variant == GemmVariant.PRESHUFFLE:
+            # A standard (non-preshuffle) sweep collapses onto one preshufflev2 kernel (its
+            # compv3/intrawave anchor); preshufflev2 keeps the default scheduler
+            # and the gfx1250 pipelines are checked by the reject helper below.
             trait_configs = [
-                replace(t, pipeline="preshufflev2", scheduler="default")
+                t
+                if t.pipeline in PRESHUFFLE_PIPELINE_CHOICES
+                else replace(t, pipeline="preshufflev2", scheduler="default")
                 for t in trait_configs
-                if t.pipeline == "compv3" and t.scheduler == "intrawave"
+                if (t.pipeline, t.scheduler) in (("compv3", "intrawave"), ("preshufflev2", "default"))
+                or t.pipeline in PRESHUFFLE_GFX1250_PIPELINES
             ]
 
         for tile, trait in itertools.product(tile_configs, trait_configs):
@@ -1818,10 +1827,25 @@ class UnifiedGemmCodegen:
                         )
 
             elif variant == GemmVariant.PRESHUFFLE:
-                if trait.persistent and trait.pipeline not in TypeMappings.PACKED_B_PIPELINES:
-                    # The compute pipelines do not expose UsePersistentKernel.
-                    # An occupancy grid would launch their ordinary entry point.
+                # Every preshuffle pipeline consumes the preshuffled B layout.
+                # permute_n selects the B-shuffle permutation (global knob, matches
+                # Old-TE); the bridge pins it to False via gemm_utils.BRIDGE_PERMUTE_N.
+                if preshuffle_pipeline_reject_reason(
+                    trait.pipeline,
+                    self.gpu_target,
+                    self.layout,
+                    trait.pad_m,
+                    trait.pad_n,
+                    trait.pad_k,
+                    tile.warp_m * tile.warp_n * tile.warp_k,
+                    self.datatype,
+                    trait.scheduler,
+                    trait.epilogue,
+                    trait.persistent,
+                ):
                     continue
+                # The CShuffle-store pow2 repeat gate applies only to the cshuffle
+                # epilogue (the default epilogue stores directly and is correct).
                 if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
                     continue
                 configs.append(
@@ -1829,7 +1853,7 @@ class UnifiedGemmCodegen:
                         tile=tile,
                         trait=trait,
                         variant=variant,
-                        preshuffle=trait.pipeline in TypeMappings.PACKED_B_PIPELINES,
+                        preshuffle=True,
                         block_size=tile.warp_m * tile.warp_n * tile.warp_k * (64 if self.gpu_target.startswith("gfx9") else 32),
                         permute_n=bool(self.config.get("permute_n", False)),
                     )
@@ -2006,7 +2030,7 @@ class UnifiedGemmCodegen:
             operator = variant_to_operator.get(variant, OperatorType.GEMM)
 
         # Use preshuffle-specific validation (comprehensive CK-specific checks)
-        if variant == GemmVariant.PRESHUFFLE and pipeline in TypeMappings.PACKED_B_PIPELINES:
+        if variant == GemmVariant.PRESHUFFLE:
             if not is_preshuffle_config_valid(
                 tile_m=tile.tile_m,
                 tile_n=tile.tile_n,

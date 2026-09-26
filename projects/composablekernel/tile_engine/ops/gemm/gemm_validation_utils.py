@@ -33,7 +33,86 @@ def _base_gfx_arch(gpu_target: str) -> str:
 
 GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
-GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2", "comp_tdm_v1", "comp_tdm_v2", "preshuffle_tdm", "comp_async"]
+GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
+
+# gfx1250 pipelines. They are opt-in per op and per arch, so the pipeline sets
+# (and therefore the generated kernels) of every other arch are unchanged.
+GEMM_TDM_PIPELINES = ["comp_tdm", "comp_tdm_v2"]
+GEMM_ASYNC_PIPELINES = ["comp_async"]
+# Exact arch required by the TDM / async pipelines. Off this arch the TDM path
+# compiles to a no-op and produces an all-zero C.
+GFX1250_ONLY_PIPELINE_ARCH = "gfx1250"
+TDM_PAD_REJECT_REASON = (
+    "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
+    "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
+)
+
+# Weight-preshuffle GEMM on gfx1250 (rcr only). preshuffle_tdm is the TDM
+# variant of preshufflev2.
+GEMM_PRESHUFFLE_TDM_PIPELINES = ["preshuffle_tdm"] + GEMM_TDM_PIPELINES
+GEMM_PRESHUFFLE_GFX1250_PIPELINES = GEMM_PRESHUFFLE_TDM_PIPELINES + GEMM_ASYNC_PIPELINES
+# comp_async has no working 8-bit async B load on gfx1250 yet.
+PRESHUFFLE_ASYNC_REJECT_DTYPES = frozenset({"fp8", "bf8"})
+PRESHUFFLE_GFX1250_LAYOUT = "rcr"
+
+
+def _is_true(value) -> bool:
+    """Accept both JSON booleans and their string spellings."""
+    return value is True or str(value).lower() == "true"
+
+
+def preshuffle_pipeline_reject_reason(
+    pipeline,
+    gpu_target="",
+    layout="",
+    pad_m=False,
+    pad_n=False,
+    pad_k=False,
+    num_waves=None,
+    dtype="",
+    scheduler="",
+    epilogue="",
+    persistent=False,
+) -> str:
+    """Reason string if a gfx1250 preshuffle pipeline is not allowed, else "".
+
+    Pipelines outside GEMM_PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only
+    get the scheduler and tdm-epilogue checks. Empty gpu_target / layout /
+    dtype / scheduler / epilogue and num_waves=None mean "not known yet" and
+    are not checked, so the helper can run at trait level and at tile level.
+    """
+    # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
+    want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
+    if scheduler and scheduler != want_scheduler:
+        return f"preshuffle {pipeline} requires scheduler {want_scheduler!r}, got {scheduler!r}"
+    # Only the comp_tdm* pipelines drive the TDM epilogue.
+    if epilogue == "tdm" and not pipeline.startswith("comp_tdm"):
+        return f"preshuffle {pipeline} cannot use the tdm epilogue"
+    if pipeline not in GEMM_PRESHUFFLE_GFX1250_PIPELINES:
+        return ""
+    arch = _base_gfx_arch(gpu_target)
+    if arch and arch != GFX1250_ONLY_PIPELINE_ARCH:
+        return f"pipeline {pipeline!r} requires {GFX1250_ONLY_PIPELINE_ARCH}, got {arch!r}"
+    # rcr also covers the comp_async A row-major / B col-major requirement.
+    if layout and layout != PRESHUFFLE_GFX1250_LAYOUT:
+        return f"preshuffle {pipeline} requires layout {PRESHUFFLE_GFX1250_LAYOUT!r}, got {layout!r}"
+    if persistent:
+        return f"preshuffle {pipeline} has no persistent kernel"
+    # comp_tdm* store through the TDM epilogue, comp_async and preshuffle_tdm
+    # through CShuffle.
+    want_epilogue = "tdm" if pipeline.startswith("comp_tdm") else "cshuffle"
+    if epilogue and epilogue != want_epilogue:
+        return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
+    if pipeline in GEMM_PRESHUFFLE_TDM_PIPELINES and (
+        _is_true(pad_m) or _is_true(pad_n) or _is_true(pad_k)
+    ):
+        return TDM_PAD_REJECT_REASON
+    if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
+        return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
+    if pipeline == "comp_async" and dtype in PRESHUFFLE_ASYNC_REJECT_DTYPES:
+        return f"preshuffle comp_async does not support {dtype}"
+    return ""
+
 
 GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
 GEMM_MX_PIPELINES_BY_ARCH = {
@@ -124,6 +203,8 @@ GEMM_PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS = {
     "gfx1250": {
         "fp16_fp16_fp16": [[16, 16, 32]],
         "bf16_bf16_bf16": [[16, 16, 32]],
+        "fp8_fp8_fp16": [[16, 16, 64]],
+        "bf8_bf8_fp16": [[16, 16, 64]],
     },
     "gfx90a": {
         "fp16_fp16_fp16": [
@@ -327,6 +408,10 @@ def is_trait_combination_valid(
     persistent_or_preshuffle_quant=None,
     kernel_name_prefix: str = "",
     layout: str = "",
+    pad_m=False,
+    pad_n=False,
+    pad_k=False,
+    gpu_target: str = "",
 ) -> bool:
     """Check if a trait combination is valid."""
     if kernel_name_prefix == "mx_gemm":
@@ -338,16 +423,19 @@ def is_trait_combination_valid(
                 and not persistent_or_preshuffle_quant
             )
         )
-    if kernel_name_prefix == "gemm_preshuffle":
-        if pipeline not in GEMM_PRESHUFFLE_PIPELINES:
-            return False
-        packed_b = pipeline in ("preshufflev2", "preshuffle_tdm")
-        if persistent_or_preshuffle_quant in (True, "true") and not packed_b:
-            return False
-        expected_scheduler = "default" if packed_b else "intrawave"
-        epilogues = ("tdm",) if pipeline in ("comp_tdm_v1", "comp_tdm_v2") else ("default", "cshuffle")
-        return scheduler == expected_scheduler and epilogue in epilogues
-    elif kernel_name_prefix == "gemm_aquant":
+    if kernel_name_prefix == "gemm_preshuffle" and preshuffle_pipeline_reject_reason(
+        pipeline,
+        gpu_target,
+        layout,
+        pad_m,
+        pad_n,
+        pad_k,
+        scheduler=scheduler,
+        epilogue=epilogue,
+        persistent=_is_true(persistent_or_preshuffle_quant),
+    ):
+        return False
+    if kernel_name_prefix == "gemm_aquant":
         if (pipeline, epilogue, scheduler) in AQUANT_TRAIT_UNSUPPORTED_COMBINATIONS:
             return False
         # mem pipeline does not support preshuffle
@@ -538,7 +626,6 @@ def validate_lds_capacity(
         "comp_tdm_v2",
         "comp_async_eight_waves",
         "weight_preshuffle",
-        "comp_tdm_v1",
         "preshuffle_tdm",
     ]
     max_tile_size = hw_lds_size // 2 if double_buffer else hw_lds_size
@@ -773,21 +860,23 @@ def is_tile_config_valid(
         logging.debug(f"LDS validation failed: {lds_error}")
         return False
 
-    if kernel_name_prefix == "gemm_preshuffle" and pipeline != "preshufflev2":
-        if pipeline not in GEMM_PRESHUFFLE_PIPELINES or _base_gfx_arch(gpu_target) != "gfx1250":
+    # The preshuffle op owns its pipelines (comp_async here is NOT the MX one).
+    is_preshuffle = (
+        pipeline in GEMM_PRESHUFFLE_PIPELINES or kernel_name_prefix == "gemm_preshuffle"
+    )
+    if kernel_name_prefix == "gemm_preshuffle":
+        reason = preshuffle_pipeline_reject_reason(
+            pipeline,
+            gpu_target,
+            layout,
+            num_waves=warp_m * warp_n * warp_k,
+            dtype=b_datatype,
+        )
+        if reason:
+            logging.debug(f"GEMM Preshuffle validation failed: {reason}")
             return False
-        if a_datatype not in ("fp16", "bf16") or b_datatype != a_datatype or layout != "rcr":
-            return False
-        if [warp_tile_m, warp_tile_n, warp_tile_k] != [16, 16, 32] or warp_k != 1:
-            return False
-        if pipeline == "comp_tdm_v2" and warp_m * warp_n != 4:
-            return False
-        # Compute pipelines consume ordinary operands and must not enter MX or
-        # packed-B distribution validation merely because of their names.
-        if pipeline != "preshuffle_tdm":
-            return True
 
-    if pipeline in GEMM_PIPELINES:
+    if pipeline in GEMM_PIPELINES and not is_preshuffle:
         gemm_valid, gemm_valid_error = validate_gemm(
             tile_m,
             tile_n,
@@ -823,7 +912,7 @@ def is_tile_config_valid(
             logging.debug(f"Warp tile validation failed: {warp_tile_error}")
             return False
 
-    elif pipeline in GEMM_MX_PIPELINES:
+    elif pipeline in GEMM_MX_PIPELINES and not is_preshuffle:
         mx_valid, mx_error = validate_gemm_mx(
             tile_m,
             tile_n,
@@ -858,7 +947,7 @@ def is_tile_config_valid(
             logging.debug(f"MX warp tile validation failed: {warp_tile_error}")
             return False
 
-    elif pipeline in GEMM_PRESHUFFLE_PIPELINES:
+    elif is_preshuffle:
         preshuffle_valid, preshuffle_valid_error = validate_gemm_preshuffle(
             tile_m,
             tile_n,

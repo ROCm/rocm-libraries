@@ -9,6 +9,7 @@ option(ENABLE_CCACHE_GEMM_PRESHUFFLE "Enable ccache for GEMM Preshuffle ops comp
 
 # Store the directory path for use in functions
 set(GEMM_PRESHUFFLE_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
+include(${CMAKE_CURRENT_LIST_DIR}/../gemm_trait_parse.cmake)
 
 # Function to create individual GEMM Preshuffle targets
 function(create_individual_gemm_preshuffle_target datatype layout trait tile_config config_json)
@@ -102,16 +103,7 @@ function(create_individual_gemm_preshuffle_target datatype layout trait tile_con
     add_dependencies(benchmark_gemm_preshuffle_${datatype}_${layout} ${target_name})
     
     # Add to trait-specific targets
-    string(REPLACE "_" ";" trait_parts ${trait})
-    # The final six fields are epilogue, scheduler and four booleans. Pipeline
-    # names such as comp_tdm_v1 contain underscores themselves.
-    list(LENGTH trait_parts trait_count)
-    math(EXPR pipeline_count "${trait_count} - 6")
-    list(SUBLIST trait_parts 0 ${pipeline_count} pipeline_parts)
-    list(JOIN pipeline_parts "_" pipeline)
-    list(GET trait_parts ${pipeline_count} epilogue)
-    math(EXPR scheduler_index "${pipeline_count} + 1")
-    list(GET trait_parts ${scheduler_index} scheduler)
+    ck_tile_gemm_split_trait("${trait}" pipeline epilogue scheduler)
     
     add_dependencies(benchmark_gemm_preshuffle_${pipeline}_pipeline ${target_name})
     add_dependencies(benchmark_gemm_preshuffle_${epilogue}_epilogue ${target_name})
@@ -137,8 +129,10 @@ function(build_individual_gemm_preshuffle_targets datatype layout)
         # Use CMake variable if set
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${GEMM_PRESHUFFLE_CONFIG_FILE}")
         message(VERBOSE "  Using custom config: ${GEMM_PRESHUFFLE_CONFIG_FILE}")
-    elseif(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL MATCHES "^gfx1250(:[^;]+)?$" AND datatype MATCHES "^(fp16|bf16)$")
+    elseif(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
+        # gfx1250 (WMMA) has its own warp-tile set and the TDM pipeline
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config_gfx1250.json")
+        message(VERBOSE "  Using gfx1250 default config for layout ${layout}")
     else()
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config.json")
         message(VERBOSE "  Using default config for layout ${layout}")
@@ -251,6 +245,27 @@ foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     endif()
 endforeach()
 
+# gfx1250 uses a different config (WMMA warp tiles, TDM pipeline) and a single
+# --gpu_target per kernel, so it is only built when it is the sole matching
+# target. In a mixed target list it is skipped and the other targets are
+# configured exactly as before.
+set(_GEMM_PRESHUFFLE_GFX1250_TARGETS "")
+foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
+    if(target MATCHES "^gfx1250(:|$)")
+        list(APPEND _GEMM_PRESHUFFLE_GFX1250_TARGETS ${target})
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES _GEMM_PRESHUFFLE_GFX1250_TARGETS)
+list(LENGTH _GEMM_PRESHUFFLE_GFX1250_TARGETS _gp_n_gfx1250)
+if(_gp_n_gfx1250 GREATER 0)
+    if(NOT GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL AND _gp_n_gfx1250 EQUAL 1)
+        set(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL ${_GEMM_PRESHUFFLE_GFX1250_TARGETS})
+        message(VERBOSE "  Adding GPU target: ${_GEMM_PRESHUFFLE_GFX1250_TARGETS}")
+    else()
+        message(WARNING "Skipping gfx1250 for Tile Engine GEMM Preshuffle: gfx1250 must be the only GPU target (found ${SUPPORTED_GPU_TARGETS})")
+    endif()
+endif()
+
 # Skip build if no matching targets found
 if(NOT GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL)
     message(WARNING "Skipping Tile Engine GEMM build: No supported GPU targets (${DESIRED_TARGETS}) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
@@ -300,9 +315,16 @@ else()
 
     # Create trait-based collection targets
     # These are common trait components used across all GEMM Preshuffle kernels
-    set(GEMM_PRESHUFFLE_PIPELINES "preshufflev2;comp_tdm_v1;comp_tdm_v2;preshuffle_tdm;comp_async")
-    set(GEMM_PRESHUFFLE_EPILOGUES "default;cshuffle;tdm")
-    set(GEMM_PRESHUFFLE_SCHEDULERS "default;intrawave")
+    set(GEMM_PRESHUFFLE_PIPELINES "preshufflev2")
+    set(GEMM_PRESHUFFLE_EPILOGUES "default;cshuffle")
+    set(GEMM_PRESHUFFLE_SCHEDULERS "default") 
+    if(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
+        # gfx1250 weight-preshuffle pipelines (see gemm_validation_utils.py;
+        # the comp_* ones run Intrawave only)
+        list(APPEND GEMM_PRESHUFFLE_PIPELINES "preshuffle_tdm;comp_tdm;comp_tdm_v2;comp_async")
+        list(APPEND GEMM_PRESHUFFLE_EPILOGUES "tdm")
+        list(APPEND GEMM_PRESHUFFLE_SCHEDULERS "intrawave")
+    endif()
 
     foreach(pipeline IN LISTS GEMM_PRESHUFFLE_PIPELINES)
         add_custom_target(benchmark_gemm_preshuffle_${pipeline}_pipeline)

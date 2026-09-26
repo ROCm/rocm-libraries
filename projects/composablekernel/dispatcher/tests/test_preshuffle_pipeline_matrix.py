@@ -25,24 +25,28 @@ from gemm_full_benchmark import resolve_configs
 from gemm_validation_utils import validate_gemm_preshuffle_warp_tile_combination
 
 CONFIG = CK_ROOT / 'tile_engine/ops/gemm/gemm_preshuffle/configs/default_config_gfx1250.json'
+# Every pipeline reads shuffle_b_v0-packed B and gets one kernel per tile_k.
 PIPELINES = {
-    'preshufflev2': ('WeightPreshufflePipelineAGmemBGmemCRegV2', True, 4),
-    'comp_tdm_v1': ('GemmPipelineAgBgCrCompTDMV1', False, 1),
-    'comp_tdm_v2': ('GemmPipelineAgBgCrCompTDMV2', False, 1),
-    'preshuffle_tdm': ('WeightPreshufflePipelineAGmemBGmemCRegTDM', True, 4),
-    'comp_async': ('GemmPipelineAgBgCrCompAsync', False, 2),
+    'preshufflev2': 'WeightPreshufflePipelineAGmemBGmemCRegV2',
+    'comp_tdm': 'GemmPipelineAgBgCrCompTDMV1',
+    'comp_tdm_v2': 'GemmPipelineAgBgCrCompTDMV2',
+    'preshuffle_tdm': 'WeightPreshufflePipelineAGmemBGmemCRegTDM',
+    'comp_async': 'GemmPipelineAgBgCrCompAsync',
 }
+# comp_async rejects fp8/bf8 on gfx1250.
+EXPECTED = {d: {p: 2 for p in PIPELINES if d in ('fp16', 'bf16') or p != 'comp_async'}
+            for d in ('fp16', 'bf16', 'fp8', 'bf8')}
 
 
 def configs(dtype='fp16', arch='gfx1250'):
     return expand_sweep(str(CONFIG), arch=arch, dtype=dtype, variant='preshuffle')
 
 
-@pytest.mark.parametrize('dtype', ['fp16', 'bf16'])
+@pytest.mark.parametrize('dtype', list(EXPECTED))
 def test_complete_sweep_reaches_both_generators(tmp_path, dtype):
     sweep = configs(dtype)
-    assert Counter(c.pipeline for c in sweep) == {p: v[2] for p, v in PIPELINES.items()}
-    assert len({c.name for c in sweep}) == 12
+    assert Counter(c.pipeline for c in sweep) == EXPECTED[dtype]
+    assert len({c.name for c in sweep}) == sum(EXPECTED[dtype].values())
     legacy = GemmKernelBuilder('gemm_preshuffle', tmp_path / 'te', 'gfx1250', dtype, 'rcr', CONFIG)
     assert len(legacy._get_sampled_kernel_list()) == len(sweep)
     for cfg in sweep:
@@ -53,24 +57,24 @@ def test_complete_sweep_reaches_both_generators(tmp_path, dtype):
         assert len(kernels) == 1, cfg.name
         kernel = kernels[0]
         assert KernelNaming.generate(kernel, dtype, 'rcr') == cfg.name
-        impl, packed, _ = PIPELINES[cfg.pipeline]
-        assert kernel.preshuffle == packed
+        impl = PIPELINES[cfg.pipeline]
+        assert kernel.preshuffle
         assert kernel.block_size == 128
         source = CKTileKernelGenerator(dtype, 'rcr').generate(kernel)
         assert f'using GemmPipeline = {impl}<UniversalGemmProblem>;' in source
         assert f'#define GEMM_KEY_PIPELINE "{cfg.pipeline}"' in source
-        assert f'#define GEMM_KEY_PRESHUFFLE {int(packed)}' in source
+        assert '#define GEMM_KEY_PRESHUFFLE 1' in source
         assert '#define GEMM_KEY_DOUBLE_BUFFER 1' in source
         assert ('TdmEpilogue<EpilogueProblem>' in source) == (cfg.epilogue == 'tdm')
         metadata = _parse_gemm_header_metadata(Path(cfg.name + '.hpp'))
         assert metadata['pipeline'] == cfg.pipeline
         assert metadata['epilogue'] == cfg.epilogue
-        assert metadata['tile'] == (128, 128, 64)
+        assert metadata['tile'] == (cfg.tile_m, cfg.tile_n, cfg.tile_k)
         te_tile = {k: v[0] for k, v in cfg.to_codegen_json()['tile_config'].items()}
         _, te_source = legacy._generate_kernel_instance(te_tile, (
             cfg.pipeline, cfg.epilogue, cfg.scheduler, cfg.pad_m, cfg.pad_n, cfg.pad_k, cfg.persistent))
         assert f'using GemmPipeline = ck_tile::{impl}<UniversalGemmProblem>;' in te_source
-        assert f'Preshuffle = {str(packed).lower()};' in te_source
+        assert 'Preshuffle = true;' in te_source
         assert ('TdmEpilogue<EpilogueProblem>' in te_source) == (cfg.epilogue == 'tdm')
 
 
@@ -93,7 +97,7 @@ def test_new_pipelines_reject_other_architectures_and_tiles(pipeline):
 
 def test_tdm_v2_requires_four_waves():
     cfg = next(c for c in configs() if c.pipeline == 'comp_tdm_v2').to_ctypes_config()
-    assert not validate_kernel_config(replace(cfg, wave_n=4)).is_valid
+    assert not validate_kernel_config(replace(cfg, wave_n=2)).is_valid
 
 
 def test_gfx1250_feature_suffix_does_not_disable_warp_validation():
@@ -112,7 +116,7 @@ def test_arch_default_and_explicit_config_selection():
     assert Path(resolve_configs(args)[0]).name == 'default_ci_config.json'
 
 
-@pytest.mark.parametrize('pipeline', ['comp_tdm_v1', 'comp_tdm_v2', 'preshuffle_tdm', 'comp_async'])
+@pytest.mark.parametrize('pipeline', ['comp_tdm', 'comp_tdm_v2', 'preshuffle_tdm', 'comp_async'])
 def test_legacy_single_instance_cli_keeps_full_pipeline_name(tmp_path, pipeline):
     cfg = next(c for c in configs() if c.pipeline == pipeline)
     trait = '_'.join([cfg.pipeline, cfg.epilogue, cfg.scheduler, 'True', 'True', 'True', 'False'])
@@ -123,7 +127,7 @@ def test_legacy_single_instance_cli_keeps_full_pipeline_name(tmp_path, pipeline)
                     '--gpu_target', 'gfx1250'], check=True, capture_output=True, text=True)
     headers = list(tmp_path.glob('*.hpp'))
     assert len(headers) == 1
-    assert f'ck_tile::{PIPELINES[pipeline][0]}<UniversalGemmProblem>' in headers[0].read_text()
+    assert f'ck_tile::{PIPELINES[pipeline]}<UniversalGemmProblem>' in headers[0].read_text()
 
 
 def test_builtin_codegen_still_has_a_preshuffle_default(tmp_path):
@@ -134,7 +138,7 @@ def test_builtin_codegen_still_has_a_preshuffle_default(tmp_path):
     assert {c.trait.pipeline for c in kernels} == {'preshufflev2'}
 
 
-@pytest.mark.parametrize('pipeline', ['comp_tdm_v1', 'comp_tdm_v2', 'comp_async'])
+@pytest.mark.parametrize('pipeline', ['comp_tdm', 'comp_tdm_v2', 'comp_async'])
 def test_compute_pipelines_reject_persistent_launch(pipeline):
     cfg = next(c for c in configs() if c.pipeline == pipeline)
     assert not validate_kernel_config(replace(cfg, persistent=True).to_ctypes_config()).is_valid
@@ -164,7 +168,7 @@ def test_legacy_cmake_default_creates_all_pipeline_targets(tmp_path, arch):
     result = subprocess.run(['cmake', '-S', str(tmp_path), '-B', str(build)],
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
-    for pipeline, (_, _, per_dtype) in PIPELINES.items():
+    for pipeline in PIPELINES:
         targets = (build / f'{pipeline}.txt').read_text().split(';')
-        assert len(targets) == 2 * per_dtype
+        assert len(targets) == 2 * EXPECTED['fp16'][pipeline]
         assert all(f'_{pipeline}_' in target for target in targets)

@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import logging
-from codegen_common import CommonTypeMappings
+from codegen_common import preshuffle_pipeline_reject_reason
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,13 @@ except ImportError:
         },
     }
 
-    PRESHUFFLE_PIPELINES = ["preshufflev2"]
+    PRESHUFFLE_PIPELINES = [
+        "preshufflev2",
+        "preshuffle_tdm",
+        "comp_tdm",
+        "comp_tdm_v2",
+        "comp_async",
+    ]
 
     # Conservative fallback: the historical 64 KB / 32 KB budget, applied to
     # every architecture. It deliberately understates gfx950 and gfx1250 rather
@@ -258,6 +264,7 @@ except ImportError:
         "compv6": 32768,
         "preshufflev1": 32768,
         "preshufflev2": 32768,
+        "preshuffle_tdm": 32768,
         # Mandatory double buffering (num_lds_buffers = 2), so half the budget.
         "comp_async": 32768,
         "wavelet": 65536,
@@ -682,8 +689,7 @@ class ArchFilter:
     def _validate_warp_tile_combo(self, config: KernelConfig, result: ValidationResult):
         """Validate warp tile combination against architecture and data types"""
         # Use preshuffle-specific warp tiles for preshuffle operator
-        if (config.operator == OperatorType.GEMM_PRESHUFFLE
-                and config.pipeline in CommonTypeMappings.PACKED_B_PIPELINES):
+        if config.operator == OperatorType.GEMM_PRESHUFFLE:
             gpu_combos = PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS.get(
                 self.gpu_arch, {}
             )
@@ -726,27 +732,17 @@ class ArchFilter:
                     f"Preshuffle GEMM requires pipeline in {PRESHUFFLE_PIPELINES}, "
                     f"got {config.pipeline}"
                 )
-            packed_b = config.pipeline in CommonTypeMappings.PACKED_B_PIPELINES
-            expected_scheduler = "default" if packed_b else "intrawave"
-            if config.scheduler != expected_scheduler:
-                result.add_error(f"{config.pipeline} requires scheduler={expected_scheduler}")
-            tdm_compute = config.pipeline in ("comp_tdm_v1", "comp_tdm_v2")
-            epilogues = ("tdm",) if tdm_compute else ("default", "cshuffle")
-            if config.epilogue not in epilogues:
-                result.add_error(f"{config.pipeline} requires epilogue in {epilogues}")
-            if config.pipeline != "preshufflev2":
-                if self.gpu_arch != "gfx1250":
-                    result.add_error(f"{config.pipeline} is bridged only for gfx1250")
-                if config.datatype_a not in ("fp16", "bf16") or config.datatype_b != config.datatype_a:
-                    result.add_error(f"{config.pipeline} requires matching fp16/bf16 inputs")
-                if config.layout != "rcr":
-                    result.add_error(f"{config.pipeline} requires rcr layout")
-                if config.warp_k != 1:
-                    result.add_error(f"{config.pipeline} requires warp_k=1")
-                if (config.warp_tile_m, config.warp_tile_n, config.warp_tile_k) != (16, 16, 32):
-                    result.add_error(f"{config.pipeline} is bridged with a 16x16x32 warp tile")
-            if config.pipeline == "comp_tdm_v2" and config.warp_m * config.warp_n * config.warp_k != 4:
-                result.add_error("comp_tdm_v2 requires exactly four waves per workgroup")
+            reason = preshuffle_pipeline_reject_reason(
+                config.pipeline,
+                self.gpu_arch,
+                config.layout,
+                num_waves=config.warp_m * config.warp_n * config.warp_k,
+                dtype=config.datatype_b,
+                scheduler=config.scheduler,
+                epilogue=config.epilogue,
+            )
+            if reason:
+                result.add_error(reason)
 
         # Conv backward operations only support compv3/mem pipelines
         # (compv4/compv5 have template issues: transpose_tile2d for bwd_weight,

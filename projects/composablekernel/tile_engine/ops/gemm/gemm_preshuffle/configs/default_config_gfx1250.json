@@ -12,17 +12,18 @@
     },
     "tile_k": {
       "values": [
-        64
+        64,
+        128
       ]
     },
     "warp_m": {
       "values": [
-        2
+        1
       ]
     },
     "warp_n": {
       "values": [
-        2
+        4
       ]
     },
     "warp_k": {
@@ -42,7 +43,8 @@
     },
     "warp_tile_k": {
       "values": [
-        32
+        32,
+        64
       ]
     }
   },
@@ -50,9 +52,9 @@
     "pipeline": {
       "values": [
         "preshufflev2",
-        "comp_tdm_v1",
-        "comp_tdm_v2",
         "preshuffle_tdm",
+        "comp_tdm",
+        "comp_tdm_v2",
         "comp_async"
       ]
     },
@@ -64,14 +66,13 @@
     },
     "epilogue": {
       "values": [
-        "default",
         "cshuffle",
         "tdm"
       ]
     },
     "pad_m": {
       "values": [
-        true
+        false
       ]
     },
     "pad_n": {
@@ -86,8 +87,7 @@
     },
     "persistent": {
       "values": [
-        false,
-        true
+        false
       ]
     }
   },

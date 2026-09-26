@@ -276,8 +276,11 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             layout=config.layout, operator=OperatorType.GEMM_PRESHUFFLE,
         ))
         errors.extend(result.errors)
-        if getattr(config, "persistent", False) and pipeline not in ("preshufflev2", "preshuffle_tdm"):
-            errors.append(f"{pipeline} does not expose native persistent-kernel support")
+        # ArchFilter has no persistent flag; the shared rules cover it.
+        from codegen_common import preshuffle_pipeline_reject_reason
+        reason = preshuffle_pipeline_reject_reason(pipeline, persistent=getattr(config, "persistent", False))
+        if reason:
+            errors.append(reason)
         # Preshuffle requires larger minimum tiles for efficiency
         if config.tile_m < 64:
             errors.append(f"Preshuffle requires tile_m >= 64, got {config.tile_m}")
@@ -337,7 +340,7 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
     # standard GEMM warp-tile table.
     table_key = (
         "preshuffle_warp_tile_combos"
-        if variant == "preshuffle" and pipeline in ("preshufflev2", "preshuffle_tdm")
+        if variant == "preshuffle"
         else "warp_tile_combos"
     )
     warp_tile_combos = (

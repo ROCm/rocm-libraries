@@ -251,7 +251,9 @@ class TestPreshuffleGfx1250(unittest.TestCase):
         from arch_specs_generated import PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS
         specs = json.loads((DISPATCHER_DIR / "codegen" / "arch_specs.json").read_text())
         expected = {"fp16_fp16_fp32": [[16, 16, 32]],
-                    "bf16_bf16_fp32": [[16, 16, 32]]}
+                    "bf16_bf16_fp32": [[16, 16, 32]],
+                    "fp8_fp8_fp32": [[16, 16, 64]],
+                    "bf8_bf8_fp32": [[16, 16, 64]]}
         self.assertEqual(specs["preshuffle_warp_tile_combos"]["gfx1250"], expected)
         self.assertEqual(PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS["gfx1250"], expected)
 
