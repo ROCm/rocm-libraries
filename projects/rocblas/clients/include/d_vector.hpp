@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,12 +27,54 @@
 #include "rocblas_test.hpp"
 #include "singletons.hpp"
 
-#if __GLIBC__ < 3 && __GLIBC__MINOR__ < 39
+// Older than glibc 2.39. Spelled out rather than "major < 3 && minor < 39", which only
+// happens to mean the same thing while glibc stays on major 2.
+#if defined(__GLIBC__) && (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 39))
 #undef _GLIBCXX_USE_C99_INTTYPES_TR1
 #endif
 #include <cinttypes>
+#ifdef GOOGLE_TEST
+#include <memory>
+#include <mutex>
+#include <new>
+#endif
 
 #define MEM_MAX_GUARD_PAD 8192
+
+#ifdef GOOGLE_TEST
+// Reports which bytes of a guard region differ from the reference pattern. Called only
+// after memcmp has already found a difference, so the byte-by-byte scan is off the clean
+// path. Takes byte pointers and lives at file scope rather than being a member or lambda of
+// d_vector<T>, so it is compiled once instead of once per precision.
+inline void report_guard_corruption(const unsigned char* host,
+                                    const unsigned char* ref,
+                                    size_t               guard_bytes,
+                                    const char*          tag)
+{
+    size_t differing = 0, first = 0;
+    for(size_t i = 0; i < guard_bytes; ++i)
+        if(host[i] != ref[i])
+        {
+            if(!differing) // record the index of the first differing byte only once
+                first = i;
+            ++differing;
+        }
+
+    // Each number is delimited on both sides so that a test matching on "corrupted: 6 of "
+    // or "offset 10 (" cannot also be satisfied by 16 or 10250.
+    if(differing > 0)
+        ADD_FAILURE() << tag << "-guard corrupted: " << differing << " of " << guard_bytes
+                      << " byte(s) differ, first at offset " << first << " (expected 0x" << std::hex
+                      << static_cast<unsigned>(ref[first]) << ", got 0x"
+                      << static_cast<unsigned>(host[first]) << std::dec << ")";
+    else
+        // The caller establishes that memcmp found a difference, so finding none here means
+        // the two disagree: report that rather than returning silently and losing the
+        // corruption entirely.
+        ADD_FAILURE() << tag << "-guard mismatch reported, but no byte differs across "
+                      << guard_bytes << " byte(s); device_vector_check is inconsistent";
+}
+#endif
 
 //
 // Forward declaration of rocblas_init_nan
@@ -64,23 +106,49 @@ template <typename T>
 class d_vector
 {
 private:
-    size_t m_size;
-    size_t m_pad, m_guard_len;
-    size_t m_bytes;
+    // Geometry, fixed at construction. const so the guard offsets used by
+    // device_vector_setup, device_vector_check and device_vector_teardown cannot drift
+    // apart: all three derive their pointer arithmetic from m_pad alone.
+    const size_t m_size;
+    const size_t m_pad;
+    // Byte length of each guard region (m_pad * sizeof(T)).
+    const size_t m_guard_len;
+    const size_t m_bytes;
 
-    static bool m_init_guard;
+    // Set only once both guard regions actually hold the pattern. Kept separate from
+    // m_guard_len so a failed guard write disables checking without touching geometry.
+    //
+    // Declared unconditionally, and only *used* under GOOGLE_TEST. A member whose presence
+    // depends on GOOGLE_TEST would change sizeof(d_vector<T>) and the offset of use_HMM
+    // between translation units, while the template's member functions keep the same
+    // mangled names: rocblas-gemm-tune compiles its own sources without GOOGLE_TEST
+    // (clients/benchmarks/CMakeLists.txt) and links rocblas_clients_common, which is built
+    // with it (clients/common/CMakeLists.txt), so both layouts would meet in one binary.
+    [[maybe_unused]] bool m_guard_written;
 
-public:
-    inline size_t nmemb() const noexcept
-    {
-        return m_size;
-    }
+#ifdef GOOGLE_TEST
+    // Guards one-time initialization of m_guard against concurrent construction.
+    // A static member has no bearing on object layout, so this one stays conditional.
+    static std::once_flag m_init_flag;
+#endif
 
 public:
     bool use_HMM = false;
 
-public:
     static T m_guard[MEM_MAX_GUARD_PAD];
+
+    // Non-copyable and non-movable: subclasses own a raw device pointer;
+    // copying or moving would duplicate it without transferring ownership,
+    // causing a double-free when both objects are destroyed.
+    d_vector(const d_vector&) = delete;
+    d_vector& operator=(const d_vector&) = delete;
+    d_vector(d_vector&&)                 = delete;
+    d_vector& operator=(d_vector&&) = delete;
+
+    inline size_t nmemb() const noexcept
+    {
+        return m_size;
+    }
 
 #ifdef GOOGLE_TEST
     d_vector(size_t s, bool HMM = false)
@@ -88,21 +156,20 @@ public:
         , m_pad(std::min(g_DVEC_PAD, size_t(MEM_MAX_GUARD_PAD)))
         , m_guard_len(m_pad * sizeof(T))
         , m_bytes((s + m_pad * 2) * sizeof(T))
+        , m_guard_written(false)
         , use_HMM(HMM)
     {
-        // Initialize m_guard with random data
-        if(!m_init_guard)
-        {
-            rocblas_init_nan(m_guard, MEM_MAX_GUARD_PAD);
-            m_init_guard = true;
-        }
+        // Initialize m_guard with NaN bytes exactly once, even if multiple
+        // d_vector<T> objects are constructed concurrently.
+        std::call_once(m_init_flag, [] { rocblas_init_nan(m_guard, MEM_MAX_GUARD_PAD); });
     }
 #else
     d_vector(size_t s, bool HMM = false)
         : m_size(s)
-        , m_pad(0) // save current pad length
-        , m_guard_len(0 * sizeof(T))
-        , m_bytes(s ? s * sizeof(T) : sizeof(T))
+        , m_pad(0)
+        , m_guard_len(0)
+        , m_bytes(s ? s * sizeof(T) : sizeof(T)) // minimum one element: hipMalloc(0) is UB
+        , m_guard_written(false)
         , use_HMM(HMM)
     {
     }
@@ -120,7 +187,7 @@ public:
             }
         }
 
-        if(use_HMM ? hipMallocManaged(&d, m_bytes) : (hipMalloc)(&d, m_bytes) != hipSuccess)
+        if((use_HMM ? hipMallocManaged(&d, m_bytes) : (hipMalloc)(&d, m_bytes)) != hipSuccess)
         {
             rocblas_cerr << "Warning: hip can't allocate " << m_bytes << " bytes ("
                          << (m_bytes >> 30) << " GB)" << std::endl;
@@ -128,68 +195,109 @@ public:
             d = nullptr;
         }
 #ifdef GOOGLE_TEST
-        else
+        else if(m_pad > 0)
         {
-            if(m_guard_len > 0)
+            // A guard that was not written is a guard that reports corruption later, so the
+            // failure has to be raised here, where the message says what actually went wrong.
+            // EXPECT is the only option in a function that returns a pointer.
+            hipError_t status = hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault);
+            EXPECT_EQ(status, hipSuccess)
+                << "cannot write the guard before the allocation: " << hipGetErrorName(status);
+
+            // Offset past the pre-guard unconditionally, so d names the pointer teardown will
+            // hand to free_ptr_use whether or not the guard writes succeeded. hipFree receives
+            // the base pointer, recovered in teardown by subtracting the same m_pad.
+            d += m_pad;
+
+            if(status == hipSuccess)
             {
-                // Copy m_guard to device memory before allocated memory
-                if(hipMemcpy(d, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                    rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
-
-                // Point to allocated block
-                d += m_pad;
-
-                // Copy m_guard to device memory after allocated memory
-                if(hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                    rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
+                status = hipMemcpy(d + m_size, m_guard, m_guard_len, hipMemcpyDefault);
+                EXPECT_EQ(status, hipSuccess)
+                    << "cannot write the guard after the allocation: " << hipGetErrorName(status);
             }
+
+            // Checked later only if both regions hold the pattern; otherwise
+            // device_vector_check would compare uninitialised device memory against it and
+            // report corruption that never happened.
+            m_guard_written = (status == hipSuccess);
         }
 #endif
 
+        // Key: the pointer handed to the caller (d, past the pre-guard in
+        // GOOGLE_TEST builds; the base allocation otherwise). teardown calls
+        // free_ptr_use on the same pointer before adjusting it, so the map
+        // entry is always found and mem_used returns to its pre-setup value.
+        // m_bytes includes guard pad bytes in GOOGLE_TEST builds; alloc and free
+        // are symmetric (both use m_bytes) so the ceiling delta is always zero.
         if(use_HMM)
-            alloc_ptr_use(d, m_bytes); // count the same as host memory
+            alloc_ptr_use(d, m_bytes);
 
         return d;
     }
 
+    // Reads both guard regions back from the device and compares them against the reference
+    // pattern, reporting any mismatch as a non-fatal GTest failure. Called from
+    // device_vector_teardown (i.e. from a destructor) so EXPECT rather than ASSERT is used
+    // throughout: ASSERT would return early and skip the second guard.
     void device_vector_check(T* d)
     {
 #ifdef GOOGLE_TEST
-        if(m_pad > 0)
+        if(!m_guard_written)
+            return;
+
+        // One host buffer, exactly one guard long, reused for both regions. Heap rather than
+        // an automatic array because m_guard_len is a runtime value, so an array would have to
+        // be sized for MEM_MAX_GUARD_PAD: 128 KB of stack for a 16-byte type, to compare at
+        // most that much. nothrow new rather than std::vector because a throwing allocation in
+        // a destructor calls std::terminate. No alignment needed: hipMemcpy and memcmp are
+        // both byte-wise.
+        std::unique_ptr<unsigned char[]> host_guard(new(std::nothrow) unsigned char[m_guard_len]);
+        if(!host_guard)
         {
-            std::vector<T> host(m_pad);
-
-            // Copy device memory after allocated memory to host
-            if(hipMemcpy(host.data(), d + m_size, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                rocblas_cerr << "Error: hipMemcpy post-guard copy failure." << std::endl;
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host.data(), m_guard, m_guard_len), 0);
-
-            // Point to m_guard before allocated memory
-            d -= m_pad;
-
-            // Copy device memory after allocated memory to host
-            if(hipMemcpy(host.data(), d, m_guard_len, hipMemcpyDefault) != hipSuccess)
-                rocblas_cerr << "Error: hipMemcpy pre-guard copy failure." << std::endl;
-
-            // Make sure no corruption has occurred
-            EXPECT_EQ(memcmp(host.data(), m_guard, m_guard_len), 0);
+            ADD_FAILURE() << "cannot allocate " << m_guard_len
+                          << " bytes to read the guards back; corruption would go unreported";
+            return;
         }
+
+        const auto* reference = reinterpret_cast<const unsigned char*>(m_guard);
+
+        // Post-guard first, because d still points at the user allocation. Each comparison is
+        // gated on its own copy succeeding, so a failed read cannot leave the other region's
+        // bytes behind to be compared a second time.
+        hipError_t status = hipMemcpy(host_guard.get(), d + m_size, m_guard_len, hipMemcpyDefault);
+        EXPECT_EQ(status, hipSuccess)
+            << "cannot read the guard after the allocation: " << hipGetErrorName(status);
+        if(status == hipSuccess && memcmp(host_guard.get(), reference, m_guard_len) != 0)
+            report_guard_corruption(host_guard.get(), reference, m_guard_len, "post");
+
+        // Pre-guard sits m_pad elements below the user pointer.
+        status = hipMemcpy(host_guard.get(), d - m_pad, m_guard_len, hipMemcpyDefault);
+        EXPECT_EQ(status, hipSuccess)
+            << "cannot read the guard before the allocation: " << hipGetErrorName(status);
+        if(status == hipSuccess && memcmp(host_guard.get(), reference, m_guard_len) != 0)
+            report_guard_corruption(host_guard.get(), reference, m_guard_len, "pre");
 #endif
     }
 
+    // Checks guards for corruption, releases the HMM accounting entry on the
+    // offset pointer (before restoring it to the base), then frees the allocation.
+    // Safe to call with d == nullptr (no-op).
     void device_vector_teardown(T* d)
     {
         if(d != nullptr)
         {
             device_vector_check(d);
 
+            // Released on the pointer setup counted, which is the one it handed out, past the
+            // guard. Releasing after the pointer moves back to the start of the allocation
+            // misses in the tracker's map, and a miss is silent: the count stays up for the
+            // life of the process and host_mem_safe starts refusing allocations that would
+            // have fit.
+            if(use_HMM)
+                free_ptr_use(d);
+
             if(m_pad > 0)
                 d -= m_pad; // restore to start of alloc
-
-            if(use_HMM)
-                free_ptr_use(d); // release count
 
             // Free device memory
             CHECK_HIP_ERROR((hipFree)(d));
@@ -200,7 +308,9 @@ public:
 template <typename T>
 T d_vector<T>::m_guard[MEM_MAX_GUARD_PAD] = {};
 
+#ifdef GOOGLE_TEST
 template <typename T>
-bool d_vector<T>::m_init_guard = false;
+std::once_flag d_vector<T>::m_init_flag;
+#endif
 
 #undef MEM_MAX_GUARD_PAD

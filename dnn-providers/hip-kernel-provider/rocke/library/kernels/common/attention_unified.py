@@ -3363,6 +3363,7 @@ def _run_3d_tiled(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     use_graph: bool = True,
+    tuning_spec=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -3373,10 +3374,18 @@ def _run_3d_tiled(
       3. Launch the 3D segment kernel with grid
          `(total_num_q_blocks, num_kv_heads, num_segments)`.
       4. Launch the reduce kernel with grid `(total_q, num_query_heads, 1)`.
+
+    ``tuning_spec`` replaces the heuristic segment/reduce specs with the
+    dispatcher's explicit pair.
     """
-    num_segments = _num_segments(problem)
-    cache_key = _tiled_3d_cache_key(problem)
-    if use_graph and _enable_3d_graph_replay(problem) and not _torch_stream_capturing():
+    if tuning_spec is not None:
+        num_segments = int(tuning_spec.kernel_spec.num_segments)
+        cache_key = tuning_spec.cache_key()
+    else:
+        num_segments = _num_segments(problem)
+        cache_key = _tiled_3d_cache_key(problem)
+    capturing = _torch_stream_capturing()
+    if use_graph and _enable_3d_graph_replay(problem) and not capturing:
         graph_key = (
             cache_key,
             int(problem.total_q),
@@ -3425,6 +3434,7 @@ def _run_3d_tiled(
                 k_scale=k_scale,
                 v_scale=v_scale,
                 use_graph=False,
+                tuning_spec=tuning_spec,
             )
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
@@ -3451,6 +3461,7 @@ def _run_3d_tiled(
                         k_scale=k_scale,
                         v_scale=v_scale,
                         use_graph=False,
+                        tuning_spec=tuning_spec,
                     )
             _3D_GRAPHS[graph_key] = graph
             _3D_GRAPH_REFS[graph_key] = (
@@ -3478,7 +3489,9 @@ def _run_3d_tiled(
     # ``rocke/runtime/launcher.py`` are removed by construction; the
     # only remaining per-call cost is packing args and issuing two
     # ``hipModuleLaunchKernel`` calls on the caller's stream.
-    prepared = _get_3d_pipeline(problem, cache_key, num_segments)
+    prepared = _get_3d_pipeline(
+        problem, cache_key, num_segments, tuning_spec=tuning_spec
+    )
     segm_output, segm_max, segm_expsum = prepared.workspace(
         problem, num_segments, q.device
     )
@@ -3546,10 +3559,14 @@ def _run_3d_tiled(
         # Output is commonly a fresh tensor per request; workspace and inputs are
         # fixed by the bound key.
         red_vals["output_ptr"] = out
-    return prepared.pipeline(
-        (seg_vals, red_vals),
-        (prepared.seg_config, prepared.red_config),
-        stream=int(stream),
+    # hipStreamSynchronize is illegal while a stream is capturing, and the
+    # default LaunchConfig.fence=True path does exactly that. Frameworks
+    # that wrap the whole forward in torch.cuda.graph (vLLM, an outer
+    # microbench) skip the internal hipGraph above; this keeps the two
+    # eager launches capturable. Workspace / compile still need a warmup
+    # call outside capture — same contract as the internal graph path.
+    return _launch_3d_pipeline(
+        prepared, seg_vals, red_vals, stream, capturing=capturing
     )
 
 
@@ -3597,6 +3614,69 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
+    """Launch segment+reduce, without a stream fence while capturing."""
+    if capturing:
+        with no_fence():
+            return prepared.pipeline(
+                (seg_vals, red_vals),
+                (prepared.seg_config, prepared.red_config),
+                stream=int(stream),
+            )
+    return prepared.pipeline(
+        (seg_vals, red_vals),
+        (prepared.seg_config, prepared.red_config),
+        stream=int(stream),
+    )
+
+
+# The dispatcher's ``AttentionTuningSpec`` satisfies this; the runtime only
+# compiles ``build()`` under ``cache_key()`` and launches its geometry.
+_EXPLICIT_TUNING_ATTRS = (
+    "arch",
+    "path",
+    "kernel_spec",
+    "compile_backend",
+    "allow_unsupported",
+    "cache_key",
+    "build",
+    "launch_grid",
+    "launch_block",
+    "with_num_kv_blocks",
+)
+
+
+def _require_explicit_tuning_spec(tuning_spec) -> None:
+    """Reject a tuning spec that does not carry the launch contract."""
+    missing = [
+        name for name in _EXPLICIT_TUNING_ATTRS if not hasattr(tuning_spec, name)
+    ]
+    if missing:
+        raise TypeError(
+            "tuning spec is missing "
+            + ", ".join(missing)
+            + "; required attributes are "
+            + ", ".join(_EXPLICIT_TUNING_ATTRS)
+        )
+
+
+def _explicit_path_supported(
+    problem: UnifiedAttentionProblem, tuning_spec, kind: str
+) -> Tuple[bool, str]:
+    """Problem-shape support for a path, with or without an explicit spec.
+
+    A tuning spec is a knob combination, not proof the problem is runnable.
+    ``AttentionTuningSpec.allow_unsupported`` is the only bypass.
+    """
+    if tuning_spec is not None and tuning_spec.allow_unsupported:
+        return True, f"explicit {kind} tuning spec (unsupported override)"
+    if kind == "3d":
+        return supports_native_unified_attention_3d_tiled(problem)
+    if kind == "2d":
+        return supports_native_unified_attention_tiled(problem)
+    raise ValueError(f"unknown attention path kind {kind!r}")
 
 
 def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
@@ -3651,21 +3731,11 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         )
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     if arch == "gfx950":
-        # The 3D split-KV decode launch is host/dispatch bound here: the two
-        # kernels (segment + reduce) device-execute in ~26-35us but the eager
-        # Python dispatch adds a ~17us flat floor, so the wall time is ~43us and
-        # does not scale with context length. Capturing the (segment + reduce)
-        # launch sequence into a hipGraph and replaying it removes that
-        # per-launch host cost and roughly halves decode latency (43->21us at
-        # k=2048), producing bitwise-identical output. Gated to the decode /
-        # short-q regime (``max_seqlen_q <= 768``) so prefill routing is never
-        # affected, and feature-flagged shapes are excluded. Opt-in via
-        # ``HIPDNN_GFX950_3D_GRAPH=1`` until broadly validated across traces.
-        if problem.max_seqlen_q > 768:
-            return False
-        if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
-            return False
-        if problem.sliding_window > 0 or problem.use_fp8:
+        # Decode / short-q 3D is launch-overhead bound. Keep replay opt-in
+        # until it is the production default (``HIPDNN_GFX950_3D_GRAPH=1``).
+        # Skipped when the caller is already capturing so an outer
+        # torch.cuda.graph wins.
+        if not _recommend_graph_replay(problem):
             return False
         env = __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
         return env in ("1", "on", "enable", "enabled", "yes", "true")
@@ -3903,38 +3973,40 @@ def _get_3d_pipeline(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     num_segments: int,
+    *,
+    tuning_spec=None,
 ) -> _Attention3DPrepared:
     prepared_key = cache_key + ("total_q", int(problem.total_q))
     if prepared_key in _3D_PIPELINES:
         return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
         arch = _resolve_attention_arch()
-        (
-            _,
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_3d_tiled,
-            build_unified_attention_reduce_tiled,
-            _,
-        ) = _tiled_3d_impl(arch)
-        seg_spec = _tiled_3d_spec_from_problem(problem)
-        reduce_spec = UnifiedAttentionReduceTiledSpec(
-            head_size=problem.head_size,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            dtype=problem.dtype,
-            num_segments=num_segments,
-            waves_per_eu=_select_3d_waves_per_eu(problem),
-        )
-        seg_art = compile_kernel(
-            build_unified_attention_3d_tiled(seg_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
-        red_art = compile_kernel(
-            build_unified_attention_reduce_tiled(reduce_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
+        if tuning_spec is not None:
+            seg_kernel, red_kernel = tuning_spec.build(arch)
+        else:
+            (
+                _,
+                UnifiedAttentionReduceTiledSpec,
+                build_unified_attention_3d_tiled,
+                build_unified_attention_reduce_tiled,
+                _,
+            ) = _tiled_3d_impl(arch)
+            seg_kernel = build_unified_attention_3d_tiled(
+                _tiled_3d_spec_from_problem(problem), arch=arch
+            )
+            red_kernel = build_unified_attention_reduce_tiled(
+                UnifiedAttentionReduceTiledSpec(
+                    head_size=problem.head_size,
+                    num_query_heads=problem.num_query_heads,
+                    num_kv_heads=problem.num_kv_heads,
+                    dtype=problem.dtype,
+                    num_segments=num_segments,
+                    waves_per_eu=_select_3d_waves_per_eu(problem),
+                ),
+                arch=arch,
+            )
+        seg_art = compile_kernel(seg_kernel, arch=arch, capture_ir_text=False)
+        red_art = compile_kernel(red_kernel, arch=arch, capture_ir_text=False)
         _ATTN_3D_TILED_CACHE[cache_key] = (
             seg_art.hsaco,
             seg_art.kernel_name,
@@ -3945,7 +4017,14 @@ def _get_3d_pipeline(
     seg_launcher = KernelLauncher(
         hsaco=seg_hsaco,
         kernel_name=seg_kname,
-        signature=_3d_signature(problem.dtype, kv_dtype=_kv_storage_dtype(problem)),
+        signature=_3d_signature(
+            problem.dtype,
+            kv_dtype=(
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
+                else _kv_storage_dtype(problem)
+            ),
+        ),
         cache_key=("3d_seg",) + cache_key,
     )
     red_launcher = KernelLauncher(
@@ -4081,23 +4160,29 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    tuning_spec=None,
 ) -> KernelLauncher:
     if cache_key in _2D_LAUNCHERS:
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
         arch = _resolve_attention_arch()
-        _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-        spec = _tiled_spec_from_problem(problem)
-        route = _gfx942_4warp_route(problem)
-        if route is not None:
-            # Distinct 4-warp GQA paged builder (keyed separately in
-            # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged ABI
-            # as the default builder. Parity+ with AITER @Sq4096/8192 (vs the
-            # 1-warp std-QK's 0.55x).
-            kernel = route.builder(spec, arch=arch)
+        if tuning_spec is not None:
+            kernel = tuning_spec.build(arch)
+            backend = tuning_spec.compile_backend
         else:
-            kernel = build_unified_attention_2d_tiled(spec, arch=arch)
-        backend = _select_2d_compile_backend(problem)
+            _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+            spec = _tiled_spec_from_problem(problem)
+            route = _gfx942_4warp_route(problem)
+            if route is not None:
+                # Distinct 4-warp GQA paged builder (keyed separately in
+                # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
+                # ABI as the default builder. Parity+ with AITER @Sq4096/8192
+                # (vs the 1-warp std-QK's 0.55x).
+                kernel = route.builder(spec, arch=arch)
+            else:
+                kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+            backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -4113,12 +4198,37 @@ def _get_2d_launcher(
             problem.dtype,
             include_bt_stride=True,
             include_qq_bias_stride=True,
-            kv_dtype=_kv_storage_dtype(problem),
+            kv_dtype=(
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
+                else _kv_storage_dtype(problem)
+            ),
         ),
         cache_key=("2d",) + cache_key,
     )
     _2D_LAUNCHERS[cache_key] = launcher
     return launcher
+
+
+def gfx942_4warp_launch_grid(problem) -> Tuple[int, int, int]:
+    """Grid the gfx942 4-warp GQA builder actually launches.
+
+    Fold-eligible shapes pack four query heads into one kv-head tile. The
+    dispatcher grid and ``_get_2d_launch_meta`` both call this so they cannot
+    drift.
+    """
+    fold = gfx942_gqa_fold_eligible(
+        problem.head_size,
+        problem.num_queries_per_kv,
+        problem.sliding_window,
+        problem.dtype,
+        problem.block_size,
+    )
+    if fold:
+        qblocks = problem.total_q // 32 + problem.num_seqs
+        return (int(problem.num_kv_heads), int(qblocks), 1)
+    qblocks = problem.total_q // 128 + problem.num_seqs
+    return (int(problem.num_query_heads), int(qblocks), 1)
 
 
 def gfx942_gqa_fold_eligible(
@@ -4150,11 +4260,19 @@ def gfx942_gqa_fold_eligible(
 def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    tuning_spec=None,
 ) -> _Attention2DLaunchMeta:
     meta_key = cache_key + ("total_q", int(problem.total_q))
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
+    if tuning_spec is not None:
+        meta = _Attention2DLaunchMeta(
+            grid=tuning_spec.launch_grid(problem), block=tuning_spec.launch_block()
+        )
+        _2D_LAUNCH_META[meta_key] = meta
+        return meta
     route = _gfx942_4warp_route(problem)
     if route is not None:
         _fold = gfx942_gqa_fold_eligible(
@@ -4259,6 +4377,7 @@ def run_unified_attention_torch(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    tuning_spec=None,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -4280,6 +4399,21 @@ def run_unified_attention_torch(
     harness amortises the segment + reduce launch overhead in the 3D
     path under a hipgraph.
     """
+    if tuning_spec is not None:
+        _require_explicit_tuning_spec(tuning_spec)
+        if tuning_spec.arch != _resolve_attention_arch():
+            raise ValueError(
+                f"tuning spec targets {tuning_spec.arch}, running on "
+                f"{_resolve_attention_arch()}"
+            )
+        implied = "3d" if tuning_spec.path == "3d" else "tiled"
+        if backend not in ("auto", implied):
+            raise ValueError(
+                f"tuning spec path {tuning_spec.path!r} conflicts with "
+                f"backend {backend!r}"
+            )
+        backend = implied
+
     bt_stride = (
         int(block_table.stride(0))
         if hasattr(block_table, "stride")
@@ -4301,6 +4435,10 @@ def run_unified_attention_torch(
         )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
+    if tuning_spec is not None:
+        # Explicit specs are initially selected before framework tensors exist.
+        # Refresh address-width state and tuning identity from the real cache.
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
@@ -4327,7 +4465,7 @@ def run_unified_attention_torch(
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
-        ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, reason_3d = _explicit_path_supported(problem, tuning_spec, "3d")
         if ok_3d:
             return _run_3d_tiled(
                 problem=problem,
@@ -4350,6 +4488,7 @@ def run_unified_attention_torch(
                 stream=int(stream),
                 k_scale=k_scale,
                 v_scale=v_scale,
+                tuning_spec=tuning_spec,
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
@@ -4361,7 +4500,11 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
-        if _enable_2d_graph_replay(problem) and not _torch_stream_capturing():
+        if (
+            tuning_spec is None
+            and _enable_2d_graph_replay(problem)
+            and not _torch_stream_capturing()
+        ):
             graphed = _run_2d_graphed(
                 problem,
                 q=q,
@@ -4385,14 +4528,18 @@ def run_unified_attention_torch(
             )
             if graphed is not _GRAPH_FALLBACK:
                 return graphed
-        ok_t, reason_t = supports_native_unified_attention_tiled(problem)
+        ok_t, reason_t = _explicit_path_supported(problem, tuning_spec, "2d")
         if ok_t:
             # Hot path: compute the cache key directly from the problem +
             # selectors (skip the 17-field dataclass build). Spec is only
             # built on cache miss inside _get_2d_launcher and for grid
             # math below.
-            key = _tiled_cache_key(problem)
-            launcher = _get_2d_launcher(problem, key)
+            key = (
+                tuning_spec.cache_key()
+                if tuning_spec is not None
+                else _tiled_cache_key(problem)
+            )
+            launcher = _get_2d_launcher(problem, key, tuning_spec=tuning_spec)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -4418,7 +4565,7 @@ def run_unified_attention_torch(
             # The dispatcher must launch with the same BLOCK_Q/threads the
             # kernel was built for. Cache that fixed metadata per kernel key so
             # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(problem, key)
+            meta = _get_2d_launch_meta(problem, key, tuning_spec=tuning_spec)
             return launcher(
                 vals,
                 config=LaunchConfig(
