@@ -198,8 +198,18 @@ int computeDsIssueTimeTimes3(size_t numDsLoads) {
 
 /// computeDsIssueTimeTimes3() in whole cycles, for callers that do not need the
 /// extra precision and would otherwise repeat the scaling.
-int computeDsIssueTime(size_t numDsLoads) {
-    return computeDsIssueTimeTimes3(numDsLoads) / 3;
+///
+/// The empirical curve above was tuned assuming one cycle of front-end issue
+/// per ds op. It is compared directly against computeDynamicDrainLatencyForLoads(),
+/// which now scales its own per-load issue spacing by dsIssueCyclesForWaves()
+/// when waves share an issue pipe. Leaving this curve un-scaled would compare
+/// a real (doubled) drain estimate against a front-end throughput estimate
+/// that still assumes the old, single-wave rate -- systematically making
+/// bursts look like they take longer to issue than to land, so this applies
+/// the same per-load multiplier here.
+int computeDsIssueTime(const HWModel& hw, size_t numDsLoads, int numWaves) {
+    const int multiplier = dsIssueCyclesForWaves(hw, /*issueCycles=*/1, numWaves);
+    return computeDsIssueTimeTimes3(numDsLoads) * multiplier / 3;
 }
 
 /// If `inst` is an LDS-load wait (s_wait_dscnt / s_wait_loadcnt_dscnt), return
@@ -395,11 +405,11 @@ class RemoveDscntPass : public StinkyInstPass {
     int computeNumDsFinished(std::span<const DsLoadDrainEntry> loads, int numWaves) const {
         if (!hw_ || loads.empty()) return 0;
 
-        const int totalIssueTime = computeDsIssueTime(loads.size());
+        const int totalIssueTime = computeDsIssueTime(*hw_, loads.size(), numWaves);
 
         int drained = 0;
         for (size_t count = 1; count <= loads.size(); ++count) {
-            const int issueTime = computeDsIssueTime(count);
+            const int issueTime = computeDsIssueTime(*hw_, count, numWaves);
             const int landsAt =
                 issueTime + computeDynamicDrainLatencyForLoads(*hw_, loads.subspan(0, count));
             if (landsAt + dsProximityThreshold_ > totalIssueTime) break;
@@ -590,6 +600,14 @@ class RemoveDscntPass : public StinkyInstPass {
                                          << "\" cycle=" << cycles
                                          << " wait check activated by WMMA src/ds overlap\n");
                 }
+            } else if (isDSRead(*inst) || isDSWrite(*inst)) {
+                // Real front-end issue cost for a ds op: consistent with the
+                // wave-sharing-adjusted issueSpacing the drain model below
+                // compares this same clock against. Advancing by the raw ISA
+                // number here would make ds ops appear to issue back-to-back
+                // faster than the drain estimate assumes they land, making
+                // this pass overcount how many are still outstanding.
+                cycles += dsIssueCyclesForWaves(*hw_, inst->issueCycles, numWaves_);
             } else {
                 cycles += inst->issueCycles;
             }
