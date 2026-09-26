@@ -208,11 +208,11 @@ template <typename TDMConfig_,
           index_t NumCoord_>
 CK_TILE_DEVICE auto
 load_tile_tdm_full_tile(const TDMConfig_& tdm_config,
-                       LdsTileWindow_&& lds_tile,
-                       const tile_window_with_static_distribution<BottomTensorView_,
-                                                                  WindowLengths_,
-                                                                  TileDistribution_,
-                                                                  NumCoord_>& tile_window)
+                        LdsTileWindow_&& lds_tile,
+                        const tile_window_with_static_distribution<BottomTensorView_,
+                                                                   WindowLengths_,
+                                                                   TileDistribution_,
+                                                                   NumCoord_>& tile_window)
 {
     return tile_window.tdm_load_to_lds(tdm_config,
                                        lds_tile,

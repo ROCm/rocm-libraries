@@ -922,11 +922,11 @@ struct tile_window_with_static_distribution
               typename LdsTileWindow_,
               typename GatherIndexView_,
               index_t i_access_ = -1,
-              bool full_tile_  = false>
+              bool full_tile_   = false>
     CK_TILE_DEVICE auto tdm_load_to_lds(const TDMConfig_& tdm_config,
                                         LdsTileWindow_&& lds_tile,
                                         const GatherIndexView_& gather_index_view,
-                                        number<i_access_> = {},
+                                        number<i_access_>         = {},
                                         bool_constant<full_tile_> = {}) const
     {
         using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
@@ -985,11 +985,11 @@ struct tile_window_with_static_distribution
                 else
                 {
                     // Clamp remaining dimensions so out-of-bounds boxes load zeros.
-                    auto dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
-                        transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                         glb_tensor_descriptor.get_lengths() -
-                                             this->get_window_origin() -
-                                             window_adaptor_thread_coord.get_bottom_index())));
+                    auto dims =
+                        to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
+                            [](auto x) { return max(index_t{0}, x); },
+                            glb_tensor_descriptor.get_lengths() - this->get_window_origin() -
+                                window_adaptor_thread_coord.get_bottom_index())));
                     dims[0] /= Traits::PackedSize;
                     return dims;
                 }

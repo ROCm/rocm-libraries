@@ -81,28 +81,27 @@ using TestFmhaTraits = ck_tile::TileFmhaTraits<false,
 template <typename DataType,
           ck_tile::index_t M,
           bool UseDoubleKVLdsBuffer = false,
-          bool ProgressiveDsLoadK = false,
-          typename FmhaMask = ck_tile::SimplifiedGenericAttentionMask<false>>
-using TestFmhaProblem =
-    ck_tile::BlockFmhaPipelineProblem<DataType,
-                                      DataType,
-                                      DataType,
-                                      float,
-                                      float,
-                                      DataType,
-                                      uint8_t,
-                                      float,
-                                      DataType,
-                                      float,
-                                      DataType,
-                                      TestFmhaShape<M>,
-                                      false,
-                                      ck_tile::ComposedAttention<0>,
-                                      FmhaMask,
-                                      false,
-                                      TestFmhaTraits,
-                                      UseDoubleKVLdsBuffer,
-                                      ProgressiveDsLoadK>;
+          bool ProgressiveDsLoadK   = false,
+          typename FmhaMask         = ck_tile::SimplifiedGenericAttentionMask<false>>
+using TestFmhaProblem = ck_tile::BlockFmhaPipelineProblem<DataType,
+                                                          DataType,
+                                                          DataType,
+                                                          float,
+                                                          float,
+                                                          DataType,
+                                                          uint8_t,
+                                                          float,
+                                                          DataType,
+                                                          float,
+                                                          DataType,
+                                                          TestFmhaShape<M>,
+                                                          false,
+                                                          ck_tile::ComposedAttention<0>,
+                                                          FmhaMask,
+                                                          false,
+                                                          TestFmhaTraits,
+                                                          UseDoubleKVLdsBuffer,
+                                                          ProgressiveDsLoadK>;
 
 template <typename BaseProblem, typename QDataType_, typename KDataType_, typename VDataType_>
 struct TestProblemWithDataTypes : BaseProblem
@@ -499,11 +498,12 @@ template <typename DataType,
           ck_tile::index_t M,
           bool UseDoubleKVLdsBuffer,
           bool ProgressiveDsLoadK = false,
-          bool ExpectedQPadding = false,
-          typename FmhaMask = ck_tile::SimplifiedGenericAttentionMask<false>>
+          bool ExpectedQPadding   = false,
+          typename FmhaMask       = ck_tile::SimplifiedGenericAttentionMask<false>>
 constexpr bool validate_policy_coupling()
 {
-    using Problem = TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer, ProgressiveDsLoadK, FmhaMask>;
+    using Problem =
+        TestFmhaProblem<DataType, M, UseDoubleKVLdsBuffer, ProgressiveDsLoadK, FmhaMask>;
     using Policy   = ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy;
     using QConfig  = typename Policy::template LdsPaddingConfigQ<Problem>;
     using KConfig  = typename Policy::template LdsPaddingConfigK<Problem>;
@@ -554,7 +554,7 @@ constexpr bool validate_policy_coupling()
     {
         static_assert(enabled_desc.get_element_space_size() == q_desc.get_element_space_size());
         static_assert(std::is_same_v<ck_tile::remove_cvref_t<decltype(enabled_desc)>,
-                                    ck_tile::remove_cvref_t<decltype(q_desc)>>);
+                                     ck_tile::remove_cvref_t<decltype(q_desc)>>);
     }
     else
     {
@@ -584,25 +584,37 @@ static_assert(validate_policy_coupling<ck_tile::half_t, 128, true, true, true>()
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<
                                  TestFmhaProblem<ck_tile::bf16_t, 128, false, true>>::Q,
                              NoPad>);
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true,
-                                      ck_tile::GenericAttentionMask<true, false>>());
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true,
-                                      ck_tile::GenericAttentionMask<true, true>>());
-static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true,
-                                      ck_tile::GenericAttentionMask<false, false>>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t,
+                                       128,
+                                       true,
+                                       true,
+                                       true,
+                                       ck_tile::GenericAttentionMask<true, false>>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t,
+                                       128,
+                                       true,
+                                       true,
+                                       true,
+                                       ck_tile::GenericAttentionMask<true, true>>());
+static_assert(validate_policy_coupling<ck_tile::bf16_t,
+                                       128,
+                                       true,
+                                       true,
+                                       true,
+                                       ck_tile::GenericAttentionMask<false, false>>());
 struct ProgressiveBiasProblem : TestFmhaProblem<ck_tile::bf16_t, 128, true, true>
 {
     [[maybe_unused]] static constexpr auto BiasEnum =
         ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
 };
-static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveBiasProblem>::Q,
-                             QKPad>);
+static_assert(
+    std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveBiasProblem>::Q, QKPad>);
 struct ProgressiveTrLoadProblem : TestFmhaProblem<ck_tile::bf16_t, 128, true, true>
 {
     [[maybe_unused]] static constexpr bool kUseTrLoad = true;
 };
-static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveTrLoadProblem>::Q,
-                             QKPad>);
+static_assert(
+    std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveTrLoadProblem>::Q, QKPad>);
 #else
 static_assert(
     is_disabled_selection<

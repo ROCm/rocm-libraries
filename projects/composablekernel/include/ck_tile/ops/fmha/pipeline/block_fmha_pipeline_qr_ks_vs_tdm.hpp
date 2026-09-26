@@ -363,24 +363,21 @@ struct BlockFmhaPipelineQRKSVSTdm
     // The progressive M128 traversal has the fragment shape required by the
     // staged hand-off below. Element types and attention features do not alter
     // those LDS fragment lifetimes.
-    static constexpr bool kStagedKPairs =
-        Problem::kProgressiveDsLoadK && kM0 == 128;
-    static constexpr bool kUseIglpBulkScheduling =
-        CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
+    static constexpr bool kStagedKPairs          = Problem::kProgressiveDsLoadK && kM0 == 128;
+    static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
 
     // Unchecked TDM bounds need a stronger, independent range proof. Keep this
     // separate from K staging so padded/group/sink/custom-mask configurations
     // can use the staged traversal without inheriting the full-box shortcut.
     static constexpr bool kTdmBoxesAlwaysInBounds =
-        kStagedKPairs && !kIsGroupMode && !kPadSeqLenK && !kPadHeadDimQ &&
-        !kPadHeadDimV && !kHasSink && !Problem::kSkipMinSeqlenQ &&
-        (!FmhaMask::IsMasking ||
-         std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>);
+        kStagedKPairs && !kIsGroupMode && !kPadSeqLenK && !kPadHeadDimQ && !kPadHeadDimV &&
+        !kHasSink && !Problem::kSkipMinSeqlenQ &&
+        (!FmhaMask::IsMasking || std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>);
 
     template <bool AllowDenseFullBox = false, typename LdsWindow, typename DramWindow>
     CK_TILE_DEVICE static void LoadTdmFullTileOrPadded(const TDMConfig& config,
-                                                     LdsWindow& lds_window,
-                                                     const DramWindow& dram_window)
+                                                       LdsWindow& lds_window,
+                                                       const DramWindow& dram_window)
     {
         if constexpr(kTdmBoxesAlwaysInBounds && (FmhaMask::IsMasking || AllowDenseFullBox))
         {
@@ -1543,9 +1540,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                 static_for<0, k0_loops, 1>{}([&](auto i_k0) {
                     gemm_0.template RunWithAfterWarp<true>(
                         s_acc,
-                        get_slice_tile(q_tile,
-                                       sequence<0, i_k0 * kK0>{},
-                                       sequence<kM0, (i_k0 + 1) * kK0>{}),
+                        get_slice_tile(
+                            q_tile, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{}),
                         k_tile,
                         [&](auto mIter, auto nIter, auto kIter) {
                             if constexpr(mIter == 1 && kIter == 0 &&
@@ -1565,8 +1561,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                     }();
                                     static_for<0, 2, 1>{}([&](auto j) {
                                         constexpr auto origin = merge_sequences(
-                                            sequence<decltype(nIter)::value - 1 + j, 0>{},
-                                            b_zeros);
+                                            sequence<decltype(nIter)::value - 1 + j, 0>{}, b_zeros);
                                         constexpr auto lengths =
                                             merge_sequences(sequence<1, 1>{}, b_lengths);
                                         k_tile.set_y_sliced_thread_data(
@@ -1899,7 +1894,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             // Keep whole-P production unchanged and defer only l's reduction
             // in the guarded path. The original left-fold and row sync remain.
             constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking;
-            auto rowsum_p = [&]() {
+            auto rowsum_p                    = [&]() {
                 if constexpr(kDeferDenominator)
                 {
                     return m;
@@ -2023,13 +2018,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                     p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
                 ReduceRowSync(rowsum_p, f_sum);
-                tile_elementwise_inout(
-                    [](auto& sum, auto correction, auto row_sum) {
-                        sum = correction * sum + row_sum;
-                    },
-                    l,
-                    l_correction,
-                    rowsum_p);
+                tile_elementwise_inout([](auto& sum,
+                                          auto correction,
+                                          auto row_sum) { sum = correction * sum + row_sum; },
+                                       l,
+                                       l_correction,
+                                       rowsum_p);
             }
 
             s_wait_tensorcnt_barrier<1>();

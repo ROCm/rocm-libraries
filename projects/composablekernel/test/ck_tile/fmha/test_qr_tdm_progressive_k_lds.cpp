@@ -38,26 +38,25 @@ template <ck_tile::index_t M,
           bool ProgressiveDsLoadK   = false,
           typename DataType         = ck_tile::half_t,
           typename Mask             = ck_tile::SimplifiedGenericAttentionMask<false>>
-using TestFmhaProblem =
-    ck_tile::BlockFmhaPipelineProblem<DataType,
-                                      DataType,
-                                      DataType,
-                                      float,
-                                      float,
-                                      DataType,
-                                      uint8_t,
-                                      float,
-                                      DataType,
-                                      float,
-                                      DataType,
-                                      TestFmhaShape<M>,
-                                      false,
-                                      ck_tile::ComposedAttention<0>,
-                                      Mask,
-                                      false,
-                                      TestFmhaTraits,
-                                      UseDoubleKVLdsBuffer,
-                                      ProgressiveDsLoadK>;
+using TestFmhaProblem = ck_tile::BlockFmhaPipelineProblem<DataType,
+                                                          DataType,
+                                                          DataType,
+                                                          float,
+                                                          float,
+                                                          DataType,
+                                                          uint8_t,
+                                                          float,
+                                                          DataType,
+                                                          float,
+                                                          DataType,
+                                                          TestFmhaShape<M>,
+                                                          false,
+                                                          ck_tile::ComposedAttention<0>,
+                                                          Mask,
+                                                          false,
+                                                          TestFmhaTraits,
+                                                          UseDoubleKVLdsBuffer,
+                                                          ProgressiveDsLoadK>;
 
 using SingleBufferM64Problem  = TestFmhaProblem<64>;
 using DoubleBufferM64Problem  = TestFmhaProblem<64, true>;
@@ -132,13 +131,14 @@ make_input(std::size_t element_count, int multiplier, int modulus, int center, f
 }
 
 template <typename Problem>
-std::vector<typename Problem::ODataType> run_kernel(const ck_tile::DeviceMem& q_device,
-                                                    const ck_tile::DeviceMem& k_device,
-                                                    const ck_tile::DeviceMem& v_device,
-                                                    ck_tile::index_t seqlen_q,
-                                                    ck_tile::index_t seqlen_k = kSeqlenK,
-                                                    ck_tile::GenericAttentionMaskEnum mask_type =
-                                                        ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
+std::vector<typename Problem::ODataType>
+run_kernel(const ck_tile::DeviceMem& q_device,
+           const ck_tile::DeviceMem& k_device,
+           const ck_tile::DeviceMem& v_device,
+           ck_tile::index_t seqlen_q,
+           ck_tile::index_t seqlen_k = kSeqlenK,
+           ck_tile::GenericAttentionMaskEnum mask_type =
+               ck_tile::GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT)
 {
     using Kernel   = TestKernel<Problem>;
     using DataType = typename Problem::ODataType;
@@ -358,13 +358,13 @@ void check_long_sequence_sum(ck_tile::index_t seqlen, float input_scale)
     // Reference retains the original serial row sum through the non-progressive
     // path. Long sequences exercise repeated l updates, not just one KV tile.
     const auto count = kBatch * kHeads * seqlen * kHeadDim;
-    const auto q = make_input<DataType>(count, 13, 29, 14, input_scale);
-    auto k = make_input<DataType>(count, 7, 31, 15, input_scale);
+    const auto q     = make_input<DataType>(count, 13, 29, 14, input_scale);
+    auto k           = make_input<DataType>(count, 7, 31, 15, input_scale);
     // Periodic K alone reaches its dense row maxima in the first tile. Grow
     // subsequent blocks so this also exercises non-unit online rescaling.
     for(std::size_t i = 0; i < k.size(); ++i)
     {
-        const auto block = (i / kHeadDim) / 64;
+        const auto block   = (i / kHeadDim) / 64;
         const float growth = 1.0f + static_cast<float>(block) / 64.0f;
         k[i] = ck_tile::type_convert<DataType>(ck_tile::type_convert<float>(k[i]) * growth);
     }
@@ -409,8 +409,8 @@ void check_mixed_row_rescaling()
 {
     SCOPED_TRACE(Mask::IsMasking ? "causal" : "dense");
     constexpr ck_tile::index_t seqlen = 256;
-    constexpr float levels[4][2] = {{4, 4}, {4, 8}, {8, 8}, {8, 16}};
-    constexpr float values[4] = {1, 0.5f, 0.25f, 0.125f};
+    constexpr float levels[4][2]      = {{4, 4}, {4, 8}, {8, 8}, {8, 16}};
+    constexpr float values[4]         = {1, 0.5f, 0.25f, 0.125f};
     std::vector<DataType> q(seqlen * kHeadDim, ck_tile::type_convert<DataType>(0));
     std::vector<DataType> k(seqlen * kHeadDim, ck_tile::type_convert<DataType>(0));
     std::vector<DataType> v(seqlen * kHeadDim);
@@ -494,11 +494,12 @@ struct PrefixDenseMask : ck_tile::SimplifiedGenericAttentionMask<false>
     using ck_tile::SimplifiedGenericAttentionMask<false>::SimplifiedGenericAttentionMask;
 
     template <ck_tile::index_t YTile, ck_tile::index_t XTile>
-    CK_TILE_HOST_DEVICE constexpr auto GetTileRangeAlongX(
-        ck_tile::index_t row, ck_tile::number<YTile> height, ck_tile::number<XTile> width) const
+    CK_TILE_HOST_DEVICE constexpr auto GetTileRangeAlongX(ck_tile::index_t row,
+                                                          ck_tile::number<YTile> height,
+                                                          ck_tile::number<XTile> width) const
     {
-        const auto range = ck_tile::SimplifiedGenericAttentionMask<false>::GetTileRangeAlongX(
-            row, height, width);
+        const auto range =
+            ck_tile::SimplifiedGenericAttentionMask<false>::GetTileRangeAlongX(row, height, width);
         return ck_tile::make_tuple(0, range.at(ck_tile::number<1>{}) - 1);
     }
 };
