@@ -2113,9 +2113,15 @@ namespace TensileLite
         // this mode's zeros for concurrent callers who did not request it.
         if(problem.getParams().uniformSummationOrder())
         {
+            const bool rowUniformStaggerCapable
+                = internalArgsSupport.staggerU
+                  && (sizeMapping.streamK == 0 || internalArgsSupport.perTileExtraIters);
+            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
+            {
             defaultStaggerUMapping     = 0;
             defaultStaggerU            = 0;
             defaultStaggerUStrideShift = 0;
+            }
         }
 
         // Mapping should be in this range: [0, 1, 2, 3, 4]
@@ -6440,12 +6446,14 @@ namespace TensileLite
         // calculateAutoStaggerU() should already have forced this to 0; checking
         // it anyway is what catches a future path that bypasses the clamp.
         const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, sk.grid));
-        const size_t  resolvedStaggerU
-            = std::get<1>(calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM));
-        if(resolvedStaggerU != 0)
+        const auto   resolvedStaggerUParams
+            = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+        const size_t resolvedStaggerUMapping = std::get<0>(resolvedStaggerUParams);
+        const size_t resolvedStaggerU        = std::get<1>(resolvedStaggerUParams);
+        if(resolvedStaggerU != 0 && resolvedStaggerUMapping != 1)
             return refuse("ResolvedStaggerU",
                           "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
-                              + " rather than 0");
+                              + " with mapping " + std::to_string(resolvedStaggerUMapping));
 
         // Only a handwritten custom kernel can carry a stagger the host cannot
         // reach. A generated kernel takes StaggerU exclusively from the packed

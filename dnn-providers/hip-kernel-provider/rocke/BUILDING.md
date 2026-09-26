@@ -77,8 +77,9 @@ from the local editable install rather than an index.
 After this, from any directory:
 
 ```sh
-python -c "import rocke, kernels, builders, dispatch"   # all resolve
-python -m builders.gfx942.attention.parity_unified_attention --help
+python -c "import rocke, kernels, builders, dispatch, benchmarks"   # all resolve
+python -m benchmarks.common.attention_combo_sweep --help
+rocke-attention-combo-sweep --list-only --arch gfx950
 pytest rocke/library/tests
 ```
 
