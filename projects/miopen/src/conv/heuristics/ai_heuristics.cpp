@@ -38,10 +38,13 @@
 #endif
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <fdeep/fdeep.hpp>
+#include <miopen/conv/problem_description.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/env.hpp>
 
 #include <any>
+#include <cmath>
+#include <cstdlib>
 #include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
@@ -49,6 +52,12 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
 // Bypass TunaNet and the KTN / two-tower kernel-tuning models, keeping only the LGBM
 // heuristics. See common::LgbmOnly().
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_ONLY)
+// Dual-heuristics gate (see common::PreferLgbm): enabled by default; the FLOP thresholds accept
+// any strtod value ("1e12", "inf") and override the per-arch defaults of the current device.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_DUAL_HEURISTICS)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_LGBM_DUAL_FLOPS_THRESHOLD)
+MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_LGBM_DUAL_BWD_FLOPS_THRESHOLD)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_LGBM_DUAL_BWD_MAX_TENSOR_BYTES)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -229,6 +238,120 @@ bool IsTunaNetCategoricalFeature(const std::string& name)
 }
 
 bool LgbmOnly() { return env::enabled(MIOPEN_DEBUG_LGBM_ONLY); }
+
+double ConvFlops(const conv::ProblemDescription& problem)
+{
+    // `in` is x for Forward and y for Backward*, so pick x/y explicitly.
+    const bool fwd = problem.IsDirectionForward();
+    const double n = static_cast<double>(problem.GetBatchSize());
+    const double x_ch =
+        static_cast<double>(fwd ? problem.GetInChannels() : problem.GetOutChannels());
+    const double y_ch =
+        static_cast<double>(fwd ? problem.GetOutChannels() : problem.GetInChannels());
+    const double y_space = fwd ? static_cast<double>(problem.GetOutDepth()) *
+                                     static_cast<double>(problem.GetOutHeight()) *
+                                     static_cast<double>(problem.GetOutWidth())
+                               : static_cast<double>(problem.GetInDepth()) *
+                                     static_cast<double>(problem.GetInHeight()) *
+                                     static_cast<double>(problem.GetInWidth());
+    const double filter  = static_cast<double>(problem.GetWeightsDepth()) *
+                          static_cast<double>(problem.GetWeightsHeight()) *
+                          static_cast<double>(problem.GetWeightsWidth());
+    const double groups = static_cast<double>(std::max(problem.GetGroupCount(), 1));
+    return 2.0 * n * y_ch * (x_ch / groups) * y_space * filter;
+}
+
+// Thresholds come from matched LGBM-only vs TunaNet+two-tower perf evals (15k random 2D shapes,
+// fwd/bwd/wrw x fp32/fp16/bf16, same build) comparing the chosen kernel's time per FLOP decade:
+//  - gfx942: LGBM picks faster kernels below ~1e11 FLOP, two-tower above (+0.27 ms median at
+//    1e12, +5.4 ms at 1e13). LGBM also saves ~24 ms of find per unique problem, so forward --
+//    which serves one-shot inference -- keeps LGBM up to 1e12. Backward-data / weights only run
+//    in training, where find cost amortizes away, so they switch at the kernel crossover (1e11).
+//  - gfx950: LGBM picks faster kernels through the 1e13 decade (-9.3 ms median), so it keeps
+//    LGBM up to 1e14 in every direction.
+//  - LGBM's worst mis-picks (+1-1.8 s kernels, gfx942) are large backward-data / grouped
+//    problems routed from ASM GTC to the CK grouped solvers; a FLOP gate does not catch all of
+//    them, so backward problems with any tensor >= 2 GiB stay on TunaNet + two-tower.
+std::optional<LgbmDualThresholds> DefaultLgbmDualThresholds(const std::string& device)
+{
+    constexpr std::size_t k2GiB = std::size_t{1} << 31;
+    if(device.starts_with("gfx942"))
+        return LgbmDualThresholds{1e12, 1e11, k2GiB};
+    if(device.starts_with("gfx950"))
+        return LgbmDualThresholds{1e14, 1e14, k2GiB};
+    return std::nullopt;
+}
+
+bool PreferLgbmForSize(bool is_forward,
+                       double flops,
+                       std::size_t max_tensor_bytes,
+                       const LgbmDualThresholds& thresholds)
+{
+    if(is_forward)
+        return flops < thresholds.fwd_flops;
+    if(thresholds.bwd_max_tensor_bytes != 0 && max_tensor_bytes >= thresholds.bwd_max_tensor_bytes)
+        return false;
+    return flops < thresholds.bwd_flops;
+}
+
+namespace {
+
+// Parse a MIOPEN_DEBUG_LGBM_DUAL_*_FLOPS_THRESHOLD override; keeps `fallback` when unset or
+// unparseable. Negative values clamp to 0, which routes every problem to TunaNet + two-tower.
+template <class EnvVar>
+double FlopsThresholdOverride(EnvVar var, double fallback)
+{
+    const auto text = env::value(var);
+    if(text.empty())
+        return fallback;
+    char* end          = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if(end == text.c_str() || *end != '\0' || std::isnan(value))
+    {
+        MIOPEN_LOG_W("Ignoring unparseable " << env::name(var) << "=" << text);
+        return fallback;
+    }
+    return std::max(value, 0.0);
+}
+
+} // namespace
+
+bool PreferLgbm(const conv::ProblemDescription& problem, const std::string& device)
+{
+    if(LgbmOnly())
+        return true;
+    if(env::disabled(MIOPEN_DEBUG_LGBM_DUAL_HEURISTICS))
+        return false;
+
+    auto thresholds = DefaultLgbmDualThresholds(device);
+    if(!thresholds)
+        return false;
+    // Only what the threshold study measured: 2D, fp32/fp16/bf16. Everything else keeps the
+    // TunaNet + two-tower order.
+    if(!problem.Is2d())
+        return false;
+    const auto dtype = problem.GetInDataType();
+    if(dtype != miopenFloat && dtype != miopenHalf && dtype != miopenBFloat16)
+        return false;
+
+    thresholds->fwd_flops =
+        FlopsThresholdOverride(MIOPEN_DEBUG_LGBM_DUAL_FLOPS_THRESHOLD, thresholds->fwd_flops);
+    thresholds->bwd_flops =
+        FlopsThresholdOverride(MIOPEN_DEBUG_LGBM_DUAL_BWD_FLOPS_THRESHOLD, thresholds->bwd_flops);
+    thresholds->bwd_max_tensor_bytes = static_cast<std::size_t>(
+        env::value_or(MIOPEN_DEBUG_LGBM_DUAL_BWD_MAX_TENSOR_BYTES,
+                      static_cast<unsigned long long>(thresholds->bwd_max_tensor_bytes)));
+
+    const double flops = ConvFlops(problem);
+    const std::size_t max_bytes =
+        std::max({problem.GetInSize(), problem.GetOutSize(), problem.GetWeightsSize()});
+    const bool prefer =
+        PreferLgbmForSize(problem.IsDirectionForward(), flops, max_bytes, *thresholds);
+    MIOPEN_LOG_I2("dual heuristics: " << device << " " << problem.GetDirectionStr()
+                                      << " flops=" << flops << " max_tensor_bytes=" << max_bytes
+                                      << " -> " << (prefer ? "LGBM" : "TunaNet + two-tower"));
+    return prefer;
+}
 } // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -958,19 +1081,67 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // covers architectures/problems TunaNet cannot serve (no per-arch model, or the
     // problem is outside the model's supported set). Only if neither produces a
     // prediction do we fall back to the non-AI WTI heuristic.
+    //
+    // Exception: where the dual-heuristics gate prefers LGBM (small/mid-size problems on
+    // gfx942/gfx950, or everything under MIOPEN_DEBUG_LGBM_ONLY) the order is
+    // LGBM -> TunaNet -> WTI; see common::PreferLgbm.
+    const bool lgbm_only  = common::LgbmOnly();
+    const bool lgbm_first = common::PreferLgbm(problem, device);
 
-    // 1. TunaNet.
+    // LGBM selector: cross-arch dispatcher trained on perf-DB data. Returns the full
+    // solver vocabulary ranked by predicted speed; the caller (GetSolutionsFallback)
+    // walks this list and applies IsApplicable lazily, exactly like the TunaNet path --
+    // so no applicability check is done here. Enabled by default (active for all
+    // architectures the model covers); set MIOPEN_ENABLE_LGBM_SELECTOR=0 to skip it.
+    // Returns an empty list when it abstains.
+    const auto run_lgbm = [&]() -> std::vector<uint64_t> {
+        if(env::disabled(MIOPEN_ENABLE_LGBM_SELECTOR))
+        {
+            MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_ENABLE_LGBM_SELECTOR=0 for " << device);
+            return {};
+        }
+        // Same never-throw contract as the TunaNet block: swallow any failure
+        // (model load, filesystem, allocation) and fall through rather than
+        // propagating out of the predictor.
+        try
+        {
+            auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
+            if(!ranked.empty())
+            {
+                MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
+                std::vector<std::any> any_sol(ranked.begin(), ranked.end());
+                StorePredictionCache(problem, device, any_sol);
+                return ranked;
+            }
+            MIOPEN_LOG_I2("lgbm: abstained for " << device);
+        }
+        catch(const std::exception& e)
+        {
+            MIOPEN_LOG_W("LGBM prediction failed (" << e.what() << ")");
+        }
+        return {};
+    };
+
+    // 1. LGBM first when the dual-heuristics gate prefers it.
+    if(lgbm_first)
+    {
+        MIOPEN_LOG_I2("Dual heuristics: LGBM first for " << device);
+        auto ranked = run_lgbm();
+        if(!ranked.empty())
+            return ranked;
+    }
+
+    // 2. TunaNet.
     // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
     // model exported in an incompatible format, which throws a non-miopen std::exception)
-    // is swallowed so we fall through to the LGBM selector instead of failing the
+    // is swallowed so we fall through to the next selector instead of failing the
     // convolution. This is the predictor's contract: it returns a prediction or nothing,
     // but never throws.
     try
     {
-        if(common::LgbmOnly())
+        if(lgbm_only)
         {
-            MIOPEN_LOG_I2("TunaNet bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << device
-                                                                             << "; trying LGBM");
+            MIOPEN_LOG_I2("TunaNet bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << device);
         }
         // ND model (for gfx942/gfx950, supports both 2D and 3D).
         else if((is2d || is3d) && HasNDTunaNetSupport(device))
@@ -985,8 +1156,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                 return ProcessAndCachePredictions(
                     problem, device, true, predictions, model->GetSolverMap());
             }
-            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device
-                                                                           << "; trying LGBM");
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
         }
         // Legacy 2D model (for gfx908/gfx90a only).
         else if(is2d && HasLegacyTunaNetSupport(device))
@@ -1000,50 +1170,23 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                 return ProcessAndCachePredictions(
                     problem, device, false, predictions, model->metadata.solver_map);
             }
-            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device
-                                                                               << "; trying LGBM");
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
         }
     }
     catch(const std::exception& e)
     {
-        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what() << "); trying LGBM selector");
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what() << ")");
     }
 
-    // 2. LGBM selector fallback: cross-arch dispatcher trained on perf-DB data.
-    // Returns the full solver vocabulary ranked by predicted speed; the caller
-    // (GetSolutionsFallback) walks this list and applies IsApplicable lazily, exactly
-    // like the TunaNet path -- so no applicability check is done here. Enabled by
-    // default (active for all architectures the model covers); set
-    // MIOPEN_ENABLE_LGBM_SELECTOR=0 to force selection straight to WTI.
-    if(!env::disabled(MIOPEN_ENABLE_LGBM_SELECTOR))
+    // 3. LGBM fallback, unless it already ran first.
+    if(!lgbm_first)
     {
-        // Same never-throw contract as the TunaNet block: swallow any failure
-        // (model load, filesystem, allocation) and fall through to WTI rather
-        // than propagating out of the predictor.
-        try
-        {
-            const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
-            if(!ranked.empty())
-            {
-                MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
-                std::vector<std::any> any_sol(ranked.begin(), ranked.end());
-                StorePredictionCache(problem, device, any_sol);
-                return ranked;
-            }
-            MIOPEN_LOG_I2("lgbm: abstained for " << device << ", falling back to WTI");
-        }
-        catch(const std::exception& e)
-        {
-            MIOPEN_LOG_W("LGBM prediction failed (" << e.what() << "); falling back to WTI");
-        }
-    }
-    else
-    {
-        MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_ENABLE_LGBM_SELECTOR=0 for " << device
-                                                                              << ", using WTI");
+        auto ranked = run_lgbm();
+        if(!ranked.empty())
+            return ranked;
     }
 
-    // 3. WTI last: no AI prediction available, trigger the non-AI heuristic fallback.
+    // 4. WTI last: no AI prediction available, trigger the non-AI heuristic fallback.
     MIOPEN_LOG_I2("No AI prediction for " << device << ", falling back to WTI");
     return {};
 }

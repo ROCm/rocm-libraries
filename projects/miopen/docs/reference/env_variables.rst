@@ -215,6 +215,29 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable (default)
         | 1: Enable
 
+    * - | ``MIOPEN_DEBUG_LGBM_DUAL_HEURISTICS``
+        | On gfx942 and gfx950, routes 2D FP32/FP16/BF16 problems below a size threshold
+        | LightGBM-first (LightGBM solver selector and perf-config picker, with TunaNet and
+        | the two-tower as fallbacks) and larger problems to TunaNet and the two-tower.
+      - | 0: Disable (TunaNet and two-tower first for every problem)
+        | 1: Enable (default)
+
+    * - | ``MIOPEN_DEBUG_LGBM_DUAL_FLOPS_THRESHOLD``
+        | Forward problems with fewer FLOPs than this go LightGBM-first. Accepts
+        | floating-point values such as ``1e12`` or ``inf``.
+      - | Default: ``1e12`` on gfx942, ``1e14`` on gfx950
+
+    * - | ``MIOPEN_DEBUG_LGBM_DUAL_BWD_FLOPS_THRESHOLD``
+        | Same as ``MIOPEN_DEBUG_LGBM_DUAL_FLOPS_THRESHOLD`` for backward-data and
+        | backward-weights problems.
+      - | Default: ``1e11`` on gfx942, ``1e14`` on gfx950
+
+    * - | ``MIOPEN_DEBUG_LGBM_DUAL_BWD_MAX_TENSOR_BYTES``
+        | Backward-data and backward-weights problems with any tensor of at least this
+        | many bytes go to TunaNet and the two-tower regardless of FLOPs.
+      - | Default: ``2147483648`` (2 GiB)
+        | 0: Disable the guard
+
     * - | ``MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK``
         | Forces immediate mode fallback for convolution operations.
       - | 0: Disable
