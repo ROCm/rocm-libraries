@@ -57,3 +57,42 @@ using BQuantPipelines = ::testing::Types<BQuantFp8Rcr<GemmConfigCompAsync>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmBQuant, BQuantPipelines);
 TYPED_TEST(TestCkTileGemmBQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
+
+template <typename Config>
+using AQuantFp8Rcr = std::tuple<RowMajor,
+                                ColumnMajor,
+                                RowMajor,
+                                RowMajor,
+                                FP8,
+                                FP8,
+                                float,
+                                Half,
+                                AQuantGrouped,
+                                Config,
+                                GroupSize1D_128>;
+
+using AQuantPipelines = ::testing::Types<AQuantFp8Rcr<GemmConfigCompAsync>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmAQuant, AQuantPipelines);
+TYPED_TEST(TestCkTileGemmAQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
+
+// ABQuant tuple appends <BQuantGroupSize, BQLayout>.
+template <typename Config>
+using ABQuantFp8Rcr = std::tuple<RowMajor,
+                                 ColumnMajor,
+                                 RowMajor,
+                                 RowMajor,
+                                 FP8,
+                                 FP8,
+                                 float,
+                                 Half,
+                                 ABQuantGrouped,
+                                 Config,
+                                 GroupSize1D_128,
+                                 GroupSize1D_128,
+                                 ColumnMajor>;
+
+using ABQuantPipelines = ::testing::Types<ABQuantFp8Rcr<GemmConfigCompAsync>>;
+
+TYPED_TEST_SUITE(TestCkTileGemmABQuant, ABQuantPipelines);
+TYPED_TEST(TestCkTileGemmABQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }

@@ -483,7 +483,8 @@ class TestCkTileGemmAQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                                      ComputeDataType,
                                                                      ComputeDataType>;
 
-        using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>;
+        using BaseGemmPipeline =
+            typename Base::GemmConfig::template BasePipeline<GemmPipelineProblem>;
 
         constexpr auto K1 = CodegenGemmShape::WarpTile::at(ck_tile::number<2>{});
         const ck_tile::index_t K_split =
@@ -512,7 +513,10 @@ class TestCkTileGemmAQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                    has_hot_loop_v,
                                                    tail_number_v>;
 
-            using GemmPipeline = ck_tile::AQuantGemmPipelineAgBgCrCompV3<PipelineProblem>;
+            using GemmPipeline =
+                QuantPipelineFor<typename Base::GemmConfig,
+                                 ck_tile::QuantType::AQuantGrouped,
+                                 ck_tile::AQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>;
             using GemmEpilogue = ck_tile::CShuffleEpilogue<
                 ck_tile::CShuffleEpilogueProblem<ADataType,
                                                  BDataType,
@@ -1558,7 +1562,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             else if constexpr(IS_FP8BLOCKSCALE)
                 return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
             else
-                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+                return typename GemmConfig::template BasePipeline<GemmPipelineProblem>{};
         }();
         using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
 
@@ -1593,9 +1597,12 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             using GemmPipeline = std::conditional_t<
                 eight_waves,
                 ck_tile::ABQuantGemmPipelineAgBgCrEightWaves<PipelineProblem>,
-                std::conditional_t<PreshuffleB,
-                                   ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
-                                   ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
+                std::conditional_t<
+                    PreshuffleB,
+                    ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
+                    QuantPipelineFor<GemmConfig,
+                                     ck_tile::QuantType::ABQuantGrouped,
+                                     ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>>;
 
             using GemmEpilogue = std::conditional_t<
                 TiledMMAPermuteN,
