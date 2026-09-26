@@ -1,0 +1,56 @@
+# gfx1250 convolution follow-on: shape adequacy and performance hypotheses
+
+## Answer
+
+**Not completely.** The first F05 depthwise experiment covered the *real BF16 corpus*, but every measured case had a reduction of 50,400 or 201,600 elements per group. That tested the long-reduction regime, not the short-reduction regime in which a one-pass group-local reduction might beat a split GEMM plus conversion. A subsequent bounded synthetic sweep found BF16 short-reduction wins against **every eligible CK split choice** on several high-group shapes. The new candidate admits only the tested short-reduction class. There is **no matching short-R/high-G shape in the inspected MIOpen corpus**, so a CK win is not a measured model or MIOpen end-to-end gain.
+
+For F03/F04, the chosen shapes did stress the proposed work reductions, but the best existing XDL family stayed faster on the real backward-data case. F08 tested a current 3x3 forward winner, yet only one address-progression implementation. F09 tested an actual one-slice backward-data winner. F06/F07 stopped at source/selection gates **before** any candidate performance trial. A source finding or a failed entry gate is not evidence that an unimplemented optimization is slow.
+
+Retained source commits: F01 `7b870fe4e31`, F02 `2f526813e88`, bounded F05 `45342628611`. The unrestricted F05 trial executable (before admission gating) had SHA-256 `2dde09a90fce6d1e1029f168727e85e442ff744e40a443230c62fe197d7e8fb1`; the subsequently rebuilt bounded CK profiler had SHA-256 `66b2203d7596f327a2660039fb229d2635fa4acf802e35f2ac10fbb70339c10b`. Both were ROCm 10.2 gfx1250 builds with a MIOpen-layout-only CK profiler; those `/tmp` binaries are temporary evidence, not an installed MIOpen solver or stable candidate-ID registry.
+
+## What was tested against the best eligible CK solver?
+
+| Item | Was the mechanism stressed? | Was the best eligible family challenged? | Observed result and limit |
+|---|---|---|---|
+| F03 residue windows | **Yes.** N4/input8x8 2x2/s2/p0 and 3x3/s2/p1 halve modeled M64 CTAs from 8 to 4; real BF16 G1/N42/C24/K96, 3x3/s2/p1/input240x320 cuts modeled CTAs only 51,140 to 50,400. | **Yes, locally.** Matched fast WMMA rows and the real shape's XDL competitors were timed. | A slow native row improved 0.976549 to 0.936462 ms, but the fast native row changed 0.243100 to 0.241163 ms (small-run variation) versus XDL near 0.220 ms. The small-shape fastest matched rows regressed about 2-4%. This rejects that transform trial on these shapes, not exact windows in general. |
+| F04 general-conv clear elision | **Yes.** The real BF16 case has 154,828,800 logical dX bytes to initialize, and positive/negative Set-coverage tests passed. | **Partly.** Fast WMMA-v3 and XDL competitors were measured, but the proof/clear-elision patch targeted WMMA-v3, not XDL. | F04 alone changed the fast native row from 0.240788 to 0.275671 ms; the best XDL row was near 0.220 ms. Logical clear bytes are not measured DRAM traffic. Earlier W01 1x1 clear elision remains. |
+| F05 group-local depthwise WRW | **Initially only long R; subsequently yes for short R.** Real BF16 G192/256/512 3x3 corpus shapes have R=201,600/50,400; synthetic G256/450/512 with R=256/512 test a distinct high-CTA, short-serial-reduction class. | **Yes for CK.** New raw timing compares direct with scalar split1 and existing two-stage/merged kernels under auto, fixed1 and `all` split enumeration. | The unrestricted direct row lost on all four long-R corpus cases. A BF16-only row bounded to `G>=256` and `R<=min(G,512)` wins on repeated short-R synthetic tests below. No MIOpen workload frequency or end-to-end advantage follows. |
+| F06 scalar WRW auto split | **No kernel performance trial.** The proposed host adapter would turn auto into split1 for an existing split1-only row. | **No need established.** MIOpen already tries fixed1 before auto and excludes gfx1250 from its AI path. | No demonstrated production auto-only selection gain; no adapter was committed. This does not imply the generic auto heuristic is optimal for other kernels. |
+| F07 CTA order | **No changed-map GPU trial.** Old-map M01=8 to 1 was the hypothesis. | **No actual winner used that map.** The real BF16 3x3/30x40 winner uses XDL-v3's grouped M01=4 map with N0=1; the 1x1/K512 winner uses a different native-v3 grouped map. | An old-map benchmark on either shape would compare a nonwinning family or change a different algorithm. A 3x3/C48/K192/120x160 real case has no established winning map/tile identity; it is a future gate, not an observed F07 loss. |
+| F08 forward addressing | **Yes for emitted address work and one candidate.** The BF16 G1/N42/C=K128, 3x3/30x40 XDL-v3 winner's gfx1250 code object retains repeated quotient/mask instructions. | **Yes for the isolated A-only carry-check row.** Same winner tile/backend/pipeline; grouped odd/tail CPU check passed. | Five-process medians regressed 0.026409 to 0.030722 ms, although VGPRs fell 128 to 120; both used 32,768-byte LDS and zero scratch. This rejects the carry-check row, not every incremental-address or spatial-staging algorithm. |
+| F09 one-slice lookup | **Yes.** Actual BF16 K1024/C16 1x1/8x8 split4 WMMA-v3 winner still emitted two serialized BlockStart/End loads and a binary-search branch. | **Yes for that one-slice winner.** The constexpr bypass removed 232 bytes of kernel code; registered competitors remained. | Fifteen alternating process medians changed 0.014090 to 0.014639 ms, with unchanged 64 VGPRs, 16,896-byte LDS and zero scratch. This is not a mixed-residue lookup experiment. |
+
+## Why the rows behaved this way: hypotheses, not established causes
+
+- **F03 [INFERENCE]:** Exact residue bounds save mostly boundary tiles. Their fractional benefit shrinks on large spatial extents, while small kernels can be launch/descriptor dominated even when CTA count halves. We measured CTA counts and complete calls, not the fraction of time spent on address masks or padded work.
+- **F04 [INFERENCE]:** Clearing a fully written output can warm or establish residency for the next kernel. Omitting it may change cache state enough to offset saved initialization on one WMMA row. No cache/HBM counters or matched no-clear kernel-stage trace isolated that cause; the sign of a full-call result cannot establish it.
+- **F05 [INFERENCE]:** The direct kernel removes dense off-diagonal WMMA arithmetic and avoids a two-stage FP32 workspace/cast, but a reduction lane serially handles about 1,575 or 6,300 terms on the real corpus cases. On short-R shapes it handles only 8-16 terms, while 288-576 filter/group CTAs expose more parallelism. Source geometry supports neighboring-group contiguous loads, but transaction efficiency and individual arithmetic/launch costs were not counted. An FP16 G512/R512 comparison was close, so the retained row is BF16 only.
+- **F07 [INFERENCE]:** Reordering spatial and channel CTAs could trade weight reuse for input reuse only if a winning family has multiple tiles in both dimensions and an appropriate cache working set. Neither requirement was demonstrated for the tested winners; block-ID order alone does not prove cache residency.
+- **F08 [INFERENCE]:** Carry checks, branch predicates or altered vector address generation may outweigh removed quotient math. Lower VGPR metadata does not show fewer memory transactions or fewer hot-loop instructions. The tested implementation did not add explicit spatial staging.
+- **F09 [INFERENCE]:** For a short 1x1 split4 call, the required output clear and kernel launch can dominate the two eliminated scalar range loads. The trace proves both dispatches occur, not their individual critical-path contribution.
+
+## The newly bounded F05 case
+
+All shapes here are 2D BF16 NHWGC/GKYXC/NHWGK, C=K=1 per group, 3x3, split-1 direct Set with FP32 accumulation. Times are **milliseconds per complete CK invocation** under `--raw-invocation`, with hot-reused buffers and 50 event intervals per process; each displayed pair is the median of independent alternating processes. The comparator is the fastest *other* eligible CK candidate among requested fixed1, auto and legal split2..128 for that shape, not a presumed MIOpen choice.
+
+| Shape | R=N*Ho*Wo | Direct / best other (ms) | Process pairs |
+|---|---:|---:|---:|
+| G256/N4, input8x8, s1/p1 | 256 | 0.014918 / 0.017254 | 9 |
+| G450/N4, input8x8, s1/p1 (group tail) | 256 | 0.016207 / 0.019551 | 9 |
+| G512/N8, input16x16, s2/p1 | 512 | 0.025031 / 0.028149 | 9 |
+| G512/N8, input8x8, s1/p1 | 512 | 0.023473 / 0.024067 | 25 |
+
+A held-out asymmetric-pad G512/R256 run also favored direct (0.016328 versus 0.019581 ms, one process). Counterexamples shaped the eligibility limit: G256/R512 direct 0.021914 versus other 0.019387 ms, and G512/R640 direct 0.027758 versus other 0.026975 ms (single-process estimates); G512/R1024 also lost. The original real BF16 corpus M06/M14/M15/M25 long-R estimates were direct **5.189/4.913/1.309/1.529** versus best other **1.096/1.034/0.407/0.513** ms, respectively. The bounded row rejects those problems rather than slowing an existing candidate search. It also rejects explicit split>1, unsupported dtype/layout/filter and missing real launch pointers; dry MIOpen eligibility is shape-only. A short-R direct trace reported 16 VGPRs, 1,024-byte LDS, zero scratch and 256-thread blocks; resource metadata alone is not an occupancy counter.
+
+The G512/R512 stride-1 advantage is borderline: a shorter five-process series reversed its order, and in the 25-process run the direct and competitor ranges overlapped (0.023035-0.023870 versus 0.023245-0.025066 ms). Do not extrapolate the stronger R256 or stride-2 gains to every admitted shape. A locally built matching MIOpen gfx1250 plugin enumerated the BF16 G450/R256 row, accepted its split-1 kernel ID and passed two selected-invoker calls with changed input and poisoned weight output. The selected MIOpen WRW solution reported 16,200 bytes of **generic alpha/beta workspace**, even though the CK direct kernel uses no native scratch. This proves selected-path correctness, not default solver ranking or speed.
+
+No inspected real MIOpen command lies in this high-G/short-R admission class. That is the central limitation of calling F05 a **CK synthetic-shape win** rather than an end-to-end model improvement. In a filtered gfx1250 profiler, a representative check is:
+
+```sh
+ckProfiler grouped_conv_bwd_weight \
+  5 2 0 1 0 0 2 512 8 1 1 3 3 8 8 1 1 1 1 1 1 1 1 all \
+  --list-instances
+# Re-enumerate for current IDs, then use --instance <id> --raw-invocation.
+```
+
+The four real long-R controls are the M06/M14/M15/M25 records in `miopen_wrw_shapes.txt`; the real backward-data and forward commands are in the [follow-on scope](gfx1250_miopen_convolution_follow_on_scope.md). CK time flag `0` plus `--raw-invocation` reports the full-call metric without relabeling adjusted legacy timings. Clocks/power were not pinned. The locally built plugin's selected BF16 output was checked, but default MIOpen ranking, layout-conversion-inclusive latency, production workload frequency and installed-plugin behavior remain **unmeasured**.
