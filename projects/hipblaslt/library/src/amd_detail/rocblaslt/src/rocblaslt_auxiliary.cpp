@@ -173,6 +173,116 @@ inline bool
 }
 
 // Preload problem/solution mappings
+namespace
+{
+    // With no tuning mode set, the file in play is the legacy override file.
+    bool legacyOverrideInPlay()
+    {
+        return TensileLite::TuningModeSingleton::getInstance().mode()
+               == TensileLite::TuningMode::Off;
+    }
+
+    /**
+     * A recorded solution index is a hint; the recorded name is what authorizes
+     * it.
+     *
+     * Resolve the index in the library that is loaded now and require the name
+     * to still match. A rebuild that moved kernels then thins the file one entry
+     * at a time instead of the whole-file build gate rejecting everything, and
+     * an index that now points at an unrelated kernel is rejected rather than
+     * silently used.
+     *
+     * Entries with no recorded name are legacy rows, already gated on the build
+     * stamp when the file was loaded, so there is nothing further to check.
+     */
+    bool tuned_entry_identity_matches(rocblaslt_handle                         handle,
+                                      const TensileLite::ProblemOverride&      key,
+                                      const TensileLite::TunedEntry&           entry,
+                                      const rocblaslt_matmul_heuristic_result& resolved)
+    {
+        // Each name is checked against the accessor it was written from.
+        // kernel_name is what new rows carry; solution_name is only still read
+        // so files written before the switch keep validating rather than all
+        // failing at once.
+        //
+        // Both accessors give the bare name. getSolutionNameFromData decorates
+        // with GSU/WGM suffixes when they differ from the solution defaults,
+        // which would never round-trip against what the writer stored.
+        std::string recorded;
+        std::string currentName;
+
+        if(entry.kernelName.has_value())
+        {
+            recorded    = *entry.kernelName;
+            currentName = getKernelNameFromAlgoIndex(handle, resolved.algo);
+        }
+        else if(entry.solutionName.has_value())
+        {
+            recorded    = *entry.solutionName;
+            currentName = getSolutionNameFromAlgoIndex(handle, resolved.algo);
+        }
+        else
+        {
+            return true;
+        }
+
+        if(currentName == recorded)
+            return true;
+
+        auto& counters = TensileLite::TuningCounters::instance();
+
+        // Once per rejected entry rather than once per probe. A single call in
+        // tune mode meets this row three times, through the heuristic lookup,
+        // the execution probe and the recheck taken under the tuning lock, and
+        // counting each sighting reported three invalidations for one entry.
+        if(TensileLite::recordTuningInvalidation(key, entry.solutionIndex))
+            counters.invalidated++;
+
+        // Once per key rather than once per lookup: a stale entry is rediscovered
+        // on every call for that shape, and the message is the same every time.
+        // A legacy override user keeps the plain info gate the rest of this file
+        // uses: there only the heuristic lookup ever reaches here.
+        const bool logInvalid
+            = legacyOverrideInPlay()
+                  ? (get_logger_layer_mode() & rocblaslt_layer_mode_log_info) != 0
+                  : TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Invalid, key);
+        if(logInvalid)
+        {
+            std::ostringstream msg;
+            msg << "tuning-cache: cache-invalid index=" << entry.solutionIndex
+                << " now resolves to '" << currentName << "', recorded '" << recorded << "' ["
+                << counters.summary() << "]";
+            log_info(__func__, msg.str());
+        }
+
+        return false;
+    }
+
+    /**
+     * The two per-problem cache events, in the wording each audience expects.
+     *
+     * With a tuning mode set these are bounded to one line per key, since a
+     * replay loop would otherwise repeat them on every call. A legacy override
+     * user keeps the historical unbounded wording it already sees at this log
+     * level.
+     */
+    void logCacheHit(const char* func, const TensileLite::ProblemOverride& key, int index)
+    {
+        if(legacyOverrideInPlay())
+            log_info(func, "Find solution with index: " + std::to_string(index));
+        else if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Hit, key))
+            log_info(func, "tuning-cache: cache-hit index=" + std::to_string(index));
+    }
+
+    void logCacheMiss(const char* func, const TensileLite::ProblemOverride& key)
+    {
+        if(legacyOverrideInPlay())
+            log_info(func, "No valid solution index found in override file.");
+        else if(TensileLite::shouldLogTuningKeyEvent(TensileLite::TuningKeyEvent::Miss, key))
+            log_info(func, "tuning-cache: cache-miss, no valid entry for this problem");
+    }
+} // namespace
+
 bool problem_override_from_file(rocblaslt_handle&                 handle,
                                 RocblasltContractionProblem&      problem,
                                 rocblaslt_matmul_desc&            matmul_desc,
@@ -187,6 +297,18 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 
     if(m_override.size() == 0)
     {
+        // Still a lookup, and still one that fell back. Leaving early without
+        // counting it made a cache mode pointed at a missing or fully rejected
+        // file report shapes=0 and misses=0, which reads as "nothing asked" when
+        // the truth is "everything asked and nothing was there". The key build
+        // is behind the mode check because legacy override users reach this too
+        // and must not start paying for it.
+        TensileLite::TuningCounters::instance().misses++;
+
+        if(!legacyOverrideInPlay())
+            TensileLite::recordTuningLookup(RocblasltContractionProblem2ProblemOverride(problem),
+                                            false);
+
         log_info(__func__, "No valid entries found in override file.");
     }
     else
@@ -194,16 +316,34 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
         TensileLite::ProblemOverride prob_key(RocblasltContractionProblem2ProblemOverride(problem));
-        auto                         sol_iter = m_override.find(prob_key);
 
-        for(auto sol_idx = sol_iter.first; !success && sol_idx != sol_iter.second; sol_idx++)
+        // Current-schema rows first, then v0 rows under the historical narrow
+        // key. Old files predate every widened field, so they can only be
+        // matched on what the old format actually recorded.
+        auto       entries = m_override.find(prob_key);
+        const auto legacy  = m_override.findLegacy(prob_key);
+        entries.insert(entries.end(), legacy.begin(), legacy.end());
+
+        for(const auto& entry : entries)
         {
-            solutionIndex[0] = sol_idx->second;
+            if(success)
+                break;
+
+            solutionIndex[0] = entry.solutionIndex;
+
+            // getSolutionsFromIndex appends, and everything below reads [0].
+            // Without clearing, the second and later entries are validated and
+            // launched against the *first* entry's solution. Harmless while a
+            // key only ever had one entry; wrong as soon as it has two.
+            overrideResults.clear();
 
             if(rocblaslt_status_success
                == getSolutionsFromIndex(
-                   handle, solutionIndex, overrideResults, max_workspace_bytes))
+                   handle, solutionIndex, overrideResults, max_workspace_bytes)
+               && !overrideResults.empty())
             {
+                if(!tuned_entry_identity_matches(handle, prob_key, entry, overrideResults[0]))
+                    continue;
 
                 size_t required_workspace_size = 0;
                 auto&  tensile_data            = matmul_desc->m_data;
@@ -250,17 +390,89 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 
         if(!success)
         {
-            log_info(__func__, "No valid solution index found in override file.");
+            TensileLite::TuningCounters::instance().misses++;
+            TensileLite::recordTuningLookup(prob_key, false);
+            logCacheMiss(__func__, prob_key);
         }
         else
         {
-            std::string mapping_result = "Find solution with index: ";
-            mapping_result += std::to_string(solutionIndex[0]);
-            log_info(__func__, mapping_result);
+            TensileLite::TuningCounters::instance().hits++;
+            TensileLite::recordTuningLookup(prob_key, true);
+            logCacheHit(__func__, prob_key, solutionIndex[0]);
         }
     }
 
     return success;
+}
+
+// Declared for the execution path in tensile_host.cpp, which must know which
+// entry is usable rather than merely whether any entry exists.
+int tuning_cache_find_valid_entry(rocblaslt_handle                    handle,
+                                  const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
+                                  size_t                              max_workspace_bytes)
+{
+    TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
+
+    auto       entries = m_override.find(key);
+    const auto legacy  = m_override.findLegacy(key);
+    entries.insert(entries.end(), legacy.begin(), legacy.end());
+
+    std::vector<rocblaslt_matmul_heuristic_result> resolved;
+    std::vector<int>                               index(1);
+
+    for(const auto& entry : entries)
+    {
+        index[0] = entry.solutionIndex;
+
+        // Cleared per entry for the same reason as the replay loop below:
+        // getSolutionsFromIndex appends and this reads [0].
+        resolved.clear();
+
+        if(rocblaslt_status_success
+               != getSolutionsFromIndex(handle, index, resolved, max_workspace_bytes)
+           || resolved.empty())
+            continue;
+        if(!tuned_entry_identity_matches(handle, key, entry, resolved[0]))
+            continue;
+
+        // Identity says the index still names the recorded kernel; usability
+        // also requires that kernel to support this concrete call. The cache key
+        // deliberately omits values such as beta and C/D aliasing, so a valid
+        // identity can still fail predicates here. Replay performs this support
+        // check, and the tune-mode gate must perform the same one or it can
+        // suppress retuning forever while replay falls back every time.
+        RocblasltContractionProblem supportProblem = problem;
+        size_t                      required       = 0;
+        auto                        algo           = resolved[0].algo;
+        if(rocblaslt_status_success
+               == isSolutionSupportedNoMutation(handle, supportProblem, gemmData, &algo, &required)
+           && required <= max_workspace_bytes)
+        {
+            return entry.solutionIndex;
+        }
+
+        // Mirror replay's XF32 fallback, but keep this a pure probe. The
+        // algorithm passed to runContractionProblem is not necessarily this
+        // cached entry (a caller can supply an explicit algorithm), so leaving
+        // gemmData in fallback mode here can launch an unrelated XF32 algorithm
+        // against an FP32 problem.
+        if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
+        {
+            supportProblem.compute_type = rocblaslt_compute_f32;
+            required                    = 0;
+            if(rocblaslt_status_success
+                   == isSolutionSupportedNoMutation(
+                       handle, supportProblem, gemmData, &algo, &required)
+               && required <= max_workspace_bytes)
+            {
+                return entry.solutionIndex;
+            }
+        }
+    }
+
+    return -1;
 }
 
 bool problem_override_from_file_cpp(
@@ -273,11 +485,27 @@ bool problem_override_from_file_cpp(
 {
 
     bool success = false;
+
+    // Grouped GEMM carries TensileDataGroupedGemm, but the key accessor casts
+    // to TensileDataGemm unconditionally. Reading a ProblemOverride out of the
+    // wrong type segfaults on its std::string member. Grouped has no key of its
+    // own yet, so it simply does not participate in the cache.
+    if(gemmType != rocblaslt::RocGemmType::ROCBLASLT_GEMM)
+    {
+        log_info(__func__, "tuning-cache: grouped GEMM is not cached; using default selection.");
+        return false;
+    }
+
     TensileLite::getContractionProblemsFromFile(file_path);
     TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
 
     if(m_override.size() == 0)
     {
+        // Counted for the same reason as the C path. The key is already built
+        // and stored on the gemm data here, so there is nothing to guard.
+        TensileLite::TuningCounters::instance().misses++;
+        TensileLite::recordTuningLookup(TensileDataGemm2ProblemOverride(gemmData), false);
+
         log_info(__func__, "No valid entries found in override file.");
     }
     else
@@ -285,15 +513,31 @@ bool problem_override_from_file_cpp(
         std::vector<rocblaslt_matmul_heuristic_result> overrideResults;
         std::vector<int>                               solutionIndex(1);
         TensileLite::ProblemOverride prob_key(TensileDataGemm2ProblemOverride(gemmData));
-        auto                         sol_iter = m_override.find(prob_key);
 
-        for(auto sol_idx = sol_iter.first; !success && sol_idx != sol_iter.second; sol_idx++)
+        auto       entries = m_override.find(prob_key);
+        const auto legacy  = m_override.findLegacy(prob_key);
+        entries.insert(entries.end(), legacy.begin(), legacy.end());
+
+        for(const auto& entry : entries)
         {
-            solutionIndex[0] = sol_idx->second;
+            if(success)
+                break;
+
+            solutionIndex[0] = entry.solutionIndex;
+
+            // Same append-and-read-[0] hazard as the C path.
+            overrideResults.clear();
+
             if(rocblaslt_status_success
-               == getSolutionsFromIndex(
-                   handle, solutionIndex, overrideResults, max_workspace_bytes))
+                   == getSolutionsFromIndex(
+                       handle, solutionIndex, overrideResults, max_workspace_bytes)
+               && !overrideResults.empty())
             {
+                // Applied here too. This path never called the git-version gate
+                // at all, so before per-entry validation a stale file was used
+                // across builds with no check whatsoever.
+                if(!tuned_entry_identity_matches(handle, prob_key, entry, overrideResults[0]))
+                    continue;
 
                 size_t                  required_workspace_size = 0;
                 rocblaslt::RocTuningV2* tuning                  = nullptr;
@@ -326,6 +570,15 @@ bool problem_override_from_file_cpp(
                             success = true;
                             log_info(__func__, "Use the fallback fp32 solution");
                         }
+                        else
+                        {
+                            // This entry failed in both modes. Restore XF32
+                            // before trying the next cached entry or falling
+                            // back to normal selection; otherwise every
+                            // subsequent check is accidentally performed as
+                            // FP32.
+                            problem->setF32XdlMathOp(rocisa::DataType::XFloat32);
+                        }
                     }
                 }
 
@@ -337,15 +590,20 @@ bool problem_override_from_file_cpp(
             }
         }
 
+        // Counted here for the same reason as the C path. This path used to
+        // update nothing, so a structured-extension caller replaying happily
+        // still reported zero hits.
         if(!success)
         {
-            log_info(__func__, "No valid solution index found in override file.");
+            TensileLite::TuningCounters::instance().misses++;
+            TensileLite::recordTuningLookup(prob_key, false);
+            logCacheMiss(__func__, prob_key);
         }
         else
         {
-            std::string mapping_result = "Find solution with index: ";
-            mapping_result += std::to_string(solutionIndex[0]);
-            log_info(__func__, mapping_result);
+            TensileLite::TuningCounters::instance().hits++;
+            TensileLite::recordTuningLookup(prob_key, true);
+            logCacheHit(__func__, prob_key, solutionIndex[0]);
         }
     }
 
@@ -2273,15 +2531,24 @@ rocblaslt_status
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
-        OverrideSingleton& override         = OverrideSingleton::getInstance();
-        bool               override_success = false;
-        if(override.env_mode)
+        const auto tuningFile       = TensileLite::selectTuningFile();
+        bool       override_success = false;
+
+        // Initialised before the lookup rather than left to getBestSolutions.
+        // When the lookup hits and the caller asked for exactly one algo, the
+        // decrement below takes requestedAlgoCount to zero, getBestSolutions is
+        // skipped entirely, and the dedup step further down would otherwise read
+        // this uninitialised and then scan heuristicResultsArray[1..] past the
+        // end of a single-element array.
+        *returnAlgoCount = 0;
+
+        if(tuningFile.active)
         {
             override_success = problem_override_from_file(handle,
                                                           prob,
                                                           matmul_desc,
                                                           heuristicResultsArray,
-                                                          override.file_path,
+                                                          tuningFile.path,
                                                           pref->max_workspace_bytes);
             if(override_success)
                 requestedAlgoCount--;
@@ -2549,14 +2816,14 @@ rocblaslt_status
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
-        OverrideSingleton&                             override = OverrideSingleton::getInstance();
+        const auto                                     tuningFile = TensileLite::selectTuningFile();
         bool                                           override_success = false;
         std::vector<rocblaslt_matmul_heuristic_result> override_result;
 
-        if(override.env_mode)
+        if(tuningFile.active)
         {
             override_success = problem_override_from_file_cpp(
-                handle, gemmType, gemmData, override_result, override.file_path, maxWorkspaceBytes);
+                handle, gemmType, gemmData, override_result, tuningFile.path, maxWorkspaceBytes);
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
@@ -2879,3 +3146,93 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
 }
+
+#ifdef HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
+// Test support for the tuning cache, same rationale as hipblaslt_debug_reload:
+// the mode switch is latched on first use and the loaded-path set is per
+// process, so a test binary exercising several modes and several cache files
+// needs a way to start clean. Built only with the client tests, and not part
+// of any supported interface.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
+{
+    TensileLite::TuningModeSingleton::getInstance().reloadForTest();
+    TensileLite::OverrideMap::getMap().resetForTest();
+
+    // The legacy override variable latches on first use too, and the first use
+    // in a test binary is whichever case ran first. Without this a case that
+    // sets it is silently exercising default selection instead.
+    OverrideSingleton::getInstance().reloadForTest();
+
+    // The announcement latch, the default-channel bounds and the once-per-key
+    // sets all live for the process, so without this the second test in a
+    // binary would inherit the first one's "already said that" state.
+    TensileLite::resetTuningDiagnosticsForTest();
+
+    auto& counters = TensileLite::TuningCounters::instance();
+    counters.entriesLoaded = 0;
+    counters.hits          = 0;
+    counters.misses        = 0;
+    counters.invalidated   = 0;
+    counters.tuned         = 0;
+    counters.skipped       = 0;
+    counters.attempts      = 0;
+
+    tuningInjectFailureForTest(0);
+    static_cast<void>(tuningLastLaunchedIndexForTest());
+}
+
+// Which solution the calling thread's last hipblasLtMatmul launched, cleared by
+// reading. The counters say that a lookup matched; only this says which kernel
+// ran, which is what an explicit-algo or algo == nullptr call has to prove.
+extern "C" HIPBLASLT_EXPORT int hipblaslt_tuning_last_launch_for_test()
+{
+    return tuningLastLaunchedIndexForTest();
+}
+
+// Make later tuning attempts fail at a chosen stage, so a test can prove each
+// failure is latched rather than repeated on every matmul. See
+// tuningInjectFailureForTest for the stages; reset_for_test clears it.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_inject_failure_for_test(int stage)
+{
+    tuningInjectFailureForTest(stage);
+}
+
+// Every tally a test asserts on, so it need not scrape log output for them:
+//
+//   0 loaded, 1 hits, 2 misses, 3 invalidated, 4 tuned, 5 skipped
+//       The counters, which count lookups.
+//   6 attempts
+//       Searches that reached tuning-start, successful or not. Lifecycle lines
+//       are bounded per shape at the default log level, so they cannot show a
+//       retry.
+//   7 shapes, 8 matched, 9 fell back, 10 tuned shapes
+//       The distinct-shape tally behind the summary line, which is written
+//       during static destruction, long after any in-process stderr capture a
+//       test could install.
+//
+// Fills up to count values in that order and returns how many there are, so a
+// test reading a different list notices instead of misreading one.
+extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* values, size_t count)
+{
+    const auto& c      = TensileLite::TuningCounters::instance();
+    uint64_t    shapes = 0, matched = 0, fellback = 0, tunedShapes = 0;
+    TensileLite::tuningLookupTallyForTest(&shapes, &matched, &fellback, &tunedShapes);
+
+    const uint64_t all[] = {c.entriesLoaded.load(),
+                            c.hits.load(),
+                            c.misses.load(),
+                            c.invalidated.load(),
+                            c.tuned.load(),
+                            c.skipped.load(),
+                            c.attempts.load(),
+                            shapes,
+                            matched,
+                            fellback,
+                            tunedShapes};
+
+    constexpr size_t known = sizeof(all) / sizeof(all[0]);
+    for(size_t i = 0; values && i < count && i < known; i++)
+        values[i] = all[i];
+    return known;
+}
+#endif // HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
