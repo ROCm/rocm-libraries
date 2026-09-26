@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include <cstdint>
 
 #include <iostream>
 
@@ -333,6 +334,22 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
     static constexpr bool CTranspose =
         (NeedTransposeKernel == false) && (is_same_v<ELayout, tensor_layout::convolution::NGCHW> ||
                                            is_same_v<ELayout, tensor_layout::convolution::NGCDHW>);
+
+    // Restrict split-K to a path whose 16-bit atomic destinations can be paired.
+    // Split partials are rounded and atomic ordering is nondeterministic; callers
+    // requiring deterministic results must continue to request split-K = 1.
+    static constexpr bool IsGfx125SplitKCandidate =
+        NDimSpatial == 2 && NumDTensor == 0 && !NeedTransposeKernel && !CTranspose &&
+        is_same_v<ALayout, tensor_layout::convolution::NHWGK> &&
+        is_same_v<BLayout, tensor_layout::convolution::GKYXC> &&
+        is_same_v<ELayout, tensor_layout::convolution::NHWGC> && is_same_v<ADataType, BDataType> &&
+        is_same_v<ADataType, EDataType> &&
+        (is_same_v<EDataType, half_t> || is_same_v<EDataType, bhalf_t>) &&
+        is_same_v<remove_cvref_t<AElementwiseOp>, element_wise::PassThrough> &&
+        is_same_v<remove_cvref_t<BElementwiseOp>, element_wise::PassThrough> && IsSplitKSupported &&
+        (CShuffleBlockTransferScalarPerVector_NPerBlock == 2 ||
+         CShuffleBlockTransferScalarPerVector_NPerBlock == 4 ||
+         CShuffleBlockTransferScalarPerVector_NPerBlock == 8);
 
     using ALayoutAfterTranspose = std::conditional_t<
         is_NGCHW_NGKHW<ELayout, BLayout, ALayout>() && NeedTransposeKernel,
@@ -700,22 +717,13 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
               a_g_n_k_wos_lengths_{a_g_n_k_wos_lengths},
               b_g_k_c_xs_lengths_{b_g_k_c_xs_lengths},
               e_g_n_c_wis_lengths_{e_g_n_c_wis_lengths},
+              e_g_n_c_wis_strides_{e_g_n_c_wis_strides},
               conv_filter_strides_{conv_filter_strides},
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads},
               k_batch_{split_k}
         {
-            stride_overflow             = stride_overflow_in;
-            bool image_covered_dilation = true;
-            bool image_covered_strides  = true;
-            for(index_t d = 0; d < NDimSpatial; d++)
-            {
-                // If dilation and stride is not equal we will have some empty places
-                image_covered_dilation &=
-                    conv_filter_dilations[d] == 1 || conv_filter_strides[d] == 1;
-                // If stride is larger than windows size then we will have some empty places
-                image_covered_strides &= conv_filter_strides[d] <= b_g_k_c_xs_lengths[d + I3];
-            }
+            stride_overflow          = stride_overflow_in;
             bool if_d_is_output_mem  = false;
             const void* out_mem_void = static_cast<const void*>(p_e);
             static_for<0, NumDTensor, 1>{}([&](auto i) {
@@ -725,10 +733,70 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
                 }
             });
 
-            bwd_needs_zero_out = k_batch_ > 1 || !image_covered_dilation || !image_covered_strides;
+            bool completely_overwrites_e = false;
+            if constexpr(NumDTensor == 0 && is_same_v<ADataType, BDataType> &&
+                         is_same_v<ADataType, EDataType> &&
+                         (is_same_v<ADataType, half_t> || is_same_v<ADataType, bhalf_t>) &&
+                         ConvBackwardDataSpecialization ==
+                             ConvolutionBackwardDataSpecialization::Filter1x1Stride1Pad0 &&
+                         (is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
+                          is_same_v<ELayout, tensor_layout::convolution::GNDHWC> ||
+                          is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
+                          is_same_v<ELayout, tensor_layout::convolution::NDHWGC>))
+            {
+                completely_overwrites_e = k_batch_ == 1 &&
+                                          a_g_n_k_wos_lengths[0] == b_g_k_c_xs_lengths[0] &&
+                                          a_g_n_k_wos_lengths[0] == e_g_n_c_wis_lengths[0] &&
+                                          a_g_n_k_wos_lengths[1] == e_g_n_c_wis_lengths[1] &&
+                                          a_g_n_k_wos_lengths[2] == b_g_k_c_xs_lengths[1] &&
+                                          b_g_k_c_xs_lengths[2] == e_g_n_c_wis_lengths[2];
 
-            // Temporary workaround untill prove/fix above conditions.
-            bwd_needs_zero_out = !if_d_is_output_mem;
+                for(index_t i = 0; i < NDimSpatial + 3; ++i)
+                {
+                    completely_overwrites_e &= a_g_n_k_wos_lengths[i] > 0 &&
+                                               b_g_k_c_xs_lengths[i] > 0 &&
+                                               e_g_n_c_wis_lengths[i] > 0;
+                }
+
+                for(index_t d = 0; d < NDimSpatial; ++d)
+                {
+                    completely_overwrites_e &=
+                        a_g_n_k_wos_lengths[d + 3] == e_g_n_c_wis_lengths[d + 3] &&
+                        b_g_k_c_xs_lengths[d + 3] == 1 && conv_filter_strides[d] == 1 &&
+                        input_left_pads[d] == 0 && input_right_pads[d] == 0;
+                }
+
+                if(completely_overwrites_e)
+                {
+                    // The 1x1 transform freezes the filter coordinates and merges
+                    // (N, output spatial) into M, with every C in GEMM N. Require
+                    // packed E strides so group/batch offsets cover distinct elements.
+                    completely_overwrites_e    = e_g_n_c_wis_strides[2] == 1;
+                    long_index_t packed_stride = e_g_n_c_wis_lengths[2];
+                    if constexpr(is_same_v<ELayout, tensor_layout::convolution::NHWGC> ||
+                                 is_same_v<ELayout, tensor_layout::convolution::NDHWGC>)
+                    {
+                        completely_overwrites_e &= e_g_n_c_wis_strides[0] == packed_stride;
+                        packed_stride *= e_g_n_c_wis_lengths[0];
+                    }
+                    for(index_t d = NDimSpatial; d > 0; --d)
+                    {
+                        completely_overwrites_e &= e_g_n_c_wis_strides[d + 2] == packed_stride;
+                        packed_stride *= e_g_n_c_wis_lengths[d + 2];
+                    }
+                    completely_overwrites_e &= e_g_n_c_wis_strides[1] == packed_stride;
+                    if constexpr(is_same_v<ELayout, tensor_layout::convolution::GNHWC> ||
+                                 is_same_v<ELayout, tensor_layout::convolution::GNDHWC>)
+                    {
+                        packed_stride *= e_g_n_c_wis_lengths[1];
+                        completely_overwrites_e &= e_g_n_c_wis_strides[0] == packed_stride;
+                    }
+                }
+            }
+
+            // An aliased D must not be zeroed before its value is read by the epilogue.
+            // Otherwise only the proved split-1, no-D case can omit initialization.
+            bwd_needs_zero_out = !if_d_is_output_mem && !completely_overwrites_e;
             e_space_size_bytes =
                 ck::accumulate_n<long_index_t>(
                     e_g_n_c_wis_lengths_.begin(), NDimSpatial + I3, 1, std::multiplies<>()) *
@@ -1140,6 +1208,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
         std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_;
         std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_;
         std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_lengths_;
+        std::array<index_t, NDimSpatial + 3> e_g_n_c_wis_strides_;
         std::array<index_t, NDimSpatial> conv_filter_strides_;
         std::array<index_t, NDimSpatial> input_left_pads_;
         std::array<index_t, NDimSpatial> input_right_pads_;
@@ -1154,6 +1223,47 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
         long_index_t e_space_size_bytes;
         bool stride_overflow;
     };
+
+    static bool IsGfx125SplitKArgument(const Argument& arg)
+    {
+        if constexpr(!IsGfx125SplitKCandidate)
+        {
+            return false;
+        }
+        else
+        {
+            if((arg.k_batch_ != 2 && arg.k_batch_ != 4) || !arg.bwd_needs_zero_out ||
+               arg.gemms_count_ == 0 || arg.e_space_size_bytes <= 0 ||
+               (arg.p_e_grid_ != nullptr &&
+                reinterpret_cast<std::uintptr_t>(arg.p_e_grid_) % 4 != 0))
+            {
+                return false;
+            }
+
+            const auto& a = arg.a_g_n_k_wos_lengths_;
+            const auto& b = arg.b_g_k_c_xs_lengths_;
+            const auto& e = arg.e_g_n_c_wis_lengths_;
+            const auto& s = arg.e_g_n_c_wis_strides_;
+            for(index_t i = 0; i < NDimSpatial + 3; ++i)
+            {
+                if(a[i] <= 0 || b[i] <= 0 || e[i] <= 0)
+                    return false;
+            }
+            if(a[0] != b[0] || a[0] != e[0] || a[1] != e[1] || a[2] != b[1] || b[2] != e[2] ||
+               e[2] % CShuffleBlockTransferScalarPerVector_NPerBlock != 0)
+            {
+                return false;
+            }
+
+            // NHWGC: [G,N,C,H,W] has C contiguous and G immediately after C.
+            // Every pair must start on a dword boundary, including at group,
+            // spatial and batch boundaries. The GEMM N vector is wholly valid
+            // or wholly masked because C is a multiple of the vector width.
+            const long_index_t gc = static_cast<long_index_t>(e[0]) * e[2];
+            return s[2] == 1 && s[0] == e[2] && s[4] == gc && s[3] == gc * e[4] &&
+                   s[1] == gc * e[4] * e[3] && arg.e_space_size_bytes % 4 == 0;
+        }
+    }
 
     // Invoker
     struct Invoker : public BaseInvoker
@@ -1502,7 +1612,10 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3
             return false;
         }
 
-        if(ck::is_gfx12_supported() && arg.k_batch_ > 1)
+        // Keep the gfx1200/1201 ban. Only explicitly requested gfx1250 split 2/4
+        // with packed, aligned 16-bit pairs may use the existing atomic epilogue.
+        if(ck::is_gfx12_supported() && arg.k_batch_ > 1 &&
+           !(ck::is_gfx125_supported() && IsGfx125SplitKArgument(arg)))
         {
             if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
             {

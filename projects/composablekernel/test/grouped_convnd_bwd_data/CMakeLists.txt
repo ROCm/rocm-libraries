@@ -25,6 +25,14 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     target_link_device_conv_libraries_if_exist(test_grouped_conv_bwd_data_scale PRIVATE gtest_main getopt::getopt utility device_conv_operations)
 endif()
 
+if(GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA)
+    add_gtest_executable(test_grouped_convnd_bwd_data_wmma_overwrite test_grouped_convnd_bwd_data_wmma_overwrite.cpp)
+    target_link_libraries(test_grouped_convnd_bwd_data_wmma_overwrite PRIVATE utility device_grouped_conv2d_bwd_data_nhwgc_instance device_grouped_conv3d_bwd_data_ndhwgc_instance)
+    # Instantiate the WMMA-v3 kernel in this TU rather than linking timed instance libraries.
+    add_gtest_executable(test_grouped_convnd_bwd_data_wmma_no_timing test_grouped_convnd_bwd_data_wmma_no_timing.cpp)
+    target_link_libraries(test_grouped_convnd_bwd_data_wmma_no_timing PRIVATE utility)
+endif()
+
 if(GPU_TARGETS MATCHES "gfx9|gfx1250")
   if(CK_EXPERIMENTAL_BUILDER AND NOT CK_TILE_DISPATCHER)
     add_gtest_executable(test_grouped_convnd_bwd_data_tile test_grouped_convnd_bwd_data_tile.cpp)
