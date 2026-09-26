@@ -3,8 +3,6 @@
 
 #ifdef ADDRESS_SANITIZER
 
-#include <hipdnn_test_sdk/utilities/AsanDefaultSuppressions.hpp>
-
 // The Windows ASan runtime ships as a DLL and finds this hook by looking the symbol up in the main
 // module, so it has to be exported to be seen at all.
 #if defined(_WIN32)
@@ -31,7 +29,10 @@
 // NOLINTNEXTLINE(readability-identifier-naming,bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
 extern "C" HIPDNN_ASAN_HOOK_EXPORT const char* __asan_default_suppressions()
 {
-    return hipdnn_test_sdk::utilities::asan::K_DEFAULT_SUPPRESSIONS;
+    // Upstream rocBLAS/Tensile data race on the lazy placeholder-library load: a solution matching
+    // table is read while an std::async loader thread deserializes into it and reallocates the
+    // backing storage. AIBTINFRA-48, ROCm/rocm-libraries#8869.
+    return "interceptor_via_fun:*findBestKeyMatch*\n";
 }
 
 #endif // ADDRESS_SANITIZER
