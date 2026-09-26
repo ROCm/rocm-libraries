@@ -26,7 +26,7 @@ from rocisa.instruction import (
     BufferLoadB128,
     SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
     SNop, SOrB32, SSubI32, SXorB32,
-    SCBranchSCC1, SCmpEQU32, SEndpgm,
+    SCBranchSCC1, SCmpEQU32, SCSelectB32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
@@ -42,7 +42,7 @@ from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
 from rocisa.code import Label
-from ...Common import INDEX_CHARS, clusterEnabled
+from ...Common import INDEX_CHARS
 from ...SolutionStructs.Utilities import isSubtileIterateMode as _isSubtileIterateMode
 from ...Common.DataType import DataType
 
@@ -1023,9 +1023,13 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
   numWaves = prod(kernel["MIWaveGroup"])
   mod = Module(f"TDM Global Offset Subtile {tc}")
 
-  with writer.allocTmpSgpr(3) as tmpSgprRes:
+  with writer.allocTmpSgpr(max(3, writer.states.laneSGPRCount)) as tmpSgprRes:
     tmp = tmpSgprRes.idx
     waveOff = tmpSgprRes.idx + 2
+
+    # Load tc[batch] into Address{tc} before tile and strided-batch offsets.
+    mod.add(writer._resolveTDMGlobalAddr(
+        kernel, tc, f"Address{tc}", tmpSgprRes))
 
     tileStride = writer.strideRef(tc, ti)
     mod.add(SMulI32(dst=sgpr(tmp), src0=tileStride, src1=int(mt * bpe),
@@ -1052,8 +1056,18 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
     if kernel["ProblemType"]["Batched"] and kernel["ProblemType"]["StridedBatched"]:
       ia = tP["ia"]
       batchStrideName = f"Stride{tc}{writer.states.indexChars[ia[2]]}"
+      batchIdx = sgpr("WorkGroup2")
+      if kernel["ProblemType"]["SupportUserArgs"] and tc in ("A", "B"):
+        writer.cmpNamedArgTypeEq(
+            mod, 3, "ArgType == 3 for General Batched GEMM")
+        mod.add(SCSelectB32(
+            dst=sgpr(waveOff),
+            src0=0,
+            src1=batchIdx,
+            comment="general batch uses an already-dereferenced matrix base"))
+        batchIdx = sgpr(waveOff)
       mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmp), sgpr(tmp+1),
-                                                     sgpr(batchStrideName), sgpr("WorkGroup2"),
+                                                     sgpr(batchStrideName), batchIdx,
                                                      comment="Batch: Stride*WG"))
       mod.add(SLShiftLeftB64(dst=sgpr(tmp, 2), src=sgpr(tmp, 2),
                               shiftHex=int(log2(bpe)), comment="scale by bpe"))
@@ -1116,8 +1130,10 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
   # OR the per-tensor broadcast mask into the descriptor for TDM multicast.
   # Subtile loads both A and B on every wave, so it uses split masks
   # (MulticastMask{tc}), not the non-subtile single parity mask.
-  if kernel["Multicast"] and clusterEnabled(kernel["ClusterDim"]):
-    mod.add(comp.setMulticastMask(descSgprName(1), f"MulticastMask{tc}", writer))
+  from ...Components.ClusterLoad import ClusterLoadTDM
+  clusterComp = ClusterLoadTDM.find(writer)
+  if clusterComp:
+    mod.add(clusterComp.applyToDescriptor(writer, kernel, descSgprName(1), tc, subtile=True))
 
   with writer.allocTmpSgpr(1) as tmpSgprRes:
     waveOffsetSgprIdx = tmpSgprRes.idx

@@ -20,7 +20,7 @@ Runtime Compilation):
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
 | hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
-| Internet access | GTest is downloaded via CMake `FetchContent` | Only needed for the first build |
+| GoogleTest including GoogleMock | Unit testing and mocking frameworks | Supplied by the hipDNN developer image, or provide its CMake package via `CMAKE_PREFIX_PATH` or `GTest_DIR`; fetching requires `-DALLOW_FETCH_DEPS=ON` |
 
 ## Directory Structure
 
@@ -97,11 +97,26 @@ example_engine_plugin/
 
 Run these commands from the example_engine_plugin folder.
 
+The [hipDNN developer image](../../dockerfiles/README.md) installs GoogleTest/GoogleMock and spdlog automatically in `/usr/local`. The Linux recipe below uses those packages without manual downloads, installs, or a fetch flag, together with hipDNN and ROCm in `/opt/rocm`.
+
+Outside the image, supply complete installed prefixes: HIP/HIPRTC, the hipDNN plugin, data, FlatBuffers and frontend SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), and GoogleTest including GoogleMock. Use absolute paths in the `CMAKE_PREFIX_PATH` lists below; `GTest_DIR` can identify the installed GoogleTest package instead of adding its prefix. The alternative `ALLOW_FETCH_DEPS=ON` only permits fetching GoogleTest, not hipDNN, HIP, or the other SDK dependencies. A copied plugin is an independent configure and does not inherit a previous hipDNN or samples build's fetch setting.
+
 ### Linux (GCC)
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH="/opt/rocm"
 cmake --build build
+```
+
+Outside the image, replace the configure command with one of:
+
+```bash
+cmake -B build -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, fetch missing GoogleTest.
+cmake -B build -DALLOW_FETCH_DEPS=ON \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies"
 ```
 
 Run all tests, including the sample app:
@@ -119,10 +134,10 @@ ctest --test-dir build -R example_provider_sample
 The tests and sample can also be run directly:
 
 ```bash
-./build/bin/example_provider_tests
+./build/bin/hipdnn_example_provider_unit_tests
 ```
 ```bash
-./build/bin/example_provider_sample
+./build/bin/hipdnn_example_provider_sample
 ```
 
 Install the plugin:
@@ -143,18 +158,20 @@ set PATH=C:\AMD\ROCm\bin;%PATH%
 With MSVC installed:
 
 ```powershell
-cmake -B build -G "Visual Studio 17 2022"
+cmake -B build -G "Visual Studio 17 2022" -DALLOW_FETCH_DEPS=OFF -DCMAKE_PREFIX_PATH="C:/path/to/hipdnn-install;C:/AMD/ROCm;C:/path/to/dependencies"
 cmake --build build --config Release
 ctest --test-dir build --build-config Release
 ```
 
+If GoogleTest is not installed, use `-DALLOW_FETCH_DEPS=ON` instead of `OFF` in this configure command; keep the installed SDK and other dependency prefixes.
+
 The tests and sample can also be run directly:
 
 ```powershell
-.\build\bin\Release\example_provider_tests.exe
+.\build\bin\Release\hipdnn_example_provider_unit_tests.exe
 ```
 ```powershell
-.\build\bin\Release\example_provider_sample.exe
+.\build\bin\Release\hipdnn_example_provider_sample.exe
 ```
 
 ### Windows (GNU/Clang with Ninja)
@@ -162,18 +179,20 @@ The tests and sample can also be run directly:
 With Clang and Ninja installed, and with the ROCm `bin` folder in your system PATH:
 
 ```powershell
-cmake -B build -G "Ninja"
+cmake -B build -G "Ninja" -DALLOW_FETCH_DEPS=OFF -DCMAKE_PREFIX_PATH="C:/path/to/hipdnn-install;C:/AMD/ROCm;C:/path/to/dependencies"
 cmake --build build
 ctest --test-dir build
 ```
 
+If GoogleTest is not installed, use `-DALLOW_FETCH_DEPS=ON` instead of `OFF` in this configure command; keep the installed SDK and other dependency prefixes.
+
 The tests and sample can also be run directly:
 
 ```powershell
-.\build\bin\example_provider_tests.exe
+.\build\bin\hipdnn_example_provider_unit_tests.exe
 ```
 ```powershell
-.\build\bin\example_provider_sample.exe
+.\build\bin\hipdnn_example_provider_sample.exe
 ```
 
 ### CMake Options
@@ -182,6 +201,10 @@ The tests and sample can also be run directly:
 |---|---|---|
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
+| `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable; inherited from the samples parent build |
+| `EXAMPLE_PROVIDER_GTEST_VERSION` | `1.17.0` | GoogleTest tag used by the explicit fetch fallback; installed packages and supplied source trees take precedence |
+
+The samples parent forwards an installed `GTest_DIR` or its supplied GoogleTest source tree to the plugin's separate build. An explicitly supplied source tree also works with fetching disabled. Package/source/version cache entries are refreshed when the parent inputs change. A copied standalone plugin keeps its own matching fallback default and needs no monorepo version include.
 
 To build only the plugin library (no tests or sample):
 
@@ -438,15 +461,19 @@ enabling unit tests to run without GPU hardware:
 10. **Register your engines**: In your renamed Container file (was
     `ExampleProviderContainer.cpp`), register your engines via
     `HIPDNN_REGISTER_ENGINE` with unique engine names and add lambdas to
-    create the new engines:
+    create the new engines. The macro generates a `_NAME` and an `_ID`
+    constant, and the ID is a hash of the name, so the name must be unique
+    across every plugin loaded alongside yours:
 
     ```cpp
-    HIPDNN_REGISTER_ENGINE(YOUR_ENGINE, "YOUR_ENGINE")
+    HIPDNN_REGISTER_ENGINE(YOUR_ENGINE)
 
     // In getEngineDefinitions():
     {YOUR_ENGINE_ID,
-     [](const IKernelCompiler& compiler) {
-         auto engine = std::make_unique<ExampleProviderEngine>(YOUR_ENGINE_ID);
+     YOUR_ENGINE_NAME,
+     [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
+         auto engine
+             = std::make_unique<ExampleProviderEngine>(YOUR_ENGINE_ID, YOUR_ENGINE_NAME);
          engine->addPlanBuilder(std::make_unique<YourPlanBuilder>(compiler));
          return engine;
      }},
@@ -544,7 +571,7 @@ Use the tables below when performing the rename steps in the workflow above.
 |---|---|---|---|
 | C++ classes | Brand only | `ExampleProviderContainer` | `YourNameContainer` |
 | C++ source files | Brand only | `ExampleProviderContainer.hpp` | `YourNameContainer.hpp` |
-| Engine names | Brand only | `EXAMPLE_PROVIDER_RELU_ENGINE` | Keep as-is until step 10 |
+| Engine names | Brand only | `EXAMPLE_PROVIDER_RELU_ENGINE` | `YOUR_NAME_RELU_ENGINE` -- renamed in step 10; an ID is a hash of its name, so keeping the example name collides with the example plugin |
 | Namespace | Brand + provider | `example_provider` | `your_name_provider` |
 | CMake targets | Brand + provider | `example_provider_impl` | `your_name_provider_impl` |
 | CMake options | Concatenated | `EXAMPLEPROVIDER_*` | `YOURNAMEPROVIDER_*` |
@@ -795,6 +822,14 @@ for (const auto& path : paths) {
     std::cout << "Loaded: " << path << std::endl;
 }
 ```
+
+### Engine Names
+
+The plugin names its own engines: `ExampleProviderContainer::getEngineName()`
+maps each engine ID to a string, so hipDNN displays
+`EXAMPLE_PROVIDER_RELU_ENGINE` rather than a hexadecimal engine ID.
+
+See "Engine names" in `docs/user-guides/how-to/develop-plugins.rst`.
 
 ### Engine Selection
 

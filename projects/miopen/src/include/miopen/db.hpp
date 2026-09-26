@@ -27,6 +27,7 @@
 #define GUARD_MIOPEN_DB_HPP_
 
 #include <miopen/config.hpp>
+#include <miopen/db_disable.hpp>
 #include <miopen/db_record.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/filesystem.hpp>
@@ -44,8 +45,6 @@ struct RecordPositions
 };
 
 class LockFile;
-
-constexpr bool DisableUserDbFileIO = MIOPEN_DISABLE_USERDB;
 
 /// No instance of this class should be used from several threads at the same time.
 class PlainTextDb
@@ -139,6 +138,11 @@ public:
 
 protected:
     const DbKinds db_kind;
+
+    /// Whether file I/O against this database is suppressed. Latched at construction, so that
+    /// every operation on a given instance sees one consistent answer even if the debug override
+    /// behind IsUserDbDisabled() is flipped between constructions.
+    const bool disable_file_io;
 
     LockFile& GetLockFile() { return lock_file; }
     const fs::path& GetFileName() const { return filename; }

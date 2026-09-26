@@ -534,6 +534,7 @@ class LayerNormKernelGenerator:
         label_upper = Label("upper", f'upper')
         label_lower = Label("lower", f'lower')
         label_empty = Label("empty", f'empty')
+        label_sync  = Label("inter_sync", f'inter-wave LDS reuse')
         label_end   = Label("end", f'end')
         mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
@@ -564,7 +565,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.DSStoreB32(vgpr("Tmp"), vgpr("Invvar"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
-        mod.add(ri.SBranch(label_inter.getLabelName()))
+        mod.add(ri.SBranch(label_sync.getLabelName()))
         mod.add(label_lower)
         mod.add(ri.SBarrier())
         mod.add(ri.VMulLOU32(vgpr("Tmp"), vgpr("Widx"), 4))
@@ -577,8 +578,13 @@ class LayerNormKernelGenerator:
         mod.add(ri.DSLoadB32(vgpr("StdB"), vgpr("Tmp"), ds))
         mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(self.merge_sum())
-        mod.add(ri.SBranch(label_inter.getLabelName()))
+        mod.add(ri.SBranch(label_sync.getLabelName()))
         mod.add(label_empty)
+        mod.add(ri.SBarrier())
+        mod.add(label_sync)
+        # The first barrier publishes the upper-wave writes. This second
+        # barrier retires the lower-wave reads before the next tree level
+        # reuses the same LDS slots.
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_end)

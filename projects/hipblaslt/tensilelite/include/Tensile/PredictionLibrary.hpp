@@ -33,6 +33,7 @@
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
 
 #include <tensilelitehost/export.h>
@@ -170,9 +171,20 @@ namespace TensileLite
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
-                const bool hwMatch   = (*(solution->hardwarePredicate))(hardware);
-                const bool probMatch = (*(solution->problemPredicate))(problem);
-                const bool predicateMatch = hwMatch && probMatch;
+                Task task(hardware, problem, *solution);
+                const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
+                // With uniform summation order off, the filter stays
+                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
+                // real filters, so they stay behind the check.
+                const bool swMatch = problem.getParams().uniformSummationOrder()
+                                         ? softwarePredicate(SolutionLibrarySearchType::DEFAULT,
+                                                             task,
+                                                             hardware,
+                                                             *solution,
+                                                             problem)
+                                         : (*(solution->problemPredicate))(problem);
+                const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
                 {
@@ -180,6 +192,7 @@ namespace TensileLite
                         std::cout, "Prediction: " + solution->name());
                     solution->hardwarePredicate->debugEval(hardware, std::cout);
                     solution->problemPredicate->debugEval(problem, std::cout);
+                    solution->taskPredicate->debugEval(task, std::cout);
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 

@@ -295,6 +295,42 @@ public:
 {% endif %}
 {% endif %}
 {% endfor %}
+{% if op.data_fields %}
+
+    /**
+     * @brief Custom equality hook for {{ op.name }}-specific attributes
+     *
+     * Compares the operation's scalar/enum/vector configuration — the
+     * fields that define its mathematical semantics rather than tensor
+     * layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const {{ op.frontend.attributes_class }}& other) const
+    {
+        return {% for df in op.data_fields %}{{ df.name }} == other.{{ df.name }}{% if not loop.last %}
+               && {% endif %}{% endfor %};
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const {{ op.frontend.attributes_class }}& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
+{% else %}
+
+    // No extra fields beyond tensors: defer entirely to the base class's
+    // tensor/metadata comparison.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool logicallyEqualsImpl([[maybe_unused]] const {{ op.frontend.attributes_class }}& other) const
+    {
+        return true;
+    }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool strictEqualsImpl([[maybe_unused]] const {{ op.frontend.attributes_class }}& other) const
+    {
+        return true;
+    }
+{% endif %}
 };
 {% if op.frontend.compatibility_typedef %}
 typedef {{ op.frontend.attributes_class }} {{ op.frontend.compatibility_typedef }}; ///< @brief Compatibility alias

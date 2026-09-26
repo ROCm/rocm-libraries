@@ -5,7 +5,9 @@
 
 #include <miopen/batched_transpose_sol.hpp>
 #include <miopen/datatype.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/op_kernel_args.hpp>
+#include <miopen/solver_id.hpp>
 #include <miopen/subbuffers.hpp>
 #include <miopen/tensor_layout.hpp>
 
@@ -806,6 +808,17 @@ struct TransposingSolverGetSolution<Derived, Base, Problem, InvokeParams, Inner,
 {
     ConvSolution GetSolution(const ExecutionContext& ctx, const Problem& problem) const override
     {
+        // Credit the wrapper (not the inner) in MIOPEN_PERFORMANCE_LOGS so the
+        // perf-eval DB attribution is correct. The inner's own logging path
+        // calls LogSolutionName with the inner's name; the override forces the
+        // wrapper's name onto the emitted JSON record. The override is gated on
+        // MIOPEN_PERFORMANCE_LOGS>0 inside its constructor, so the empty-string
+        // path below pays only the env-var read in production builds.
+        const auto wrapper_name =
+            IsPerformanceLoggingEnabled() ? this->SolverDbId() : std::string{};
+        const auto wrapper_id = wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
+        ScopedSolverNameOverride name_override(wrapper_name, wrapper_id);
+
         auto transposed_problem = Derived::Transpose(problem);
         ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem);
         return static_cast<const Derived*>(this)->WrapSolutionWithTranspose(
@@ -839,6 +852,16 @@ struct TransposingSolverGetSolution<Derived, Base, Problem, InvokeParams, Inner,
                                  const Problem& problem,
                                  const AnyInvokeParams& invoke_ctx) const override
     {
+        // Force the wrapper's name onto the per-config records emitted by the
+        // inner solver's GenericSearch loop. Without this the perf log credits
+        // the inner solver against the original (e.g. NCHW) problem key, which
+        // a NHWC-only inner cannot actually serve at runtime. Gated on the env
+        // var: in production builds we pay only the env-var read.
+        const auto wrapper_name =
+            IsPerformanceLoggingEnabled() ? this->SolverDbId() : std::string{};
+        const auto wrapper_id = wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
+        ScopedSolverNameOverride name_override(wrapper_name, wrapper_id);
+
         auto transposed_problem = Derived::Transpose(problem);
         return Inner{}.Search(ctx, transposed_problem, invoke_ctx);
     }
@@ -847,6 +870,11 @@ struct TransposingSolverGetSolution<Derived, Base, Problem, InvokeParams, Inner,
                              const Problem& problem,
                              const PerformanceConfigType& config) const override
     {
+        const auto wrapper_name =
+            IsPerformanceLoggingEnabled() ? this->SolverDbId() : std::string{};
+        const auto wrapper_id = wrapper_name.empty() ? 0 : miopen::solver::Id(wrapper_name).Value();
+        ScopedSolverNameOverride name_override(wrapper_name, wrapper_id);
+
         auto transposed_problem = Derived::Transpose(problem);
         ConvSolution sln        = Inner{}.GetSolution(ctx, transposed_problem, config);
         return static_cast<const Derived*>(this)->WrapSolutionWithTranspose(

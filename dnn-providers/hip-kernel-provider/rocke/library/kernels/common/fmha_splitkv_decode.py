@@ -6,7 +6,7 @@
 Decoding from a long KV cache with a small batch is bandwidth-limited;
 splitting the K dimension across many CTAs (each handling one
 K-segment) and then reducing the per-segment ``(m, l, acc)`` triples
-lifts occupancy to fully saturate the SMs.
+lifts occupancy to fully saturate the CUs.
 
 Two-launch pipeline:
 

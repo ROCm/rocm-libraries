@@ -92,8 +92,6 @@ inline std::vector<RMSNormTestCase> getRMSnormMedium4DTestCases()
             {{32, 3, 14, 1}, {1, 1, 14, 1}, TensorLayout::NCHW},
             {{16, 32, 192, 128}, {1, 32, 192, 128}, TensorLayout::NCHW},
             {{16, 32, 192, 128}, {1, 1, 192, 128}, TensorLayout::NCHW},
-            {{16, 64, 225, 225}, {1, 64, 225, 225}, TensorLayout::NCHW},
-            {{16, 64, 225, 225}, {1, 1, 1, 225}, TensorLayout::NCHW},
             {{16, 128, 56, 56}, {1, 128, 56, 56}, TensorLayout::NCHW},
             {{16, 128, 56, 56}, {1, 1, 56, 56}, TensorLayout::NCHW},
 
@@ -108,8 +106,6 @@ inline std::vector<RMSNormTestCase> getRMSnormMedium4DTestCases()
             {{32, 3, 14, 1}, {1, 1, 14, 1}, TensorLayout::NHWC},
             {{16, 32, 192, 128}, {1, 32, 192, 128}, TensorLayout::NHWC},
             {{16, 32, 192, 128}, {1, 1, 192, 128}, TensorLayout::NHWC},
-            {{16, 64, 225, 225}, {1, 64, 225, 225}, TensorLayout::NHWC},
-            {{16, 64, 225, 225}, {1, 1, 1, 225}, TensorLayout::NHWC},
             {{16, 128, 56, 56}, {1, 128, 56, 56}, TensorLayout::NHWC},
             {{16, 128, 56, 56}, {1, 1, 56, 56}, TensorLayout::NHWC}};
 }
@@ -153,7 +149,11 @@ inline std::vector<RMSNormTestCase> getRMSnormLarge4DTestCases()
             {{16, 2048, 16, 32}, {1, 1, 16, 32}, TensorLayout::NHWC},
             {{128, 35, 48, 32}, {1, 35, 48, 32}, TensorLayout::NHWC},
             {{128, 512, 24, 48}, {1, 512, 24, 48}, TensorLayout::NHWC},
-            {{128, 512, 24, 48}, {1, 1, 24, 48}, TensorLayout::NHWC}};
+            {{128, 512, 24, 48}, {1, 1, 24, 48}, TensorLayout::NHWC},
+            {{16, 64, 225, 225}, {1, 64, 225, 225}, TensorLayout::NCHW},
+            {{16, 64, 225, 225}, {1, 1, 1, 225}, TensorLayout::NCHW},
+            {{16, 64, 225, 225}, {1, 64, 225, 225}, TensorLayout::NHWC},
+            {{16, 64, 225, 225}, {1, 1, 1, 225}, TensorLayout::NHWC}};
 }
 
 inline std::vector<RMSNormTestCase> getRMSnormLarge5DTestCases()

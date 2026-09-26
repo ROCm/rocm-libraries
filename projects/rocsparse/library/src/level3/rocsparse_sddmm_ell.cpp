@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,138 +21,9 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse.h"
-#include "rocsparse_common.hpp"
-#include "rocsparse_control.hpp"
-#include "rocsparse_handle.hpp"
-#include "rocsparse_sddmm.hpp"
-#include "rocsparse_utility.hpp"
+#include "rocsparse_sddmm_ell_kernel.hpp"
 
 #include "../conversion/rocsparse_ell2dense.hpp"
-
-namespace rocsparse
-{
-    template <rocsparse_int BLOCKSIZE,
-              rocsparse_int NTHREADS_PER_DOTPRODUCT,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
-    void sddmm_ell_kernel(rocsparse_operation transA,
-                          rocsparse_operation transB,
-                          rocsparse_order     orderA,
-                          rocsparse_order     orderB,
-                          J                   M,
-                          J                   N,
-                          J                   K,
-                          I                   nnz,
-                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                          const A* __restrict__ dense_A,
-                          int64_t lda,
-                          const B* __restrict__ dense_B,
-                          int64_t ldb,
-                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                          C* __restrict__ val,
-                          const J* __restrict__ ind,
-                          rocsparse_index_base base,
-                          bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
-        {
-            return;
-        }
-        //
-        // Each group treats one row.
-        //
-        static constexpr rocsparse_int NUM_COEFF         = (BLOCKSIZE / NTHREADS_PER_DOTPRODUCT);
-        const I                        local_coeff_index = hipThreadIdx_x / NTHREADS_PER_DOTPRODUCT;
-        const I       local_thread_index                 = hipThreadIdx_x % NTHREADS_PER_DOTPRODUCT;
-        const int64_t incx                               = (orderA == rocsparse_order_column)
-                                                               ? ((transA == rocsparse_operation_none) ? lda : 1)
-                                                               : ((transA == rocsparse_operation_none) ? 1 : lda);
-
-        const int64_t incy = (orderB == rocsparse_order_column)
-                                 ? ((transB == rocsparse_operation_none) ? 1 : ldb)
-                                 : ((transB == rocsparse_operation_none) ? ldb : 1);
-
-        const I innz = hipBlockIdx_x * NUM_COEFF + local_coeff_index;
-        if(innz >= nnz)
-        {
-            return;
-        }
-
-        const J i = innz % M;
-        const J j = ind[innz] - base;
-        if(j < 0)
-        {
-            return;
-        }
-        const A* x
-            = (orderA == rocsparse_order_column)
-                  ? ((transA == rocsparse_operation_none) ? (dense_A + i) : (dense_A + lda * i))
-                  : ((transA == rocsparse_operation_none) ? (dense_A + lda * i) : (dense_A + i));
-
-        const B* y
-            = (orderB == rocsparse_order_column)
-                  ? ((transB == rocsparse_operation_none) ? (dense_B + ldb * j) : (dense_B + j))
-                  : ((transB == rocsparse_operation_none) ? (dense_B + j) : (dense_B + ldb * j));
-
-        T sum = static_cast<T>(0);
-        for(J k = local_thread_index; k < K; k += NTHREADS_PER_DOTPRODUCT)
-        {
-            sum = rocsparse::fma<T>(x[k * incx], y[k * incy], sum);
-        }
-
-        sum = rocsparse::wfreduce_sum<NTHREADS_PER_DOTPRODUCT>(sum);
-
-        if(local_thread_index == NTHREADS_PER_DOTPRODUCT - 1)
-        {
-            val[innz] = beta * val[innz] + alpha * sum;
-        }
-    }
-
-    template <rocsparse_int NUM_ELL_COLUMNS_PER_BLOCK,
-              rocsparse_int WF_SIZE,
-              typename T,
-              typename I,
-              typename C>
-    ROCSPARSE_KERNEL(WF_SIZE* NUM_ELL_COLUMNS_PER_BLOCK)
-    void sddmm_ell_sample_kernel(I m,
-                                 I n,
-                                 const C* __restrict__ dense_val,
-                                 int64_t ld,
-                                 I       ell_width,
-                                 C* __restrict__ ell_val,
-                                 const I* __restrict__ ell_col_ind,
-                                 rocsparse_index_base ell_base)
-    {
-        const auto wavefront_index  = hipThreadIdx_x / WF_SIZE;
-        const auto lane_index       = hipThreadIdx_x % WF_SIZE;
-        const auto ell_column_index = NUM_ELL_COLUMNS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
-
-        if(ell_column_index < ell_width)
-        {
-            //
-            // One wavefront executes one ell column.
-            //
-            for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
-            {
-                const auto ell_idx      = ELL_IND(row_index, ell_column_index, m, ell_width);
-                const auto column_index = ell_col_ind[ell_idx] - ell_base;
-
-                if(column_index >= 0 && column_index < n)
-                {
-                    ell_val[ell_idx] = dense_val[column_index * ld + row_index];
-                }
-            }
-        }
-    }
-}
 
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
@@ -255,22 +126,35 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
                                     const T*             alpha,
                                     const A*             A_val,
                                     int64_t              A_ld,
+                                    int64_t              batch_stride_A,
                                     const B*             B_val,
                                     int64_t              B_ld,
+                                    int64_t              batch_stride_B,
                                     const T*             beta,
                                     const I*             C_row_data,
+                                    int64_t              offsets_batch_stride_C,
                                     const J*             C_col_data,
+                                    int64_t              indices_batch_stride_C,
                                     C*                   C_val_data,
+                                    int64_t              values_batch_stride_C,
+                                    int64_t              batch_count,
                                     rocsparse_index_base C_base,
                                     rocsparse_mat_descr  C_descr,
                                     rocsparse_sddmm_alg  alg,
                                     void*                buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_sddmm_alg_dense:
         {
+            // Batched computation is currently only supported for the default
+            // algorithm.
+            if(batch_count > 1)
+            {
+                return rocsparse_status_not_implemented;
+            }
 
             if(nnz == 0)
             {
@@ -393,7 +277,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
 
 #define LAUNCH(K_)                                                                       \
     int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x);                                                        \
+    dim3    blocks(num_blocks_x, get_batch_grid_size(batch_count));                      \
     dim3    threads(NB);                                                                 \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, T>),         \
                                        blocks,                                           \
@@ -408,14 +292,19 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
                                        n,                                                \
                                        k,                                                \
                                        nnz,                                              \
+                                       batch_count,                                      \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha), \
                                        A_val,                                            \
                                        A_ld,                                             \
+                                       batch_stride_A,                                   \
                                        B_val,                                            \
                                        B_ld,                                             \
+                                       batch_stride_B,                                   \
                                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),  \
                                        C_val_data,                                       \
+                                       values_batch_stride_C,                            \
                                        C_col_data,                                       \
+                                       indices_batch_stride_C,                           \
                                        C_base,                                           \
                                        handle->pointer_mode == rocsparse_pointer_mode_host)
 

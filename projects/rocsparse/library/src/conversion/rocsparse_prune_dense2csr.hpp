@@ -30,8 +30,8 @@ namespace rocsparse
 {
     template <typename T>
     rocsparse_status prune_dense2csr_buffer_size_template(rocsparse_handle          handle,
-                                                          rocsparse_int             m,
-                                                          rocsparse_int             n,
+                                                          int64_t                   m,
+                                                          int64_t                   n,
                                                           const T*                  A,
                                                           int64_t                   lda,
                                                           const T*                  threshold,
@@ -43,8 +43,8 @@ namespace rocsparse
 
     template <typename T>
     rocsparse_status prune_dense2csr_nnz_template(rocsparse_handle          handle,
-                                                  rocsparse_int             m,
-                                                  rocsparse_int             n,
+                                                  int64_t                   m,
+                                                  int64_t                   n,
                                                   const T*                  A,
                                                   int64_t                   lda,
                                                   const T*                  threshold,
@@ -55,8 +55,8 @@ namespace rocsparse
 
     template <typename T>
     rocsparse_status prune_dense2csr_template(rocsparse_handle          handle,
-                                              rocsparse_int             m,
-                                              rocsparse_int             n,
+                                              int64_t                   m,
+                                              int64_t                   n,
                                               const T*                  A,
                                               int64_t                   lda,
                                               const T*                  threshold,

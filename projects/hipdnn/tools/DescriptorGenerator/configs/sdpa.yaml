@@ -450,6 +450,7 @@ operation:
       required: false
       default_value: "DiagonalAlignment::TOP_LEFT"
       mode_sentinel: "none"
+      mode_converter_optional: true
       frontend_getter: "diagonal_alignment"
       backend_setter: "setDiagonalAlignment"
       backend_getter: "getDiagonalAlignment"
@@ -478,6 +479,7 @@ operation:
       required: false
       default_value: "AttentionImplementation::AUTO"
       mode_sentinel: "none"
+      mode_converter_optional: true
       frontend_getter: "implementation"
       backend_setter: "setAttentionImplementation"
       backend_getter: "getAttentionImplementation"

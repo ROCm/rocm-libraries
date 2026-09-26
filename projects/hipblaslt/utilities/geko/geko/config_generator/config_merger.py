@@ -220,6 +220,19 @@ def merge_sizes_in_cluster(
     current_sizes = list(first.sizes)
     current_mis: Dict[Any, int] = dict(first.mis_per_size)
 
+    def _finalize(
+        params: Dict[str, ForkParameter],
+        sizes: List[Any],
+        mis: Dict[Any, int],
+    ) -> ConfigEntry:
+        primary_count = _trim_mi_to_fit(params, max_kernels)
+        return ConfigEntry(
+            sizes=sizes,
+            fork_params=params,
+            nkernels=primary_count,
+            mis_per_size=mis,
+        )
+
     for i in range(1, len(cluster_indices)):
         idx = cluster_indices[i]
         entry = entries[idx]
@@ -227,13 +240,7 @@ def merge_sizes_in_cluster(
         tentative_count = count_kernels(tentative)
 
         if tentative_count > max_kernels:
-            actual_count = _trim_mi_to_fit(current_params, max_kernels)
-            result.append(ConfigEntry(
-                sizes=current_sizes,
-                fork_params=current_params,
-                nkernels=actual_count,
-                mis_per_size=current_mis,
-            ))
+            result.append(_finalize(current_params, current_sizes, current_mis))
 
             current_params = copy.deepcopy(entry.fork_params)
             current_sizes = list(entry.sizes)
@@ -243,12 +250,6 @@ def merge_sizes_in_cluster(
             current_sizes.extend(entry.sizes)
             current_mis.update(entry.mis_per_size)
 
-    actual_count = _trim_mi_to_fit(current_params, max_kernels)
-    result.append(ConfigEntry(
-        sizes=current_sizes,
-        fork_params=current_params,
-        nkernels=actual_count,
-        mis_per_size=current_mis,
-    ))
+    result.append(_finalize(current_params, current_sizes, current_mis))
 
     return result

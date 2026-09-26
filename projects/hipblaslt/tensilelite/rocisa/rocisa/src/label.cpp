@@ -32,9 +32,6 @@ namespace nb = nanobind;
 void init_label(nb::module_ m)
 {
     auto m_label = m.def_submodule("label", "rocIsa label submodule.");
-    m_label.def("magicGenerator",
-                &rocisa::magicGenerator,
-                "Generates a random string with length equals to 17.");
     nb::class_<rocisa::LabelManager>(m_label, "LabelManager")
         .def(nb::init<>())
         .def("addName", &rocisa::LabelManager::addName, "Add name to the LabelManager.")
@@ -53,13 +50,14 @@ void init_label(nb::module_ m)
              "Get unique name with a custom prefix from the LabelManager.")
         .def("__deepcopy__",
              [](rocisa::LabelManager& self, nb::dict mamo) {
-                 rocisa::LabelManager* copy = new rocisa::LabelManager(self.getData());
-                 return copy;
+                 return new rocisa::LabelManager(self);
              })
         .def("__getstate__",
-             [](const rocisa::LabelManager& self) { return std::make_tuple(self.getData()); })
+             [](const rocisa::LabelManager& self) {
+                 return std::make_tuple(self.getData(), self.getCounter());
+             })
         .def("__setstate__",
-             [](rocisa::LabelManager& self, const std::tuple<std::map<std::string, int>>& state) {
-                 new(&self) rocisa::LabelManager(std::get<0>(state));
+             [](rocisa::LabelManager& self, std::tuple<std::map<std::string, int>, uint64_t> state) {
+                 new(&self) rocisa::LabelManager(std::move(std::get<0>(state)), std::get<1>(state));
              });
 }

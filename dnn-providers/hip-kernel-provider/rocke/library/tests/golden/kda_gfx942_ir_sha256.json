@@ -1,0 +1,53 @@
+{
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "kda_gfx942/c16_fused_initial_state": {
+          "bytes": 234689,
+          "sha256": "0ee75a285cc7ae8bfb1aae97f01fb5259e92edf1b6421e405a8631e1ee461593"
+        },
+        "kda_gfx942/c16_fused_prefetch": {
+          "bytes": 217013,
+          "sha256": "3d420a014e62518d91665299e3060b1fe94999649a25f1e57642cafcccd182d7"
+        },
+        "kda_gfx942/c16_prep_default": {
+          "bytes": 127312,
+          "sha256": "d09db5ddb3c170ec3359706a985be4a1b94b053bd3ab8e528caeadc17da78a9e"
+        },
+        "kda_gfx942/c16_scan_default": {
+          "bytes": 89769,
+          "sha256": "6ac8bc41cb18a9a90dcfeba744eb159002d17eac1b3c5115ef6fa7ed4dff95cc"
+        },
+        "kda_gfx942/c16_scan_initial_state": {
+          "bytes": 107040,
+          "sha256": "80e5c495f5305c667ab603780fe6c04510da26e8561db07bd3e07e92ba5a7cde"
+        }
+      }
+    },
+    "llvm22": {
+      "cases": {
+        "kda_gfx942/c16_fused_initial_state": {
+          "bytes": 234696,
+          "sha256": "11bdcf1032363665d1e914221d588ff730873ebb23969870b1e4373d009b2ff0"
+        },
+        "kda_gfx942/c16_fused_prefetch": {
+          "bytes": 217020,
+          "sha256": "0f7aec534b2a8d89c536209acc16bb05c8b89daf61daecf0cbaaf601448c3235"
+        },
+        "kda_gfx942/c16_prep_default": {
+          "bytes": 127319,
+          "sha256": "954b5c9d268902fc1506a1fd11dcb5b3e964a30a353d817e916ba514a35d10db"
+        },
+        "kda_gfx942/c16_scan_default": {
+          "bytes": 89776,
+          "sha256": "c8cee7ad6a23db515dbfacbf7adc44b33e0099387a193dbc92a5fa8e9545cebd"
+        },
+        "kda_gfx942/c16_scan_initial_state": {
+          "bytes": 107047,
+          "sha256": "1460ae64f3a6548bba959b99838bb7c185cd36526c53c6c238ac124e637b094a"
+        }
+      }
+    }
+  },
+  "schema": "kda_gfx942.ir_golden_sha256/v1"
+}

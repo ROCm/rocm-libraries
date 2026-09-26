@@ -29,7 +29,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(sys.path[0]),'..','Tensile'))
 from DataType import DataType
 from yaml import SafeDumper as yamlDumper
-from yaml import SafeLoader as yamlLoader
+from yaml import SafeLoader
 
 def parseArgs():
     argParser = argparse.ArgumentParser()
@@ -78,7 +78,7 @@ def main():
     mfmaKey = "mfma" if args.mfma else "non_mfma"
 
     with open(args.specs) as y:
-        specs = yaml.load(y, yamlLoader)
+        specs = yaml.load(y, SafeLoader)
 
     try:
         os.makedirs(args.outDir)
@@ -91,7 +91,7 @@ def main():
             print(f)
             with open(f) as y:
 
-                data = yaml.load(y, yamlLoader)
+                data = yaml.load(y, SafeLoader)
 
                 sched = data[1]
                 if args.x:

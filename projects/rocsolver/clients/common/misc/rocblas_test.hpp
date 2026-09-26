@@ -100,7 +100,24 @@
 
 #define EXPECT_ROCBLAS_STATUS ASSERT_EQ
 
-#else // ROCSOLVER_CLIENTS_TEST
+// Checks that statement throws an exception of exception_class, e.g.,
+// rocblas_status, and checks its value, e.g., rocblas_status_invalid_size.
+#define EXPECT_THROW_VALUE(statement, exception_class, value) \
+    EXPECT_THROW(                                             \
+        {                                                     \
+            try                                               \
+            {                                                 \
+                statement;                                    \
+            }                                                 \
+            catch(exception_class const& ex)                  \
+            {                                                 \
+                EXPECT_EQ(ex, value);                         \
+                throw;                                        \
+            }                                                 \
+        },                                                    \
+        exception_class)
+
+#else // not def ROCSOLVER_CLIENTS_TEST
 
 inline void rocblas_expect_status(rocblas_status status, rocblas_status expect)
 {
@@ -143,6 +160,29 @@ inline void rocblas_expect_status(rocblas_status status, rocblas_status expect)
 
 #define EXPECT_ROCBLAS_STATUS rocblas_expect_status
 
+// Checks that statement throws an exception of exception_class, e.g.,
+// rocblas_status, and checks its value, e.g., rocblas_status_invalid_size.
+// TODO: should this be more specific, e.g., EXPECT_THROW_ROCBLAS_STATUS?
+// Then we could print more meaningful error messages.
+#define EXPECT_THROW_VALUE(statement, exception_class, value)                              \
+    do                                                                                     \
+    {                                                                                      \
+        try                                                                                \
+        {                                                                                  \
+            statement;                                                                     \
+            fmt::print(stderr, "expected exception, but none thrown\n");                   \
+            rocblas_abort();                                                               \
+        }                                                                                  \
+        catch(exception_class const& ex)                                                   \
+        {                                                                                  \
+            if(ex != value)                                                                \
+            {                                                                              \
+                fmt::print(stderr, "caught expected exception, but it has wrong value\n"); \
+                rocblas_abort();                                                           \
+            }                                                                              \
+        }                                                                                  \
+    } while(0)
+
 // The info provided to EXPECT macros is used in rocsolver-test, but
 // in rocsolver-bench, the information is just discarded.
 struct rocsolver_info_discarder
@@ -160,6 +200,8 @@ struct rocsolver_info_discarder
 #define EXPECT_LE(v1, v2) rocsolver_info_discarder()
 #define EXPECT_GT(v1, v2) rocsolver_info_discarder()
 #define EXPECT_GE(v1, v2) rocsolver_info_discarder()
+#define EXPECT_TRUE(v1) rocsolver_info_discarder()
+#define EXPECT_FALSE(v1) rocsolver_info_discarder()
 
 #endif // ROCSOLVER_CLIENTS_TEST
 

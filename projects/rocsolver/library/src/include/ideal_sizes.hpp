@@ -249,6 +249,27 @@
 #define xxTD2_SSKER_MAX_N 192
 #endif
 
+/***************** gehrd **********************************************
+*******************************************************************************/
+/*! \brief Determines the size of the leading block reduced at each step of the
+    blocked Hessenberg reduction algorithm (GEHRD). Also applies to the
+    corresponding batched and strided-batched routines.*/
+#ifndef GEHRD_BLOCKSIZE
+#define GEHRD_BLOCKSIZE 64
+#endif
+
+/*! \brief Determines the size at which rocSOLVER switches from the blocked
+    to the unblocked algorithm when executing GEHRD. Also applies to the
+    corresponding batched and strided-batched routines.
+
+    \details GEHRD will use LAHR2 to reduce blocks of GEHRD_BLOCKSIZE columns
+    at a time until the rest of the matrix has no more than GEHRD_GEHD2_SWITCHSIZE
+    rows or columns; at this point the remainder is reduced with the unblocked
+    algorithm (GEHD2).*/
+#ifndef GEHRD_GEHD2_SWITCHSIZE
+#define GEHRD_GEHD2_SWITCHSIZE 512
+#endif
+
 /***************** sygs2/sygst and hegs2/hegst ********************************
 *******************************************************************************/
 /*! \brief Determines the size of the leading block that is reduced to standard form at each step
@@ -259,7 +280,7 @@
     SYGST/HEGST will directly call the unblocked routines (SYGS2/HEGS2). However, when n is not a
     multiple of xxGST_BLOCKSIZE, the last block reduced in the blocked process is allowed to be smaller than xxGST_BLOCKSIZE.*/
 #ifndef xxGST_BLOCKSIZE
-#define xxGST_BLOCKSIZE 64
+#define xxGST_BLOCKSIZE 256
 #endif
 
 /****************************** stedc ******************************************
@@ -311,6 +332,27 @@
     and eigenvectors will be computed with a single kernel call. */
 #ifndef SYEVJ_BLOCKED_SWITCH
 #define SYEVJ_BLOCKED_SWITCH 58
+#endif
+
+/************************** syevd/heevd 2-stage *******************************
+*******************************************************************************/
+/*! \brief Determines the size threshold above which rocSOLVER uses the 2-stage
+    algorithm (he2hb + hb2st) instead of the 1-stage algorithm (hetrd) when
+    executing SYEVD/HEEVD. */
+// Tuned for single/double with vectors on MI300.
+#ifndef SYEVD_2STAGE_SWITCHSIZE
+#define SYEVD_2STAGE_SWITCHSIZE 11000
+#endif
+
+/*! \brief Bandwidth kd used by the 2-stage algorithm in SYEVD/HEEVD. */
+#ifndef SYEVD_2STAGE_KD
+#define SYEVD_2STAGE_KD 32
+#endif
+
+/*! \brief Block size nb used by he2hb in the 2-stage algorithm in SYEVD/HEEVD.
+    Must satisfy nb >= kd and nb % kd == 0. */
+#ifndef SYEVD_2STAGE_NB
+#define SYEVD_2STAGE_NB SYEVD_2STAGE_KD
 #endif
 
 /*************************** sytf2/sytrf **************************************

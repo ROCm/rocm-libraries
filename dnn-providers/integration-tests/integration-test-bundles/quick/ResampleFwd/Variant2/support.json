@@ -1,0 +1,40 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "1_2_4_3_3_bfp16_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+          "1_2_4_3_3_bfp16_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+          "1_2_4_3_3_fp16_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+          "1_2_4_3_3_fp16_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+          "1_2_4_3_3_fp32_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+          "1_2_4_3_3_fp32_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+          "1_2_4_6_bfp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "1_2_4_6_fp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "1_2_4_6_fp32_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "1_2_8_3_bfp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "1_2_8_3_fp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "1_2_8_3_fp32_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "2_3_3_5_bfp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "2_3_3_5_bfp16_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "2_3_3_5_fp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "2_3_3_5_fp16_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "2_3_3_5_fp32_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "2_3_3_5_fp32_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+          "2_3_7_2_bfp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "2_3_7_2_bfp16_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "2_3_7_2_fp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "2_3_7_2_fp16_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "2_3_7_2_fp32_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+          "2_3_7_2_fp32_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

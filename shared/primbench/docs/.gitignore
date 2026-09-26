@@ -1,0 +1,5 @@
+/_build
+/doxygen/html/
+/doxygen/xml/
+/sphinx/_toc.yml
+/.venv

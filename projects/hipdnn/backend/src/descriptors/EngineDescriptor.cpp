@@ -16,6 +16,9 @@
 #include <algorithm>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace hipdnn_backend
 {
@@ -47,11 +50,16 @@ void EngineDescriptor::finalize()
     _engineDetails = plugin::EnginePluginResourceManager::getEngineDetails(
         pluginResourceManager, _engineId, _graph.get());
 
+    // Declared here so its storage outlives the resolveEngineName() call below,
+    // which takes a view of it.
+    std::optional<std::string> detailsName;
+
     auto engineDetailsPtr = _engineDetails->get();
     if(engineDetailsPtr != nullptr)
     {
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper detailsWrapper(
             engineDetailsPtr);
+        detailsName = detailsWrapper.name();
         auto rawBehaviorNotes = detailsWrapper.behaviorNotes();
         std::vector<hipdnnBackendBehaviorNote_t> behaviorNotes;
         behaviorNotes.reserve(rawBehaviorNotes.size());
@@ -94,6 +102,9 @@ void EngineDescriptor::finalize()
         }
     }
 
+    _engineName = pluginResourceManager->resolveEngineName(
+        _engineId, detailsName ? std::optional<std::string_view>(*detailsName) : std::nullopt);
+
     HipdnnBackendDescriptorImpl<EngineDescriptor>::finalize();
 }
 
@@ -123,6 +134,14 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
         getBehaviorNotes(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINE_NAME_EXT:
+        getString(_engineName,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "EngineDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
@@ -214,6 +233,7 @@ void EngineDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE:
     case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
     case HIPDNN_ATTR_ENGINE_DEVICEPROP:
+    case HIPDNN_ATTR_ENGINE_NAME_EXT:
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -409,6 +429,7 @@ std::string EngineDescriptor::toString() const
 {
     std::string str = "EngineDescriptor: {engineId=";
     str += _engineIdSet ? std::to_string(_engineId) : "unset";
+    str += ", engineName=" + (_engineName.empty() ? std::string("unset") : _engineName);
     str += _graph ? ", graph=" + fmt::format("{:p}", static_cast<const void*>(_graph.get()))
                   : ", graph=null";
     str += '}';

@@ -69,6 +69,11 @@ from ...helpers.tensor_view import (
     make_global_view,
     make_tile_window,
 )
+from ..common._moe_fused_mega_lds import (
+    LdsAlloc,
+    lds_elem_bytes,
+    validate_mega_lds_budget,
+)
 from ..common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -1095,6 +1100,33 @@ def _emit_wmma_down_reduce_atomic(
 
 
 # ---------------------------------------------------------------------------
+# LDS budget
+# ---------------------------------------------------------------------------
+
+
+def _lds_allocs(spec: FusedMegaWmmaSpec) -> Tuple[LdsAlloc, ...]:
+    """Every LDS buffer :func:`build_moe_fused_mega_wmma` allocates, in order.
+
+    Keep in lock-step with the ``b.smem_alloc`` calls in the builder: this is
+    what the whole-kernel budget in
+    :mod:`..common._moe_fused_mega_lds` is computed from. ``double_buffer``
+    doubles the three operand tiles (the ping-pong halves live in one
+    allocation), which is the config most likely to overrun the budget.
+    """
+    t = spec.gate_up_tile()
+    td = spec.down_tile()
+    eb = lds_elem_bytes(_storage_dtype(spec.gate_up_universal_spec()))
+    nbuf = 2 if spec.double_buffer else 1
+    return (
+        LdsAlloc("A_smem", eb, nbuf * t.tile_m * t.tile_k),
+        LdsAlloc("Bg_smem", eb, nbuf * t.tile_n * t.tile_k),
+        LdsAlloc("Bu_smem", eb, nbuf * t.tile_n * t.tile_k),
+        LdsAlloc("Hidden_smem", eb, t.tile_m * t.tile_n),
+        LdsAlloc("Bd_smem", eb, nbuf * td.tile_n * td.tile_k),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
 
@@ -1111,7 +1143,10 @@ def build_moe_fused_mega_wmma(
     exposes only inputs + ``Y``).
 
     Requires a WMMA (wave32) target with the 16x16x32 atom (gfx1250); an MFMA /
-    wave64 spec is rejected by the GEMM-spec validator.
+    wave64 spec is rejected by the GEMM-spec validator. A tiling whose two GEMMs
+    each fit the per-WG LDS budget but whose fused total does not is rejected
+    too -- the two sub-specs are validated independently and neither sees
+    ``Hidden_smem``.
     """
     u_gu = spec.gate_up_universal_spec()
     ok, why = is_valid_gemm_spec(u_gu, arch=arch)
@@ -1121,6 +1156,9 @@ def build_moe_fused_mega_wmma(
     ok, why = is_valid_gemm_spec(u_down, arch=arch)
     if not ok:
         raise ValueError(f"invalid fused-mega-wmma down GEMM spec: {why}")
+    ok, why = validate_mega_lds_budget(_lds_allocs(spec), arch)
+    if not ok:
+        raise ValueError(f"invalid fused-mega-wmma spec: {why}")
 
     op_gu = _resolve_mma_op(u_gu, arch)
     if op_gu is None:
@@ -1213,6 +1251,8 @@ def build_moe_fused_mega_wmma(
     gu_n_off = b.mul(b.block_id_x(), c_block_n)
 
     # ---- LDS allocations -----------------------------------------------
+    # Mirrored by :func:`_lds_allocs` for the whole-kernel budget above; the two
+    # must stay in lock-step.
     # Double-buffer doubles the A/B operand LDS so the next K-tile can be
     # written into the opposite half while the current half is being read.
     db = bool(spec.double_buffer)

@@ -94,6 +94,7 @@ void init_inst(nb::module_ m)
         .def("getMemToken", &rocisa::Instruction::getMemToken)
         .def("setInlineAsm", &rocisa::Instruction::setInlineAsm)
         .def("getParams", &rocisa::Instruction::getParams)
+        .def("preStr", &rocisa::Instruction::preStr)
         .def("__str__", &rocisa::Instruction::toString)
         .def("__deepcopy__",
              [](const rocisa::Instruction& self, const nb::dict&) {

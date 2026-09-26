@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,10 @@ set(lapack_cmake_args -DCMAKE_INSTALL_PREFIX=${PREFIX_LAPACK})
 append_cmake_cli_arguments(lapack_cmake_args lapack_cmake_args)
 
 set(lapack_git_repository "https://github.com/Reference-LAPACK/lapack-release" CACHE STRING "URL to download lapack from")
-set(lapack_git_tag "lapack-3.7.1" CACHE STRING "git branch")
+# pinned-dep lapack: immutable commit (was the mutable "lapack-3.7.1" branch).
+# Same commit as the v3.7.1 tag in Reference-LAPACK/lapack. Bump only on a deliberate LAPACK upgrade.
+# grep "pinned-dep" to find every pin that needs bumping.
+set(lapack_git_tag "9f7abc2cc93fac3a5a8905307447c70163abdef2" CACHE STRING "lapack commit (v3.7.1)")
 
 # message(STATUS "lapack_make (" ${lapack_make} ") ")
 # message(STATUS "lapack_cmake_args (" ${lapack_cmake_args} ") ")

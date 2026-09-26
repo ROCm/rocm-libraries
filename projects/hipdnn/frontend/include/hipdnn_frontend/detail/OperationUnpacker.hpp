@@ -22,6 +22,7 @@
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulBwdNode.hpp>
 #include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -116,6 +117,10 @@ namespace hipdnn_frontend::detail
                 {}};
     case HIPDNN_OPERATION_TYPE_MATMUL_EXT:
         return {std::make_shared<graph::MatmulNode>(graph::MatmulAttributes{}, graphAttrs), {}};
+    case HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_BWD_EXT:
+        return {std::make_shared<graph::MoeGroupedMatmulBwdNode>(
+                    graph::MoeGroupedMatmulBwdAttributes{}, graphAttrs),
+                {}};
     case HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT:
         return {std::make_shared<graph::MoeGroupedMatmulNode>(graph::MoeGroupedMatmulAttributes{},
                                                               graphAttrs),

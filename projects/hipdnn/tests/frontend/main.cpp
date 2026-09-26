@@ -11,11 +11,17 @@ SPDX-License-Identifier: MIT
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);
+
+    // Keep the autotune ranking cache out of the developer's ~/.cache/hipdnn: the
+    // persistence suite both reads and writes it, so a shard left by an earlier run
+    // of this build would otherwise decide the outcome.
+    const hipdnn_test_sdk::utilities::ScopedTestCacheDir cacheDir("hipdnn-frontend-integration");
 
     // Initialize test log recording infrastructure to always forward logs to hipdnnLoggingCallback_ext().
     // NOTE: The frontend logger must be initialized with recordingCallback to ensure the logs

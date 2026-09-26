@@ -115,6 +115,12 @@ struct SdpaFwdSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // FP8 (E4M3) inputs with BF16 output — matches the ASM engine's fp8bf16 path.
+        // Requires q/k/v descales (enforced in SdpaFwdPlanBuilder::isApplicable).
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }

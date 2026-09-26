@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -170,7 +171,7 @@ public:
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
+        activAttrs.set_mode(sdkToFrontendPointwiseMode(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
             activAttrs.set_relu_lower_clip(activTestCase.reluLowerClip.value());

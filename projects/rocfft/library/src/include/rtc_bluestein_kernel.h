@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,16 +28,16 @@
 struct RTCKernelBluesteinSingle : public RTCKernel
 {
     RTCKernelBluesteinSingle(const std::string&                       kernel_name,
+                             KIntType                                 itype,
                              std::shared_future<hipModule_wrapper_t>& module,
                              dim3                                     gridDim,
                              dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 
-    static RTCKernel::RTCGenerator generate_from_node(const LeafNode&    node,
-                                                      const std::string& gpu_arch,
-                                                      bool               enable_callbacks);
+    static RTCKernel::RTCGenerator
+        generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
 };
@@ -46,6 +46,7 @@ struct RTCKernelBluesteinSingle : public RTCKernel
 struct RTCKernelBluesteinMulti : public RTCKernel
 {
     RTCKernelBluesteinMulti(const std::string&                       kernel_name,
+                            KIntType                                 itype,
                             ComputeScheme                            scheme,
                             size_t                                   N,
                             size_t                                   M,
@@ -54,7 +55,7 @@ struct RTCKernelBluesteinMulti : public RTCKernel
                             std::shared_future<hipModule_wrapper_t>& module,
                             dim3                                     gridDim,
                             dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
         , scheme(scheme)
         , N(N)
         , M(M)
@@ -63,9 +64,8 @@ struct RTCKernelBluesteinMulti : public RTCKernel
     {
     }
 
-    static RTCKernel::RTCGenerator generate_from_node(const LeafNode&    node,
-                                                      const std::string& gpu_arch,
-                                                      bool               enable_callbacks);
+    static RTCKernel::RTCGenerator
+        generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);
 
     virtual RTCKernelArgs get_launch_args(DeviceCallIn& data) override;
 

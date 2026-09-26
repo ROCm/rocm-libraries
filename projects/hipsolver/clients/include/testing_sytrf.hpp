@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, typename T, typename U, typename V>
 void sytrf_checkBadArgs(const hipsolverHandle_t   handle,
@@ -369,14 +370,14 @@ void sytrf_getPerfData(const hipsolverHandle_t   handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         sytrf_initData<false, true, T>(
             handle, uplo, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_sytrf(API,
                         handle,
                         uplo,
@@ -390,9 +391,9 @@ void sytrf_getPerfData(const hipsolverHandle_t   handle,
                         lwork,
                         dInfo.data(),
                         bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API, bool BATCHED, bool STRIDED, typename T>
@@ -566,7 +567,7 @@ void testing_sytrf(Arguments& argus)
         //                                &max_error);
 
         // // collect performance data
-        // if(argus.timing)
+        // if(argus.timing && hot_calls > 0)
         //     sytrf_getPerfData<API, T>(handle,
         //                                   uplo,
         //                                   n,
@@ -632,7 +633,7 @@ void testing_sytrf(Arguments& argus)
                                    &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytrf_getPerfData<API, T>(handle,
                                       uplo,
                                       n,

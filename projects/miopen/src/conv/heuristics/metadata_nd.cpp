@@ -403,6 +403,25 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     }
 }
 
+MIOPEN_INTERNALS_EXPORT
+size_t MetadataND::GetEngineeredNumInputs() const
+{
+    if(!is_valid)
+        return 0;
+
+    size_t count = GetInLayoutClassCount() + GetFilLayoutClassCount() + GetOutLayoutClassCount() +
+                   GetPrecisionClassCount() + GetDirectionClassCount();
+    for(const auto& feature : features)
+    {
+        if(!common::IsTunaNetCategoricalFeature(feature))
+            ++count;
+    }
+    // Derived from common::EngineeredConvFeatures (18 for 2D, 19 for 3D) rather than hardcoded,
+    // so this stays in lockstep if that feature block changes.
+    count += common::EngineeredConvFeatureCount(spatial_dim);
+    return count;
+}
+
 // Encoding methods with safe error handling
 MIOPEN_INTERNALS_EXPORT
 size_t MetadataND::EncodeDirection(miopen::conv::Direction dir) const

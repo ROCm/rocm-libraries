@@ -78,6 +78,23 @@ namespace TensileLite
         // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
         bool printStreamKModeSelection() const;
 
+        // Emits a StreamK "launch summary" of the decisions made in the StreamK
+        // launch-parameter path (mode, reduction, grid/tiles/split, workspace,
+        // partials, DP-only, fallbacks) for each StreamK solve(). Purely
+        // observational. Gated by TENSILE_DB bit 0x200000 = StreamK launch summary
+        // (sits alongside the 0x100000 StreamK-mode-selection bit above).
+        bool printStreamKLaunchSummary() const;
+
+        // Reports, on stderr, every problem for which solution selection came
+        // back with nothing, together with the uniform-summation-order clauses
+        // that eliminated the candidates. Answers "why does my problem have no
+        // solution when uniform summation order is on" without requiring the
+        // gate to be re-derived from outside the library. Gated by TENSILE_DB
+        // bit 0x400000: a dedicated bit, so it can be turned on by itself
+        // without also enabling per-call tracing or the StreamK launch summary
+        // on 0x200000 above.
+        bool printNoSolutionUniformSummationOrder() const;
+
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
@@ -91,6 +108,8 @@ namespace TensileLite
         //    1 -> force the dynamic (SK4) path
         // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
         int streamK5ForceMode() const;
+
+        bool usePreciseSMTarget() const;
 
         int useExperimentalSelection() const;
 
@@ -167,6 +186,7 @@ namespace TensileLite
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
+        bool        m_usePreciseSMTarget  = false;
         StringSet   m_excludedFromGetAll;
 
         Debug();

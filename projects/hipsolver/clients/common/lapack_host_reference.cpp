@@ -604,6 +604,96 @@ void zgeqrf_(int*                    m,
              int*                    lwork,
              int*                    info);
 
+void sgeqlf_(int* m, int* n, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
+void dgeqlf_(
+    int* m, int* n, double* A, int* lda, double* ipiv, double* work, int* lwork, int* info);
+void cgeqlf_(int*              m,
+             int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             hipsolverComplex* ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgeqlf_(int*                    m,
+             int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             hipsolverDoubleComplex* ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
+void sgelqf_(int* m, int* n, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
+void dgelqf_(
+    int* m, int* n, double* A, int* lda, double* ipiv, double* work, int* lwork, int* info);
+void cgelqf_(int*              m,
+             int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             hipsolverComplex* ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgelqf_(int*                    m,
+             int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             hipsolverDoubleComplex* ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
+void sgerqf_(int* m, int* n, float* A, int* lda, float* ipiv, float* work, int* lwork, int* info);
+void dgerqf_(
+    int* m, int* n, double* A, int* lda, double* ipiv, double* work, int* lwork, int* info);
+void cgerqf_(int*              m,
+             int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             hipsolverComplex* ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgerqf_(int*                    m,
+             int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             hipsolverDoubleComplex* ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
+
+void slarft_(
+    char* direct, char* storev, int* n, int* k, float* V, int* ldv, float* tau, float* T, int* ldt);
+void dlarft_(char*   direct,
+             char*   storev,
+             int*    n,
+             int*    k,
+             double* V,
+             int*    ldv,
+             double* tau,
+             double* T,
+             int*    ldt);
+void clarft_(char*             direct,
+             char*             storev,
+             int*              n,
+             int*              k,
+             hipsolverComplex* V,
+             int*              ldv,
+             hipsolverComplex* tau,
+             hipsolverComplex* T,
+             int*              ldt);
+void zlarft_(char*                   direct,
+             char*                   storev,
+             int*                    n,
+             int*                    k,
+             hipsolverDoubleComplex* V,
+             int*                    ldv,
+             hipsolverDoubleComplex* tau,
+             hipsolverDoubleComplex* T,
+             int*                    ldt);
+
 void sgesv_(int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
 void dgesv_(int* n, int* nrhs, double* A, int* lda, int* ipiv, double* B, int* ldb, int* info);
 void cgesv_(int*              n,
@@ -2227,6 +2317,194 @@ void cpu_geqrf<hipsolverDoubleComplex>(int                     m,
                                        int*                    info)
 {
     zgeqrf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// geqlf
+template <>
+void cpu_geqlf<float>(
+    int m, int n, float* A, int lda, float* ipiv, float* work, int lwork, int* info)
+{
+    sgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_geqlf<double>(
+    int m, int n, double* A, int lda, double* ipiv, double* work, int lwork, int* info)
+{
+    dgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_geqlf<hipsolverComplex>(int               m,
+                                 int               n,
+                                 hipsolverComplex* A,
+                                 int               lda,
+                                 hipsolverComplex* ipiv,
+                                 hipsolverComplex* work,
+                                 int               lwork,
+                                 int*              info)
+{
+    cgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_geqlf<hipsolverDoubleComplex>(int                     m,
+                                       int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       hipsolverDoubleComplex* ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgeqlf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// gelqf
+template <>
+void cpu_gelqf<float>(
+    int m, int n, float* A, int lda, float* ipiv, float* work, int lwork, int* info)
+{
+    sgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gelqf<double>(
+    int m, int n, double* A, int lda, double* ipiv, double* work, int lwork, int* info)
+{
+    dgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gelqf<hipsolverComplex>(int               m,
+                                 int               n,
+                                 hipsolverComplex* A,
+                                 int               lda,
+                                 hipsolverComplex* ipiv,
+                                 hipsolverComplex* work,
+                                 int               lwork,
+                                 int*              info)
+{
+    cgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gelqf<hipsolverDoubleComplex>(int                     m,
+                                       int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       hipsolverDoubleComplex* ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgelqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// gerqf
+template <>
+void cpu_gerqf<float>(
+    int m, int n, float* A, int lda, float* ipiv, float* work, int lwork, int* info)
+{
+    sgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gerqf<double>(
+    int m, int n, double* A, int lda, double* ipiv, double* work, int lwork, int* info)
+{
+    dgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gerqf<hipsolverComplex>(int               m,
+                                 int               n,
+                                 hipsolverComplex* A,
+                                 int               lda,
+                                 hipsolverComplex* ipiv,
+                                 hipsolverComplex* work,
+                                 int               lwork,
+                                 int*              info)
+{
+    cgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_gerqf<hipsolverDoubleComplex>(int                     m,
+                                       int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       hipsolverDoubleComplex* ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgerqf_(&m, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// larft
+template <>
+void cpu_larft<float>(hipsolverDirectMode_t directR,
+                      hipsolverStorevMode_t storevR,
+                      int                   n,
+                      int                   k,
+                      float*                V,
+                      int                   ldv,
+                      float*                tau,
+                      float*                T,
+                      int                   ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    slarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
+template <>
+void cpu_larft<double>(hipsolverDirectMode_t directR,
+                       hipsolverStorevMode_t storevR,
+                       int                   n,
+                       int                   k,
+                       double*               V,
+                       int                   ldv,
+                       double*               tau,
+                       double*               T,
+                       int                   ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    dlarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
+template <>
+void cpu_larft<hipsolverComplex>(hipsolverDirectMode_t directR,
+                                 hipsolverStorevMode_t storevR,
+                                 int                   n,
+                                 int                   k,
+                                 hipsolverComplex*     V,
+                                 int                   ldv,
+                                 hipsolverComplex*     tau,
+                                 hipsolverComplex*     T,
+                                 int                   ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    clarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
+}
+
+template <>
+void cpu_larft<hipsolverDoubleComplex>(hipsolverDirectMode_t   directR,
+                                       hipsolverStorevMode_t   storevR,
+                                       int                     n,
+                                       int                     k,
+                                       hipsolverDoubleComplex* V,
+                                       int                     ldv,
+                                       hipsolverDoubleComplex* tau,
+                                       hipsolverDoubleComplex* T,
+                                       int                     ldt)
+{
+    char direct = hipsolver2char_direct(directR);
+    char storev = hipsolver2char_storev(storevR);
+    zlarft_(&direct, &storev, &n, &k, V, &ldv, tau, T, &ldt);
 }
 
 // gesv

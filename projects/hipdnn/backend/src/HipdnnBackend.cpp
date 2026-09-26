@@ -12,12 +12,17 @@
 #include "descriptors/VariantDescriptor.hpp"
 #include "handle/Handle.hpp"
 #include "handle/HandleFactory.hpp"
+#include "heuristics/DeviceProperties.hpp"
+#include "heuristics/config/AutotuneCacheEnv.hpp"
+#include "heuristics/config/AutotuneCacheKey.hpp"
+#include "heuristics/config/AutotuneRankingStore.hpp"
 #include "hipdnn_backend.h"
 #include "logging/Logging.hpp"
 #include "plugin/EnginePluginResourceManager.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
 
 #include <hipdnn_backend/version.h>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
@@ -827,6 +832,77 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId)
+{
+    LOG_API_ENTRY("handle={:p}, engineName_ptr={:p}, engineId_ptr={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<const void*>(engineName),
+                  static_cast<void*>(engineId));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineName);
+        throwIfNull(engineId);
+
+        const auto resolved = handle->findEngineIdByName(engineName);
+        if(!resolved.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  std::string("No loaded engine is named '") + engineName + "'.");
+        }
+
+        *engineId = *resolved;
+
+        LOG_API_SUCCESS(apiName, "engineName={}, engineId={}", engineName, *engineId);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen)
+{
+    LOG_API_ENTRY("handle={:p}, engineId={}, engineName_ptr={:p}, engineNameLen_ptr={:p}",
+                  static_cast<void*>(handle),
+                  engineId,
+                  static_cast<void*>(engineName),
+                  static_cast<void*>(engineNameLen));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineNameLen);
+
+        const auto resolved = handle->findEngineNameById(engineId);
+        if(!resolved.has_value())
+        {
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  "No loaded engine has ID "
+                                      + hipdnn_data_sdk::utilities::formatEngineIdHex(engineId)
+                                      + ".");
+        }
+
+        const size_t requiredEngineNameLen = resolved->size() + 1;
+
+        if(engineName == nullptr)
+        {
+            *engineNameLen = requiredEngineNameLen;
+            return;
+        }
+
+        if(*engineNameLen < requiredEngineNameLen)
+        {
+            throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Insufficient buffer space provided.");
+        }
+
+        hipdnn_data_sdk::utilities::copyMaxSizeWithNullTerminator(
+            engineName, resolved->c_str(), *engineNameLen);
+
+        LOG_API_SUCCESS(apiName, "engineId={}, engineName={}", engineId, *resolved);
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHandle_t handle,
                                                                        size_t* numPolicies)
 {
@@ -934,6 +1010,138 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyInfo_ext(hipdnnHand
                         info.pluginName,
                         info.pluginVersion,
                         info.apiVersion);
+    });
+}
+
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t
+    hipdnnBackendWriteEngineRankingResults_ext(hipdnnHandle_t handle,
+                                               hipdnnBackendDescriptor_t graphDescriptor,
+                                               const int64_t* engineIdsInRankOrder,
+                                               size_t engineIdCount,
+                                               hipdnnAutotuneCacheWriteOutcome_ext_t* outcome)
+{
+    LOG_API_ENTRY("handle={}, graphDescriptor={}, engineIdsInRankOrder_ptr={:p}, engineIdCount={}",
+                  logPtr(handle),
+                  logPtr(graphDescriptor),
+                  static_cast<const void*>(engineIdsInRankOrder),
+                  engineIdCount);
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__]() {
+        throwIfNull(handle);
+
+        if(outcome != nullptr)
+        {
+            *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+        }
+
+        // Runs before all other validation: a disabled cache must never read or write.
+        if(hipdnn_backend::heuristics::config::exactCacheDisabled())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: exact-match autotune cache "
+                "disabled via HIPDNN_DISABLE_EXACT_ENGINE_CACHE; declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_DISABLED;
+            }
+            return;
+        }
+
+        throwIfInvalidDescriptor(graphDescriptor);
+
+        // Declines rather than failing the caller's run on any cache problem below.
+        if(!graphDescriptor->isFinalized())
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: graph descriptor is not "
+                "finalized; declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+            }
+            return;
+        }
+
+        if(engineIdsInRankOrder == nullptr || engineIdCount == 0)
+        {
+            HIPDNN_BACKEND_LOG_INFO(
+                "hipdnnBackendWriteEngineRankingResults_ext: no engine ranking provided; "
+                "declining write.");
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
+            }
+            return;
+        }
+
+        auto graphDesc = graphDescriptor->asDescriptor<hipdnn_backend::GraphDescriptor>();
+
+        try
+        {
+            const hipdnnPluginConstData_t serializedGraph = graphDesc->getSerializedGraph();
+
+            const auto devProps = hipdnn_backend::heuristics::queryDeviceProperties(handle);
+            const auto devicePropsSerialized
+                = hipdnn_backend::heuristics::serializeDeviceProperties(devProps);
+            const hipdnnPluginConstData_t devicePropsWrapper
+                = hipdnn_backend::heuristics::wrapSerializedDeviceProperties(devicePropsSerialized);
+
+            const auto cacheKey = hipdnn_backend::heuristics::config::deriveCacheKey(
+                serializedGraph, devicePropsWrapper);
+            if(!cacheKey.has_value())
+            {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "hipdnnBackendWriteEngineRankingResults_ext: graph is unkeyable; "
+                    "declining write.");
+                if(outcome != nullptr)
+                {
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                }
+                return;
+            }
+
+            const std::vector<int64_t> order(engineIdsInRankOrder,
+                                             engineIdsInRankOrder + engineIdCount);
+
+            // Report what the store actually did. The optimistic WRITTEN set at entry is a
+            // default for the paths that never reach here; a record identical to one already on
+            // disk writes nothing, and saying otherwise would make the outcome a lie precisely
+            // where a caller is relying on it to tell writes apart from no-ops.
+            const auto writeStatus = hipdnn_backend::heuristics::config::exactCacheStore().put(
+                *cacheKey, {}, order, order);
+            if(outcome != nullptr)
+            {
+                switch(writeStatus)
+                {
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::WRITTEN:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNCHANGED:
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_UNCHANGED;
+                    break;
+                case hipdnn_backend::heuristics::config::RankingWriteStatus::UNAVAILABLE:
+                    // The shard could not be opened, locked, or read. The cache is best-effort,
+                    // so this stays a success with a decline rather than an error.
+                    *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+                    break;
+                default:
+                    break;
+                }
+            }
+
+            LOG_API_SUCCESS(apiName, "wrote engine ranking with {} engines", engineIdCount);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "hipdnnBackendWriteEngineRankingResults_ext: failed to write engine ranking "
+                "({}); declining write.",
+                e.what());
+            if(outcome != nullptr)
+            {
+                *outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_UNKEYABLE_OR_UNFINALIZED;
+            }
+        }
     });
 }
 

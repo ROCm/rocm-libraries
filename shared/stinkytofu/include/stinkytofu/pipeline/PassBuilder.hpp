@@ -95,6 +95,15 @@ class STINKYTOFU_EXPORT PassBuilder {
     static void loadPluginsFromDirectory(const std::string& dirPath);
 
     /// Load a single plugin shared library (.so on Linux, .dll on Windows).
+    ///
+    /// In addition to `registerPlugin()`, every plugin must export
+    /// `extern "C" const char* stinkytofuPluginVersion()` returning its own
+    /// STINKYTOFU_FULL_VERSION (see Version.h). loadPlugin() rejects — with a
+    /// diagnostic and a `false` return, not a crash — any plugin missing that
+    /// symbol or whose version string doesn't exactly match the stinkytofu
+    /// actually running (getRuntimeVersion()). StinkyTofu does not support
+    /// loading a plugin built against a different stinkytofu build; this is not
+    /// a semver-range check, it's an exact string comparison.
     static bool loadPlugin(const std::string& path);
 
     /// Absolute path to StinkyTofu's own bundled example plugin, or "" if it was

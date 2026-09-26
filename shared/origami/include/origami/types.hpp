@@ -183,11 +183,10 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
- * @brief StreamK=5 hybrid sub-path selector.
+ * @brief The tile-scheduling mode a kernel launches in.
  *
  * Picks between the SK3 static work-assignment sub-path and the SK4
- * dynamic per-XCD work-queue sub-path inside a single SK5 kernel
- * launch. Used by ::origami::streamk::select_hybrid_mode().
+ * dynamic per-XCD work-queue sub-path inside a single SK5 kernel launch.
  */
 enum class hybrid_mode_t : std::uint32_t {
   static_ = 0,        ///< SK3 static work-assignment sub-path
@@ -195,6 +194,14 @@ enum class hybrid_mode_t : std::uint32_t {
   count,              ///< Count of hybrid modes
   none = 0xFFFFFFFFu  ///< Explicitly invalid
 };
+
+/**
+ * @brief Convert hybrid_mode_t to string.
+ *
+ * @param mode Tile-scheduling mode
+ * @return std::string String representation of the mode
+ */
+ORIGAMI_EXPORT std::string hybrid_mode_to_string(hybrid_mode_t mode);
 
 /**
  * @brief Prediction mode types for latency estimation.
@@ -446,9 +453,9 @@ struct tensile_params_t {
   bool swizzle_b = false;
 
   /// Workgroup mapping XCC parameters
-  int workgroup_mapping_xcc = 1;
-  int workgroup_mapping_xcc_group = 0;
-  bool global_split_u_coalesced = false;
+  int workgroup_mapping_xcc           = 1;
+  int workgroup_mapping_xcc_group     = 0;
+  bool global_split_u_coalesced       = false;
   bool global_split_u_wgm_round_robin = false;
 
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
@@ -529,6 +536,9 @@ struct config_t {
   std::size_t workspace_size            = 0;
   std::size_t workspace_size_per_elem_c = 0;
 
+  /// Stream-K mode selector (0 disables stream-K; 1 to 5 enables stream-K).
+  int stream_k = 5;
+
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
@@ -579,7 +589,7 @@ struct config_t {
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
            subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b &&
+           cache_hints_b == o.cache_hints_b && stream_k == o.stream_k &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -597,6 +607,7 @@ struct config_t {
                                           subtile,
                                           cache_hints_a,
                                           cache_hints_b,
+                                          stream_k,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
                                           static_cast<std::uint32_t>(prediction_mode),

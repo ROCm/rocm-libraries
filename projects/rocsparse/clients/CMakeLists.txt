@@ -173,6 +173,9 @@ add_subdirectory(tools)
 if(BUILD_CLIENTS_TESTS)
   add_subdirectory(tests)
 
+  # Fast, GPU-independent unit tests for individual host-side components.
+  add_subdirectory(unittests)
+
   if(NOT CONVERT_SOURCE)
     set(CONVERT_SOURCE ${CMAKE_SOURCE_DIR}/deps/convert.cpp)
   endif()

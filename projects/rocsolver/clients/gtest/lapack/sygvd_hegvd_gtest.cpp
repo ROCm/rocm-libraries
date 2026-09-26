@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,7 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef std::tuple<vector<int>, vector<printable_char>> sygvd_tuple;
+typedef std::tuple<vector<int>, vector<printable_char>, int> sygvd_tuple;
 
 // each matrix_size_range is a {n, lda, ldb, singular}
 // if singular = 1, then the used matrix for the tests is not positive definite
@@ -46,6 +46,9 @@ typedef std::tuple<vector<int>, vector<printable_char>> sygvd_tuple;
 const vector<vector<printable_char>> type_range
     = {{'1', 'N', 'U'}, {'2', 'N', 'L'}, {'3', 'N', 'U'},
        {'1', 'V', 'L'}, {'2', 'V', 'U'}, {'3', 'V', 'L'}};
+
+// each hetrd_stage_range value is a hetrd_alg_mode: 1 = 1-stage, 2 = 2-stage
+const vector<int> hetrd_stage_range = {1, 2};
 
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
@@ -71,6 +74,7 @@ Arguments sygvd_setup_arguments(sygvd_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
     vector<printable_char> type = std::get<1>(tup);
+    int hetrd_stage = std::get<2>(tup);
 
     Arguments arg;
 
@@ -81,6 +85,8 @@ Arguments sygvd_setup_arguments(sygvd_tuple tup)
     arg.set<char>("itype", type[0]);
     arg.set<char>("evect", type[1]);
     arg.set<char>("uplo", type[2]);
+
+    arg.hetrd_alg_mode = hetrd_stage;
 
     // only testing standard use case/defaults for strides
 
@@ -192,16 +198,24 @@ TEST_P(HEGVD, strided_batched__double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SYGVD,
-                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range)));
+                         Combine(ValuesIn(large_matrix_size_range),
+                                 ValuesIn(type_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SYGVD,
-                         Combine(ValuesIn(matrix_size_range), ValuesIn(type_range)));
+                         Combine(ValuesIn(matrix_size_range),
+                                 ValuesIn(type_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          HEGVD,
-                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(type_range)));
+                         Combine(ValuesIn(large_matrix_size_range),
+                                 ValuesIn(type_range),
+                                 ValuesIn(hetrd_stage_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          HEGVD,
-                         Combine(ValuesIn(matrix_size_range), ValuesIn(type_range)));
+                         Combine(ValuesIn(matrix_size_range),
+                                 ValuesIn(type_range),
+                                 ValuesIn(hetrd_stage_range)));

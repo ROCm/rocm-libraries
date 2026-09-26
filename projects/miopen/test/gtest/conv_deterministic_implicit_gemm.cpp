@@ -356,7 +356,7 @@ protected:
 } // namespace
 
 // ============================================================================
-// Type aliases for all 7 solvers (BFP16)
+// Type aliases for all 6 solvers (BFP16)
 // GPU_ConvDeterministic_* naming matches TheRock CI positive filter */GPU_Conv*
 // ============================================================================
 
@@ -381,11 +381,6 @@ using GPU_ConvDeterministic_BwdV1R1_BFP16 =
     GPU_ConvDeterministicImplicitGemm<bfloat16,
                                       Direction::BackwardData,
                                       miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1>;
-
-using GPU_ConvDeterministic_BwdV4R1_BFP16 =
-    GPU_ConvDeterministicImplicitGemm<bfloat16,
-                                      Direction::BackwardData,
-                                      miopen::solver::conv::ConvHipImplicitGemmBwdDataV4R1>;
 
 // Weight-update solvers
 using GPU_ConvDeterministic_WrwV4R4_BFP16 =
@@ -420,7 +415,6 @@ TEST_P(GPU_ConvDeterministic_FwdV4R5Xdlops_BFP16, DeterministicTest) { this->Run
 
 // Backward Data
 TEST_P(GPU_ConvDeterministic_BwdV1R1_BFP16, DeterministicTest) { this->RunTest(); };
-TEST_P(GPU_ConvDeterministic_BwdV4R1_BFP16, DeterministicTest) { this->RunTest(); };
 
 // Weight-update
 TEST_P(GPU_ConvDeterministic_WrwV4R4_BFP16, DeterministicTest) { this->RunTest(); };
@@ -455,11 +449,6 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // Backward Data solvers
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_ConvDeterministic_BwdV1R1_BFP16,
-                         testing::Values(DeterministicTestConfig{
-                             64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_ConvDeterministic_BwdV4R1_BFP16,
                          testing::Values(DeterministicTestConfig{
                              64, 64, 64, 14, 14, 1, 1, 0, 0, 1, 1, 1, 1}));
 

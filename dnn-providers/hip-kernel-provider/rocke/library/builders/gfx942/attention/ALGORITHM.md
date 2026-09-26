@@ -27,7 +27,7 @@ and the **transposed-x8** flash regime — actually do.
 | $V$ | $S_k \times d$ | value matrix |
 | $O$ | $S_q \times d$ | output (same shape as $Q$) |
 | $S_q, S_k$ | scalar | sequence lengths (query, key) |
-| $d$ | scalar | head dimension (`head_size`, here 64 or 128) |
+| $d$ | scalar | head dimension (`head_size`, here 64, 128, or 256) |
 | $\tau$ | scalar | softmax scale, $\tau = 1/\sqrt{d}$ |
 | $T$ | scalar | the KV tile width (`block_size`, 64 in this example) |
 
@@ -168,11 +168,21 @@ exercises the same build + launch plumbing as the provider.
 
 ---
 
-## 6. Two matmul orientations: narrow vs transposed-x8
+## 6. Four matmul schedules: narrow, transposed-x8, D256-lean, GQA head-fold
 
-The recurrence of Section 3 is fixed; the two shipped gfx942 paths differ only in
+The recurrence of Section 3 is fixed; the shipped gfx942 paths differ only in
 **how the two matmuls ($QK^\top$ and $PV$) are mapped onto the CDNA3 matrix
-unit**. The harness selects between them in `_build_spec`.
+unit** and how K/V reach it. The harness's `_build_spec` selects between the first
+two (narrow §6.1, transposed-x8 §6.2); the third — the D256 lean natural-QK path
+(§6.3) — is a *production-dispatcher* path (`_d256_gfx942_fast`), not a harness
+`_build_spec` choice.
+
+The fourth (§6.4) is a different kind of change and worth naming as such: the
+**GQA head-fold** does not alter either matmul, the atom, or the recurrence. It
+changes only **which query rows a workgroup owns**, so that the paged K/V a
+workgroup streams is read once per KV head instead of once per query head. It is
+also a *production-dispatcher* path (`gfx942_gqa_fold_eligible`), and it is
+**default-ON** for its cohort.
 
 ### 6.1 The narrow default (`16x16x16`)
 
@@ -230,6 +240,154 @@ is a *kernel-path* restriction, not a hardware one: gfx942 does have the bf16
 through the `..._1k` builtin), but the transposed-x8 attention path is only wired
 and validated for fp16. That is why D128 **bf16** falls back to the narrow
 `16x16x16` path (Section 6.1) rather than the flash regime.
+
+### 6.3 The D256 lean natural-QK path (bf16 prefill)
+
+`head_size = 256` gets its own dedicated body. gfx942 has **no** fast D256 route
+on the two paths above: the wide-flash gate (`_enable_gfx942_bf16_flash`) excludes
+`head_size == 256`, and the narrow `16x16x16` fallback overflows the 64 KB LDS at
+any competitive tile. When the D256 body was folded into the shared D128
+sliding-window kernel during an earlier routing consolidation it inherited that
+path's heavier memory schedule (K **and** V staged + double-buffered, a 3-way
+masked loop-split, a K prefetch pipeline) — machinery a D256 prefill does not
+need — and regressed below the standalone kernel it replaced, losing to the
+reference. The fix is a **self-contained lean builder**
+(`_build_gfx942_4warp_gqa_lean`, reached from `build_gfx942_4warp_gqa` for
+`head_size == 256`) that keeps only what D256 needs.
+
+It is a **natural-QK** schedule — it computes $S = Q K^{\top}$ *directly* (the
+narrow orientation of §6.1), **not** the transposed $S^{\top} = K Q^{\top}$ trick
+of §6.2 — on the gfx942-legal bf16 `mfma_32x32x8` atom, laid out for the 4-wave64
+/ `BLOCK_M = 128` workgroup (`block = (256, 1, 1)`). The data movement is the lean
+part:
+
+- **K and Q stream direct from global memory into registers** — no K/Q LDS
+  staging, no prefetch pipeline.
+- **V is the only operand in LDS.** A single-buffer `V_lds` of `[BN, HD] = [64,
+  256]` is filled once per KV tile and read back as the PV A-operand. Single-buffer
+  means the tile loop needs **both** barriers around the fill: a **WAR** barrier
+  before the stores (the previous iteration's PV reads of `V_lds` must finish
+  before this tile overwrites it) and the **RAW** barrier after (the stores must be
+  visible before PV reads them).
+- **One masked key-loop** over `BN = 64`-key tiles — a single bottom-right causal +
+  varlen mask (§4) with the early-exit `kvend = min(causal_tile, klen_tile)`, not
+  the D128 path's 3-way masked/interior/tail split. The 2-wave max/sum reductions
+  go through `ds_bpermute` (lane `xor 32`).
+- **Both softmax exponentials use `exp2_fast`** — the rescale $\alpha = 2^{\,(m_{t-1}-m_t)}$
+  and the per-key weight $p = 2^{\,(s - m_t)}$. Both exponents are $\le 0$ **by
+  construction** (running max subtracted), which is exactly the domain the
+  range-reduction-free intrinsic is valid on. This is the D256-only site; the
+  §6.1/§6.2 copies are untouched.
+
+**Why it is faster.** The D256 path is latency/memory-bound, not compute-bound, so
+the win is issuing fewer global-memory ops for the same matmul/softmax work: the
+lean body stops paying for the D128 kernel's prefetch/scheduling overhead that
+bought nothing at D256. `exp2_fast` then collapses the multi-instruction
+range-reduced exponential to one VALU op and relieves register pressure enough to
+drop a scratch spill the fuller exponential forced. (Ratios vs the reference /
+AITER live in the gate docstring; absolute throughput is on the protected results
+page per `AGENTS.md`.)
+
+**Scope / how it is selected.** The cohort is exactly `_d256_gfx942_fast`: gfx942,
+**bf16**, `head_size == 256`, **causal prefill** (`sliding_window == 0`,
+`max_seqlen_q > 1`), `block_size in {16, 32}`, none of the feature flags
+(fp8/softcap/sinks/alibi/qq-bias), and i32-addressable KV (caches $\le$ 2 GiB).
+Anything outside that cohort falls back to the default builder. The body itself
+guards `head_size == _4WGQA_LEAN_HEAD_SIZE` **and** `sliding_window == 0`, raising
+`NotImplementedError` otherwise. The head-size guard is a **real limit** of the
+lean body, not merely a validation gate: most head-dim extents derive from
+`head_size`, but the V-staging stride is hardwired to the 256-wide row, so a
+different head size would compute wrong offsets — those sizes are served instead by
+the general 4-warp body (the D128 branch, whose V-fill derives the stride from
+`BN·HD`) and the default tiled builder. Correctness is otherwise the same online-softmax
+recurrence (§3), bottom-right causal mask (§4), and paged-KV layout (§5), gated by
+the fp32 reference (§10) on real gfx942.
+
+> The same `build_gfx942_4warp_gqa` builder also serves the **D128
+> sliding-window** cohort (`_d128_gfx942_swa_fast`) through its non-lean branch;
+> that branch keeps the fuller D128 schedule (K **and** V staged, double-buffered
+> at `block_size ≤ 32`) and adds the windowed mask / windowed KV-skip. Only
+> `head_size == 256` takes the lean body above. Part of that D128 cohort also
+> takes the **head-fold** of §6.4, which changes the row ownership of that same
+> body rather than the body itself.
+
+### 6.4 The GQA head-fold (D128 sliding-window bf16)
+
+In grouped-query attention several query heads share one KV head. The shipped
+cohort here is 32 query heads over 8 KV heads, so `num_queries_per_kv = 4`.
+
+**The problem.** Without the fold, one workgroup owns **one query head**:
+
+```
+grid = (num_query_heads, total_q // 128 + num_seqs, 1)   # block_m = 128
+```
+
+The 4 query heads that share a KV head are therefore 4 *separate* workgroups,
+and each one streams the same paged K and V. The same bytes cross the HBM
+(High Bandwidth Memory — the off-chip DRAM) interface up to 4 times, with reuse
+only by luck of L2 residency.
+
+**The fold.** Pack those 4 heads into one workgroup's 128-row M-tile, as 32
+tokens × 4 heads instead of 128 tokens × 1 head:
+
+```
+row m  ->  token = qbase + m // FOLD_HEADS ,  head = kv_head * GQAG + m % FOLD_HEADS
+grid   =  (num_kv_heads, total_q // 32 + num_seqs, 1)
+```
+
+`FOLD_HEADS = 4` and `TOKBLK = 128 // FOLD_HEADS = 32`. KV is now read **once per
+KV head**. The inverse map recovers `m` at the O-store, so the output layout is
+unchanged.
+
+**Parallelism is preserved**, which is why the smaller token tile is affordable.
+At `total_q = 8192`, one sequence:
+
+| | grid.x | grid.y | workgroups |
+|---|---:|---:|---:|
+| unfolded | 32 | 8192/128 + 1 = 65 | 2080 |
+| folded | 8 | 8192/32 + 1 = 257 | 2056 |
+
+The 4× cut in `grid.x` is paid back by the 4× rise in `grid.y`. The occupancy is
+the same; only the KV traffic changes.
+
+**`FOLD_HEADS` is tile geometry, not the GQA ratio.** They are equal only because
+the predicate pins `num_queries_per_kv == 4`. A 4:1 fold needs 4 × 32 = 128 rows,
+which is exactly the tile; an 8:1 fold would need 8 × 32 = 256 rows, which the
+tile cannot hold. Widening the cohort therefore requires re-deriving the row
+split, not just relaxing the predicate — so `build_gfx942_4warp_gqa` **raises** on
+`GQAG != FOLD_HEADS` rather than silently corrupting addresses.
+
+**Scope / how it is selected.** One predicate,
+`gfx942_gqa_fold_eligible(head_size, num_queries_per_kv, sliding_window, dtype,
+block_size)`, drives **both** the builder and the launch grid — they must agree or
+the kernel and its grid describe different tiles. The cohort is `head_size == 128`
+**and** `num_queries_per_kv == 4` **and** `sliding_window > 0` **and** `bf16`
+**and** `block_size <= 32`. Every other shape keeps the unfolded path. fp16 is
+excluded as a *measurement* boundary, not a structural one: the fp16 atom has the
+same `32x32x8` geometry, but only bf16 has an A/B behind it.
+
+All five predicate inputs are already components of `_tiled_cache_key`, so the
+cache key stays faithful without carrying a separate fold flag.
+
+**Measured.** `gqa_head_fold_bench.py` in `prefill/` A/Bs the fold against the
+same kernel with the predicate forced false — same builder, so the baseline arm is
+the exact pre-fold kernel. bf16 D128 GQA 32/8, `sliding_window = 4096`, block sizes
+16 and 32, seqlens 512-16384, ROCm 7.13, two different gfx942 parts:
+
+| gfx942 part | range over 12 points | at seqlen >= 4096 |
+|---|---|---|
+| part A | +5.2% to +21.3% | ~5.3% |
+| part B (different memory topology) | +0.6% to +13.1% | ~4.0-4.2% |
+
+**No regression at any point on either part.** Quote the part with the number: the
+fold removes memory traffic, so how much wall clock that buys depends on the memory
+system being relieved. The headline to carry is the sustained figure — **~4-5% at
+the long sequence lengths that dominate prefill** — not the short-sequence peak.
+
+Numerically the fold is **exact** — at seqlen 16384 the folded and unfolded kernels
+agree to `max_abs = 0`, as they must, since the fold only repacks rows. The case
+study (`gqa_head_fold_case_study.md`) records the full per-part table, the traffic
+counters, and the dead ends.
 
 ---
 

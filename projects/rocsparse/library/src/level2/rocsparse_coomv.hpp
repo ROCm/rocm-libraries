@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "rocsparse_coomv_info.hpp"
 #include "rocsparse_handle.hpp"
 
 namespace rocsparse
@@ -45,7 +46,8 @@ namespace rocsparse
                                              const rocsparse_mat_descr descr,
                                              const void*               coo_val,
                                              const void*               coo_row_ind,
-                                             const void*               coo_col_ind);
+                                             const void*               coo_col_ind,
+                                             rocsparse_coomv_info*     coomv_info);
 
     template <typename T, typename I, typename A, typename X, typename Y>
     rocsparse_status coomv_template(rocsparse_handle          handle,
@@ -59,6 +61,7 @@ namespace rocsparse
                                     const void*               coo_val,
                                     const void*               coo_row_ind,
                                     const void*               coo_col_ind,
+                                    rocsparse_coomv_info      coomv_info,
                                     const void*               x,
                                     const void*               beta_device_host,
                                     void*                     y,
@@ -76,7 +79,8 @@ namespace rocsparse
                                     rocsparse_indextype       coo_row_indextype,
                                     const void*               coo_row_ind,
                                     rocsparse_indextype       coo_col_indextype,
-                                    const void*               coo_col_ind);
+                                    const void*               coo_col_ind,
+                                    rocsparse_coomv_info*     coomv_info);
 
     rocsparse_status coomv(rocsparse_handle          handle,
                            rocsparse_operation       trans,
@@ -93,6 +97,7 @@ namespace rocsparse
                            const void*               coo_row_ind,
                            rocsparse_indextype       coo_col_indextype,
                            const void*               coo_col_ind,
+                           rocsparse_coomv_info      coomv_info,
                            rocsparse_datatype        x_datatype,
                            const void*               x,
                            rocsparse_datatype        beta_device_host_datatype,

@@ -399,6 +399,20 @@ Tests:
   transA_transB: *complex_transA_transB_range
   alpha_beta: *complex_alpha_beta_range
   batch_count: 10
+  batch_mode: [0, 1]
+  gpu_arch: '9(42|50)|1250'
+
+# NT + size-1 complex (f32_c) cases return "NO solution found" on gfx950.
+# Those are quarantined for gfx950 in known_bugs.yaml.
+- name: matmul_batch_complex_general_batch_edge
+  category: pre_checkin
+  function:
+    - matmul: *complex_precisions
+  matrix_size: *one_matrix_size_range
+  transA_transB: *complex_transA_transB_range
+  alpha_beta: *complex_alpha_beta_range
+  batch_count: 3
+  batch_mode: [0, 1]
   gpu_arch: '9(42|50)|1250'
 
 
@@ -1257,6 +1271,25 @@ Tests:
   bias_type: bf16_r
   unit_check: 1
   gpu_arch: '942'
+
+- name: matmul_f8_dst_bf16_scale_ab_vec
+  category: pre_checkin
+  function:
+    matmul: *f8_precision_dst_bf16
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  scaleA: [2]
+  scaleB: [2]
+  bias_vector: [0, 1]
+  bias_type: bf16_r
+  unit_check: 1
+  gpu_arch: '1250'
+
 
 - name: matmul_stride_lt_ld
   category: pre_checkin
@@ -3006,6 +3039,45 @@ Tests:
   unit_check: 1
   gpu_arch: '9(0a|42|50)'
 
+# Concrete ROCM-31230 reproducer: fp32 NN with an oversized A leading dimension, so
+# lda * DepthU * bpe reaches 2^31 and the signed widen of the StaggerU global-read
+# increment walks the A read descriptor backwards instead of forwards. On gfx1201 this
+# FAILs pre-fix / PASSes post-fix. The failure is a memory fault at this lda, because
+# the displacement is close to 2 GB and lands unmapped; at an lda near 2^32 the same
+# defect displaces by only tens of bytes, stays inside mapped memory and returns
+# silently wrong results instead. unit_check with integer_exact is bit-exact, so it
+# gates both faces of the defect, but the shape here is the one that fits on a 16 GiB
+# part -- the silent-corruption shape needs 17 GiB for A.
+#
+# Every supported solution is exercised, via algo_method 1 with
+# requested_solution_num -1 (the matmul_heuristic_all_solutions pattern), rather than
+# only the heuristic's pick. The defect is kernel-specific, so a gate that ran one
+# heuristically chosen solution would stop covering it the moment a retune changed
+# that choice, and it would do so silently. Pinning solution_index is the other way
+# to guarantee the affected kernel runs, but indices are not stable across retunes
+# either. The all-solutions cost is small here because the 8.6 GiB allocation is made
+# once and reused across launches: 17 solutions at this shape, about 7 s in total
+# against 4.3 s for a single one.
+#
+# nightly rather than pre_checkin: A is 8.6 GiB on both the host and the device and
+# cannot be made smaller, and a host-side shortfall currently crashes the harness
+# instead of skipping (see the get_available_host_memory note on ROCM-31230), so this
+# is kept off the per-PR tier.
+- name: matmul_size_t_stagger_incs_overflow_f32_ROCM31230
+  category: nightly
+  function:
+    matmul: *single_precision
+  matrix_size: *size_t_stagger_incs_overflow
+  transA: N
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  algo_method: [1]
+  requested_solution_num: -1
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '1201'
+
 
 - name: matmul_96_complex
   category: pre_checkin
@@ -3371,7 +3443,6 @@ Tests:
   beta: 0.0
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Offset variation test - various offset values
 # Note: Uses M=256 to avoid known General Batched GEMM issue with larger sizes
@@ -3398,7 +3469,6 @@ Tests:
   beta: [0.0, 1.0]
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Transpose with offset
 # Note: lda/ldb must be valid for all transpose combinations
@@ -3428,7 +3498,6 @@ Tests:
   beta: 0.5
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Alpha/Beta edge cases with offset
 - name: matmul_batch_offset_alpha_beta
@@ -3449,7 +3518,6 @@ Tests:
   alpha_beta: *alpha_beta_range
   unit_check: 1
   norm_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Large offset test
 - name: matmul_batch_offset_large
@@ -3500,7 +3568,6 @@ Tests:
   beta: 1.0
   requested_solution_num: -1
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Test with negative batch offsets to verify proper memory layout handling
 - name: matmul_batch_offset_negative
@@ -3524,7 +3591,6 @@ Tests:
   alpha: 1.0
   beta: 1.0
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 # Test with mixed positive and negative offsets
 - name: matmul_batch_offset_mixed
@@ -3548,6 +3614,5 @@ Tests:
   alpha: 1.0
   beta: 1.0
   unit_check: 1
-  gpu_arch: '9(0a|42|50)'
 
 ...

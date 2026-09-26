@@ -30,6 +30,8 @@
 // Meta configuration for hipCUB
 #include "config.hpp" // IWYU pragma: export
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "backend/rocprim/hipcub.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

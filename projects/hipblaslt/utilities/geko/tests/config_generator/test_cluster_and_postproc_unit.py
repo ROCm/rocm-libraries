@@ -10,6 +10,7 @@ from geko.config_generator import cluster_sizes as cs
 from geko.config_generator.fork_params import post_processor as base_pp
 from geko.config_generator.fork_params.hw_profiles.gfx950 import post_processor as gfx950_pp
 from geko.config_generator.fork_params import optimization_param as opt_param
+from geko.config_generator.mi_designer import MFMAParameters
 from geko.config_generator.shared_utils import ConfigEntry, ForkParameter
 from geko.schemas import GemmType
 
@@ -43,7 +44,7 @@ def test_cluster_sizes_mi_and_reorder(monkeypatch) -> None:
     e0 = _entry_with_groups((64, 16, 1, 16), groups)
     e1 = _entry_with_groups((16, 64, 1, 16), groups)
 
-    monkeypatch.setattr(cs.MIDesign, "calculate_mfma_parameters", lambda _mi: (64, 32, 1, 1, 1, 1, 1))
+    monkeypatch.setattr(cs.MIDesign, "calculate_mfma_parameters", lambda _mi: MFMAParameters(MT0=64, MT1=32, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1))
     out = cs._cluster_sizes_mi([e0, e1], CUs=256)
     assert list(out.keys()) == [(64, 32, 1, 1)]
     assert out[(64, 32, 1, 1)] == [0, 1]
@@ -72,11 +73,11 @@ def test_base_postprocessor_mt_du_and_matcher(monkeypatch) -> None:
         "WorkGroupMapping": ForkParameter(name="WorkGroupMapping", values=[16]),
     }
     groups = [
-        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[1, 2, 3])},
-        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[4, 5, 6])},
+        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 4, 1, 1, 2, 2, 2, 2])},
+        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[32, 32, 4, 2, 1, 2, 2, 2, 2])},
     ]
 
-    monkeypatch.setattr(base_pp.MIDesign, "calculate_mfma_parameters", lambda mi: (64, 32, 1, 1, 1, 1, 1) if mi == [1, 2, 3] else (32, 32, 1, 1, 1, 1, 1))
+    monkeypatch.setattr(base_pp.MIDesign, "calculate_mfma_parameters", lambda mi: MFMAParameters(MT0=64, MT1=32, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1) if mi.M == 16 else MFMAParameters(MT0=32, MT1=32, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1))
     f2, g2 = pp.apply(fork, groups, (16, 16, 1, 16))
     assert f2["DepthU"].values == [16]
     assert f2["WorkGroupMapping"].values == [0]
@@ -94,14 +95,14 @@ def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
         "WorkGroupMapping": ForkParameter(name="WorkGroupMapping", values=[16, 32]),
     }
     groups = [
-        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[1])},
-        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[2])},
+        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[16, 16, 4, 1, 1, 2, 2, 1, 1])},
+        {"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[32, 32, 4, 2, 1, 4, 4, 2, 2])},
     ]
 
     def _calc(mi):
-        if mi == [1]:
-            return (16, 16, 1, 1, 1, 1, 1)
-        return (256, 256, 1, 1, 1, 1, 1)
+        if mi.M == 16:
+            return MFMAParameters(MT0=16, MT1=16, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1)
+        return MFMAParameters(MT0=256, MT1=256, TT0=1, TT1=1, WG0=1, WG1=1, MIBlockM=1)
 
     monkeypatch.setattr(gfx950_pp.MIDesign, "calculate_mfma_parameters", _calc)
     f2, g2 = pp.apply(fork, groups, (128, 128, 1, 2048))

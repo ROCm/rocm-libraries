@@ -32,9 +32,47 @@ auto GetConvTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    return std::vector{
+    auto cases = std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        // clang-format on
+    };
+
+    // Point-output shapes (stride == filter, output spatially 1x1) take the single-GEMM path.
+    // FP32 is left out: at K=1280 its RMS error sits just under the 1.0*eps threshold that
+    // non-TF32 GPUs use, so the case is not reliable there.
+    if(datatype == miopenHalf)
+    {
+        // clang-format off
+        cases.emplace_back(TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype});
+        cases.emplace_back(TestCase{{4, 3, 4, 4, 4}, {1280, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {4, 4, 14, 14}},
+                                    {datatype, miopenTensorNHWC, {64, 4, 14, 14}},
+                                    datatype, {{0, 0}, {14, 14}, {1, 1}}});
+        cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {4, 4, 4, 4, 4}},
+                                    {datatype, miopenTensorNDHWC, {64, 4, 4, 4, 4}},
+                                    datatype, {{0, 0, 0}, {4, 4, 4}, {1, 1, 1}}});
+        // clang-format on
+    }
+
+    return cases;
+}
+
+// Point-output bf16, covering both sides of the batch size condition that decides whether
+// dw is accumulated in an fp32 workspace and cast back to bf16 (batch > 1) or written
+// directly (batch == 1).
+auto GetConvTestCasesPointOutputBf16()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    constexpr auto datatype = miopenBFloat16;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype},
+        TestCase{{4, 3, 4, 4, 4}, {1280, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
+        TestCase{{1, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype},
+        TestCase{{1, 3, 4, 4, 4}, {1280, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
         // clang-format on
     };
 }
@@ -44,6 +82,18 @@ const auto& GetTestParams()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.SetTolerance(Gpu::gfx90A, miopenHalf, 2.0f);
+        return p;
+    }();
+    return params;
+}
+
+// A batch of 1 keeps dw in bf16, which makes the GEMM BF16->BF16. rocBLAS does not support that
+// on gfx90a, so exclude it here; every other GPU runs the point-output bf16 cases.
+// TODO: Remove this exclusion once the rocBLAS bug is fixed.
+const auto& GetTestParamsNoGfx90A()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All & ~Gpu::gfx90A);
         return p;
     }();
     return params;
@@ -89,6 +139,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(SmokePointOutput,
+                         GPU_UnitTestConvSolverGemmWrwUniversalWrw_BFP16,
+                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
+                                          testing::Values(miopenConvolutionAlgoGEMM),
+                                          testing::ValuesIn(GetConvTestCasesPointOutputBf16())));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverGemmWrwUniversalWrw_FP32,

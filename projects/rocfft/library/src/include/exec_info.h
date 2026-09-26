@@ -50,6 +50,13 @@ struct rocfft_execution_info_t
     void** store_cb_fns       = nullptr;
     void** store_cb_data      = nullptr;
     size_t store_cb_lds_bytes = 0;
+
+    // Copies of user-supplied JIT callback data.  This is necessary
+    // because JIT callback data is specified using separate APIs
+    // from rocfft_execute, so the pointers above need something to
+    // point to that lives long enough.
+    std::vector<void*> load_cb_data_jit;
+    std::vector<void*> store_cb_data_jit;
 };
 
 class InternalTempBuffer;
@@ -104,6 +111,11 @@ private:
     // map InternalTempBuffers from a plan to actual pointers - this
     // map is set during rocfft_execute.
     std::map<const InternalTempBuffer*, void*> tempBufferPtrs;
+
+    // Check that the number of JIT callback data pointers (if
+    // specified) matches the number of input/output brick pointers.
+    // Throws if there is a mismatch.
+    void validate_jit_data_ptr_count(const rocfft_plan_t& plan) const;
 };
 
 #endif

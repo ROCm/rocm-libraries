@@ -57,6 +57,7 @@ import shutil
 from dataclasses import dataclass
 
 import pytest
+from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 from rocisa.code import Module
 
@@ -86,8 +87,12 @@ def _init_rocisa():
     return ri
 
 
-# One-time module-level init.
-_RI = _init_rocisa()
+@pytest.fixture(scope="module", autouse=True)
+def _rocisa_gfx942():
+    """Provide the required caps without leaking gfx942 during collection."""
+    with preserve_rocisa_kernel_state():
+        _init_rocisa()
+        yield
 
 
 # ---------------------------------------------------------------------------

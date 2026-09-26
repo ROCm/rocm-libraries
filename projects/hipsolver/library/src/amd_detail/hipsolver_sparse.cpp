@@ -467,7 +467,26 @@ try
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
 
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
-    return hipsolver::rocblas2hip_status(rocblas_set_stream(sp->handle, streamId));
+
+    // Update the streams atomically. If the rocSPARSE update fails,
+    // restore rocBLAS.
+    hipStream_t    prev_stream = nullptr;
+    rocblas_status rb_status   = rocblas_get_stream(sp->handle, &prev_stream);
+    if(rb_status != rocblas_status_success)
+        return hipsolver::rocblas2hip_status(rb_status);
+
+    rb_status = rocblas_set_stream(sp->handle, streamId);
+    if(rb_status != rocblas_status_success)
+        return hipsolver::rocblas2hip_status(rb_status);
+
+    // Roll back to previous stream if the stream set fails
+    if(rocsparse_set_stream(sp->sphandle, streamId) != rocsparse_status_success)
+    {
+        rocblas_set_stream(sp->handle, prev_stream);
+        return HIPSOLVER_STATUS_INTERNAL_ERROR;
+    }
+
+    return HIPSOLVER_STATUS_SUCCESS;
 }
 catch(...)
 {

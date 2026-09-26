@@ -1,0 +1,6 @@
+{
+  "version": "0.1",
+  "id": "udd-copy",
+  "name": "Copy dispatch",
+  "dispatch_symbol": "hipkernel.copy.dispatch"
+}

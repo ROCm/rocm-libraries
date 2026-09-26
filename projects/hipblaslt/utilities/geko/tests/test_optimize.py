@@ -25,6 +25,7 @@ import warnings
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 import yaml
 
@@ -34,7 +35,7 @@ from geko.pipeline import run_optimize
 ROOT = Path(__file__).resolve().parents[1]
 
 
-# Configure step matches test_configure.py; optimize can take much longer (Tensile / GA).
+# Configure step matches test_configure.py; optimize can take much longer (Tensile / Ductile).
 _CONFIGURE_TIMEOUT_S = 600
 _OPTIMIZE_TIMEOUT_S = 7200
 
@@ -91,14 +92,31 @@ class TestPipelineFast:
 
         merged.dump.side_effect = _dump_libs
         mock_run = MagicMock()
-        mock_analyze = MagicMock(return_value=None)
+        mock_analyze = MagicMock(
+            return_value=(
+                pd.DataFrame([{"dummy": 1}]),
+                pd.DataFrame([{"dummy": 1, "winner": "reference", "lib": "merged_stub.yaml"}]),
+            )
+        )
         mock_merge = MagicMock(return_value=merged)
+        final_lib = MagicMock()
+        full_lib = MagicMock()
+        mock_from_dataframe = MagicMock(return_value=final_lib)
+        mock_from_full_dataframe = MagicMock(return_value=full_lib)
 
         with patch.object(pipeline_mod.optim, "run", mock_run), patch.object(
             pipeline_mod.optim.utils,
             "check_progress",
             side_effect=[(1, 1, 0), (1, 1, 0)],
         ), patch.object(pipeline_mod.library, "merge_solutions", mock_merge), patch.object(
+            pipeline_mod.library,
+            "from_dataframe",
+            mock_from_dataframe,
+        ), patch.object(
+            pipeline_mod.library,
+            "from_full_dataframe",
+            mock_from_full_dataframe,
+        ), patch.object(
             pipeline_mod.optim,
             "analyze",
             mock_analyze,
@@ -113,6 +131,10 @@ class TestPipelineFast:
 
         mock_merge.assert_called_once()
         mock_analyze.assert_called_once()
+        mock_from_dataframe.assert_called_once()
+        mock_from_full_dataframe.assert_called_once()
+        final_lib.dump.assert_called_once_with(workdir / "final_libs")
+        full_lib.dump.assert_called_once_with(workdir / "full_libs")
 
         with (workdir / "run_state.json").open() as f:
             final_state = json.load(f)

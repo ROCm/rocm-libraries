@@ -1,0 +1,36 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --RemoveDefUseAnalysisPass --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
+#
+# LiftAsmRegistersToSSAPass: the def-use analysis is discarded first.
+#
+# BuildUseDefChainPass inserts GFX::PHI pseudo-instructions and records def-use
+# edges, both keyed by physical register. Those cannot describe SSA values, so
+# RemoveDefUseAnalysisPass clears them before SSA is attached. Leaving them would
+# let a later consumer trust stale, physically-keyed data, and lifting rejects a
+# function that still carries them rather than repairing it, because construction
+# reads the instruction stream without modifying it.
+#
+# The merge that the analysis PHI approximated reappears as a block argument.
+#
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_after_defuse
+# CHECK: ^join(%7:v):
+# CHECK-NEXT: %7:v = phi(^left:
+# CHECK-SAME: ^right:
+#
+# No PHI pseudo-instruction is left in the stream.
+# CHECK-NOT: st.PHI
+
+st.func @lift_asm_registers_to_ssa_after_defuse() {
+^entry:
+  SCC0 = "st.v_cmp_eq_u32"(v10, v11)
+  "st.s_cbranch_scc1"("right", SCC0)
+  Successors: ^left, ^right
+^left:
+  v5 = "st.v_add_f32"(v20, v21)
+  "st.s_branch"("join")
+  Successors: ^join
+^right:
+  v5 = "st.v_add_f32"(v22, v23)
+  Successors: ^join
+^join:
+  v6 = "st.v_add_f32"(v5, v5)
+}

@@ -104,6 +104,45 @@ struct numeric_traits<float>
     using bitwise_type                  = uint32_t;
 };
 
+template <>
+struct numeric_traits<double>
+{
+    // IEEE 754
+    static constexpr int exp            = 11;
+    static constexpr int mant           = 52;
+    static constexpr int bias           = 1023;
+    static constexpr uint64_t nan_mask  = 0x7FF0000000000000;
+    static constexpr uint64_t head_mask = 0xFFF0000000000000;
+    static constexpr uint64_t mant_mask = 0xFFFFFFFFFFFFF;
+    static constexpr uint64_t exp_mask  = 0x7FF;
+    static constexpr uint64_t abs_mask  = 0x7FFFFFFFFFFFFFFF;
+    static constexpr uint64_t Inf       = 0x7FF0000000000000;
+    static constexpr uint64_t NegInf    = 0xFFF0000000000000;
+    static constexpr uint64_t NaN       = 0x7FF0000000000001;
+    static constexpr uint64_t Neg0      = 0x8000000000000000;
+    static constexpr int PackedSize     = 1;
+    using bitwise_type                  = uint64_t;
+};
+/**
+ * @brief Number of elements of T that fit in one 128-bit (16-byte) access.
+ *
+ * Use this wherever a host-side layout and a device-side tile distribution must agree on an
+ * access granularity. Deriving it independently on each side has silently produced
+ * mismatched K interleaving, where each side walks the same elements in a different order.
+ *
+ * @tparam T element type
+ * @return element count
+ */
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr int items_per_128b_access()
+{
+    // ck_tile::remove_cvref_t is not visible from this header.
+    using type = std::remove_cv_t<std::remove_reference_t<T>>;
+    static_assert(16 * numeric_traits<type>::PackedSize % sizeof(type) == 0,
+                  "128-bit access is not an integral number of elements for this type");
+    return 16 * numeric_traits<type>::PackedSize / static_cast<int>(sizeof(type));
+}
+
 } // namespace ck_tile
 
 #define CK_TILE_ARITHMETIC_USING_FLOAT(attr_, type_)                                       \
