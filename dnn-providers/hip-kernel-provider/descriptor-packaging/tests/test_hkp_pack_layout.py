@@ -163,6 +163,32 @@ def test_a_hidden_folder_is_skipped_and_logged(tmp_path, empty_arch_fixture):
     assert all(".vendor" in m for m in skipped), logs
 
 
+@pytest.mark.quick
+def test_a_non_descriptor_json_is_skipped_and_logged(tmp_path, empty_arch_fixture):
+    """A `.json` carrying no type token is passed over, and it is named in the log.
+
+    The source root is user-supplied, so an incidental file like a
+    `compile_commands.json` must be tolerated rather than abort the pack. The
+    log line is half the behaviour: skipping silently would be the same
+    invisible omission the hidden-path case above is logged to prevent.
+
+    Removing either the log call or the skip in `load_flat_input` fails this.
+    """
+    root = tmp_path / "root"
+    _nest(root, "hip/a", empty_arch_fixture)
+    incidental = root / "hip" / "a" / "compile_commands.json"
+    incidental.write_text("[]", encoding="utf-8")
+    logs = []
+
+    flat = load_flat_input(root, log=logs.append)
+
+    assert {d.rel_dir.as_posix() for d in flat.descriptors} == {"hip/a"}
+    assert not [d for d in flat.descriptors if d.path.name == incidental.name]
+
+    skipped = [m for m in logs if m.startswith("skipping non-descriptor file")]
+    assert any(incidental.name in m for m in skipped), logs
+
+
 # --- B. Path-preserving output (real compile) -------------------------------
 def test_output_mirrors_authored_subpath(
     tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
@@ -471,6 +497,58 @@ def test_failed_arch_leaves_no_partial_tree(
     assert not (out_root / "gfx950").exists()
     # No staging residue either.
     assert not list(out_root.glob(".*staging"))
+
+
+def test_failed_arch_removes_its_previous_good_output(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir, monkeypatch
+):
+    """A re-pack that fails must delete the shard its last good run wrote.
+
+    The partial-tree case above starts from an empty output root, so it holds
+    only the staging cleanup: it passes whether or not the failure path removes
+    a PRE-EXISTING <out>/<arch>. Pack once to create that shard, then re-pack
+    the same arch into the same root with the arch failing. A surviving shard
+    would be stale -- built from the previous sources, installed by
+    install(DIRECTORY ... OPTIONAL) as though current, and wrong at dispatch.
+
+    Removing the `out_arch_dir` rmtree from run_pipeline's failure path fails
+    this and nothing else in the suite.
+    """
+    from hkp_pack import pipeline
+
+    root = tmp_path / "root"
+    _nest(root, "hip/pointwise", main_fixture)
+    out_root = tmp_path / "out"
+
+    pipeline.run_pipeline(
+        source_root=root,
+        arches=[ARCH],
+        out_root=out_root,
+        hipcc=hipcc,
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+    )
+    good_shard = out_root / ARCH
+    assert good_shard.is_dir() and any(good_shard.rglob("*.kpack"))
+
+    def always_fail(flat, inter, out_arch_dir, *a, **kw):
+        raise HkpPackError(f"induced {inter.arch}")
+
+    monkeypatch.setattr(pipeline, "pack_arch", always_fail)
+
+    with pytest.raises(HkpPackError, match=ARCH):
+        pipeline.run_pipeline(
+            source_root=root,
+            arches=[ARCH],
+            out_root=out_root,
+            hipcc=hipcc,
+            rocm_kpack_dir=rocm_kpack_dir,
+            inter_root=tmp_path / "inter",
+        )
+
+    assert (
+        not good_shard.exists()
+    ), "a failed re-pack left the previous run's shard, which install() would ship as current"
 
 
 def test_failure_names_every_failed_arch(
