@@ -363,7 +363,8 @@ struct BlockFmhaPipelineQRKSVSTdm
     // The progressive M128 traversal has the fragment shape required by the
     // staged hand-off below. Element types and attention features do not alter
     // those LDS fragment lifetimes.
-    static constexpr bool kStagedKPairs          = Problem::kProgressiveDsLoadK && kM0 == 128;
+    static constexpr bool kStagedKPairs =
+        Problem::kProgressiveDsLoadK && kM0 == 128 && kQKHeaddim == 128 && kK0 == 32;
     static constexpr bool kUseIglpBulkScheduling = CK_TILE_FMHA_TDM_IGLP_BULK && !kStagedKPairs;
 
     // Unchecked TDM bounds need a stronger, independent range proof. Keep this

@@ -58,11 +58,45 @@ using TestFmhaProblem = ck_tile::BlockFmhaPipelineProblem<DataType,
                                                           UseDoubleKVLdsBuffer,
                                                           ProgressiveDsLoadK>;
 
-using SingleBufferM64Problem  = TestFmhaProblem<64>;
-using DoubleBufferM64Problem  = TestFmhaProblem<64, true>;
-using ProgressiveM64Problem   = TestFmhaProblem<64, true, true>;
-using DoubleBufferM128Problem = TestFmhaProblem<128, true>;
-using ProgressiveM128Problem  = TestFmhaProblem<128, true, true>;
+using TestFmhaShapeD64 = ck_tile::TileFmhaShape<ck_tile::sequence<128, 64, 32, 32, 32, 64>,
+                                                ck_tile::sequence<4, 1, 1>,
+                                                ck_tile::sequence<16, 16, 32>,
+                                                ck_tile::sequence<4, 1, 1>,
+                                                ck_tile::sequence<16, 16, 32>,
+                                                true,
+                                                true>;
+
+template <typename Shape,
+          bool UseDoubleKVLdsBuffer = false,
+          bool ProgressiveDsLoadK   = false,
+          typename DataType         = ck_tile::half_t,
+          typename Mask             = ck_tile::SimplifiedGenericAttentionMask<false>>
+using TestFmhaProblemForShape = ck_tile::BlockFmhaPipelineProblem<DataType,
+                                                                  DataType,
+                                                                  DataType,
+                                                                  float,
+                                                                  float,
+                                                                  DataType,
+                                                                  uint8_t,
+                                                                  float,
+                                                                  DataType,
+                                                                  float,
+                                                                  DataType,
+                                                                  Shape,
+                                                                  false,
+                                                                  ck_tile::ComposedAttention<0>,
+                                                                  Mask,
+                                                                  false,
+                                                                  TestFmhaTraits,
+                                                                  UseDoubleKVLdsBuffer,
+                                                                  ProgressiveDsLoadK>;
+
+using SingleBufferM64Problem    = TestFmhaProblem<64>;
+using DoubleBufferM64Problem    = TestFmhaProblem<64, true>;
+using ProgressiveM64Problem     = TestFmhaProblem<64, true, true>;
+using DoubleBufferM128Problem   = TestFmhaProblem<128, true>;
+using ProgressiveM128Problem    = TestFmhaProblem<128, true, true>;
+using ProgressiveM128D64Problem = TestFmhaProblemForShape<TestFmhaShapeD64, true, true>;
 
 static_assert(!SingleBufferM64Problem::kUseDoubleKVLdsBuffer);
 static_assert(!SingleBufferM64Problem::kProgressiveDsLoadK);
@@ -85,6 +119,7 @@ static_assert(TestPipeline<ProgressiveM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<ProgressiveM128Problem>::kKLoadOnce);
 static_assert(!TestPipeline<DoubleBufferM128Problem>::kStagedKPairs);
 static_assert(!TestPipeline<ProgressiveM64Problem>::kStagedKPairs);
+static_assert(!TestPipeline<ProgressiveM128D64Problem>::kStagedKPairs);
 // K-pair staging is a traversal optimization; FP16/BF16 and attention
 // features do not change its LDS fragment lifetime contract.
 static_assert(TestPipeline<ProgressiveM128Problem>::kStagedKPairs);
