@@ -5,7 +5,7 @@
 
 preshuffle_tdm, comp_tdm, comp_tdm_v2 and comp_async are emitted on gfx1250
 for rcr only (the TDM ones unpadded, comp_async not for fp8/bf8). gfx942 /
-gfx950 keep only preshufflev2.
+gfx950 keep only preshufflev2. On gfx1250 no preshuffle pipeline pads N or K.
 """
 
 import os
@@ -28,12 +28,12 @@ GFX1250_CONFIG = os.path.join(_HERE, "configs", "default_config_gfx1250.json")
 COMP = ("comp_tdm", "comp_tdm_v2", "comp_async")
 
 
-def _trait_ok(pipeline, gpu_target="gfx1250", layout="rcr", pad=False):
+def _trait_ok(pipeline, gpu_target="gfx1250", layout="rcr", pad=False, pad_m=None):
     scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
     epilogue = "tdm" if pipeline.startswith("comp_tdm") else "cshuffle"
     return is_trait_combination_valid(
         pipeline, epilogue, scheduler, False, "gemm_preshuffle", layout,
-        pad_m=pad, pad_n=pad, pad_k=pad, gpu_target=gpu_target,
+        pad_m=pad if pad_m is None else pad_m, pad_n=pad, pad_k=pad, gpu_target=gpu_target,
     )
 
 
@@ -59,12 +59,17 @@ class TestTraitRules(unittest.TestCase):
             self.assertTrue(_trait_ok(pipeline), pipeline)
             self.assertFalse(_trait_ok(pipeline, gpu_target="gfx950"), pipeline)
             self.assertFalse(_trait_ok(pipeline, layout="rrr"), pipeline)
-            # Only the TDM pipelines require unpadded tiles.
-            self.assertEqual(_trait_ok(pipeline, pad=True), pipeline == "comp_async", pipeline)
+            self.assertFalse(_trait_ok(pipeline, pad=True), pipeline)
+            # Only the TDM pipelines also require an unpadded M.
+            self.assertEqual(_trait_ok(pipeline, pad_m=True), pipeline == "comp_async", pipeline)
 
     def test_preshufflev2_unchanged(self):
         for arch in ("gfx942", "gfx950", "gfx1250"):
             self.assertTrue(_trait_ok("preshufflev2", gpu_target=arch))
+            self.assertTrue(_trait_ok("preshufflev2", gpu_target=arch, pad_m=True))
+            # Padded N/K cannot be preshuffled on gfx1250.
+            self.assertEqual(_trait_ok("preshufflev2", gpu_target=arch, pad=True),
+                             arch != "gfx1250", arch)
 
 
 class TestTileRules(unittest.TestCase):

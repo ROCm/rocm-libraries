@@ -84,6 +84,7 @@ class TestRejectHelperParity(unittest.TestCase):
 
     def test_constants_match(self):
         self.assertEqual(cc.TDM_PAD_REJECT_REASON, TE.TDM_PAD_REJECT_REASON)
+        self.assertEqual(cc.PRESHUFFLE_PAD_NK_REJECT_REASON, TE.PRESHUFFLE_PAD_NK_REJECT_REASON)
         self.assertEqual(set(cc.PRESHUFFLE_GFX1250_PIPELINES),
                          set(TE.GEMM_PRESHUFFLE_GFX1250_PIPELINES))
         self.assertEqual(set(cc.PRESHUFFLE_TDM_PIPELINES),
@@ -95,7 +96,7 @@ class TestRejectHelperParity(unittest.TestCase):
             ALL_PIPELINES,
             ("", "gfx950", "gfx1250", "gfx1250:sramecc+"),
             ("", "rcr", "rrr"),
-            itertools.product((False, True), repeat=3),
+            itertools.product((False, True, "false", "True"), repeat=3),
             (None, 2, 4),
             ("", "fp16", "fp8"),
             ("", "default", "intrawave"),
@@ -123,8 +124,9 @@ class TestRejectRules(unittest.TestCase):
             self.assertEqual(self._ok(pipeline, dtype=dtype), "", pipeline)
 
     def test_preshufflev2_keeps_its_old_contract(self):
-        for arch, layout in itertools.product(("gfx942", "gfx950", "gfx1250"), ("rcr", "rrr")):
+        for arch, layout in itertools.product(("gfx942", "gfx950"), ("rcr", "rrr")):
             self.assertEqual(self.reject("preshufflev2", arch, layout, True, True, True, 8), "")
+        self.assertEqual(self.reject("preshufflev2", "gfx1250", "rrr", True, False, False, 8), "")
         self.assertIn("scheduler", self.reject("preshufflev2", scheduler="intrawave"))
         self.assertIn("tdm epilogue", self.reject("preshufflev2", epilogue="tdm"))
 
@@ -147,6 +149,21 @@ class TestRejectRules(unittest.TestCase):
                 self.assertEqual(self._ok(pipeline, pad_m=pads[0], pad_n=pads[1], pad_k=pads[2]),
                                  cc.TDM_PAD_REJECT_REASON)
 
+    def test_string_pad_flags(self):
+        for pipeline in cc.PRESHUFFLE_TDM_PIPELINES:
+            self.assertEqual(self._ok(pipeline, pad_m="false", pad_n="False", pad_k="false"), "")
+            self.assertEqual(self._ok(pipeline, pad_m="true"), cc.TDM_PAD_REJECT_REASON)
+
+    def test_gfx1250_rejects_pad_n_pad_k(self):
+        for pipeline in ("preshufflev2", "comp_async"):
+            self.assertEqual(self._ok(pipeline, pad_m=True), "", pipeline)
+            for pads in ({"pad_n": True}, {"pad_k": True}, {"pad_k": "true"}):
+                self.assertEqual(self._ok(pipeline, **pads),
+                                 cc.PRESHUFFLE_PAD_NK_REJECT_REASON, (pipeline, pads))
+        # Off gfx1250 and at trait level without an arch, preshufflev2 pads stay allowed.
+        for arch in ("", "gfx942", "gfx950"):
+            self.assertEqual(self._ok("preshufflev2", gpu_target=arch, pad_n=True), "", arch)
+
     def test_comp_tdm_v2_requires_four_waves(self):
         self.assertIn("4 waves", self._ok("comp_tdm_v2", num_waves=2))
 
@@ -163,7 +180,9 @@ class TestCodegen(unittest.TestCase):
                  ("preshuffle_tdm", "gfx1250", "rcr", True),
                  ("comp_tdm", "gfx942", "rcr", False),
                  ("comp_async", "gfx1250", "rrr", False),
-                 ("comp_tdm_v2", "gfx1250", "rcr", True)]
+                 ("comp_tdm_v2", "gfx1250", "rcr", True),
+                 ("comp_async", "gfx1250", "rcr", True),
+                 ("preshufflev2", "gfx1250", "rcr", True)]
         for pipeline, arch, layout, pad in cases:
             with self.subTest(pipeline=pipeline, arch=arch, layout=layout, pad=pad):
                 self.assertEqual(_generate(pipeline, arch, layout, pad), [])

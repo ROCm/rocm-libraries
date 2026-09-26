@@ -129,7 +129,7 @@ function(build_individual_gemm_preshuffle_targets datatype layout)
         # Use CMake variable if set
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/${GEMM_PRESHUFFLE_CONFIG_FILE}")
         message(VERBOSE "  Using custom config: ${GEMM_PRESHUFFLE_CONFIG_FILE}")
-    elseif(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
+    elseif(GEMM_PRESHUFFLE_GFX1250_BUILD)
         # gfx1250 (WMMA) has its own warp-tile set and the TDM pipeline
         set(json_blob "${CMAKE_CURRENT_LIST_DIR}/configs/default_config_gfx1250.json")
         message(VERBOSE "  Using gfx1250 default config for layout ${layout}")
@@ -235,7 +235,8 @@ message(VERBOSE "SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
 
 # Filter GPU targets to the supported preshuffle architectures.
 set(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL "")
-set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx1250;gfx12-generic")
+# gfx1250 is not listed here; the sole-target check below decides it.
+set(DESIRED_TARGETS "gfx90a;gfx942;gfx950;gfx12-generic")
 
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     string(REGEX REPLACE ":.*$" "" target_base "${target}")
@@ -250,6 +251,7 @@ endforeach()
 # target. In a mixed target list it is skipped and the other targets are
 # configured exactly as before.
 set(_GEMM_PRESHUFFLE_GFX1250_TARGETS "")
+set(GEMM_PRESHUFFLE_GFX1250_BUILD OFF)
 foreach(target IN LISTS SUPPORTED_GPU_TARGETS)
     if(target MATCHES "^gfx1250(:|$)")
         list(APPEND _GEMM_PRESHUFFLE_GFX1250_TARGETS ${target})
@@ -260,6 +262,7 @@ list(LENGTH _GEMM_PRESHUFFLE_GFX1250_TARGETS _gp_n_gfx1250)
 if(_gp_n_gfx1250 GREATER 0)
     if(NOT GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL AND _gp_n_gfx1250 EQUAL 1)
         set(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL ${_GEMM_PRESHUFFLE_GFX1250_TARGETS})
+        set(GEMM_PRESHUFFLE_GFX1250_BUILD ON)
         message(VERBOSE "  Adding GPU target: ${_GEMM_PRESHUFFLE_GFX1250_TARGETS}")
     else()
         message(WARNING "Skipping gfx1250 for Tile Engine GEMM Preshuffle: gfx1250 must be the only GPU target (found ${SUPPORTED_GPU_TARGETS})")
@@ -318,7 +321,7 @@ else()
     set(GEMM_PRESHUFFLE_PIPELINES "preshufflev2")
     set(GEMM_PRESHUFFLE_EPILOGUES "default;cshuffle")
     set(GEMM_PRESHUFFLE_SCHEDULERS "default") 
-    if(GEMM_PRESHUFFLE_GPU_TARGETS_INDIVIDUAL MATCHES "gfx1250")
+    if(GEMM_PRESHUFFLE_GFX1250_BUILD)
         # gfx1250 weight-preshuffle pipelines (see gemm_validation_utils.py;
         # the comp_* ones run Intrawave only)
         list(APPEND GEMM_PRESHUFFLE_PIPELINES "preshuffle_tdm;comp_tdm;comp_tdm_v2;comp_async")

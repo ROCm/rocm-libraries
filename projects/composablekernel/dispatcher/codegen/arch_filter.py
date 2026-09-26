@@ -265,6 +265,8 @@ except ImportError:
         "preshufflev1": 32768,
         "preshufflev2": 32768,
         "preshuffle_tdm": 32768,
+        "comp_tdm": 32768,
+        "comp_tdm_v2": 32768,
         # Mandatory double buffering (num_lds_buffers = 2), so half the budget.
         "comp_async": 32768,
         "wavelet": 65536,

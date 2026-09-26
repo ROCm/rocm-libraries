@@ -46,6 +46,11 @@ TDM_PAD_REJECT_REASON = (
     "TDM bounds-clips on real descriptor extents; kPad right-pad transforms "
     "inflate them, so TDM requires pad_m=pad_n=pad_k=False"
 )
+# The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
+# packed buffer and a partial K tile packs the wrong elements.
+PRESHUFFLE_PAD_NK_REJECT_REASON = (
+    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
+)
 
 # Weight-preshuffle GEMM on gfx1250 (rcr only). preshuffle_tdm is the TDM
 # variant of preshufflev2.
@@ -77,9 +82,10 @@ def preshuffle_pipeline_reject_reason(
     """Reason string if a gfx1250 preshuffle pipeline is not allowed, else "".
 
     Pipelines outside GEMM_PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only
-    get the scheduler and tdm-epilogue checks. Empty gpu_target / layout /
-    dtype / scheduler / epilogue and num_waves=None mean "not known yet" and
-    are not checked, so the helper can run at trait level and at tile level.
+    get the scheduler and tdm-epilogue checks, plus the pad_n/pad_k check on
+    gfx1250. Empty gpu_target / layout / dtype / scheduler / epilogue and
+    num_waves=None mean "not known yet" and are not checked, so the helper can
+    run at trait level and at tile level.
     """
     # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
     want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
@@ -88,9 +94,11 @@ def preshuffle_pipeline_reject_reason(
     # Only the comp_tdm* pipelines drive the TDM epilogue.
     if epilogue == "tdm" and not pipeline.startswith("comp_tdm"):
         return f"preshuffle {pipeline} cannot use the tdm epilogue"
-    if pipeline not in GEMM_PRESHUFFLE_GFX1250_PIPELINES:
-        return ""
     arch = _base_gfx_arch(gpu_target)
+    pad_nk = _is_true(pad_n) or _is_true(pad_k)
+    if pipeline not in GEMM_PRESHUFFLE_GFX1250_PIPELINES:
+        on_gfx1250 = arch == GFX1250_ONLY_PIPELINE_ARCH
+        return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and on_gfx1250 else ""
     if arch and arch != GFX1250_ONLY_PIPELINE_ARCH:
         return f"pipeline {pipeline!r} requires {GFX1250_ONLY_PIPELINE_ARCH}, got {arch!r}"
     # rcr also covers the comp_async A row-major / B col-major requirement.
@@ -103,10 +111,10 @@ def preshuffle_pipeline_reject_reason(
     want_epilogue = "tdm" if pipeline.startswith("comp_tdm") else "cshuffle"
     if epilogue and epilogue != want_epilogue:
         return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
-    if pipeline in GEMM_PRESHUFFLE_TDM_PIPELINES and (
-        _is_true(pad_m) or _is_true(pad_n) or _is_true(pad_k)
-    ):
+    if pipeline in GEMM_PRESHUFFLE_TDM_PIPELINES and (_is_true(pad_m) or pad_nk):
         return TDM_PAD_REJECT_REASON
+    if pad_nk:
+        return PRESHUFFLE_PAD_NK_REJECT_REASON
     if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
         return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
     if pipeline == "comp_async" and dtype in PRESHUFFLE_ASYNC_REJECT_DTYPES:
