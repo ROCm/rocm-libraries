@@ -1479,9 +1479,11 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
-//            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
-//            numWaves) over every matching ds_read (last-load latency,
-//            count-weighted average throughput, max maxDrain over the burst).
+//            (> 0), else the last matching ds_read's own (already
+//            wave-sharing-adjusted) drain latency -- every matching ds_read
+//            is already issued earlier in program order by this point, so
+//            only that one load's own remaining transit time matters, not a
+//            burst issue-spacing term for issuing them in the first place.
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1552,16 +1554,21 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency)
-        // + 1. A positive dsReadDrainLatency pins the latency. A non-positive value
-        // (default 0) means "use dynamic drain latency," derived from all matching
-        // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency,
-        // count-weighted average throughput, max maxDrain over the burst), keyed
-        // by this pass context's NumWaves.
+        // + 1. A positive dsReadDrainLatency pins the latency. A non-positive
+        // value (default 0) means "use the last matching ds_load's own drain
+        // latency": by this point every matching ds_load has already been
+        // issued (they are earlier in program order; their issue spacing is
+        // already reflected in real instruction positions), so all that is
+        // left to wait out is that one load's own transit time through the
+        // return queue -- not computeDynamicDrainLatencyForLoads()'s
+        // (count-1)*issueSpacing burst-growth term, which models spreading
+        // NEW issues out, not draining ones already in flight. Using that
+        // term here would double-count the same issue spacing that is
+        // already paid for by the real cycle positions of the earlier loads.
         const int configuredDrainLatency = dsReadDrainLatency();
         const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
         const int latencyForAfterThreshold =
-            configuredDrainLatency > 0 ? configuredDrainLatency
-                                       : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads);
+            configuredDrainLatency > 0 ? configuredDrainLatency : matchingDsLoads.back().latency;
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
