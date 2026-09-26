@@ -401,19 +401,6 @@ def is_valid_spec_for_problem(
             f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
         )
 
-    # Reject pipeline="basic" configs that would Python-unroll the K loop
-    # beyond this threshold — above it IR size explodes and comgr compilation
-    # time grows unacceptably.
-    _MAX_BASIC_K_ITERS = 128
-    if spec.pipeline == "basic":
-        _k_iters = (problem.K_gemm + spec.tile_k - 1) // spec.tile_k
-        if _k_iters > _MAX_BASIC_K_ITERS:
-            return False, (
-                f"pipeline='basic' K-loop would unroll to {_k_iters} iterations "
-                f"(K_gemm={problem.K_gemm} tile_k={spec.tile_k}), "
-                f"exceeding the {_MAX_BASIC_K_ITERS}-iteration limit"
-            )
-
     return True, "ok"
 
 
@@ -544,14 +531,15 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         # The WMMA K-loop is fully unrolled: each iteration emits
         #   mfmas_per_warp_m × mfmas_per_warp_n WMMA calls,
         # and the loop runs K_iters = ceil(K_gemm / tile_k) times.
-        # Empirically, cost > 4096 causes comgr_relocatable to take > 30 s
-        # (e.g. t512x512x32 w1x1 with cost=36864 never completes in practice).
-        # The cut-off is conservative enough that all practical tile shapes pass.
+        # Empirically, cost > 512 causes comgr_relocatable to take excessively
+        # long (e.g. t512x512x32 w1x1 with cost=36864 never completes in
+        # practice).  The cut-off is conservative so all practical tile shapes
+        # pass.
         _mfmas_m = spec.tile_m // (spec.warp_m * spec.warp_tile_m)
         _mfmas_n = spec.tile_n // (spec.warp_n * spec.warp_tile_n)
         _k_iters = (spec.problem.K_gemm + spec.tile_k - 1) // spec.tile_k
         _wmma_cost = _k_iters * _mfmas_m * _mfmas_n
-        _WMMA_COST_LIMIT = 4096
+        _WMMA_COST_LIMIT = 512
         if _wmma_cost > _WMMA_COST_LIMIT:
             return False, (
                 f"pipeline='wavelet' unrolled WMMA count {_wmma_cost} "
@@ -1242,36 +1230,6 @@ def _build_implicit_gemm_conv_impl(
             rsrc=b_rsrc,
         )
 
-    def emit_global_read(k_off: Value) -> tuple:
-        """Issue only the global memory reads (buffer_load_vN) for one K tile.
-
-        Returns ``(k_off, a_staged, b_staged)`` — the tile offset and the two
-        lists of ``(row, col, v)`` triples from :meth:`CoalescedTileLoader.load_global`.
-        The caller must later call :func:`emit_lds_write` to commit these values
-        to LDS. Only valid on the sync (non-async-DMA) path; CK pipeline_basic
-        uses this to overlap VMEM latency with MFMA compute.
-        """
-        k_off_capture[0] = k_off
-        a_staged = a_sync_loader.load_global(
-            b, tid=tid, descriptor=a_descriptor, rsrc=a_rsrc
-        )
-        b_staged = b_sync_loader.load_global(
-            b, tid=tid, descriptor=b_descriptor, rsrc=b_rsrc
-        )
-        return k_off, a_staged, b_staged
-
-    def emit_lds_write(staged_tuple: tuple, A_dst: Value, B_dst: Value) -> None:
-        """Commit previously-staged VGPR values to LDS (smem_store_vN).
-
-        ``staged_tuple`` is the value returned by :func:`emit_global_read`.
-        Restores ``k_off_capture`` so the descriptor sees the correct k offset
-        even though the global read and LDS write happen in different loop positions.
-        """
-        k_off, a_staged, b_staged = staged_tuple
-        k_off_capture[0] = k_off
-        a_sync_loader.store_lds(b, smem_dst=A_dst, staged=a_staged)
-        b_sync_loader.store_lds(b, smem_dst=B_dst, staged=b_staged)
-
     def emit_wmma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -1624,53 +1582,6 @@ def _build_implicit_gemm_conv_impl(
             k_off_capture[0] = b.const_i32(it * block_k)
             current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
             b.sync()
-
-        final_accs = current_accs
-    elif spec.pipeline == "basic":
-        # CK pipeline_basic: single-buffer, global-read/compute overlap.
-        #
-        # The buffer_load_vN for tile k+1 is issued before the sync+mfma for
-        # tile k so VMEM latency is hidden behind compute. The LDS write
-        # (smem_store_vN) is deferred until AFTER the second sync (after all
-        # ds_reads for tile k have drained), using the split emit_global_read /
-        # emit_lds_write helpers. Only one LDS buffer is needed.
-        #
-        # Per-iteration instruction order:
-        #   emit_global_read(k+1)         buffer_load_vN (VMEM, in flight)
-        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
-        #                                 (drains prior ds_write; tile k RAW-safe)
-        #   k_off_capture = k             (descriptor uses tile k's offset)
-        #   emit_mfma_phase               ds_read(A_smem,B_smem) + mfma
-        #   sync()                        s_waitcnt(lgkmcnt=0) + s_barrier
-        #                                 (drains ds_reads; A_smem WAR-safe)
-        #   emit_lds_write(staged_k+1)    smem_store_vN (now safe to write)
-        K_iters = (p.K_gemm + block_k - 1) // block_k
-        current_accs = [v for _, v in accs]
-
-        # Prologue: global read for tile 0 then immediately write to LDS.
-        # (No prior ds_reads to drain, so lds_write can follow immediately.)
-        staged0 = emit_global_read(b.const_i32(0))
-        emit_lds_write(staged0, A_smem, B_smem)
-
-        pending_staged = None  # staged tuple for the tile whose ds_write is next
-
-        for it in range(K_iters):
-            # Issue buffer_load for tile it+1 BEFORE the sync. The VMEM latency
-            # (~300-600 cycles) overlaps with the mfma stream that follows.
-            if it + 1 < K_iters:
-                pending_staged = emit_global_read(b.const_i32((it + 1) * block_k))
-            # Drain the current tile's ds_write (prologue or previous iter's
-            # emit_lds_write), then barrier all waves.
-            b.sync()
-            # Set k offset so descriptors address tile it during mfma.
-            k_off_capture[0] = b.const_i32(it * block_k)
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            # Drain ds_reads before the next ds_write can overwrite A_smem/B_smem.
-            b.sync()
-            # Now safe to commit the next tile's staged VGPRs to LDS.
-            if pending_staged is not None:
-                emit_lds_write(pending_staged, A_smem, B_smem)
-                pending_staged = None
 
         final_accs = current_accs
     elif not spec.async_dma:

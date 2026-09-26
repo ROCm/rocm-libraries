@@ -1443,7 +1443,26 @@ def _build_tilde_dgrad(
         )
         axis_b = "col"
     elif spec.vector_size_b is not None:
-        load_vec_b = spec.vector_size_b
+        # Clamp, exactly as the K-outer branch above does. vector_size_* is a
+        # CAP, not a demand -- wgrad documents it that way and passes
+        # vector_size_c through as ``max_store_vec`` -- so an explicit width
+        # wider than the tile geometry supports must be narrowed, not obeyed.
+        # Taking it verbatim let a spec pass is_valid_dgrad_spec and then raise
+        # from CoalescedTileLoader.vecs_per_thread deep in the builder.
+        #
+        # Emission-neutral for every spec that already built: choose_vec's
+        # accepted set is a strict subset of vecs_per_thread's, and the
+        # tile_n % (warp_n * warp_tile_n) rule the validator already enforces
+        # makes the axis-divisibility condition free, so this returns exactly
+        # spec.vector_size_b wherever the verbatim path worked, and a narrower
+        # width only where it used to raise.
+        load_vec_b = CoalescedTileLoader.choose_vec(
+            tile_rows=block_n,
+            tile_cols=block_k,
+            block_size=threads,
+            max_vec=min(_def_vec_b, spec.vector_size_b),
+            vector_axis="row",
+        )
         axis_b = "row" if load_vec_b > 1 else "col"
     elif _vb > 1:
         load_vec_b = _vb
@@ -1470,6 +1489,21 @@ def _build_tilde_dgrad(
         """A (dY, NHWK) offset: (m_sub_local, k_sub_local) → element offset."""
         m_sub = b_.add(block_m_off_v, row)
         k_sub = b_.add(k_off_capture[0], col)
+
+        # Pointwise (Y=X=1, stride 1, pad 0, ungrouped) fast path. The tilde
+        # decomposition is the identity here -- h_tilde_slice == Ho,
+        # w_tilde_slice == Wo, y_dot_slice == x_dot_slice == 1, gemm_k == kpg --
+        # so (n*Ho+ho)*Wo*K + wo*K + k_out reduces exactly to m_sub*K + k_sub.
+        # Forward and wgrad both already special-case this; dgrad did not, and
+        # the generic form costs a runtime divide plus a tautological bounds
+        # predicate INSIDE the K-loop.
+        if p.is_pointwise and not grouped:
+            off = b_.add(b_.mul(m_sub, c_K), k_sub)
+            ok = b_.land(
+                b_.cmp_lt(m_sub, b_.const_i32(p.N * p.Ho * p.Wo)),
+                b_.cmp_lt(k_sub, c_K),
+            )
+            return off, ok
 
         # Decompose k_sub → (ydot, xdot, k_out)  [k_out innermost, CK-compatible]
         # k_sub = ydot * xdot_slice * kpg + xdot * kpg + k_out.  The reduction is
@@ -1517,6 +1551,14 @@ def _build_tilde_dgrad(
         """B (W, KYXC) offset: (c_local, k_sub_local) → element offset."""
         c_val = b_.add(block_n_off_v, row)
         k_sub = b_.add(k_off_capture[0], col)
+
+        # Pointwise fast path: Y == X == 1 means y == x == 0, so KYXC is just
+        # [K, cpg] and the offset is k_sub*C + c_val. Must stay in lockstep with
+        # the dy_descriptor fast path above.
+        if p.is_pointwise and not grouped:
+            off = b_.add(b_.mul(k_sub, c_C), c_val)
+            ok = b_.land(b_.cmp_lt(k_sub, c_K), b_.cmp_lt(c_val, c_C))
+            return off, ok
 
         # Same k_out-innermost decomposition as dy_descriptor (must match).
         # c (row axis) is stride-1 in KYXC; vectorised loads along c use

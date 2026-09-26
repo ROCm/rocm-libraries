@@ -102,7 +102,7 @@ namespace rocisa
         case rocisa::DataType::E5M3:
             return "E5M3";
         case rocisa::DataType::Count:
-        ;
+            return "Invalid";
         }
         return "Invalid";
     }
@@ -187,7 +187,7 @@ namespace rocisa
         case rocisa::DataType::E5M3:
             return TensileLite::TypeInfo<TensileLite::E5M3>::ElementSize;
         case rocisa::DataType::Count:
-        ;
+            return 1;
         }
         return 1;
     }
@@ -202,44 +202,7 @@ namespace rocisa
         std::string strValue;
         stream >> strValue;
 
-#if 1
         t = TensileLite::DataTypeInfo::Get(strValue).dataType;
-
-#else
-
-        if(strValue == ToString(rocisa::DataType::Float))
-            t = rocisa::DataType::Float;
-        else if(strValue == ToString(rocisa::DataType::Double))
-            t = rocisa::DataType::Double;
-        else if(strValue == ToString(rocisa::DataType::ComplexFloat))
-            t = rocisa::DataType::ComplexFloat;
-        else if(strValue == ToString(rocisa::DataType::ComplexDouble))
-            t = rocisa::DataType::ComplexDouble;
-        else if(strValue == ToString(rocisa::DataType::Half))
-            t = rocisa::DataType::Half;
-        else if(strValue == ToString(rocisa::DataType::Int8x4))
-            t = rocisa::DataType::Int8x4;
-        else if(strValue == ToString(rocisa::DataType::Int32))
-            t = rocisa::DataType::Int32;
-        else if(strValue == ToString(rocisa::DataType::Int64))
-            t = rocisa::DataType::Int64;
-        else if(strValue == ToString(rocisa::DataType::Int8))
-            t = rocisa::DataType::Int8;
-        else if(strValue == ToString(rocisa::DataType::XFloat32))
-            t = rocisa::DataType::XFloat32;
-        else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
-        {
-            int value = atoi(strValue.c_str());
-            if(value >= 0 && value < static_cast<int>(rocisa::DataType::Count))
-                t = static_cast<DataType>(value);
-            else
-                throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-        else
-        {
-            throw std::runtime_error(concatenate("Can't convert ", strValue, " to DataType."));
-        }
-#endif
 
         return stream;
     }
@@ -452,5 +415,112 @@ namespace TensileLite
         default:
             throw std::runtime_error("Unsupported variant cast type.");
         }
+    }
+
+    std::string toString(CustomArgType arg)
+    {
+        switch(arg)
+        {
+        case CustomArgType::int8:
+            return "int8";
+        case CustomArgType::uint8:
+            return "uint8";
+        case CustomArgType::int16:
+            return "int16";
+        case CustomArgType::uint16:
+            return "uint16";
+        case CustomArgType::int32:
+            return "int32";
+        case CustomArgType::uint32:
+            return "uint32";
+        case CustomArgType::int64:
+            return "int64";
+        case CustomArgType::uint64:
+            return "uint64";
+        case CustomArgType::float4:
+            return "float4";
+        case CustomArgType::float6:
+            return "float6";
+        case CustomArgType::float8:
+            return "float8";
+        case CustomArgType::bfloat8:
+            return "bfloat8";
+        case CustomArgType::float16:
+            return "float16";
+        case CustomArgType::bfloat16:
+            return "bfloat16";
+        case CustomArgType::float32:
+            return "float32";
+        case CustomArgType::tfloat32:
+            return "tfloat32";
+        case CustomArgType::float64:
+            return "float64";
+        case CustomArgType::boolean:
+            return "boolean";
+        case CustomArgType::address:
+            return "address";
+        case CustomArgType::CustomArgType_Count:
+            break;
+        }
+
+        throw std::runtime_error(concatenate("Invalid CustomArgType value: ", static_cast<int>(arg)));
+    }
+
+    CustomArgType fromStringCustomArgType(std::string& str)
+    {
+        if(str == toString(CustomArgType::int8))
+            return CustomArgType::int8;
+        else if(str == toString(CustomArgType::uint8))
+            return CustomArgType::uint8;
+        else if(str == toString(CustomArgType::int16))
+            return CustomArgType::int16;
+        else if(str == toString(CustomArgType::uint16))
+            return CustomArgType::uint16;
+        else if(str == toString(CustomArgType::int32))
+            return CustomArgType::int32;
+        else if(str == toString(CustomArgType::uint32))
+            return CustomArgType::uint32;
+        else if(str == toString(CustomArgType::int64))
+            return CustomArgType::int64;
+        else if(str == toString(CustomArgType::uint64))
+            return CustomArgType::uint64;
+        else if(str == toString(CustomArgType::float4))
+            return CustomArgType::float4;
+        else if(str == toString(CustomArgType::float6))
+            return CustomArgType::float6;
+        else if(str == toString(CustomArgType::float8))
+            return CustomArgType::float8;
+        else if(str == toString(CustomArgType::bfloat8))
+            return CustomArgType::bfloat8;
+        else if(str == toString(CustomArgType::float16))
+            return CustomArgType::float16;
+        else if(str == toString(CustomArgType::bfloat16))
+            return CustomArgType::bfloat16;
+        else if(str == toString(CustomArgType::float32))
+            return CustomArgType::float32;
+        else if(str == toString(CustomArgType::tfloat32))
+            return CustomArgType::tfloat32;
+        else if(str == toString(CustomArgType::float64))
+            return CustomArgType::float64;
+        else if(str == toString(CustomArgType::boolean))
+            return CustomArgType::boolean;
+        else if(str == toString(CustomArgType::address))
+            return CustomArgType::address;
+        else
+            throw std::runtime_error(concatenate("Invalid argument type: ", str));
+        return CustomArgType::CustomArgType_Count;
+    }
+
+    std::ostream& operator<<(std::ostream& stream, const CustomArgType& t)
+    {
+        return stream << toString(t);
+    }
+
+    std::istream& operator>>(std::istream& stream, CustomArgType& t)
+    {
+        std::string strValue;
+        stream >> strValue;
+        t = fromStringCustomArgType(strValue);
+        return stream;
     }
 } // namespace TensileLite

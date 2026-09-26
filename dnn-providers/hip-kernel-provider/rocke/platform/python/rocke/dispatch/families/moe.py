@@ -66,6 +66,7 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 _FAMILY = "moe_fused_mega"
@@ -149,16 +150,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     except KeyError as e:
         errors.append(str(e))
     return errors
-
-
-def _selector_matches(req: MoeRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
 
 
 # gfx942 (CDNA3) departures from the shipped gfx950 geometry. Neither is a
@@ -265,7 +256,7 @@ def _make_candidate(*, name, spec_id, dtypes, spec_fn, priority) -> KernelCandid
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, MoeRequest)
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         # Gate on the spec this candidate would actually return, not on a
@@ -386,18 +377,32 @@ def _kernel_id(req: MoeRequest, candidate: KernelCandidate, spec) -> KernelId:
     )
 
 
+def registered_moe_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Every registered MoE candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_moe` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return MOE_REGISTRY.combos(req)
+
+
 def moe_sweep_space(req: OperatorRequest) -> Sequence[object]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in MOE_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(_struct(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return MOE_REGISTRY.sweep_space(
+        req, spec_key=lambda spec: stable_json_hash(_struct(spec), n=16)
+    )
+
+
+def dispatch_moe_all(req: MoeRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible fused-MoE kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return MOE_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_moe(req: MoeRequest, *, ranker: Ranker | None = None) -> DispatchResult:

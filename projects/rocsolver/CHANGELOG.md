@@ -6,6 +6,13 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
+
+* Support added for the gfx1250-strict architecture.
+
 ### Changed
 ### Removed
 ### Optimized

@@ -19,7 +19,6 @@
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
@@ -386,7 +385,7 @@ VerificationOutcome
                                            refLabel(type) + " errored (verification-mode="
                                                + refLabel(type) + "): " + result.message);
     case RefStatus::RAN:
-        return compareOutputs(engine.outputs, refOutputs);
+        return compareOutputs(engine.outputs, refOutputs, result.site);
     default:
         return VerificationOutcome::failed(
             VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -414,7 +413,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
             = runReferenceCapturingOutputs(ReferenceExecutorType::GPU, refOutputs);
         if(gpu.status == RefStatus::RAN)
         {
-            return compareOutputs(engine.outputs, refOutputs);
+            return compareOutputs(engine.outputs, refOutputs, gpu.site);
         }
         if(gpu.status == RefStatus::RUNTIME_ERROR)
         {
@@ -447,7 +446,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
                                                "CPU reference errored (auto mode, last resort): "
                                                    + cpu.message);
         case RefStatus::RAN:
-            return compareOutputs(engine.outputs, refOutputs);
+            return compareOutputs(engine.outputs, refOutputs, cpu.site);
         default:
             return VerificationOutcome::failed(
                 VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -597,7 +596,7 @@ IntegrationBundleVerificationHarness::RefRunResult
     }
 
     detail::markOutputsModified(refOutputs, useDevice);
-    return {RefStatus::RAN, {}};
+    return {RefStatus::RAN, {}, useDevice ? ValidationSite::DEVICE : ValidationSite::HOST};
 }
 
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
@@ -610,47 +609,44 @@ void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& ou
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
-    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *_bundle->tensors->at(uid);
-    });
+    return compareAgainst(
+        engineOutputs,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        },
+        ValidationSite::HOST);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::compareOutputs(OutputTensors& engineOutputs,
-                                                         OutputTensors& expected)
+VerificationOutcome IntegrationBundleVerificationHarness::compareOutputs(
+    OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site)
 {
-    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *expected.at(uid);
-    });
+    return compareAgainst(
+        engineOutputs,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
+        site);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::compareAgainst(OutputTensors& engineOutputs,
-                                                         const ExpectedTensorLookup& expectedFor)
+VerificationOutcome IntegrationBundleVerificationHarness::compareAgainst(
+    OutputTensors& engineOutputs, const ExpectedTensorLookup& expectedFor, ValidationSite site)
 {
     auto wrapper = _bundle->graphWrapper();
+    // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
+    // applied by gradingForTensor(), which reads the validator override first and so is
+    // the only place that can log the check that actually graded this tensor.
+    const auto toleranceFor
+        = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+              const float value = tolerance::defaultTolerance(wrapper, dataType);
+              return gradingForTensor(currentTestName(), label, value, value);
+          };
 
-    const auto tomlOverride = TestConfig::get().findToleranceOverride(currentTestName());
-    if(tomlOverride)
-    {
-        HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << currentTestName()
-                                                                 << ": atol=" << tomlOverride->atol
-                                                                 << " rtol=" << tomlOverride->rtol);
-    }
-
-    const auto toleranceFor = [&](hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-        ComparisonTolerance tolerance;
-        tolerance::resolveTolerance(
-            wrapper, dataType, currentTestName(), tolerance.atol, tolerance.rtol);
-        return tolerance;
-    };
-
-    const auto mismatches = bundle::compareOutputs(wrapper,
-                                                   _bundle->outputTensorUids,
-                                                   engineOutputs,
-                                                   expectedFor,
-                                                   toleranceFor,
-                                                   "Bundle: " + _bundlePath.string());
+    const auto mismatches
+        = bundle::compareOutputs(wrapper,
+                                 _bundle->outputTensorUids,
+                                 engineOutputs,
+                                 expectedFor,
+                                 toleranceFor,
+                                 resolveValidationSite(_deps.policy.validator, site),
+                                 "Bundle: " + _bundlePath.string());
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.

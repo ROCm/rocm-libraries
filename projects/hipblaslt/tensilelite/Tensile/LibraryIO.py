@@ -241,6 +241,8 @@ def write(filename_noExt, data, format="yaml"):
         writeJson(filename_noExt + ".json", data)
     elif format == "msgpack":
         writeMsgPack(filename_noExt + ".dat", data)
+    elif format == "msgpack-indexed":
+        writeMsgPackIndexed(filename_noExt + ".dat", data)
     else:
         printExit("Unrecognized write format {}".format(format))
 
@@ -267,6 +269,61 @@ def writeJson(filename, data):
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
     raw = msgpack.packb(data)
+    compressed = zlib.compress(raw, 9)
+    with open(filename + ".zlib", "wb") as f:
+        f.write(compressed)
+    try:
+        os.unlink(filename)
+    except FileNotFoundError:
+        pass
+
+# Bumped only when the on-disk layout changes incompatibly. The C++ loader
+# accepts this exact value and rejects anything higher, so a reader that
+# predates a future format cannot silently misparse it.
+INDEXED_FORMAT_VERSION = 2
+
+def writeMsgPackIndexed(filename, data):
+    """Writes a MasterSolutionLibrary state dict in indexed Message Pack format.
+
+    Same artifact contract as writeMsgPack -- zlib level 9, ".dat.zlib" on
+    disk, stale uncompressed sibling removed -- but each solution is packed
+    on its own into one concatenated BIN blob, described by a flat
+    [index, offset, length, ...] side table. That lets the runtime hold the
+    blob unparsed and deserialize only the solutions a query actually
+    selects. The "library" decision tree and optional "version" are emitted
+    unchanged.
+
+    Only MasterSolutionLibrary payloads may be written this way. Flat
+    dictionaries such as the per-arch lazy-loading mapping file have no
+    "solutions" key and must keep using writeMsgPack.
+    """
+    if not isinstance(data, dict) or "solutions" not in data or "library" not in data:
+        printExit("writeMsgPackIndexed requires a MasterSolutionLibrary state dict "
+                  "with 'solutions' and 'library' keys")
+
+    # state() emits solutions as a list of dicts, so sorting needs an explicit
+    # key; a bare sorted() would try to order dicts and raise TypeError.
+    solutions = sorted(data["solutions"], key=lambda s: s["index"])
+
+    packer = msgpack.Packer(use_bin_type=True)
+    solutionsIndex = []
+    chunks = []
+    offset = 0
+    for solution in solutions:
+        packed = packer.pack(solution)
+        solutionsIndex.extend((solution["index"], offset, len(packed)))
+        chunks.append(packed)
+        offset += len(packed)
+
+    # Fixed key order keeps the artifact byte-reproducible across runs.
+    indexed = {"format_version": INDEXED_FORMAT_VERSION}
+    if "version" in data:
+        indexed["version"] = data["version"]
+    indexed["solutions_index"] = solutionsIndex
+    indexed["solutions_blob"] = b"".join(chunks)
+    indexed["library"] = data["library"]
+
+    raw = msgpack.packb(indexed, use_bin_type=True)
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)
@@ -540,6 +597,8 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = data["IndexOrder"]
         data["Library"]["table"] = data["ExactLogic"]
         data["Library"]["distance"] = libraryType
+        if data.get("UseKdTree", False):
+            data["Library"]["useKdTree"] = True
 
 
 def reorderSolutionsParams(data: Dict[str, Any]) -> None:
@@ -662,7 +721,7 @@ def parseLibraryLogicData(
     )
 
     # unpack solution
-    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
+    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
         # Fill missing keys: library DefaultSolution, then GlobalParameters defaultSolution.
         for key, val in libDefaults.items():
             if key not in solutionState:
@@ -674,7 +733,7 @@ def parseLibraryLogicData(
         if "KernelLanguage" not in solutionState.keys():
             solutionState["KernelLanguage"] = defaultSolution["KernelLanguage"]
         if "CustomKernelName" not in solutionState.keys():
-            solutionState["CustomKernelName"] = defaultSolution["CustomKernelName"]
+            solutionState["CustomKernelName"] = defaultSolution.get("CustomKernelName", "")
 
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
@@ -683,11 +742,23 @@ def parseLibraryLogicData(
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
-        if solutionState["CustomKernelName"]:
+        customKernelName = None
+        ck = solutionState.get("CustomKernel")
+        if isinstance(ck, dict) and ck.get("name") and not ck.get("generated", False):
+            customKernelName = ck["name"]
+        elif solutionState.get("CustomKernelName", ""):
+            customKernelName = solutionState["CustomKernelName"]
+
+        if customKernelName:
             isp = {}
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
-            customConfig = getCustomKernelConfig(solutionState["CustomKernelName"], isp)
+            try:
+                customConfig = getCustomKernelConfig(customKernelName, isp)
+            except (RuntimeError, KeyError, TypeError) as e:
+                printWarning(f"Skipping custom kernel '{customKernelName}': "
+                             f"missing or invalid custom.config ({e})")
+                return None
             for key, value in customConfig.items():
                 solutionState[key] = value
 
@@ -723,7 +794,12 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
-    solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    resetTypeMismatchCollector()
+    allSolutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    skipped = sum(1 for s in allSolutions if s is None)
+    if skipped:
+        printWarning(f"Skipped {skipped} solution(s) due to missing or invalid custom.config")
+    solutions = [s for s in allSolutions if s is not None]
     typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
@@ -754,7 +830,11 @@ def parseLibraryLogicList(data, srcFile="?"):
 
     if isinstance(data[2], dict):
         rv["ArchitectureName"] = data[2]["Architecture"]
-        rv["CUCount"] = data[2]["CUCount"]
+        rv["CUCount"] = data[2].get("CUCount")
+        # Optional, and carried only when declared, so a file written before this
+        # key existed parses to exactly the dict it did before.
+        if data[2].get("UseKdTree", False):
+            rv["UseKdTree"] = True
     else:
         rv["ArchitectureName"] = data[2]
         rv["CUCount"] = None
@@ -797,6 +877,8 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["Library"]["indexOrder"] = data[6]
         rv["Library"]["table"] = data[7]
         rv["Library"]["distance"] = libraryType
+        if rv.get("UseKdTree"):
+            rv["Library"]["useKdTree"] = True
 
     return rv
 
@@ -809,8 +891,16 @@ def rawLibraryLogic(data):
 
         architectureName = data.get("ArchitectureName")
         cuCount = data.get("CUCount")
-        if cuCount is not None:
-            architectureName = {"Architecture": architectureName, "CUCount": cuCount}
+        useKdTree = data.get("UseKdTree", False)
+        if cuCount is not None or useKdTree:
+            architectureName = {"Architecture": architectureName}
+            # Each key is emitted only when set, so unaffected files round-trip
+            # byte-identically and a table that is not CU-scoped can still
+            # declare UseKdTree without inventing a null CUCount.
+            if cuCount is not None:
+                architectureName["CUCount"] = cuCount
+            if useKdTree:
+                architectureName["UseKdTree"] = True
 
         deviceNames = data.get("DeviceNames")
         problemTypeState = data.get("ProblemType")

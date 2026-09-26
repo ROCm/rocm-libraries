@@ -23,17 +23,21 @@
 #include "rtc_cache.h"
 
 std::shared_future<std::unique_ptr<RTCKernel>> RTCKernelChirp::generate(const std::string& gpu_arch,
+                                                                        const size_t&      N,
                                                                         rocfft_precision precision)
 {
+    auto itype = RTCKernelChirp::itype(gpu_arch, N);
+
     RTCGenerator generator;
-    generator.generate_name = [=]() { return chirp_rtc_kernel_name(precision); };
+    generator.generate_name = [=]() { return chirp_rtc_kernel_name(precision, itype); };
     generator.generate_src
-        = [=](const std::string& kernel_name) { return chirp_rtc(kernel_name, precision); };
-    generator.construct_rtckernel = [](const std::string&                       kernel_name,
-                                       std::shared_future<hipModule_wrapper_t>& module,
-                                       dim3                                     gridDim,
-                                       dim3                                     blockDim) {
-        return std::unique_ptr<RTCKernel>(new RTCKernelChirp{kernel_name, module, {}, {}});
+        = [=](const std::string& kernel_name) { return chirp_rtc(kernel_name, precision, itype); };
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3                                     gridDim,
+                                        dim3                                     blockDim) {
+        return std::unique_ptr<RTCKernel>(
+            new RTCKernelChirp{kernel_name, itype, module, gridDim, blockDim});
     };
 
     std::string kernel_name;

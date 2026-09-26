@@ -59,6 +59,18 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "table", table.table);
 
+                /// Should this GridBased matching table carry a kd-tree index?
+                ///
+                /// Declared by the logic file (`UseKdTree` in the library-logic header), so a
+                /// table that wants the kd-tree says so itself. Absent, mapOptional leaves the
+                /// member at its `false` default and behaviour is unchanged -- which is every
+                /// logic file that predates this key.
+                ///
+                /// Keeping it on the table rather than deciding at load time means library
+                /// deserialization no longer has to probe for a device: it can legitimately run
+                /// with none (CPU-only tooling and tests).
+                iot::mapOptional(io, "useKdTree", table.useKdTree);
+
                 if(!iot::outputting(io))
                 {
                     using Entry  = typename Table::Entry;
@@ -71,7 +83,12 @@ namespace TensileLite
 
                     if constexpr(std::is_same<Distance, Matching::GridBasedDistance<Key>>{})
                     {
-                        if(Debug::Instance().gridBasedKDTree())
+                        // TENSILE_GRIDBASED_KDTREE can only add: it turns the index on for
+                        // every table, and never off for one that asked for it. Resolved here,
+                        // once per table, so the query path reads a single settled member.
+                        table.useKdTree = table.useKdTree || Debug::Instance().gridBasedKDTree();
+
+                        if(table.useKdTree)
                         {
                             // Creating K map
                             for(auto it = table.table.begin(); it != table.table.end(); ++it)
@@ -265,24 +282,42 @@ namespace TensileLite
 
                     auto ctx
                         = static_cast<LibraryIOContext<ContractionSolution>*>(iot::getContext(io));
-                    if(ctx == nullptr || ctx->solutions == nullptr)
+                    if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
                     {
                         iot::setError(io,
                                       "SingleSolutionLibrary requires that context be set to "
                                       "a SolutionMap.");
                     }
-
-                    auto iter = ctx->solutions->find(index);
-                    if(iter == ctx->solutions->end())
+                    else if(ctx->blobCache)
                     {
-                        std::ostringstream msg;
-                        msg << "[MatchingLibrary] Invalid solution index: " << index;
-                        iot::setError(io, msg.str());
+                        // Indexed file: hand the leaf the index and the cache
+                        // and let it parse on first use. Several rows commonly
+                        // name the same index; the cache dedupes.
+                        if(!ctx->blobCache->contains(index))
+                        {
+                            iot::setError(
+                                io,
+                                concatenate("[MatchingLibrary] Invalid solution index: ", index));
+                        }
+                        else
+                        {
+                            entry.value = std::make_shared<SSLibrary>(index, ctx->blobCache);
+                        }
                     }
                     else
                     {
-                        std::shared_ptr<ContractionSolution> solution = iter->second;
-                        entry.value = std::make_shared<SSLibrary>(solution);
+                        auto iter = ctx->solutions->find(index);
+                        if(iter == ctx->solutions->end())
+                        {
+                            std::ostringstream msg;
+                            msg << "[MatchingLibrary] Invalid solution index: " << index;
+                            iot::setError(io, msg.str());
+                        }
+                        else
+                        {
+                            std::shared_ptr<ContractionSolution> solution = iter->second;
+                            entry.value = std::make_shared<SSLibrary>(solution);
+                        }
                     }
                 }
                 else
