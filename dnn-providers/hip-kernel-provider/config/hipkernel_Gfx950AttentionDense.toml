@@ -12,5 +12,4 @@ version = 1
 # non-gfx950 device declines through the ordinary path. An entry cannot express
 # "skip everywhere except gfx950" -- the schema has no negation, and an empty
 # `archs` list means EVERY arch (TestSettings.hpp: `entry.archs.empty() || ...`),
-# so a skip written that way would silence gfx950 too. ASM_SDPA_ENGINE.toml ships
-# no skips for the same reason.
+# so a skip written that way would silence gfx950 too.

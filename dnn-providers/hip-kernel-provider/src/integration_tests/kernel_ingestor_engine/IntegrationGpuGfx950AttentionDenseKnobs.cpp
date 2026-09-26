@@ -137,11 +137,13 @@ struct UnsatisfiableCase
     Tile forcedTile;
 };
 
+// NOLINTNEXTLINE(readability-identifier-naming) -- gtest customization point
 void PrintTo(const KnobCase& knobCase, std::ostream* os)
 {
     *os << knobCase.name;
 }
 
+// NOLINTNEXTLINE(readability-identifier-naming) -- gtest customization point
 void PrintTo(const UnsatisfiableCase& unsatisfiableCase, std::ostream* os)
 {
     *os << unsatisfiableCase.name;
@@ -493,7 +495,7 @@ public:
     ~SelectedKernelReport()
     {
         std::cout << "KNOB_SELECTED " << _caseName << " "
-                  << selectedKernelId(_capture.recorder()).value_or("none") << std::endl;
+                  << selectedKernelId(_capture.recorder()).value_or("none") << '\n';
     }
 
     SelectedKernelReport(const SelectedKernelReport&) = delete;
