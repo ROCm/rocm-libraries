@@ -134,6 +134,9 @@ IMPL_RE = re.compile(r"^miopen[A-Za-z0-9_]*_impl$")
 # rediscovering why this check started failing.
 PRIVATE_INCLUDE_DIRS = ("miopen/private",)
 
+# Where MIOpen stages its public headers, relative to the staged include tree.
+PUBLIC_INCLUDE_DIR = "miopen"
+
 # What counts as a header in the staged include tree. MIOpen stages .h and .hpp;
 # the rest are here because a consumer can include any of them.
 HEADER_SUFFIXES = frozenset({".h", ".hpp", ".hh", ".hxx", ".inc", ".ipp"})
@@ -990,8 +993,10 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
         raise AbiError(f"installed include directory not found: {root}")
 
     exempt_roots = [root / rel for rel in exempt]
+    public_root = root / PUBLIC_INCLUDE_DIR
     offenders: list[tuple[Path, int, str]] = []
     scanned = 0
+    scanned_public = 0
 
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -1001,6 +1006,8 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
         if any(path.is_relative_to(d) for d in exempt_roots):
             continue
         scanned += 1
+        if path.is_relative_to(public_root):
+            scanned_public += 1
         text = path.read_text(encoding="utf-8", errors="replace")
         for lineno, line in enumerate(text.splitlines(), start=1):
             # Match on whole identifiers via the same pattern the symbol checks
@@ -1012,10 +1019,11 @@ def check_installed_headers(include_dir: str, exempt: list[str]) -> bool:
 
     # Nothing scanned is not a clean tree, it is a tree this never looked at.
     # Nothing else guards the staged include tree, so a vacuous pass is
-    # undetectable.
-    if scanned == 0:
+    # undetectable. Only MIOpen's own headers count: a prefix shared with other
+    # packages would otherwise pass having never read one of them.
+    if scanned_public == 0:
         raise AbiError(
-            f"no headers found under {root} -- nothing was checked "
+            f"no headers found under {public_root} -- nothing was checked "
             "(wrong prefix, or an install staged without C++ headers?)"
         )
 

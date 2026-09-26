@@ -596,6 +596,26 @@ def test_an_include_tree_with_no_headers_is_an_error(tmp_path):
         abi.check_installed_headers(str(root), [])
 
 
+def test_an_include_tree_with_no_miopen_headers_is_an_error(tmp_path):
+    """Headers from other packages sharing the prefix do not count: passing on them
+    would report MIOpen's headers clean having read none of them."""
+    root = staged(tmp_path, {"hip/hip_runtime.h": "void hipFoo(void);\n"})
+    with pytest.raises(abi.AbiError, match="nothing was checked"):
+        abi.check_installed_headers(str(root), [])
+
+
+def test_other_packages_headers_are_still_scanned_for_leaks(tmp_path, capsys):
+    root = staged(
+        tmp_path,
+        {
+            "miopen/miopen.h": "miopenStatus_t miopenFoo(int);\n",
+            "other/leak.h": "miopenStatus_t miopenFoo_impl(int);\n",
+        },
+    )
+    assert abi.check_installed_headers(str(root), []) is False
+    assert "other/leak.h:1: miopenFoo_impl" in capsys.readouterr().out
+
+
 def test_an_include_tree_exempt_all_the_way_down_is_an_error(tmp_path):
     """Exempting every staged header leaves the same nothing-was-read result."""
     root = staged(tmp_path, {"miopen/private/rename.hpp": "void miopenFoo_impl();\n"})

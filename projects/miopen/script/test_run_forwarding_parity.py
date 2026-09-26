@@ -30,13 +30,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parent / "run_forwarding_parity.py"
 
 FAKE_GTEST_TEMPLATE = """#!/usr/bin/env python3
-import json, os, pathlib, sys
+import json, os, pathlib, sys, time
 mode = os.environ.get("MIOPEN_HIPDNN_FORWARDING")
 pathlib.Path(__file__).with_name("env_%s.json" % mode).write_text(json.dumps({{
     "MIOPEN_HIPDNN_FORWARDING": mode,
@@ -49,6 +50,8 @@ if {announce}:
         "[MIOpen] MIOPEN_HIPDNN_FORWARDING=%s: entry points in the forwarding set "
         "are redirected to hipDNN\\n" % mode
     )
+    sys.stderr.flush()
+{hold}
 out = [a.split("xml:", 1)[1] for a in sys.argv if a.startswith("--gtest_output=")][0]
 open(out, "w").write(
     '<?xml version="1.0"?><testsuites tests="1" failures="0" disabled="0" errors="0">'
@@ -57,12 +60,21 @@ open(out, "w").write(
 )
 """
 
-FAKE_GTEST = FAKE_GTEST_TEMPLATE.format(announce='mode == "enabled"')
+FAKE_GTEST = FAKE_GTEST_TEMPLATE.format(announce='mode == "enabled"', hold="")
 
 # A test binary that clears the variable before the library reads it.
-LOSES_THE_SETTING = FAKE_GTEST_TEMPLATE.format(announce="False")
+LOSES_THE_SETTING = FAKE_GTEST_TEMPLATE.format(announce="False", hold="")
 
-ALWAYS_FORWARDS = FAKE_GTEST_TEMPLATE.format(announce="True")
+ALWAYS_FORWARDS = FAKE_GTEST_TEMPLATE.format(announce="True", hold="")
+
+# Prints the banner, then stays running until the test creates a "release" file
+# beside it, so the test can see whether the banner got out before the replay ended.
+HANGS_AFTER_THE_BANNER = FAKE_GTEST_TEMPLATE.format(
+    announce='mode == "enabled"',
+    hold="""release = pathlib.Path(__file__).with_name("release")
+while mode == "enabled" and not release.exists():
+    time.sleep(0.05)""",
+)
 
 # Passes, and leaves behind what it was called with, so the harness's own wiring can
 # be checked rather than assumed.
@@ -95,8 +107,9 @@ class ParityRunnerTest(unittest.TestCase):
             ("fake_gtest.py", FAKE_GTEST),
             ("loses_the_setting.py", LOSES_THE_SETTING),
             ("always_forwards.py", ALWAYS_FORWARDS),
+            ("hangs_after_the_banner.py", HANGS_AFTER_THE_BANNER),
             ("fake_compare.py", RECORDS_ARGV),
-            ("failing_compare.py", FAILS),
+            ("fails.py", FAILS),
         ):
             path = self.tree / name
             path.write_text(body)
@@ -203,9 +216,7 @@ class ParityRunnerTest(unittest.TestCase):
         self.assertEqual(list(self.tmp.iterdir()), [])
 
     def test_the_temporary_report_directory_is_kept_after_a_failure(self):
-        result = self.run_harness(
-            self.tree, "--compare", str(self.tree / "failing_compare.py")
-        )
+        result = self.run_harness(self.tree, "--compare", str(self.tree / "fails.py"))
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         [kept] = self.tmp.iterdir()
         self.assertIn(f"replay reports: {kept}", result.stdout)
@@ -227,6 +238,12 @@ class ParityRunnerTest(unittest.TestCase):
             argv[argv.index("--newer-than") + 1], str(self.tree / "fake_gtest.py")
         )
 
+    def test_a_replay_that_exits_non_zero_fails(self):
+        result = self.run_harness(self.tree, gtest="fails.py")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL: forwarding=disabled replay exited 1", result.stdout)
+        self.assertFalse((self.tree / "fake_compare.argv").exists())
+
     def test_an_enabled_replay_that_never_forwarded_fails(self):
         result = self.run_harness(self.tree, gtest="loses_the_setting.py")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -243,6 +260,45 @@ class ParityRunnerTest(unittest.TestCase):
         result = self.run_harness(self.tree)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("MIOPEN_HIPDNN_FORWARDING=enabled:", result.stderr)
+
+    def test_the_replay_s_stderr_is_passed_through_while_it_runs(self):
+        """A replay killed by ctest's timeout must still have left its output behind."""
+        release = self.tree / "release"
+        # Frees the replay if the banner never arrives, so a regression fails
+        # instead of hanging the suite.
+        fallback = threading.Timer(30, release.touch)
+        fallback.start()
+        self.addCleanup(fallback.cancel)
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(HARNESS),
+                "--gtest",
+                str(self.tree / "hangs_after_the_banner.py"),
+                "--filter",
+                "*",
+                "--lib-dir",
+                str(self.tree / "lib"),
+                "--compare",
+                str(self.tree / "fake_compare.py"),
+            ],
+            cwd=str(self.tree),
+            env=dict(os.environ, TMPDIR=str(self.tmp)),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        with proc:
+            for line in proc.stderr:
+                if "MIOPEN_HIPDNN_FORWARDING=enabled:" in line:
+                    break
+            released_early = not release.exists()
+            release.touch()
+            proc.stderr.read()
+        self.assertTrue(
+            released_early, "the banner only arrived after the replay was freed"
+        )
+        self.assertEqual(proc.returncode, 0)
 
     def test_helpers_run_without_their_exec_bit(self):
         """They are launched through this interpreter, not their shebang lines."""

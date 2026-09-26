@@ -36,20 +36,24 @@ def run(argv, what, env=None):
 def replay(argv, mode, env):
     what = f"forwarding={mode} replay"
     print(f"+ {' '.join(str(a) for a in argv)}", flush=True)
-    result = subprocess.run(
+    # Passed through line by line rather than after exit: if ctest's timeout kills
+    # a hung replay, whatever it printed up to then is the only clue to why.
+    announced = False
+    with subprocess.Popen(
         [str(a) for a in argv],
         env=env,
         stderr=subprocess.PIPE,
         text=True,
         errors="replace",
-    )
-    sys.stderr.write(result.stderr)
-    sys.stderr.flush()
-    if result.returncode != 0:
-        print(f"FAIL: {what} exited {result.returncode}", flush=True)
+    ) as proc:
+        for line in proc.stderr:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+            announced = announced or ENABLED_BANNER in line
+    if proc.returncode != 0:
+        print(f"FAIL: {what} exited {proc.returncode}", flush=True)
         return False
 
-    announced = ENABLED_BANNER in result.stderr
     if mode == "enabled" and not announced:
         print(
             f"FAIL: {what} never printed '{ENABLED_BANNER}...', so it ran with "

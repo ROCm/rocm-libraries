@@ -87,6 +87,14 @@ jobs:
             -DGPU_TARGETS="gfx942" \
             -DMIOPEN_TEST_GFX94X=ON
 
+      # The scripts behind the wrapper gates, including the GPU-label lookup that
+      # depends on the shared test-category parser's output format. The entry only
+      # exists with the wrapper on, so nothing else runs it. Needs no build, so it
+      # goes before one and fails in seconds.
+      - name: Wrapper script self-tests
+        run: |
+          ctest --test-dir build -R '^test_forwarding_parity_scripts$' --no-tests=error --output-on-failure
+
       - name: Build
         run: cmake --build build --target install --target miopen_gtest -j$(nproc)
 
