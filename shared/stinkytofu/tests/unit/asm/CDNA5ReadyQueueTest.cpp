@@ -121,10 +121,13 @@ class CDNA5ReadyQueueTest : public ::testing::Test {
     }
 };
 
-DsLoadDrainEntry entryFromOpcode(const HWModel& hw, GFX opcode, int latency) {
+DsLoadDrainEntry entryFromOpcode(const HWModel& hw, GFX opcode, int latency, int numWaves) {
     const HwInstDesc* desc = getMCIDByUOp(opcode, GfxArchID::Gfx1250);
-    return makeDsLoadDrainEntry(hw, latency, desc ? desc->dsThroughput : 0,
-                                desc ? desc->dsMaxDrain : 0);
+    return makeDsLoadDrainEntry(hw, {.latency = latency,
+                                     .dsThroughput = desc ? desc->dsThroughput : 0,
+                                     .dsMaxDrain = desc ? desc->dsMaxDrain : 0,
+                                     .isaIssueCycles = desc ? desc->issue : 0,
+                                     .numWaves = numWaves});
 }
 
 }  // namespace
@@ -179,15 +182,18 @@ TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesTypeSpecificThroughput) {
     constexpr int kFirstOverflowLoad = 17;
     constexpr int kLoadLatency = 56;
     constexpr int kNumWaves = 4;
+    // Real per-load issue spacing at 4 waves: dsIssueCyclesForWaves saturates
+    // at the arch's wavesPerDsIssuePipe, so this is 2, not raw kNumWaves.
+    const int kIssueSpacing = dsIssueCyclesForWaves(hw, /*issueCycles=*/1, kNumWaves);
 
-    // Base = 56 + 15*4 = 116. Overflow term = 1*4 / throughput.
-    // B128 / Tr16B128 throughput 2 => +2 = 118; default throughput 4 => +1 = 117.
+    // Base = 56 + 15*2 = 86. Overflow term = 1*2 / throughput.
+    // B128 / Tr16B128 throughput 2 => +1 = 87; default throughput 4 => +0 = 86.
     EXPECT_EQ(computeDynamicDrainLatency(hw, kFirstOverflowLoad, kLoadLatency, /*thr=*/2,
-                                         /*maxDrain=*/255, kNumWaves),
-              118);
+                                         /*maxDrain=*/255, kIssueSpacing),
+              87);
     EXPECT_EQ(computeDynamicDrainLatency(hw, kFirstOverflowLoad, kLoadLatency, /*thr=*/4,
-                                         /*maxDrain=*/131, kNumWaves),
-              117);
+                                         /*maxDrain=*/131, kIssueSpacing),
+              86);
 }
 
 TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesExperimentalTypeSpecificMaximum) {
@@ -195,24 +201,28 @@ TEST_F(CDNA5ReadyQueueTest, DynamicDrainUsesExperimentalTypeSpecificMaximum) {
     constexpr int kLoadsBeyondMaximum = 100;
     constexpr int kLoadLatency = 56;
     constexpr int kNumWaves = 4;
+    const int kIssueSpacing = dsIssueCyclesForWaves(hw, /*issueCycles=*/1, kNumWaves);
 
     const auto drain = [&](int thr, int maxDrain) {
         return computeDynamicDrainLatency(hw, kLoadsBeyondMaximum, kLoadLatency, thr, maxDrain,
-                                          kNumWaves);
+                                          kIssueSpacing);
     };
 
     EXPECT_EQ(drain(4, 120), 120);
-    EXPECT_EQ(drain(4, 131), 131);
-    EXPECT_EQ(drain(2, 255), 255);
-    EXPECT_EQ(drain(4, 135), 135);
-    EXPECT_EQ(drain(2, 255), 255);
+    EXPECT_EQ(drain(4, 131), 128);
+    EXPECT_EQ(drain(2, 255), 170);
+    EXPECT_EQ(drain(4, 135), 128);
+    EXPECT_EQ(drain(2, 255), 170);
     // Fallback defaults via makeDsLoadDrainEntry.
-    const DsLoadDrainEntry fallback = makeDsLoadDrainEntry(hw, kLoadLatency, 0, 0);
+    const DsLoadDrainEntry fallback = makeDsLoadDrainEntry(
+        hw, {.latency = kLoadLatency, .isaIssueCycles = 1, .numWaves = kNumWaves});
     EXPECT_EQ(fallback.throughput, 4);
     EXPECT_EQ(fallback.maxDrain, 120);
-    EXPECT_EQ(computeDynamicDrainLatency(hw, kLoadsBeyondMaximum, fallback.latency,
-                                         fallback.throughput, fallback.maxDrain, kNumWaves),
-              120);
+    EXPECT_EQ(fallback.issueSpacing, kIssueSpacing);
+    EXPECT_EQ(
+        computeDynamicDrainLatency(hw, kLoadsBeyondMaximum, fallback.latency, fallback.throughput,
+                                   fallback.maxDrain, fallback.issueSpacing),
+        120);
 }
 
 TEST_F(CDNA5ReadyQueueTest, MixedDrainHomogeneousMatchesSingleTypeFormula) {
@@ -220,16 +230,17 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainHomogeneousMatchesSingleTypeFormula) {
     constexpr int kLoadLatency = 56;
     constexpr int kNumWaves = 4;
     constexpr int kCount = 17;
+    const int kIssueSpacing = dsIssueCyclesForWaves(hw, /*issueCycles=*/1, kNumWaves);
 
-    std::vector<DsLoadDrainEntry> b64Loads(kCount,
-                                           entryFromOpcode(hw, GFX::ds_load_b64, kLoadLatency));
-    std::vector<DsLoadDrainEntry> b128Loads(kCount,
-                                            entryFromOpcode(hw, GFX::ds_load_b128, kLoadLatency));
+    std::vector<DsLoadDrainEntry> b64Loads(
+        kCount, entryFromOpcode(hw, GFX::ds_load_b64, kLoadLatency, kNumWaves));
+    std::vector<DsLoadDrainEntry> b128Loads(
+        kCount, entryFromOpcode(hw, GFX::ds_load_b128, kLoadLatency, kNumWaves));
 
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, b64Loads, kNumWaves),
-              computeDynamicDrainLatency(hw, kCount, kLoadLatency, 4, 131, kNumWaves));
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, b128Loads, kNumWaves),
-              computeDynamicDrainLatency(hw, kCount, kLoadLatency, 2, 255, kNumWaves));
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, b64Loads),
+              computeDynamicDrainLatency(hw, kCount, kLoadLatency, 4, 131, kIssueSpacing));
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, b128Loads),
+              computeDynamicDrainLatency(hw, kCount, kLoadLatency, 2, 255, kIssueSpacing));
 }
 
 TEST_F(CDNA5ReadyQueueTest, MixedDrainUsesLastLatencyAndCountWeightedRate) {
@@ -238,30 +249,35 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainUsesLastLatencyAndCountWeightedRate) {
     constexpr int kB64Latency = 40;
     constexpr int kNumWaves = 4;
 
+    // Issue spacing at 4 waves is 2 (dsIssueCyclesForWaves), not raw numWaves.
+    // Throughput rate math is unaffected -- it comes from per-type dsThroughput,
+    // not wave count.
+    //
     // 17 B128 + 1 B64. Rate = (1*4 + 17*2) / 18 = 2.
-    // L=40 (last B64); cap = max(255,131) = 255 => 40 + 15*4 + (18-16)*4/2 = 104.
-    std::vector<DsLoadDrainEntry> endsWithB64(17,
-                                              entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency));
-    endsWithB64.push_back(entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency));
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, endsWithB64, kNumWaves), 104);
+    // L=40 (last B64); cap = max(255,131) = 255 => 40 + 15*2 + (18-16)*2/2 = 72.
+    std::vector<DsLoadDrainEntry> endsWithB64(
+        17, entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency, kNumWaves));
+    endsWithB64.push_back(entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency, kNumWaves));
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, endsWithB64), 72);
 
-    // 9 B128 + 9 B64, last B64. Rate = (9*4 + 9*2) / 18 = 3 => 40+60+(2*4)/3 = 102.
-    std::vector<DsLoadDrainEntry> grouped(9, entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency));
-    grouped.insert(grouped.end(), 9, entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency));
+    // 9 B128 + 9 B64, last B64. Rate = (9*4 + 9*2) / 18 = 3 => 40+30+(2*2)/3 = 71.
+    std::vector<DsLoadDrainEntry> grouped(
+        9, entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency, kNumWaves));
+    grouped.insert(grouped.end(), 9, entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency, kNumWaves));
     std::vector<DsLoadDrainEntry> interleaved;
     for (int i = 0; i < 9; ++i) {
-        interleaved.push_back(entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency));
-        interleaved.push_back(entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency));
+        interleaved.push_back(entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency, kNumWaves));
+        interleaved.push_back(entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency, kNumWaves));
     }
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, grouped, kNumWaves), 102);
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, interleaved, kNumWaves), 102);
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, grouped), 71);
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, interleaved), 71);
 
-    // Same mix but last is B128: L=56 => 56+60+4 = 120.
-    std::vector<DsLoadDrainEntry> endsWithB128(1,
-                                               entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency));
+    // Same mix but last is B128: L=56 => 56 + 15*2 + (2*2)/2 = 88.
+    std::vector<DsLoadDrainEntry> endsWithB128(
+        1, entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency, kNumWaves));
     endsWithB128.insert(endsWithB128.end(), 17,
-                        entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency));
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, endsWithB128, kNumWaves), 120);
+                        entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency, kNumWaves));
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, endsWithB128), 88);
 }
 
 TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxDrainInBurst) {
@@ -270,9 +286,13 @@ TEST_F(CDNA5ReadyQueueTest, MixedDrainCapUsesMaxDrainInBurst) {
     constexpr int kB64Latency = 40;
     constexpr int kNumWaves = 4;
 
-    // 100 B128 + 1 B64. Rate = (1*4 + 100*2) / 101 = 2.
-    // Raw = 40 + 15*4 + (101-16)*4/2 = 270. Cap = max(255,131) = 255.
-    std::vector<DsLoadDrainEntry> loads(100, entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency));
-    loads.push_back(entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency));
-    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, loads, kNumWaves), 255);
+    // Issue spacing at 4 waves is 2, not raw numWaves -- a bigger burst than
+    // before is needed to still push the raw estimate past the cap.
+    //
+    // 300 B128 + 1 B64. Rate = (1*4 + 300*2) / 301 = 2.
+    // Raw = 40 + 15*2 + (301-16)*2/2 = 355. Cap = max(255,131) = 255.
+    std::vector<DsLoadDrainEntry> loads(
+        300, entryFromOpcode(hw, GFX::ds_load_b128, kB128Latency, kNumWaves));
+    loads.push_back(entryFromOpcode(hw, GFX::ds_load_b64, kB64Latency, kNumWaves));
+    EXPECT_EQ(computeDynamicDrainLatencyForLoads(hw, loads), 255);
 }

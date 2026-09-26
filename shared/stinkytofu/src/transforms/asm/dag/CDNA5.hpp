@@ -854,15 +854,24 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 
 // After a picked instruction: advance the co-issue timeline. Barriers use
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
-// progress; others use issueCycles.
+// progress; others (including ds_read) use issueCycles.
+//
+// ds_read deliberately does NOT use dsIssueCost() here. dsIssueCost()'s
+// wave-sharing multiplier models cross-wave contention for the shared ds
+// issue pipe -- how long THIS wave must wait before its NEXT ds_load can
+// issue -- which is already tracked separately via dsReadThrottleWait() /
+// dsIssueCap_ / dsReadInflight_. This timeline instead gates whether a VALU
+// can co-issue into the active WMMA window at the current position; a wave
+// still issues one instruction per cycle from its own stream regardless of
+// contention on the (shared, cross-wave) ds pipe, so charging the doubled
+// cost here would incorrectly consume a co-issue slot that a same-wave VALU
+// could otherwise still fill one cycle later.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
     int elapsedCycles = node->inst->issueCycles;
     if (isBarrier(*node->inst))
         elapsedCycles = node->inst->latencyCycles;
     else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
         elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
-    else if (isDSRead(*node->inst))
-        elapsedCycles = dsIssueCost(*node->inst);
     advanceTime(elapsedCycles);
 }
 
@@ -1266,10 +1275,17 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         // comparison below is false for every wait and would drop the ds_load
         // -- the veto this change removed, reached by another route.
         const bool outOfWmmaWindow = activeWmmaLatency_ <= 0 && dsReadThrottleWait() == 0;
+        // schedulingSpace/activeWmmaLatency_ is this wave's own remaining
+        // window, consumed at the raw issueCycles rate once a ds_load is
+        // actually picked (see updateWMMAStatus). dsIssueCost()'s wave-sharing
+        // doubling belongs to dsThrottleWait (cross-wave ds pipe contention,
+        // already added above), not to this admission test -- charging it
+        // here too would reject a ds_load the window can actually fit,
+        // splitting matched ds_load pairs apart for no real reason.
         const bool fitsSchedulingBudget =
             dsThrottleWait == 0 || outOfWmmaWindow ||
             (schedulingPos < activeWmmaLatency_ &&
-             dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
+             dsThrottleWait + pickedDS->inst->issueCycles <= schedulingSpace);
         if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
@@ -1463,9 +1479,11 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS
 //            per-WMMA cap. latency = dsReadDrainLatency when it is configured
-//            (> 0), else computeDynamicDrainLatencyForLoads(hw, matchingLoads,
-//            numWaves) over every matching ds_read (last-load latency,
-//            count-weighted average throughput, max maxDrain over the burst).
+//            (> 0), else the last matching ds_read's own (already
+//            wave-sharing-adjusted) drain latency -- every matching ds_read
+//            is already issued earlier in program order by this point, so
+//            only that one load's own remaining transit time matters, not a
+//            burst issue-spacing term for issuing them in the first place.
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1485,6 +1503,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
     //          signal/wait pairs so both halves share one threshold.
     auto barrierGroups =
         groupBarrierTokens(collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/true));
+    const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
 
     std::vector<BarrierAfterSummary> overlapChecks;
     for (const BarrierTokenGroup& group : barrierGroups) {
@@ -1507,8 +1526,11 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                 if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
                     const HwInstDesc* desc = inst.getHwInstDesc();
                     matchingDsLoads.push_back(makeDsLoadDrainEntry(
-                        hw_, static_cast<int>(inst.latencyCycles), desc ? desc->dsThroughput : 0,
-                        desc ? desc->dsMaxDrain : 0));
+                        hw_, {.latency = static_cast<int>(inst.latencyCycles),
+                              .dsThroughput = desc ? desc->dsThroughput : 0,
+                              .dsMaxDrain = desc ? desc->dsMaxDrain : 0,
+                              .isaIssueCycles = static_cast<int>(inst.issueCycles),
+                              .numWaves = numWaves}));
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
                     break;
@@ -1532,18 +1554,21 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency)
-        // + 1. A positive dsReadDrainLatency pins the latency. A non-positive value
-        // (default 0) means "use dynamic drain latency," derived from all matching
-        // ds_loads via computeDynamicDrainLatencyForLoads (last-load latency,
-        // count-weighted average throughput, max maxDrain over the burst), keyed
-        // by this pass context's NumWaves.
+        // + 1. A positive dsReadDrainLatency pins the latency. A non-positive
+        // value (default 0) means "use the last matching ds_load's own drain
+        // latency": by this point every matching ds_load has already been
+        // issued (they are earlier in program order; their issue spacing is
+        // already reflected in real instruction positions), so all that is
+        // left to wait out is that one load's own transit time through the
+        // return queue -- not computeDynamicDrainLatencyForLoads()'s
+        // (count-1)*issueSpacing burst-growth term, which models spreading
+        // NEW issues out, not draining ones already in flight. Using that
+        // term here would double-count the same issue spacing that is
+        // already paid for by the real cycle positions of the earlier loads.
         const int configuredDrainLatency = dsReadDrainLatency();
-        const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
         const int matchingDsLoadCount = static_cast<int>(matchingDsLoads.size());
         const int latencyForAfterThreshold =
-            configuredDrainLatency > 0
-                ? configuredDrainLatency
-                : computeDynamicDrainLatencyForLoads(hw_, matchingDsLoads, numWaves);
+            configuredDrainLatency > 0 ? configuredDrainLatency : matchingDsLoads.back().latency;
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);

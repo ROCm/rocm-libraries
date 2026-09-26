@@ -821,16 +821,22 @@ TEST_F(DAGSchedulerPassTest, WmmaHideBudgetCountsSplitBarrierGroupOnce) {
 
 // ---------------------------------------------------------------------------
 // HWModel::Lds::wavesPerDsIssuePipe (the ds issue pipe shared between waves)
-// is TEMPORARILY DISABLED -- see HWModel.cpp -- after real hardware measured
-// it costing f8_tn_medium/mxf4_tn_medium real throughput. With it disabled,
-// NumWaves has no effect on ds issue cost end-to-end; the sharing math itself
-// stays covered at the unit level, re-enabled on a local HWModel copy
-// (HWModelDsIssue.FourWavesRunAsPairsSoTheCostDoubles and neighbors).
+// is enabled -- see HWModel.cpp. dsIssueCost()'s wave-sharing multiplier
+// models cross-wave contention for that shared pipe: how long THIS wave must
+// wait before its NEXT ds_load can issue. That is a ds-to-ds admission
+// throttle, already tracked separately via dsReadThrottleWait()/dsIssueCap_,
+// so updateWMMAStatus's co-issue clock advances ds_read by the raw
+// issueCycles, not dsIssueCost() -- a wave still issues one instruction per
+// cycle from its own stream regardless of contention on the (shared,
+// cross-wave) ds pipe, so charging the doubled cost to the same-wave co-issue
+// timeline would consume a slot a VALU could otherwise still fill.
 //
-// The rule (4) cap is held inert here (perCap well above the ds_load count) so
-// what is measured is the window filling up, not the cap.
+// With this scenario's generous throttle/cap settings (perCap well above the
+// ds_load count, queueDepth/throttleLatency wide open), ds-to-ds admission
+// never gates either, so how many ds_loads fit in the first WMMA's window is
+// unaffected by wave count.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingIsDisabled) {
+TEST_F(DAGSchedulerPassTest, DsIssueCostSharesThePipeBetweenWaves) {
     auto dsInFirstWmmaWindow = [this](uint32_t numWaves) {
         SetUp();  // fresh block per run
         createWmmaF32_16x16x16_bf16(/*destStart=*/100, /*src0Start=*/200);
@@ -859,9 +865,11 @@ TEST_F(DAGSchedulerPassTest, DsIssueCostIsUnaffectedByWaveCountWhilePipeSharingI
     const int fourWaves = dsInFirstWmmaWindow(4);
 
     EXPECT_EQ(oneWave, fourWaves)
-        << "pipe sharing is disabled, so NumWaves must not change how many "
-           "ds_loads fit in a WMMA's co-issue window (see HWModel.cpp)";
-    EXPECT_EQ(twoWaves, fourWaves);
+        << "dsIssueCost()'s wave-sharing multiplier only throttles ds-to-ds "
+           "admission, not this same-wave co-issue timeline, so with "
+           "admission wide open here wave count should not change how many "
+           "ds_loads fit in the window";
+    EXPECT_EQ(twoWaves, fourWaves) << "same reasoning applies regardless of wave count";
 }
 
 // A non-positive dsReadPerCap is not a cap anyone can mean. It used to fall

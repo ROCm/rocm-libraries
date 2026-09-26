@@ -34,13 +34,13 @@ constexpr HWModel kGfx1250Model = {
             // cost 2. Independent of dagFeatures.dsReadPerCap, which stays a
             // separately tuned ceiling.
             //
-            // TEMPORARILY DISABLED (set to 1, i.e. no sharing): measured on
-            // real gfx1250 hardware to cost f8_tn_medium ~17.5% and
-            // mxf4_tn_medium ~12.3% real throughput, both fully recovered by
-            // this single-line revert -- see PR discussion. The model itself
-            // is believed correct in principle; needs re-validation against
-            // hardware before it goes back to 2.
-            .wavesPerDsIssuePipe = 1,
+            // Re-enabled: previously measured ~17.5%/~12.3% real regressions on
+            // f8_tn_medium/mxf4_tn_medium. Root cause wasn't this cost model --
+            // it was a second consumer (the WMMA-hide scheduling-budget check in
+            // CDNA5ReadyQueue) that fed the same doubled cost into a threshold
+            // tuned assuming single-wave issue cost. That check now uses the raw
+            // ISA issueCycles instead of dsIssueCost(); this value stays real.
+            .wavesPerDsIssuePipe = 2,
         },
     .barrier =
         {
@@ -86,8 +86,7 @@ int capDrainLatency(int latency, int maxDrainLatency) {
 }  // namespace
 
 int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
-                               int dsLoadThroughput, int maxDrainLatency, int rawNumWaves) {
-    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
+                               int dsLoadThroughput, int maxDrainLatency, int issueSpacing) {
     const int queueDepth = hw.lds.readQueueDepth;
     const int throughput = std::max(1, dsLoadThroughput);
 
@@ -101,13 +100,13 @@ int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int t
     // one load's latency plus the per-wave issue spacing of the loads ahead of
     // it.
     if (matchingDsLoadCount <= queueDepth)
-        return capDrainLatency(targetDSLoadLatency + (matchingDsLoadCount - 1) * numWaves,
+        return capDrainLatency(targetDSLoadLatency + (matchingDsLoadCount - 1) * issueSpacing,
                                maxDrainLatency);
 
     // Past the depth the queue is full. Divide by throughput so half-rate DS
     // loads (smaller throughput) pay a larger overflow term.
-    return capDrainLatency(targetDSLoadLatency + (queueDepth - 1) * numWaves +
-                               (matchingDsLoadCount - queueDepth) * numWaves / throughput,
+    return capDrainLatency(targetDSLoadLatency + (queueDepth - 1) * issueSpacing +
+                               (matchingDsLoadCount - queueDepth) * issueSpacing / throughput,
                            maxDrainLatency);
 }
 
@@ -123,14 +122,25 @@ int dsIssueCyclesForWaves(const HWModel& hw, int issueCycles, int numWaves) {
     return issueCycles * std::min(numWaves, share);
 }
 
-int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads,
-                                       int rawNumWaves) {
+DsLoadDrainEntry makeDsLoadDrainEntry(const HWModel& hw, const DsLoadDrainInputs& in) {
+    const int numWaves = std::clamp(in.numWaves, kMinModeledWaves, kMaxModeledWaves);
+    return {
+        .latency = in.latency > 0 ? in.latency : hw.lds.readDrainLatency,
+        .throughput = in.dsThroughput > 0 ? in.dsThroughput : hw.lds.dsLoadDefaultThroughput,
+        .maxDrain = in.dsMaxDrain > 0 ? in.dsMaxDrain : hw.lds.dsLoadDefaultMaxDrain,
+        .issueSpacing = dsIssueCyclesForWaves(hw, in.isaIssueCycles, numWaves),
+    };
+}
+
+int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoadDrainEntry> loads) {
     if (loads.empty()) return 0;
 
-    const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
     const int queueDepth = hw.lds.readQueueDepth;
     const int count = static_cast<int>(loads.size());
     const int targetLatency = loads.back().latency;
+    // Last load's own (already wave-sharing-adjusted) issue cost, matching
+    // targetLatency above -- see makeDsLoadDrainEntry.
+    const int issueSpacing = loads.back().issueSpacing;
 
     // Cap with the largest maxDrain among the whole burst, not just the last
     // load.
@@ -144,12 +154,12 @@ int computeDynamicDrainLatencyForLoads(const HWModel& hw, std::span<const DsLoad
     if (queueDepth <= 0 || count <= 1) return capDrainLatency(targetLatency, maxDrainLatency);
 
     if (count <= queueDepth)
-        return capDrainLatency(targetLatency + (count - 1) * numWaves, maxDrainLatency);
+        return capDrainLatency(targetLatency + (count - 1) * issueSpacing, maxDrainLatency);
 
     const int dsLoadThroughput =
         static_cast<int>(std::max<long long>(1, throughputSum / std::max(1, count)));
-    return capDrainLatency(targetLatency + (queueDepth - 1) * numWaves +
-                               (count - queueDepth) * numWaves / dsLoadThroughput,
+    return capDrainLatency(targetLatency + (queueDepth - 1) * issueSpacing +
+                               (count - queueDepth) * issueSpacing / dsLoadThroughput,
                            maxDrainLatency);
 }
 
