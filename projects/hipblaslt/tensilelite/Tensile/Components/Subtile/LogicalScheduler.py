@@ -4722,7 +4722,8 @@ class LogicalScheduler:
         return dict(enumerate(stages))
 
     def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None,
-                           unroll_iter=0, storeCfg=None):
+                           unroll_iter=0, storeCfg=None, fusedPrelude=None,
+                           plainOverride=None):
         """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
 
         Non-fused kernels: byte-identical to the stock single-NLL emission (early
@@ -4735,13 +4736,20 @@ class LogicalScheduler:
         arms fall through to the unchanged post-loop store, so GPU output is correct
         regardless of which arm runs — this just makes the FUSED block reachable so it
         is actually exercised. Step 4d-3a relocates the store into the FUSED copy and
-        adds the NonEdge condition + stored_flag dedup. FUSED/guard labels carry the
+        adds the NonEdge condition + stored_flag dedup.         FUSED/guard labels carry the
         site suffix so the two per-unroll emit sites never collide.
+
+        plainOverride/fusedPrelude let the two arms come from different bodies.
+        The four-deep tail needs that: it is the FUSED arm's schedule, and a wave
+        that fails the guard has to take the baseline NGLL/NLL pair instead.
+        fusedPrelude then holds the entry sync and local-read prime that only the
+        four-deep body needs, so the plain arm never runs them.
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import SBranch
 
-        plain = self._emitLoop(writer, kernel, label, emitted_3d)
+        plain = (plainOverride if plainOverride is not None
+                 else self._emitLoop(writer, kernel, label, emitted_3d))
         if not getattr(writer.states, "postLoopStoreInNll", False):
             return plain
 
@@ -4750,6 +4758,8 @@ class LogicalScheduler:
         plainLabel = Label(f"{label}_PlainNLL", "")
         # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
         module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        if fusedPrelude is not None:
+            module.add(fusedPrelude)
         # The woven store is generated in capture mode first. Its actual ACC-read
         # instructions and Phase1/Phase2 gaps then drive terminal-MFMA placement.
         fusedEmitted = copy.deepcopy(emitted_3d)
@@ -6175,7 +6185,22 @@ class LogicalScheduler:
         # Kept separate from nll_ft, which still has to decide where the
         # SkipToNLL label goes -- overwriting it would emit that label twice.
         nll_ft_ui = nll_ft
+        tailPrelude = None
+        tailPlain = None
         if spanNgll:
+            # The four-deep body is the PLSIN arm's schedule and nothing else's.
+            # A wave that fails the fused guard runs the baseline NGLL/NLL pair,
+            # built here while nll_ft_3d still names it. Those bodies were
+            # populated before the tail reallocated the tile registers, so they
+            # still read the registers the mainloop's last iteration prefetched
+            # into; the two arms alias that space but never both run.
+            tailPlain = Module(f"NLL_C{last}_PlainSplit")
+            tailPlain.addComment0(f"NGLL_C{last} (non-PLSIN arm)")
+            tailPlain.add(self._emitLoop(writer, kernel, f"NGLL_C{last}",
+                                         self._ngll_per_unroll[(last + 1) % uf]))
+            tailPlain.addComment0(f"NLL_C{last} (non-PLSIN arm)")
+            tailPlain.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
+                                         inject_pap_after_nll_drain(nll_ft_3d)))
             nll_ft_ui = 0
             nll_ft_3d = self._tail_merged_emitted
         if hasNGLL and not spanNgll:
@@ -6200,17 +6225,21 @@ class LogicalScheduler:
             from rocisa.instruction import SWaitCnt, SBarrier
             entryVmcnt = int(plsinDebugEnv("TENSILE_PLSIN_TAIL_ENTRY_VMCNT",
                                            str(self._tailEntryInflightBound())))
-            module.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
+            # Collected rather than emitted: this is the four-deep body's entry
+            # sequence, so it belongs behind the fused guard with the body it
+            # serves. The plain arm keeps the baseline pair's own sync.
+            tailPrelude = Module("FourDeepTailEntry")
+            tailPrelude.add(SWaitCnt(vlcnt=entryVmcnt, dscnt=-1, vscnt=-1,
                                 comment="four-deep tail: retire the mainloop's"
                                         " loads before reading what they wrote"))
-            module.add(SBarrier(comment="four-deep tail entry"))
+            tailPrelude.add(SBarrier(comment="four-deep tail entry"))
             if self._tail_prime_emitted is not None:
                 # Under tailOwnTiles the body reallocates its tiles, so the
                 # operands its first MFMA expects are not the ones the mainloop
                 # left behind. Read them here, after the barrier that makes the
                 # mainloop's writes visible, so the body starts from LDS.
-                module.addComment0("four-deep tail: prime LR pipeline")
-                module.add(self._emitLoop(writer, kernel, "TAILPRIME",
+                tailPrelude.addComment0("four-deep tail: prime LR pipeline")
+                tailPrelude.add(self._emitLoop(writer, kernel, "TAILPRIME",
                                           [[self._tail_prime_emitted]],
                                           schedule=False))
         module.addComment0(f"NLL_C{last}")
@@ -6222,7 +6251,9 @@ class LogicalScheduler:
                                             if (self._tail_own_peaks is not None
                                                 and plsinDebugEnv(
                                                     "TENSILE_PLSIN_TAIL_STAGE_STORE", "1") != "0")
-                                            else None)))
+                                            else None),
+                                  fusedPrelude=tailPrelude,
+                                  plainOverride=tailPlain))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
         if plsin:
             with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
