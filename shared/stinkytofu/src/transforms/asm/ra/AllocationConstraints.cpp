@@ -1,28 +1,11 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/ra/AllocationConstraints.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -31,6 +14,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/AsmTargetRegisters.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
 #include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
@@ -188,6 +172,34 @@ void collectReadWriteTies(const StinkyInstruction& instruction, const RegClassSe
     }
 }
 
+/// Where the dispatch stops writing scalars, or "everywhere" when the function
+/// does not say.
+///
+/// Unknown has to mean the whole file. The metadata is absent for anything that
+/// skipped the rocisa conversion -- a .stir file, a test -- and a stored zero is
+/// a default nobody set, every dispatch filling something. Believing either
+/// would unpin live-ins on no more than the absence of evidence.
+uint32_t dispatchFilledSgprsOf(const Function& function) {
+    constexpr uint32_t kEverything = std::numeric_limits<uint32_t>::max();
+    const uint64_t filled = function.getMetaData(kSigDispatchFilledSgprsMetaKey).value_or(0);
+    if (filled == 0 || filled > kEverything) return kEverything;
+    return static_cast<uint32_t>(filled);
+}
+
+/// Whether a live-in bound to \p hint arrived holding something.
+///
+/// Per DWORD, each unit of a tuple carrying its own hint, so a tuple straddling
+/// the line keeps the pin on its lower units and tupleRuns() holds the rest in
+/// place behind them.
+///
+/// Scalars only: the vector side is filled with workitem ids whose packing this
+/// does not model. A missing hint counts as filled too, there being no index to
+/// compare and no reading of "no register recorded" that means "any will do".
+bool dispatchFillsLiveIn(const std::optional<RegKey>& hint, uint32_t dispatchFilledSgprs) {
+    if (!hint.has_value() || hint->type != RegType::S) return true;
+    return hint->idx < dispatchFilledSgprs;
+}
+
 std::string joinIds(const std::vector<SSAValueID>& ids) {
     std::ostringstream out;
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -215,6 +227,7 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
     }
 
     const RegClassSet& liftedClasses = function.ssaArena().liftedClasses();
+    const uint32_t dispatchFilledSgprs = dispatchFilledSgprsOf(function);
 
     for (const BasicBlock& block : function) {
         for (const IRBase& ir : block) {
@@ -227,12 +240,20 @@ AllocationConstraints AllocationConstraints::build(const Function& function,
 
         for (const SSABlockArgument& arg : block.ssaArguments()) {
             if (arg.value == nullptr) continue;
-            // No incoming edge means nothing in the function defines this value:
-            // it arrives in a register the dispatch chose, so it cannot move.
+            // No incoming edge means nothing in the function defines this value.
+            // Pinned where the dispatch filled the register it names, since it
+            // then arrives holding something that moving it would lose. Above
+            // that line nobody wrote it, so a pin would fix a block in place to
+            // preserve contents that do not exist -- and at s[100:107] on a
+            // 106-register file could not be honoured at all.
             if (arg.incoming.empty()) {
                 const SSAValueID id = arg.value->valueId();
-                if (id != kInvalidSSAValueID && id < constraints.pinnedByValue_.size())
+                if (id == kInvalidSSAValueID || id >= constraints.pinnedByValue_.size()) continue;
+                if (dispatchFillsLiveIn(constraints.hintByValue_[id], dispatchFilledSgprs)) {
                     constraints.pinnedByValue_[id] = true;
+                } else {
+                    constraints.undefinedLiveIns_.push_back(id);
+                }
                 continue;
             }
             AffinitySet set;
@@ -287,6 +308,7 @@ std::string AllocationConstraints::toString() const {
     for (size_t id = 1; id < hintByValue_.size(); ++id) {
         out << '%' << id << ':' << regTypeToString(classOf(static_cast<SSAValueID>(id)));
         if (hintByValue_[id].has_value()) out << " hint " << regKeyToString(*hintByValue_[id]);
+        if (isPinned(static_cast<SSAValueID>(id))) out << " pinned";
         out << '\n';
     }
     for (const TupleRun& run : tupleRuns_) {
@@ -294,6 +316,9 @@ std::string AllocationConstraints::toString() const {
     }
     for (const AffinitySet& set : affinitySets_) {
         out << "affinity {" << joinIds(set.members) << "}\n";
+    }
+    if (!undefinedLiveIns_.empty()) {
+        out << "undefined live-in {" << joinIds(undefinedLiveIns_) << "}\n";
     }
     return out.str();
 }
