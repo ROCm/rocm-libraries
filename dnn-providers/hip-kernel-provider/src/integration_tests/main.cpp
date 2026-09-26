@@ -5,6 +5,7 @@ SPDX-License-Identifier: MIT
 
 #include <filesystem>
 #include <iostream>
+#include <system_error>
 
 #include <gtest/gtest.h>
 
@@ -48,6 +49,29 @@ int main(int argc, char** argv)
 
         hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", descriptors.string().c_str());
     }
+
+#ifdef HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR
+    // The production descriptor tree, loaded beside the set above. The offset is fixed at
+    // build time whatever GPU targets the build had, and the tree is looked up here at run
+    // time: an install may pair this binary with device content another build produced,
+    // and a tree that is absent adds nothing. The set above replaces the plugin-relative
+    // tree the production engines would otherwise come from; HIPDNN_DESCRIPTOR_RUNTIME_DIR
+    // is additive, so both load. The root is the arch-neutral one: the loader walks every
+    // arch subtree under it and prunes each pack by its `arch` list against the running
+    // device at match time, so the device's own shard is the only one that can serve. A
+    // caller-set value is kept as given.
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        const auto product = hip_kernel_provider::testing::descriptorSetRoot(
+            HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR);
+        std::error_code absent;
+        if(!product.empty() && std::filesystem::is_directory(product, absent))
+        {
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR",
+                                               product.string().c_str());
+        }
+    }
+#endif
 #endif
 
     // Register HipErrorHandler to check and clear HIP errors after each test

@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "4b3a0123-578f-4e9c-a965-b010a18ff107",
+  "name": "hipkernel:Gfx950AttentionDense",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx950_attention_dense.graph_match"
+  },
+  "metadata": "589bc6c6-d94e-4400-95d7-3e517f9b6b67",
+  "heuristic": "b01732db-91fe-43b4-8b49-3646c22eccc0",
+  "knobs": [
+    "block_m",
+    "block_n"
+  ]
+}

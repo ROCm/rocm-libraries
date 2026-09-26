@@ -1,10 +1,19 @@
 ## Splice point 5: .../src/tests/engines/kernel_ingestor_engine/CMakeLists.txt
-## Append these lines INSIDE the existing target_sources(hip_kernel_provider_tests
-## PRIVATE ...) block; do not replace the block. This tool's output tree places both
-## files under tests/ (see fragments header) while the provider's test tree nests
-## pack-scoped test files under packs/ (see TestConvFwdPack.cpp /
-## TestPointwisePacks.cpp) -- move both files there when splicing.
+##
+## TWO targets, one line each. The pack-shape census needs a descriptor shard and the
+## census environment to say anything; the matcher test needs neither and must keep
+## running as an ordinary unit. Putting both in one binary is what made ordinary units
+## require package-census state. Append each line INSIDE the target_sources() block
+## named above it -- do not replace either block, and do not merge the two.
+##
+## This tool's output tree places both files under tests/ (see fragments header) while
+## the provider's test tree nests pack-scoped test files under packs/ (see
+## TestConvFwdPack.cpp / TestPointwisePacks.cpp) -- move both files there when splicing.
+##
+## Splice point 5a: into target_sources(hip_kernel_provider_census_tests PRIVATE ...)
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Packs.cpp
+##
+## Splice point 5b: into target_sources(hip_kernel_provider_tests PRIVATE ...)
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/Test{{ config.engine.pascal_name }}Matchers.cpp
 
 {% if emitted.source_kind == 'kpack' %}
@@ -23,16 +32,39 @@
 {% for line in packs_source.split('\n') if line.startswith(case_marker) %}
 {% set _ = expected_cases.append(line.split(case_marker)[1].split(')')[0] | trim) %}
 {% endfor %}
-## Splice point 5b: P/src/tests/CMakeLists.txt, beside the other per-pack-target
+{#
+   The arch restriction is the emitted inventory's own concrete architectures, taken
+   from the finalized documents this run wrote. The wildcard key is deliberately not
+   among them: "*" is how a descriptor says it ships everywhere, not an architecture a
+   shard can be named after, and `ARCHES *` would ask for a shard that never exists.
+   The keyword is emitted only when the list is non-empty -- present-with-no-values is
+   fatal by contract, and rightly so: it reads as a restriction while admitting nothing.
+-#}
+{% set restricted_arches = [] %}
+{% for arch in emitted.arches %}
+{% if arch != '*' %}{% set _ = restricted_arches.append(arch) %}{% endif %}
+{% endfor %}
+## Splice point 5c: P/src/tests/CMakeLists.txt, beside the other per-pack-target
 ## census calls that follow hkp_verify_embedded_sources(). Add this call:
-hkp_register_census_tests(TARGET hip_kernel_provider_tests
+hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
                           PACK_NAME product
+{% if restricted_arches %}
+                          ARCHES
+{% for arch in restricted_arches %}
+                              {{ arch }}
+{% endfor %}
+{% endif %}
                           SUITES Test{{ config.engine.pascal_name }}Packs
                           EXPECTED_CASES
 {% for case in expected_cases %}
                               {{ case }}
 {% endfor %}
                           )
+##
+## `TARGET hip_kernel_provider_census_tests` is not interchangeable with the ordinary
+## unit binary: the census target is the one registered with a shard, an expected arch
+## and the strict guard. Naming the unit binary here puts package-census state back on
+## every ordinary unit run.
 ##
 ## `PACK_NAME product` addresses the `product` pack target, wired only where the shipped
 ## root holds a descriptor AND at least one of them declares an architecture this build
@@ -41,12 +73,19 @@ hkp_register_census_tests(TARGET hip_kernel_provider_tests
 ## dormant pack, so leave it unguarded. A PACK_NAME no pack target carries is a configure
 ## error, which is the typo this keeps visible.
 ##
+## `ARCHES` narrows registration to the architectures THIS bundle emitted, intersected
+## with the arches the pack target was wired for. Eligibility is restricted, not
+## universal: without it the suite registers for every arch the pack target carries,
+## including ones this bundle ships nothing for, and the census then asserts a gfx950
+## inventory against a gfx942 shard. Omitting the keyword is the deliberate
+## "every wired arch" spelling; supplying it with no values is a configure error.
+##
 ## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing this
 ## call, or the census runs against a shard without your descriptors.
 ##
-## The call registers one CTest entry per arch the `product` pack target was wired with:
+## The call registers one CTest entry per eligible arch:
 ## hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs,
-## running hip_kernel_provider_tests --gtest_filter=Test{{ config.engine.pascal_name }}Packs.*
+## running hip_kernel_provider_census_tests --gtest_filter=Test{{ config.engine.pascal_name }}Packs.*
 ## with HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs,
 ## HIPDNN_TEST_EXPECTED_ARCH=<arch> and HIPDNN_DESCRIPTOR_DIR set to that pack target's
 ## own out-root shard for <arch>, under the labels unit_test;hip-kernel-provider;host.
@@ -60,15 +99,24 @@ hkp_register_census_tests(TARGET hip_kernel_provider_tests
 ## list above is read out of the suite this run rendered; re-splice whenever the bundle's
 ## shape changes.
 {% else %}
-## Splice point 5b: nothing is registered for this direct-load engine by default.
+## Splice point 5c: nothing is registered for this direct-load engine by default.
 ##
 ## A direct-load engine's suite is censused, if at all, by a hand-added
-## `hkp_register_census_tests(TARGET hip_kernel_provider_tests PACK_NAME <set>
+## `hkp_register_census_tests(TARGET hip_kernel_provider_census_tests PACK_NAME <set>
 ## SUITES Test{{ config.engine.pascal_name }}Packs EXPECTED_CASES <case> <case> ...)`
 ## call in `P/src/tests/CMakeLists.txt`, where `<set>` is the pack target for the
 ## authored set this bundle writes into (`unit`, `integration`, `shared` or
-## `archive_fixture`). Census requires every case in the suite to execute without
-## skipping, so only declare a suite that reads this bundle's shard and no other.
+## `archive_fixture`). The census target is the one to name: the census cannot run as an
+## ordinary unit, whatever dialect the bundle is.
+##
+## Write NO `ARCHES` keyword in that call. This bundle's descriptors declare no concrete
+## architecture, so it ships on every arch its pack target was wired for, and omission is
+## exactly how that is spelled. `ARCHES *` is not the wildcard -- no shard is named "*" --
+## and the keyword with no values after it is a configure error rather than "no
+## restriction".
+##
+## Census requires every case in the suite to execute without skipping, so only declare a
+## suite that reads this bundle's shard and no other.
 ##
 ## EXPECTED_CASES is optional to configure and required for the census to mean what it
 ## claims: the guard's obligations come from the registered cases. Pin the TEST_F names.

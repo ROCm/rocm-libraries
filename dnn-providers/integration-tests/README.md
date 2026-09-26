@@ -240,7 +240,9 @@ for a `[[validator_overrides]]` RMS check); output checked against the CPU refer
 or against golden data is compared on the host (`CpuFpReferenceValidation` /
 `CpuFpReferenceMiopenRmsValidation`). That holds for every mode, including each step
 of the `auto` fallback chain, and for C++ graph tests under
-`--reference-executor gpu|cpu`.
+`--reference-executor gpu|cpu`. A `[[validator_overrides]]`
+`"allclose_matching_infinities"` check has a host validator only: a comparison
+that resolves to the device fails that tensor instead of running it.
 
 `--validator auto|cpu|gpu` (or `HIPDNN_TEST_VALIDATOR`) overrides that choice for
 every comparison in the run, independently of the reference. `auto` (the default)
@@ -454,12 +456,28 @@ reason  = "ROCm/rocm-libraries#6979 — no engine has an applicable solution for
   the output tensor's label — its name (e.g. `LayernormBackward_0::DSCALE`), or
   `uid=N` when the graph did not name it. Match on the tensor label rather than
   the uid: uids differ between a C++ graph test and the bundle captured from it,
-  names do not. `validator` is `"allclose"` or `"rms"`; `rms_threshold` is
-  required and must be positive when the validator is `"rms"`, and must be
-  absent when it is `"allclose"` — an entry that does not say exactly what it
-  means is a load error, never a silent fall-back. `"rms"` is only defined for
-  float, half, bfloat16 and double outputs; a glob wide enough to catch an
-  integer output fails that tensor with a message naming the glob to narrow.
+  names do not. `validator` is `"allclose"`, `"allclose_matching_infinities"` or
+  `"rms"`; `rms_threshold` is required and must be positive when the validator is
+  `"rms"`, and must be absent for either of the other two — an entry that does not
+  say exactly what it means is a load error, never a silent fall-back.
+  `"allclose_matching_infinities"` grades exactly as `"allclose"` does, at the
+  same resolved atol/rtol, except that an element that is infinite with the *same
+  sign* in both the reference and the device output compares equal. NaN,
+  opposite-signed infinities and finite-versus-infinite disagreements all still
+  fail, and every finite element is still graded by atol/rtol. Use it for an
+  output whose correct value is infinite on both sides — an SDPA forward
+  log-sum-exp row that is fully masked is `-inf` in the reference and `-inf` on
+  the device, and both are right, but `|ref - impl|` is NaN and plain allclose
+  fails the tensor. It is **host-only**: there is no device implementation, so a
+  tensor it selects fails with "Validator override NOT APPLICABLE ON DEVICE"
+  whenever its comparison runs on the device — under `auto` that is every run
+  where the GPU reference produced the expected values. Run such a config with
+  `--validator cpu` (or `HIPDNN_TEST_VALIDATOR=cpu`), or narrow the `tensors`
+  glob. Neither `"rms"` nor `"allclose_matching_infinities"` is
+  defined for integer outputs (RMS has no integer formulation; an integer has no
+  infinity to match): they are float, half, bfloat16 and double only, and a glob
+  wide enough to catch an integer output fails that tensor with a message naming
+  the glob to narrow.
   Absent any match the comparison is allclose — **allclose is the default
   everywhere, and this section is the only thing that changes it.** Use it when
   a per-element check is the wrong question, not to buy slack: an output that is

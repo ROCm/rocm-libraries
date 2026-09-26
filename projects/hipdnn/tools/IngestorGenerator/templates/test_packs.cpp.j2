@@ -35,14 +35,21 @@
  * de-duplication -- not from the authored config, whose pack file stems are not the
  * pack names the loader reports.
  *
- * Register one entry with hkp_register_census_tests(TARGET ... PACK_NAME ... SUITES
- * Test{{ config.engine.pascal_name }}Packs EXPECTED_CASES ...) in
+ * This file belongs to the census binary, hip_kernel_provider_census_tests, NOT to the
+ * ordinary unit binary: every case below needs a descriptor shard and the census
+ * environment, which an ordinary unit run has no business requiring. The generated
+ * matcher test is the one that stays in hip_kernel_provider_tests.
+ *
+ * Register one entry with hkp_register_census_tests(TARGET ... PACK_NAME ... ARCHES ...
+ * SUITES Test{{ config.engine.pascal_name }}Packs EXPECTED_CASES ...) in
  * src/tests/CMakeLists.txt, beside hkp_verify_embedded_sources(). CMake registers one
- * native process per arch of that pack target, supplying the shard's
+ * native process per ELIGIBLE arch -- the arches this bundle emitted, intersected with
+ * the ones the pack target was wired for -- supplying the shard's
  * HIPDNN_DESCRIPTOR_DIR, HIPDNN_TEST_EXPECTED_ARCH (from the caller, never detected)
- * and HIPDNN_TEST_CENSUS_SUITE. Every registered case must then execute and pass
- * without skipping in every iteration, so declare a suite only where every case reads
- * one pack target's shard.
+ * and HIPDNN_TEST_CENSUS_SUITE. An arch this bundle ships nothing for is not registered
+ * at all, rather than registered against another arch's shard. Every registered case
+ * must then execute and pass without skipping in every iteration, so declare a suite
+ * only where every case reads one pack target's shard.
  *
  * This proves registration, loading and inventory, and nothing about dispatch.
  *

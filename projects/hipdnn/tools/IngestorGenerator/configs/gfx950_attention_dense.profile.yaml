@@ -1,0 +1,287 @@
+# Profile: gfx950 dense flash-attention prefill
+#
+# Drives dispatch_parity.py, knob_sweep.py, verify_variant_sets.py and
+# variant_reachability.py. Every tool reads the same file, so the kernel
+# and the tooling cannot disagree.
+
+arch: gfx950
+slug: gfx950_attention_dense
+
+# Repository-relative, resolved against the checkout root the tools find from their
+# own location -- never against the current directory. A `../..` chain is only correct
+# when the tool is invoked from one particular directory, which nothing guarantees.
+provider_root: dnn-providers/hip-kernel-provider
+
+# The reference candidate registry, used by reconcile_applicability.py.
+reference_candidates:
+  module: dispatch.attention
+  function: attention_candidates
+  match: algorithm
+  family: attention_dense
+
+# rocKE source module and builder function.
+source: kernels/gfx950/attention_dense.py
+builder: build_attention_dense
+
+# The dispatcher factory that constructs the spec from a request.
+dispatch:
+  module: dispatch.attention.gfx950
+  function: dense_spec_for_request
+
+# The request class the factory takes.
+request:
+  module: dispatch.attention.common
+  class: AttentionRequest
+  defaults:
+    arch: gfx950
+    algorithm: attention_dense
+    # Pins the NON-persistent arm, which is the only one this catalog ships.
+    #
+    # AttentionRequest defaults this field to "auto", and the gfx950 dispatcher then
+    # reads auto as `persistent = work >= dense_num_persistent` (256). B=1,
+    # Sq=Skv=8192, Hq=Hkv=8, D=128 gives work = 32*8*1 = 256, so auto resolves
+    # persistent=True -- and, at D=128 causal bf16/fp16, wide_lds_dma=True with it.
+    # That is a different compiled kernel and a different kernel-argument contract
+    # from the variants here, every one of which is non-persistent on the
+    # eight-argument signature.
+    #
+    # The quotes are mandatory, not style: PyYAML reads a bare `off` as the boolean
+    # False, and the dispatcher calls `.strip().lower()` on this field, so the
+    # unquoted spelling aborts the tool instead of selecting an arm.
+    dense_persistent: "off"
+
+# The eligibility predicate.
+predicate:
+  module: kernels.gfx950.attention_dense
+  function: supports_attention_dense
+
+# The spec class.
+arch_spec:
+  module: kernels.gfx950.attention_dense
+  class: Gfx950AttentionDenseSpec
+
+# Metadata fields the compiled binary specializes on. block_m/block_n are the
+# tile, also public engine knobs; a record omitting them completes to the
+# 256/64 baseline tile, and with no tile knob set, cold selection prefers the
+# applicable 256/64 candidate.
+metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+
+# Vocabulary: map kernel dtype spelling to hipDNN matcher spelling.
+vocabulary:
+  dtype:
+    bf16: BF16
+    fp16: FP16
+
+# Specialization contract.
+specialization:
+  metadata_fields:
+    - dtype
+    - head_size
+    - num_query_heads
+    - num_kv_heads
+    - causal
+    - ragged
+    - sliding_window
+    - batch
+    - seqlen_q
+    - seqlen_kv
+    - block_m
+    - block_n
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+
+# Emitted config skeleton.
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense
+
+engine:
+  name: "hipkernel:Gfx950AttentionDense"
+  sdk_version: "1.0.0"
+  knobs:
+    - head_size
+    - num_query_heads
+    - num_kv_heads
+    - causal
+    - block_m
+    - block_n
+  heuristic: native
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: head_size
+    type: int
+    default_value: 128
+  - name: num_query_heads
+    type: int
+    default_value: 8
+  - name: num_kv_heads
+    type: int
+    default_value: 8
+  - name: causal
+    type: int
+    default_value: 1
+  - name: ragged
+    type: int
+    default_value: 0
+  - name: sliding_window
+    type: int
+    default_value: 0
+  - name: batch
+    type: int
+    default_value: 1
+  - name: seqlen_q
+    type: int
+    default_value: 512
+  - name: seqlen_kv
+    type: int
+    default_value: 512
+  - name: block_m
+    type: int
+    default_value: 256
+  - name: block_n
+    type: int
+    default_value: 64
+
+kernel_source_kind: rocke
+workspace_policy: none
+delegates_to_existing_plan: false
+
+# Knob sweep declarations.
+#
+# The padding knobs are settled. The tile knobs are open sweep inputs; the
+# dispatcher default stays block_m=256/block_n=64, and the shipped catalog is the
+# `knob_sets` tile lists in gfx950_attention_dense.yaml, not a sweep product.
+sweep:
+  lds_k_group_pad:
+    verdict: >
+      Settled at 8. Sweep {0,8,16,24,32} at D=64: 8 and 16 tied at the
+      4-deep bank-conflict floor; 0 and 32 were measurably worse. Commit a2cb8ab.
+  lds_v_row_pad:
+    verdict: >
+      Settled at 32. Sweep {0,8,16,32}: 32 eliminates all bank conflicts for
+      the D=128 transposed PV accumulation slab. Commit 88b8bc5.
+  block_m:
+    values: [128, 256]
+    hazard: >
+      Moves with block_n. Catalog tiles satisfy block_m % block_n == 0,
+      block_n % (block_m / 32) == 0 and static LDS (528 * block_n bytes at
+      D=64, 1184 * block_n at D=128) within 163,840 bytes. Arms the spec or
+      supports_attention_dense() refuses are reported NARROWED; an arm that
+      builds is not thereby a legal catalog tile.
+  block_n:
+    values: [32, 64, 128, 256]
+    hazard: >
+      Moves with block_m; same tile constraints as block_m. BN256 is legal
+      only with block_m=256 at D=64.
+
+# Fields the aligned kernel reads only from kernel arguments: every entry is
+# built at the canonical B1/Sq512/Skv512 and reused for any runtime shape its
+# tile divides. The catalog is aligned-only (840 entries, ragged 0), and
+# ragged candidates are declined. Documentation only: no generator tool reads
+# this block, and the rocKE spec's own runtime_param_fields decides per mode.
+runtime_param_fields:
+  - batch
+  - seqlen_q
+  - seqlen_kv
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+# Launch-surface audit: every quantity the C++ engine restates from the Python
+# launch path, per surface. See tools/launch_surface.py for the schema and checks.
+#
+# Four surfaces for this kernel:
+#   grid     -- attention_dense_grid, single non-persistent arm (ceil(Sq/block_m), Hq, B)
+#   block    -- attention_dense_block, block_m / 32 * 64 threads (256 or 512)
+#   matcher  -- build_attention_dense field comparisons in kernelMatches()
+#   kernargs -- attentionDenseKernelSignature, always 8-arg (q,k,v,o,scale,B,Sq,Skv)
+#
+# No sliding_window or dtype surface: neither controls the grid, block or ABI.
+launch_surface:
+  - name: grid
+    python_source: kernels/gfx950/attention_dense.py:attention_dense_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp
+    kmd_fields: [block_m, seqlen_q, num_query_heads, batch]
+    guard: >
+      gfx950AttentionDenseGeometry() throws HipdnnPluginException for
+      non-positive dimensions (seqlen_q, num_query_heads or batch <= 0).
+      Grid is (ceil(Sq/block_m), Hq, B) from the candidate's own block_m.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+
+  - name: block
+    python_source: kernels/gfx950/attention_dense.py:attention_dense_block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseGeometry.hpp
+    kmd_fields: [block_m]
+    guard: >
+      block_m / GFX950_ROWS_PER_WAVE(32) * GFX950_WAVE_LANES(64) threads:
+      256 for block_m=128, 512 for block_m=256.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseGeometry.cpp
+
+  - name: matcher
+    python_source: kernels/gfx950/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, ragged, block_m, block_n]
+    guard: >
+      kernelMatches() returns false (no panic) if dtype, head_size,
+      num_query_heads, num_kv_heads, causal or sliding_window disagrees with
+      the graph, the candidate's tile is illegal, or the candidate is ragged
+      (ragged != 0). The metadata's batch, seqlen_q and seqlen_kv are build
+      inputs of a shape-generic kernel and are never compared; the graph's
+      shape enters only through seqlen_q % block_m == 0 and
+      seqlen_kv % block_n == 0 per candidate. score() ranks an applicable
+      256/64 baseline first, then ascending (block_m, block_n).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
+
+  - name: kernargs
+    python_source: kernels/gfx950/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [ragged, seqlen_q, num_query_heads, batch]
+    guard: >
+      attentionDenseKernelSignature() always returns the 8-arg form
+      (q,k,v,o,scale,batch,seqlen_q,seqlen_kv). Every variant is
+      non-persistent, which is what request.defaults.dense_persistent: "off"
+      above keeps true. use_sinks=False; no sink_ptr slot. Validated at
+      prepare() time by buildIngestorKernelCode(..., expectedSignature).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseSignature.cpp
