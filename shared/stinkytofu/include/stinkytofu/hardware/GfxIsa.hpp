@@ -264,6 +264,16 @@ struct HwInstDesc {
     // execution unit (e.g., VALU, SALU, MatrixUnit)
     ExecUnit unit = ExecUnit::NONE;
 
+    /// Experimental upper bound on modeled LDS-burst drain latency for this DS
+    /// load opcode (cycles). 0 = use HWModel::lds.dsLoadDefaultMaxDrain via
+    /// makeDsLoadDrainEntry (not "uncapped").
+    uint16_t dsMaxDrain = 0;
+
+    /// Overflow issue throughput for this DS load opcode (per WGP). Higher
+    /// shortens the overflow term of the dynamic drain model. 0 = fall back to
+    /// HWModel::lds.dsLoadDefaultThroughput.
+    uint16_t dsThroughput = 0;
+
     /// Per-operand encoding field description (dest/src, encoding field,
     /// register type, and size in bits).
     struct OperandFieldDesc {

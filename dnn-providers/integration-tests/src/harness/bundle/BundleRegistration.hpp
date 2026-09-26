@@ -34,13 +34,18 @@ namespace hipdnn_integration_tests::bundle
 namespace detail
 {
 
-inline std::filesystem::path sidecarPathFor(const DiscoveredBundle& disc)
+// Where this bundle's support claim lives. Delegates to the SupportClaims
+// factories rather than re-deriving the paths, so the writer, the enforcer and
+// the round-trip tests all name a bundle's sidecar by one rule -- a second
+// derivation here could drift from that rule and have the writer overwrite a
+// file the enforcer never reads.
+inline SupportClaimLocator claimLocatorFor(const DiscoveredBundle& disc)
 {
     if(disc.isTemplateSweepCase())
     {
-        return disc.jsonPath.parent_path() / "support.json";
+        return sweepCaseClaimLocator(disc.jsonPath, disc.sweep->caseId);
     }
-    return supportJsonPath(disc.diagnosticPath());
+    return singleGraphClaimLocator(disc.jsonPath);
 }
 
 // A discovered bundle paired with its eagerly-loaded contents. The bundle is
@@ -154,20 +159,12 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
         return SkippedLoad{"Skipping bundle " + diagnosticPath.string() + ": " + toString(*error)};
     }
 
-    SupportClaimLocator locator;
-    locator.sidecarPath = sidecarPathFor(disc);
-    locator.diagnosticPath = diagnosticPath.string();
-    if(disc.isTemplateSweepCase())
-    {
-        locator.caseId = disc.sweep->caseId;
-    }
-
     return LoadedBundle{diagnosticPath,
                         disc.suiteName,
                         disc.testName,
                         std::make_shared<IntegrationTestBundle>(
                             std::move(std::get<IntegrationTestBundle>(loadResult))),
-                        locator};
+                        claimLocatorFor(disc)};
 }
 
 // Registers one GTest test per preloaded bundle, run by the Engine executor.
@@ -253,14 +250,19 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
             nullptr,
             __FILE__,
             __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
-                // Only the GPU reference touches a device. Passing true for the CPU
-                // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
-                // writes host memory, so CPU golden-data validation silently skipped
-                // on any runner without a GPU.
-                const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
+            [loaded = bundle.bundle,
+             path = bundle.jsonPath,
+             referenceType,
+             validator = TestConfig::get().getValidatorDevice()]() -> ::testing::Test* {
+                // Only the GPU reference — or a forced GPU validator — touches a
+                // device. Passing true for a plain CPU lane made SetUp() run
+                // SKIP_IF_NO_DEVICES() on work that reads and writes host memory, so
+                // CPU golden-data validation silently skipped on any runner without a
+                // GPU.
+                const bool requiresDevice = referenceType == ReferenceExecutorType::GPU
+                                            || validator == ValidatorDevice::GPU;
                 auto* test = new BundleReferenceValidationHarness(
-                    referenceType, requiresDevice, sharedReferenceExecutors());
+                    referenceType, requiresDevice, sharedReferenceExecutors(), validator);
                 test->setBundle(loaded, path);
                 return test;
             });
@@ -315,8 +317,8 @@ namespace detail
 // nullopt when there is nothing to register; the reason is already on stderr.
 //
 // `countClaimCoverage` seeds the support-claim counters as bundles load. Only the
-// engine binary enforces claims, so the golden-data binary passes false rather
-// than seeding counters no one will ever satisfy.
+// engine binary enforces or authors claims, so the golden-data binary passes
+// false rather than seeding counters no one will ever satisfy.
 inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool countClaimCoverage)
 {
     if(!TestConfig::get().allowBundles())
@@ -386,7 +388,9 @@ inline std::optional<std::vector<LoadedBundle>> discoverAndLoadBundles(bool coun
         if(countClaimCoverage)
         {
             supportClaimCoverage().graphsFound++;
-            if(std::filesystem::exists(sidecarPathFor(disc)))
+            // The locator the registered test will carry, not a second derivation
+            // of it -- the coverage number has to count the file the run reads.
+            if(std::filesystem::exists(std::get<LoadedBundle>(outcome).claimLocator.sidecarPath))
             {
                 supportClaimCoverage().graphsWithClaims++;
             }
@@ -416,7 +420,12 @@ inline void registerBundleTests()
     const std::optional<LoadedEngine> engineUnderTest = resolveEngineUnderTest();
     const bool enforcing = TestConfig::get().enforceSupportClaims() && engineUnderTest.has_value();
 
-    auto bundles = detail::discoverAndLoadBundles(enforcing);
+    // Write mode needs `graphsFound` as the denominator for what the observer
+    // saw: SetUp() can skip a bundle before the observer runs, and such a graph
+    // is invisible to the observation log.
+    const bool writing = TestConfig::get().writeSupportClaims();
+
+    auto bundles = detail::discoverAndLoadBundles(enforcing || writing);
     if(!bundles.has_value())
     {
         return;

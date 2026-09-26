@@ -1,26 +1,17 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Embed the kernel sources this engine's packs compile at plan-build time. The list is
-# shared with the test binary, which embeds its own copy of the same set.
-include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KernelEmbedding.cmake")
-include("${CMAKE_CURRENT_SOURCE_DIR}/IngestorKernels.cmake")
-
-foreach(kernel IN LISTS HIPDNN_INGESTOR_PACK_KERNELS)
-    list(APPEND _ingestor_pack_kernel_sources "${HIPDNN_INGESTOR_PACK_KERNEL_DIR}/${kernel}.cpp")
-endforeach()
-
-add_kernels_for_embedding(
-    TARGET hip_kernel_provider_impl
-    FILES ${_ingestor_pack_kernel_sources}
-)
+# The plugin resolves kpack descriptors, which read their kernel code from an archive on
+# disk, so nothing is embedded there. The unit-test binary resolves both kinds: it reads
+# kpack descriptors from a staged archive, and for embedded_source descriptors it links
+# this engine statically and embeds its own copy of the kernel sources.
 
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
-    # One file per pack, the native seam; its descriptors are installed JSON. Listed
-    # explicitly rather than globbed -- CMake's own docs discourage GLOB for sources,
-    # and CONFIGURE_DEPENDS does not re-run on removal under every generator.
+    # Descriptors naming these packs are not in this tree. They arrive from the install tree:
+    # test_descriptors/ for the test binaries, and descriptor-packaging/examples/descriptors
+    # where the superbuild CI lane points the production source root.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
 )

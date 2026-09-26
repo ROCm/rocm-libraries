@@ -93,7 +93,7 @@ try
         ("iters,i",
          value<rocblas_int>(&argus.iters)->default_value(10),
             "Iterations to run inside the GPU timing loop.\n"
-            "                           Reported time will be the average.\n"
+            "                           Reported time will be the median.\n"
             "                           ")
 
         ("mem_query",

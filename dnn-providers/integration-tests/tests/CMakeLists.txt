@@ -15,6 +15,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/ProductionPolicy.cpp
     ../src/harness/bundle/ReferenceOpCoverage.cpp
     ../src/harness/bundle/SupportClaimReport.cpp
+    ../src/harness/bundle/SupportClaimWriter.cpp
     ../src/harness/bundle/SupportClaims.cpp
     ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/bundle/VariantPackBuilder.cpp
@@ -35,10 +36,18 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuLayernormBwdPlan.cpp
     TestGpuLayernormFwdSignatureKey.cpp
     TestGpuLayernormFwdPlan.cpp
+    TestGpuMatmulSignatureKey.cpp
+    TestGpuMatmulPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaFwdPlan.cpp
+    TestGpuReductionSignatureKey.cpp
+    TestGpuReductionPlan.cpp
     TestGpuRMSNormSignatureKey.cpp
     TestGpuRMSNormPlan.cpp
+    TestGpuBatchnormFwdInfSignatureKey.cpp
+    TestGpuBatchnormFwdInfPlan.cpp
+    TestGpuBatchnormFwdInfVarianceSignatureKey.cpp
+    TestGpuBatchnormFwdInfVariancePlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
@@ -53,6 +62,9 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimReport.cpp
     TestSupportClaimEnforcement.cpp
     TestEnforcementRungs.cpp
+    TestSupportClaimRoundTrip.cpp
+    TestSupportClaimWriter.cpp
+    TestObserveSupportOnly.cpp
     TestSupportVerdict.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
@@ -93,10 +105,12 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
     gpu-ref/TestGpuFpReferenceLayernormFwd.cpp
+    gpu-ref/TestGpuFpReferenceMatmul.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceReduction.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
+    gpu-ref/TestGpuFpReferenceRmsValidation.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp
     gpu-ref/TestGpuRefHipError.cpp
     gpu-ref/TestGpuRefKernelCompiler.cpp
@@ -105,6 +119,7 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceCommon.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInf.cpp
     gpu-ref/TestGpuFpReferenceBatchnormFwdInfWithVariance.cpp
+    gpu-ref/TestGpuFpReferenceBatchnormFwdTrain.cpp
 )
 
 target_link_libraries(hipdnn_gpu_ref_tests

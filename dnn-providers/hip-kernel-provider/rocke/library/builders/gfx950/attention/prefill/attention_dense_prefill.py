@@ -74,6 +74,12 @@ def _make_launcher(spec: Gfx950AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.runtime_shape:
+        sb = (
+            sb.scalar("batch", "i32")
+            .scalar("seqlen_q", "i32")
+            .scalar("seqlen_kv", "i32")
+        )
     if spec.use_sinks:
         sb = sb.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
@@ -102,8 +108,32 @@ def _causal_flops(spec: Gfx950AttentionDenseSpec) -> int:
     return 2 * 2 * B * Hq * D * Sq * Skv
 
 
+def _dense_tile_pin(shape: dict[str, Any]) -> str:
+    if "block_m" not in shape:
+        return "auto"
+    bm = int(shape["block_m"])
+    for name, geometry in DENSE_TILE_GEOMETRIES.items():
+        if int(geometry["block_m"]) == bm:
+            return name
+    raise ValueError(
+        f"block_m={bm} is not a registered gfx950 dense tile; "
+        f"known: {sorted(DENSE_TILE_GEOMETRIES)}"
+    )
+
+
+def _on_off_auto_pin(shape: dict[str, Any], key: str, *, default: str) -> str:
+    if key not in shape:
+        return default
+    return "on" if bool(shape[key]) else "off"
+
+
 def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
-    """Resolve the gfx950 dispatch spec, then apply explicit harness overrides."""
+    """Resolve the gfx950 dispatch spec, then apply explicit harness overrides.
+
+    Tile, persist, and wide-DMA are request pins (the dispatcher owns those
+    axes). Remaining builder-only knobs (V-pad, waves_per_eu, interleave,
+    lazy_rescale, block_n) still overlay via ``dataclasses.replace``.
+    """
     req = AttentionRequest(
         batch=int(shape.get("batch", 1)),
         nhead_q=int(shape["num_query_heads"]),
@@ -117,7 +147,9 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
         dtype=str(shape.get("dtype", "fp16")),
         algorithm="attention_dense",
         spec_id="gfx950_attention_dense",
-        dense_persistent="on" if bool(shape.get("persistent", False)) else "off",
+        dense_tile=_dense_tile_pin(shape),
+        dense_persistent=_on_off_auto_pin(shape, "persistent", default="off"),
+        dense_wide_lds_dma=_on_off_auto_pin(shape, "wide_lds_dma", default="auto"),
         dense_num_persistent=int(shape.get("num_persistent", 256)),
         dense_persist_decode=str(shape.get("persist_decode", "auto")),
         sliding_window=int(shape.get("sliding_window", 0)),
@@ -125,13 +157,11 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
     )
     spec = dense_spec_for_request(req)
     coercers = {
-        "block_m": int,
         "block_n": int,
         "lds_v_row_pad": int,
         "waves_per_eu": int,
         "interleave": bool,
         "lazy_rescale": bool,
-        "wide_lds_dma": bool,
     }
     overrides = {
         name: coerce(shape[name]) for name, coerce in coercers.items() if name in shape
@@ -190,6 +220,10 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if spec.runtime_shape:
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
 

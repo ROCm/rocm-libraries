@@ -12,8 +12,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
-from typing import Any, Callable, Iterable, Mapping, Sequence, Tuple
+from dataclasses import asdict, dataclass, is_dataclass, replace
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Mapping,
+    Protocol,
+    Sequence,
+    Tuple,
+    runtime_checkable,
+)
 
 from ..core.arch import known_arches
 
@@ -22,6 +31,59 @@ def stable_json_hash(payload: Mapping[str, Any], *, n: int = 16) -> str:
     """Stable short SHA256 over JSON-serializable dispatcher payloads."""
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:n]
+
+
+def spec_identity(spec: Any) -> str:
+    """Stable identity for one sweep spec, used to dedupe ``sweep_space``.
+
+    Dataclass specs hash through :func:`stable_json_hash`; everything else falls
+    back to ``kernel_name()`` or ``repr``. Family wrappers that already have a
+    tighter key (MoE's ``_struct``, grouped-conv kernel names) pass that key
+    instead of this default.
+    """
+    if is_dataclass(spec) and not isinstance(spec, type):
+        try:
+            return stable_json_hash(asdict(spec), n=16)
+        except (TypeError, ValueError):
+            pass
+    kernel_name = getattr(spec, "kernel_name", None)
+    if callable(kernel_name):
+        try:
+            return str(kernel_name())
+        except TypeError:
+            pass
+    return repr(spec)
+
+
+def opt_in_probe(
+    request: OperatorRequest, candidate: KernelCandidate
+) -> OperatorRequest:
+    """Copy of ``request`` with this candidate's ``algorithm`` / ``spec_id`` pinned.
+
+    Opt-in candidates refuse ``algorithm='auto'``. A sweep has to name them the
+    same way a caller would pin production traffic, without mutating the original
+    request (which must stay ``auto`` for the next candidate). Requests that do
+    not carry those fields are returned unchanged.
+    """
+    updates: dict[str, str] = {}
+    if hasattr(request, "algorithm"):
+        updates["algorithm"] = candidate.algorithm
+    if hasattr(request, "spec_id"):
+        updates["spec_id"] = candidate.spec_id
+    if not updates:
+        return request
+    try:
+        return replace(request, **updates)
+    except TypeError:
+        return request
+
+
+def _request_selector(request: OperatorRequest, field: str) -> str:
+    value = getattr(request, field, "auto")
+    if isinstance(value, str):
+        stripped = value.strip().lower()
+        return stripped or "auto"
+    return "auto"
 
 
 @dataclass(frozen=True)
@@ -312,6 +374,21 @@ class ProblemBinding:
 
 
 @dataclass(frozen=True)
+class TorchBinding:
+    """Launch contract over caller-owned tensors.
+
+    The name is historical. This is not a Torch type: it never imports Torch,
+    and ``launch`` closes over tensors the caller already holds. Distinct from
+    :class:`ProblemBinding`, which allocates HIP buffers. Used by attention
+    tensor harnesses and graph capture.
+    """
+
+    launch: Callable[..., Any]
+    grid: Tuple[int, int, int]
+    block: Tuple[int, int, int]
+
+
+@dataclass(frozen=True)
 class KernelCandidate:
     """One selectable implementation family for an operator request."""
 
@@ -363,6 +440,25 @@ class KernelCandidate:
     cannot drift from the dispatcher the way a hand-written adapter can.
     """
 
+    bind_torch: Callable[..., TorchBinding] | None = None
+    """``bind_torch(request, spec, tensors, **kwargs) -> TorchBinding``; optional.
+
+    Second substrate for families whose benches already hold torch tensors.
+    Must not import Torch at module load; the callable may import it lazily.
+    """
+
+    opt_in: bool = False
+    """When true, ``supported`` and ``select`` ignore this candidate for
+    ``algorithm='auto'``. Sweeps still see it through ``include_opt_in``.
+    """
+
+    sample_space: Callable[[OperatorRequest, int, int], Iterable[Any]] | None = None
+    """``sample_space(request, n, seed)`` draws up to ``n`` distinct legal specs.
+
+    For candidates whose ``sweep_space`` is too large to walk. Without it a
+    sampled sweep falls back to the full ``sweep_space``.
+    """
+
     def built(self, spec: Any, arch: str) -> Any:
         """Build this candidate's IR for ``spec`` on ``arch``."""
         if self.build is None:
@@ -383,6 +479,18 @@ class KernelCandidate:
             )
         return self.bind(result, verify)
 
+    def bound_torch(
+        self, request: OperatorRequest, spec: Any, tensors: Mapping[str, Any], **kwargs
+    ) -> TorchBinding:
+        """Bind ``spec`` to caller-owned tensors, or explain what is missing."""
+        if self.bind_torch is None:
+            raise NotImplementedError(
+                f"candidate {self.name!r} ({self.family}) declares no bind_torch(); "
+                "it can be selected but not launched through a torch harness. "
+                "Give it a bind_torch returning a TorchBinding to close that gap."
+            )
+        return self.bind_torch(request, spec, tensors, **kwargs)
+
     def admits(self, request: OperatorRequest) -> Tuple[bool, str]:
         """Full eligibility verdict: capability prefilter, then predicate.
 
@@ -398,6 +506,92 @@ class KernelCandidate:
             if not ok:
                 return False, f"capability: {why}"
         return self._supports(request)
+
+
+@runtime_checkable
+class PinnableRequest(Protocol):
+    """What the shared selector/identity helpers actually read off a request.
+
+    ``OperatorRequest`` declares only :meth:`normalized`, but
+    :func:`selector_matches` and :func:`make_kernel_id` also read ``algorithm``,
+    ``spec_id`` and ``arch``. While each family owned a private copy of those
+    helpers, the annotation was that family's concrete request type and the
+    requirement was stated where it was used. Hoisting made the consumers
+    shared, which left the contract stated nowhere -- a new family learns it
+    from an ``AttributeError`` at first dispatch.
+
+    A Protocol rather than base-class fields because the fields cannot go on the
+    frozen base: every family declares ``arch`` WITHOUT a default, and a
+    defaulted inherited field in front of it is a ``TypeError`` at class
+    creation ("non-default argument 'arch' follows default argument").
+
+    Structural, so no family has to inherit anything: a request that carries the
+    three attributes satisfies it.
+    """
+
+    arch: str
+    algorithm: str
+    spec_id: str
+
+    def normalized(self) -> dict: ...
+
+
+def normalize_selector(value: str) -> str:
+    """Normalize an algorithm or spec-id selector for matching and identity."""
+    return value.strip().lower()
+
+
+def selector_matches(
+    request: PinnableRequest, candidate: KernelCandidate
+) -> Tuple[bool, str]:
+    """Match an explicit ``algorithm``/``spec_id`` pin against one candidate.
+
+    ``"auto"`` (the default on every family request) matches any candidate; a
+    set value must equal the candidate's. Shared by every operator family so the
+    pin semantics cannot drift between them.
+
+    Both fields are read directly, not via ``getattr`` with a default, and
+    ``.strip()`` is called on the attribute itself rather than on ``str(...)``:
+    a request whose pin is missing OR not a string is a family wiring bug, and
+    it should raise here as it did when each family had its own copy. Wrapping
+    in ``str()`` would turn ``None`` into ``"none"`` and reject every candidate
+    instead, so the caller sees "no candidate supports request" -- a routing
+    failure pointing at the registry rather than at their malformed request.
+    Defaulting to ``"auto"`` is the same mistake one step worse: a pin silently
+    ignored.
+    """
+    algorithm = normalize_selector(request.algorithm)
+    spec_id = normalize_selector(request.spec_id)
+    if algorithm not in ("auto", candidate.algorithm):
+        return (
+            False,
+            f"request algorithm {request.algorithm!r} != {candidate.algorithm!r}",
+        )
+    if spec_id not in ("auto", candidate.spec_id):
+        return False, f"request spec_id {request.spec_id!r} != {candidate.spec_id!r}"
+    return True, "ok"
+
+
+def make_kernel_id(
+    request: PinnableRequest, candidate: KernelCandidate, spec: Any, *, op: str
+) -> KernelId:
+    """The stable identity shared by caches/manifests/benchmarks for one pick.
+
+    Identical across families except the operator name ``op``; the family is
+    taken from the candidate and the request/spec hashes from their normalized
+    forms, so a family cannot hash a pick differently from its peers.
+    """
+    return KernelId(
+        op=op,
+        family=candidate.family,
+        candidate=candidate.name,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+        arch=request.arch,
+        abi_version=candidate.abi_version,
+        request_hash=stable_json_hash(request.normalized(), n=16),
+        spec_hash=stable_json_hash(asdict(spec), n=16),
+    )
 
 
 Ranker = Callable[
@@ -420,6 +614,7 @@ class CandidateRegistry:
         dim_vocabulary: Iterable[str] | None = None,
         require_build: bool = False,
         require_binding: bool = False,
+        require_torch_binding: bool = False,
     ) -> None:
         self.family = family
         self.dim_vocabulary = (
@@ -442,6 +637,8 @@ class CandidateRegistry:
         its candidates; from then on a new candidate cannot rejoin the
         unlaunchable set by omission. See ARCHITECTURE.md 5.2.
         """
+        self.require_torch_binding = require_torch_binding
+        """Whether this family refuses candidates that cannot bind torch tensors."""
         self._candidates = {}
 
     def register(self, candidate: KernelCandidate) -> None:
@@ -454,6 +651,7 @@ class CandidateRegistry:
         self._validate_capability(candidate)
         self._validate_build(candidate)
         self._validate_binding(candidate)
+        self._validate_torch_binding(candidate)
         self._candidates[candidate.name] = candidate
 
     def _validate_build(self, candidate: KernelCandidate) -> None:
@@ -474,6 +672,15 @@ class CandidateRegistry:
                 "returning a ProblemBinding (see ARCHITECTURE.md 7.5), or if "
                 "this candidate genuinely cannot be launched, that is a reason "
                 "not to register it here."
+            )
+
+    def _validate_torch_binding(self, candidate: KernelCandidate) -> None:
+        if self.require_torch_binding and candidate.bind_torch is None:
+            raise ValueError(
+                f"{candidate.name!r} declares no bind_torch, and family "
+                f"{self.family!r} requires one: every candidate it registers "
+                "must bind caller-owned tensors. Give it a bind_torch returning "
+                "a TorchBinding, or do not register it on this execution registry."
             )
 
     def _validate_capability(self, candidate: KernelCandidate) -> None:
@@ -551,10 +758,13 @@ class CandidateRegistry:
         surface instead of reading source. Ordering follows :meth:`candidates`,
         so the manifest is stable across processes.
         """
+        candidates = self.candidates()
         return {
             "family": self.family,
             "requires_build": self.require_build,
             "requires_binding": self.require_binding,
+            "requires_torch_binding": self.require_torch_binding,
+            "opt_in_candidates": sum(1 for c in candidates if c.opt_in),
             "candidates": [
                 {
                     "name": c.name,
@@ -568,11 +778,13 @@ class CandidateRegistry:
                     # might raise.
                     "buildable": c.build is not None,
                     "bindable": c.bind is not None,
+                    "torch_bindable": c.bind_torch is not None,
+                    "opt_in": c.opt_in,
                     "capability": (
                         None if c.capability is None else c.capability.as_dict()
                     ),
                 }
-                for c in self.candidates()
+                for c in candidates
             ],
         }
 
@@ -589,8 +801,193 @@ class CandidateRegistry:
             if c.capability is not None and arch in c.capability.arches
         )
 
+    def _auto_visible(
+        self, request: OperatorRequest, candidate: KernelCandidate
+    ) -> bool:
+        """Opt-in candidates stay out of production auto selection.
+
+        An explicit ``algorithm`` pin equal to the candidate's algorithm still
+        sees them, so a sweep or a replay can select one by name.
+        """
+        if not candidate.opt_in:
+            return True
+        algorithm = _request_selector(request, "algorithm")
+        return algorithm == candidate.algorithm.strip().lower()
+
     def supported(self, request: OperatorRequest) -> Tuple[KernelCandidate, ...]:
-        return tuple(c for c in self.candidates() if c.admits(request)[0])
+        return tuple(
+            c
+            for c in self.candidates()
+            if self._auto_visible(request, c) and c.admits(request)[0]
+        )
+
+    def iter_combos(
+        self,
+        request: OperatorRequest,
+        *,
+        candidate_prefix: str = "",
+        include_opt_in: bool = True,
+        selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        sample: int = 0,
+        seed: int = 0,
+    ) -> Iterable[Tuple[KernelCandidate, Any]]:
+        """Yield each ``(candidate, spec)`` that can launch ``request``.
+
+        Unlike :meth:`supported`, this is the sweep primitive: it walks the
+        full registry, probes opt-in candidates by pinning each candidate's
+        own ``algorithm`` / ``spec_id``, and expands ``candidate.sweep_space``.
+        Production :meth:`select` is unchanged and still never sees an opt-in
+        candidate under ``algorithm='auto'``.
+
+        ``sample > 0`` draws up to that many specs per candidate through
+        ``candidate.sample_space`` (seeded by ``seed``) instead of the full
+        ``sweep_space``.
+
+        Pin matching always goes through :func:`selector_matches`. ``selector_ok``
+        adds a further constraint; it does not replace the pin. ``spec_id_alias``
+        is the only relaxation, used when one family id should admit several
+        concrete ``spec_id`` values.
+        """
+        for candidate in self.candidates():
+            if candidate_prefix and not candidate.name.startswith(candidate_prefix):
+                continue
+            if candidate.opt_in and not include_opt_in:
+                continue
+            capability = candidate.capability
+            arch = getattr(request, "arch", "")
+            if capability is not None and arch and arch not in capability.arches:
+                continue
+            pinned, _why = selector_matches(request, candidate)
+            if not pinned and spec_id_alias is not None:
+                algorithm = normalize_selector(request.algorithm)
+                if algorithm in ("auto", candidate.algorithm) and spec_id_alias(
+                    request, candidate
+                ):
+                    pinned = True
+            if not pinned:
+                continue
+            if selector_ok is not None and not selector_ok(request, candidate):
+                continue
+            probe = opt_in_probe(request, candidate) if include_opt_in else request
+            ok, _why = candidate.admits(probe)
+            if not ok:
+                continue
+            if sample > 0 and candidate.sample_space is not None:
+                specs = candidate.sample_space(probe, int(sample), int(seed))
+            else:
+                specs = candidate.sweep_space(probe)
+            yielded = False
+            for spec in specs:
+                yielded = True
+                yield candidate, spec
+            if not yielded:
+                yield candidate, candidate.select_spec(probe)
+
+    def combos(
+        self,
+        request: OperatorRequest,
+        *,
+        candidate_prefix: str = "",
+        include_opt_in: bool = True,
+        selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+    ) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+        """Materialized :meth:`iter_combos` for callers that need a sequence."""
+        return tuple(
+            self.iter_combos(
+                request,
+                candidate_prefix=candidate_prefix,
+                include_opt_in=include_opt_in,
+                selector_ok=selector_ok,
+                spec_id_alias=spec_id_alias,
+            )
+        )
+
+    def sweep_space(
+        self,
+        request: OperatorRequest,
+        *,
+        candidate_prefix: str = "",
+        include_opt_in: bool = True,
+        selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_key: Callable[[Any], str] | None = None,
+        spec_filter: Callable[[Any], bool] | None = None,
+    ) -> Tuple[Any, ...]:
+        """Deduped specs from :meth:`combos`.
+
+        Production auto-dispatch does not call this. Family wrappers keep their
+        request-error short-circuit and any spec-key tighter than
+        :func:`spec_identity`.
+        """
+        key = spec_key or spec_identity
+        specs: list[Any] = []
+        seen: set[str] = set()
+        for _candidate, spec in self.combos(
+            request,
+            candidate_prefix=candidate_prefix,
+            include_opt_in=include_opt_in,
+            selector_ok=selector_ok,
+            spec_id_alias=spec_id_alias,
+        ):
+            if spec_filter is not None and not spec_filter(spec):
+                continue
+            identity = key(spec)
+            if identity not in seen:
+                seen.add(identity)
+                specs.append(spec)
+        return tuple(specs)
+
+    def dispatch_all(
+        self,
+        request: OperatorRequest,
+        *,
+        kernel_id: Callable[[OperatorRequest, KernelCandidate, Any], KernelId],
+        candidate_prefix: str = "",
+        include_opt_in: bool = True,
+        selector_ok: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_id_alias: Callable[[OperatorRequest, KernelCandidate], bool] | None = None,
+        spec_filter: Callable[[Any], bool] | None = None,
+    ) -> Tuple[DispatchResult, ...]:
+        """One :class:`DispatchResult` per :meth:`combos` entry.
+
+        The documented autotune primitive: every eligible kernel, including
+        opt-in candidates and each candidate's ``sweep_space`` variants, as an
+        independently buildable/launchable result. Does not rank or collapse.
+        """
+        results: list[DispatchResult] = []
+        for candidate, spec in self.combos(
+            request,
+            candidate_prefix=candidate_prefix,
+            include_opt_in=include_opt_in,
+            selector_ok=selector_ok,
+            spec_id_alias=spec_id_alias,
+        ):
+            if spec_filter is not None and not spec_filter(spec):
+                continue
+            probe = opt_in_probe(request, candidate) if include_opt_in else request
+            kid = kernel_id(probe, candidate, spec)
+            results.append(
+                DispatchResult(
+                    request=probe,
+                    candidate=candidate,
+                    spec=spec,
+                    kernel_id=kid,
+                    grid=candidate.grid(spec, probe),
+                    block=candidate.block(spec),
+                    signature=tuple(candidate.signature(spec)),
+                    explanation=(
+                        f"sweep {candidate.name} ({candidate.algorithm}) on "
+                        f"{getattr(request, 'arch', '')}",
+                        f"algorithm={candidate.algorithm}",
+                        f"spec_id={candidate.spec_id}",
+                        f"spec_hash={kid.spec_hash}",
+                        f"request_hash={kid.request_hash}",
+                    ),
+                )
+            )
+        return tuple(results)
 
     def select(
         self, request: OperatorRequest, *, ranker: Ranker | None = None
@@ -651,3 +1048,7 @@ class DispatchResult:
         chose: ``dispatch_gemm_fp16(req).bind(verify=True)``.
         """
         return self.candidate.bound(self, verify=verify)
+
+    def bind_torch(self, tensors: Mapping[str, Any], **kwargs) -> TorchBinding:
+        """Bind this selection to caller-owned tensors."""
+        return self.candidate.bound_torch(self.request, self.spec, tensors, **kwargs)

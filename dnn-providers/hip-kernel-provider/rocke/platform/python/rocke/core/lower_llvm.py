@@ -40,6 +40,12 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
+    BF16,
+    F32,
+    F16,
+    I1,
+    I16,
+    I32,
     KernelDef,
     Op,
     Param,
@@ -406,6 +412,23 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     # gfx1250 (gfx1250) async global<->LDS DMA + its dedicated ASYNC counter.
     # The gfx9 buffer/global load-to-LDS intrinsics are NOT selectable here.
     "s.wait.asynccnt": "declare void @llvm.amdgcn.s.wait.asynccnt(i16 immarg)",
+    "s.wait.tensorcnt": "declare void @llvm.amdgcn.s.wait.tensorcnt(i16 immarg)",
+    "s.barrier.signal": ("declare void @llvm.amdgcn.s.barrier.signal(i32 immarg)"),
+    "s.barrier.wait": "declare void @llvm.amdgcn.s.barrier.wait(i16 immarg)",
+    "s.barrier.init": (
+        "declare void @llvm.amdgcn.s.barrier.init(ptr addrspace(3) nocapture, i32)"
+    ),
+    "s.barrier.signal.var": (
+        "declare void @llvm.amdgcn.s.barrier.signal.var("
+        "ptr addrspace(3) nocapture, i32)"
+    ),
+    "s.barrier.join": (
+        "declare void @llvm.amdgcn.s.barrier.join(ptr addrspace(3) nocapture)"
+    ),
+    "s.wakeup.barrier": (
+        "declare void @llvm.amdgcn.s.wakeup.barrier(ptr addrspace(3) nocapture)"
+    ),
+    "s.barrier.leave": "declare void @llvm.amdgcn.s.barrier.leave(i16 immarg)",
     "global.load.async.to.lds.b32": (
         "declare void @llvm.amdgcn.global.load.async.to.lds.b32("
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
@@ -418,13 +441,48 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare void @llvm.amdgcn.global.load.async.to.lds.b128("
         "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
     ),
+    "global.store.async.from.lds.b8": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b8("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b32": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b32("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b64": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b64("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.store.async.from.lds.b128": (
+        "declare void @llvm.amdgcn.global.store.async.from.lds.b128("
+        "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"
+    ),
+    "global.load.tr.b128.v8f16": (
+        "declare <8 x half> @llvm.amdgcn.global.load.tr.b128.v8f16("
+        "ptr addrspace(1) nocapture)"
+    ),
+    "global.load.tr.b128.v8bf16": (
+        "declare <8 x bfloat> @llvm.amdgcn.global.load.tr.b128.v8bf16("
+        "ptr addrspace(1) nocapture)"
+    ),
+    "global.load.tr.b128.v8i16": (
+        "declare <8 x i16> @llvm.amdgcn.global.load.tr.b128.v8i16("
+        "ptr addrspace(1) nocapture)"
+    ),
+    "tensor.load.to.lds": (
+        "declare void @llvm.amdgcn.tensor.load.to.lds("
+        "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
+    ),
+    "tensor.store.from.lds": (
+        "declare void @llvm.amdgcn.tensor.store.from.lds("
+        "<4 x i32>, <8 x i32>, <4 x i32>, <4 x i32>, <8 x i32>, i32 immarg)"
+    ),
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
     "amdgcn.exp2.f32": "declare float @llvm.amdgcn.exp2.f32(float)",
     "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
-    "tanh.f32": "declare float @llvm.tanh.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
@@ -550,6 +608,18 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "wmma.gfx1250.f32.16x16x64.bf8.bf8": (
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
         "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"
+    ),
+    "wmma.scale.block32.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i32, "
+        "i32 immarg, i32 immarg, i32, i1 immarg, i1 immarg)"
+    ),
+    "wmma.scale.block16.gfx1250.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32": (
+        "declare <8 x float> @llvm.amdgcn.wmma.scale16.f32.16x16x128.f8f6f4."
+        "v8f32.v16i32.v16i32(i32 immarg, <16 x i32>, i32 immarg, "
+        "<16 x i32>, i16 immarg, <8 x float>, i32 immarg, i32 immarg, i64, "
+        "i32 immarg, i32 immarg, i64, i1 immarg, i1 immarg)"
     ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
@@ -1014,11 +1084,16 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for the declares rocke
-# emits today. Split entries here if an LLVM 23 host proves drift.
-_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = dict(
-    _INTRINSIC_DECLS_LLVM22_OVERRIDES
-)
+# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
+# intrinsic's ABI changed again.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
+    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
+    ),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -1058,6 +1133,78 @@ def _llvm_type(t: Type) -> str:
     if t.name == "f32":
         return "float"
     raise NotImplementedError(f"no LLVM mapping for type {t!r}")
+
+
+def _llvm_loop_carried_type(t: Type) -> str:
+    """Render an admitted ``scf.for`` carry with the canonical type renderer."""
+    if isinstance(t, VectorType):
+        if t.count <= 0:
+            raise ValueError(
+                f"scf.for loop-carried vector type {t.name!r} must have a positive width"
+            )
+        if isinstance(t.elem, (PtrType, SmemType, VectorType)):
+            raise NotImplementedError(
+                f"scf.for loop-carried type {t.name!r} is unsupported; "
+                "expected a scalar or vector of scalar values"
+            )
+    elif isinstance(t, (PtrType, SmemType)):
+        raise NotImplementedError(
+            f"scf.for loop-carried type {t.name!r} is unsupported; "
+            "expected a scalar or vector of scalar values"
+        )
+    try:
+        return _llvm_type(t)
+    except NotImplementedError as exc:
+        raise NotImplementedError(
+            f"scf.for loop-carried type {t.name!r} has no LLVM mapping"
+        ) from exc
+
+
+def _scf_iter_llvm_types(op: Op, num_iter: int) -> List[str]:
+    """Validate serialized loop metadata and render the real carry types."""
+    iter_inits = op.operands[3:]
+    iter_meta = op.attrs.get("iter_args", [])
+    if not isinstance(iter_meta, list):
+        raise ValueError("scf.for iter_args metadata must be a list")
+    if len(iter_inits) != num_iter:
+        raise ValueError(
+            f"scf.for declares {num_iter} iter_args but has "
+            f"{len(iter_inits)} init operands"
+        )
+    if len(iter_meta) != num_iter:
+        raise ValueError(
+            f"scf.for declares {num_iter} iter_args but has "
+            f"{len(iter_meta)} metadata entries"
+        )
+    if len(op.results) != num_iter:
+        raise ValueError(
+            f"scf.for declares {num_iter} iter_args but has {len(op.results)} results"
+        )
+
+    llvm_types: List[str] = []
+    for index, (meta, init, result) in enumerate(
+        zip(iter_meta, iter_inits, op.results)
+    ):
+        if not isinstance(meta, dict):
+            raise ValueError(f"scf.for iter_arg {index} metadata must be a map")
+        name = meta.get("name")
+        type_name = meta.get("type")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"scf.for iter_arg {index} metadata has no name")
+        if not isinstance(type_name, str):
+            raise ValueError(f"scf.for iter_arg {name} metadata has no type")
+        if type_name != init.type.name:
+            raise ValueError(
+                f"scf.for iter_arg {name} metadata type {type_name!r} "
+                f"does not match init type {init.type.name!r}"
+            )
+        if result.type != init.type:
+            raise ValueError(
+                f"scf.for result type {result.type.name!r} does not match "
+                f"iter_arg {name} type {init.type.name!r}"
+            )
+        llvm_types.append(_llvm_loop_carried_type(init.type))
+    return llvm_types
 
 
 def _param_llvm_type(p: Param) -> str:
@@ -1496,6 +1643,48 @@ class _Lowerer:
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
 
+    @staticmethod
+    def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
+        """Make an inline constant for a lowering-time operation expansion."""
+
+        result = Value("", ty)
+        producer = Op(
+            "arith.constant",
+            results=[result],
+            attrs={"value": value, "ity": ity},
+        )
+        result.op = producer
+        return result
+
+    def _lower_composed_op(
+        self,
+        name: str,
+        operands: List[Value],
+        result_type: Type,
+        hint: str,
+        *,
+        attrs: Optional[Dict[str, object]] = None,
+        result_name: Optional[str] = None,
+    ) -> Value:
+        """Lower one synthetic primitive while expanding a higher-level op.
+
+        The synthetic operation is not inserted into the public rocKE IR. It is
+        dispatched through the normal primitive lowering handler, so composite
+        operations do not have to duplicate LLVM spelling, intrinsic tracking,
+        or type handling.
+        """
+
+        result = Value(result_name or self._fresh(hint), result_type)
+        expanded = Op(
+            name,
+            operands=list(operands),
+            results=[result],
+            attrs=dict(attrs or {}),
+        )
+        result.op = expanded
+        self.lower_op(expanded)
+        return result
+
     def _anyptr_space(
         self, op: str, ptr: Value, allowed: Dict[int, str]
     ) -> Tuple[int, str]:
@@ -1568,6 +1757,13 @@ class _Lowerer:
                 f"{op} {field} must fit an unsigned i16 (0..65535), got {v}"
             )
         return v
+
+    def _require_gfx1250_llvm23(self, op: str) -> None:
+        """Reject use of an LLVM-23 gfx1250-only operation on another backend."""
+        if self._backend.arch.gfx != "gfx1250":
+            raise ValueError(f"{op} requires gfx1250, got {self._backend.arch.gfx}")
+        if self._flavor != LLVM_FLAVOR_LLVM23:
+            raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
 
@@ -2657,10 +2853,57 @@ class _Lowerer:
     def _op_math_tanh(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
-            raise NotImplementedError("math.tanh currently supports f32")
-        self._need("tanh.f32")
-        self._current().emit(
-            f"  {op.result.name} = call float @llvm.tanh.f32(float {self._operand(v)})"
+            raise ValueError(f"math.tanh requires f32 operand, got {v.type.name}")
+
+        # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
+        # Coefficients are in Horner power-basis order, not Taylor coefficients.
+        # Source: amd/device-libs/ocml/src/tanhF.cl.
+        f32 = lambda value: self._composed_constant(value, F32, "f32")
+        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        lower = self._lower_composed_op
+
+        one = f32(1.0)
+        neg_two = f32(-2.0)
+        two_log2e = f32(2.0 * 1.4426950408889634)
+        cutoff = f32(0.625)
+        c0 = f32(float.fromhex("-0x1.758e7ap-8"))
+        c1 = f32(float.fromhex("0x1.521192p-6"))
+        c2 = f32(float.fromhex("-0x1.b8389cp-5"))
+        c3 = f32(float.fromhex("0x1.110704p-3"))
+        c4 = f32(float.fromhex("-0x1.555532p-2"))
+
+        x_bits = lower("arith.bitcast", [v], I32, "tanh.xbits")
+        sign = lower("arith.and", [x_bits, i32(-0x80000000)], I32, "tanh.sign")
+        abs_bits = lower("arith.and", [x_bits, i32(0x7FFFFFFF)], I32, "tanh.abits")
+        abs_x = lower("arith.bitcast", [abs_bits], F32, "tanh.abs")
+        y2 = lower("arith.fmul", [abs_x, abs_x], F32, "tanh.y2")
+        p0 = lower("arith.fma", [y2, c0, c1], F32, "tanh.p0")
+        p1 = lower("arith.fma", [y2, p0, c2], F32, "tanh.p1")
+        p2 = lower("arith.fma", [y2, p1, c3], F32, "tanh.p2")
+        p3 = lower("arith.fma", [y2, p2, c4], F32, "tanh.p3")
+        yp = lower("arith.fmul", [abs_x, p3], F32, "tanh.yp")
+        poly = lower("arith.fma", [y2, yp, abs_x], F32, "tanh.poly")
+        exp_scaled = lower("arith.fmul", [two_log2e, abs_x], F32, "tanh.escaled")
+        exp = lower("math.exp2", [exp_scaled], F32, "tanh.exp")
+        exp_den = lower("arith.fadd", [exp, one], F32, "tanh.eden")
+        exp_inv = lower("math.rcp_fast", [exp_den], F32, "tanh.einv")
+        exp_mag = lower("arith.fma", [neg_two, exp_inv, one], F32, "tanh.emag")
+        use_poly = lower(
+            "arith.fcmp",
+            [abs_x, cutoff],
+            I1,
+            "tanh.small",
+            attrs={"pred": "olt"},
+        )
+        mag = lower("arith.select", [use_poly, poly, exp_mag], F32, "tanh.mag")
+        mag_bits = lower("arith.bitcast", [mag], I32, "tanh.mbits")
+        signed_bits = lower("arith.or", [mag_bits, sign], I32, "tanh.sbits")
+        lower(
+            "arith.bitcast",
+            [signed_bits],
+            F32,
+            "tanh.result",
+            result_name=op.result.name,
         )
 
     # gpu
@@ -3248,14 +3491,24 @@ class _Lowerer:
             )
         else:
             b_packed = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-            f"<4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-            f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
-        )
+        if self._flavor == LLVM_FLAVOR_LLVM23:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)})"
+            )
+        else:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+            )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
         a, b, c = op.operands
@@ -3322,9 +3575,8 @@ class _Lowerer:
         value 0 (exponent 0 => 2^0 == 1.0), making it numerically a plain
         unscaled fp8 MFMA. ``cbsz=0`` / ``blgp=0`` select fp8e4m3 for A and
         B; ``op_sel`` scale-byte selectors are 0. This is ADDITIVE — it
-        reuses the existing scaled intrinsic decl and emits the same call
-        shape as :meth:`_op_tile_mfma_scale_f32_16x16x128_f8f6f4`, but with
-        constant zero scales (so no scale registers are loaded).
+        uses a dedicated declaration key for the nine-argument form and pins
+        both scale operands to zero (so no scale registers are loaded).
 
         A / B arrive as ``<32 x fp8e4m3>`` (== ``<32 x i8>``, 32 f8 bytes
         per lane) and are bitcast to the intrinsic's ``<8 x i32>``.
@@ -3332,9 +3584,8 @@ class _Lowerer:
         """
         a, b, c = op.operands
         # ADDITIVE: a dedicated decl key for the unscaled hero atom (the
-        # 9-arg LLVM22 f8f6f4 scale-MFMA signature). We do NOT touch the
-        # existing ``mfma.scale.f32.16x16x128.f8f6f4`` decl (different,
-        # frozen, 11-arg form used by the MX-scaled lowering).
+        # 9-arg f8f6f4 scale-MFMA signature). The separate key preserves the
+        # LLVM20/22 MX-scaled declaration, which remains the 11-arg form.
         self._need("mfma.f32.16x16x128.fp8.hero")
         a_packed = self._fresh("a_fp8_128")
         b_packed = self._fresh("b_fp8_128")
@@ -3724,6 +3975,26 @@ class _Lowerer:
             f"i32 {dpp_ctrl}, i32 15, i32 15, i1 true)"
         )
 
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        ``ctrl`` packs four two-bit lane selectors
+        (``p0 | p1 << 2 | p2 << 4 | p3 << 6``), so every value in
+        ``0..255`` is legal and anything outside it is malformed IR.
+        Reject rather than mask: truncation would turn an out-of-range
+        control into a different, silently valid permutation.
+        """
+        (data,) = op.operands
+        self._need("update.dpp.i32")
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._current().emit(
+            f"  {op.result.name} = call i32 @llvm.amdgcn.update.dpp.i32("
+            f"i32 {self._operand(data)}, i32 {self._operand(data)}, "
+            f"i32 {ctrl}, i32 15, i32 15, i1 true)"
+        )
+
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:
         """``ds_swizzle_b32`` with XOR butterfly via SWAP-mode encoding.
 
@@ -4049,6 +4320,17 @@ class _Lowerer:
         The ``$N`` placeholders in the template refer to: ``$0`` = the
         output (if any), then the inputs in ``op.operands`` order.
         """
+        required_arch = op.attrs.get("required_arch")
+        required_flavor = op.attrs.get("required_llvm_flavor")
+        if required_arch is not None and self._backend.arch.gfx != required_arch:
+            raise ValueError(
+                f"tile.inline_asm requires {required_arch}, got {self._backend.arch.gfx}"
+            )
+        if required_flavor is not None and self._flavor != required_flavor:
+            raise ValueError(
+                f"tile.inline_asm requires LLVM flavor {required_flavor}, "
+                f"got {self._flavor}"
+            )
         template = _escape_llvm_asm_string(op.attrs["template"])
         constraints = op.attrs["constraints"]
         flags = []
@@ -4239,6 +4521,83 @@ class _Lowerer:
         self._need("s.wait.asynccnt")
         self._current().emit(f"  call void @llvm.amdgcn.s.wait.asynccnt(i16 {n})")
 
+    def _op_tile_s_wait_tensorcnt(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_wait_tensorcnt")
+        n = self._check_u16("s_wait_tensorcnt", "n", op.attrs.get("n", 0))
+        self._need("s.wait.tensorcnt")
+        self._current().emit(f"  call void @llvm.amdgcn.s.wait.tensorcnt(i16 {n})")
+
+    def _op_tile_s_barrier_signal(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_barrier_signal")
+        barrier_type = int(op.attrs.get("barrier_type", 0))
+        if not 0 <= barrier_type <= 0xFFFFFFFF:
+            raise ValueError(
+                "s_barrier_signal barrier_type must fit an unsigned i32, "
+                f"got {barrier_type}"
+            )
+        self._need("s.barrier.signal")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.barrier.signal(i32 {barrier_type})"
+        )
+
+    def _op_tile_s_barrier_wait(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_barrier_wait")
+        barrier_type = self._check_u16(
+            "s_barrier_wait", "barrier_type", op.attrs.get("barrier_type", 0)
+        )
+        self._need("s.barrier.wait")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.barrier.wait(i16 {barrier_type})"
+        )
+
+    def _op_tile_s_barrier_init(self, op: Op) -> None:
+        self._lower_named_barrier_count(op, "s.barrier.init")
+
+    def _op_tile_s_barrier_signal_var(self, op: Op) -> None:
+        self._lower_named_barrier_count(op, "s.barrier.signal.var")
+
+    def _lower_named_barrier_count(self, op: Op, intrinsic: str) -> None:
+        short_name = intrinsic.replace(".", "_")
+        self._require_gfx1250_llvm23(short_name)
+        if len(op.operands) != 2:
+            raise ValueError(f"{short_name} expects barrier and member_count")
+        barrier, member_count = op.operands
+        if member_count.type != I32:
+            raise TypeError(f"{short_name} member_count must be i32")
+        local = self._lds_ptr_operand(short_name, barrier)
+        self._need(intrinsic)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{intrinsic}("
+            f"ptr addrspace(3) {local}, i32 {self._operand(member_count)})"
+        )
+
+    def _op_tile_s_barrier_join(self, op: Op) -> None:
+        self._lower_named_barrier_one(op, "s.barrier.join")
+
+    def _op_tile_s_wakeup_barrier(self, op: Op) -> None:
+        self._lower_named_barrier_one(op, "s.wakeup.barrier")
+
+    def _lower_named_barrier_one(self, op: Op, intrinsic: str) -> None:
+        short_name = intrinsic.replace(".", "_")
+        self._require_gfx1250_llvm23(short_name)
+        if len(op.operands) != 1:
+            raise ValueError(f"{short_name} expects one barrier pointer")
+        local = self._lds_ptr_operand(short_name, op.operands[0])
+        self._need(intrinsic)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{intrinsic}(ptr addrspace(3) {local})"
+        )
+
+    def _op_tile_s_barrier_leave(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("s_barrier_leave")
+        barrier_type = self._check_u16(
+            "s_barrier_leave", "barrier_type", op.attrs.get("barrier_type", 0)
+        )
+        self._need("s.barrier.leave")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.s.barrier.leave(i16 {barrier_type})"
+        )
+
     def _op_tile_global_load_async_to_lds(self, op: Op) -> None:
         src_ptr = op.operands[0]
         src_index = op.operands[1]
@@ -4271,6 +4630,102 @@ class _Lowerer:
             f"  call void @llvm.amdgcn.global.load.async.to.lds.{suffix}("
             f"ptr addrspace(1) {gep_s}, ptr addrspace(3) {gep_l}, "
             f"i32 {ioff}, i32 {cpol})"
+        )
+
+    def _op_tile_global_store_async_from_lds(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("global_store_async_from_lds")
+        if len(op.operands) != 2:
+            raise ValueError("global_store_async_from_lds expects two operands")
+        dst_ptr, lds_ptr = op.operands
+        if self._ptr_llvm_type(dst_ptr) != "ptr addrspace(1)":
+            raise TypeError(
+                "global_store_async_from_lds dst_ptr must be a global pointer"
+            )
+        width = int(op.attrs["width_bytes"])
+        if width not in (1, 4, 8, 16):
+            raise ValueError(
+                f"global_store_async_from_lds width_bytes must be 1, 4, 8, or 16, got {width}"
+            )
+        offset = int(op.attrs.get("offset_bytes", 0))
+        if not -(1 << 31) <= offset < (1 << 31):
+            raise ValueError(
+                f"global_store_async_from_lds offset_bytes must fit signed i32, got {offset}"
+            )
+        cachepolicy = int(op.attrs.get("cachepolicy", 0))
+        if not 0 <= cachepolicy <= 0x1F:
+            raise ValueError(
+                f"global_store_async_from_lds cachepolicy must be in 0..31, got {cachepolicy}"
+            )
+        suffix = {1: "b8", 4: "b32", 8: "b64", 16: "b128"}[width]
+        local = self._lds_ptr_operand("global_store_async_from_lds", lds_ptr)
+        key = f"global.store.async.from.lds.{suffix}"
+        self._need(key)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.global.store.async.from.lds.{suffix}("
+            f"ptr addrspace(1) {self._operand(dst_ptr)}, "
+            f"ptr addrspace(3) {local}, i32 {offset}, i32 {cachepolicy})"
+        )
+
+    def _op_tile_global_load_tr16_b128(self, op: Op) -> None:
+        self._require_gfx1250_llvm23("global_load_tr16_b128")
+        if len(op.operands) != 1:
+            raise ValueError("global_load_tr16_b128 expects one operand")
+        src_ptr = op.operands[0]
+        if self._ptr_llvm_type(src_ptr) != "ptr addrspace(1)":
+            raise TypeError("global_load_tr16_b128 src_ptr must be a global pointer")
+        dtype = str(op.attrs.get("dtype", ""))
+        suffixes = {"f16": "v8f16", "bf16": "v8bf16", "i16": "v8i16"}
+        if dtype not in suffixes:
+            raise TypeError(
+                f"global_load_tr16_b128 dtype must be f16/bf16/i16, got {dtype}"
+            )
+        expected = VectorType({"f16": F16, "bf16": BF16, "i16": I16}[dtype], 8)
+        if op.result.type != expected:
+            raise TypeError(
+                f"global_load_tr16_b128 result must be {expected}, got {op.result.type}"
+            )
+        suffix = suffixes[dtype]
+        llvm_ty = _llvm_type(op.result.type)
+        key = f"global.load.tr.b128.{suffix}"
+        self._need(key)
+        self._current().emit(
+            f"  {op.result.name} = call {llvm_ty} "
+            f"@llvm.amdgcn.global.load.tr.b128.{suffix}("
+            f"ptr addrspace(1) {self._operand(src_ptr)})"
+        )
+
+    def _op_tile_tensor_load_to_lds(self, op: Op) -> None:
+        self._lower_tensor_lds_transfer(op, "tensor.load.to.lds")
+
+    def _op_tile_tensor_store_from_lds(self, op: Op) -> None:
+        self._lower_tensor_lds_transfer(op, "tensor.store.from.lds")
+
+    def _lower_tensor_lds_transfer(self, op: Op, intrinsic: str) -> None:
+        short_name = intrinsic.replace(".", "_")
+        self._require_gfx1250_llvm23(short_name)
+        expected = (
+            VectorType(I32, 4),
+            VectorType(I32, 8),
+            VectorType(I32, 4),
+            VectorType(I32, 4),
+            VectorType(I32, 8),
+        )
+        if len(op.operands) != len(expected):
+            raise ValueError(f"{short_name} expects five descriptor groups")
+        for index, (operand, want) in enumerate(zip(op.operands, expected)):
+            if operand.type != want:
+                raise TypeError(
+                    f"{short_name} d{index} must be {want}, got {operand.type}"
+                )
+        cachepolicy = int(op.attrs.get("cachepolicy", 0))
+        if not 0 <= cachepolicy <= 0x1F:
+            raise ValueError(
+                f"{short_name} cachepolicy must be in 0..31, got {cachepolicy}"
+            )
+        self._need(intrinsic)
+        args = ", ".join(self._operand_with_type(value) for value in op.operands)
+        self._current().emit(
+            f"  call void @llvm.amdgcn.{intrinsic}({args}, i32 {cachepolicy})"
         )
 
     def _op_tile_sync(self, op: Op) -> None:
@@ -5356,6 +5811,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
+        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
         iv_name = op.attrs["iv"]
         iv_ty = _llvm_type(lower.type)
 
@@ -5374,9 +5830,7 @@ class _Lowerer:
             f"[ %iv.next.{header.label}, %FOR_LATCH ]"
         )
         iter_phi_lines: List[int] = []
-        for meta, init in zip(iter_meta, iter_inits):
-            ty = meta["type"]
-            ll_ty = _llvm_type_from_name(ty)
+        for meta, init, ll_ty in zip(iter_meta, iter_inits, iter_llvm_types):
             header.emit(
                 f"  {meta['name']} = phi {ll_ty} "
                 f"[ {self._operand(init)}, %{pred_block} ], "
@@ -5413,8 +5867,7 @@ class _Lowerer:
 
         iv_next = f"%iv.next.{header.label}"
         latch.emit(f"  {iv_next} = add nsw {iv_ty} {iv_name}, {self._operand(step)}")
-        for meta, yld in zip(iter_meta, yielded):
-            ll_ty = _llvm_type_from_name(meta["type"])
+        for meta, yld, ll_ty in zip(iter_meta, yielded, iter_llvm_types):
             latch.emit(
                 f"  {meta['name']}.next.{header.label} = bitcast {ll_ty} {yld} to {ll_ty}"
             )
@@ -5430,8 +5883,7 @@ class _Lowerer:
         # Bind the for op's results: in LLVM IR, the header phi values
         # (which include the yielded values from the last latch iteration)
         # are the loop results. We add aliases via bitcast in the exit.
-        for meta, result in zip(iter_meta, op.results):
-            ll_ty = _llvm_type_from_name(meta["type"])
+        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             exit_blk.emit(
                 f"  {result.name} = bitcast {ll_ty} {meta['name']} to {ll_ty}"
             )
@@ -5451,6 +5903,7 @@ class _Lowerer:
         lower, upper, step = op.operands[:3]
         iter_inits = op.operands[3 : 3 + num_iter]
         iter_meta = op.attrs.get("iter_args", [])
+        iter_llvm_types = _scf_iter_llvm_types(op, num_iter)
         iv_name = op.attrs["iv"]
 
         # Evaluate constant bounds
@@ -5569,8 +6022,7 @@ class _Lowerer:
                 current_iter_values[meta["name"]] = yld
 
         # After all iterations, bind results to final iter var values
-        for meta, result in zip(iter_meta, op.results):
-            ll_ty = _llvm_type_from_name(meta["type"])
+        for meta, result, ll_ty in zip(iter_meta, op.results, iter_llvm_types):
             final_val = current_iter_values[meta["name"]]
             self._current().emit(
                 f"  {result.name} = bitcast {ll_ty} {final_val} to {ll_ty}"
@@ -5796,32 +6248,6 @@ def _format_agpr_alloc(value: object) -> str:
     if lo > hi:
         raise ValueError("agpr_alloc min must be <= max")
     return f"{lo},{hi}"
-
-
-def _llvm_type_from_name(name: str) -> str:
-    """Map our IR type-name string (from op.attrs) back to LLVM IR text."""
-    if name == "i32":
-        return "i32"
-    if name == "i64":
-        return "i64"
-    if name == "i8":
-        return "i8"
-    if name == "f16":
-        return "half"
-    if name == "bf16":
-        return "bfloat"
-    if name == "f32":
-        return "float"
-    if name == "fp8e4m3":
-        return "i8"
-    if name.startswith("vec<"):
-        # vec<f32x4> / vec<f16x4>
-        inner = name[4:-1]
-        elem, _, count = inner.partition("x")
-        count = int(count)
-        elem_map = {"f32": "float", "f16": "half", "bf16": "bfloat", "i32": "i32"}
-        return f"<{count} x {elem_map[elem]}>"
-    raise NotImplementedError(f"no LLVM type for {name!r}")
 
 
 def _param_attrs(attrs: Dict[str, object], t: Type) -> str:

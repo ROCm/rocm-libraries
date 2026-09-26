@@ -39,7 +39,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - 1LDSBuffer: [-1]
+        - 1LDSBuffer: [0]
         - ClusterLocalRead: [1]
         - DepthU: [ 128 ]
         - ExpandPointerSwap: [true]

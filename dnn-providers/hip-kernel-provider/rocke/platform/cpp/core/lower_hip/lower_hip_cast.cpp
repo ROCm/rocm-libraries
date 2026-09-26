@@ -32,16 +32,41 @@ static const rocke_value_t* h_res(const rocke_op_t* op)
 
 /* ----------------------------- arith: int width casts ---------------------- */
 
-/* def _op_arith_zext(self, op):
- *     (v,) = op.operands
- *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
- *                f"({_type_to_hip(op.result.type)}){_name(v)};") */
+static const char* h_unsigned_int_type(const rocke_type_t* t)
+{
+    const char* name = t ? t->name : NULL;
+    if(!name)
+        return NULL;
+    if(__builtin_strcmp(name, "i1") == 0)
+        return "bool";
+    if(__builtin_strcmp(name, "i8") == 0)
+        return "uint8_t";
+    if(__builtin_strcmp(name, "i16") == 0)
+        return "uint16_t";
+    if(__builtin_strcmp(name, "i32") == 0)
+        return "uint32_t";
+    if(__builtin_strcmp(name, "i64") == 0)
+        return "uint64_t";
+    return NULL;
+}
+
+/* Zero extension must cast through the unsigned spelling of the source type.
+ * A direct int8_t -> int/int64_t cast sign-extends bytes 0x80..0xff. */
 static rocke_status_t rocke_h_op_arith_zext(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     const char* t = rocke_h_type_to_hip(lw, r->type);
-    rocke_h_emitf(lw, "%s %s = (%s)%s;", t, rocke_h_name(lw, r), t, rocke_h_name(lw, v));
+    const char* source_unsigned = h_unsigned_int_type(v->type);
+    if(!source_unsigned)
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "HIP zext requires an integer scalar source, got '%s'",
+                            v->type ? v->type->name : "(null)");
+    }
+    rocke_h_emitf(
+        lw, "%s %s = (%s)(%s)%s;", t, rocke_h_name(lw, r), t, source_unsigned, rocke_h_name(lw, v));
     return lw->status;
 }
 

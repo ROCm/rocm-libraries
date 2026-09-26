@@ -1,0 +1,16 @@
+{% extends "common/base.h.jinja2" %}
+{% block config_constructor -%}
+reduce_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} }, ::rocprim::block_reduce_algorithm::using_warp_reduce }
+{%- endblock %}
+
+{% block target_tparams -%}
+template<class Target, class key_type>
+{%- endblock %}
+
+{% block config_guard scoped %}
+    ({% if not type.key_type.is_floating %}!{% endif %}bool(rocprim::is_floating_point<key_type>::value)
+    && (sizeof(key_type) <= {{ type.key_type.size }})
+    {% if type.key_type.size_min > 0 %}&& (sizeof(key_type) > {{ type.key_type.size_min }}){% endif %})
+{%- endblock %}
+
+{% block config_base_type -%}reduce_config_params_base<key_type>{%- endblock -%}

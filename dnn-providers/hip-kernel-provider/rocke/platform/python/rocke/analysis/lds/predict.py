@@ -76,10 +76,19 @@ def _validate_accesses(
                 f"access {access.access_id} width {access.access_width_bytes} does not "
                 f"match {opcode} width {spec.access_width_bytes}"
             )
-        if access.lds_byte_address % 4:
+        if (
+            access.lds_byte_address + access.access_width_bytes
+            > profile.lds_capacity_bytes
+        ):
+            raise LdsPredictionError(
+                f"access {access.access_id} end address "
+                f"{access.lds_byte_address + access.access_width_bytes} exceeds "
+                f"{profile.identity.target} LDS capacity {profile.lds_capacity_bytes}"
+            )
+        if access.lds_byte_address % spec.access_width_bytes:
             raise LdsPredictionError(
                 f"access {access.access_id} address {access.lds_byte_address} must be "
-                "dword aligned"
+                f"{spec.access_width_bytes}-byte aligned"
             )
     return ordered
 
@@ -141,6 +150,7 @@ def predict_lds_conflicts(
     """Predict conflicts and broadcasts for one LDS instruction in one wave.
 
     Each lane may contribute at most one active access of the opcode's full width.
+    Accesses must be naturally aligned and fit within the profile's LDS capacity.
     """
 
     if isinstance(coordinate_axes, (str, bytes)) or not isinstance(

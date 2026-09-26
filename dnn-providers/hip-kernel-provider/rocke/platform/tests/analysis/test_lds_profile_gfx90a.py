@@ -3,7 +3,12 @@
 
 """CPU-only golden cases for the explicit gfx90a LDS profile."""
 
+import importlib
+
 import pytest
+
+from rocke.analysis.lds import opcodes, profiles
+from rocke.analysis.lds.profiles import gfx90a
 
 from rocke.analysis.lds.model import AccessClassification, GroupKind, LdsAccess
 from rocke.analysis.lds.opcodes import UnsupportedLdsOpcodeError
@@ -177,7 +182,7 @@ def test_prediction_is_deterministic_for_unsorted_inputs():
     [
         ("ds_read_b32", [_access(0, 64, 0)], "lane 64"),
         ("ds_read_b64", [_access(0, 0, 0)], "does not match"),
-        ("ds_read_b32", [_access(0, 0, 2)], "dword aligned"),
+        ("ds_read_b32", [_access(0, 0, 2)], "4-byte aligned"),
         ("ds_read_b32", [_access(0, 0, 0), _access(0, 1, 128)], "must be unique"),
     ],
 )
@@ -210,3 +215,54 @@ def test_coordinate_axes_must_be_a_string_sequence():
             accesses=[_access(0, 0, 0)],
             coordinate_axes="row",
         )
+
+
+@pytest.mark.parametrize("width", [4, 8, 16])
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_access_at_end_of_lds_is_valid(direction, width):
+    result = _predict(
+        f"ds_{direction}_b{width * 8}", [_access(0, 0, 65536 - width, width=width)]
+    )
+    assert result.accesses[0].classification is AccessClassification.NORMAL
+
+
+@pytest.mark.parametrize("width", [4, 8, 16])
+@pytest.mark.parametrize("direction", ["read", "write"])
+@pytest.mark.parametrize("address", [65536, 65664])
+def test_access_outside_lds_is_rejected(direction, width, address):
+    with pytest.raises(LdsPredictionError, match="exceeds.*LDS capacity"):
+        _predict(f"ds_{direction}_b{width * 8}", [_access(0, 0, address, width=width)])
+
+
+@pytest.mark.parametrize("width", [8, 16])
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_access_crossing_lds_end_is_rejected(direction, width):
+    with pytest.raises(LdsPredictionError, match="exceeds.*LDS capacity"):
+        _predict(f"ds_{direction}_b{width * 8}", [_access(0, 0, 65532, width=width)])
+
+
+@pytest.mark.parametrize(("width", "address"), [(8, 4), (16, 4), (16, 8), (16, 12)])
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_vector_access_requires_natural_alignment(direction, width, address):
+    with pytest.raises(LdsPredictionError, match=f"{width}-byte aligned"):
+        _predict(f"ds_{direction}_b{width * 8}", [_access(0, 0, address, width=width)])
+
+
+def test_global_opcode_addition_does_not_expand_gfx90a_support(monkeypatch):
+    opcode = "ds_read_b96"
+    monkeypatch.setitem(
+        opcodes._OPCODE_SPECS, opcode, opcodes.OpcodeSpec(opcode, "read", 12)
+    )
+    # Reload so the new opcode is present when the profile class is defined.
+    profile = importlib.reload(gfx90a).Gfx90aProfile()
+    monkeypatch.setattr(profiles, "BUILTIN_PROFILES", (profile,))
+    try:
+        with pytest.raises(LdsPredictionError, match="not supported by gfx90a"):
+            _predict(opcode, [_access(0, 0, 0, width=12)])
+        with pytest.raises(ValueError, match="not supported by gfx90a"):
+            profile.phase_key(opcode, 0)
+        with pytest.raises(ValueError, match="not supported by gfx90a"):
+            profile.collision_key(opcode, 0)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(gfx90a)

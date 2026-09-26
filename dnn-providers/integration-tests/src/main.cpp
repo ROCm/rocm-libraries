@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -27,6 +28,8 @@
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
+#include "harness/bundle/SupportClaimWriter.hpp"
+#include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -142,6 +145,11 @@ int main(int argc, char** argv) noexcept
                   "golden data against a reference (no engine involved) is not a mode "
                   "here; run the hipdnn_golden_data_tests binary instead. Can also be "
                   "set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--validator")
+            .help("Where outputs are compared: 'auto' (default; follow the reference -- "
+                  "the device for a GPU reference, the host for a CPU reference or golden "
+                  "data), 'cpu', or 'gpu'. Applies to bundle and C++ graph tests alike. "
+                  "Can also be set via HIPDNN_TEST_VALIDATOR env var.");
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
@@ -151,6 +159,16 @@ int main(int argc, char** argv) noexcept
             .help("Enforce engine support claims from .support.json sidecars. "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
                   "a test FAIL instead of a silent SKIP.");
+        parser.add_argument("--write-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Observe live engine support and write .support.json sidecars. "
+                  "Requires --test-article and --golden-data-dir (mode B: all "
+                  "engines, or mode C with --test-engine). Implies --allow-bundles, "
+                  "since bundles are what carry the claims. Idempotent: no support "
+                  "change = zero git diff. Run one at a time: concurrent "
+                  "--write-support-claims runs against the same bundle tree race "
+                  "on the sidecars and the last writer wins.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -249,6 +267,22 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --validator (case-insensitive); invalid value -> exit 1.
+        std::optional<hipdnn_integration_tests::ValidatorDevice> validator;
+        if(parser.is_used("--validator"))
+        {
+            try
+            {
+                validator = hipdnn_integration_tests::parseValidatorDevice(
+                    parser.get<std::string>("--validator"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+        }
+
         // Parse --capture-bundles argument
         std::optional<std::filesystem::path> captureDir;
         if(parser.is_used("--capture-bundles"))
@@ -301,8 +335,38 @@ int main(int argc, char** argv) noexcept
         opts.allowBundles = allowBundles;
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
+        opts.validatorDevice = validator;
         opts.captureDir = std::move(captureDir);
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
+        opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
+
+        if(opts.writeSupportClaims && !opts.articlePath.has_value())
+        {
+            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
+                      << "Mode A (auto-select) cannot generate support claims.\n";
+            return 1;
+        }
+
+        // Only that a directory was named -- "is this the source tree" is not
+        // decidable, a build directory is just a directory. The env var is the
+        // documented alternative to the flag, so it satisfies this too.
+        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
+           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
+        {
+            std::cerr << "--write-support-claims requires a bundle data directory: pass "
+                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
+                      << "Point it at the source tree -- sidecars written into a build "
+                      << "directory are lost on the next clean build.\n";
+            return 1;
+        }
+
+        if(opts.writeSupportClaims && opts.enforceSupportClaims)
+        {
+            std::cerr << "--write-support-claims and --enforce-support-claims are "
+                      << "mutually exclusive.\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -412,12 +476,38 @@ int main(int argc, char** argv) noexcept
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
-        hipdnn_integration_tests::bundle::printSupportClaimSummary(
-            hipdnn_integration_tests::bundle::supportClaimCoverage(),
-            hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
-            std::cerr);
+        if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
+        {
+            hipdnn_integration_tests::bundle::printSupportClaimSummary(
+                hipdnn_integration_tests::bundle::supportClaimCoverage(),
+                hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
+                std::cerr);
+        }
 
         int exitCode = result;
+
+        if(hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
+        {
+            auto& observationLog = hipdnn_integration_tests::bundle::SupportObservationLog::get();
+
+            // Named field assignment, not designated initializers: this is C++17.
+            hipdnn_integration_tests::bundle::AuthoringRunSummary runSummary;
+            runSummary.graphsObserved = observationLog.graphsObserved();
+            runSummary.graphsUnobserved = observationLog.graphsUnobserved();
+            runSummary.graphsSkippedBeforeObservation
+                = observationLog.graphsSkippedBeforeObservation();
+            runSummary.graphsRegistered
+                = hipdnn_integration_tests::bundle::supportClaimCoverage().graphsFound;
+            runSummary.selectionNarrowed = hipdnn_integration_tests::bundle::selectionWasNarrowed();
+
+            const auto authoring = hipdnn_integration_tests::bundle::authorSupportClaims(
+                observationLog.all(), runSummary, std::cerr);
+
+            if(authoring.shouldFail)
+            {
+                exitCode = 1;
+            }
+        }
 
         if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
            && hipdnn_integration_tests::bundle::verifiedNothing(
