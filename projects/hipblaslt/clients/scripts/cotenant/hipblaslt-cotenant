@@ -30,6 +30,7 @@ from typing import TextIO
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "hipblaslt-cotenant-kernel.hip"
+HEADER = HERE / "cotenant.hpp"
 # A precompiled binary installed next to this script (the shipped case), if present.
 SHIPPED_BIN = HERE / "hipblaslt-cotenant-kernel"
 
@@ -75,16 +76,16 @@ def resolve_binary(arch: str | None, env: dict[str, str], explicit: str | None) 
 
 def build_cotenant(arch: str | None, env: dict[str, str]) -> Path:
     """Build the kernel into the per-user cache and return its path (rebuilds when stale)."""
-    if not SRC.is_file():
+    if not SRC.is_file() or not HEADER.is_file():
         sys.exit(
-            f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH."
+            f"ERROR: no prebuilt kernel and source/header not found ({HERE}); pass --binary PATH."
         )
     out = cache_dir() / "hipblaslt-cotenant-kernel"
     stamp = cache_dir() / "arch"
     try:
         fresh = (
             out.exists()
-            and out.stat().st_mtime >= SRC.stat().st_mtime
+            and out.stat().st_mtime >= max(SRC.stat().st_mtime, HEADER.stat().st_mtime)
             and stamp.exists()
             and stamp.read_text().strip() == arch
         )

@@ -7,6 +7,7 @@ add_library(hipblaslt-clients-common STATIC)
 target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
@@ -168,7 +169,7 @@ target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL
 # CU-contention cotenant helper (clients/scripts/cotenant). A standalone HIP
 # binary, compiled as CXX so it picks up GPU_TARGETS via hip::device like the
 # other clients (the project does not enable the HIP language). POSIX-only
-# (unistd.h, pause(), usleep(), getpid()), so it is not built on Windows.
+# (unistd.h, pause(), getpid()), so it is not built on Windows.
 if(NOT WIN32)
     add_executable(hipblaslt-cotenant-kernel "${CMAKE_CURRENT_SOURCE_DIR}/scripts/cotenant/hipblaslt-cotenant-kernel.hip")
     set_source_files_properties(

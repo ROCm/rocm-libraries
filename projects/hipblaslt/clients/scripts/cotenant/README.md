@@ -3,8 +3,7 @@
 Run `hipblaslt-bench` (or any command) with LDS contention from a background
 "cotenant" kernel.
 
-Linux only: the kernel uses POSIX APIs (`unistd.h`, `pause()`, `usleep()`,
-`getpid()`) and is not built or installed on Windows.
+The standalone launcher is Linux only and is not built or installed on Windows.
 
 ```bash
 hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
@@ -72,6 +71,34 @@ residency without polling driver internals or guessing a settle time.
 Pass `--cus 0` to run the command with no cotenant at all — the uncontended
 baseline. Otherwise `--cus` must be at least 1 and less than the device CU count
 (reported by `rocminfo`). This bound applies at every max-occupancy setting.
+Very high contention can still stall a GEMM despite leaving some CUs available.
+If this happens, reduce the workgroup count or increase max occupancy to reserve
+less LDS per workgroup. This applies to both launcher and same-process use.
 
 Useful flags: `--device N` (sets `HIP_VISIBLE_DEVICES`), `--wait` (max seconds to
 wait for `READY`), `--grace` (extra settle time after residency, default 0).
+
+## Same-process benchmarking
+
+To run the same cotenant in `hipblaslt-bench` on a separate, nonblocking stream:
+
+```bash
+hipblaslt-bench --cotenant-cus 64 --cotenant-max-occupancy 4 -m 4096 -n 4096 -k 4096
+```
+
+`--cotenant-cus` defaults to 0 (disabled); otherwise it must be less than the
+selected device's CU count. `--cotenant-max-occupancy` defaults to 1 and uses
+the same LDS calculation and 1–64 range as the launcher. Use the benchmark's
+`--device` option to select the GPU.
+
+For each candidate solution, the cotenant starts after setup and waits for all
+workgroups to become resident (30-second timeout). It stays active through warmup,
+skip-slow screening, and fixed or adaptive timing, then stops before validation
+and cleanup. Skipping a solution also stops its cotenant. Startup and shutdown
+are outside the GEMM timing interval.
+
+The in-process kernel checks a device-resident stop flag once per wave after
+every 256 sleeps. After measurement, a one-thread kernel on the GEMM stream
+sets that flag. Shutdown waits for the next check, outside GEMM timing.
+The standalone kernel sleeps until its process is killed. Both share the
+same kernel source and LDS reservation logic.

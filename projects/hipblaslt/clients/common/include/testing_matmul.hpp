@@ -30,6 +30,7 @@
 #include "allclose.hpp"
 #include "benchmark_timing.hpp"
 #include "cblas_interface.hpp"
+#include "cotenant.hpp"
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
 #include "hipBuffer.hpp"
@@ -5651,6 +5652,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   tuningVec[heuristicTuningIndex[sol]],
                                                   *dWorkspace));
                     }
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -5698,6 +5703,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -5798,6 +5807,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else
                 {
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -5920,6 +5933,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   gemm_count * sizeof(hipblaslt_ext::UserArguments),
                                                   hipMemcpyHostToDevice));
                     }
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
@@ -5980,6 +5997,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                             stream));
                     }
 
+                    hipblaslt_cotenant::Scoped cotenant(
+                        hipblaslt_bench_options::cotenant_cus(),
+                        hipblaslt_bench_options::cotenant_max_occupancy(),
+                        stream);
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
