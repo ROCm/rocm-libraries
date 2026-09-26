@@ -1275,10 +1275,17 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         // comparison below is false for every wait and would drop the ds_load
         // -- the veto this change removed, reached by another route.
         const bool outOfWmmaWindow = activeWmmaLatency_ <= 0 && dsReadThrottleWait() == 0;
+        // schedulingSpace/activeWmmaLatency_ is this wave's own remaining
+        // window, consumed at the raw issueCycles rate once a ds_load is
+        // actually picked (see updateWMMAStatus). dsIssueCost()'s wave-sharing
+        // doubling belongs to dsThrottleWait (cross-wave ds pipe contention,
+        // already added above), not to this admission test -- charging it
+        // here too would reject a ds_load the window can actually fit,
+        // splitting matched ds_load pairs apart for no real reason.
         const bool fitsSchedulingBudget =
             dsThrottleWait == 0 || outOfWmmaWindow ||
             (schedulingPos < activeWmmaLatency_ &&
-             dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
+             dsThrottleWait + pickedDS->inst->issueCycles <= schedulingSpace);
         if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
