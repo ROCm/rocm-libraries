@@ -104,7 +104,7 @@ def _domains() -> List[Tuple[str, str, Callable[..., Any], List[int]]]:
         return DOMAINS
     from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-    from rocke.instances.common.conv_implicit_gemm import ConvProblem
+    from kernels.common.conv_implicit_gemm import ConvProblem
 
     attn_base = dict(
         batch=1,

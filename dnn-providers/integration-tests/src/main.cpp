@@ -145,6 +145,11 @@ int main(int argc, char** argv) noexcept
                   "golden data against a reference (no engine involved) is not a mode "
                   "here; run the hipdnn_golden_data_tests binary instead. Can also be "
                   "set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--validator")
+            .help("Where outputs are compared: 'auto' (default; follow the reference -- "
+                  "the device for a GPU reference, the host for a CPU reference or golden "
+                  "data), 'cpu', or 'gpu'. Applies to bundle and C++ graph tests alike. "
+                  "Can also be set via HIPDNN_TEST_VALIDATOR env var.");
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
@@ -262,6 +267,22 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --validator (case-insensitive); invalid value -> exit 1.
+        std::optional<hipdnn_integration_tests::ValidatorDevice> validator;
+        if(parser.is_used("--validator"))
+        {
+            try
+            {
+                validator = hipdnn_integration_tests::parseValidatorDevice(
+                    parser.get<std::string>("--validator"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+        }
+
         // Parse --capture-bundles argument
         std::optional<std::filesystem::path> captureDir;
         if(parser.is_used("--capture-bundles"))
@@ -314,6 +335,7 @@ int main(int argc, char** argv) noexcept
         opts.allowBundles = allowBundles;
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
+        opts.validatorDevice = validator;
         opts.captureDir = std::move(captureDir);
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");

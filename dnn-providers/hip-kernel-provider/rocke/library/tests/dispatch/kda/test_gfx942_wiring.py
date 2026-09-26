@@ -20,8 +20,10 @@ from dispatch.kda import (
     KDA_REGISTRY,
     KdaRequest,
     dispatch_kda,
+    dispatch_kda_all,
     kda_candidates,
     kda_sweep_space,
+    registered_kda_combos,
 )
 
 _FUSED = "kda_gfx942_chunk_fused"
@@ -104,10 +106,18 @@ class TestRouting(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("opt-in", why)
 
-    def test_sweep_space_offers_only_what_is_reachable(self):
-        # auto routes to fused alone, so the sweep space is one spec -- not the
-        # three it would be if the opt-in gate were advisory.
-        self.assertEqual(len(kda_sweep_space(_req())), 1)
+    def test_sweep_space_probes_opt_in_split_halves(self):
+        # Production auto still routes to fused alone. The sweep primitive
+        # probes opt-in prep/scan the same way attention probes dense/tuning.
+        self.assertEqual(dispatch_kda(_req()).candidate.name, _FUSED)
+        self.assertEqual(len(KDA_REGISTRY.supported(_req())), 1)
+        self.assertEqual(len(kda_sweep_space(_req())), 3)
+        names = [c.name for c, _spec in registered_kda_combos(_req())]
+        self.assertEqual(names, [_FUSED, _PREP, _SCAN])
+        self.assertEqual(
+            [r.candidate.name for r in dispatch_kda_all(_req())],
+            [_FUSED, _PREP, _SCAN],
+        )
 
 
 class TestArchGate(unittest.TestCase):

@@ -10,7 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as _dataclass_fields
+from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
 from rocke.core.ir import BF16, F16
@@ -73,6 +73,8 @@ class AttentionDenseSpec:
     block_size: int = 0
     num_kv_blocks: int = 0
     use_sinks: bool = False
+    # Appended for positional compatibility with existing concrete specs.
+    causal_bottom_right: bool = field(default=False, kw_only=True)
 
     def supported_persist_decodes(self) -> frozenset[str]:
         """Decode values the concrete kernel type can actually emit."""
@@ -97,13 +99,22 @@ class AttentionDenseSpec:
                 "elements (16 bytes) so the K group pitch stays "
                 f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
             )
+        if self.causal_bottom_right:
+            if not self.causal:
+                raise ValueError("causal_bottom_right requires causal=True")
+            if self.seqlen_q > self.seqlen_kv:
+                raise ValueError(
+                    "causal_bottom_right requires seqlen_q <= seqlen_kv, got "
+                    f"{self.seqlen_q} > {self.seqlen_kv}"
+                )
 
         if self.ragged:
             if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
                 raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv:
+            if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
                 raise ValueError(
-                    "ragged is self-attention only (seqlen_q == seqlen_kv), got "
+                    "ragged is self-attention only (seqlen_q == seqlen_kv) unless "
+                    "causal_bottom_right is set, got "
                     f"{self.seqlen_q} != {self.seqlen_kv}"
                 )
             if self.varlen:
@@ -246,11 +257,20 @@ class AttentionDenseSpec:
         declaration lives on the spec that owns the body rather than in the
         shared key function.
 
-        NOTE: this does not yet drive the symbol name. ``batch`` has never
-        appeared in the dense name on any path, so a spec that bakes batch and
-        one that does not are homonyms. Harmless for in-process dispatch, where
-        the cache key is the identity; a blocker for AOT packaging and for
-        per-batch specialization, where the symbol IS the identity.
+        NOTE: this does not drive the symbol name -- each spec curates its own
+        name parts by hand, and the two must be kept in sync deliberately.
+
+        Getting that wrong is not cosmetic: a field dropped from the key but kept
+        in the name gives two specs that share ONE cache slot two DIFFERENT
+        symbols, and ``run_attention_dense_torch``'s ``assert art.kernel_name ==
+        spec.kernel_name()`` then fires on the second one served from that slot.
+        ``Gfx942AttentionDenseSpec`` is the live example: it appends ``_b{batch}``
+        (batch sized its buffer-resource extents), so declaring ``batch`` here
+        obliged it to drop that token in the same change.
+
+        Deriving the name FROM this tuple would make the two correct by
+        construction. It does not today, which is the blocker for AOT packaging
+        and per-batch specialization, where the symbol IS the identity.
         """
         return ()
 
@@ -285,6 +305,8 @@ class AttentionDenseSpec:
         parts.extend(self._layout_name_parts())
         parts.extend(self._shape_name_parts())
         parts.append("causal" if self.causal else "full")
+        if self.causal_bottom_right:
+            parts.append("br")
         if self.ragged:
             parts.append("ragged")
         if self.sliding_window > 0:

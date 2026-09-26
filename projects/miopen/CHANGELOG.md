@@ -10,6 +10,17 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Exposed a bounded gfx1250 BF16 group-local depthwise CK backward-weights candidate for packed 2D channels-last short-reduction problems; selected BF16 plugin execution requires the usual WRW alpha/beta workspace contract.
 * [Conv] Elided four grouped-CK NCHW staging transposes for packed BF16 2D G1 unit-spatial pointwise invocations when the caller tensors and reserved workspace are disjoint; overlapping or nonqualifying calls retain the original staging path and workspace size.
 
+## MIOpen 3.6.2 for ROCm 10.2.0
+
+### Added
+* [Conv] Added gfx950 depthwise backward-weights (fp16/bf16) and gfx1250 depthwise
+  kernels to the `ConvHipConv` solver (hipconv v0.3.1).
+
+### Removed
+* [Conv] Removed gfx803 convolution solver `ConvBinWinogradRxSFused` and its kernel sources.
+* [Conv] Removed the gfx803 code paths and kernel sources from `ConvBinWinograd3x3U` and `ConvBinWinogradRxS`.
+* [Conv] Removed the gfx803 find-database files.
+
 ## MIOpen 3.6.1 for ROCm 10.1.0
 
 ### Resolved Issues

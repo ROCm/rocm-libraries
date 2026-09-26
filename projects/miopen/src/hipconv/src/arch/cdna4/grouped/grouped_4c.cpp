@@ -91,11 +91,11 @@ struct GroupedDataTraits<DataType::tf32>
     static constexpr bool needs_lds_pack = false;
     static __device__ __forceinline__ mfma_operand_t to_mfma_operand(operand_t raw)
     {
-        return fp32x4_to_bf16_pair(raw);
+        return fp32xN_to_bf16_pair(raw);
     }
     static __device__ __forceinline__ mfma_operand_t zero_operand()
     {
-        return fp32x4_to_bf16_pair(fp32x4_t{0.f, 0.f, 0.f, 0.f});
+        return fp32xN_to_bf16_pair(fp32x4_t{0.f, 0.f, 0.f, 0.f});
     }
 };
 
@@ -875,7 +875,7 @@ __global__ void conv2d_grouped_4c_nhwc_cdna4(const ToType<DT>* __restrict__ in,
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
-                 const Conv2dParams& par,
+                 const ConvParams& par,
                  const void* in,
                  const void* wei,
                  void* out,
@@ -926,7 +926,7 @@ public:
     {
     }
 
-    bool is_valid_config(const Conv2dParams& par) const override
+    bool is_valid_config(const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -958,7 +958,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const Conv2dParams& par) const override
+    LaunchParams get_launch_params(const ConvParams& par) const override
     {
         // Compute the grid size.
         // For Dgrad the output is the input gradient (width = par.w, not par.q).

@@ -99,14 +99,14 @@ std::vector<std::string> RunFind(miopenHandle_t handle, size_t max_solutions = 8
 bool IsNaive(const std::string& name) { return name.find("Naive") != std::string::npos; }
 
 // RunFind's convolution (3x3, pad 1, stride 1, fp32, K=64) is exactly what
-// ConvBinWinograd3x3U accepts, and that solver is applicable only on these four
+// ConvBinWinograd3x3U accepts, and that solver is applicable only on these
 // archs.  There IsWinograd3x3SupportedAndFast() sets use_winograd_only, which
 // disables the Direct finder outright, so ConvDirectNaive is never a candidate
 // and assertions about its presence or absence say nothing about the timeout.
 bool IsWinogradOnlyArch(const miopen::Handle& handle)
 {
     const auto name = handle.GetDeviceName();
-    return name == "gfx803" || name == "gfx900" || name == "gfx906" || name == "gfx908";
+    return name == "gfx900" || name == "gfx906" || name == "gfx908";
 }
 
 } // namespace

@@ -445,7 +445,12 @@ class _RawArchHeader(NamedTuple):
 
 
 _LIST_MINVER_RE = re.compile(r"- (?:\{MinimumRequiredVersion|MinimumRequiredVersion:)")
-_LIST_ARCH_WITH_CU_RE = re.compile(r"- \{Architecture: (\w+), CUCount: (\d+)\}")
+# The architecture line is an open mapping: CUCount is optional, and table-level
+# keys such as UseKdTree may follow it. Only Architecture and CUCount are read
+# here, so anything else is accepted and left to the full YAML load.
+_LIST_ARCH_WITH_CU_RE = re.compile(
+    r"- \{Architecture: (\w+)(?:, CUCount: (\d+))?(?:, [^}]*)?\}"
+)
 _LIST_ARCH_RE = re.compile(r"- gfx(\w+)")
 _LIST_DEVICE_LINE_RE = re.compile(r"- \[Device")
 
@@ -478,7 +483,7 @@ def _extractArchInfoFromList(lines: List[str], file: Union[str, Path]) -> _RawAr
         match2 = _LIST_ARCH_RE.match(line)
         if match1:
             architecture, cu_count = match1.groups()
-            return architecture, f"cu={cu_count}"
+            return architecture, f"cu={cu_count}" if cu_count else None
         elif match2:
             return line[2:].strip(), None
         else:

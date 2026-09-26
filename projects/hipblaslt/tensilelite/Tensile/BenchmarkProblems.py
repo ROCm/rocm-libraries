@@ -326,6 +326,24 @@ def _getCustomKernelSolutionObj(
     return sol
 
 
+def _hashableProblemTypeKV(k, v):
+    """Make (k, v) hashable for set-difference comparisons of ProblemType.
+
+    Lists become tuples; otherwise we fall back to repr(v) for unhashable
+    nested values (e.g. dict-valued problem-type fields). Note: repr is
+    insertion-order-sensitive for dicts, so equivalent dicts with different
+    insertion orders compare as different. Acceptable for the diagnostic
+    "differing parameters" message produced below.
+    """
+    if isinstance(v, list):
+        return (k, tuple(v))
+    try:
+        hash(v)
+        return (k, v)
+    except TypeError:
+        return (k, repr(v))
+
+
 def _generateCustomKernelSolutions(
         problemType,
         customKernels,
@@ -339,17 +357,19 @@ def _generateCustomKernelSolutions(
     solutions = []
     for kernelName in customKernels:
         print1("# Processing custom kernel {}".format(kernelName))
-        solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
+        try:
+            solution = _getCustomKernelSolutionObj(kernelName, internalSupportParams, assembler, debugConfig, isaInfoMap)
+        except (RuntimeError, KeyError, TypeError) as e:
+            printWarning(f"Skipping custom kernel '{kernelName}': missing or invalid custom.config ({e})")
+            continue
         # The ActivationType setting in YAML is meaningless in customKernel case.
         # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
         solution["ProblemType"]["ActivationType"] = problemType["ActivationType"]
         if solution["ProblemType"] != problemType:
             # Raise error if this kernel was specifically requested and problem type doesn't match
             if failOnMismatch:
-                benchmarkSet = set([(k,tuple(v)) if type(v) is list else (k,v) \
-                        for k,v in problemType.items()])
-                customSet = set([(k,tuple(v)) if type(v) is list else (k,v) \
-                        for k,v in solution["ProblemType"].items()])
+                benchmarkSet = {_hashableProblemTypeKV(k, v) for k, v in problemType.items()}
+                customSet = {_hashableProblemTypeKV(k, v) for k, v in solution["ProblemType"].items()}
 
                 msg = "The problem type in the config file does not match " \
                         "that of the custom kernel, {}.".format(kernelName) \

@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <numeric>
 #include <stdexcept>
 #include <type_traits>

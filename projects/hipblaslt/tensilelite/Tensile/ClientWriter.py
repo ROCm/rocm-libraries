@@ -45,7 +45,7 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
 from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .TensileCreateLibrary import computeOutputArchNames, copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -124,6 +124,32 @@ def buildTargetGfx(isaInfoMap, archNames=None) -> str:
   return requested.get(isa, isaToGfx(isa))
 
 
+def clientLibraryFiles(clientLibraryPath, archs, outArchNames=None):
+  """Return the code objects and master library files built for `archs`.
+
+  Kernels fan out into one per-base subdir per arch, so the lists are unioned
+  across them. `outArchNames` maps an ISA-derived arch to the subdir it was
+  written to (see computeOutputArchNames): a stepping such as gfx1250v0 lands
+  in `library/gfx1250v0/` while its master keeps the `gfx1250` suffix. The
+  master is matched by its exact name because lazy-loading shards share the
+  `TensileLibrary_` prefix. Msgpack is written to disk as `<name>.dat.zlib`,
+  but the client must be given the logical `.dat` name; it probes for the
+  `.zlib` variant itself.
+  """
+  libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+  masterPrefix = "TensileLibrary_lazy_" if globalParameters["LazyLibraryLoading"] else "TensileLibrary_"
+  outArchNames = outArchNames or {}
+  coList = []
+  libraryList = []
+  for arch in archs:
+    archDir = libraryDir(clientLibraryPath, outArchNames.get(arch, arch))
+    coList.extend(glob(os.path.join(archDir, "*.co")))
+    master = os.path.join(archDir, masterPrefix + arch + libraryExt)
+    if os.path.exists(master) or os.path.exists(master + ".zlib"):
+      libraryList.append(master)
+  return coList, libraryList
+
+
 def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str, archNames=None):
 
   libraryLogicPath = ensurePath(outputPath / LIBRARY_LOGIC_DIR)
@@ -155,13 +181,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  # Kernels fan out into one per-base subdir per arch; union the globs across them.
-  coList = []
-  yamlList = []
-  for arch in archs:
-    archDir = libraryDir(clientLibraryPath, arch)
-    coList.extend(glob(os.path.join(archDir, "*.co")))
-    yamlList.extend(glob(os.path.join(archDir, "*.yaml")))
+  coList, libraryList = clientLibraryFiles(clientLibraryPath, archs, computeOutputArchNames([targetGfx]))
 
   clientParametersPaths = []
   splitGSU = False
@@ -227,7 +247,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   deviceId=deviceId,
                                   gfxName=gfxName,
                                   tileAwareSelection=False,
-                                  libraryFile=yamlList[0]))
+                                  libraryFile=libraryList[0]))
 
   forBenchmark = False
   problemSizes = None
@@ -525,7 +545,8 @@ def problemSizeParams(problemType, problem, factorDim):
             "Invalid number of problem type indices: {0} - Indices: {1}, problemSize: {2}".format(len(problem.sizes), numIndices,
             ', '.join(map(str, problem.sizes))))
 
-    problemSizeArg = ('problem-size', ','.join(map(str, problem.sizes[:numIndices])))
+    sizes = list(problem.sizes[:numIndices])
+    problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
     rv.insert(0, problemSizeArg)
 
     rv.append(('a-strides', ",".join(map(str, astrides))))

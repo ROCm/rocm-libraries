@@ -92,9 +92,8 @@ public:
             variantPack.at(_params.biasTensor.uid),
             _params.biasTensor.dims,
             _params.biasTensor.strides);
-        const auto epsilon = static_cast<double>(
-            hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<ComputeDataType>(
-                _params.epsilonTensor, variantPack, "Epsilon"));
+        const auto epsilon = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+            _params.epsilonTensor, variantPack, "Epsilon");
         std::unique_ptr<hipdnn_gpu_ref::ShallowGpuTensor<MeanInvVarianceDataType>> meanTensor;
         hipdnn_gpu_ref::ShallowGpuTensor<MeanInvVarianceDataType>* meanTensorPtr = nullptr;
         if(_params.meanTensor.has_value())
@@ -194,7 +193,6 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), YDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
             CHECK_TENSOR_TYPE(

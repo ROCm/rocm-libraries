@@ -26,6 +26,13 @@
 
 struct RTCKernelTwiddle : public RTCKernel
 {
+    // Twiddle tables are all small enough to index with 32 bits - the
+    // per-length tables are bounded by LDS size, and the large 3-step
+    // table is only X * Y entries.  This bounds the table indices only:
+    // the LARGE kernel also computes step values that scale with the
+    // transform length, so those stay 64-bit in the kernel body.
+    static inline KIntType default_itype = KIntType::U32;
+
     // generate twiddle kernel from type and precision
     static std::shared_future<std::unique_ptr<RTCKernel>>
         generate(const std::string& gpu_arch, TwiddleTableType type, rocfft_precision precision);
@@ -39,10 +46,11 @@ struct RTCKernelTwiddle : public RTCKernel
 
 protected:
     RTCKernelTwiddle(const std::string&                       kernel_name,
+                     KIntType                                 itype,
                      std::shared_future<hipModule_wrapper_t>& module,
                      dim3                                     gridDim,
                      dim3                                     blockDim)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
 };

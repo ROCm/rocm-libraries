@@ -56,6 +56,7 @@ set(roclapack_test_source
   lapack/gelq2_gelqf_gtest.cpp
   # problem and matrix reductions (diagonalizations)
   lapack/gebd2_gebrd_gtest.cpp
+  lapack/gehd2_gehrd_gtest.cpp
   lapack/sytxx_hetxx_gtest.cpp
   lapack/sygsx_hegsx_gtest.cpp
   # singular value decomposition
@@ -251,6 +252,9 @@ if(ROCSOLVER_ENABLE_CHOLQR)
 endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
 endif()
 
 # Mirror the library's 2-stage eigensolver feature flag so the tests assert the

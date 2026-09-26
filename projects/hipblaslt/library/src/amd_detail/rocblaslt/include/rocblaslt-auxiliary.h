@@ -113,6 +113,21 @@ rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
 rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
                                                int32_t*         sm_count_target);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+/*! \ingroup aux_module
+ *  \brief Bytes in one device communicator channel's flag region.
+ *
+ *  \details
+ *  The kernel's arrival atomics and drain barrier index into this region, so the
+ *  backend that supplies the kernel owns its layout and this only reports the
+ *  total, which is all the host needs in order to allocate and zero it. Stating
+ *  the geometry a second time on the host would be a second definition of an ABI
+ *  the kernel already fixes, and a host region smaller than the block the kernel
+ *  addresses corrupts memory rather than returning a wrong answer.
+ */
+size_t rocblaslt_device_comm_flag_block_bytes(void);
+#endif
+
 /*! \ingroup aux_module
  *  \brief Set the handle-level uniform-summation-order request.
  *  See hipblasLtSetUniformSummationOrder.

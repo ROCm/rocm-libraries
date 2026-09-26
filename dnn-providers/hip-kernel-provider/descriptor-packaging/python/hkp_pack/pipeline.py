@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from . import toolchain
+from . import agreement, toolchain
 from .hip_compile import (
     compile_hip_variant,
     hip_source_relpath,
@@ -52,6 +52,9 @@ class InlineUKD:
     origin_kind: str = "hip"
     builder: object = None
     spec: object = None
+    provenance: dict = field(default_factory=dict)
+    observations: dict = field(default_factory=dict)
+    consumers: list = field(default_factory=list)
 
 
 @dataclass
@@ -197,6 +200,10 @@ def _compile_ukd_variant(
     inter_arch_dir,
     variant_co,
     variant_symbol,
+    observation_requests,
+    consumer_records,
+    variant_observations,
+    origins,
 ):
     """Compile one UKD variant for arch, deduped into variant_co per kind.
 
@@ -243,12 +250,40 @@ def _compile_ukd_variant(
         spec = ks["spec"]
         vk = _variant_key_for(ukd, rel_dir)
         if vk not in variant_co:
-            co_path, captured = compile_rocke_variant(
-                source, builder, spec, arch, inter_arch_dir
+            co_path, captured, observations = compile_rocke_variant(
+                source,
+                builder,
+                spec,
+                arch,
+                inter_arch_dir,
+                observation_requests.get(vk, {}),
+                origins,
             )
             variant_co[vk] = co_path
             variant_symbol[vk] = captured
+            variant_observations[vk] = observations
+        observations = variant_observations[vk]
         symbol = variant_symbol[vk]
+        # A reused compile result is checked as hard as a fresh one, for EVERY
+        # consumer: the first's agreement says nothing about a second completing
+        # different metadata from the same decisions.
+        if observations.get("arch") != arch:
+            raise HkpPackError(
+                f"{where}: compile observations were taken for "
+                f"'{observations.get('arch')}', not '{arch}'"
+            )
+        if observations.get("symbol") != symbol:
+            raise HkpPackError(
+                f"{where}: compile observations name symbol "
+                f"'{observations.get('symbol')}', not '{symbol}'"
+            )
+        # Empty only for a UKD whose pack authors no engine, which `_agreement_inputs`
+        # has already established carries no catalog to disagree with.
+        consumers = consumer_records.get(ukd["id"], [])
+        for record in consumers:
+            agreement.compare(
+                record["declaration"], record["kmd"], ukd["metadata"], observations
+            )
         fields = {
             "origin_kind": "rocke",
             "source": source,
@@ -256,9 +291,12 @@ def _compile_ukd_variant(
             "build": None,
             "builder": builder,
             "spec": spec,
+            "observations": observations,
+            "consumers": consumers,
         }
     else:
         raise HkpPackError(f"{where} kernel_source has unsupported kind '{kind}'")
+    fields["provenance"] = copy.deepcopy(ukd.get("provenance", {}))
     return vk, symbol, fields
 
 
@@ -324,6 +362,7 @@ class _VariantJob:
     out_dir: str
     hipcc: str
     arch: str
+    requests: dict = field(default_factory=dict)
 
 
 def _selected_entries(doc, arch, ukd_by_id):
@@ -352,23 +391,98 @@ def _selected_entries(doc, arch, ukd_by_id):
             yield None, entry, None
 
 
-def _prewarm_jobs(flat, source_root, arch):
+def _agreement_inputs(flat, arch):
+    """Every consumer's declaration and observation request, before any compile.
+
+    The requests belong to the whole selected set, since two variants of one
+    builder share a compile result and two KDPs can reference one standalone UKD;
+    collecting up front lets a single pass over the builder object capture every
+    consumer's readouts. References resolve by UUID. Returns
+    `({ukd id: [consumer record]}, {variant key: {digest: request}})`. A KDP
+    authoring `engine` as null leaves an EMPTY obligation, not a waived one, so a
+    contract declared under it is rejected.
+    """
+    generics = {d.id: d.doc for d in flat.generics()}
+    schemas = {d.id: d.doc for d in flat.generics() if d.type == "kmd"}
+    ukd_by_id = flat.ukd_by_id()
+    records, requests = {}, {}
+    for kdp in flat.kdps():
+        engine_id = kdp.doc["engine"]
+        if engine_id is None:
+            if agreement.resolved_contract(kdp.doc) is not None:
+                raise HkpPackError(
+                    f"KDP {kdp.path.name}: a specialization contract names an "
+                    "engine, and this KDP authors none"
+                )
+            # The KDP declares nothing (just checked), so there is nothing for a
+            # kernel to inherit and each speaks only for itself.
+            for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+                if agreement.resolved_contract(ukd) is not None:
+                    raise HkpPackError(
+                        f"UKD {ukd['id']} in {kdp.path.name}: a specialization "
+                        "contract names an engine, and this KDP authors none"
+                    )
+            continue
+        if engine_id not in generics:
+            raise HkpPackError(
+                f"KDP {kdp.path.name}: engine '{engine_id}' resolves to no descriptor"
+            )
+        engine = generics[engine_id]
+        kmd_id = engine.get("metadata")
+        if kmd_id not in schemas:
+            raise HkpPackError(
+                f"engine '{engine_id}': metadata '{kmd_id}' resolves to no KMD"
+            )
+        kmd = schemas[kmd_id]
+        header = _kdp_header(kdp.doc)
+        header["arch"] = [arch]
+        for sid, ukd, sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+            # Completion is checked against the KMD the chain actually resolved to,
+            # so a mis-typed or missing mandatory value fails before a compile.
+            agreement.complete_metadata(ukd["metadata"], kmd)
+            kind = ukd["kernel_source"]["kind"]
+            # A passthrough kind runs no producer, so there is no producing compiler
+            # whose specialization a contract could state.
+            if kind in _PASSTHROUGH_KINDS:
+                continue
+            # A standalone UKD is its own file and several KDPs may reference it,
+            # so it inherits from none of them and states its own declaration.
+            enclosing = kdp.doc if sid is None else None
+            declaration = agreement.select_declaration(
+                ukd, engine, kmd, schemas, enclosing
+            )
+            if kind != "rocke" and declaration["metadata_fields"]:
+                raise HkpPackError(
+                    f"UKD {ukd['id']}: a '{kind}' source cannot fulfil compiled "
+                    f"specialization bindings for {sorted(declaration['metadata_fields'])}; "
+                    "declare them matcher-only or supply a compiling source"
+                )
+            records.setdefault(ukd["id"], []).append(
+                agreement.consumer_record(ukd, engine, kmd, header, arch, declaration)
+            )
+            if kind != "rocke":
+                continue
+            rel_dir = sdesc.rel_dir if sid is not None else kdp.rel_dir
+            vk = _variant_key_for(ukd, rel_dir)
+            request = agreement.observation_request(declaration, kmd)
+            requests.setdefault(vk, {})[agreement.digest(request)] = request
+    return (
+        {uid: agreement.canonical_records(entries) for uid, entries in records.items()},
+        requests,
+    )
+
+
+def _prewarm_jobs(flat, source_root, arch, observation_requests=None):
     """The distinct variant jobs the walk will compile.
 
-    Selection comes from the same generator the walk consumes, so the job set
-    equals the walk's set by construction rather than by a second reading of
-    the same filters. Dedup is on the variant key and keeps first-seen order,
-    which is walk order: the pool compiles each distinct variant once, in the
-    order the serial path would have reached them.
-
-    A kind `_variant_key_for` declines to key is dropped here, leaving the walk
-    to reach it and report whatever it produces.
-
-    `out_dir` and `hipcc` are left empty because they belong to the pack run
-    rather than to the selection; `_prewarm_variants` fills them in before
-    dispatch.
+    Selection comes from the generator the walk consumes, and dedup on the variant
+    key keeps first-seen (walk) order. A kind `_variant_key_for` declines is dropped
+    here, leaving the walk to report it; `out_dir` and `hipcc` are filled in by
+    `_prewarm_variants`.
     """
     ukd_by_id = flat.ukd_by_id()
+    if observation_requests is None:
+        _, observation_requests = _agreement_inputs(flat, arch)
     jobs = []
     seen = set()
     for kdp in flat.kdps():
@@ -388,6 +502,7 @@ def _prewarm_jobs(flat, source_root, arch):
                     out_dir="",
                     hipcc="",
                     arch=arch,
+                    requests=observation_requests.get(vk, {}),
                 )
             )
     return jobs
@@ -396,16 +511,23 @@ def _prewarm_jobs(flat, source_root, arch):
 def _compile_one_variant(job):
     """Compile one variant in a worker process, returning a result tuple.
 
-    `(vk, co_path, symbol, None)` on success, `(vk, None, None, "Name: text")`
-    on any failure. Failures are returned rather than raised: rocke and comgr
+    `(vk, co_path, symbol, None, observations, origins)` on success,
+    `(vk, None, None, "Name: text", None, {})` on any failure.
+    Failures are returned rather than raised: rocke and comgr
     exceptions are not guaranteed picklable, and an exception that cannot cross
     the process boundary takes the diagnosis with it.
+
+    `observations` carries the compiler observations checked for every consumer.
+    `origins` is this variant's producer file identities in picklable form, the
+    only route to `OriginObserver.absorb`.
 
     No key is computed here. `job.vk` was computed in the parent, under
     whatever key functions were in force there; a key recomputed in the child
     would resolve the real functions and disagree with the walk.
     """
+    origins = agreement.OriginObserver()
     try:
+        observations = {}
         ks = job.ukd["kernel_source"]
         if job.kind == "hip":
             co_path = compile_hip_variant(
@@ -421,12 +543,14 @@ def _compile_one_variant(job):
             # is why it is read here rather than returned by the producer.
             symbol = ks["entry"]
         elif job.kind == "rocke":
-            co_path, symbol = compile_rocke_variant(
+            co_path, symbol, observations = compile_rocke_variant(
                 ks["source"],
                 ks["builder"],
                 ks["spec"],
                 job.arch,
                 job.out_dir,
+                job.requests,
+                origins,
             )
         else:
             # Unreachable while `_variant_key_for` keys only these two kinds. A
@@ -437,8 +561,8 @@ def _compile_one_variant(job):
                 f"no variant compiler for kernel source kind '{job.kind}'"
             )
     except Exception as exc:
-        return job.vk, None, None, f"{type(exc).__name__}: {exc}"
-    return job.vk, str(co_path), symbol, None
+        return job.vk, None, None, f"{type(exc).__name__}: {exc}", None, {}
+    return job.vk, str(co_path), symbol, None, observations, origins.exported()
 
 
 def _cgroup_v2_cpu_quota():
@@ -596,28 +720,34 @@ def _prewarm_variants(
     inter_arch_dir,
     variant_co,
     variant_symbol,
+    variant_observations,
+    observation_requests,
     log=print,
 ):
     """Compile this arch's distinct variants concurrently into the caches.
 
     The walk then finds each key already present and skips the expensive call.
-    Records, symbols and doc rewriting stay entirely the walk's: this only
-    populates two dicts.
+    Records, symbols and doc rewriting stay entirely the walk's: this fills the
+    code-object, symbol and observation caches. Returns one producer-origin map
+    per compiled variant, which the caller must fold into the observer spanning
+    the arch, since a prewarmed variant is observed nowhere else.
 
     Fails fast, matching the serial path: the first failing variant in walk
     order raises and the queued jobs are cancelled, so a broken builder costs
     the jobs already in flight rather than the whole pack. Nothing is written
-    into either cache when that happens -- a partly-filled cache would let the
+    into any cache when that happens -- a partly-filled cache would let the
     walk skip compiles whose artefacts were never produced.
     """
     jobs = [
         replace(job, out_dir=str(inter_arch_dir), hipcc=str(hipcc))
-        for job in _prewarm_jobs(flat, source_root, arch)
+        for job in _prewarm_jobs(flat, source_root, arch, observation_requests)
     ]
 
     workers = _pack_jobs()
     if len(jobs) < 2 or workers < 2:
-        return
+        # Nothing was compiled here, so the walk observes every producer against
+        # the caller's own observer.
+        return []
     workers = min(workers, len(jobs))
     log(f"hkp_pack: compiling {len(jobs)} variants for {arch} on {workers} workers")
 
@@ -671,9 +801,13 @@ def _prewarm_variants(
             f"{failure[3]}"
         )
 
-    for vk, co_path, symbol, _err in results:
+    origins = []
+    for vk, co_path, symbol, _err, observations, variant_origins in results:
         variant_co[vk] = Path(co_path)
         variant_symbol[vk] = symbol
+        variant_observations[vk] = observations
+        origins.append(variant_origins)
+    return origins
 
 
 def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=print):
@@ -695,12 +829,15 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
+    origins = agreement.OriginObserver()
+    consumer_records, observation_requests = _agreement_inputs(flat, arch)
     arch_kdps = []
     standalone_ukds = {}
     passthrough_standalone_ukds = {}
     ukd_by_id = flat.ukd_by_id()
 
-    _prewarm_variants(
+    prewarmed_origins = _prewarm_variants(
         flat,
         source_root,
         arch,
@@ -708,8 +845,12 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
         inter_arch_dir,
         variant_co,
         variant_symbol,
+        variant_observations,
+        observation_requests,
         log,
     )
+    for variant_origins in prewarmed_origins:
+        origins.absorb(variant_origins)
 
     for kdp in flat.kdps():
         doc = kdp.doc
@@ -731,7 +872,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 # reference appears in both and is compiled for the first only.
                 entries.append(sid)
                 new_kds.append(sid)
-                if sid in standalone_ukds or sid in passthrough_standalone_ukds:
+                if sid in passthrough_standalone_ukds:
                     continue
                 sukd = entry
                 where = f"standalone UKD {sdesc.path.name}"
@@ -754,7 +895,13 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                     inter_arch_dir,
                     variant_co,
                     variant_symbol,
+                    observation_requests,
+                    consumer_records,
+                    variant_observations,
+                    origins,
                 )
+                if sid in standalone_ukds:
+                    continue
                 standalone_ukds[sid] = StandaloneUKD(
                     id=sukd.get("id"),
                     name=sukd.get("name"),
@@ -787,6 +934,10 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
                 inter_arch_dir,
                 variant_co,
                 variant_symbol,
+                observation_requests,
+                consumer_records,
+                variant_observations,
+                origins,
             )
             ukd["kernel_source"] = {
                 "kind": "hsaco",
@@ -840,6 +991,7 @@ def compile_intermediate(flat, source_root, arch, hipcc, inter_arch_dir, log=pri
             generic.path.read_bytes(),
         )
 
+    origins.stable()
     return IntermediateArch(
         arch=arch,
         directory=inter_arch_dir,
@@ -885,6 +1037,11 @@ def _rewrite_ukd_kpack(
     the key, a wheel bump would rename every rocKE artifact including ones it
     could not affect.
     """
+    if "effective_spec" in ukd.provenance:
+        raise HkpPackError(
+            f"UKD '{ukd.id}': authored input supplies provenance.effective_spec, "
+            "which only the producing compiler creates"
+        )
     if ukd.origin_kind == "rocke":
         provenance = {
             "origin_kind": "rocke",
@@ -899,6 +1056,7 @@ def _rewrite_ukd_kpack(
             "entry": ukd.entry,
             "build": ukd.build,
         }
+    provenance = {**ukd.provenance, **provenance}
     if toolchain_fields:
         provenance.update(toolchain_fields)
     doc = {
@@ -916,10 +1074,19 @@ def _rewrite_ukd_kpack(
         "priority": ukd.priority,
         "provenance": provenance,
     }
+    if set(doc) & ukd.extra.keys():
+        raise HkpPackError(
+            f"UKD '{ukd.id}': authored extra names produced UKD field(s) "
+            f"{sorted(set(doc) & ukd.extra.keys())}"
+        )
     doc.update(ukd.extra)
     # Every shipped UKD carries the single shard arch, matching the KDP. Set it
     # after the extra passthrough so a source multi-arch list can't leak through.
     doc["arch"] = [arch]
+    if ukd.origin_kind == "rocke":
+        # Published last, onto the finished document, so `descriptor_digest` binds
+        # the bytes that actually ship.
+        agreement.publish(doc, ukd.observations, ukd.consumers)
     return doc
 
 

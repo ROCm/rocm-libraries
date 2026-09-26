@@ -49,12 +49,14 @@ int RTCKernel::get_current_hip_device()
 }
 
 RTCKernel::RTCKernel(const std::string&                       kernel_name,
+                     KIntType                                 itype,
                      std::shared_future<hipModule_wrapper_t>& module,
                      dim3                                     gridDim,
                      dim3                                     blockDim)
     : gridDim(gridDim)
     , blockDim(blockDim)
     , kernel_name(kernel_name)
+    , itype(itype)
     , deviceId(get_current_hip_device())
     , module(module)
 {

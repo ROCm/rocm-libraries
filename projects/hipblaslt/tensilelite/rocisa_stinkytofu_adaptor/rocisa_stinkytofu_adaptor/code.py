@@ -56,6 +56,19 @@ def _forward_memtoken(rocisa_item: Any, logical: Any) -> None:
             setter(tokens)
 
 
+def _forward_true16(rocisa_item: Any, logical: Any) -> None:
+    from .instruction import _apply_true16  # noqa: WPS433
+
+    if isinstance(logical, list):
+        return
+    _apply_true16(
+        logical,
+        getattr(rocisa_item, "dst", None),
+        getattr(rocisa_item, "srcs", None) or [],
+        getattr(rocisa_item, "dst1", None),
+    )
+
+
 # Synthetic instruction-group name that marks the DAG-scheduler region spanning
 # the persistent prefetch prologue + main loop. Must match the registered gfx125x
 # group name (see Gfx1250Backend.cpp) and native's kPGR literal.
@@ -1537,6 +1550,7 @@ class Module(Item):
         # this the DAG scheduler cannot see LDS store->load / barrier ordering
         # and may reorder tensor_load_to_lds, corrupting the tensor descriptor.
         _forward_memtoken(it, logical)
+        _forward_true16(it, logical)
         if isinstance(logical, list):
             for inst in logical:
                 if comment and not inst.comment:
@@ -1561,6 +1575,7 @@ class Module(Item):
             if logical is None:
                 continue
             _forward_memtoken(it, logical)
+            _forward_true16(it, logical)
             if isinstance(logical, list):
                 out.extend(logical)
             else:

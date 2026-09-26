@@ -145,7 +145,7 @@ flowchart TD
     subgraph S4["4 · Consume — one registry, three lanes"]
         direction LR
         C1["client API<br/>dispatch(req) → 1 kernel"]
-        C2["benchmark · autotune<br/>dispatch_all + sweep_space + bind"]
+        C2["benchmark · autotune<br/>dispatch_all + bind"]
         C3["CI<br/>by-id replay · coverage"]
     end
 
@@ -239,8 +239,9 @@ replacement is the hipDNN Universal Kernel Descriptor connector
 connector is the planned consumer of this lane, which is why single-kernel
 selection has to stay reproducible from a request alone.
 - **Benchmark and autotune** — `dispatch_*_all(req)` returns every eligible
-kernel, `sweep_space(req)` expands each into its knob variants, and `bind()`
-makes them launchable by one generic harness (section 7.5).
+spec (opt-in candidates included, each candidate's `sweep_space` already
+expanded), and `bind()` makes them launchable by one generic harness
+(section 7.5).
 - **CI** — by-identifier replay and coverage queries (sections 7.3 and 7.4)
 assert that what was registered is still selectable and still byte-identical.
 
@@ -877,30 +878,37 @@ for result in dispatch_attention_all(req):
     ...time it...
 ```
 
-Same filters, no ranking collapse: returns one `DispatchResult` per eligible
-candidate in ranked order. This is the correct primitive for a sweep lane —
-every entry is independently buildable and launchable, so timing them compares
-real kernels rather than re-timing one kernel under several names.
-
-For within-candidate tuning, expand `sweep_space`:
+Every family exposes the same three entry points, all backed by
+`CandidateRegistry.combos` / `sweep_space` / `dispatch_all`:
 
 ```python
-def dispatch_attention_sweep(req):
-    for cand in ATTENTION_REGISTRY.supported(req):
-        for spec in cand.sweep_space(req):     # e.g. num_warps x waves_per_eu
-            yield cand, spec
+# ATTENTION_REGISTRY is the route registry. Its candidates are not all
+# buildable. Sweeps use the execution registry.
+ATTENTION_EXECUTION_REGISTRY.combos(req)        # (candidate, spec) pairs
+ATTENTION_EXECUTION_REGISTRY.sweep_space(req)   # deduped specs
+ATTENTION_EXECUTION_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 ```
 
-Two axes, deliberately separate: `dispatch_all` varies the kernel,
-`sweep_space` varies the knobs within one kernel. Section 7.5 completes the
-picture with the launch side — how a harness turns these candidates into timed,
-verified measurements.
+Family wrappers (`dispatch_gemm_fp16_all`, `kda_sweep_space`,
+`registered_moe_combos`, …) keep the request-error short-circuit and any
+family-specific spec key. Attention additionally remaps dense candidates onto
+their standalone dense spec.
+
+This is **not** `supported(req)`. Production `select` / `dispatch_*` still
+filter with `algorithm='auto'` and never see opt-in candidates. The sweep
+walks the full registry, probes each candidate by pinning its own
+`algorithm` / `spec_id`, and expands `candidate.sweep_space` (geometry
+candidates × micro-knob variants). That is how dense, unified tuning, and
+KDA split-path halves become visible to a bench without displacing auto.
+
+Section 7.5 completes the picture with the launch side — how a harness turns
+these candidates into timed, verified measurements.
 
 ### 7.3 By identifier — replay and pinning
 
 ```python
 result = dispatch_attention_by_id(req, "attention_gfx1250_wmma")
-result = ATTENTION_REGISTRY.resolve(kernel_id)
+result = ATTENTION_EXECUTION_REGISTRY.resolve(kernel_id)
 ```
 
 Requires the registry additions:
@@ -931,8 +939,8 @@ changed kernel.
 ### 7.4 Coverage query — no request needed
 
 ```python
-ATTENTION_REGISTRY.for_arch("gfx1250")   # -> candidates declaring gfx1250
-ATTENTION_REGISTRY.coverage()            # -> serializable manifest
+ATTENTION_EXECUTION_REGISTRY.for_arch("gfx1250")   # buildable candidates
+ATTENTION_EXECUTION_REGISTRY.coverage()            # serializable manifest
 ```
 
 Pure `Capability` reads. This is what a declarative capability buys, and it is
@@ -1043,38 +1051,39 @@ That is what keeps `dispatch/` free of a HIP import and lets a binding be built
 and asserted on a machine with no GPU, which is where most of its tests run. It
 is also, not coincidentally, the shape the existing adapters already use.
 
-A family-agnostic sweep is then the whole harness:
+A family-agnostic sweep is then the whole harness. `dispatch_*_all` already
+probes opt-in candidates and expands each candidate's `sweep_space`, so the
+loop is one result per concrete spec — do not nest another `sweep_space` walk.
 
 ```python
 def sweep(req, *, warmup=5, iters=100):
     rt = Runtime()
-    for result in dispatch_attention_all(req):          # every eligible kernel
+    for result in dispatch_attention_all(req):          # every eligible spec
         cand, spec = result.candidate, result.spec
-        for tuned in cand.sweep_space(req):             # knobs within the kernel
-            art = compile_kernel(cand.build(tuned, req.arch), arch=req.arch)
-            mod = rt.load_module(art.hsaco)
-            fn = mod.get_function(art.kernel_name)
+        art = compile_kernel(cand.build(spec, req.arch), arch=req.arch)
+        mod = rt.load_module(art.hsaco)
+        fn = mod.get_function(art.kernel_name)
 
-            b = cand.bind(req, tuned)
-            args, ptrs = b.make_args(rt)
-            ms = time_launches(
-                lambda: rt.launch(fn, cand.grid(tuned, req), cand.block(tuned), args),
-                warmup=warmup, iters=iters,
-            )
-            max_abs, bad, total = b.check(rt, ptrs) if b.check else (0.0, 0, 0)
+        b = cand.bind(result, verify=True)
+        args, ptrs = b.make_args(rt)
+        ms = time_launches(
+            lambda: rt.launch(fn, result.grid, result.block, args),
+            warmup=warmup, iters=iters,
+        )
+        max_abs, bad, total = b.check(rt, ptrs)
 
-            yield SweepRow(
-                kernel_id=result.kernel_id,
-                compile_key=result.kernel_id.compile_key,
-                ms=ms,
-                tflops=b.flop / 1e9 / ms,
-                gbps=b.bytes_moved / 1e6 / ms,
-                max_abs_diff=max_abs,
-                ok=(bad == 0),
-            )
-            for p in ptrs:
-                rt.free(p)
-            mod.unload()
+        yield SweepRow(
+            kernel_id=result.kernel_id,
+            compile_key=result.kernel_id.compile_key,
+            ms=ms,
+            tflops=b.flop / 1e9 / ms,
+            gbps=b.bytes_moved / 1e6 / ms,
+            max_abs_diff=max_abs,
+            ok=(bad == 0),
+        )
+        for p in ptrs:
+            rt.free(p)
+        mod.unload()
 ```
 
 Three properties worth noting. Every row is keyed by `kernel_id`, so a measured

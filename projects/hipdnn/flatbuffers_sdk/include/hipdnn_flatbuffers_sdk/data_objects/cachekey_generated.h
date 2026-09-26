@@ -4101,6 +4101,7 @@ inline void hashAppend(Hasher& hasher, const TensorAttributes* value, const UidC
         }
     }
     hasher.raw(value->alignment());
+    hasher.raw(value->ragged_offset_multiplier());
 }
 
 inline bool logicallyEqual(const TensorAttributes* a, const TensorAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -4176,6 +4177,10 @@ inline bool logicallyEqual(const TensorAttributes* a, const TensorAttributes* b,
         }
     }
     if(a->alignment() != b->alignment())
+    {
+        return false;
+    }
+    if(a->ragged_offset_multiplier() != b->ragged_offset_multiplier())
     {
         return false;
     }

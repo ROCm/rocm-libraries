@@ -323,7 +323,8 @@ using KernelTypesCompTDMWmma = ::testing::Types<
 >;
 
 using KernelTypesCompAsyncWmma = ::testing::Types<
-    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync>
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompAsync, Persistent>
 >;
 
 // Task 9 (docs_gfx1250/GFX1250_WRW_REMAINING_TASKS.md): A via global_load_async, B via

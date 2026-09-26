@@ -48,7 +48,6 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     MUBUFModifiers,
     SDWAModifiers,
     SMEMModifiers,
-    True16Modifiers,
     VOP3PModifiers,
     Holder,
     HolderContainer,
@@ -61,7 +60,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     sgpr,
     vgpr,
 )
-from rocisa_stinkytofu_adaptor.enum import CacheScope, HighBitSel, NonVolatile, SelectBit, TemporalHint  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import CacheScope, NonVolatile, SelectBit, TemporalHint  # noqa: E402
 
 
 # ===========================================================================
@@ -1859,12 +1858,6 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
         dpp = DPPModifiers(row_shr=1, quad_perm=[0, 1, 2, 3])
         self.assertEqual(str(dpp), " row_shr:1 quad_perm:[0,1,2,3]")
 
-    def test_true16_modifiers(self):
-        self.assertEqual(str(True16Modifiers()), "")
-        self.assertEqual(str(True16Modifiers(HighBitSel.HIGH)), ".h")
-        self.assertEqual(str(True16Modifiers(HighBitSel.LOW)), ".l")
-        self.assertEqual(str(True16Modifiers(2)), ".h")
-
     def test_is_container(self):
         self.assertIsInstance(DSModifiers(), Container)
         self.assertIsInstance(FLATModifiers(), Container)
@@ -1879,7 +1872,6 @@ class TestModifiersGfx1250(_Gfx1250CapsTestCase):
             SDWAModifiers(dst_sel=SelectBit.WORD_0),
             VOP3PModifiers([1], [2], [3]),
             DPPModifiers(row_bcast=2),
-            True16Modifiers(HighBitSel.LOW),
         ):
             self.assertEqual(str(obj.clone()), str(obj))
             self.assertEqual(str(copy.deepcopy(obj)), str(obj))

@@ -723,35 +723,6 @@ struct ProblemProperties
               && ((this->_allBatchBStridesAreZero)
                   >= solutionRequirements._allBatchBStridesAreZero);
 
-#if 0
-      if(this->_db & 0x10)
-      {
-          if(!rv)
-          {
-#define check_print(name, oper)                                                                \
-    if(!(this->name oper solutionRequirements.name))                                           \
-    {                                                                                          \
-        std::cout << #name << "failed: !(" << this->name << #oper << solutionRequirements.name \
-                  << ")" << std::endl;                                                         \
-    }
-
-              std::cout << "Assertion failed:" << std::endl;
-              check_print(_summationElementMultiple, >=);
-              check_print(_free0ElementMultiple, >=);
-              check_print(_free1ElementMultiple, >=);
-              check_print(_approxSize, >=);
-              check_print(_equalStrides, ==);
-              check_print(_allBatchAStridesAreZero, >=);
-              check_print(_allBatchBStridesAreZero, >=);
-#undef check_print
-          }
-          else
-          {
-              std::cout << "Satisfied asserts!" << std::endl;
-          }
-      }
-#endif
-
         return rv;
     }
 

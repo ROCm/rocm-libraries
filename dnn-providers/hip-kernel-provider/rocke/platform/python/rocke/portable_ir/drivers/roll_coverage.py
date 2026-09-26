@@ -33,7 +33,7 @@ ARCH = "gfx950"
 
 
 def _tiers():
-    from rocke.instances.common.deep_fused_conv_pool import (
+    from kernels.common.deep_fused_conv_pool import (
         build_deep_fused_conv_pool,
         make_deep_fused_conv_pool_spec,
     )

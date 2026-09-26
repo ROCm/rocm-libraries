@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from .arch.wmma_scale import gfx1250_scaled_wmma
 from .ir import (
     KernelDef,
     Op,
@@ -309,6 +310,9 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
+            self._emit_wmma_gfx1250_scaled(op)
+            return
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no HIP lowering for op {op.name!r}")
@@ -526,7 +530,7 @@ class _Lowerer:
 
         The HIP source path has no ISA backend (it emits ``__builtin_amdgcn_*``
         directly), so the ``op_id`` is mapped back to the concrete
-        ``tile.<op_id>`` op and dispatched through the existing per-op handler.
+        ``tile.<op_id>`` op and passed through the shared operation dispatcher.
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
@@ -652,12 +656,6 @@ class _Lowerer:
     def _op_tile_wmma_gfx1250_f32_16x16x64_bf8_bf8(self, op: Op) -> None:
         self._emit_wmma_gfx1250_fp8(op, "bf8_bf8")
 
-    def _op_tile_wmma_scale_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=False)
-
-    def _op_tile_wmma_scale16_f32_16x16x128_fp8_fp8(self, op: Op) -> None:
-        self._emit_wmma_gfx1250_scaled(op, scale16=True)
-
     def _emit_wmma_gfx1250_fp8(self, op: Op, ab: str) -> None:
         # gfx1250 K=64 FP8/BF8 builtin: A/B are <8 x i32> (32 low-bit
         # bytes per lane), 6-operand form (A, B, fmt, C, reuseA, reuseB).
@@ -669,23 +667,24 @@ class _Lowerer:
             f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
         )
 
-    def _emit_wmma_gfx1250_scaled(self, op: Op, *, scale16: bool) -> None:
-        op_id = (
-            "wmma_scale16_f32_16x16x128_fp8_fp8"
-            if scale16
-            else "wmma_scale_f32_16x16x128_fp8_fp8"
-        )
+    def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
+        spec = gfx1250_scaled_wmma(op.name)
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        op_id = spec.op_id
+        fmt0, fmt1 = spec.matrix_formats
         self._require_wmma_arch(op_id)
         a, b, c, a_scale, b_scale = op.operands
         builtin = (
             "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
-            if scale16
+            if spec.scale16
             else "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4"
         )
         self._emit(
             f"f32x8 {_name(op.result)} = {builtin}("
-            f"0, {_name(a)}, 0, {_name(b)}, (int16_t)0, {_name(c)}, "
-            f"0, 0, {_name(a_scale)}, 0, 0, {_name(b_scale)}, false, false);"
+            f"{fmt0}, {_name(a)}, {fmt1}, {_name(b)}, (int16_t)0, {_name(c)}, "
+            f"0, {spec.scale_formats[0]}, {_name(a_scale)}, "
+            f"0, {spec.scale_formats[1]}, {_name(b_scale)}, false, false);"
         )
 
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
@@ -1969,6 +1968,22 @@ class _Lowerer:
         self._emit(
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
+        )
+
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
+        packs four two-bit lane selectors, so ``0..255`` is the whole
+        legal range and out-of-range values are malformed IR.
+        """
+        (data,) = op.operands
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {ctrl}, 15, 15, 1);"
         )
 
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:

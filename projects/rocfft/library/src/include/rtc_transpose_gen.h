@@ -29,7 +29,7 @@
 
 struct TransposeSpecs
 {
-    IndexType               itype;
+    KIntType                itype;
     unsigned int            tileX;
     unsigned int            tileY;
     size_t                  dim;

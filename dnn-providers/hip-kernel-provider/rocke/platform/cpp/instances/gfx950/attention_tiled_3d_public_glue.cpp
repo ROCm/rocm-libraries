@@ -120,9 +120,9 @@ static void rocke_attn3d950_set_err_buf(char* err, size_t err_cap, const char* m
 static bool rocke_attn3d950_narrow_k_available(const rocke_archtarget_t* t)
 {
     const rocke_mmaop_t* f16
-        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
+        = rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16, nullptr);
     const rocke_mmaop_t* bf16
-        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
+        = rocke_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16, nullptr);
     return f16 != NULL && bf16 != NULL;
 }
 
@@ -131,7 +131,8 @@ static bool rocke_attn3d950_narrow_k_available(const rocke_archtarget_t* t)
  * exposed by the C arch surface -- see the ARCH GATE NOTE above). */
 static bool rocke_attn3d950_wide_k_available(const rocke_archtarget_t* t)
 {
-    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32) != NULL;
+    return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32, nullptr)
+           != NULL;
 }
 
 /* validate_tiled_attention_arch(arch) gate (shared by supports + config). On

@@ -114,8 +114,16 @@ set(MIOPEN_ENABLE_SQLITE On CACHE BOOL "")
 # Use SQLITE for compiled kernels, when turned off this will use raw files
 set(MIOPEN_ENABLE_SQLITE_KERN_CACHE On CACHE BOOL "")
 
-# By default build shared libraries
-option(BUILD_SHARED_LIBS "Create shared libraries" ON)
+# By default build shared libraries. Use a directory-scoped (non-cache) default
+# rather than option()/a cache entry: a cache write to the global BUILD_SHARED_LIBS
+# leaks out of MIOpen's subtree and forces sibling subprojects in a parent
+# superbuild to build shared too (e.g. hipDNN's internal, un-exported
+# hipdnn_backend_private, which then breaks install(EXPORT)). An explicit
+# user/parent value (cache or -D) is still honored because we only set a default
+# when BUILD_SHARED_LIBS is not already defined.
+if(NOT DEFINED BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS ON)
+endif()
 
 # PREPEND (rather than APPEND) so MIOpen's local cmake helpers (ClangTidy,
 # ClangCheck, etc.) take precedence over any same-named modules a parent
@@ -170,7 +178,7 @@ if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.6.1)
+rocm_setup_version(VERSION 3.6.2)
 
 include(TargetFlags)
 
@@ -772,7 +780,7 @@ endfunction()
 # The default behaviour when no list of AMDGPU targets is supplied should be to
 # install for all targets; this was the behaviour before MIOPEN_INSTALL_GPU_DATABASES
 # was added.
-set(ALL_GPU_DATABASES gfx803 gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
+set(ALL_GPU_DATABASES gfx900 gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1102 gfx1151 gfx1200 gfx1201)
 set(MIOPEN_INSTALL_GPU_DATABASES "${ALL_GPU_DATABASES}" CACHE LIST "List of AMDGPU targets for which to install databases")
 
 # This list should be updated when a new KDB file is added to the project

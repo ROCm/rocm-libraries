@@ -26,16 +26,13 @@
 struct RTCKernelTranspose : public RTCKernel
 {
     RTCKernelTranspose(const std::string&                       kernel_name,
+                       KIntType                                 itype,
                        std::shared_future<hipModule_wrapper_t>& module,
                        dim3                                     gridDim,
-                       dim3                                     blockDim,
-                       IndexType                                itype)
-        : RTCKernel(kernel_name, module, gridDim, blockDim)
-        , itype(itype)
+                       dim3                                     blockDim)
+        : RTCKernel(kernel_name, itype, module, gridDim, blockDim)
     {
     }
-
-    IndexType itype;
 
     static RTCKernel::RTCGenerator
         generate_from_node(const LeafNode& node, const std::string& gpu_arch, CallbackType cbtype);

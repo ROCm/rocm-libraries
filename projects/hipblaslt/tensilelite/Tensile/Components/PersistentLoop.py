@@ -87,19 +87,29 @@ class PersistentLoopOn(PersistentLoop):
         persistentLabel = Label(label="PersistentLoopStart", comment="")
         module.add(persistentLabel)
 
-        # Re-init sgprWaveIdx every persistent loop iteration: TDM init reads
-        # s[sgprWaveIdx] but the same sgpr is later UNDEFed and reused as a temp,
-        # so on the 2nd iteration the value would be stale.
+        module.add(self.reinitWaveIdx(writer, kernel))
+
+        # TODO remove?
+        # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
+        #kStr += str(Code.WaitCnt(self.version, 0,0,"wait for outstanding stores"))
+        return module
+
+    def reinitWaveIdx(self, writer, kernel):
+        """Re-init sgprWaveIdx, which every persistent iteration needs afresh.
+
+        TDM init reads s[sgprWaveIdx], but the same sgpr is later UNDEFed and
+        reused as a temp, so on the second iteration the value would be stale.
+        Emitted at whichever label the persistent loop actually branches back to,
+        which under ReuseAcrossPersistent is the peeled iterN entry rather than
+        the loop head.
+        """
+        module = Module("PersistentLoop On reinitWaveIdx")
         if kernel["enableTDMA"] or kernel["enableTDMB"]:
             wavelen = kernel["WavefrontSize"]
             with writer.allocTmpSgpr(1, tag="PersistentLoopOn_openPersistentLoop_tmpSgprRes") as tmpSgprRes:
                 module.add(VReadfirstlaneB32(sgpr(tmpSgprRes.idx), vgpr("Serial"), "first tId"))
                 module.add(SLShiftRightB32(sgpr("WaveIdx"), ceil(log2(wavelen)), sgpr(tmpSgprRes.idx),
                                            "re-init WaveIdx for persistent loop iteration"))
-
-        # TODO remove?
-        # kStr += inst("s_add_u32", sgpr("PersistentLoopIter"), sgpr("PersistentLoopIter"), hex(1), "Inc PersistentLoop Iter")     # Back-up: not needed now
-        #kStr += str(Code.WaitCnt(self.version, 0,0,"wait for outstanding stores"))
         return module
 
     def recalcLocalWriteAddresses(self, writer, kernel, tc):
@@ -176,5 +186,9 @@ class PersistentLoopOn(PersistentLoop):
             module.add(sk5CloseDoneLabel)
         else:
             module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
-            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
+            # Under RAP the compute section is peeled, so later tiles re-enter at
+            # the second copy rather than at the loop head; the first copy exists
+            # only to fill the resident registers. Both this branch and the peel
+            # itself read one predicate so they cannot disagree.
+            module.add(writer.longBranchScc0(Label(writer.rapPersistentLoopEntryLabel(kernel), ""), posNeg=-1))
         return module

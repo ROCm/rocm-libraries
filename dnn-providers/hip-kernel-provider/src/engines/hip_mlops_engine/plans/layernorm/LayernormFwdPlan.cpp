@@ -97,10 +97,6 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 {
     // Extract dimensions from x tensor
     const auto* xDims = _params.x()->dims();
-    const auto* xStrides = _params.x()->strides();
-    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
-        std::vector<int64_t>(xStrides->begin(), xStrides->end()));
-
     // Ensure that the input tensor is either 4D or 5D
     if(xDims->size() != 4 && xDims->size() != 5)
     {
@@ -109,34 +105,12 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
-    const size_t normalizedDim
-        = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
-    int64_t outerSize = 1;
-    int64_t innerSize = 1;
-    int64_t stride = 1;
-    const auto layoutNHWC = hipdnn_data_sdk::utilities::TensorLayout::NHWC;
-    const auto layoutNDHWC = hipdnn_data_sdk::utilities::TensorLayout::NDHWC;
-
-    if(normalizedDim > 1
-       && (strideOrder == layoutNHWC.strideOrder || strideOrder == layoutNDHWC.strideOrder))
-    {
-        stride = static_cast<int64_t>(xDims->Get(1));
-    }
-
-    for(unsigned int i = 0; i < xDims->size(); ++i)
-    {
-        if(i < normalizedDim)
-        {
-            if(stride == 1 || i != 1) // Don't add C to outerSize if there is a stride
-            {
-                outerSize *= static_cast<int64_t>(xDims->Get(i));
-            }
-        }
-        else
-        {
-            innerSize *= static_cast<int64_t>(xDims->Get(i));
-        }
-    }
+    const auto statAttr
+        = _params.mean() == nullptr ? std::nullopt : std::make_optional(_params.mean());
+    const ProblemDescription problem(_params.x(), _params.scale(), statAttr, Direction::FORWARD);
+    const int64_t outerSize = problem.outerSize();
+    const int64_t innerSize = problem.innerSize();
+    const int64_t stride = problem.stride();
 
     const int64_t xlocalsize = 1024;
     const int64_t xgridsize = outerSize * stride;

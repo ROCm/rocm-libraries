@@ -160,9 +160,13 @@ protected:
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
         this->registerValidator(outputs.dx, this->getTolerance(graphObj, outputs.dx));
-        // RMS validator as the standard validator breaks down for resulting elements that happen to be near zero after summing hundreds of thousands of floating point values
-        this->registerRmsValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
-        this->registerRmsValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
+        // dscale/dbias are reductions over the batch axes: elements land arbitrarily
+        // near zero through cancellation, so allclose is the wrong check for them.
+        // HIP_MLOPS_ENGINE's TOML selects the RMS validator for these two tensors via
+        // [[validator_overrides]]. The tolerance passed here is the fallback: it is what
+        // grades them on any engine whose config names no validator for them.
+        this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
+        this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
         this->inputFillRecipes().setGlobalSeed(layernormTestCase.seed);
         this->verifyGraph(graphObj);

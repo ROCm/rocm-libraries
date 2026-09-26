@@ -68,13 +68,46 @@ namespace TensileLite
                 iot::mapOptional(io, "linearModel", s.linearModel);
 
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
-                if(!iot::outputting(io) && s.customKernel.name.empty())
-                    s.customKernel.name = s.sizeMapping.customKernelName;
+                iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
                 iot::mapRequired(io, "problemType", s.problemType);
             }
 
             const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<CustomKernel, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomKernel& s)
+            {
+                iot::mapOptional(io, "name", s.name);
+                iot::mapOptional(io, "args", s.args);
+                iot::mapOptional(io, "macrotile", s.macrotile);
+                iot::mapOptional(io, "threads", s.threads);
+                iot::mapOptional(io, "grid", s.grid);
+                iot::mapOptional(io, "workspaceType", s.workspaceType);
+                iot::mapOptional(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
+                iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
+                iot::mapOptional(io, "generated", s.generated);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<CustomArgDefinition, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomArgDefinition& s)
+            {
+                iot::mapRequired(io, "type", s.type);
+                iot::mapRequired(io, "semantic", s.semantic);
+                iot::mapOptional(io, "padding", s.padding);
+                iot::mapOptional(io, "index", s.index);
+            }
+            const static bool flow = true;
         };
 
         template <typename IO>
@@ -120,8 +153,6 @@ namespace TensileLite
 
                 iot::mapOptional(io, "activationFused", s.activationFused);
 
-                iot::mapOptional(io, "CustomKernelName", s.customKernelName);
-
                 iot::mapRequired(io, "workGroupMappingXCC", s.workGroupMappingXCC);
                 iot::mapRequired(io, "workGroupMappingXCCGroup", s.workGroupMappingXCCGroup);
 
@@ -135,6 +166,9 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                iot::mapOptional(io, "temporalHintA", s.temporalHintA);
+                iot::mapOptional(io, "temporalHintB", s.temporalHintB);
+                iot::mapOptional(io, "hasTemporalHint", s.hasTemporalHint);
                 iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
                 iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);

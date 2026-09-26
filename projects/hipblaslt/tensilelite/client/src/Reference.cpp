@@ -329,11 +329,6 @@ namespace TensileLite
             }
         };
 
-        void throwException(const std::string& msg)
-        {
-            throw std::runtime_error(msg.c_str());
-        }
-
         template <typename Accumulator,
                   typename MathOpAccum = Accumulator,
                   typename TypeL,

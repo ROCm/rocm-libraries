@@ -8,6 +8,10 @@
 /.azuredevops/                                      @ROCm/external-ci
 /.github/                                           @ROCm/rocm-libraries-reviewers
 
+# Team specific CI ownership
+/.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-core
+/.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
+
 # Project-specific ownership
 /dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
 /dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core

@@ -56,11 +56,13 @@ function(hipconv_add_arch_lib name)
     # One .cpp per kernel header, globbed here.
     #
     # hipconv_autoshard generates the per-config shard .cpp files for direct,
-    # direct_l1 and depthwise_1d/2d_toeplitz into the build tree and adds them
-    # with target_sources, so the glob sees only their host helper .cpp.
+    # direct_l1, depthwise_1d/2d_toeplitz and depthwise_wgrad_hankel into the
+    # build tree and adds them with target_sources, so the glob sees only their
+    # host helper .cpp.
     file(GLOB variant_sources CONFIGURE_DEPENDS
         "grouped/*.cpp"
         "depthwise/*.cpp"
+        "depthwise/*/*.cpp"
         "direct/*.cpp"
         "direct/direct_l1/*.cpp"
         "direct/direct/*.cpp"
@@ -74,6 +76,7 @@ function(hipconv_add_arch_lib name)
         "${HIPCONV_ROOT}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(hipconv_arch_${name} PRIVATE hip::device)
+    target_compile_options(hipconv_arch_${name} PRIVATE ${HIPCONV_DEVICE_COMPILE_OPTIONS})
     # Position-independent so the objects can link into libMIOpen.so.
     #
     # hipconv_set_stand_in_offload sets HIP_ARCHITECTURES, once every architecture has

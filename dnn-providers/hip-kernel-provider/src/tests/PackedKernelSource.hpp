@@ -15,6 +15,8 @@ SPDX-License-Identifier: MIT
 
 #include <hip/hip_runtime_api.h>
 
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+
 #include "TestDescriptorRoot.hpp"
 
 namespace hip_kernel_provider::testing
@@ -50,8 +52,7 @@ inline void findPackedArchDirectory(hipDeviceProp_t& properties,
 {
     ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
 
-    const std::string reported = properties.gcnArchName;
-    arch = reported.substr(0, reported.find(':'));
+    arch = std::string(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
 
     const std::filesystem::path candidate = unitKpackRoot() / arch;
     directory = std::filesystem::is_directory(candidate) ? candidate : std::filesystem::path{};

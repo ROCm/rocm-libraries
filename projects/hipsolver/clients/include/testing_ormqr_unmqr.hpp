@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #pragma once
 
 #include "clientcommon.hpp"
+#include "hipsolver_timer.hpp"
 
 template <testAPI_t API, bool COMPLEX, typename T, typename U>
 void ormqr_unmqr_checkBadArgs(const hipsolverHandle_t    handle,
@@ -395,14 +396,14 @@ void ormqr_unmqr_getPerfData(const hipsolverHandle_t    handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(hipsolverGetStream(handle, &stream));
-    double start;
+    hipsolver_timer timer;
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
         ormqr_unmqr_initData<false, true, T>(
             handle, side, trans, m, n, k, dA, lda, dIpiv, dC, ldc, hA, hIpiv, hC, hW, size_W);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         hipsolver_ormqr_unmqr(API,
                               handle,
                               side,
@@ -418,9 +419,9 @@ void ormqr_unmqr_getPerfData(const hipsolverHandle_t    handle,
                               dWork.data(),
                               lwork,
                               dInfo.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <testAPI_t API, typename T, bool COMPLEX = is_complex<T>>
@@ -586,7 +587,7 @@ void testing_ormqr_unmqr(Arguments& argus)
                                      &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         ormqr_unmqr_getPerfData<API, T>(handle,
                                         side,
                                         trans,

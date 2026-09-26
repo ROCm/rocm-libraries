@@ -102,6 +102,11 @@ as described in the notes.
 | `kda_chunk_prep` | ✅ | ✅ | ❌ | bf16 only; split path phase 1, one workgroup per chunk |
 | `kda_chunk_scan` | ✅ | ✅ | ❌ | bf16 only; split path phase 2, consumes what prep wrote |
 
+## Linear attention / recurrent-state decode
+
+| Instance | gfx942 | gfx950 | gfx1151 | Notes |
+|---|:--:|:--:|:--:|---|
+| `gdn_decode` | ❌ | ✅ | ❌ | gated delta rule, single-token decode over a paged recurrent state; no softmax |
 ---
 
 ## Arch-specific native instances
@@ -163,3 +168,12 @@ as described in the notes.
 - gfx942/gfx950 cells use a portable f16 16x16x16 config; an instance marked ❌
   for a CDNA arch lacks the specific atom that config selects (e.g. `mfma_gemm`
   and `direct_conv_16c` need the CDNA4 16x16x32 atom absent on gfx942).
+- **`gdn_decode` dispatch is gfx950-only by registration and a wave64 target
+  match.** Its candidates are registered only for gfx950 and create a default
+  `GdnDecodeSpec` with `wave_size=64`. `is_valid_spec` requires that value to
+  match the target's hardware wave size, rejecting wave32 targets before it
+  considers the thread-block limit. The lane mapping and XOR butterfly depend
+  on this match. Adding an arch requires a new module under
+  `library/dispatch/gdn/` plus a tuning run. This instance is GPU-numeric-verified on
+  gfx950 against an fp32 reference, covering both the output and the in-place
+  recurrent-state update.
