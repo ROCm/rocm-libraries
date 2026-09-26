@@ -53,17 +53,19 @@ ROCSOLVER_KERNEL void
     I const id_start = hipBlockIdx_y;
     I const id_inc = hipGridDim_y;
 
+    I const i_start = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
+    I const i_inc = hipBlockDim_x * hipGridDim_x;
+
     for(I id = id_start; id < batch_count; id += id_inc)
     {
-        I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
-
         // batch instance
-        I* permut = permutA + id * stridePI;
+        I* const permut = permutA + id * stridePI;
 
-        // initialize
-        if(i < m)
+        for(I i = i_start; i < m; i += i_inc)
+        {
             permut[i] = i;
-    }
+        }
+    } // end for id
 }
 
 /** This kernel updates the chosen pivot, checks singularity and
@@ -76,14 +78,14 @@ ROCSOLVER_KERNEL void getf2_check_singularity(const I n,
                                               const I inca,
                                               const I lda,
                                               const rocblas_stride strideA,
-                                              I* ipivA,
+                                              I* const ipivA,
                                               const rocblas_stride shiftP,
                                               const rocblas_stride strideP,
-                                              T* pivot_val,
-                                              I* pivot_idxA,
-                                              INFO* info,
+                                              T* const pivot_val,
+                                              I* const pivot_idxA,
+                                              INFO* const info,
                                               const I offset,
-                                              I* permut_idx,
+                                              I* const permut_idx,
                                               const rocblas_stride stridePI,
                                               const I batch_count)
 {
@@ -92,31 +94,32 @@ ROCSOLVER_KERNEL void getf2_check_singularity(const I n,
     I const id_start = hipBlockIdx_y;
     I const id_inc = hipGridDim_y;
 
+    I const tid_start = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
+    I const tid_inc = hipBlockDim_x * hipGridDim_x;
+
     for(I id = id_start; id < batch_count; id += id_inc)
     {
-        I tid = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
+        // batch instance
+        T* const A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+        I const pivot_idx = pivot_idxA[id] + j;
 
-        if(tid < n)
+        for(I tid = tid_start; tid < n; tid += tid_inc)
         {
-            // batch instance
-            T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-            I pivot_idx = pivot_idxA[id] + j;
-
             // swap rows
-            I exch = pivot_idx - 1;
+            I const exch = pivot_idx - 1;
             if(exch != j)
                 swap(A[j * inca + tid * lda], A[exch * inca + tid * lda]);
 
             if(tid == j)
             {
                 // update pivot index
-                I* ipiv = ipivA + id * strideP + shiftP;
+                I* const ipiv = ipivA + id * strideP + shiftP;
                 ipiv[j] = pivot_idx + offset;
 
                 // update row order of final permutated matrix
                 if(permut_idx)
                 {
-                    I* permut = permut_idx + id * stridePI;
+                    I* const permut = permut_idx + id * stridePI;
                     if(exch != j)
                         swap(permut[j], permut[exch]);
                 }
@@ -131,8 +134,8 @@ ROCSOLVER_KERNEL void getf2_check_singularity(const I n,
                 else
                     pivot_val[id] = S(1) / A[j * inca + j * lda];
             }
-        }
-    }
+        } // end for tid
+    } // end for id
 }
 
 /** Non-pivoting version **/
@@ -152,22 +155,26 @@ ROCSOLVER_KERNEL void getf2_npvt_check_singularity(const I j,
 
     I const id_start = hipBlockIdx_y;
     I const id_inc = hipGridDim_y;
+    I const tid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     for(I id = id_start; id < batch_count; id += id_inc)
     {
-        // batch instance
-        T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-
-        // update info (check singularity)
-        if(A[j * inca + j * lda] == 0)
+        if(tid == 0)
         {
-            pivot_val[id] = 1;
-            if(info[id] == 0)
-                info[id] = static_cast<INFO>(j + 1 + offset); // use Fortran 1-based indexing
+            // batch instance
+            T* const A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+
+            // update info (check singularity)
+            if(A[j * inca + j * lda] == 0)
+            {
+                pivot_val[id] = 1;
+                if(info[id] == 0)
+                    info[id] = static_cast<INFO>(j + 1 + offset); // use Fortran 1-based indexing
+            }
+            else
+                pivot_val[id] = S(1) / A[j * inca + j * lda];
         }
-        else
-            pivot_val[id] = S(1) / A[j * inca + j * lda];
-    }
+    } // end for id
 }
 
 /** This kernel executes an optimized reduction to find the index of the
@@ -192,7 +199,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(IAMAX_THDS) getf2_iamax(const I m,
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
         const I tid = hipThreadIdx_x;
-        T* x = load_ptr_batch<T>(xx, bid, shiftx, stridex);
+        T* const x = load_ptr_batch<T>(xx, bid, shiftx, stridex);
 
         // shared memory setup
         __shared__ S sval[IAMAX_THDS];
@@ -682,10 +689,12 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
                                     batch_count);
         }
         else
+        {
             // check singularity
             ROCSOLVER_LAUNCH_KERNEL(getf2_npvt_check_singularity<T>, gridPivot, threadsPivot, 0,
                                     stream, j, A, shiftA, inca, lda, strideA, pivotval, info,
                                     offset, batch_count);
+        }
 
         mm = m - j - 1;
         nn = n - j - 1;

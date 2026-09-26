@@ -163,14 +163,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         return;
 
     // batch instance
-    T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-    INFO* info = infoA + id;
+    T* const A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+    INFO* const info = infoA + id;
 
     // shared memory (for communication between threads in group)
     // (SHUFFLES DO NOT IMPROVE PERFORMANCE IN THIS CASE)
     extern __shared__ double lmem[];
     T* common = reinterpret_cast<T*>(lmem);
-    T* val = common + hipBlockDim_y * DIM;
+    T* const val = common + hipBlockDim_y * DIM;
     common += ty * DIM;
 
     // local variables
@@ -228,13 +228,13 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
                                          const rocblas_stride shiftA,
                                          const I lda,
                                          const rocblas_stride strideA,
-                                         I* ipivA,
+                                         I* const ipivA,
                                          const rocblas_stride shiftP,
                                          const rocblas_stride strideP,
-                                         INFO* infoA,
+                                         INFO* const infoA,
                                          const I batch_count,
                                          const I offset,
-                                         I* permut_idx,
+                                         I* const permut_idx,
                                          const rocblas_stride stridePI)
 {
     using S = decltype(std::real(T{}));
@@ -252,23 +252,23 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
     for(I id = id_start; id < batch_count; id += id_inc)
     {
         // batch instance
-        T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-        I* ipiv = load_ptr_batch<I>(ipivA, id, shiftP, strideP);
-        I* permut = (permut_idx != nullptr ? permut_idx + id * stridePI : nullptr);
-        INFO* info = infoA + id;
+        T* const A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+        I* const ipiv = load_ptr_batch<I>(ipivA, id, shiftP, strideP);
+        I* const permut = (permut_idx != nullptr ? permut_idx + id * stridePI : nullptr);
+        INFO* const info = infoA + id;
 
         // shared memory (for communication between threads in group)
         extern __shared__ double lmem[];
-        T* x = reinterpret_cast<T*>(lmem);
-        T* y = x + bdx;
-        S* sval = reinterpret_cast<S*>(y + n);
-        I* sidx = reinterpret_cast<I*>(sval + bdx);
+        T* const x = reinterpret_cast<T*>(lmem);
+        T* const y = x + bdx;
+        S* const sval = reinterpret_cast<S*>(y + n);
+        I* const sidx = reinterpret_cast<I*>(sval + bdx);
         __shared__ T val;
 
         // local variables
-        S val1, val2;
-        T valtmp, pivot_val;
-        I idx1, idx2, pivot_idx;
+        S val1{}, val2{};
+        T valtmp{}, pivot_val{};
+        I idx1{}, idx2{}, pivot_idx{};
         INFO myinfo = 0; // to build info
 
         // init step: read column zero from A
@@ -388,7 +388,14 @@ ROCSOLVER_KERNEL void getf2_panel_kernel(const I m,
         // update info
         if(tx == 0 && *info == 0 && myinfo > 0 && ty == 0)
             *info = myinfo + offset;
-    }
+
+        // ------------------------------------------------
+        // synchronize to make sure LDS arrays are available
+        // for next batch entry
+        // ------------------------------------------------
+        __syncthreads();
+
+    } // end for id
 }
 
 /** getf2_npvt_panel_kernel (non pivoting version) **/
@@ -399,7 +406,7 @@ ROCSOLVER_KERNEL void getf2_npvt_panel_kernel(const I m,
                                               const rocblas_stride shiftA,
                                               const I lda,
                                               const rocblas_stride strideA,
-                                              INFO* infoA,
+                                              INFO* const infoA,
                                               const I batch_count,
                                               const I offset)
 {
@@ -416,17 +423,17 @@ ROCSOLVER_KERNEL void getf2_npvt_panel_kernel(const I m,
     for(I id = id_start; id < batch_count; id += id_inc)
     {
         // batch instance
-        T* A = load_ptr_batch<T>(AA, id, shiftA, strideA);
-        INFO* info = infoA + id;
+        T* const A = load_ptr_batch<T>(AA, id, shiftA, strideA);
+        INFO* const info = infoA + id;
 
         // shared memory (for communication between threads in group)
         extern __shared__ double lmem[];
-        T* x = reinterpret_cast<T*>(lmem);
-        T* y = x + bdx;
+        T* const x = reinterpret_cast<T*>(lmem);
+        T* const y = x + bdx;
         __shared__ T val;
 
         // local variables
-        T pivot_val, val1;
+        T pivot_val{}, val1{};
         INFO myinfo = 0; // to build info
 
         // init step: read column zero from A
@@ -492,7 +499,14 @@ ROCSOLVER_KERNEL void getf2_npvt_panel_kernel(const I m,
         // update info
         if(tx == 0 && *info == 0 && myinfo > 0 && ty == 0)
             *info = myinfo + offset;
-    }
+
+        // ------------------------------------------------
+        // synchronize to make sure LDS arrays are available
+        // for next batch entry
+        // ------------------------------------------------
+        __syncthreads();
+
+    } // end for id
 }
 
 /** getf2_scale_update_kernel executes an optimized scaled rank-update (scal + ger)
@@ -532,7 +546,7 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
         T const pivot = pivotval[bid];
 
         // read data from global to shared memory
-        I j = tx * hipBlockDim_y + ty;
+        I const j = tx * hipBlockDim_y + ty;
         if(j < n)
             y[j] = Y[j * lda];
 
