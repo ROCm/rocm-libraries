@@ -66,6 +66,14 @@ using TestFmhaShapeD64 = ck_tile::TileFmhaShape<ck_tile::sequence<128, 64, 32, 3
                                                 true,
                                                 true>;
 
+using TestFmhaShapeD256 = ck_tile::TileFmhaShape<ck_tile::sequence<64, 64, 32, 256, 32, 256>,
+                                                 ck_tile::sequence<4, 1, 1>,
+                                                 ck_tile::sequence<16, 16, 32>,
+                                                 ck_tile::sequence<4, 1, 1>,
+                                                 ck_tile::sequence<16, 16, 32>,
+                                                 true,
+                                                 true>;
+
 template <typename Shape,
           bool UseDoubleKVLdsBuffer = false,
           bool ProgressiveDsLoadK   = false,
@@ -97,6 +105,7 @@ using ProgressiveM64Problem     = TestFmhaProblem<64, true, true>;
 using DoubleBufferM128Problem   = TestFmhaProblem<128, true>;
 using ProgressiveM128Problem    = TestFmhaProblem<128, true, true>;
 using ProgressiveM128D64Problem = TestFmhaProblemForShape<TestFmhaShapeD64, true, true>;
+using ProgressiveM64D256Problem = TestFmhaProblemForShape<TestFmhaShapeD256, true, true>;
 
 static_assert(!SingleBufferM64Problem::kUseDoubleKVLdsBuffer);
 static_assert(!SingleBufferM64Problem::kProgressiveDsLoadK);
@@ -120,6 +129,10 @@ static_assert(TestPipeline<ProgressiveM128Problem>::kKLoadOnce);
 static_assert(!TestPipeline<DoubleBufferM128Problem>::kStagedKPairs);
 static_assert(!TestPipeline<ProgressiveM64Problem>::kStagedKPairs);
 static_assert(!TestPipeline<ProgressiveM128D64Problem>::kStagedKPairs);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveM64D256Problem>::K,
+                             ck_tile::detail::LdsPaddingConfig<false, 0, 0>>);
+static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<ProgressiveM64D256Problem>::V,
+                             ck_tile::detail::LdsPaddingConfig<false, 0, 0>>);
 // K-pair staging is a traversal optimization; FP16/BF16 and attention
 // features do not change its LDS fragment lifetime contract.
 static_assert(TestPipeline<ProgressiveM128Problem>::kStagedKPairs);

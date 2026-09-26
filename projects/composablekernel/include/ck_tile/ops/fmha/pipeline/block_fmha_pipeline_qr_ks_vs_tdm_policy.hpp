@@ -221,6 +221,9 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     // bf16/fp16 -> head dim % 8, fp8 -> head dim % 16 (holds for the current
     // bf16/fp16 gate above; stays correct if the dtype gate is later widened).
     Problem::BlockFmhaShape::kSubQKHeaddim == Problem::BlockFmhaShape::kQKHeaddim &&
+    // D256's double K/V arena reaches the 128 KiB LDS limit before padding;
+    // keep its existing unpadded layout.
+    Problem::BlockFmhaShape::kQKHeaddim < 256 &&
     (Problem::BlockFmhaShape::kQKHeaddim * sizeof(typename Problem::KDataType)) %
             kQrTdmLdsAccessBytes ==
         0 &&
