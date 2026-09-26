@@ -61,7 +61,7 @@ set(GROUPED_CONV2D_BWD_WEIGHT_NHWGC
    xdl/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f32_default_large_tensors_instance.cpp
 )
 
-if((GPU_TARGETS MATCHES "gfx1250"))
+if(SUPPORTED_GPU_TARGETS STREQUAL "gfx1250")
 set_source_files_properties(wmma/nhwgc_gkyxc_nhwgk/device_grouped_conv2d_bwd_weight_wmma_nhwgc_gkyxc_nhwgk_bf16_instance_large_tiles.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
 endif()
 
