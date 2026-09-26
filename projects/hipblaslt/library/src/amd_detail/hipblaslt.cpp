@@ -51,43 +51,6 @@
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
-bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHandle_t& handle)
-{
-    char git_version[128];
-    hipblasLtGetGitRevision(handle, &git_version[0]);
-    static std::string cached_firstline;
-    static std::string cached_path;
-    static bool        cached = false;
-    std::string        firstline;
-
-    if(!cached || cached_path != override.file_path)
-    {
-        std::ifstream file_read(override.file_path);
-        std::getline(file_read, firstline);
-        cached_firstline = firstline;
-        cached_path      = override.file_path;
-        cached           = true;
-    }
-    else
-    {
-        firstline = cached_firstline;
-    }
-
-    std::string header = "Git Version: ";
-    size_t      pos    = firstline.find(header);
-    if(pos != std::string::npos)
-    {
-        std::string file_version = firstline.substr(pos + header.length());
-        if(file_version == git_version)
-            return true;
-    }
-
-    // A mismatch leaves override.env_mode set. Trust is decided per entry on
-    // both APIs: a row that records a kernel name is validated at replay, and a
-    // row without one is refused against the build stamp when the file loads.
-    return false;
-}
-
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 {
     switch(status)
@@ -1171,19 +1134,6 @@ try
         return fused_status;
     }
 #endif
-
-    OverrideSingleton& override = OverrideSingleton::getInstance();
-    if(override.env_mode)
-    {
-        bool override_success = override_path_compare_git_version(override, handle);
-        if(override_success)
-            log_info(__func__, "HIPBLASLT_TUNING_OVERRIDE_FILE is the correct setting.");
-        else
-            log_info(__func__,
-                     "The override file was produced by a different hipBLASLt build. Entries "
-                     "that record a kernel name are still validated individually; entries "
-                     "without one are skipped.");
-    }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,

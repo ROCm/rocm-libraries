@@ -39,22 +39,29 @@
 #define TO_STR(x) TO_STR2(x)
 #endif
 
+#ifndef HIPBLASLT_VERSION_TWEAK
+#error "HIPBLASLT_VERSION_TWEAK (hipblaslt-version.h) decides which tuning file rows are trusted"
+#endif
+
 namespace TensileLite
 {
     namespace
     {
-        const char* const kGitVersionHeader = "Git Version: ";
+        const char* const kGitVersionHeader = "Git Version:";
 
         // The build this library was compiled from, in the form hipblaslt-bench
-        // writes on a tuning file's first line.
+        // writes on a tuning file's first line. Empty for a build made outside a
+        // git checkout.
         const std::string& currentBuildStamp()
         {
-#ifdef HIPBLASLT_VERSION_TWEAK
             static const std::string stamp = TO_STR(HIPBLASLT_VERSION_TWEAK);
-#else
-            static const std::string stamp;
-#endif
             return stamp;
+        }
+
+        // A build with no stamp of its own cannot recognise a file as its own.
+        bool writtenByThisBuild(const std::string& fileBuildStamp)
+        {
+            return !currentBuildStamp().empty() && fileBuildStamp == currentBuildStamp();
         }
 
         std::string trimmed(const std::string& s)
@@ -175,17 +182,26 @@ namespace TensileLite
 
     void getContractionProblemsFromFile(const std::string& path)
     {
-        OverrideMap&                m_override = OverrideMap::getMap();
-        std::mutex&                 map_guard  = m_override.getLock();
-        std::lock_guard<std::mutex> lock(map_guard);
+        OverrideMap& m_override = OverrideMap::getMap();
 
+        // Runs on every heuristic query. Once the file is loaded, the read lock
+        // isLoaded takes is all a query needs.
         if(m_override.isLoaded(path))
             return;
 
+        std::lock_guard<std::mutex> lock(m_override.getLock());
+        if(m_override.isLoaded(path))
+            return;
+
+        // A file that does not open is looked for again on the next query.
         std::ifstream file_read(path);
-        std::string   fileBuildStamp;
-        std::string   line;
-        std::string   pendingHeader;
+        if(!file_read.is_open())
+            return;
+
+        std::string fileBuildStamp;
+        std::string line;
+        std::string pendingHeader;
+        size_t      skippedUnnamed = 0;
 
         while(true)
         {
@@ -208,7 +224,7 @@ namespace TensileLite
                 const auto pos = header.find(kGitVersionHeader);
                 if(pos != std::string::npos)
                 {
-                    fileBuildStamp = header.substr(pos + std::strlen(kGitVersionHeader));
+                    fileBuildStamp = trimmed(header.substr(pos + std::strlen(kGitVersionHeader)));
                     continue;
                 }
             }
@@ -240,11 +256,26 @@ namespace TensileLite
             // resolved in the running library and the name must still match. A
             // row without one has nothing to check it against, so it is trusted
             // only when the file was written by this build.
-            if(!entry.kernelName && !entry.solutionName && fileBuildStamp != currentBuildStamp())
+            if(!entry.kernelName && !entry.solutionName && !writtenByThisBuild(fileBuildStamp))
+            {
+                ++skippedUnnamed;
                 continue;
+            }
 
             m_override.addIfAbsent(key, entry);
         }
+
+        if(skippedUnnamed > 0)
+            log_error(__func__,
+                      "Ignored " + std::to_string(skippedUnnamed)
+                          + " entries without a kernel name in " + path
+                          + ": its Git Version line does not match this build. Re-run the "
+                            "tuning with this build to use them.");
+        else if(!writtenByThisBuild(fileBuildStamp))
+            log_info(__func__,
+                     path
+                         + " has no Git Version line matching this build; each entry is used "
+                           "only while its kernel_name still matches.");
 
         // Only a clean read counts as loaded. A read that stopped on an I/O error
         // partway through would otherwise leave a partial map that is never

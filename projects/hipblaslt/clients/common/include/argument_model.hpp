@@ -48,17 +48,6 @@ void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
                                   const Arguments&            arg,
                                   const double                hipblaslt_gflops);
 
-// The ext API's name accessors append " (Custom tuning: GSU: x, WGM: y)" when
-// GemmTuning overrides differ from the solution's own values. Replay compares
-// against getKernelNameFromAlgoIndex, which never appends it, so a persisted
-// kernel_name must not carry it.
-inline std::string hipblaslt_strip_custom_tuning_suffix(const std::string& name)
-{
-    static const std::string marker = " (Custom tuning: ";
-    const size_t             pos    = name.find(marker);
-    return pos == std::string::npos ? name : name.substr(0, pos);
-}
-
 // ArgumentModel template has a variadic list of argument enums
 template <hipblaslt_argument... Args>
 class ArgumentModel
@@ -327,7 +316,7 @@ public:
             // Replay resolves solution_index and uses it only if it still
             // names this kernel.
             name_list << delim << "kernel_name";
-            value_list << delim << hipblaslt_strip_custom_tuning_suffix(kernel_name);
+            value_list << delim << kernel_name;
 
             const char*   tuningEnv  = getenv("HIPBLASLT_TUNING_FILE");
             std::string   tuningPath = tuningEnv;

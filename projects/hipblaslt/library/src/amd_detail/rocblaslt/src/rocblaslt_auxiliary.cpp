@@ -2963,13 +2963,11 @@ extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
 }
 
-#ifdef HIPBLASLT_ENABLE_TUNING_TEST_HOOKS
 // Test support, like hipblaslt_debug_reload: HIPBLASLT_TUNING_OVERRIDE_FILE is
-// read on first use and each file is loaded once per process. Built only with
-// the client tests, and not part of any supported interface.
+// read on first use and each file is loaded once per process. Not part of any
+// supported interface.
 extern "C" HIPBLASLT_EXPORT void hipblaslt_tuning_reset_for_test()
 {
     TensileLite::OverrideMap::getMap().resetForTest();
     OverrideSingleton::getInstance().reloadForTest();
 }
-#endif // HIPBLASLT_ENABLE_TUNING_TEST_HOOKS

@@ -105,7 +105,8 @@ to normal heuristic selection.
 Validation is per entry, so upgrading hipBLASLt thins a tuning file rather than discarding it, and
 only the shapes that failed need re-tuning. A row that carries a ``solution_name`` instead is
 validated the same way. Files written by an older hipBLASLt carry no name at all, and those are used
-only when the file was produced by the running build.
+only when the file's ``Git Version`` line matches the running build. A build made outside a git
+checkout has no version to match, so it uses none of them.
 
 ``kernel_name`` names the compiled kernel, not the whole solution. The index still selects the
 solution, including its GSU, WGM and StaggerU defaults, and several solutions can share one compiled

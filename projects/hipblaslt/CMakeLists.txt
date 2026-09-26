@@ -389,11 +389,6 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
-    if(HIPBLASLT_ENABLE_CLIENT AND (HIPBLASLT_BUILD_TESTING OR BUILD_TESTING))
-        # Tuning file test hooks, exported only from builds that include the
-        # client tests that call them.
-        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_TUNING_TEST_HOOKS)
-    endif()
     if(NOT HIPBLASLT_ENABLE_YAML)
         target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
     endif()

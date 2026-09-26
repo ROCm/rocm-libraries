@@ -6155,13 +6155,15 @@ void testing_matmul_with_bias(const Arguments& arg,
             std::string archName      = "";
             std::string cuNum         = "";
 
-            if(tuningEnv && heuristicResult.size() == 1)
+            // The tuning file has no grouped GEMM key, so a grouped winner would
+            // be read back as a single GEMM of the same shape.
+            if(tuningEnv && !do_grouped_gemm && heuristicResult.size() == 1)
             {
                 archName = deviceProps.gcnArchName;
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);
             }
 
-            if(arg.print_solution_found)
+            if(arg.print_solution_found || tuningEnv)
             {
                 // A tuning run records the winner's kernel name, which comes
                 // from best_k_name below.
@@ -6245,7 +6247,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             std::string kernelName   = "";
             std::string archName     = "";
             std::string cuNum        = "";
-            if(tuningEnv)
+            if(tuningEnv && !do_grouped_gemm)
             {
                 archName = deviceProps.gcnArchName;
                 cuNum    = std::to_string(deviceProps.multiProcessorCount);

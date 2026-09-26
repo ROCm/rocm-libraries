@@ -423,7 +423,7 @@ namespace
         }
     }
 
-    class TuningCache : public ::testing::Test
+    class TuningCache_pre_checkin : public ::testing::Test
     {
     protected:
         void SetUp() override
@@ -482,7 +482,7 @@ namespace
 
     // A row whose recorded name still matches what its index resolves to is
     // replayed.
-    TEST_F(TuningCache, NamedEntryReplays)
+    TEST_F(TuningCache_pre_checkin, NamedEntryReplays)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -498,7 +498,7 @@ namespace
 
     // A row whose index now resolves to a different kernel is not launched: the
     // problem falls back to default selection.
-    TEST_F(TuningCache, EntryWhoseNameNoLongerMatchesIsRejected)
+    TEST_F(TuningCache_pre_checkin, EntryWhoseNameNoLongerMatchesIsRejected)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -514,7 +514,7 @@ namespace
 
     // The second row for a problem is judged on its own solution, even when the
     // first row is stale.
-    TEST_F(TuningCache, StaleFirstEntryDoesNotHideAValidSecond)
+    TEST_F(TuningCache_pre_checkin, StaleFirstEntryDoesNotHideAValidSecond)
     {
         if(!haveSolutions(3))
             GTEST_SKIP() << "the heuristic offers fewer than three solutions for this problem";
@@ -532,7 +532,7 @@ namespace
     }
 
     // A named row is trusted on its name, not on the file's version line.
-    TEST_F(TuningCache, NamedEntrySurvivesAnotherBuildsVersionLine)
+    TEST_F(TuningCache_pre_checkin, NamedEntrySurvivesAnotherBuildsVersionLine)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -548,7 +548,7 @@ namespace
 
     // A row without a name has nothing to be checked against, so it is used
     // only when the file was written by the running build.
-    TEST_F(TuningCache, UnnamedEntryFromThisBuildIsUsed)
+    TEST_F(TuningCache_pre_checkin, UnnamedEntryFromThisBuildIsUsed)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -563,7 +563,7 @@ namespace
         EXPECT_EQ(selected, m_identities[1].index);
     }
 
-    TEST_F(TuningCache, UnnamedEntryFromAnotherBuildIsIgnored)
+    TEST_F(TuningCache_pre_checkin, UnnamedEntryFromAnotherBuildIsIgnored)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -576,8 +576,23 @@ namespace
         EXPECT_EQ(selected, m_identities[0].index);
     }
 
+    // A file with no version line vouches for no build, including one built
+    // outside a git checkout, which has no revision of its own.
+    TEST_F(TuningCache_pre_checkin, UnnamedEntryWithoutAVersionLineIsIgnored)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        writeTuningFile(m_path, "", {{m_identities[1].index, std::nullopt}});
+        useTuningFile();
+
+        int selected = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, m_identities[0].index);
+    }
+
     // The C++ extension API applies the same per-row rule as the C API.
-    TEST_F(TuningCache, ExtApiIgnoresUnnamedEntryFromAnotherBuild)
+    TEST_F(TuningCache_pre_checkin, ExtApiIgnoresUnnamedEntryFromAnotherBuild)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -591,7 +606,7 @@ namespace
             << "the C++ API applied an unnamed row written by another build";
     }
 
-    TEST_F(TuningCache, ExtApiReplaysNamedEntry)
+    TEST_F(TuningCache_pre_checkin, ExtApiReplaysNamedEntry)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -607,7 +622,7 @@ namespace
 
     // An XF32 problem whose entry cannot run, as XF32 or as the FP32 fallback,
     // is still XF32 when default selection takes over.
-    TEST_F(TuningCache, ExtApiXf32ProblemStaysXf32AfterAnUnusableEntry)
+    TEST_F(TuningCache_pre_checkin, ExtApiXf32ProblemStaysXf32AfterAnUnusableEntry)
     {
         if(!haveSolutions(1))
             GTEST_SKIP() << "the heuristic offers no solution for this problem";
@@ -633,7 +648,7 @@ namespace
 
     // Tuning file rows describe single GEMMs. A grouped GEMM whose groups match
     // a row still uses default selection.
-    TEST_F(TuningCache, GroupedGemmUsesDefaultSelection)
+    TEST_F(TuningCache_pre_checkin, GroupedGemmUsesDefaultSelection)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -652,7 +667,7 @@ namespace
 
     // When the file satisfies a single-algo request, the heuristic's own search
     // is skipped; the returned count must still be exactly one.
-    TEST_F(TuningCache, SingleAlgoRequestServedByTheFileReturnsOne)
+    TEST_F(TuningCache_pre_checkin, SingleAlgoRequestServedByTheFileReturnsOne)
     {
         if(!haveSolutions(2))
             GTEST_SKIP() << "the heuristic offers one solution for this problem";
@@ -666,5 +681,25 @@ namespace
         ASSERT_TRUE(runGemm(&selected, 1, &returned));
         EXPECT_EQ(selected, recorded.index);
         EXPECT_EQ(returned, 1);
+    }
+
+    // A file that is not there yet when the first query looks for it is read
+    // once it appears.
+    TEST_F(TuningCache_pre_checkin, FileCreatedAfterTheFirstQueryIsRead)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        useTuningFile();
+
+        int selected = -1;
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, m_identities[0].index);
+
+        const auto& recorded = m_identities[1];
+        writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}});
+
+        ASSERT_TRUE(runGemm(&selected));
+        EXPECT_EQ(selected, recorded.index);
     }
 } // namespace

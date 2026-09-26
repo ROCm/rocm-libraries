@@ -44,14 +44,11 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "smoke + quick + pre_checkin + tuning cache (target: ~30 min)"
+    description: "smoke + quick + pre_checkin (target: ~30 min)"
     test_patterns:
       - "*smoke*"
       - "*quick*"
       - "*pre_checkin*"
-      # Named fixture: these are plain TEST_F cases, which no category pattern
-      # above selects. The whole fixture takes seconds.
-      - "TuningCache.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -66,7 +63,6 @@ test_categories:
       - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
-      - "TuningCache.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -82,7 +78,6 @@ test_categories:
       - "*pre_checkin*"
       - "*nightly*"
       - "*HMM*"
-      - "TuningCache.*"
     exclude:
       - "*known_bug*"
     labels:
