@@ -416,7 +416,9 @@ class RequiredCheckTests(unittest.TestCase):
             {"name": "pre-commit", "conclusion": None},
             {"name": "labeler", "conclusion": "success"},
         ]
-        self.assertEqual(pc.pending_required_checks(policy, runs), ["pre-commit", "codeql"])
+        self.assertEqual(
+            pc.pending_required_checks(policy, runs), ["pre-commit", "codeql"]
+        )
 
     def test_pending_only_comment_uses_waiting_heading(self) -> None:
         marker = "<!-- test -->"

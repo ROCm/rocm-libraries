@@ -1310,7 +1310,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 build_policy_table_comment(final_results, marker, note=wait_note),
             )
             fix_marker = "<!-- therock-pr-bot-fix-policies -->"
-            waiting_lines = "\n".join(f"- ⏳ {name}" for name in waiting_on) or "- ⏳ Pending"
+            waiting_lines = (
+                "\n".join(f"- ⏳ {name}" for name in waiting_on) or "- ⏳ Pending"
+            )
             upsert_comment(
                 owner,
                 repo,
