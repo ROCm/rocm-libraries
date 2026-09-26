@@ -325,12 +325,6 @@ def _to_sgpr(arg):
     return arg
 
 
-def _to_vgpr(arg):
-    if isinstance(arg, (int, str)):
-        return vgpr(arg)
-    return arg
-
-
 def _get_vgpr(arg, idx):
     if isinstance(arg, int):
         return vgpr(arg + idx)
