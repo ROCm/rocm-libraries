@@ -315,6 +315,24 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr0_iteration_kernel(const I n,
                               status, statusT);
 }
 
+/** LAQR0_CORE4_KERNEL completes an iteration deferred by laqr0_iteration_kernel because
+    of a large deflation window (see laqr0_core4_block). **/
+template <int BS, typename T, typename I>
+ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr0_core4_kernel(const I n,
+                                                               const I kbot,
+                                                               const I ndfl,
+                                                               const I nwmax,
+                                                               const I nsr,
+                                                               const I nsmax,
+                                                               T* H,
+                                                               const I ldh,
+                                                               T* W,
+                                                               I* status,
+                                                               T* statusT)
+{
+    laqr0_core4_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT);
+}
+
 /** LAQR0_PART1_KERNEL and LAQR0_PART2_KERNEL run the device parts of one iteration
     of the multishift QR algorithm in hybrid mode (the core of the aggressive early
     deflation runs on the host in between). **/
@@ -720,6 +738,18 @@ I hseqr_multishift(rocblas_handle handle,
         HIP_CHECK(hipMemcpyAsync(st, dstatus, sizeof(I) * LAQR0_STATUS_SIZE, hipMemcpyDeviceToHost,
                                  stream));
         HIP_CHECK(hipStreamSynchronize(stream));
+
+        // with a deflation window larger than LAQR4_NMIN, the iteration kernel leaves the AED
+        // core (multishift QR) and part 2 to laqr0_core4_kernel
+        if(!hybrid && st[LAQR0_DEFER])
+        {
+            ROCSOLVER_LAUNCH_KERNEL((laqr0_core4_kernel<HSEQR_BLOCKSIZE, T>), dim3(1),
+                                    dim3(HSEQR_BLOCKSIZE), 0, stream, n, kbot, ndfl, nwmax, nsr_t,
+                                    nsmax, H, ldh, W, dstatus, dstatusT);
+            HIP_CHECK(hipMemcpyAsync(st, dstatus, sizeof(I) * LAQR0_STATUS_SIZE,
+                                     hipMemcpyDeviceToHost, stream));
+            HIP_CHECK(hipStreamSynchronize(stream));
+        }
 
         const I ktop = st[LAQR0_KTOP];
         nw = st[LAQR0_NW];

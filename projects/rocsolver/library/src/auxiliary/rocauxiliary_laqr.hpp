@@ -328,6 +328,27 @@ __device__ bool aed_setup_block(const I n,
     return true;
 }
 
+/** Maximum number of shifts of the sweeps of laqr4_block, and the size of the window
+    above which aed_core_block uses laqr4_block for its Schur form (on the device). **/
+#define LAQR4_MAX_SHIFTS 32
+#define LAQR4_NMIN 64
+
+template <int BS, typename T, typename I>
+__device__ I laqr4_block(const I n,
+                         T* H,
+                         const I ldh,
+                         T* W,
+                         T* Z,
+                         const I ldz,
+                         I* st,
+                         T* stT,
+                         T (*sV)[3],
+                         I (*s_ired)[HQR_RED(BS)],
+                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
+                         int& ibuf,
+                         int& sbuf,
+                         T* lds_ws);
+
 /** AED_CORE_BLOCK performs the part of ZLAQR2 that only involves the jw-by-jw
     window (jw > 1): given the spike s, T (the window in upper Hessenberg form, zero
     below) and V = I, it computes the Schur form of T (ZLAHQR), tests the spike for
@@ -340,8 +361,13 @@ __device__ bool aed_setup_block(const I n,
     - update: whether H must be updated with T and V,
     - spike: the new value of H(kwtop, kwtop-1).
     On the device it is executed by all the threads of a thread-block of BS threads;
-    on the host, with BS = 1. **/
-template <int BS, typename T, typename I>
+    on the host, with BS = 1. With MULTISHIFT (on the device, with st4, stT4 and sV4, the
+    status arrays and the reflections of laqr4_block in shared memory), windows with
+    jw > LAQR4_NMIN are reduced to Schur form by laqr4_block (the multishift QR
+    algorithm, as LAPACK ZLAQR3 calls ZLAQR4), whose own deflation windows use this
+    function without MULTISHIFT. (It is a template parameter so that the kernels of small
+    windows do not contain laqr4_block.) **/
+template <int BS, typename T, typename I, bool MULTISHIFT = false>
 __host__ __device__ void aed_core_block(const I n,
                                         const I jw,
                                         T s,
@@ -359,7 +385,10 @@ __host__ __device__ void aed_core_block(const I n,
                                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
                                         int& ibuf,
                                         int& sbuf,
-                                        T* lds_ws = nullptr)
+                                        T* lds_ws = nullptr,
+                                        I* st4 = nullptr,
+                                        T* stT4 = nullptr,
+                                        T (*sV4)[3] = nullptr)
 {
     using S = decltype(std::real(T{}));
 
@@ -373,8 +402,23 @@ __host__ __device__ void aed_core_block(const I n,
 
     I infqr;
 #if defined(__HIP_DEVICE_COMPILE__)
+    bool multishift = false;
+    if constexpr(MULTISHIFT)
+        multishift = (jw > LAQR4_NMIN);
+    if(multishift)
+    {
+        // large windows: multishift QR (it uses the part of T below its first subdiagonal
+        // as workspace, whose converged entries it sets to zero)
+        if constexpr(MULTISHIFT)
+            infqr = laqr4_block<BS>(jw, Tw, ldt, Wsh, V, ldv, st4, stT4, sV4, s_ired, s_sred, ibuf,
+                                    sbuf, lds_ws);
+        hqr_sync();
+        for(I j = 1; j <= jw - 2; j++)
+            for(I i = j + 2 + tid; i <= jw; i += BS)
+                t(i, j) = T(0);
+    }
     // small windows: Schur form in shared memory (see lahqr_lds_block)
-    if constexpr(BS >= HQR_LDS_NMAX)
+    else if constexpr(BS >= HQR_LDS_NMAX)
     {
         if(lds_ws && jw <= HQR_LDS_NMAX)
             infqr = lahqr_lds_block<BS>(jw, Tw, ldt, Wsh, V, ldv, lds_ws);
@@ -383,9 +427,11 @@ __host__ __device__ void aed_core_block(const I n,
                                     s_ired, ibuf);
     }
     else
-#endif
         infqr = lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired,
                                 ibuf);
+#else
+    infqr = lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired, ibuf);
+#endif
     hqr_sync();
 
     // deflation detection loop
@@ -1219,6 +1265,7 @@ enum laqr0_status_index
     LAQR0_KBOT,
     LAQR0_CORE,
     LAQR0_TOOFEW,
+    LAQR0_DEFER,
     LAQR0_STATUS_SIZE
 };
 
@@ -1430,6 +1477,7 @@ __device__ void laqr0_part1_block(const I n,
         status[LAQR0_LS] = ns;
         status[LAQR0_LD] = nd;
         status[LAQR0_UPDATE] = 0;
+        status[LAQR0_DEFER] = 0;
         statusT[LAQR0_SPIKE_IN] = s;
         statusT[LAQR0_SPIKE_OUT] = T(0);
     }
@@ -1596,6 +1644,208 @@ __device__ void
     }
 }
 
+/** HQR_BLOCK_GEMM_COPY computes C (m-by-nn) = op(A) * B (op(A) = A, or A^H if conjA; k
+    is the inner dimension) in the scratch Wk (ldw), then copies it back into C (which
+    may be A or B). All the threads of the block must call it. **/
+template <int BS, typename T, typename I>
+__device__ void hqr_block_gemm_copy(const bool conjA,
+                                    const I m,
+                                    const I nn,
+                                    const I k,
+                                    const T* A,
+                                    const I lda,
+                                    const T* B,
+                                    const I ldb,
+                                    T* C,
+                                    const I ldc,
+                                    T* Wk,
+                                    const I ldw)
+{
+    const I tid = hqr_tid();
+    if(m <= 0 || nn <= 0)
+        return;
+    for(I idx = tid; idx < m * nn; idx += BS)
+    {
+        const I i = idx % m;
+        const I j = idx / m;
+        T sum = T(0);
+        for(I l = 0; l < k; l++)
+            sum += (conjA ? conj(A[idx2D(l, i, lda)]) : A[idx2D(i, l, lda)]) * B[idx2D(l, j, ldb)];
+        Wk[idx2D(i, j, ldw)] = sum;
+    }
+    hqr_sync();
+    for(I idx = tid; idx < m * nn; idx += BS)
+    {
+        const I i = idx % m;
+        const I j = idx / m;
+        C[idx2D(i, j, ldc)] = Wk[idx2D(i, j, ldw)];
+    }
+    hqr_sync();
+}
+
+/** LAQR4_BLOCK computes the Schur form of the n-by-n upper Hessenberg matrix H and
+    multiplies Z (n-by-n) by the Schur vectors, with the multishift QR algorithm and
+    aggressive early deflation of LAPACK ZLAQR4 (ZLAQR0 without recursion: its deflation
+    windows use ZLAHQR), for the deflation windows of aed_core_block. The iterations are
+    those of hseqr_multishift, with wantt and wantz, and the off-window updates and the
+    sweeps are applied directly (the reflections are not accumulated). The part of H
+    below its first subdiagonal is the workspace, as in LAPACK. st and stT are the
+    status arrays (see laqr0_status_index) and sV holds LAQR4_MAX_SHIFTS/2+2
+    reflections (in shared memory on the device). The eigenvalues are returned in W.
+    Returns 0, or kbot > 0 if the iterations failed to converge (as in LAPACK). All the
+    threads of the block must call it. **/
+template <int BS, typename T, typename I>
+__device__ I laqr4_block(const I n,
+                         T* H,
+                         const I ldh,
+                         T* W,
+                         T* Z,
+                         const I ldz,
+                         I* st,
+                         T* stT,
+                         T (*sV)[3],
+                         I (*s_ired)[HQR_RED(BS)],
+                         decltype(std::real(T{})) (*s_sred)[HQR_RED(BS)],
+                         int& ibuf,
+                         int& sbuf,
+                         T* lds_ws)
+{
+    const I tid = hqr_tid();
+    auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
+
+    // tuning parameters (LAPACK IPARMQ for the order n, and ZLAQR4 with an unlimited LWORK)
+    I ns_ip = 2;
+    if(n >= 30)
+        ns_ip = 4;
+    if(n >= 60)
+        ns_ip = 10;
+    if(n >= 150)
+        ns_ip = std::max(I(10), I(n / I(::lround(::log2(double(n))))));
+    if(n >= 590)
+        ns_ip = 64;
+    ns_ip = std::max(I(2), ns_ip - ns_ip % 2);
+    const I nw_ip = (n <= 500) ? ns_ip : 3 * ns_ip / 2;
+    const I nwr = std::min(n, std::min((n - 1) / 3, std::max(I(2), nw_ip)));
+    I nsr = std::min(ns_ip, std::min((n + 6) / 9, n - 1));
+    nsr = std::min(nsr, I(LAQR4_MAX_SHIFTS));
+    nsr = std::max(I(2), nsr - nsr % 2);
+    const I nwmax = (n - 1) / 3;
+    I nsmax = (n + 6) / 9;
+    nsmax = std::min(nsmax - nsmax % 2, I(LAQR4_MAX_SHIFTS));
+    const I itmax = 30 * std::max(I(10), n);
+
+    I kbot = n;
+    I nw = nwmax;
+    I ndec = -1;
+    I ndfl = 1;
+    for(I it = 1; it <= itmax; it++)
+    {
+        if(kbot < 1)
+            return 0;
+
+        // active block, deflation window, AED (with ZLAHQR for the window) and shifts
+        laqr0_part1_block<BS>(n, I(1), kbot, ndfl, nw, ndec, nwr, nwmax, H, ldh, W, st, stT, s_ired,
+                              ibuf);
+        hqr_sync();
+        if(st[LAQR0_CORE])
+        {
+            const I nwc = st[LAQR0_NW];
+            const I jw = st[LAQR0_JW];
+            const I kwtop = st[LAQR0_KWTOP];
+            const T s = stT[LAQR0_SPIKE_IN];
+            const I kv = n - nwc + 1;
+            const I kt = nwc + 1;
+            const I kwv = nwc + 2;
+            I ls, ld;
+            bool update;
+            T spike;
+            hqr_sync();
+            aed_core_block<BS, T, I, false>(n, jw, s, &h(kv, kt), ldh, &h(kv, 1), ldh, &h(kwv, 1),
+                                            W + (kwtop - 1), ls, ld, update, spike, s_ired, s_sred,
+                                            ibuf, sbuf, lds_ws);
+            if(tid == 0)
+            {
+                st[LAQR0_LS] = ls;
+                st[LAQR0_LD] = ld;
+                st[LAQR0_UPDATE] = update ? 1 : 0;
+                stT[LAQR0_SPIKE_OUT] = spike;
+            }
+        }
+        hqr_sync();
+        laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, st, stT, s_ired, ibuf);
+        hqr_sync();
+
+        const I ktop = st[LAQR0_KTOP];
+        nw = st[LAQR0_NW];
+        ndec = st[LAQR0_NDEC];
+        const I ld = st[LAQR0_LD];
+
+        // off-window updates of the AED, through the workspace below the subdiagonal:
+        // V = H(kv,1), WV = H(kwv,1) (nve rows) and WH = H(kv,kt) (nho columns)
+        if(st[LAQR0_UPDATE])
+        {
+            const I jw = st[LAQR0_JW];
+            const I kwtop = st[LAQR0_KWTOP];
+            const I kv = n - nw + 1;
+            const I kt = nw + 1;
+            const I nho = (n - nw - 1) - kt + 1;
+            const I kwv = nw + 2;
+            const I nve = (n - nw) - kwv + 1;
+            T* V = &h(kv, 1);
+            for(I krow = 1; krow <= kwtop - 1; krow += nve)
+            {
+                const I kln = std::min(nve, kwtop - krow);
+                hqr_block_gemm_copy<BS>(false, kln, jw, jw, &h(krow, kwtop), ldh, V, ldh,
+                                        &h(krow, kwtop), ldh, &h(kwv, 1), ldh);
+            }
+            for(I kcol = kbot + 1; kcol <= n; kcol += nho)
+            {
+                const I kln = std::min(nho, n - kcol + 1);
+                hqr_block_gemm_copy<BS>(true, jw, kln, jw, V, ldh, &h(kwtop, kcol), ldh,
+                                        &h(kwtop, kcol), ldh, &h(kv, kt), ldh);
+            }
+            for(I krow = 1; krow <= n; krow += nve)
+            {
+                const I kln = std::min(nve, n - krow + 1);
+                hqr_block_gemm_copy<BS>(false, kln, jw, jw, &Z[idx2D(krow - 1, kwtop - 1, ldz)],
+                                        ldz, V, ldh, &Z[idx2D(krow - 1, kwtop - 1, ldz)], ldz,
+                                        &h(kwv, 1), ldh);
+            }
+        }
+
+        // too few shifts from the AED
+        if(st[LAQR0_TOOFEW])
+        {
+            laqr0_toofew_block<BS>(n, H, ldh, W, st, s_ired, ibuf);
+            hqr_sync();
+        }
+
+        kbot = st[LAQR0_KBOT];
+
+        // small-bulge multishift QR sweep, applied directly to H and Z
+        const I ns = st[LAQR0_NS];
+        if(st[LAQR0_SWEEP] && ns >= 2 && ktop < kbot)
+        {
+            const I ks = st[LAQR0_KS];
+            const I nbmps = ns / 2;
+            hqr_sync();
+            if(tid == 0 && ktop + 2 <= kbot)
+                h(ktop + 2, ktop) = T(0);
+            hqr_sync();
+            for(I incol = 3 * (1 - nbmps) + ktop - 1; incol <= kbot - 2; incol += 3 * nbmps - 2)
+                laqr5_chunk_block<BS>(true, true, false, n, ktop, kbot, nbmps, incol, W + (ks - 1),
+                                      H, ldh, I(1), n, Z, ldz, (T*)nullptr, I(1), (T*)nullptr, sV);
+        }
+
+        // note progress (or the lack of it)
+        ndfl = (ld > 0) ? 1 : ndfl + 1;
+        hqr_sync();
+    }
+
+    // iteration limit exceeded
+    return kbot;
+}
+
 /** LAQR0_ITERATION_BLOCK runs one iteration (both parts and the AED core) on the
     device. **/
 template <int BS, typename T, typename I>
@@ -1628,6 +1878,15 @@ __device__ void laqr0_iteration_block(const I n,
     laqr0_part1_block<BS>(n, ilo, kbot, ndfl, nw_prev, ndec_prev, nwr, nwmax, H, ldh, W, status,
                           statusT, s_ired, ibuf);
 
+    // large windows: the AED core and part 2 are left to laqr0_core4_block
+    if(status[LAQR0_CORE] && status[LAQR0_JW] > LAQR4_NMIN)
+    {
+        hqr_sync();
+        if(tid == 0)
+            status[LAQR0_DEFER] = 1;
+        return;
+    }
+
     if(status[LAQR0_CORE])
     {
         const I nw = status[LAQR0_NW];
@@ -1652,6 +1911,61 @@ __device__ void laqr0_iteration_block(const I n,
         }
     }
     __syncthreads();
+
+    laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT, s_ired, ibuf);
+}
+
+/** LAQR0_CORE4_BLOCK completes an iteration that laqr0_iteration_block deferred
+    (status[LAQR0_DEFER]) because of a large deflation window: the AED core, with the
+    Schur form of the window computed by laqr4_block, and part 2. **/
+template <int BS, typename T, typename I>
+__device__ void laqr0_core4_block(const I n,
+                                  const I kbot,
+                                  const I ndfl,
+                                  const I nwmax,
+                                  const I nsr,
+                                  const I nsmax,
+                                  T* H,
+                                  const I ldh,
+                                  T* W,
+                                  I* status,
+                                  T* statusT)
+{
+    using S = decltype(std::real(T{}));
+    __shared__ I s_ired[2][HQR_RED(BS)];
+    __shared__ S s_sred[2][HQR_RED(BS)];
+    __shared__ T lds_ws[HQR_LDS_WS_SIZE];
+    __shared__ I st4[LAQR0_STATUS_SIZE];
+    __shared__ T stT4[LAQR0_STATUS_SCALAR_SIZE];
+    __shared__ T sV4[LAQR4_MAX_SHIFTS / 2 + 2][3];
+    int ibuf = 0, sbuf = 0;
+
+    const I tid = hqr_tid();
+    auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
+
+    const I nw = status[LAQR0_NW];
+    const I jw = status[LAQR0_JW];
+    const I kwtop = status[LAQR0_KWTOP];
+    const T s = statusT[LAQR0_SPIKE_IN];
+    const I kv = n - nw + 1;
+    const I kt = nw + 1;
+    const I kwv = nw + 2;
+    I ns, nd;
+    bool update;
+    T spike;
+    hqr_sync();
+    aed_core_block<BS, T, I, true>(n, jw, s, &h(kv, kt), ldh, &h(kv, 1), ldh, &h(kwv, 1),
+                                   W + (kwtop - 1), ns, nd, update, spike, s_ired, s_sred, ibuf,
+                                   sbuf, lds_ws, st4, stT4, sV4);
+    if(tid == 0)
+    {
+        status[LAQR0_LS] = ns;
+        status[LAQR0_LD] = nd;
+        status[LAQR0_UPDATE] = update ? 1 : 0;
+        status[LAQR0_DEFER] = 0;
+        statusT[LAQR0_SPIKE_OUT] = spike;
+    }
+    hqr_sync();
 
     laqr0_part2_block<BS>(n, kbot, ndfl, nwmax, nsr, nsmax, H, ldh, W, status, statusT, s_ired, ibuf);
 }
