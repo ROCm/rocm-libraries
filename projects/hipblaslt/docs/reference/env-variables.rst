@@ -26,6 +26,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_LEVEL``
         | Controls the verbosity level of hipBLASLt logging output.
+        | Levels are cumulative: each one also enables the levels below it.
       - | 0: Off (logging disabled, default)
         | 1: Error (only errors are logged)
         | 2: Trace (API calls with kernel launches log parameters)
@@ -35,6 +36,7 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_MASK``
         | Controls logging output using bit mask flags (can be combined).
+        | Consulted only when ``HIPBLASLT_LOG_LEVEL`` is unset.
       - | 0: Off
         | 1: Error
         | 2: Trace
@@ -47,8 +49,9 @@ For more information, see :doc:`Use logging and heuristics <../how-to/use-loggin
 
     * - | ``HIPBLASLT_LOG_FILE``
         | Specifies path to logging file. Can contain ``%i`` for process ID replacement.
+        | Has no effect unless a level or mask has enabled logging.
       - | Path to log file (for example, ``logfile_%i.log``)
-        | If not defined: log messages printed to stdout
+        | If not defined: log messages printed to stderr
 
     * - | ``HIPBLASLT_ENABLE_MARKER``
         | Enables marker trace for ROCProfiler profiling.
@@ -83,6 +86,43 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
         | Sets maximum workspace size constraint during tuning stage.
       - | Integer value in bytes (default: 128 * 1024 * 1024)
         | Limits workspace size for solution selection
+
+Runtime tuning cache
+====================
+
+The runtime tuning cache is opt-in and off by default. ``HIPBLASLT_TUNING_MODE`` and
+``HIPBLASLT_TUNING_CACHE_PATH`` are read the first time they are needed in a process, so set them
+before the first hipBLASLt call. A process running in a secure execution context (set-user-ID,
+set-group-ID, or another credential-changing exec such as file capabilities) ignores both, and the
+cache stays off. For more information, see
+:doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
+
+``cache`` mode writes two notices without any logging variable: one line naming the mode, the file
+and how many entries loaded, and a closing summary. Replaying the cache adds no output per call.
+Where the notices go depends on logging:
+
+* No level or mask: stderr. ``HIPBLASLT_LOG_FILE`` alone does not open a log file.
+* ``HIPBLASLT_LOG_LEVEL`` 1 to 3, or a mask without the info bit: the stream logging already opened,
+  including ``HIPBLASLT_LOG_FILE``.
+* ``HIPBLASLT_LOG_LEVEL=4`` or higher, or ``HIPBLASLT_LOG_MASK`` including ``8``: the same stream,
+  formatted like every other log line, plus a cache hit, miss or invalidation line once per problem.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_TUNING_MODE``
+        | Selects runtime tuning behavior.
+      - | ``off``: Disable runtime tuning (default)
+        | ``cache``: Replay valid entries from the cache file
+
+    * - | ``HIPBLASLT_TUNING_CACHE_PATH``
+        | Specifies the runtime cache file.
+      - | Path to a tuning file
+        | Required for ``cache`` mode
 
 Origami with Stream-K configuration
 ===================================
