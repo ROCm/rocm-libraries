@@ -17900,9 +17900,18 @@ class KernelWriterAssembly(KernelWriter):
         # fill the VGPR file. Four more registers there push ValuC past the 256 cap
         # and the kernel fails to assemble.  Fold's dead-ValuC repack never names the
         # ring either, so keep it off under the fold as well (not isSubtileFold).
-        if kernel.get("UseSubtileImpl") and not isSubtileFold and col128Base < 0 and plsinBlockSchedTile(kernel) and \
-           plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None):
-          pairQuads = max(1, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2")))
+        permForRing = plsinStorePermlane16Active(kernel, True if self.states.subtileFusedFullTileStore else None)
+        # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the ring buffers the two
+        # M-adjacent pairs the DPP repack already blends (batchA in the cvt quad, batchB
+        # in ring slot 1), so the fold can source batchB from the ring instead of the
+        # dead-ValuC slots -- letting batchA's pack spread to the first pair. Needs one
+        # extra quad, so gate it on the same block-sched-tile budget as the paired ring.
+        _foldRing = (isSubtileFold and col128Base < 0 and permForRing
+                     and plsinBlockSchedTile(kernel)
+                     and plsinDebugEnv("TENSILE_PLSIN_FOLD_RING", "0") != "0")
+        if (kernel.get("UseSubtileImpl") and not isSubtileFold and col128Base < 0
+            and plsinBlockSchedTile(kernel) and permForRing) or _foldRing:
+          pairQuads = max(2, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2")))
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
         # Slot 0 of the ring is the cvt block's own quad, which the paired store already

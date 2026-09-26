@@ -5040,7 +5040,15 @@ class GlobalWriteBatchWriter:
     # and never grows the high-water past ValuC, which is what lets near-cap tiles host the fold.
     assert sumIdx0 % 2 == 0 and sumIdx1 % 2 == 0, \
       f"ValuC reuse needs 2-aligned batchA element windows (sumIdx0={sumIdx0}, sumIdx1={sumIdx1})"
-    vPack2       = sumIdx0   # batchA sba0's 4 dead ValuC slots  -> batchB packed data
+    # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the pair-pack ring buffers the
+    # two M-adjacent pairs this DPP swap blends, so when it is allocated under the fold
+    # batchB packs into the ring quad (slot 1, alongside batchA in the cvt quad = slot 0)
+    # and the blend runs over the two ring-buffered pairs directly. The ring quad is a
+    # 2-aligned dwordx4 window, same shape as the dead-ValuC window it replaces. Off by
+    # default -> batchB reuses batchA sba0's now-dead ValuC slots exactly as before.
+    _foldRing = (self.cvtVgprStruct.vgprPairPackRing >= 0
+                 and plsinDebugEnv("TENSILE_PLSIN_FOLD_RING", "0") != "0")
+    vPack2       = self.cvtVgprStruct.vgprPairPackRing if _foldRing else sumIdx0
     vSD          = sumIdx1   # batchA sba1's 4 dead ValuC slots  -> blended store src
 
     permlane16 = getattr(self, "_permlane16Active", False)
