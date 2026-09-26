@@ -178,6 +178,7 @@ class UnifiedAttention3DTiledSpec:
             f"seg{self.num_segments}",
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            "fnuz" if self.kv_storage_dtype else "",
             "sinks" if self.use_sinks else "",
             f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
