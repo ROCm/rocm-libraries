@@ -22,23 +22,11 @@
 #
 ################################################################################
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
 
 import pytest
-
-
-# Load ValidChipId.py via importlib to bypass Tensile/TensileLogic/__init__.py,
-# which transitively imports joblib / heavy build deps via Run.py.
-def _load_validchipid_mod():
-    p = Path(__file__).resolve().parents[2] / "TensileLogic" / "ValidChipId.py"
-    spec = importlib.util.spec_from_file_location("ValidChipId_under_test", p)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def _install_rocisa_stub(monkeypatch):
@@ -63,7 +51,9 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def validchipid_mod(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    return _load_validchipid_mod()
+    from Tensile.TensileLogic import ValidChipId
+
+    return ValidChipId
 
 
 @pytest.fixture
