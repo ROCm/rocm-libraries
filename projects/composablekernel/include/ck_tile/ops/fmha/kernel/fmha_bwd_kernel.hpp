@@ -452,6 +452,8 @@ struct FmhaBwdDQDKDVKernel
     static constexpr ck_tile::index_t kBlockPerCu = FmhaPipeline::kBlockPerCu;
     static constexpr bool kUseQrQtrDorPipeline =
         ck_tile::fmha_bwd_qr_qtr_dor_pipeline<FmhaPipeline>::value;
+    static constexpr bool kUseQMajorDQ = ck_tile::fmha_bwd_qmajor_dq_pipeline<FmhaPipeline>::value;
+    static constexpr bool kWritesDqDirect = kUseQrQtrDorPipeline || kUseQMajorDQ;
     static_assert(!kUseQrQtrDorPipeline || !std::is_same_v<QGradEpiloguePipeline_, void>,
                   "QrQtrDorPipeline needs QGradEpiloguePipeline");
 
@@ -484,13 +486,14 @@ struct FmhaBwdDQDKDVKernel
     static constexpr bool kIsDeterministic = FmhaPipeline::kIsDeterministic;
     static constexpr bool kUseTrLoad       = FmhaPipeline::kUseTrLoad;
     static constexpr index_t kMaxSeqLenQ   = FmhaPipeline::BlockFmhaShape::kMaxSeqLenQ;
-    static_assert(kUseQrQtrDorPipeline == (kMaxSeqLenQ != 0));
+    static_assert(kUseQrQtrDorPipeline == (kUseTrLoad && kMaxSeqLenQ != 0));
 #if defined(__gfx950__)
     static constexpr bool kIsAvailable = true;
 #else
     static constexpr bool kIsAvailable = !kUseTrLoad;
 #endif
-    static constexpr bool kUsePersistent = kIsDeterministic && !kUseQrQtrDorPipeline;
+    static constexpr bool kUsePersistent =
+        kIsDeterministic && !kUseQrQtrDorPipeline && !kUseQMajorDQ;
     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
 
     // clang-format off
@@ -540,13 +543,13 @@ struct FmhaBwdDQDKDVKernel
     template <typename... Args>
     CK_TILE_HOST static constexpr auto GetWorkspaceHostSize(Args&&... args)
     {
-        return WorkspaceManager::template GetWorkspaceHostSize<kUseQrQtrDorPipeline>(
+        return WorkspaceManager::template GetWorkspaceHostSize<kWritesDqDirect>(
             std::forward<Args>(args)...);
     }
     template <typename... Args>
     CK_TILE_HOST static constexpr auto PrepareWorkspaceHost(Args&&... args)
     {
-        return WorkspaceManager::template PrepareWorkspaceHost<kUseQrQtrDorPipeline,
+        return WorkspaceManager::template PrepareWorkspaceHost<kWritesDqDirect,
                                                                FmhaPipeline::BlockFmhaShape::kN0,
                                                                FmhaPipeline::BlockFmhaShape::kM0>(
             std::forward<Args>(args)...);
@@ -555,18 +558,18 @@ struct FmhaBwdDQDKDVKernel
     CK_TILE_HOST static size_t GetWorkspaceDeviceSizeUpperBound(Args&&... args)
     {
         return WorkspaceManager::template GetWorkspaceDeviceSizeUpperBound<
-            kUseQrQtrDorPipeline,
+            kWritesDqDirect,
             FmhaPipeline::BlockFmhaShape::kN0>(std::forward<Args>(args)...);
     }
     CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
     {
-        return WorkspaceManager::template NeedsZeroDqAcc<kUseQrQtrDorPipeline, kHasMask>();
+        return WorkspaceManager::template NeedsZeroDqAcc<kWritesDqDirect, kHasMask>();
     }
     // Group + persistent + deterministic is the only path where NeedsZeroDqAcc()
     // is false yet dq_acc still has unowned slots (per-head varying active isplit
     // sets) that must be zeroed beforehand.
     static constexpr bool kNeedsKernelPrezeroDqAcc =
-        kIsGroupMode && kIsDeterministic && !kUseQrQtrDorPipeline;
+        kIsGroupMode && kIsDeterministic && !kWritesDqDirect;
 
     // Flat-zeroes the active dq_acc region before the main kernel.
     struct DqAccPrezeroKernel
@@ -788,7 +791,7 @@ struct FmhaBwdDQDKDVKernel
           std::conditional_t<kHasMask, FmhaBwdMaskKargs, FmhaBwdEmptyKargs<3>>,
           std::conditional_t<kHasDropout, FmhaBwdBatchModeDropoutKargs, FmhaBwdEmptyKargs<4>>,
           std::conditional_t<kIsDeterministic, FmhaBwdDeterministicKargs, FmhaBwdEmptyKargs<5>>,
-          std::conditional_t<kUseQrQtrDorPipeline, FmhaBwdQrQtrDorKargs, FmhaBwdEmptyKargs<6>>
+          std::conditional_t<kWritesDqDirect, FmhaBwdQrQtrDorKargs, FmhaBwdEmptyKargs<6>>
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -810,7 +813,7 @@ struct FmhaBwdDQDKDVKernel
           std::conditional_t<kHasMask, FmhaBwdMaskKargs, FmhaBwdEmptyKargs<2>>,
           std::conditional_t<kHasDropout, FmhaBwdCommonDropoutKargs, FmhaBwdEmptyKargs<3>>,
           std::conditional_t<kIsDeterministic, FmhaBwdDeterministicKargs, FmhaBwdEmptyKargs<4>>,
-          std::conditional_t<kUseQrQtrDorPipeline, FmhaBwdQrQtrDorKargs, FmhaBwdEmptyKargs<5>>
+          std::conditional_t<kWritesDqDirect, FmhaBwdQrQtrDorKargs, FmhaBwdEmptyKargs<5>>
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -905,6 +908,7 @@ struct FmhaBwdDQDKDVKernel
                       drop_seed_offset)
     {
         uint8_t* ws = reinterpret_cast<uint8_t*>(workspace_ptr);
+
         Kargs kargs{
             {q_ptr,
              k_ptr,
@@ -913,7 +917,7 @@ struct FmhaBwdDQDKDVKernel
              do_ptr,
              d_ptr,
              [&]() {
-                 if constexpr(kUseQrQtrDorPipeline)
+                 if constexpr(kWritesDqDirect)
                      return dq_ptr;
                  else
                      return ws +
@@ -1010,7 +1014,7 @@ struct FmhaBwdDQDKDVKernel
             }
         }
 
-        if constexpr(kUseQrQtrDorPipeline)
+        if constexpr(kWritesDqDirect)
         {
             kargs.stride_dq       = stride_dq;
             kargs.nhead_stride_dq = nhead_stride_dq;
@@ -1092,7 +1096,7 @@ struct FmhaBwdDQDKDVKernel
              do_ptr,
              d_ptr,
              [&]() {
-                 if constexpr(kUseQrQtrDorPipeline)
+                 if constexpr(kWritesDqDirect)
                      return dq_ptr;
                  else
                      return ws +
@@ -1137,7 +1141,7 @@ struct FmhaBwdDQDKDVKernel
             nullptr, // dq_acc_batch_offset_ptr (set below for non-QrQtrDor deterministic)
         };
 
-        if constexpr(!kUseQrQtrDorPipeline)
+        if constexpr(!kWritesDqDirect)
             kargs.dq_acc_batch_offset_ptr = reinterpret_cast<const long_index_t*>(
                 ws + WorkspaceManager::template GetDqAccOffsetsOffset<kUseQrQtrDorPipeline>(batch));
 
@@ -1187,7 +1191,7 @@ struct FmhaBwdDQDKDVKernel
                 kargs.nhead_stride_randval = nhead_stride_randval;
             }
         }
-        if constexpr(kUseQrQtrDorPipeline)
+        if constexpr(kWritesDqDirect)
         {
             kargs.stride_dq       = stride_dq;
             kargs.nhead_stride_dq = nhead_stride_dq;
@@ -1214,7 +1218,10 @@ struct FmhaBwdDQDKDVKernel
     GridSize(ck_tile::index_t batch_size_, ck_tile::index_t nhead_, ck_tile::index_t seqlen_k_)
     {
         const index_t jobs_per_head =
-            kUseQrQtrDorPipeline ? 1 : integer_divide_ceil(seqlen_k_, FmhaPipeline::kN0);
+            kUseQrQtrDorPipeline
+                ? 1
+                : (kUseQMajorDQ ? integer_divide_ceil(seqlen_k_, FmhaPipeline::kM0)
+                                : integer_divide_ceil(seqlen_k_, FmhaPipeline::kN0));
         if constexpr(kUsePersistent)
             return dim3(get_num_cus(), 1, 1);
         else
@@ -1246,15 +1253,80 @@ struct FmhaBwdDQDKDVKernel
         {
             if constexpr(!kUsePersistent)
             {
-                if constexpr(kUseQrQtrDorPipeline || kIsGroupMode)
+                if constexpr(kUseQrQtrDorPipeline || kUseQMajorDQ || kIsGroupMode)
                 {
-                    run_(std::move(kargs), blockIdx, blockIdx.x, 0);
+                    // QMAJOR_CAUSAL_LONGFIRST_CTA_ORDER:
+                    if constexpr(kUseQMajorDQ && !kIsGroupMode && kHasMask)
+                    {
+                        const bool square_full_causal = kargs.seqlen_q == kargs.seqlen_k &&
+                                                        kargs.window_size_left < 0 &&
+                                                        kargs.window_size_right == 0;
+
+                        if(square_full_causal)
+                        {
+                            const index_t nx = static_cast<index_t>(gridDim.x);
+                            const index_t ny = static_cast<index_t>(gridDim.y);
+
+                            const index_t physical_linear = static_cast<index_t>(blockIdx.y) * nx +
+                                                            static_cast<index_t>(blockIdx.x);
+
+                            const index_t logical_q = nx - 1 - physical_linear / ny;
+
+                            const index_t logical_head = physical_linear % ny;
+
+                            run_(std::move(kargs),
+                                 dim3(logical_q, logical_head, blockIdx.z),
+                                 logical_q,
+                                 0);
+                        }
+                        else
+                        {
+                            run_(std::move(kargs), blockIdx, blockIdx.x, 0);
+                        }
+                    }
+                    else
+                    {
+                        run_(std::move(kargs), blockIdx, blockIdx.x, 0);
+                    }
                 }
                 else
                 {
                     static_assert(!kIsDeterministic,
                                   "Deterministic Batch Mode should use persistent kernel");
-                    run_(std::move(kargs), blockIdx, blockIdx.x, 1);
+
+                    // DKDV_CAUSAL_KMAJOR_HEAD_INTERLEAVE:
+                    if constexpr(kHasMask && !kIsGroupMode)
+                    {
+                        const bool square_full_causal = kargs.seqlen_q == kargs.seqlen_k &&
+                                                        kargs.window_size_left < 0 &&
+                                                        kargs.window_size_right == 0;
+
+                        if(square_full_causal)
+                        {
+                            const index_t nx = static_cast<index_t>(gridDim.x);
+                            const index_t ny = static_cast<index_t>(gridDim.y);
+
+                            const index_t physical_linear = static_cast<index_t>(blockIdx.y) * nx +
+                                                            static_cast<index_t>(blockIdx.x);
+
+                            const index_t logical_k = physical_linear / ny;
+
+                            const index_t logical_head = physical_linear % ny;
+
+                            run_(std::move(kargs),
+                                 dim3(logical_k, logical_head, blockIdx.z),
+                                 blockIdx.x,
+                                 1);
+                        }
+                        else
+                        {
+                            run_(std::move(kargs), blockIdx, blockIdx.x, 1);
+                        }
+                    }
+                    else
+                    {
+                        run_(std::move(kargs), blockIdx, blockIdx.x, 1);
+                    }
                 }
             }
             else
@@ -1367,7 +1439,10 @@ struct FmhaBwdDQDKDVKernel
         const index_t i_nhead  = tile_index.y;
         const index_t i_batch  = tile_index.z;
 
-        const index_t i_n0 = amd_wave_read_first_lane(i_tile_n * FmhaPipeline::kN0);
+        const index_t i_m0 =
+            amd_wave_read_first_lane(kUseQMajorDQ ? i_tile_n * FmhaPipeline::kM0 : 0);
+        const index_t i_n0 =
+            amd_wave_read_first_lane(kUseQMajorDQ ? 0 : i_tile_n * FmhaPipeline::kN0);
 
         long_index_t batch_offset_q       = 0;
         long_index_t batch_offset_k       = 0;
@@ -1400,7 +1475,7 @@ struct FmhaBwdDQDKDVKernel
             batch_offset_lsed = query_start;
             // All !kUseQrQtrDorPipeline paths use per-batch compact dq_acc layout
             // QrQtrDor: direct write to dq_ptr (flat layout with per-nhead strides)
-            if constexpr(kUseQrQtrDorPipeline)
+            if constexpr(kWritesDqDirect)
                 batch_offset_dq_acc = query_start * kargs.stride_dq;
             else if constexpr(!kIsDeterministic)
                 batch_offset_dq_acc = query_start * kargs.hdim_q * kargs.nhead_q;
@@ -1473,7 +1548,7 @@ struct FmhaBwdDQDKDVKernel
             batch_offset_do   = static_cast<long_index_t>(i_batch) * kargs.batch_stride_do;
             batch_offset_lsed = static_cast<long_index_t>(i_batch) * kargs.batch_stride_lsed;
 
-            if constexpr(kUseQrQtrDorPipeline)
+            if constexpr(kWritesDqDirect)
                 batch_offset_dq_acc = static_cast<long_index_t>(i_batch) * kargs.batch_stride_dq;
             else if constexpr(!kIsDeterministic)
                 batch_offset_dq_acc = static_cast<long_index_t>(i_batch) * kargs.nhead_q *
@@ -1519,6 +1594,94 @@ struct FmhaBwdDQDKDVKernel
         const OGradDataType* do_ptr = reinterpret_cast<const OGradDataType*>(kargs.do_ptr) +
                                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_do +
                                       batch_offset_do;
+
+        // DOT_FUSION_COOP:
+        //
+        // Q-major batch-mode only.
+        // dk karg slots carry O / stride_o from fmha_bwd.hpp.
+        //
+        // Instead of one thread serially summing all 128 elements,
+        // split each Q row across the CTA threads.
+        //
+        // Typical gfx1201 product:
+        //   M0       = 32 rows
+        //   blockDim = 128 threads
+        //   => 4 threads cooperate per row
+        //
+        // Scratch reuses the Q-major LDS before the normal pipeline
+        // begins using it, so no additional LDS allocation is needed.
+        if constexpr(kUseQMajorDQ && !kIsGroupMode)
+        {
+            const OGradDataType* o_ptr_fused =
+                reinterpret_cast<const OGradDataType*>(kargs.dk_ptr) +
+                static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_dk + batch_offset_dk;
+
+            DDataType* d_ptr_fused = const_cast<DDataType*>(d_ptr);
+
+            AccDataType* fused_partial = reinterpret_cast<AccDataType*>(smem_ptr);
+
+            const index_t tid = static_cast<index_t>(threadIdx.x);
+
+            const index_t nthreads = static_cast<index_t>(blockDim.x);
+
+            constexpr index_t nrows = FmhaPipeline::kM0;
+
+            const index_t parts_per_row = nthreads / nrows;
+
+            const index_t local_row = tid / parts_per_row;
+
+            const index_t part = tid - local_row * parts_per_row;
+
+            AccDataType acc = AccDataType{0};
+
+            if(local_row < nrows)
+            {
+                const index_t row = i_m0 + local_row;
+
+                if(row < kargs.seqlen_q)
+                {
+                    for(index_t j = part; j < kargs.hdim_v; j += parts_per_row)
+                    {
+                        const auto o_val = type_convert<AccDataType>(
+                            o_ptr_fused[static_cast<long_index_t>(row) * kargs.stride_dk + j]);
+
+                        const auto do_val = type_convert<AccDataType>(
+                            do_ptr[static_cast<long_index_t>(row) * kargs.stride_do + j]);
+
+                        acc += o_val * do_val;
+                    }
+                }
+            }
+
+            fused_partial[tid] = acc;
+
+            __syncthreads();
+
+            // One thread per row performs the tiny final reduction.
+            if(local_row < nrows && part == 0)
+            {
+                const index_t row = i_m0 + local_row;
+
+                if(row < kargs.seqlen_q)
+                {
+                    AccDataType total = AccDataType{0};
+
+                    const index_t base = local_row * parts_per_row;
+
+                    for(index_t p = 0; p < parts_per_row; ++p)
+                    {
+                        total += fused_partial[base + p];
+                    }
+
+                    d_ptr_fused[row] = type_convert<DDataType>(total);
+                }
+            }
+
+            // Make D globally visible before the unchanged Q-major
+            // pipeline starts and allow LDS scratch to be reused.
+            __syncthreads();
+        }
+
         auto dk_ptr = reinterpret_cast<KGradDataType*>(kargs.dk_ptr) +
                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_dk + batch_offset_dk;
         auto dv_ptr = reinterpret_cast<VGradDataType*>(kargs.dv_ptr) +
@@ -1581,7 +1744,7 @@ struct FmhaBwdDQDKDVKernel
         auto q_dram_window = make_tile_window(
             q_dram,
             make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kQKHeaddim>{}),
-            {0, 0});
+            {i_m0, 0});
 
         auto k_dram_window = make_tile_window(
             k_dram,
@@ -1596,14 +1759,14 @@ struct FmhaBwdDQDKDVKernel
         auto do_dram_window = make_tile_window(
             do_dram,
             make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kVHeaddim>{}),
-            {0, 0});
+            {i_m0, 0});
 
         auto dq_dram_window = [&, i_nhead_ = i_nhead]() {
-            constexpr bool kUseKSplit = !kUseQrQtrDorPipeline && kIsDeterministic;
-            using DType = std::conditional_t<kUseQrQtrDorPipeline, QGradDataType, AccDataType>;
+            constexpr bool kUseKSplit = !kWritesDqDirect && kIsDeterministic;
+            using DType = std::conditional_t<kWritesDqDirect, QGradDataType, AccDataType>;
 
             auto dq_acc_ptr = reinterpret_cast<DType*>(kargs.dq_acc_ptr) + [&]() {
-                if constexpr(kUseQrQtrDorPipeline)
+                if constexpr(kWritesDqDirect)
                 {
                     return batch_offset_dq_acc +
                            static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_dq;
@@ -1636,10 +1799,11 @@ struct FmhaBwdDQDKDVKernel
             //   a single CU may process multiple chunks of the same (batch, head, isplit)
             //   sequentially, so contributions must accumulate rather than overwrite.
             // Non-deterministic paths also use 'atomic_add' (kUseKSplit=false).
-            constexpr auto DstInMemOp = conditional_expr<(kUseKSplit && !kUsePersistent)>(
-                memory_operation_enum::set, memory_operation_enum::atomic_add);
+            constexpr auto DstInMemOp =
+                conditional_expr<(kUseQMajorDQ || (kUseKSplit && !kUsePersistent))>(
+                    memory_operation_enum::set, memory_operation_enum::atomic_add);
             const index_t stride_dq_acc = [&]() {
-                if constexpr(kUseQrQtrDorPipeline)
+                if constexpr(kWritesDqDirect)
                     return kargs.stride_dq;
                 else
                     return kargs.hdim_q;
@@ -1658,13 +1822,14 @@ struct FmhaBwdDQDKDVKernel
             return make_tile_window(
                 dq_acc_dram,
                 make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kQKHeaddim>{}),
-                {0, 0});
+                {i_m0, 0});
         }();
 
         auto lse_dram_window =
-            make_tile_window(lse_dram, make_tuple(number<FmhaPipeline::kM0>{}), {0});
+            make_tile_window(lse_dram, make_tuple(number<FmhaPipeline::kM0>{}), {i_m0});
 
-        auto d_dram_window = make_tile_window(d_dram, make_tuple(number<FmhaPipeline::kM0>{}), {0});
+        auto d_dram_window =
+            make_tile_window(d_dram, make_tuple(number<FmhaPipeline::kM0>{}), {i_m0});
 
         /// FIXME: Before C++20, capturing structured binding variables are not supported. Remove
         /// following copy capture of the 'i_nhead' if in C++20
@@ -1900,8 +2065,11 @@ struct FmhaBwdDQDKDVKernel
             }
 #endif
 
-            KGradEpiloguePipeline{}(dk_dram_window, dk_acc_tile, nullptr);
-            VGradEpiloguePipeline{}(dv_dram_window, dv_acc_tile, nullptr);
+            if constexpr(!kUseQMajorDQ)
+            {
+                KGradEpiloguePipeline{}(dk_dram_window, dk_acc_tile, nullptr);
+                VGradEpiloguePipeline{}(dv_dram_window, dv_acc_tile, nullptr);
+            }
         }
         else
         {

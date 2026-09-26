@@ -131,6 +131,19 @@ add_test(
 set_tests_properties(${FMHA_FWD_TUNE_CONFIG_PY_TEST}
     PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
+# Pure-Python integration test for the gfx12 D=128 backward product-dual
+# codegen path. No GPU or HIP compiler is required.
+set(FMHA_BWD_PRODUCT_DUAL_CODEGEN_PY_TEST
+    test_ck_tile_fmha_bwd_product_dual_codegen)
+add_test(
+    NAME ${FMHA_BWD_PRODUCT_DUAL_CODEGEN_PY_TEST}
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_bwd_product_dual_codegen.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(${FMHA_BWD_PRODUCT_DUAL_CODEGEN_PY_TEST}
+    PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
 # Umbrella target to build and run all ck_tile fmha tests
 # Usage: ninja ck_tile_fmha_tests
 add_custom_target(ck_tile_fmha_tests

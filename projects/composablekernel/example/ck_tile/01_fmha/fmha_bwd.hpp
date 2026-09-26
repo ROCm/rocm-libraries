@@ -233,6 +233,18 @@ template <typename FmhaBwdDQDKDVKernel>
 auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
 {
     assert(args.nhead_q % args.nhead_k == 0);
+
+    // DOT_FUSION_PROBE:
+    // Q-major DQ does not emit dK. Reuse its dK karg slot to carry O
+    // without changing the common Kargs ABI. Batch mode proof only.
+    if constexpr(FmhaBwdDQDKDVKernel::kUseQMajorDQ && !FmhaBwdDQDKDVKernel::kIsGroupMode)
+    {
+        args.dk_ptr          = const_cast<void*>(args.o_ptr);
+        args.stride_dk       = args.stride_o;
+        args.nhead_stride_dk = args.nhead_stride_o;
+        args.batch_stride_dk = args.batch_stride_o;
+    }
+
     auto kargs = [&] {
         // create group mode kernel arguments
         if constexpr(FmhaBwdDQDKDVKernel::kIsGroupMode)
@@ -352,7 +364,9 @@ auto fmha_bwd_dq_dk_dv_create_kargs_and_grids(fmha_bwd_args args)
         }
     }();
 
-    dim3 grids = FmhaBwdDQDKDVKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_k);
+    const auto grid_seqlen =
+        FmhaBwdDQDKDVKernel::kUseQMajorDQ ? args.max_seqlen_q : args.max_seqlen_k;
+    dim3 grids = FmhaBwdDQDKDVKernel::GridSize(args.batch, args.nhead_q, grid_seqlen);
     return ck_tile::make_tuple(kargs, grids);
 }
 
@@ -583,6 +597,31 @@ float fmha_bwd_(const ck_tile::stream_config& s, fmha_bwd_args a)
     }
     else
     {
+        // FUSED_D_SKIP_STANDALONE_DOT:
+        //
+        // Product-dual D128 path now computes D inside the Q-major DQ
+        // kernel. Therefore the standalone dot_do_o launch is redundant.
+        //
+        // Detect the exact generated product-dual implementation rather
+        // than changing ordinary backward variants.
+        static const bool fused_product_dual = [] {
+            const auto name = fmha_bwd_dq_dk_dv_get_name_<T1, Arch>();
+            return name.rfind("product_dual@", 0) == 0;
+        }();
+
+        if(fused_product_dual)
+        {
+            if(s.log_level_ > 0)
+                std::cout << ", fused_dot@" << fmha_bwd_dq_dk_dv_get_name_<T1, Arch>()
+                          << std::flush;
+
+            // The product-dual implementation itself launches:
+            //   Q-major DQ + fused D
+            //   DKDV
+            // on the same stream, so DKDV observes the D stores from Q-major.
+            return fmha_bwd_dq_dk_dv_<T1, Arch>(s, a);
+        }
+
         if(s.log_level_ > 0)
             std::cout << ", " << fmha_bwd_dot_do_o_get_name_<T0, Arch>() << "@"
                       << fmha_bwd_dq_dk_dv_get_name_<T1, Arch>() << std::flush;

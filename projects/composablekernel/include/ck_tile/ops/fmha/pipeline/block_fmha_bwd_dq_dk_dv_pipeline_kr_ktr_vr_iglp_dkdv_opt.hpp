@@ -12,7 +12,7 @@
 namespace ck_tile {
 
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineDefaultPolicy>
-struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
+struct BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLPDKDVOpt
 {
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
     using KDataType             = remove_cvref_t<typename Problem::KDataType>;
@@ -48,6 +48,9 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
     static constexpr index_t kQKHeaddim = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kVHeaddim  = BlockFmhaShape::kVHeaddim;
 
+    static_assert(kM0 == 32 && kN0 == 32 && kQKHeaddim == 128 && kVHeaddim == 128,
+                  "The DK/DV-only pipeline is specialized for the D128 product path");
+
     static constexpr bool kIsGroupMode     = Problem::kIsGroupMode;
     static constexpr index_t kPadHeadDimQ  = Problem::kPadHeadDimQ;
     static constexpr index_t kPadHeadDimV  = Problem::kPadHeadDimV;
@@ -74,49 +77,46 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
         kPadHeadDimV ? kPadHeadDimV : Policy::template GetAlignmentVGrad<Problem>();
     static constexpr index_t kAlignmentBias = 1;
 
-    static constexpr const char* name = "kr_ktr_vr";
-
-    // The 2x2-wave M32/N32 topology needs cross-wave P and dS consumers.
-    // A thread-buffer permutation cannot perform that exchange.
-    static constexpr bool kFallbackXWave = kM0 == 32 && kN0 == 32 && kK1 == 32 && kK3 == 32 &&
-                                           kQKHeaddim == 128 && kVHeaddim == 128 &&
-                                           kBlockSize == 128;
-
-    template <typename Tile, typename Distribution>
-    CK_TILE_DEVICE static auto
-    ReadFallbackTranspose(void* smem_ptr, const Tile& tile, Distribution distribution)
-    {
-        constexpr auto desc = Policy::template MakeSGradLdsBlockDescriptor<Problem>();
-        auto* ptr           = reinterpret_cast<GemmDataType*>(static_cast<char*>(smem_ptr) +
-                                                    Policy::template GetSmemSize<Problem>());
-        auto view           = make_tensor_view<address_space_enum::lds>(ptr, desc);
-        auto write_window =
-            make_tile_window(view, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
-        constexpr auto transposed =
-            transform_tensor_descriptor(desc,
-                                        make_tuple(make_pass_through_transform(number<kN0>{}),
-                                                   make_pass_through_transform(number<kM0>{})),
-                                        make_tuple(sequence<1>{}, sequence<0>{}),
-                                        make_tuple(sequence<0>{}, sequence<1>{}));
-        auto read_window =
-            make_tile_window(make_tensor_view<address_space_enum::lds>(ptr, transposed),
-                             make_tuple(number<kN0>{}, number<kM0>{}),
-                             {0, 0},
-                             distribution);
-        store_tile(write_window, tile);
-        block_sync_lds(); // Publish all producer waves.
-        auto result = load_tile(read_window);
-        block_sync_lds(); // Finish every read before P/dS scratch is reused.
-        return result;
-    }
+    static constexpr const char* name = "kr_ktr_vr_iglp_dkdv_opt";
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>() +
-               (kFallbackXWave
-                    ? sizeof(GemmDataType) * Policy::template MakeSGradLdsBlockDescriptor<Problem>()
-                                                 .get_element_space_size()
-                    : 0);
+        // DK/DV-only pipeline:
+        // - K and V reuse the same LDS base, and K^T was removed.
+        // - dS stays in registers for Gemm3, so no dS LDS is needed.
+        // Reserve only the LDS regions this pipeline actually addresses.
+        constexpr index_t smem_size_q = Policy::template GetSmemSizeQ<Problem>();
+
+        constexpr index_t smem_size_qt = Policy::template GetSmemSizeQT<Problem>();
+
+        constexpr index_t smem_size_lse = Policy::template GetSmemSizeLSE<Problem>();
+
+        constexpr index_t smem_size_k = Policy::template GetSmemSizeK<Problem>();
+
+        constexpr index_t smem_size_v = Policy::template GetSmemSizeV<Problem>();
+
+        constexpr index_t smem_size_do = Policy::template GetSmemSizeOGrad<Problem>();
+
+        constexpr index_t smem_size_dot = Policy::template GetSmemSizeOGradT<Problem>();
+
+        constexpr index_t smem_size_d = Policy::template GetSmemSizeD<Problem>();
+
+        constexpr index_t smem_size_bias = Policy::template GetSmemSizeBias<Problem>();
+
+        constexpr index_t smem_size_kv = max(smem_size_k, smem_size_v);
+
+        // Raw Q and Q^T reuse the same LDS backing at disjoint times.
+        constexpr index_t smem_size_qloop = smem_size_qt + smem_size_do + smem_size_dot +
+                                            smem_size_lse + smem_size_d + smem_size_bias;
+
+        // Reserve one extra M0 x N0 LDS tile so the Gemm0 C layout can
+        // cross wave boundaries before Gemm1 consumes P^T.
+        constexpr index_t smem_size_xwave_tile =
+            sizeof(remove_cvref_t<typename Problem::GemmDataType>) *
+            Policy::template MakeSGradLdsBlockDescriptor<Problem>().get_element_space_size();
+
+        // Keep P and dS in physically separate LDS scratch regions.
+        return max(smem_size_kv, smem_size_qloop + 2 * smem_size_xwave_tile);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -179,7 +179,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
         constexpr auto gemm_1 = Policy::template GetPTOGradTBlockGemm<Problem>();
         constexpr auto gemm_2 = Policy::template GetOGradVBlockGemm<Problem>();
         constexpr auto gemm_3 = Policy::template GetSGradTQTBlockGemm<Problem>();
-        constexpr auto gemm_4 = Policy::template GetSGradKTBlockGemm<Problem>();
+        // dQ is computed by the companion Q-major kernel, so Gemm4 is omitted.
 
         // init VGrad & KGrad
         auto dv_acc = decltype(gemm_1.MakeCBlockTile()){};
@@ -201,7 +201,9 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
             amd_wave_read_first_lane(integer_divide_ceil(seqlen_q_end - seqlen_q_start, kM0));
 
         // check early exit if no work to do.
-        if(num_total_loop <= 0)
+        // __builtin_expect is load-bearing: omitting it causes incorrect AGPR allocation in
+        // the dK/dV accumulation loop on some compiler versions, leading to wrong results.
+        if(__builtin_expect(num_total_loop <= 0, 0))
         {
             // Note: here dk_acc&dv_acc are all cleared, return it
             return make_tuple(dk_acc, dv_acc);
@@ -216,7 +218,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
 
         auto k_lds_read_window =
             make_tile_window(k_lds_write_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kK0>{}),
+                             make_tuple(number<kN0>{}, number<kQKHeaddim>{}),
                              k_lds_write_window.get_window_origin(),
                              Policy::template MakeKRegBlockDescriptor<Problem>());
 
@@ -242,54 +244,30 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
 
         auto v_lds_read_window =
             make_tile_window(v_lds_write_window.get_bottom_tensor_view(),
-                             make_tuple(number<kN0>{}, number<kK2>{}),
+                             make_tuple(number<kN0>{}, number<kVHeaddim>{}),
                              v_lds_write_window.get_window_origin(),
                              Policy::template MakeVRegBlockDescriptor<Problem>());
 
-        //------------------------------------------------------------------
-        // KT, Reg ->LDS ->Reg
-        auto shuffled_k_block_tile = make_static_distributed_tensor<KDataType>(
-            Policy::template MakeShuffledKRegWriteBlockDescriptor<Problem>());
-
-        KDataType* kt_lds_ptr = static_cast<KDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeK<Problem>()));
-
-        auto shuffled_k_lds_write = make_tensor_view<address_space_enum::lds>(
-            kt_lds_ptr, Policy::template MakeShuffledKLdsWriteBlockDescriptor<Problem>());
-
-        auto shuffled_k_lds_write_window = make_tile_window(
-            shuffled_k_lds_write, make_tuple(number<kN0>{}, number<kQKHeaddim>{}), {0, 0});
-
-        auto kt_lds_read = make_tensor_view<address_space_enum::lds>(
-            kt_lds_ptr, Policy::template MakeKTLdsReadBlockDescriptor<Problem>());
-
-        auto kt_lds_read_window =
-            make_tile_window(kt_lds_read,
-                             make_tuple(number<kQKHeaddim>{}, number<kN0>{}),
-                             {0, 0},
-                             Policy::template MakeKTRegBlockDescriptor<Problem>());
-
+        // dK/dV do not need the K^T path used for dQ.
         //------------------------------------------------------------------
         // Pre-Load KV into Registers
         auto k_block_tile = load_tile(k_dram_window);
         auto v_block_tile = load_tile(v_dram_window);
 
         store_tile(k_lds_write_window, k_block_tile);
-        shuffle_tile(shuffled_k_block_tile, k_block_tile);
-        store_tile(shuffled_k_lds_write_window, shuffled_k_block_tile);
 
         block_sync_lds();
         k_reg_tensor = load_tile(k_lds_read_window);
-        block_sync_lds();
 
-        auto kt_reg_tensor = load_tile(kt_lds_read_window);
+        // K and V reuse the same LDS backing store.
+        // Ensure K register load is complete before V overwrites LDS.
+        block_sync_lds();
 
         store_tile(v_lds_write_window, v_block_tile);
 
         block_sync_lds();
 
         auto v_reg_tensor = load_tile(v_lds_read_window);
-        block_sync_lds();
         //---------------------------- Loop Load in ----------------------------//
         // Q: HBM ->Reg ->LDS
         auto q_dram_window =
@@ -298,10 +276,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                              {seqlen_q_start, 0},
                              Policy::template MakeQDramTileDistribution<Problem>());
 
-        QDataType* q_lds_ptr = static_cast<QDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>()));
+        QDataType* q_lds_ptr =
+            static_cast<QDataType*>(static_cast<void*>(static_cast<char*>(smem_ptr)));
 
         auto q_lds = make_tensor_view<address_space_enum::lds>(
             q_lds_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
@@ -315,8 +291,147 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                              q_lds_window.get_window_origin(),
                              Policy::template MakeQRegSliceBlockDescriptor<Problem>());
 
-        auto pt_reg_tensor = make_static_distributed_tensor<GemmDataType>(
-            Policy::template MakePTRegSliceBlockDescriptor<Problem>());
+        // Gemm0 C -> Gemm1 A is not wave-local for the M32/N32 2x2 topology.
+        // Store logical P[M,N] to shared LDS, then read the same bytes through
+        // an [N,M] descriptor using Gemm1's A distribution.
+        constexpr index_t p_xwave_lds_offset = Policy::template GetSmemSizeQT<Problem>() +
+                                               Policy::template GetSmemSizeOGrad<Problem>() +
+                                               Policy::template GetSmemSizeOGradT<Problem>() +
+                                               Policy::template GetSmemSizeLSE<Problem>() +
+                                               Policy::template GetSmemSizeD<Problem>() +
+                                               Policy::template GetSmemSizeBias<Problem>();
+
+        GemmDataType* p_xwave_lds_ptr = static_cast<GemmDataType*>(
+            static_cast<void*>(static_cast<char*>(smem_ptr) + p_xwave_lds_offset));
+
+        // P-ADJACENT-MPAIR:
+        // P-only LDS layout for gfx12 M32/N32 BF16.
+        //
+        // Logical:
+        //   A = M >> 1, P = M & 1, B = N >> 3, R = N & 7
+        //
+        // Physical element offset:
+        //   A*64 + (B ^ ((A >> 1) & 3))*16 + R*2 + P
+        //
+        // This makes P[N,M-even:M-even+2] a naturally aligned BF16x2 pair.
+        constexpr auto p_xwave_lds_desc = [&]() {
+            if constexpr(kM0 == 32 && kN0 == 32 && sizeof(GemmDataType) == 2)
+            {
+                // Physical dimensions:
+                // H,C,L,G,R,P = 2,4,2,4,8,2
+                // A = H*8 + C*2 + L
+                constexpr auto p_desc_0 = make_naive_tensor_descriptor(make_tuple(number<2>{},
+                                                                                  number<4>{},
+                                                                                  number<2>{},
+                                                                                  number<4>{},
+                                                                                  number<8>{},
+                                                                                  number<2>{}),
+                                                                       make_tuple(number<512>{},
+                                                                                  number<128>{},
+                                                                                  number<64>{},
+                                                                                  number<16>{},
+                                                                                  number<2>{},
+                                                                                  number<1>{}),
+                                                                       number<2>{},
+                                                                       number<1>{});
+
+                // G = B xor C.  Preserve C separately so A can be reconstructed.
+                constexpr auto p_desc_xor = transform_tensor_descriptor(
+                    p_desc_0,
+                    make_tuple(make_pass_through_transform(number<2>{}),
+                               make_xor_transform(make_tuple(number<4>{}, number<4>{})),
+                               make_pass_through_transform(number<2>{}),
+                               make_pass_through_transform(number<8>{}),
+                               make_pass_through_transform(number<2>{})),
+                    make_tuple(sequence<0>{},
+                               sequence<1, 3>{},
+                               sequence<2>{},
+                               sequence<4>{},
+                               sequence<5>{}),
+                    make_tuple(sequence<0>{},
+                               sequence<1, 3>{},
+                               sequence<2>{},
+                               sequence<4>{},
+                               sequence<5>{}));
+
+                // [H,C,L,P] -> M, [B,R] -> N
+                constexpr auto p_desc = transform_tensor_descriptor(
+                    p_desc_xor,
+                    make_tuple(
+                        make_merge_transform_v3_division_mod(
+                            make_tuple(number<2>{}, number<4>{}, number<2>{}, number<2>{})),
+                        make_merge_transform_v3_division_mod(make_tuple(number<4>{}, number<8>{}))),
+                    make_tuple(sequence<0, 1, 2, 5>{}, sequence<3, 4>{}),
+                    make_tuple(sequence<0>{}, sequence<1>{}));
+
+                static_assert(p_desc.get_element_space_size() == 32 * 32);
+                return p_desc;
+            }
+            else
+            {
+                return Policy::template MakeSGradLdsBlockDescriptor<Problem>();
+            }
+        }();
+
+        constexpr index_t xwave_tile_bytes =
+            sizeof(GemmDataType) * p_xwave_lds_desc.get_element_space_size();
+
+        GemmDataType* ds_xwave_lds_ptr = static_cast<GemmDataType*>(static_cast<void*>(
+            static_cast<char*>(smem_ptr) + p_xwave_lds_offset + xwave_tile_bytes));
+
+        auto p_xwave_lds =
+            make_tensor_view<address_space_enum::lds>(p_xwave_lds_ptr, p_xwave_lds_desc);
+
+        auto p_xwave_lds_write_window =
+            make_tile_window(p_xwave_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
+
+        // Keep dS in its own LDS region, but use the validated adjacent-M
+        // physical layout. Gemm3 A distribution remains unchanged.
+        static_assert(
+            p_xwave_lds_desc.get_element_space_size() ==
+            Policy::template MakeSGradLdsBlockDescriptor<Problem>().get_element_space_size());
+
+        auto ds_xwave_lds =
+            make_tensor_view<address_space_enum::lds>(ds_xwave_lds_ptr, p_xwave_lds_desc);
+
+        auto ds_xwave_lds_write_window =
+            make_tile_window(ds_xwave_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
+
+        constexpr auto p_xwave_t_lds_desc =
+            transform_tensor_descriptor(p_xwave_lds_desc,
+                                        make_tuple(make_pass_through_transform(number<kN0>{}),
+                                                   make_pass_through_transform(number<kM0>{})),
+                                        make_tuple(sequence<1>{}, sequence<0>{}),
+                                        make_tuple(sequence<0>{}, sequence<1>{}));
+
+        // dS keeps the original SGrad LDS layout.  It used to share the
+        // transpose descriptor with P only because both physical layouts
+        // were identical.
+        constexpr auto ds_xwave_t_lds_desc =
+            transform_tensor_descriptor(p_xwave_lds_desc,
+                                        make_tuple(make_pass_through_transform(number<kN0>{}),
+                                                   make_pass_through_transform(number<kM0>{})),
+                                        make_tuple(sequence<1>{}, sequence<0>{}),
+                                        make_tuple(sequence<0>{}, sequence<1>{}));
+
+        auto pt_xwave_lds =
+            make_tensor_view<address_space_enum::lds>(p_xwave_lds_ptr, p_xwave_t_lds_desc);
+
+        auto pt_xwave_lds_read_window =
+            make_tile_window(pt_xwave_lds,
+                             make_tuple(number<kN0>{}, number<kM0>{}),
+                             {0, 0},
+                             Policy::template MakePTRegSliceBlockDescriptor<Problem>());
+
+        // Same physical LDS scratch, but reload using Gemm3 A distribution.
+        auto dst_xwave_lds =
+            make_tensor_view<address_space_enum::lds>(ds_xwave_lds_ptr, ds_xwave_t_lds_desc);
+
+        auto dst_xwave_lds_read_window =
+            make_tile_window(dst_xwave_lds,
+                             make_tuple(number<kN0>{}, number<kM0>{}),
+                             {0, 0},
+                             Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
         // QT: Reg -> Reg-> LDS
         auto shuffled_q_block_tile = make_static_distributed_tensor<QDataType>(
             Policy::template MakeShuffledQRegWriteBlockDescriptor<Problem>());
@@ -383,28 +498,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                              {0, 0},
                              Policy::template MakeOGradTRegSliceBlockDescriptor<Problem>());
 
-        // dS: Reg -> Reg -> LDS
-        GemmDataType* ds_lds_ptr = static_cast<GemmDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
-            Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeLSE<Problem>() +
-            Policy::template GetSmemSizeD<Problem>()));
+        // dS stays in registers for Gemm3; no dS LDS staging is needed.
 
-        auto ds_lds = make_tensor_view<address_space_enum::lds>(
-            ds_lds_ptr, Policy::template MakeSGradLdsBlockDescriptor<Problem>());
-
-        auto ds_lds_window =
-            make_tile_window(ds_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
-
-        auto ds_lds_read_window =
-            make_tile_window(ds_lds_window.get_bottom_tensor_view(),
-                             make_tuple(number<kM0>{}, number<kK4>{}),
-                             ds_lds_window.get_window_origin(),
-                             Policy::template MakeSGradRegSliceBlockDescriptor<Problem>());
-
-        auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
-            Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
         // Bias: HBM ->Reg ->Reg ->LDS
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
 
@@ -418,8 +513,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
             static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeLSE<Problem>() +
-            Policy::template GetSmemSizeD<Problem>()));
+            Policy::template GetSmemSizeLSE<Problem>() + Policy::template GetSmemSizeD<Problem>()));
 
         auto bias_lds = make_tensor_view<address_space_enum::lds>(
             bias_lds_ptr, Policy::template MakeBiasLdsBlockDescriptor<Problem>());
@@ -446,8 +540,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
         LSEDataType* lse_lds_ptr = static_cast<LSEDataType*>(static_cast<void*>(
             static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
-            Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>()));
+            Policy::template GetSmemSizeOGradT<Problem>()));
 
         auto lse_lds = make_tensor_view<address_space_enum::lds>(
             lse_lds_ptr, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
@@ -471,7 +564,7 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
             static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQT<Problem>() +
             Policy::template GetSmemSizeOGrad<Problem>() +
             Policy::template GetSmemSizeOGradT<Problem>() +
-            Policy::template GetSmemSizeQ<Problem>() + Policy::template GetSmemSizeLSE<Problem>()));
+            Policy::template GetSmemSizeLSE<Problem>()));
 
         auto d_lds = make_tensor_view<address_space_enum::lds>(
             d_lds_ptr, Policy::template MakeLSEDLdsWriteBlockDescriptor<Problem>());
@@ -504,13 +597,14 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                              Policy::template MakeShuffledBiasTileDistribution<Problem>());
 
         // ----------------------------Loop write out------------------------------//
-        auto dq_dram_window = make_tile_window(dq_dram_block_window_tmp.get_bottom_tensor_view(),
-                                               dq_dram_block_window_tmp.get_window_lengths(),
-                                               {seqlen_q_start, 0});
+        // dQ is handled by the companion Q-major kernel.
 
         using SPBlockTileType     = decltype(gemm_0.MakeCBlockTile());
         using SPGradBlockTileType = decltype(gemm_2.MakeCBlockTile());
-        using QGradBlockTileType  = decltype(gemm_4.MakeCBlockTile());
+
+        // Gemm3 (dS^T @ Q^T -> dK) still needs this register tile.
+        auto dst_reg_tensor = make_static_distributed_tensor<GemmDataType>(
+            Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
 
         index_t i_total_loops = 0;
         index_t seqlen_q_step = seqlen_q_start;
@@ -518,39 +612,62 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
         static_assert(kM0 == kK1, "kM0 should equal to kK1");
         static_assert(kVHeaddim >= kK2, "kVHeaddim should be equal or greater than kK2");
         static_assert(kM0 == kK3, "kM0 should equal to kK3");
-        constexpr index_t k4_loops = kN0 / kK4;
+        /*
+         * Prefetch Q, LSE, dO, D
+         */
+        auto q_block_tile = load_tile(q_dram_window);
+        move_tile_window(q_dram_window, {kM0, 0});
+        auto lse_block_tile = load_tile(lse_dram_window);
+        move_tile_window(lse_dram_window, {kM0});
+
+        auto do_block_tile = load_tile(do_dram_window);
+        move_tile_window(do_dram_window, {kM0, 0});
+
+        /*
+         * Store prefetched data into LDS
+         */
+        block_sync_lds();
+        store_tile(q_lds_window, q_block_tile);
+
+        store_tile(lse_lds_write_window, lse_block_tile);
+
+        store_tile(do_lds_window, do_block_tile);
+        shuffle_tile(shuffled_do_block_tile, do_block_tile);
+        store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
+
+        block_sync_lds();
+
+        /*
+         * Prefetch LDS data into Reg to Asynchronous Data Movement and MFMA pipeline
+         */
+
+        auto q_reg_tensor = load_tile(q_lds_read_window);
+
+        // Q-QT-ALIAS:
+        // Every wave has consumed raw Q from LDS.
+        // The same bytes may now become Q^T.
+        block_sync_lds();
+
+        shuffle_tile(shuffled_q_block_tile, q_block_tile);
+        store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+        // LSE-AFTER-HANDOFF: LSE uses independent LDS; keep it out of raw-Q read rendezvous.
+        __builtin_amdgcn_sched_barrier(0);
+        auto lse = load_tile(lse_lds_read_window);
 
         clear_tile(dv_acc);
         clear_tile(dk_acc);
 
         __builtin_amdgcn_sched_barrier(0);
         // Hot loop
-        while(i_total_loops < num_total_loop)
+        while(i_total_loops < (num_total_loop - 1))
         {
-            auto q_block_tile = load_tile(q_dram_window);
-            move_tile_window(q_dram_window, {kM0, 0});
-
-            auto lse_block_tile = load_tile(lse_dram_window);
-            move_tile_window(lse_dram_window, {kM0});
-
-            store_tile(q_lds_window, q_block_tile);
-            shuffle_tile(shuffled_q_block_tile, q_block_tile);
-            store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
-
-            store_tile(lse_lds_write_window, lse_block_tile);
-
-            block_sync_lds();
-
-            auto q_reg_tensor = load_tile(q_lds_read_window);
-            auto lse          = load_tile(lse_lds_read_window);
-
-            block_sync_lds();
-
             // STAGE 1, Q@K Gemm0
             auto s_acc = SPBlockTileType{};
 
             s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
 
+            HotLoopScheduler::template GemmStagedScheduler<0>();
+            __builtin_amdgcn_sched_barrier(0);
             // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -558,6 +675,9 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                 auto shuffled_bias_tile = make_static_distributed_tensor<BiasDataType>(
                     Policy::template MakeShuffledBiasTileDistribution<Problem>());
                 shuffle_tile(shuffled_bias_tile, bias_tile);
+                // SGrad and Bias use the same address in LDS, finish loading ds on the previous
+                // iteration to reuse LDS.
+                block_sync_lds();
                 store_tile(bias_lds_write_window, shuffled_bias_tile);
                 block_sync_lds();
                 auto bias_s_tile = load_tile(bias_s_lds_read_window);
@@ -587,15 +707,6 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                     });
                 });
             }
-#if defined(__gfx9__)
-            else
-            {
-                // Workaround for a compiler issue: sometimes there are not enough wait-states
-                // between v_mfma_f32... and v_accvgpr_read_b32 instructions if they are separated
-                // by s_cbranch.
-                tile_elementwise_inout([](auto& x) { asm("; force move to %0" : "+v"(x)); }, s_acc);
-            }
-#endif
 
             {
                 bool need_perpixel_check = mask.IsEdgeTile(
@@ -645,6 +756,10 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                 });
             });
 
+            // gfx12 R2 baseline:
+            // Load dOT after P/exp2, before dropout/P transform/Gemm1.
+            auto dot_reg_tensor = load_tile(dot_lds_read_window);
+
             if constexpr(FmhaDropout::IsDropout)
             {
                 dropout.template Run<decltype(gemm_0), RandValOutputDataType>(
@@ -664,47 +779,42 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
             }();
 
             // STAGE 3, P^T@OGrad^T Gemm1
-            auto do_block_tile = load_tile(do_dram_window);
-            move_tile_window(do_dram_window, {kM0, 0});
-
-            auto d_block_tile = load_tile(d_dram_window);
-            move_tile_window(d_dram_window, {kM0});
-
-            store_tile(do_lds_window, do_block_tile);
-            shuffle_tile(shuffled_do_block_tile, do_block_tile);
-            store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
-
-            store_tile(d_lds_write_window, d_block_tile);
-
+            // Cross-wave P transpose through LDS.
+            store_tile(p_xwave_lds_write_window, p_gemm);
             block_sync_lds();
+            auto pt_xwave_reg_tensor = load_tile(pt_xwave_lds_read_window);
+            gemm_1(dv_acc, pt_xwave_reg_tensor, dot_reg_tensor);
 
-            auto dot_reg_tensor = load_tile(dot_lds_read_window);
-
-            block_sync_lds();
-
-            if constexpr(kFallbackXWave)
-            {
-                pt_reg_tensor = ReadFallbackTranspose(
-                    smem_ptr, p_gemm, Policy::template MakePTRegSliceBlockDescriptor<Problem>());
-            }
-            else
-            {
-                Policy::template PTFromGemm0CToGemm1A<Problem,
-                                                      decltype(pt_reg_tensor),
-                                                      decltype(p_gemm)>(pt_reg_tensor, p_gemm);
-            }
-            gemm_1(dv_acc, pt_reg_tensor, dot_reg_tensor);
-
+            HotLoopScheduler::template GemmStagedScheduler<1>();
+            __builtin_amdgcn_sched_barrier(0);
             // STAGE 4, OGrad@V Gemm2
-            auto do_reg_tensor = load_tile(do_lds_read_window);
-            auto d             = load_tile(d_lds_read_window);
-            block_sync_lds();
-
             auto dp_acc = SPGradBlockTileType{};
 
+            // D-PREFETCH-BEFORE-GEMM2:
+            // Issue current-tile D global loads before the dO LDS load/Gemm2.
+            // Keep D live until Stage5 so global latency can overlap Gemm2.
+            auto d_hot_direct_window = make_tile_window(
+                d_dram_block_window_tmp.get_bottom_tensor_view(),
+                d_dram_block_window_tmp.get_window_lengths(),
+                {seqlen_q_step},
+                Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+
+            auto d_hot_direct = load_tile(d_hot_direct_window);
+            __builtin_amdgcn_sched_barrier(0);
+
+            // DO-JIT: leave dO in its independent LDS region until Gemm2.
+            auto do_reg_tensor = load_tile(do_lds_read_window);
+            __builtin_amdgcn_sched_barrier(0);
             dp_acc = gemm_2(do_reg_tensor, v_reg_tensor);
 
+            // Delay the next-iteration global prefetch to shorten VGPR live ranges.
+            HotLoopScheduler::template GemmStagedScheduler<2>();
+            __builtin_amdgcn_sched_barrier(0);
             // STAGE 5, P^T(PGrad^T - D)
+
+            // The earlier HBM->LDS->Reg D staging is intentionally omitted.
+            // Current D is loaded directly immediately before Stage 5.
+            // Current-tile D, reconstructed from backing view.
             auto ds                 = SPGradBlockTileType{};
             constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
             sweep_tile_span(ds_spans[number<0>{}], [&](auto idx0) {
@@ -713,8 +823,8 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     bool undrop_flag       = p[i_j_idx] >= 0;
                     ds(i_j_idx)            = p[i_j_idx] * (!FmhaDropout::IsDropout || undrop_flag
-                                                               ? (dp_acc[i_j_idx] - d[i_idx])
-                                                               : d[i_idx]);
+                                                               ? (dp_acc[i_j_idx] - d_hot_direct[i_idx])
+                                                               : d_hot_direct[i_idx]);
                 });
             });
 
@@ -746,83 +856,288 @@ struct BlockFmhaBwdDQDKDVPipelineKRKTRVR
             }
 
             // STAGE 6, SGrad^T@Q^T Gemm3
-            auto qt_reg_tensor = load_tile(qt_lds_read_window);
-            block_sync_lds();
-
             const auto ds_gemm = cast_tile<GemmDataType>(ds);
 
-            if constexpr(kFallbackXWave)
-            {
-                dst_reg_tensor = ReadFallbackTranspose(
-                    smem_ptr,
-                    ds_gemm,
-                    Policy::template MakeSGradTRegSliceBlockDescriptor<Problem>());
-            }
-            else
-            {
-                Policy::template SGradTFromGemm2CToGemm3A<Problem,
-                                                          decltype(dst_reg_tensor),
-                                                          decltype(ds_gemm)>(dst_reg_tensor,
-                                                                             ds_gemm);
-            }
+            // Cross-wave dS^T redistribution through shared LDS scratch.
+            // P has already been consumed by Gemm1, so the buffer can be reused.
+            block_sync_lds();
+            store_tile(ds_xwave_lds_write_window, ds_gemm);
+            // Ensure this wave's LDS writes are completed before
+            // all waves rendezvous and begin cross-wave LDS reads.
+            __builtin_amdgcn_s_waitcnt(0);
+            block_sync_lds();
+            auto dst_xwave_hot_reg_tensor = load_tile(dst_xwave_lds_read_window);
+            // Ensure LDS reads have retired before Gemm3 consumes the fragment.
+            __builtin_amdgcn_s_waitcnt(0);
+            // Issue next Q after the existing broad dS read wait,
+            // before QT LDS reads/Gemm3. Do not move any LDS commit or barrier.
+            q_block_tile = load_tile(q_dram_window);
+            move_tile_window(q_dram_window, {kM0, 0});
+            // Issue next Q before QT loads/Gemm3.
+            // Compiler scheduling boundary only; no runtime memory wait.
+            __builtin_amdgcn_sched_barrier(0);
 
-            gemm_3(dk_acc, dst_reg_tensor, qt_reg_tensor);
+            // Keep Q^T in LDS until Gemm3 actually needs it.
+            auto qt_reg_tensor = load_tile(qt_lds_read_window);
+            // Keep the compiler from moving the Q^T load across Gemm3.
+            __builtin_amdgcn_sched_barrier(0);
+            gemm_3(dk_acc, dst_xwave_hot_reg_tensor, qt_reg_tensor);
 
-            store_tile(ds_lds_window, ds_gemm);
+            HotLoopScheduler::template GemmStagedScheduler<3>();
+            __builtin_amdgcn_sched_barrier(0);
 
+            // LSE and dO stay late; next Q alone was issued before Gemm3.
+
+            lse_block_tile = load_tile(lse_dram_window);
+            move_tile_window(lse_dram_window, {kM0});
+
+            do_block_tile = load_tile(do_dram_window);
+            move_tile_window(do_dram_window, {kM0, 0});
+
+            // All waves have consumed the old Q^T.
+            // Commit the already-prefetched next Q/LSE/dO to LDS now.
             block_sync_lds();
 
-            auto ds_reg_tensor      = load_tile(ds_lds_read_window);
-            auto ds_reg_tensor_next = decltype(ds_reg_tensor){};
-            move_tile_window(ds_lds_read_window, {0, kK4});
+            store_tile(q_lds_window, q_block_tile);
 
-            // STAGE7 SGrad@K^T Gemm4
-            auto dq_acc = QGradBlockTileType{};
-            clear_tile(dq_acc);
+            store_tile(lse_lds_write_window, lse_block_tile);
 
-            static_for<0, k4_loops, 1>{}([&](auto i_k4) {
-                if constexpr(i_k4 < k4_loops - 1)
-                {
-                    ds_reg_tensor_next = load_tile(ds_lds_read_window);
-                    move_tile_window(ds_lds_read_window, {0, kK4});
-                }
-                auto kt_reg_tensor_slice = get_slice_tile(kt_reg_tensor,
-                                                          sequence<0, i_k4 * kK4>{},
-                                                          sequence<kQKHeaddim, (i_k4 + 1) * kK4>{});
-                gemm_4(dq_acc, ds_reg_tensor, kt_reg_tensor_slice);
+            store_tile(do_lds_window, do_block_tile);
+            shuffle_tile(shuffled_do_block_tile, do_block_tile);
+            store_tile(shuffled_do_lds_write_window, shuffled_do_block_tile);
 
-                if constexpr(i_k4 < k4_loops - 1)
-                {
-                    ds_reg_tensor.get_thread_buffer() = ds_reg_tensor_next.get_thread_buffer();
-                }
-            });
-            move_tile_window(ds_lds_read_window, {0, -kN0});
-            // QGrad Scale
-            if constexpr(FmhaDropout::IsDropout)
-            {
-                tile_elementwise_inout([&scale_rp_undrop](auto& x) { x = x * scale_rp_undrop; },
-                                       dq_acc);
-            }
-            else
-            {
-                tile_elementwise_inout([&raw_scale](auto& x) { x = x * raw_scale; }, dq_acc);
-            }
-            if constexpr(decltype(dq_dram_window)::BottomTensorView::DstInMemOp ==
-                         memory_operation_enum::set)
-            {
-                store_tile(dq_dram_window, dq_acc);
-            }
-            else
-            {
-                update_tile(dq_dram_window, dq_acc);
-            }
-            move_tile_window(dq_dram_window, {kM0, 0});
+            // Publish next-iteration Q/LSE/dO before register reload.
+            block_sync_lds();
+
+            // Gemm4/dQ and the original dS LDS round-trip are not needed here.
+            // The next Q/LSE/dO were prefetched early and committed after Gemm3.
+            q_reg_tensor = load_tile(q_lds_read_window);
+
+            // Q-QT-ALIAS:
+            // Every wave has consumed raw next-Q.
+            // Reuse those bytes for next-iteration Q^T.
+            block_sync_lds();
+
+            shuffle_tile(shuffled_q_block_tile, q_block_tile);
+            store_tile(shuffled_q_lds_write_window, shuffled_q_block_tile);
+            // LSE-AFTER-HANDOFF: LSE uses independent LDS; keep it out of raw-Q read rendezvous.
+            __builtin_amdgcn_sched_barrier(0);
+            lse = load_tile(lse_lds_read_window);
 
             i_total_loops += 1;
             seqlen_q_step += kM0;
         }
+        __builtin_amdgcn_sched_barrier(0);
 
-        // Results Scale
+        // Tail
+        auto s_acc = SPBlockTileType{};
+
+        // STAGE 1, Q@K Gemm0
+        s_acc = gemm_0(q_reg_tensor, k_reg_tensor);
+
+        // STAGE 2, Scale, Add bias, Mask, Softmax, Dropout
+        if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+        {
+            const auto bias_tile    = load_tile(bias_dram_window);
+            auto shuffled_bias_tile = make_static_distributed_tensor<BiasDataType>(
+                Policy::template MakeShuffledBiasTileDistribution<Problem>());
+            shuffle_tile(shuffled_bias_tile, bias_tile);
+            // SGrad and Bias use the same address in LDS, finish loading ds in the hot loop to
+            // reuse LDS.
+            block_sync_lds();
+            store_tile(bias_lds_write_window, shuffled_bias_tile);
+            block_sync_lds();
+            auto bias_s_tile = load_tile(bias_s_lds_read_window);
+            tile_elementwise_inout(
+                [&](auto& x, const auto& y) {
+                    x = scale * x + log2e_v<AccDataType> * type_convert<AccDataType>(y);
+                },
+                s_acc,
+                bias_s_tile);
+            __builtin_amdgcn_sched_barrier(0);
+        }
+        else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
+        {
+            constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
+            sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
+                sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
+                    const auto tile_idx = get_x_indices_from_distributed_indices(
+                        s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
+
+                    const auto row         = seqlen_q_step + tile_idx.at(number<0>{});
+                    const auto col         = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
+
+                    s_acc(i_j_idx) *= scale;
+                    position_encoding.update(s_acc(i_j_idx), row, col);
+                });
+            });
+        }
+
+        {
+            bool need_perpixel_check = mask.IsEdgeTile(
+                seqlen_q_step, k_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
+            if(need_perpixel_check)
+            {
+                set_tile_if(s_acc, -numeric<AccDataType>::infinity(), [&](auto tile_idx) {
+                    const auto row = seqlen_q_step + tile_idx.at(number<0>{});
+                    const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                    return mask.IsOutOfBound(row, col);
+                });
+            }
+        }
+
+        static const auto get_validated_lse = [](LSEDataType raw_lse) {
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         FmhaMask::IsMasking)
+            {
+                return raw_lse == -numeric<LSEDataType>::infinity() ? type_convert<LSEDataType>(0.f)
+                                                                    : raw_lse;
+            }
+            else
+            {
+                return raw_lse;
+            }
+        };
+
+        auto p                 = SPBlockTileType{};
+        constexpr auto p_spans = decltype(p)::get_distributed_spans();
+        sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            auto row_lse         = log2e_v<LSEDataType> * get_validated_lse(lse[i_idx]);
+
+            sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                {
+                    p(i_j_idx) = exp2(s_acc[i_j_idx] - row_lse);
+                }
+                else
+                {
+                    p(i_j_idx) = exp2(scale * s_acc[i_j_idx] - row_lse);
+                }
+            });
+        });
+
+        if constexpr(FmhaDropout::IsDropout)
+        {
+            dropout.template Run<decltype(gemm_0), RandValOutputDataType>(
+                seqlen_q_step, k_origin.at(number<0>{}), p, randval_dram_window);
+        }
+
+        // STAGE 3, P^T@OGrad^T Gemm1
+        const auto p_gemm = [&]() {
+            if constexpr(FmhaDropout::IsDropout)
+            {
+                return tile_elementwise_in(
+                    [](const auto& x) { return type_convert<GemmDataType>(x > 0.f ? x : 0.f); }, p);
+            }
+            else
+            {
+                return cast_tile<GemmDataType>(p);
+            }
+        }();
+
+        // Cross-wave P transpose through LDS.
+        store_tile(p_xwave_lds_write_window, p_gemm);
+        block_sync_lds();
+        auto pt_xwave_tail_reg_tensor = load_tile(pt_xwave_lds_read_window);
+        auto dot_reg_tensor           = load_tile(dot_lds_read_window);
+        gemm_1(dv_acc, pt_xwave_tail_reg_tensor, dot_reg_tensor);
+
+        HotLoopScheduler::template GemmStagedScheduler<1>();
+        __builtin_amdgcn_sched_barrier(0);
+
+        // STAGE 4, OGrad@V Gemm2
+        auto dp_acc = SPGradBlockTileType{};
+
+        auto qt_reg_tensor = load_tile(qt_lds_read_window);
+
+        // DO-JIT: leave dO in its independent LDS region until Gemm2.
+        auto do_reg_tensor = load_tile(do_lds_read_window);
+        dp_acc             = gemm_2(do_reg_tensor, v_reg_tensor);
+
+        HotLoopScheduler::template GemmStagedScheduler<2>();
+        __builtin_amdgcn_sched_barrier(0);
+
+        // STAGE 5, P^T(PGrad^T - D)
+
+        // Read D directly from global memory immediately before Stage 5,
+        // but use the same register distribution expected by the old
+        // d_lds_read_window consumer.
+        auto d_direct_dram_window = make_tile_window(
+            d_dram_block_window_tmp.get_bottom_tensor_view(),
+            d_dram_block_window_tmp.get_window_lengths(),
+            {seqlen_q_step},
+            Policy::template MakeLSEDLdsReadBlockDescriptor<Problem, decltype(gemm_0)>());
+
+        auto d_direct = load_tile(d_direct_dram_window);
+
+        // Make sure the direct global load is complete before using it.
+        __builtin_amdgcn_s_waitcnt(0);
+
+        // Consume the completed HBM D tile directly.
+        auto ds                 = SPGradBlockTileType{};
+        constexpr auto ds_spans = decltype(ds)::get_distributed_spans();
+        sweep_tile_span(ds_spans[number<0>{}], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            sweep_tile_span(ds_spans[number<1>{}], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                bool undrop_flag       = p[i_j_idx] >= 0;
+                ds(i_j_idx)            = p[i_j_idx] * (!FmhaDropout::IsDropout || undrop_flag
+                                                           ? (dp_acc[i_j_idx] - d_direct[i_idx])
+                                                           : d_direct[i_idx]);
+            });
+        });
+
+        if constexpr(kHasBiasGrad)
+        {
+            const auto dbias = [&]() {
+                if constexpr(FmhaDropout::IsDropout)
+                {
+                    return tile_elementwise_in(
+                        [&rp_undrop](const auto& x) {
+                            return type_convert<BiasGradDataType>(x * rp_undrop);
+                        },
+                        ds);
+                }
+                else
+                {
+                    return cast_tile<BiasGradDataType>(ds);
+                }
+            }();
+            // Finish loading bias_s to reuse LDS.
+            block_sync_lds();
+            store_tile(bias_lds_write_window, dbias);
+            block_sync_lds();
+            auto shuffled_dbias_tile = load_tile(dbias_lds_read_window);
+            auto dbias_tile          = make_static_distributed_tensor<BiasGradDataType>(
+                Policy::template MakeBiasTileDistribution<Problem>());
+            shuffle_tile(dbias_tile, shuffled_dbias_tile);
+            store_tile(dbias_dram_window, dbias_tile);
+            __builtin_amdgcn_sched_barrier(0);
+        }
+
+        // STAGE 6, SGrad^T@Q^T Gemm3
+        const auto ds_gemm = cast_tile<GemmDataType>(ds);
+
+        // Cross-wave dS^T redistribution through shared LDS scratch.
+        // P has already been consumed by Gemm1, so the buffer can be reused.
+        block_sync_lds();
+        store_tile(ds_xwave_lds_write_window, ds_gemm);
+        // Ensure this wave's LDS writes are completed before
+        // all waves rendezvous and begin cross-wave LDS reads.
+        __builtin_amdgcn_s_waitcnt(0);
+        block_sync_lds();
+        auto dst_xwave_tail_reg_tensor = load_tile(dst_xwave_lds_read_window);
+        // Ensure LDS reads have retired before Gemm3 consumes the fragment.
+        __builtin_amdgcn_s_waitcnt(0);
+        gemm_3(dk_acc, dst_xwave_tail_reg_tensor, qt_reg_tensor);
+
+        HotLoopScheduler::template GemmStagedScheduler<3>();
+        __builtin_amdgcn_sched_barrier(0);
+
         if constexpr(FmhaDropout::IsDropout)
         {
             tile_elementwise_inout([&scale_rp_undrop](auto& x) { x = x * scale_rp_undrop; },
