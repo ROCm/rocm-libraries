@@ -888,6 +888,13 @@ namespace rocsparse
         // Check bounds
         if(idx >= 0 && idx < size)
         {
+            // Halves are paired by 32-bit word, so index from the 4-byte aligned
+            // address at or below base_ptr; base_ptr may be only 2-byte aligned,
+            // e.g. a per-batch pointer with an odd batch stride.
+            const int64_t shift = (reinterpret_cast<uintptr_t>(base_ptr) >> 1) & 1;
+            base_ptr -= shift;
+            idx += shift;
+            size += shift;
 
             half* addr      = &base_ptr[idx];
             int   is_second = (idx & 1);
@@ -997,6 +1004,13 @@ namespace rocsparse
         // Check bounds
         if(idx >= 0 && idx < size)
         {
+            // Halves are paired by 32-bit word, so index from the 4-byte aligned
+            // address at or below base_ptr; base_ptr may be only 2-byte aligned,
+            // e.g. a per-batch pointer with an odd batch stride.
+            const int64_t shift = (reinterpret_cast<uintptr_t>(base_ptr) >> 1) & 1;
+            base_ptr -= shift;
+            idx += shift;
+            size += shift;
 
             rocsparse_bfloat16* addr      = &base_ptr[idx];
             int                 is_second = (idx & 1);
