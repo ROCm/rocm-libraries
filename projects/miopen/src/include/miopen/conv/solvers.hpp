@@ -4658,7 +4658,19 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 // descriptor coverage across every family.
 struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
 {
-    int index = -1;
+    // Arch-neutral kernel identity ("family[field=value,...]", e.g.
+    // "direct[tile_size_k=256,...]"). This is the serialized form, so a perf
+    // config is portable across architectures: the perf-config picker ranks over
+    // it and the perf-db stores it. Resolved to `index` at runtime against the
+    // live get_valid_configs enumeration, which is arch- and build-specific.
+    // mutable because IsValid() keeps it in sync with `index` on a const config
+    // (search path) as well as resolving from it (picker path).
+    mutable std::string descriptor;
+
+    // Arch-local index into get_valid_configs, resolved from `descriptor` (or set
+    // directly by search / heuristic init). NOT serialized. mutable because
+    // IsValid() resolves it on a const config in the perf-config-picker walk.
+    mutable int index = -1;
 
     PerformanceConfigConvHipConv() = default;
     PerformanceConfigConvHipConv(bool) {}
@@ -4666,7 +4678,7 @@ struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipCon
     template <class Self, class F>
     static void Visit(Self&& self, F f)
     {
-        f(self.index, "index");
+        f(self.descriptor, "descriptor");
     }
 
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
