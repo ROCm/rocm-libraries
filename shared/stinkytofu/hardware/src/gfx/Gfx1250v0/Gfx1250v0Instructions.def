@@ -239,6 +239,9 @@ DEF_BATCH(.format = DS_STORE,
     //        currently stinkytofu will legalize this in LegalizationUtils.cpp.
     DsStoreB192Inst, "ds_store_b192", .logical = "DSStoreB192",
         .operand_fields = { {S1, .size=192} },
+    // Same pseudo as b192: gfx1250 has no ds_store_b256 encoding.
+    DsStoreB256Inst, "ds_store_b256", .logical = "DSStoreB256",
+        .operand_fields = { {S1, .size=256} },
 )
 // Matrix Instructions (WMMA/MXWMMA only; gfx1250 has no MFMA)
 //

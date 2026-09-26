@@ -290,6 +290,28 @@ TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
     EXPECT_EQ(ds2->offset, 48);  // 32 + 16
 }
 
+TEST_F(LegalizationUtilsTest, DSLoadB192SecondHalfCrossing256GetsItsOwnMsbOffset) {
+    // v[254:259]: the b128 half stays in MSB bank 0, but the b64 half starts at
+    // 258 and belongs to bank 1, so it needs its own -256 encoding offset.
+    StinkyInstruction* inst = createInst(GFX::ds_load_b192);
+    inst->addDestReg(StinkyRegister("v", 254, 6));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
+    inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
+
+    AsmIRBuilder builder(*bb, arch);
+    auto result = legalizeDSLoadB192(inst, builder, arch, /*hasVgprMsb=*/true);
+
+    auto* load1 = dyn_cast<StinkyInstruction>(result.first);
+    ASSERT_NE(load1, nullptr);
+    EXPECT_EQ(load1->getDestReg(0).reg.idx, 254);
+    EXPECT_EQ(load1->getDestReg(0).reg.offset, 0);
+
+    auto* load2 = dyn_cast<StinkyInstruction>(result.last);
+    ASSERT_NE(load2, nullptr);
+    EXPECT_EQ(load2->getDestReg(0).reg.idx, 258);
+    EXPECT_EQ(load2->getDestReg(0).reg.offset, -256);
+}
+
 // ---------------------------------------------------------------------------
 // legalizeDSStoreB192
 // ---------------------------------------------------------------------------
@@ -321,6 +343,26 @@ TEST_F(LegalizationUtilsTest, DSStoreB192SplitsIntoB128AndB64) {
     auto* ds2 = store2->getModifier<DSModifiers>();
     ASSERT_NE(ds2, nullptr);
     EXPECT_EQ(ds2->offset, 16);
+}
+
+TEST_F(LegalizationUtilsTest, DSStoreB192SecondHalfCrossing256GetsItsOwnMsbOffset) {
+    StinkyInstruction* inst = createInst(GFX::ds_store_b192);
+    inst->addSrcReg(StinkyRegister("v", 50, 1));
+    inst->addSrcReg(StinkyRegister("v", 254, 6));
+    inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
+
+    AsmIRBuilder builder(*bb, arch);
+    auto result = legalizeDSStoreB192(inst, builder, arch, /*hasVgprMsb=*/true);
+
+    auto* store1 = dyn_cast<StinkyInstruction>(result.first);
+    ASSERT_NE(store1, nullptr);
+    EXPECT_EQ(store1->getSrcReg(1).reg.idx, 254);
+    EXPECT_EQ(store1->getSrcReg(1).reg.offset, 0);
+
+    auto* store2 = dyn_cast<StinkyInstruction>(result.last);
+    ASSERT_NE(store2, nullptr);
+    EXPECT_EQ(store2->getSrcReg(1).reg.idx, 258);
+    EXPECT_EQ(store2->getSrcReg(1).reg.offset, -256);
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +397,28 @@ TEST_F(LegalizationUtilsTest, DSStoreB256SplitsIntoTwoB128) {
     auto* ds2 = store2->getModifier<DSModifiers>();
     ASSERT_NE(ds2, nullptr);
     EXPECT_EQ(ds2->offset, 16);
+}
+
+TEST_F(LegalizationUtilsTest, DSStoreB256SecondHalfCrossing256GetsItsOwnMsbOffset) {
+    // Surrogate opcode: legalizeDSStoreB256 only requires 0 dests and 2 srcs.
+    StinkyInstruction* inst = createInst(GFX::ds_store_b128);
+    inst->addSrcReg(StinkyRegister("v", 50, 1));
+    inst->addSrcReg(StinkyRegister("v", 254, 8));
+    inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
+
+    AsmIRBuilder builder(*bb, arch);
+    auto result = legalizeDSStoreB256(inst, builder, arch, /*hasVgprMsb=*/true);
+
+    auto* store1 = dyn_cast<StinkyInstruction>(result.first);
+    ASSERT_NE(store1, nullptr);
+    EXPECT_EQ(store1->getSrcReg(1).reg.idx, 254);
+    EXPECT_EQ(store1->getSrcReg(1).reg.offset, 0);
+
+    auto* store2 = dyn_cast<StinkyInstruction>(result.last);
+    ASSERT_NE(store2, nullptr);
+    EXPECT_EQ(store2->getSrcReg(1).reg.idx, 258);
+    EXPECT_EQ(store2->getSrcReg(1).reg.num, 4);
+    EXPECT_EQ(store2->getSrcReg(1).reg.offset, -256);
 }
 
 // ---------------------------------------------------------------------------

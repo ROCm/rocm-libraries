@@ -253,6 +253,11 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
 }
 
 Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
+    return legalizeBarrier(inst, irBuilder, archId, -1, false, false);
+}
+
+Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId,
+                          int barrierId, bool separate, bool wait) {
     // Only legalize on gfx12.5 (either stepping).
     if (!isGfx125(archId)) return {nullptr, nullptr};
 
@@ -261,27 +266,29 @@ Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     std::string comment = commentMod ? commentMod->comment : "";
     const MemTokenData* memTokenMod = inst->getModifier<MemTokenData>();
 
-    // Create s_barrier_signal -1 (signal global barrier)
-    const HwInstDesc* signalDesc = getMCIDByUOp(GFX::s_barrier_signal, archId);
-    StinkyInstruction* signalInst = irBuilder.create(signalDesc, inst);
-    signalInst->addSrcReg(StinkyRegister(-1));  // -1 = global barrier
+    auto createBarrier = [&](GFX opcode) {
+        const HwInstDesc* desc = getMCIDByUOp(opcode, archId);
+        StinkyInstruction* barrier = irBuilder.create(desc, inst);
+        barrier->addSrcReg(StinkyRegister(barrierId));
+        if (memTokenMod) barrier->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
+        return barrier;
+    };
 
-    // Create s_barrier_wait -1 (wait on global barrier)
-    const HwInstDesc* waitDesc = getMCIDByUOp(GFX::s_barrier_wait, archId);
-    StinkyInstruction* waitInst = irBuilder.create(waitDesc, inst);
-    waitInst->addSrcReg(StinkyRegister(-1));  // -1 = global barrier
-    if (!comment.empty()) {
-        waitInst->addModifier<CommentData>(CommentData{comment});
+    StinkyInstruction* firstInst = nullptr;
+    StinkyInstruction* lastInst = nullptr;
+    if (separate) {
+        firstInst = lastInst = createBarrier(wait ? GFX::s_barrier_wait : GFX::s_barrier_signal);
+    } else {
+        firstInst = createBarrier(GFX::s_barrier_signal);
+        lastInst = createBarrier(GFX::s_barrier_wait);
     }
-    if (memTokenMod) {
-        signalInst->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
-        waitInst->addModifier<MemTokenData>(MemTokenData{memTokenMod->tokens});
-    }
+
+    if (!comment.empty()) lastInst->addModifier<CommentData>(CommentData{comment});
 
     // Remove the original s_barrier instruction
     inst->erase();
 
-    return {signalInst, waitInst};
+    return {firstInst, lastInst};
 }
 
 /// Helper: compute MSB offset for VGPR when hasVgprMsb is true.

@@ -38,6 +38,7 @@ class StinkyAsmModuleWithAdapterSignature:
     def emitAssembly(self) -> str:
         out = ""
         if self._signature is not None:
+            self._refreshSgprCount()
             out += self._signature.toString()
         # .set directives go between signature and instruction body.
         set_dirs = getattr(self._inner, "getSetDirectives", None)
@@ -45,6 +46,29 @@ class StinkyAsmModuleWithAdapterSignature:
             out += set_dirs()
         out += self._inner.emitAssembly()
         return out
+
+    def _refreshSgprCount(self) -> None:
+        """Take the declared SGPR count from the lowered code, as C++ does.
+
+        Port of ``StinkyAsmModuleWithSignature::refreshSgprCount``. Tensile
+        declares ``sgprPool.size()``, the pool high-water mark, which still
+        counts registers that were checked back in and appear in no operand,
+        so the count arrives too high. Only that number moves, and only
+        downwards: everything else in the descriptor states what the hardware
+        does before entry, and a flow whose registers did not move keeps the
+        producer's number.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        counter = getattr(leaf, "getRequiredSgprCount", None)
+        if counter is None:
+            return
+        kd = self._signature.kernelDescriptor
+        required = int(counter(kd.numSgprPreload, list(kd.sgprWorkGroup)))
+        if required == 0 or required >= kd.totalSgprs:
+            return
+        self._signature.setGprs(kd.totalVgprs, kd.totalAgprs, required)
 
     def getName(self) -> str:
         return self._inner.getName()
@@ -63,6 +87,37 @@ class StinkyAsmModuleWithAdapterSignature:
 
     def getModule(self) -> Any:
         return self._inner
+
+
+def _apply_optimization_config(signature: Any, options: Any) -> None:
+    """Fill the signature the way C++ ``toStinkyTofuModule`` does.
+
+    Native conversion does not copy ``descriptionTopic`` / ``descriptionList``.
+    It calls ``setOptimizationConfig`` from ModuleOptions; the descriptor then
+    prints the Optimizations block as raw text. Drop the TextBlock copies so
+    they cannot print a second copy when comments are enabled.
+    """
+    setter = getattr(signature, "setOptimizationConfig", None)
+    if setter is None or not options:
+        return
+    gro = options.get("UseSgprForGRO", 0)
+    setter(
+        (int(options.get("TileA0", 0)), int(options.get("TileB0", 0))),
+        (int(options.get("SubGroup0", 0)), int(options.get("SubGroup1", 0))),
+        (int(options.get("WaveGroup0", 0)), int(options.get("WaveGroup1", 0))),
+        int(options.get("VectorWidthA", 0)),
+        int(options.get("VectorWidthB", 0)),
+        int(options.get("GlobalReadVectorWidthA", 0)),
+        int(options.get("GlobalReadVectorWidthB", 0)),
+        bool(options.get("DirectToLdsA", False)),
+        bool(options.get("DirectToLdsB", False)),
+        int(gro),
+    )
+    if hasattr(signature, "descriptionTopic"):
+        signature.descriptionTopic = _code.TextBlock("")
+    clearer = getattr(signature, "clearDescription", None)
+    if clearer is not None:
+        clearer()
 
 
 def _convert_options(options: Any) -> dict:
@@ -118,4 +173,5 @@ def toStinkyTofuModule(
     inner = module.to_stinky_asm(arch_list, logical_name=logical_name, options=st_options)
     if signature is None:
         return inner
+    _apply_optimization_config(signature, options)
     return StinkyAsmModuleWithAdapterSignature(inner, signature)

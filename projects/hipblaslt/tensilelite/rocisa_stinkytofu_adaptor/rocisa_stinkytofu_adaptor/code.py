@@ -334,7 +334,6 @@ class _PostProcessModule:
         asm = _postprocess_vcmpx(asm)
         asm = _postprocess_sbarrier(asm)
         asm = _postprocess_carry(asm)
-        asm = asm.replace("+-", "-")
         return asm
 
     def getSetDirectives(self) -> str:
@@ -497,32 +496,6 @@ def _block_3line(comment: str) -> str:
     return out
 
 
-def _format_endif_str(instr: str, comment: str) -> str:
-    """Format an instruction line with an optional trailing comment.
-
-    Used by ``ValueEndif.toString`` for the ``.endif [// <comment>]``
-    rendering. Layout rules:
-
-      * ``comment`` empty OR ``_outputNoComment()`` returns True ->
-        ``"{instr}\\n"`` with no padding.
-      * Otherwise: ``instr`` is right-padded with spaces to width 50
-        (``max(0, 50 - len(instr))`` spaces), then ``" // {comment}\\n"``
-        is appended. Padding width 50 matches the column where rocisa
-        instruction lines align their trailing ``// ...`` notes.
-
-    Currently used only by ``ValueEndif``; Phase 5 (assembly emit)
-    will need the full surface (including an ``outputInlineAsm``
-    branch that wraps the instruction string in ``"...\\n\\t"`` for
-    inline-asm output). When that lands, lift this into a public
-    ``format.py`` module; for now keeping it private to ``code.py``
-    keeps the surface area minimal.
-    """
-    if not comment or _outputNoComment():
-        return instr + "\n"
-    padding = " " * max(0, 50 - len(instr))
-    return f"{instr}{padding} // {comment}\n"
-
-
 def _to_hex_parity(num: int) -> str:
     """Lowercase hex (no ``0x`` prefix) mirroring rocisa's ``std::hex``
     cast over an ``int64_t``.
@@ -546,12 +519,9 @@ def _to_hex_parity(num: int) -> str:
 # Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
 # ---------------------------------------------------------------------------
 #
-# Mirror of rocisa's ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``.
-# These produce the GNU assembler preprocessor directives ``.if`` /
-# ``.elseif`` / ``.endif`` that KernelWriter uses to gate macro /
-# kernel-text sections at assemble time (CustomSchedule.py:448-508
-# chains them; KernelWriterAssembly.py:1827 uses a single ValueEndif
-# for the "overflowed resources" guard).
+# These nodes carry assembler conditional metadata in the adaptor Module tree.
+# ``_populate_one_item`` forwards ValueIf / ValueEndif to PyLogicalModule
+# sidecars; StinkyAsmEmitter owns their final assembly formatting.
 #
 # Parity notes:
 #   * ``Item.name`` is set to the CLASS NAME ("ValueIf" / ... ) rather
@@ -560,16 +530,8 @@ def _to_hex_parity(num: int) -> str:
 #     ``findNamedItem("ValueIf")`` matches every ValueIf node in a
 #     Module; KernelWriter doesn't rely on that today but the parity
 #     keeps any future searcher behaviour identical.
-#   * Subclasses of ``Item`` -- ``__str__`` / ``prettyPrint`` /
-#     ``countType`` / ``countExactType`` / 7 cap-proxy methods all
-#     come from Item's defaults. We override only ``toString``,
-#     ``__deepcopy__``, ``__getstate__``, ``__setstate__`` -- the
-#     same four overrides rocisa's nanobind binding wires up
-#     explicitly.
 #   * ValueIf / ValueElseIf store a ``value`` (the condition
-#     expression); ValueEndif stores a ``comment`` and uses
-#     ``_format_endif_str`` to byte-match rocisa's ``formatStr``
-#     padding semantics.
+#     expression); ValueEndif stores a ``comment``.
 
 class ValueIf(Item):
     """``.if <value>`` directive; mirror of ``rocisa::ValueIf``."""
@@ -581,12 +543,6 @@ class ValueIf(Item):
         # condition expression -- matches rocisa's ctor.
         super().__init__(name="ValueIf")
         self.value: str = value
-
-    def toString(self) -> str:
-        # Raw ``.if`` + value + newline; no padding / comment support
-        # (the condition expression IS the trailing payload on this
-        # line).
-        return f".if {self.value}\n"
 
     def __deepcopy__(self, memo):
         # Copy ctor -- a fresh ValueIf with the same value.
@@ -643,14 +599,7 @@ class ValueElseIf(Item):
 
 
 class ValueEndif(Item):
-    """``.endif [// <comment>]`` directive; mirror of
-    ``rocisa::ValueEndif``.
-
-    The comment is padding-aligned to column 50 to match how rocisa
-    instruction lines align their trailing ``// ...`` notes, and is
-    suppressed entirely when ``outputNoComment`` is set (see
-    ``_format_endif_str`` for the exact rules).
-    """
+    """Carries a ``.endif`` directive's optional comment."""
 
     __slots__ = ("comment",)
 
@@ -661,12 +610,6 @@ class ValueEndif(Item):
         # ctor.
         super().__init__(name="ValueEndif")
         self.comment: str = comment
-
-    def toString(self) -> str:
-        # ``.endif`` + optional ``// <comment>`` padded to column 50;
-        # gated by ``outputNoComment``. See ``_format_endif_str`` for
-        # the byte-level rules.
-        return _format_endif_str(".endif", self.comment)
 
     def __deepcopy__(self, memo):
         clone = ValueEndif(self.comment)
@@ -1508,11 +1451,26 @@ class Module(Item):
     def _populate_one_item(self, lm: Any, it: Any) -> None:
         """Emit a single ``itemList`` entry into *lm* (see ``_populate_logical_module``)."""
         if isinstance(it, Module):
+            if it.isCallable:
+                fn_name = it.callableName or it.name
+                lm.begin_callable(fn_name)
+                it._populate_logical_module(lm)
+                lm.end_callable(fn_name)
+                return
             if it.name:
                 lm.begin_group(it.name)
             it._populate_logical_module(lm)
             if it.name:
                 lm.end_group(it.name)
+            return
+        if isinstance(it, ValueIf):
+            lm.add_if_directive(it.value)
+            return
+        if isinstance(it, ValueEndif):
+            # Match rocisa ValueEndif::toString / native toStinkyTofuModule:
+            # formatStr drops the comment when outputNoComment (DisableAsmComments).
+            comment = "" if _outputNoComment() else it.comment
+            lm.add_endif_directive(comment)
             return
         if isinstance(it, ValueSet):
             text = it.toString().strip()  # ".set <sym>, <val>"
@@ -1531,12 +1489,11 @@ class Module(Item):
         if isinstance(it, TextBlock):
             lm.add_textblock(it.text)
             return
-        # Skip SDelayAlu instructions — the optimization pipeline handles
-        # all hazard insertion (InsertWaitAluPass for ESM2, InsertDelayAluPass
-        # for non-ESM2 regions).  The adaptor previously emitted these as
-        # s_nop 0 placeholders that survived the pipeline unrecognized.
-        if getattr(it, "instStr", "") == "s_delay_alu":
-            return
+        # SDelayAlu now lowers to a real stinkytofu SDelayAlu (with the
+        # SDelayAluData modifier) via to_stinky_logical, matching the native
+        # ToStinkyTofuUtils path. This keeps the pipeline-input identical to
+        # rocisa -- required at OptLevel 0, where RemoveDelayAlu is gated off
+        # and the incoming s_delay_alu feeds the downstream wait/hazard passes.
         handle = getattr(it, "to_stinky_logical", None)
         if not callable(handle):
             return
@@ -2008,6 +1965,10 @@ class _SignatureKernelDescriptor(Item):
         "totalVgprs", "totalAgprs", "totalSgprs", "originalTotalVgprs",
         "accumOffset", "groupSegSize", "sgprWorkGroup", "vgprWorkItem",
         "numSgprPreload",
+        "threadTile", "subGroup", "waveGroup",
+        "vectorWidthA", "vectorWidthB",
+        "globalReadVectorWidthA", "globalReadVectorWidthB",
+        "directToLdsA", "directToLdsB", "useSgprForGRO",
     )
 
     def __init__(
@@ -2029,6 +1990,16 @@ class _SignatureKernelDescriptor(Item):
         self.totalSgprs = int(totalSgprs)
         self.originalTotalVgprs = int(totalVgprs)
         self.numSgprPreload = int(numSgprPreload)
+        self.threadTile = (0, 0)
+        self.subGroup = (0, 0)
+        self.waveGroup = (0, 0)
+        self.vectorWidthA = 0
+        self.vectorWidthB = 0
+        self.globalReadVectorWidthA = 0
+        self.globalReadVectorWidthB = 0
+        self.directToLdsA = False
+        self.directToLdsB = False
+        self.useSgprForGRO = 0
         self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
 
     def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
@@ -2055,6 +2026,36 @@ class _SignatureKernelDescriptor(Item):
 
     def getNextFreeSgpr(self) -> int:
         return self.totalSgprs
+
+    def setOptimizationConfig(
+        self,
+        tt: Sequence[int],
+        sg: Sequence[int],
+        wg: Sequence[int],
+        vwA: int,
+        vwB: int,
+        glvwA: int,
+        glvwB: int,
+        d2lA: bool,
+        d2lB: bool,
+        useSgprForGRO: int,
+    ) -> None:
+        """Store tiling knobs that ``toString`` prints after Num SGPR.
+
+        Port of C++ ``SignatureKernelDescriptor::setOptimizationConfig``.
+        Native ``toStinkyTofuModule`` fills these from ModuleOptions and
+        emits them as raw comment text, not as ``TextBlock``s.
+        """
+        self.threadTile = (int(tt[0]), int(tt[1]))
+        self.subGroup = (int(sg[0]), int(sg[1]))
+        self.waveGroup = (int(wg[0]), int(wg[1]))
+        self.vectorWidthA = int(vwA)
+        self.vectorWidthB = int(vwB)
+        self.globalReadVectorWidthA = int(glvwA)
+        self.globalReadVectorWidthB = int(glvwB)
+        self.directToLdsA = bool(d2lA)
+        self.directToLdsB = bool(d2lB)
+        self.useSgprForGRO = int(useSgprForGRO)
 
     def toString(self) -> str:
         kd_indent = "  "
@@ -2139,6 +2140,32 @@ class _SignatureKernelDescriptor(Item):
         out += _sig_block(f"Num VGPR   ={self.originalTotalVgprs}")
         out += _sig_block(f"Num AccVGPR={self.totalAgprs}")
         out += _sig_block(f"Num SGPR   ={self.totalSgprs}")
+        # Same placement as C++ SignatureKernelDescriptor::toString: raw
+        # comment text after the GPR counts, not gated by outputNoComment.
+        out += _sig_block3line("Optimizations and Config:")
+        out += _sig_block(
+            f"ThreadTile= {self.threadTile[0]} x {self.threadTile[1]}"
+        )
+        out += _sig_block(
+            f"SubGroup= {self.subGroup[0]} x {self.subGroup[1]}"
+        )
+        out += _sig_block(f"VectorWidthA={self.vectorWidthA}")
+        out += _sig_block(f"VectorWidthB={self.vectorWidthB}")
+        out += _sig_block(
+            "GlobalReadVectorWidthA="
+            f"{self.globalReadVectorWidthA}, "
+            f"GlobalReadVectorWidthB={self.globalReadVectorWidthB}"
+        )
+        out += _sig_block(
+            f"DirectToLdsA={'True' if self.directToLdsA else 'False'}"
+        )
+        out += _sig_block(
+            f"DirectToLdsB={'True' if self.directToLdsB else 'False'}"
+        )
+        out += _sig_block(
+            "UseSgprForGRO="
+            f"{'True' if self.useSgprForGRO else 'False'}"
+        )
         return out
 
     def prettyPrint(self, indent: str = "") -> str:
@@ -2290,6 +2317,23 @@ class SignatureBase(Item):
     def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
         self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
         self.codeMeta.setGprs(totalVgprs, totalSgprs)
+
+    def setOptimizationConfig(
+        self,
+        tt: Sequence[int],
+        sg: Sequence[int],
+        wg: Sequence[int],
+        vwA: int,
+        vwB: int,
+        glvwA: int,
+        glvwB: int,
+        d2lA: bool,
+        d2lB: bool,
+        useSgprForGRO: int,
+    ) -> None:
+        self.kernelDescriptor.setOptimizationConfig(
+            tt, sg, wg, vwA, vwB, glvwA, glvwB, d2lA, d2lB, useSgprForGRO
+        )
 
     @property
     def offset(self) -> int:

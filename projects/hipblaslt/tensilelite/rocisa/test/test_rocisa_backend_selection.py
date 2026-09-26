@@ -75,9 +75,10 @@ def _bootstrap_rocisa_on_syspath() -> None:
 
     for root in candidates:
         if _has_built_rocisa(root):
-            # ``root`` for ``import rocisa``; ``tensilelite`` so an eventual
-            # ``import rocisa_stinkytofu_adaptor`` (adapter backend) also works.
-            for p in (tensilelite, root):
+            # ``root`` for ``import rocisa``; adaptor parent so
+            # ``import rocisa_stinkytofu_adaptor`` resolves the inner package.
+            _adaptor_parent = os.path.join(tensilelite, "rocisa_stinkytofu_adaptor")
+            for p in (tensilelite, _adaptor_parent, root):
                 if p not in sys.path:
                     sys.path.insert(0, p)
             break
@@ -147,16 +148,42 @@ def test_unavailable_surfaces_reason_and_skips_load(warnings_sink):
     assert msgs == [reason]
 
 
-def test_load_failure_falls_back_with_reason(warnings_sink):
-    """Available but the adapter import/rewire failed -> native + warning that
-    surfaces the concrete reason."""
+def test_load_failure_after_available_raises(warnings_sink):
+    """Binding already imported + adapter load failure must not fall back to
+    native rocisa (that loads _rocisa.so and nanobind-aborts)."""
     msgs, warn = warnings_sink
     load = _Probe((False, "import failed: ModuleNotFoundError('boom')"))
 
-    assert _resolve_backend("stinkytofu", _Probe((True, "")), load, warn=warn) is False
-    assert len(msgs) == 1
-    assert "boom" in msgs[0]
-    assert "adapter failed to load" in msgs[0]
+    with pytest.raises(ImportError, match="Cannot fall back to native rocisa"):
+        _resolve_backend("stinkytofu", _Probe((True, "")), load, warn=warn)
+    assert msgs == []
+
+
+def test_auto_detected_unavailable_falls_back_silently(warnings_sink):
+    """Auto-detected gfx1250 but stinkytofu not built -> silent fallback."""
+    msgs, warn = warnings_sink
+    load = _Probe((True, ""))
+
+    assert _resolve_backend(
+        "stinkytofu", _Probe((False, "not built")), load,
+        warn=warn, auto_detected=True,
+    ) is False
+    assert load.calls == 0
+    assert msgs == []
+
+
+def test_auto_detected_load_failure_after_available_raises(warnings_sink):
+    """Auto-detected gfx1250, stinkytofu available but adapter fails -> raise,
+    not a silent native fallback (the binding is already in-process)."""
+    msgs, warn = warnings_sink
+    load = _Probe((False, "import failed: AttributeError('boom')"))
+
+    with pytest.raises(ImportError, match="Cannot fall back to native rocisa"):
+        _resolve_backend(
+            "stinkytofu", _Probe((True, "")), load,
+            warn=warn, auto_detected=True,
+        )
+    assert msgs == []
 
 
 def test_backend_value_is_normalized_strip_lower():

@@ -85,6 +85,12 @@ STINKYTOFU_EXPORT Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilde
 STINKYTOFU_EXPORT Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
                                             GfxArchID archId);
 
+// Legalize an s_barrier while preserving rocisa's split/wait/cluster form.
+// barrierId is -3 for cluster scope and -1 for workgroup scope.
+STINKYTOFU_EXPORT Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
+                                            GfxArchID archId, int barrierId, bool separate,
+                                            bool wait);
+
 // Legalize ds_load_b192 instruction
 // Expands into two ds_load instructions (b128 + b64).
 // Caller must insert s_set_vgpr_msb between the two when they use VGPRs in different MSB

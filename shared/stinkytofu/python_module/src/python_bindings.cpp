@@ -30,6 +30,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <sstream>
 
@@ -48,6 +49,7 @@
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/asm/ra/AllocationRulesRegistry.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
@@ -108,6 +110,22 @@ NB_MODULE(_stinkytofu, m) {
                 return self.getFunction(name) != nullptr;
             },
             nb::arg("name"), "Return true when this module contains a Function with the name")
+        .def(
+            "getRequiredSgprCount",
+            [](StinkyAsmModule& self, int numSgprPreload, const std::array<int, 3>& workgroupIds) {
+                uint32_t required = 0;
+                for (const auto* function : self.getFunctions()) {
+                    if (function == nullptr) continue;
+                    required = std::max(required, stinkytofu::requiredSgprCount(
+                                                      *function, numSgprPreload, workgroupIds));
+                }
+                return required;
+            },
+            nb::arg("numSgprPreload"), nb::arg("workgroupIds"),
+            "SGPR count this module must declare: the highest index its code names, floored by "
+            "what the dispatch fills before entry. 0 when no function names one. Callers that "
+            "own a signature use it the way StinkyAsmModuleWithSignature::refreshSgprCount does "
+            "-- to lower a declared count, never to raise it.")
         .def(
             "registerPassAtExtensionPoint",
             [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
@@ -218,7 +236,7 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("type"), nb::arg("index"), nb::arg("count") = 1,
             "Create a register (e.g., Register('v', 0, 1) for v0). Raises on unknown type.")
-        .def(nb::init<float>(), nb::arg("value"), "Create a float literal")
+        .def(nb::init<double>(), nb::arg("value"), "Create a float/double literal")
         .def(nb::init<int>(), nb::arg("value"), "Create an int literal")
         // Single-string ctor → LiteralString. Used for keywords like MUBUF "off".
         // Distinct from the (type,index,count) overload by arg count.
@@ -481,8 +499,8 @@ NB_MODULE(_stinkytofu, m) {
         nb::arg("index"), nb::arg("count") = 1, "Create an MGPR (Memory descriptor) register");
 
     m.def(
-        "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
-        "Create a float literal");
+        "literal", [](double value) { return StinkyRegister(value); }, nb::arg("value"),
+        "Create a float/double literal");
 
     // ========================================================================
     // Architecture IDs
@@ -560,6 +578,10 @@ NB_MODULE(_stinkytofu, m) {
         .def("add_set_directive", &PyLogicalModule::addSetDirective, nb::arg("symbol"),
              nb::arg("value"),
              "Record a .set directive at the current position in the instruction stream")
+        .def("add_if_directive", &PyLogicalModule::addIfDirective, nb::arg("condition"),
+             "Record a .if directive at the current position in the instruction stream")
+        .def("add_endif_directive", &PyLogicalModule::addEndifDirective, nb::arg("comment") = "",
+             "Record a .endif directive at the current position in the instruction stream")
         .def("add_label", &PyLogicalModule::addLabel, nb::arg("label_name"),
              nb::arg("alignment") = 1, nb::arg("comment") = "",
              "Record a label at the current position in the instruction stream")
@@ -569,6 +591,10 @@ NB_MODULE(_stinkytofu, m) {
              "Mark the beginning of a named instruction-group scope")
         .def("end_group", &PyLogicalModule::endGroup, nb::arg("name"),
              "Mark the end of a named instruction-group scope")
+        .def("begin_callable", &PyLogicalModule::beginCallable, nb::arg("name"),
+             "Mark the beginning of a callable function body")
+        .def("end_callable", &PyLogicalModule::endCallable, nb::arg("name"),
+             "Mark the end of a callable function body")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",
@@ -608,19 +634,46 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("na") = 1, nb::arg("offset") = 0, nb::arg("offset0") = 0,
             nb::arg("offset1") = 0, nb::arg("gds") = false, "Set DS (LDS/GDS) modifiers")
         .def(
+            "set_flat",
+            [](LogicalInstruction& inst, int offset, bool glc, bool slc, bool lds, bool isStore,
+               bool hasGLCModifier, bool hasSC0Modifier, int scope, int th) {
+                inst.flat =
+                    FLATModifiers(offset, glc, slc, lds, isStore, hasGLCModifier, hasSC0Modifier,
+                                  static_cast<MUBUFScope>(scope), static_cast<TemporalHint>(th));
+            },
+            nb::arg("offset") = 0, nb::arg("glc") = false, nb::arg("slc") = false,
+            nb::arg("lds") = false, nb::arg("is_store") = false,
+            nb::arg("has_glc_modifier") = false, nb::arg("has_sc0_modifier") = false,
+            nb::arg("scope") = 0, nb::arg("th") = -1, "Set FLAT memory modifiers")
+        .def(
+            "set_global",
+            [](LogicalInstruction& inst, int offset, int th, int scope, bool glc, bool slc,
+               bool dlc, bool lds, bool isStore, bool hasGLCModifier, bool hasSC0Modifier,
+               bool hasDLCModifier) {
+                inst.global = GLOBALModifiers(
+                    offset, static_cast<TemporalHint>(th), static_cast<MUBUFScope>(scope), glc, slc,
+                    dlc, lds, isStore, hasGLCModifier, hasSC0Modifier, hasDLCModifier);
+            },
+            nb::arg("offset") = 0, nb::arg("th") = -1, nb::arg("scope") = 0, nb::arg("glc") = false,
+            nb::arg("slc") = false, nb::arg("dlc") = false, nb::arg("lds") = false,
+            nb::arg("is_store") = false, nb::arg("has_glc_modifier") = false,
+            nb::arg("has_sc0_modifier") = false, nb::arg("has_dlc_modifier") = false,
+            "Set GLOBAL memory modifiers")
+        .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
-               int scope, int th, bool isStore) {
+               int scope, int th, bool isStore, int nv) {
                 MUBUFScope mScope = static_cast<MUBUFScope>(scope);
                 TemporalHint mTh = static_cast<TemporalHint>(th);
-                inst.mubuf = MUBUFModifiers(
-                    offen, offset, glc, slc, nt, /*lds=*/false, isStore, /*hasMUBUFConst=*/false,
-                    /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false, mScope, mTh);
+                inst.mubuf = MUBUFModifiers(offen, offset, glc, slc, nt, /*lds=*/false, isStore,
+                                            /*hasMUBUFConst=*/false,
+                                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
+                                            mScope, mTh, static_cast<NonVolatile>(nv));
             },
             nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
             nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0, nb::arg("th") = -1,
-            nb::arg("is_store") = false,
-            "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store)")
+            nb::arg("is_store") = false, nb::arg("nv") = 0,
+            "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store, nv)")
         .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
@@ -634,6 +687,16 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("op_sel") = std::vector<int>{}, nb::arg("op_sel_hi") = std::vector<int>{},
             nb::arg("byte_sel") = std::vector<int>{},
             "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers")
+        .def(
+            "set_sdwa",
+            [](LogicalInstruction& inst, int dstSel, int dstUnused, int src0Sel, int src1Sel) {
+                inst.sdwa = SDWAModifiers(static_cast<SDWAModifiers::SelectBit>(dstSel),
+                                          static_cast<SDWAModifiers::UnusedBit>(dstUnused),
+                                          static_cast<SDWAModifiers::SelectBit>(src0Sel),
+                                          static_cast<SDWAModifiers::SelectBit>(src1Sel));
+            },
+            nb::arg("dst_sel") = 0, nb::arg("dst_unused") = 0, nb::arg("src0_sel") = 0,
+            nb::arg("src1_sel") = 0, "Set SDWA sub-dword modifiers")
         .def(
             "set_true16",
             [](LogicalInstruction& inst, int dst0, int dst1, const std::vector<int>& srcs) {
@@ -660,7 +723,38 @@ NB_MODULE(_stinkytofu, m) {
             nb::arg("vlcnt") = -1, nb::arg("vscnt") = -1, nb::arg("dlcnt") = -1,
             nb::arg("dscnt") = -1, nb::arg("kmcnt") = -1,
             "Set per-counter s_waitcnt values (forwarded to SWaitCntData; gfx12+ "
-            "legalizeWaitCnt splits the s_waitcnt into typed waits)");
+            "legalizeWaitCnt splits the s_waitcnt into typed waits)")
+        .def(
+            "set_sdelayalu",
+            [](LogicalInstruction& inst, int id0Type, int id0Cnt, bool hasId1, int skip,
+               int id1Type, int id1Cnt) {
+                // Map rocisa DelayALUType ints (VALU=0, TRANS=1, SALU=2, OTHER=3)
+                // to SDelayAluData::InstType by name, matching the native
+                // ToStinkyTofuUtils::convertSDelayAluData switch.
+                auto toInst = [](int t) -> SDelayAluData::InstType {
+                    switch (t) {
+                        case 0:
+                            return SDelayAluData::InstType::VALU;
+                        case 1:
+                            return SDelayAluData::InstType::TRANS;
+                        case 2:
+                            return SDelayAluData::InstType::SALU;
+                        default:
+                            return SDelayAluData::InstType::NO_DEP;
+                    }
+                };
+                if (hasId1) {
+                    inst.sdelayalu = SDelayAluData(toInst(id0Type), static_cast<int8_t>(id0Cnt),
+                                                   static_cast<int8_t>(skip), toInst(id1Type),
+                                                   static_cast<int8_t>(id1Cnt));
+                } else {
+                    inst.sdelayalu = SDelayAluData(toInst(id0Type), static_cast<int8_t>(id0Cnt));
+                }
+            },
+            nb::arg("id0_type"), nb::arg("id0_cnt"), nb::arg("has_id1") = false,
+            nb::arg("skip") = 0, nb::arg("id1_type") = 3, nb::arg("id1_cnt") = 0,
+            "Set s_delay_alu data (SDelayAluData); id types are rocisa DelayALUType ints "
+            "(VALU=0, TRANS=1, SALU=2, OTHER=3), mapped by name like the native path");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)
@@ -671,23 +765,34 @@ NB_MODULE(_stinkytofu, m) {
     // Special Instruction Classes (manually defined)
     // ========================================================================
 
+    // SBarrier - preserve split/wait/cluster semantics when requested.
+    // The generated comment-only overload remains available for the default form.
+    m.def(
+        "SBarrier",
+        [](bool separate, bool wait, bool clusterBarrier, const std::string& comment) {
+            return makeLogicalInstructionShared(SBarrier(separate, wait, clusterBarrier, comment));
+        },
+        nb::arg("separate"), nb::arg("wait"), nb::arg("clusterBarrier"), nb::arg("comment") = "",
+        "Create an SBarrier instruction with explicit barrier semantics");
+
     // MFMA - Matrix Fused Multiply-Add
     m.def(
         "MFMA",
         [](const std::string& instType, const std::string& accType, int m, int n, int k, int blocks,
            bool mfma1k, const StinkyRegister& acc, const StinkyRegister& a, const StinkyRegister& b,
-           std::optional<StinkyRegister> acc2, bool neg, const std::string& matrixAFmt,
-           const std::string& matrixBFmt, bool scaled, bool scaleOperands,
-           const std::string& comment) {
+           std::optional<StinkyRegister> acc2, bool neg, bool reuseA, bool reuseB,
+           const std::string& matrixAFmt, const std::string& matrixBFmt, bool scaled,
+           bool scaleOperands, const std::string& comment) {
             return makeLogicalInstructionShared(MFMA(
                 instType, accType, m, n, k, blocks, mfma1k, acc, a, b, acc2 ? &(*acc2) : nullptr,
-                neg, matrixAFmt, matrixBFmt, scaled, scaleOperands, comment));
+                neg, reuseA, reuseB, matrixAFmt, matrixBFmt, scaled, scaleOperands, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("m"), nb::arg("n"), nb::arg("k"),
         nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
-        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("matrixAFmt") = "",
-        nb::arg("matrixBFmt") = "", nb::arg("scaled") = false, nb::arg("scaleOperands") = false,
-        nb::arg("comment") = "", "Create an MFMA instruction");
+        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("reuseA") = false,
+        nb::arg("reuseB") = false, nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "",
+        nb::arg("scaled") = false, nb::arg("scaleOperands") = false, nb::arg("comment") = "",
+        "Create an MFMA instruction");
 
     // MXMFMA - Mixed-precision Matrix Fused Multiply-Add
     m.def(
@@ -697,17 +802,19 @@ NB_MODULE(_stinkytofu, m) {
            int k, int block, const StinkyRegister& acc, const StinkyRegister& a,
            const StinkyRegister& b, const StinkyRegister& acc2, const StinkyRegister& mxsa,
            const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& matrixAFmt,
-           const std::string& matrixBFmt, const std::string& comment) {
+           const std::string& matrixBFmt, int mxScaleASel, int mxScaleBSel,
+           const std::string& comment) {
             return makeLogicalInstructionShared(
                 MXMFMA(instType, accType, mxScaleATypeStr, mxScaleBTypeStr, m, n, k, block, acc, a,
-                       b, acc2, mxsa, mxsb, reuseA, reuseB, matrixAFmt, matrixBFmt, comment));
+                       b, acc2, mxsa, mxsb, reuseA, reuseB, matrixAFmt, matrixBFmt, mxScaleASel,
+                       mxScaleBSel, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("mxScaleATypeStr"),
         nb::arg("mxScaleBTypeStr"), nb::arg("m"), nb::arg("n"), nb::arg("k"), nb::arg("block"),
         nb::arg("acc"), nb::arg("a"), nb::arg("b"), nb::arg("acc2"), nb::arg("mxsa"),
         nb::arg("mxsb"), nb::arg("reuseA") = false, nb::arg("reuseB") = false,
-        nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "", nb::arg("comment") = "",
-        "Create an MXMFMA instruction");
+        nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "", nb::arg("mxScaleASel") = 0,
+        nb::arg("mxScaleBSel") = 0, nb::arg("comment") = "", "Create an MXMFMA instruction");
 
     // SMFMA - Sparse Matrix Fused Multiply-Add
     m.def(

@@ -938,6 +938,11 @@ class HolderContainer(RegisterContainer):
         c.isAbs = self.isAbs
         c.isMacro = self.isMacro
         c.isOff = self.isOff
+        # Parent true16 half-select slot: RegisterContainer._shallow_clone copies
+        # it, and getCopiedRC reads it, so a cloned holder must carry it too --
+        # otherwise the __slots__ slot stays unset and getCopiedRC raises
+        # AttributeError (e.g. accvgpr replaceHolder in globalWriteBatch).
+        c.halfSelect = self.halfSelect
         # Subclass fields.
         c.holderName = self.holderName
         c.holderIdx = self.holderIdx

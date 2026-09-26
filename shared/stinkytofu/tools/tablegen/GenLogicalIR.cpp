@@ -125,6 +125,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const StinkyRegister& b,\n";
     out << "        const StinkyRegister* acc2 = nullptr,\n";
     out << "        bool neg = false,\n";
+    out << "        bool reuseA = false,\n";
+    out << "        bool reuseB = false,\n";
     out << "        const std::string& matrixAFmt = \"\",\n";
     out << "        const std::string& matrixBFmt = \"\",\n";
     out << "        bool scaled = false,\n";
@@ -141,7 +143,7 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        \n";
     out << "        // Create and set special data\n";
     out << "        auto* data = new MFMAData(instType, accType, m, n, k, blocks, mfma1k, "
-           "neg, matrixAFmt, matrixBFmt, scaled, scaleOperands);\n";
+           "neg, reuseA, reuseB, matrixAFmt, matrixBFmt, scaled, scaleOperands);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";
@@ -175,6 +177,8 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        bool reuseB = false,\n";
     out << "        const std::string& matrixAFmt = \"\",\n";
     out << "        const std::string& matrixBFmt = \"\",\n";
+    out << "        int mxScaleASel = 0,\n";
+    out << "        int mxScaleBSel = 0,\n";
     out << "        const std::string& comment = \"\")\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MXMFMA);\n";
@@ -191,7 +195,7 @@ static bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        auto* data = new MXMFMAData(instType, accType, mxScaleATypeStr, "
            "mxScaleBTypeStr,\n";
     out << "                                    m, n, k, block, reuseA, reuseB, matrixAFmt, "
-           "matrixBFmt);\n";
+           "matrixBFmt, mxScaleASel, mxScaleBSel);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";

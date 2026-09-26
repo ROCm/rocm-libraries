@@ -36,9 +36,13 @@ than the old substring assertions).
 from __future__ import annotations
 
 import copy
+import json
 import os
+import subprocess
 import sys
+import textwrap
 import unittest
+import unittest.mock
 
 # ---------------------------------------------------------------------------
 # Self-contained sys.path bootstrap (matches test_container / test_code).
@@ -50,12 +54,14 @@ if _PKG_PARENT not in sys.path:
 
 from rocisa_stinkytofu_adaptor.code import Module  # noqa: E402
 from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
+    GLOBALModifiers,
+    MUBUFModifiers,
     RegisterContainer,
     SMEMModifiers,
     sgpr,
     vgpr,
 )
-from rocisa_stinkytofu_adaptor.enum import InstType  # noqa: E402
+from rocisa_stinkytofu_adaptor.enum import CacheScope, DelayALUType, InstType, NonVolatile, TemporalHint  # noqa: E402
 from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     CommonInstruction,
     Instruction,
@@ -70,6 +76,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SAndSaveExecB64,
     SAShiftRightI32,
     SBarrier,
+    SDelayAlu,
     SBitcmp1B32,
     SCmpEQI32,
     SCmpEQU32,
@@ -104,6 +111,9 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SMulI32,
     SMulLOU32,
     SNop,
+    SSetPrior,
+    SSetVgprMsb,
+    SSleep,
     SOrB32,
     SOrB64,
     SOrSaveExecB32,
@@ -254,6 +264,8 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     FlatStoreB64,
     FlatStoreB128,
     FlatAtomicCmpswapB32,
+    GlobalInv,
+    GlobalWb,
     DSLoadU8,
     DSLoadU16,
     DSLoadB32,
@@ -271,6 +283,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     DSStore2B64,
     DSBPermuteB32,
     TensorLoadToLds,
+    GlobalPrefetchB8,
     BranchInstruction,
     SBranch,
     SCBranchSCC0,
@@ -286,6 +299,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     SWaitTensorcnt,
     SWaitAlu,
     SSchedulingFence,
+    _as_rocisa_i32,
     _to_stinky_register,
 )
 
@@ -355,6 +369,33 @@ class TestInstructionBase(unittest.TestCase):
         import pickle
         with self.assertRaises(RuntimeError):
             pickle.dumps(Instruction(InstType.INST_B32))
+
+
+class TestMemIssueLatencyExplicit(unittest.TestCase):
+    """Factory ``latency=`` is KernelWriter Python SIA, not logical-IR cycles."""
+
+    def test_ds_overrides_match_rocisa_mem_hpp(self):
+        from rocisa_stinkytofu_adaptor.instruction import (
+            DSLoadB64, DSLoadB128, DSLoadB192,
+            DSStoreB8, DSStoreU16, DSStoreB32, DSStoreB64, DSStoreB96,
+            DSStoreB128, DSStoreB192, DSStoreB256,
+        )
+        self.assertEqual(DSLoadB64.issueLatency(), 1)
+        self.assertEqual(DSLoadB128.issueLatency(), 2)
+        self.assertEqual(DSLoadB192.issueLatency(), 3)
+        self.assertEqual(DSStoreB8.issueLatency(), 1)
+        self.assertEqual(DSStoreU16.issueLatency(), 2)
+        self.assertEqual(DSStoreB32.issueLatency(), 2)
+        self.assertEqual(DSStoreB64.issueLatency(), 3)
+        self.assertEqual(DSStoreB96.issueLatency(), 4)
+        self.assertEqual(DSStoreB128.issueLatency(), 5)
+        self.assertEqual(DSStoreB192.issueLatency(), 8)
+        self.assertEqual(DSStoreB256.issueLatency(), 10)
+
+    def test_instance_getIssueLatency_matches_static(self):
+        from rocisa_stinkytofu_adaptor.instruction import DSLoadB192
+        inst = DSLoadB192()
+        self.assertEqual(inst.getIssueLatency(), DSLoadB192.issueLatency())
 
 
 # ===========================================================================
@@ -686,6 +727,28 @@ class TestMacroInstructionDeepcopy(unittest.TestCase):
 
 
 # ===========================================================================
+# _as_rocisa_i32 -- signed-32 wrap matching rocisa InstructionInput int.
+# ===========================================================================
+
+
+class TestAsRocisaI32(unittest.TestCase):
+    def test_in_range_positive(self):
+        self.assertEqual(_as_rocisa_i32(42), 42)
+
+    def test_in_range_negative(self):
+        self.assertEqual(_as_rocisa_i32(-1), -1)
+        self.assertEqual(_as_rocisa_i32(-2147483648), -2147483648)
+
+    def test_uint32_magic_wraps_like_cpp_int(self):
+        # (1<<33)//3 + 1 == 2863311531 == 0xAAAAAAAB; C++ int stores -1431655765.
+        self.assertEqual(_as_rocisa_i32(2863311531), -1431655765)
+        self.assertEqual(_as_rocisa_i32(0xAAAAAAAB), -1431655765)
+
+    def test_drops_bits_above_32(self):
+        self.assertEqual(_as_rocisa_i32(0x1AAAAAAAA), -1431655766)
+
+
+# ===========================================================================
 # _to_stinky_register coercion table.
 # ===========================================================================
 
@@ -724,6 +787,13 @@ class TestToStinkyRegister(unittest.TestCase):
     def test_int_literal(self):
         reg = _to_stinky_register(42)
         self.assertTrue(reg.is_literal)
+
+    def test_uint32_magic_literal_wraps_to_signed_i32(self):
+        # Match rocisa C++ `int` overflow so emit is `v_mov_b32 v0, -1431655765`.
+        reg = _to_stinky_register(2863311531)
+        self.assertTrue(reg.is_literal)
+        self.assertFalse(reg.is_literal_string)
+        self.assertIn("-1431655765", repr(reg))
 
     def test_bool_routed_through_int(self):
         # bool is int subclass; ensure we don't crash on it.
@@ -844,6 +914,11 @@ class TestSMovB32Construction(unittest.TestCase):
         self.assertTrue(text.startswith("s_mov_b32 s0, s1"), text)
         self.assertTrue(text.endswith(" // probe\n"), text)
 
+    def test_positional_comment_matches_rocisa(self):
+        m = SMovB32(sgpr(0), sgpr(1), "gsuIterOffset = GSUSumIdx")
+        self.assertEqual(m.comment, "gsuIterOffset = GSUSumIdx")
+        self.assertIn("gsuIterOffset = GSUSumIdx", str(m))
+
     def test_inherits_common_instruction(self):
         m = SMovB32(sgpr(0), sgpr(1))
         self.assertIsInstance(m, Instruction)
@@ -912,6 +987,102 @@ class TestSNopConstruction(unittest.TestCase):
         m = SNop(3, "delay")
         self.assertEqual(m.wait_state, 3)
         self.assertEqual(m.comment, "delay")
+
+
+# ===========================================================================
+# SSetPrior / SSleep / SSetVgprMsb / SDelayAlu
+# ===========================================================================
+
+
+class TestSSetPriorConstruction(unittest.TestCase):
+    def test_keyword_prior(self):
+        m = SSetPrior(prior=1, comment="Raise priority while processing macs")
+        self.assertEqual(m.prior, 1)
+        self.assertEqual(m.instStr, "s_setprio")
+        text = str(m)
+        self.assertIn("s_setprio 1", text)
+        self.assertIn("Raise priority while processing macs", text)
+
+    def test_positional(self):
+        m = SSetPrior(0)
+        self.assertEqual(m.getParams(), [0])
+        self.assertEqual(m.getSrcParams(), [0])
+        self.assertEqual(m.getDstParams(), [])
+
+    def test_deepcopy(self):
+        m = SSetPrior(prior=1, comment="x")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SSetPrior)
+        self.assertIsNot(c, m)
+        self.assertEqual(c.prior, 1)
+        self.assertEqual(c.comment, "x")
+
+
+class TestSSleepConstruction(unittest.TestCase):
+    def test_keyword_simm16(self):
+        m = SSleep(simm16=1, comment="idle")
+        self.assertEqual(m.simm16, 1)
+        text = str(m)
+        self.assertIn("s_sleep 1", text)
+        self.assertIn("idle", text)
+
+    def test_positional(self):
+        m = SSleep(3, "pad")
+        self.assertEqual(m.getParams(), [3])
+        self.assertEqual(m.comment, "pad")
+
+
+class TestSSetVgprMsbConstruction(unittest.TestCase):
+    def test_simm16_keyword(self):
+        m = SSetVgprMsb(simm16=5)
+        self.assertEqual(m.simm16, 5)
+        self.assertIn("s_set_vgpr_msb 5", str(m))
+
+    def test_packed_keywords(self):
+        m = SSetVgprMsb(msbSrc0=1, msbSrc1=2, msbSrc2=3, msbDst=1)
+        # (dst<<6)+(src2<<4)+(src1<<2)+src0 = 64+48+8+1 = 121
+        self.assertEqual(m.simm16, 121)
+
+    def test_packed_positional(self):
+        m = SSetVgprMsb(1, 2, 3, 1, "pack")
+        self.assertEqual(m.simm16, 121)
+        self.assertEqual(m.comment, "pack")
+
+
+class TestSDelayAluConstruction(unittest.TestCase):
+    def test_instid0_only(self):
+        m = SDelayAlu(DelayALUType.VALU, 2)
+        self.assertEqual(m.getParams(), [0, 2])
+        self.assertEqual(m.getSrcParams(), [])
+        self.assertFalse(m.hasInstID1())
+        self.assertEqual(m.instStr, "s_delay_alu")
+
+    def test_to_string_respects_cap(self):
+        m = SDelayAlu(instid0type=DelayALUType.VALU, instid0cnt=1)
+        from rocisa_stinkytofu_adaptor import base as _base
+
+        old = _base.getAsmCaps
+        try:
+            _base.getAsmCaps = lambda: {"s_delay_alu": 0}
+            self.assertEqual(m.toString(), "")
+            _base.getAsmCaps = lambda: {"s_delay_alu": 1}
+            self.assertIn("s_delay_alu instid0(VALU_DEP_1)", m.toString())
+        finally:
+            _base.getAsmCaps = old
+
+    def test_set_inst_id1(self):
+        m = SDelayAlu(DelayALUType.VALU, 1)
+        self.assertTrue(m.setInstID1(1, DelayALUType.SALU, 1))
+        self.assertFalse(m.setInstID1(0, DelayALUType.VALU, 1))
+        self.assertEqual(m.getParams(), [0, 1, 1, 2, 1])
+
+    def test_deepcopy(self):
+        m = SDelayAlu(DelayALUType.TRANS, 3, comment="d")
+        c = copy.deepcopy(m)
+        self.assertIsInstance(c, SDelayAlu)
+        self.assertEqual(c.instid0type, int(DelayALUType.TRANS))
+        self.assertEqual(c.instid0cnt, 3)
+        self.assertEqual(c.comment, "d")
 
 
 # ===========================================================================
@@ -1016,6 +1187,46 @@ class TestCollectLogicalIntegration(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
+class TestScopedGlobalFences(unittest.TestCase):
+    def test_scope_is_rendered_like_rocisa(self):
+        self.assertEqual(str(GlobalWb()), "global_wb scope:SCOPE_DEV\n")
+        self.assertEqual(
+            str(GlobalInv(scope=CacheScope.SCOPE_CU)),
+            "global_inv scope:SCOPE_CU\n",
+        )
+        self.assertEqual(
+            str(GlobalWb(scope=CacheScope.SCOPE_NONE)),
+            "global_wb\n",
+        )
+
+    def test_deepcopy_preserves_scope(self):
+        inst = GlobalInv(scope=CacheScope.SCOPE_SYS, comment="acquire")
+        clone = copy.deepcopy(inst)
+        inst.scope = CacheScope.SCOPE_NONE
+        self.assertEqual(clone.scope, CacheScope.SCOPE_SYS)
+        self.assertIn("global_inv scope:SCOPE_SYS", str(clone))
+        self.assertIn("// acquire", str(clone))
+
+    def test_scope_is_forwarded_to_logical_global_modifier(self):
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.GlobalWb = unittest.mock.Mock(return_value=logical)
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}):
+            GlobalWb(scope=CacheScope.SCOPE_DEV).to_stinky_logical()
+        logical.set_global.assert_called_once_with(
+            scope=int(CacheScope.SCOPE_DEV),
+        )
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_emitted_assembly_contains_scope(self):
+        module = Module("scoped_global_fences")
+        module.add(GlobalInv(scope=CacheScope.SCOPE_DEV))
+        module.add(GlobalWb(scope=CacheScope.SCOPE_DEV))
+        text = module.to_stinky_asm([12, 5, 0]).emitAssembly()
+        self.assertIn("global_inv scope:SCOPE_DEV", text)
+        self.assertIn("global_wb scope:SCOPE_DEV", text)
+
+
 # ===========================================================================
 # Scalar ALU instructions (Phase 6 Step 1)
 # ===========================================================================
@@ -1092,6 +1303,23 @@ class TestSBarrierConstruction(unittest.TestCase):
         m = Module()
         m.add(SBarrier())
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_explicit_barrier_semantics_survive_lowering(self):
+        cases = (
+            (SBarrier(True, False, True, "signal"), "s_barrier_signal -3"),
+            (SBarrier(True, True, True, "wait"), "s_barrier_wait -3"),
+            (SBarrier(True, False, False, "signal"), "s_barrier_signal -1"),
+            (SBarrier(True, True, False, "wait"), "s_barrier_wait -1"),
+        )
+        for barrier, expected in cases:
+            with self.subTest(expected=expected):
+                m = Module()
+                m.add(barrier)
+                text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+                self.assertIn(expected, text)
+                self.assertEqual(text.count("s_barrier_signal"), int("signal" in expected))
+                self.assertEqual(text.count("s_barrier_wait"), int("wait" in expected))
 
 
 class TestSGetRegB32Construction(unittest.TestCase):
@@ -2158,6 +2386,38 @@ class TestBufferLoadInstructions(unittest.TestCase):
                 m.add(cls(dst=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
 
+    def test_to_stinky_logical_forwards_mubuf_nv(self):
+        mubuf = MUBUFModifiers(
+            offen=True, scope=CacheScope.SCOPE_CU, nv=NonVolatile.NV,
+        )
+        inst = BufferLoadB32(
+            dst=vgpr(13), vaddr=vgpr(33), saddr=sgpr(64, 4), soffset=sgpr(47),
+            mubuf=mubuf,
+        )
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.BufferLoadB32 = unittest.mock.Mock(return_value=logical)
+        fake_st.Register = lambda name: name
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda a: a,
+             ):
+            inst.to_stinky_logical()
+        self.assertEqual(logical.set_mubuf.call_args.kwargs.get("nv"), int(NonVolatile.NV))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_emit_assembly_prints_nv(self):
+        m = Module("kNvLoad")
+        m.add(BufferLoadB32(
+            dst=vgpr(13), vaddr=vgpr(33), saddr=sgpr(64, 4), soffset=sgpr(47),
+            mubuf=MUBUFModifiers(
+                offen=True, scope=CacheScope.SCOPE_CU, nv=NonVolatile.NV,
+            ),
+        ))
+        text = m.to_stinky_asm([12, 5, 0]).emitAssembly()
+        self.assertRegex(text, r"buffer_load_b32 .* nv")
+
 
 class TestBufferAtomicAddF32(unittest.TestCase):
     def test_construction(self):
@@ -2200,6 +2460,27 @@ class TestBufferStoreInstructions(unittest.TestCase):
                 m = Module()
                 m.add(cls(src=vgpr(0), vaddr=vgpr(1), saddr=sgpr(4, 4), soffset=0))
                 self.assertEqual(len(m._collect_logical_insts()), 1)
+
+    def test_to_stinky_logical_forwards_mubuf_nv(self):
+        mubuf = MUBUFModifiers(
+            offen=True, isStore=True, scope=CacheScope.SCOPE_CU,
+            th=TemporalHint.TH_NT, nv=NonVolatile.NV,
+        )
+        inst = BufferStoreB32(
+            src=vgpr(12), vaddr=vgpr(32), saddr=sgpr(60, 4), soffset=sgpr(46),
+            mubuf=mubuf,
+        )
+        logical = unittest.mock.Mock()
+        fake_st = unittest.mock.Mock()
+        fake_st.BufferStoreB32 = unittest.mock.Mock(return_value=logical)
+        fake_st.Register = lambda name: name
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda a: a,
+             ):
+            inst.to_stinky_logical()
+        self.assertEqual(logical.set_mubuf.call_args.kwargs.get("nv"), int(NonVolatile.NV))
 
 
 class TestFlatLoadInstructions(unittest.TestCase):
@@ -2451,6 +2732,55 @@ class TestTensorLoadToLds(unittest.TestCase):
         self.assertEqual(len(m._collect_logical_insts()), 1)
 
 
+class TestGlobalPrefetchB8(unittest.TestCase):
+    def _mods(self):
+        return GLOBALModifiers(th=TemporalHint.TH_NT, scope=CacheScope.SCOPE_SE)
+
+    def test_construction_stores_modifiers(self):
+        mods = self._mods()
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0), mods, "pf")
+        self.assertIs(inst._modifiers, mods)
+        self.assertEqual(inst.comment, "pf")
+        self.assertIn("global_prefetch_b8", str(inst))
+
+    def test_deepcopy_copies_modifiers(self):
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0), self._mods())
+        clone = copy.deepcopy(inst)
+        self.assertIsInstance(clone, GlobalPrefetchB8)
+        self.assertIsNot(clone._modifiers, inst._modifiers)
+        self.assertEqual(clone._modifiers.th, TemporalHint.TH_NT)
+        self.assertEqual(clone._modifiers.scope, CacheScope.SCOPE_SE)
+
+    def test_has_to_stinky_logical(self):
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0))
+        self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    def test_to_stinky_logical_applies_global_modifiers(self):
+        mods = self._mods()
+        inst = GlobalPrefetchB8(vgpr(0, 2), sgpr(0), mods)
+        logical = unittest.mock.Mock()
+        factory = unittest.mock.Mock(return_value=logical)
+        fake_st = unittest.mock.Mock()
+        fake_st.GlobalPrefetchB8 = factory
+        with unittest.mock.patch.dict(sys.modules, {"stinkytofu": fake_st}), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._to_stinky_register",
+                 side_effect=lambda a: a,
+             ), \
+             unittest.mock.patch(
+                 "rocisa_stinkytofu_adaptor.instruction._apply_global",
+             ) as apply_g:
+            out = inst.to_stinky_logical()
+        self.assertIs(out, logical)
+        apply_g.assert_called_once_with(logical, mods)
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_collected_by_module(self):
+        m = Module()
+        m.add(GlobalPrefetchB8(vgpr(0, 2), sgpr(0), self._mods()))
+        self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
 # ===========================================================================
 # End-to-end coverage -- see ``tests/test_emission_consistency.py``.
 # ===========================================================================
@@ -2633,6 +2963,23 @@ class TestWaitCntInstructions(unittest.TestCase):
         self.assertIsInstance(inst, Instruction)
         self.assertTrue(inst.waitAll)
 
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_swaitcnt_wait_all_splits_four_typed_waits(self):
+        # Native setupInstructions order: dscnt, kmcnt, loadcnt, storecnt.
+        insts = SWaitCnt(waitAll=True, comment="wait for swizzle operation").to_stinky_logical()
+        self.assertIsInstance(insts, list)
+        self.assertEqual(len(insts), 4)
+        for inst in insts:
+            self.assertEqual(inst.comment, "(Wait all)")
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_swaitcnt_load_and_ds_stay_separate(self):
+        insts = SWaitCnt(vlcnt=0, dscnt=0, comment="pair").to_stinky_logical()
+        self.assertIsInstance(insts, list)
+        self.assertEqual(len(insts), 2)
+        self.assertEqual(insts[0].comment, "pair")
+        self.assertEqual(insts[1].comment, "pair")
+
     def test_swaitcnt_composite_deepcopy(self):
         inst = SWaitCnt(vlcnt=1, comment="sync")
         dup = copy.deepcopy(inst)
@@ -2757,6 +3104,71 @@ class TestSSchedulingFence(unittest.TestCase):
         m = Module()
         m.add(SSchedulingFence())
         self.assertEqual(len(m._collect_logical_insts()), 1)
+
+
+class TestIssueLatencyParity(unittest.TestCase):
+    """``issueLatency()`` must match native rocisa for every mirrored shim.
+
+    KernelWriter's software instruction scheduler budgets each MFMA slot with
+    ``miLatencyLeft`` and subtracts ``issueLatency()*2`` per scheduled local
+    read/write (``scheduleLocalRead`` / ``localReadsVacancy``). An
+    underestimate here does not fail loudly -- it silently opens extra
+    vacancy slots, so the adapter and native backends emit differently
+    scheduled (but individually valid) asm for the same kernel.
+    """
+
+    # Native rocisa lives in a separate process: importing it in-process
+    # would collide with the adapter when ROCISA_BACKEND is set, and the
+    # parent runner's env is not guaranteed to be clean.
+    _SENTINEL = "<<<LAT_A17C33>>>"
+
+    def _native_latencies(self, names):
+        script = textwrap.dedent(f"""\
+            import json
+            import rocisa.instruction as ri
+            names = {names!r}
+            out = {{}}
+            for n in names:
+                cls = getattr(ri, n, None)
+                fn = getattr(cls, "issueLatency", None)
+                if fn is not None:
+                    out[n] = fn()
+            print({self._SENTINEL!r} + json.dumps(out) + {self._SENTINEL!r})
+        """)
+        env = os.environ.copy()
+        env.pop("ROCISA_BACKEND", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env, capture_output=True, text=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            self.skipTest(f"native rocisa not importable:\n{proc.stderr}")
+        start = proc.stdout.find(self._SENTINEL)
+        end = proc.stdout.rfind(self._SENTINEL)
+        if start < 0 or end <= start:
+            self.skipTest(f"native rocisa produced no payload:\n{proc.stdout}")
+        return json.loads(proc.stdout[start + len(self._SENTINEL):end])
+
+    def test_matches_native(self):
+        import rocisa_stinkytofu_adaptor.instruction as adaptor
+
+        mine = {}
+        for name in dir(adaptor):
+            cls = getattr(adaptor, name)
+            fn = getattr(cls, "issueLatency", None)
+            if isinstance(cls, type) and callable(fn):
+                mine[name] = fn()
+
+        theirs = self._native_latencies(sorted(mine))
+        self.assertTrue(theirs, "no comparable classes found in native rocisa")
+
+        mismatches = {
+            n: (theirs[n], mine[n]) for n in theirs if theirs[n] != mine[n]
+        }
+        self.assertEqual(
+            mismatches, {},
+            "issueLatency drift (class: native vs adapter): " + repr(mismatches),
+        )
 
 
 if __name__ == "__main__":

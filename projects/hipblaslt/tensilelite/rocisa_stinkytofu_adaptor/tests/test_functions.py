@@ -364,6 +364,7 @@ from rocisa_stinkytofu_adaptor.instruction import (  # noqa: E402
     Instruction, BufferLoadB128, BufferLoadB32, FlatLoadB64,
     DSLoadB32, DSLoadB64, DSLoadB192, DSLoad2B32,
     DSStoreB32, DSStoreB64, DSStoreB128, DSStoreB192, DSStoreB256,
+    DSStoreB8, DSStoreB8HID16, DSStoreD16HIB16, DSStoreU16, DSBPermuteB32,
     DSStore2B32, VMovB32, SLoadB32, SLoadB128,
     GlobalLoadTR8B64, MFMAInstruction, SMFMAInstruction, MXMFMAInstruction,
     SAddU32, SNop,
@@ -456,6 +457,26 @@ class TestCountLocalWrite(unittest.TestCase):
         m.add(DSStoreB64())
         m.add(DSStore2B32())
         m.add(DSLoadB32())
+        self.assertEqual(countLocalWrite(m), 3)
+
+    def test_counts_all_local_write_subclasses(self):
+        """SIA writesPerItem uses this count; packed byte stores must be included.
+
+        Mirrors rocisa ``countX<LocalWriteInstruction>``. A module of 8x
+        ``ds_store_b8`` + 8x ``ds_store_b8_d16_hi`` is 16 writes, not 8.
+        """
+        m = Module()
+        for _ in range(8):
+            m.add(DSStoreB8())
+            m.add(DSStoreB8HID16())
+        self.assertEqual(countLocalWrite(m), 16)
+
+    def test_hi_and_u16_and_bpermute_are_local_writes(self):
+        m = Module()
+        m.add(DSStoreD16HIB16())
+        m.add(DSStoreU16())
+        m.add(DSBPermuteB32())
+        m.add(VMovB32(dst="v0", src="v1"))
         self.assertEqual(countLocalWrite(m), 3)
 
 

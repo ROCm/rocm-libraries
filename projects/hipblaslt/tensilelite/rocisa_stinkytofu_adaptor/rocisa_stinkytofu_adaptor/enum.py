@@ -137,3 +137,13 @@ export_enum_values(globals(), RoundType, _RoundType_values)
 _SaturateCastType_values = ["NORMAL", "DO_NOTHING", "UPPER", "LOWER"]
 SaturateCastType = make_dummy_enum(f"{_P}.SaturateCastType", _SaturateCastType_values)
 export_enum_values(globals(), SaturateCastType, _SaturateCastType_values)
+
+
+# Not bound in rocisa/src/enum.cpp, but SDelayAlu's nanobind ctor takes these
+# C++ enums (enum.hpp). Exposed here so the adaptor SDelayAlu shim can use
+# the same names / integer values as rocisa::DelayALUType / DelayALUSkip.
+DelayALUType = make_dummy_enum(f"{_P}.DelayALUType", ["VALU", "TRANS", "SALU", "OTHER"])
+DelayALUSkip = make_dummy_enum(
+    f"{_P}.DelayALUSkip",
+    ["SAME", "NEXT", "SKIP_1", "SKIP_2", "SKIP_3", "SKIP_4"],
+)
