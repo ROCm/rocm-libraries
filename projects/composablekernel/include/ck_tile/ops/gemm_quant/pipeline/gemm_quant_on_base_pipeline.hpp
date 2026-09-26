@@ -37,6 +37,35 @@ struct rebind_policy<Pipeline<Problem, Policy>, NewPolicy>
 template <typename QuantBlockGemm>
 struct BlockGemmQuantRegAdaptor : QuantBlockGemm
 {
+    using QuantBlockGemm::LocalPrefetch;
+
+    // LDS -> register-tile read of the TDM pipelines. The quant policy runs them with one sub tile
+    // per K block, so the LDS windows never slide.
+    template <WindowSlideMode Mode,
+              typename ADstBlockTile,
+              typename BDstBlockTile,
+              typename ASmemBlockWindow,
+              typename BSmemBlockWindow,
+              bool ALoadTranspose,
+              bool BLoadTranspose>
+    CK_TILE_DEVICE void LocalPrefetch(ADstBlockTile& a_dst_block_tile,
+                                      BDstBlockTile& b_dst_block_tile,
+                                      ASmemBlockWindow& a_block_window,
+                                      BSmemBlockWindow& b_block_window,
+                                      bool_constant<ALoadTranspose>,
+                                      bool_constant<BLoadTranspose>)
+    {
+        static_assert(Mode == WindowSlideMode::Stay, "quant block gemm needs one sub tile");
+        if constexpr(ALoadTranspose)
+            a_dst_block_tile = load_tile_transpose(a_block_window);
+        else
+            load_tile(a_dst_block_tile, a_block_window);
+        if constexpr(BLoadTranspose)
+            b_dst_block_tile = load_tile_transpose(b_block_window);
+        else
+            load_tile(b_dst_block_tile, b_block_window);
+    }
+
     template <index_t SubTileIdx = 0,
               typename CBlockTensor,
               typename ABlockTensor,
@@ -66,10 +95,10 @@ struct BlockGemmQuantRegAdaptor : QuantBlockGemm
     }
 };
 
-// For plain pipelines without a scale-window path (e.g. Mem, CompV4): the block gemm carries the
-// scale windows and loads the scales of the current K block on each (c, a, b) call. The pipelines
-// call the block gemm exactly once per K block in K order. a / b are either LDS windows (already
-// read by LocalPrefetch) or register tiles.
+// For plain pipelines without a scale-window path (e.g. Mem, CompV4, CompTDM): the block gemm
+// carries the scale windows and loads the scales of the current K block on each (c, a, b) call. The
+// pipelines call the block gemm exactly once per K block in K order. a / b are either LDS windows
+// (already read by LocalPrefetch) or register tiles.
 template <typename QuantBlockGemm,
           typename AQWindow,
           typename BQWindow,
@@ -108,9 +137,16 @@ struct BlockGemmQuantStreamAdaptor : BlockGemmQuantRegAdaptor<QuantBlockGemm>
 };
 
 // Policy of the plain pipeline with the quant block gemm and quant scale-window steps.
+// The quant block gemm covers a whole K block, so sub-tiled pipelines run with one sub tile.
 template <typename BasePolicy, typename QuantPolicy, QuantType QT>
 struct GemmQuantBasePolicy : BasePolicy
 {
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetPipelineSubTileNum()
+    {
+        return number<1>{};
+    }
+
     template <typename Problem, bool = false>
     CK_TILE_HOST_DEVICE static constexpr auto GetBlockGemm()
     {

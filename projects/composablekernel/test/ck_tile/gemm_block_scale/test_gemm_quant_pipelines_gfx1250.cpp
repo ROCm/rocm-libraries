@@ -56,7 +56,9 @@ using BQuantFp8Rcr = std::tuple<RowMajor,
 using BQuantPipelines = ::testing::Types<BQuantFp8Rcr<GemmConfigMem>,
                                          BQuantFp8Rcr<GemmConfigCompV3>,
                                          BQuantFp8Rcr<GemmConfigCompV4>,
-                                         BQuantFp8Rcr<GemmConfigCompAsync>>;
+                                         BQuantFp8Rcr<GemmConfigCompAsync>,
+                                         BQuantFp8Rcr<GemmConfigCompTDMV1>,
+                                         BQuantFp8Rcr<GemmConfigCompTDMV2>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmBQuant, BQuantPipelines);
 TYPED_TEST(TestCkTileGemmBQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
@@ -77,7 +79,9 @@ using AQuantFp8Rcr = std::tuple<RowMajor,
 using AQuantPipelines = ::testing::Types<AQuantFp8Rcr<GemmConfigMem>,
                                          AQuantFp8Rcr<GemmConfigCompV3>,
                                          AQuantFp8Rcr<GemmConfigCompV4>,
-                                         AQuantFp8Rcr<GemmConfigCompAsync>>;
+                                         AQuantFp8Rcr<GemmConfigCompAsync>,
+                                         AQuantFp8Rcr<GemmConfigCompTDMV1>,
+                                         AQuantFp8Rcr<GemmConfigCompTDMV2>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmAQuant, AQuantPipelines);
 TYPED_TEST(TestCkTileGemmAQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
@@ -101,7 +105,9 @@ using ABQuantFp8Rcr = std::tuple<RowMajor,
 using ABQuantPipelines = ::testing::Types<ABQuantFp8Rcr<GemmConfigMem>,
                                           ABQuantFp8Rcr<GemmConfigCompV3>,
                                           ABQuantFp8Rcr<GemmConfigCompV4>,
-                                          ABQuantFp8Rcr<GemmConfigCompAsync>>;
+                                          ABQuantFp8Rcr<GemmConfigCompAsync>,
+                                          ABQuantFp8Rcr<GemmConfigCompTDMV1>,
+                                          ABQuantFp8Rcr<GemmConfigCompTDMV2>>;
 
 TYPED_TEST_SUITE(TestCkTileGemmABQuant, ABQuantPipelines);
 TYPED_TEST(TestCkTileGemmABQuant, Pipelines) { this->run_test_with_validation(1024, 1024, 1024); }
