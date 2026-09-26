@@ -2,6 +2,23 @@
 
 Documentation for Composable Kernel available at [https://rocm.docs.amd.com/projects/composable_kernel/en/latest/](https://rocm.docs.amd.com/projects/composable_kernel/en/latest/).
 
+## Unreleased
+
+### Added
+
+* Added gfx1250 FP16/BF16 grouped backward-data split-K 2/4 for aligned 2D channels-last WMMA-v3 instances in nondeterministic mode.
+* Added split-1-only scalar direct-output FP16/BF16 grouped backward-weight instances for odd per-group channels.
+* Added a profiler mode linking only MIOpen-facing 2D/3D channels-last grouped convolution candidates and explicit backward-weight competitors.
+
+### Optimized
+
+* Omitted redundant output/workspace clears for packed, completely overwritten split-1 grouped convolution backward paths.
+
+### Fixed
+
+* Preserved preprocessing when CK kernel timing is disabled at compile time, including the zeroing required before split-K atomic accumulation.
+* Applied gfx1250 BF16 large-tile compiler flags consistently to single-target `GPU_ARCHS` library builds.
+
 ## Composable Kernel 1.3.0 for ROCm 10.1.0
 
 ### Added
