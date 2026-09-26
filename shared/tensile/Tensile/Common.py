@@ -332,7 +332,8 @@ architectureMap = {
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
   'gfx1200':'gfx1200',
   'gfx1201':'gfx1201',
-  'gfx1250':'gfx1250'
+  'gfx1250':'gfx1250',
+  'gfx1250-strict':'gfx1250'
 }
 
 def getArchitectureName(gfxName: str) -> Optional[str]:
@@ -2115,7 +2116,7 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
 
     derivedAsmCaps["SupportedSource"] = True
 
-    ignoreCacheCheck = globalParameters["IgnoreAsmCapCache"]
+    ignoreCacheCheck = globalParameters["IgnoreAsmCapCache"] or compilerTarget("gfx1250") == "gfx1250-strict"
 
     # disable cache checking for < rocm 5.3
     if len(hipVersion) >= 2:
@@ -2220,10 +2221,26 @@ def gfxArch(name: str) -> Optional[IsaVersion]:
 
     return rv
 
+def configureCompilerTarget(architecture):
+    targets = architecture.replace("_", ";").split(";")
+    if "gfx1250-strict" in targets:
+        if any(a in targets for a in ("gfx1250", "all")):
+            raise ValueError("gfx1250-strict requires a separate generator invocation")
+        os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    else:
+        os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+
+
+def compilerTarget(name):
+    if name == "gfx1250" and os.environ.get("TENSILE_GFX1250_COMPILER_TARGET") == "gfx1250-strict":
+        return "gfx1250-strict"
+    return name
+
+
 def gfxName(arch):
     # convert last digit to hex because reasons
     name = str(arch[0]) + str(arch[1]) + ('%x' % arch[2])
-    return 'gfx' + ''.join(map(str,name))
+    return compilerTarget('gfx' + ''.join(map(str,name)))
 
 
 def detectIsaWindows(output):

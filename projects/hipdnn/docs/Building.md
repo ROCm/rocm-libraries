@@ -4,6 +4,7 @@
 - [Prerequisites](#prerequisites)
   - [System Requirements](#system-requirements)
   - [Dependencies](#dependencies)
+    - [Third-Party Libraries](#third-party-libraries)
 - [Superbuild vs. Standalone Build](#superbuild-vs-standalone-build)
 - [Quick Start Guide](#quick-start-guide)
 - [Building the Samples](#building-the-samples)
@@ -12,6 +13,7 @@
   - [Address Sanitizer Build](#address-sanitizer-build)
   - [Disabling JSON Support](#disabling-json-support)
   - [Kernel packing (rocm_kpack)](#kernel-packing-rocm_kpack)
+  - [comgr compilation cache (build speed)](#comgr-compilation-cache-build-speed)
   - [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)
   - [Clang Tools](#clang-tools)
 - [Build Targets](#build-targets)
@@ -55,11 +57,36 @@
 | Python3 | Latest | For test name validation |
 
 #### Third-Party Libraries
-The following libraries are automatically managed by CMake (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
+This section applies to every hipDNN component: hipDNN itself, the providers in `dnn-providers/`, the samples, and the example engine plugin. Each is configured independently, and each resolves the same libraries the same way, with `find_package` (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
 - [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
-- [Google Test](https://github.com/google/googletest) - Unit testing framework
+- [GoogleTest and GoogleMock](https://github.com/google/googletest) - Unit testing and mocking frameworks
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
+
+The build environment provides them: TheRock's third-party tree when building within TheRock, or installed packages found through standard CMake search paths. This follows TheRock's [dependency policy](https://github.com/ROCm/TheRock/blob/main/docs/development/dependencies.md), which keeps third-party acquisition in TheRock rather than in each sub-project. A missing library fails configuration with an error naming it.
+
+The [developer image](../dockerfiles/README.md) automatically installs GoogleTest/GoogleMock 1.17.0 and spdlog 1.15.3 with bundled fmt in `/usr/local`; its ROCm prefix supplies FlatBuffers and nlohmann_json. CMake finds `/usr/local` without extra flags, and a runtime `/opt/rocm` mount does not hide those developer packages. The normal image build needs no manual download, dependency installation, or fetch opt-in.
+
+Outside the image, supply a **complete** set of installed packages. With ROCm available as described below, use absolute paths in a semicolon-separated `CMAKE_PREFIX_PATH` list for any additional prefixes. The combined search paths must provide FlatBuffers, GoogleTest including GoogleMock, spdlog (and any dependencies required by its installed configuration), and nlohmann_json when JSON support is enabled. A hipDNN or ROCm prefix alone does not necessarily contain all of them. Package-specific `GTest_DIR` and `spdlog_DIR` may instead point at the directories containing their package configuration files.
+
+To fetch a missing library instead, configure with `-DALLOW_FETCH_DEPS=ON`. Standalone hipDNN, providers, and samples default to `OFF`. The developer superbuild defaults to `ON`, but preserves an explicit `-DALLOW_FETCH_DEPS=OFF`.
+
+From `projects/hipdnn`, choose one outside-image configuration; every other component offers the same two options from its own build directory:
+
+```bash
+# Installed packages only; /path/to/dependencies contains the third-party packages.
+cmake --preset release -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, permit fetching missing third-party libraries.
+cmake --preset release -DALLOW_FETCH_DEPS=ON
+```
+
+Because each component configures independently, a provider build directory, a samples tree, or a copied plugin needs its own package inputs or its own fetch opt-in; configuring hipDNN with `ON` does not enable it for a later standalone build. The samples forward `ALLOW_FETCH_DEPS` to the example plugin's separate CMake build, preserving an explicit `OFF`. In TheRock, `hipDNN_samples` must declare its GoogleTest build dependency even when the lookup uses `QUIET`.
+
+The opt-in covers only the third-party libraries listed above. It does not install ROCm, HIP, the hipDNN SDK packages, or provider libraries such as hipBLASLt and MIOpen; those always come from the prefixes you supply.
+
+GoogleTest fetch fallbacks default to **1.17.0** in hipDNN, the providers, and the example plugin. Installed packages and explicitly supplied source trees take precedence over fallback versions. The copied plugin retains its own matching default so it works outside the monorepo; this is default alignment, not one shared declaration or a forced package upgrade.
 
 ## Superbuild vs. Standalone Build
 
@@ -119,6 +146,8 @@ For the **superbuild**, follow [Superbuild](#superbuild) instead. These steps bu
 
 Two build types are available: `release` (optimized) and `debug` (slower, but suited for a debugger). The examples below use `release`; for a debug build, substitute `debug` for `release` throughout, including the `build/release` -> `build/debug` binary directory. By default the presets find your ROCm installation on your PATH; if ROCm is not on your PATH, add `-DROCM_CMAKE_PATH=<rocm-root>` (see [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)).
 
+Inside the developer image, the following recipe uses its installed dependencies with fetching disabled by default. Outside the image, substitute one of the [complete-prefix or opt-in configurations](#third-party-libraries) for the configure command.
+
 Configure, build, and run the tests:
 
 ```bash
@@ -161,6 +190,19 @@ cd rocm-libraries/projects/hipdnn/samples
 cmake --preset release   # matches the hipDNN build type; use debug for a debug build
 cmake --build build/release
 ```
+
+The samples are a separate configure and resolve third-party libraries as described in [Third-Party Libraries](#third-party-libraries); they do not inherit hipDNN's `ALLOW_FETCH_DEPS`. For installed dependencies, retain the matching hipDNN build-tree prefix when adding complete ROCm and third-party prefixes:
+
+```bash
+# From projects/hipdnn/samples; replace paths with absolute locations.
+cmake --preset release -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/rocm-libraries/projects/hipdnn/build/release/lib/cmake;/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, let the nested example plugin fetch missing GoogleTest.
+cmake --preset release -DALLOW_FETCH_DEPS=ON
+```
+
+The installed paths must satisfy the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies, plus HIP/HIPRTC and GoogleTest including GoogleMock. Only GoogleTest is fetchable here; the SDK packages and their other dependencies must be installed. See the [samples README](../samples/README.md#how-to-build) for the separate installed-hipDNN route.
 
 A standalone hipDNN build does **not** build any provider plugins, so the samples will have no engine to load at runtime. To run them, build a provider and either install its plugin alongside hipDNN or point `HIPDNN_PLUGIN_DIR` at the plugin's location. Because the superbuild handles this for you, it is the simpler choice for building and running samples against an in-tree hipDNN build.
 
@@ -270,9 +312,12 @@ cmake --build build/release --target coverage
 Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
 > [!IMPORTANT]
-> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
-> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+> Standalone ASAN tests are run manually. CI automation differs:
+> - Pull-request ASAN jobs build host-ASAN binaries but do not run their tests.
+> - Manual workflow runs can run full ASAN tests when matching GPU runners are available.
+> - The nightly ASAN workflow runs automatically and executes tests where external runner settings provide a test node.
+> - **Linux** standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
+> - **Windows** standalone ASAN instruments code built in this project, not installed ROCm libraries.
 
 Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
 
@@ -283,7 +328,7 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing § Test Categories](./Testing.md#test-categories) for what each tier covers.
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is the default check. See [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
 
 **Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
 
@@ -333,6 +378,8 @@ Resolution order:
 `<dir>` is whichever directory *contains* `rocm_kpack/`: a rocm-systems checkout's
 `shared/kpack/python`, or a virtual environment's `site-packages`.
 
+An explicit `HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` takes precedence over `ALLOW_FETCH_DEPS=OFF`. The build warns when that override actually acquires kpack; using a supplied local tree or reusing the pinned checkout does not emit an acquisition warning.
+
 If nothing resolves, the ASM SDPA engine logs `skipping .kpack packing` and the build proceeds;
 the runtime loads loose `.co` files, so this is not fatal. Descriptor packaging
 (`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, off by default) hard-fails instead — both when kpack is
@@ -369,6 +416,47 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
   tree staged for a different Python, or one whose `msgpack`/`zstandard` are missing. Install the
   dependencies for this interpreter, or point `-DPython3_EXECUTABLE` at the one they were built
   for.
+
+#### Descriptor packaging Python environment
+
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can run `-m pip` and import `msgpack` and `zstandard`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+
+Packaging installs the exact local `rocke` and `rocke_library` wheels into the build-owned `hkp-rocke-python` directory, using `pip --target --no-index --no-deps --disable-pip-version-check`. `ROCKE_BUILD_PYENV=ON` supplies generated wheels through the existing rocKE developer build; with `ROCKE_BUILD_PYENV=OFF`, supply `ROCKE_WHEEL_DIR` and `ROCKE_WHEEL_VERSION`. Neither packaging mode installs rocKE into the supplied Python environment.
+
+The `hkp_rocke_wheel_python_interp` target prepares those private imports, not a second interpreter. Every descriptor-packaging subprocess uses the supplied interpreter with the private directory prepended to its execution-time `PYTHONPATH`; ordinary Python startup, `.pth` files, enabled user-site packages, and the rest of `PYTHONPATH` remain effective. Changed wheel content replaces the private directory, and readiness is recorded inside it only after imports succeed. Identical wheel content does not reinstall.
+
+This is a dependency-acquisition policy, not a sealed Python environment or a global offline-build guarantee. The separate rocKE editable developer environment and wheel-generation setup are outside packaging's no-index installation guarantee.
+
+### comgr compilation cache (build speed)
+
+Every rocKE kernel packed by the hip-kernel-provider is lowered in-process through
+`libamd_comgr`, which keeps an on-disk cache of its compilation results. Where that cache
+lives dominates descriptor-packaging build time, above worker count and above whether the
+cache is warm.
+
+> [!IMPORTANT]
+> The default location is **`~/.cache/comgr`**. If your home directory is on a network
+> filesystem (NFS, or any mounted share), every cache probe and write becomes a network
+> round trip, and packing slows down by an order of magnitude. Point the cache at a
+> **RAM disk or local disk** instead.
+
+```bash
+# Anywhere on fast local storage. A tmpfs/RAM disk is ideal; a local SSD is fine.
+export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache
+```
+
+On a network home the cache costs more than it saves.
+
+Related variables, both read by comgr itself rather than by hipDNN:
+
+| Variable | Effect |
+|---|---|
+| `AMD_COMGR_CACHE_DIR` | Cache location. Defaults to `~/.cache/comgr`. |
+| `AMD_COMGR_CACHE` | Set to `0` to disable caching entirely. Unset means **enabled**. |
+
+Disabling the cache is a diagnostic, not a fix: every build then pays full compilation cost. A cache on local disk is per-machine and per-container, so a fresh CI runner or rebuilt container starts cold.
+
+The other lever is the packer's worker count. A CMake-driven build fixes it per packaging root through the `PACK_JOBS` argument at each `hkp_wire_pack_target()` call site, not through the `HKP_PACK_JOBS` environment variable, which reaches only a direct `hkp_pack` run. The [descriptor-packaging README](../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md) gives the per-root values.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
@@ -421,8 +509,8 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 | Target | Description |
 |--------|-------------|
 | \<no target\> | Build all components |
-| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./Testing.md)) |
-| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, `full`, `unit`, `integration` |
+| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./TESTING.md)) |
+| `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, and `full` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
 | `hipdnn-tidy` | Run clang-tidy on hipDNN sources |
@@ -444,10 +532,6 @@ To build a target, for example `hipdnn-check` to build and run all tests:
 cmake --build build/release --target hipdnn-check
 ```
 
-Or run it through Ninja directly from the build directory:
-```bash
-projects/hipdnn/build/release> ninja hipdnn-check
-```
 
 ## Superbuild
 
@@ -468,10 +552,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For test category targets and other details, see [Testing](./Testing.md#superbuild-root-cmakepresetsjson).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. See [Build Targets](#build-targets) for target names and [Testing Strategy: Test Categories](./testing/TESTING_STRATEGY.md#test-categories) for current category behavior.
 
 > [!NOTE]
-> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [ctest vs. check targets](./Testing.md#ctest-vs-check-targets) for the available test targets.
+> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./TESTING.md#development-workflow) for the available test paths.
 
 To build only hipDNN core from the superbuild (the same components as the [standalone build](#2-build-hipdnn), without the providers), use the `hipdnn` preset:
 
@@ -583,12 +667,12 @@ Test targets (each `<component>-check` has per-category variants, and each targe
 |--------|-------------|
 | `miopen-provider-check` | Run all miopen-provider tests |
 | `miopen-provider-<category>-check` | Run miopen-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
-| `miopen-provider-external-integration-check` | Run the cross-provider integration tests for miopen-provider |
+| `miopen-provider-external-integration-check` | Run the provider-agnostic integration suite independently against miopen-provider |
 | `hipblaslt-provider-check` | Run all hipblaslt-provider tests |
 | `hipblaslt-provider-<category>-check` | Run hipblaslt-provider tests for a category: `quick`, `standard`, `comprehensive`, `full` |
-| `hipblaslt-provider-external-integration-check` | Run the cross-provider integration tests for hipblaslt-provider |
-| `hipdnn-integration-tests-check` | Run all cross-provider integration tests |
-| `hipdnn-integration-tests-<category>-check` | Run integration tests for a category: `unit`, `integration` |
+| `hipblaslt-provider-external-integration-check` | Run the provider-agnostic integration suite independently against hipblaslt-provider |
+| `hipdnn-integration-tests-check` | Run the provider-agnostic integration test executable |
+| `hipdnn-integration-tests-<category>-check` | Run integration tests for a configured category |
 
 hip-kernel-provider does not register `-check` targets; its tests are staged through its install bucket rather than the shared test-target machinery.
 

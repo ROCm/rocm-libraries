@@ -353,6 +353,7 @@ def build_attention_2d(
     sliding_window=0,
     has_softcap=False,
     use_alibi=False,
+    use_sinks=False,
     **kw,
 ):
     def _build():
@@ -365,7 +366,7 @@ def build_attention_2d(
             num_query_heads=num_query_heads,
             num_kv_heads=num_kv_heads,
             dtype=dtype,
-            use_sinks=False,
+            use_sinks=use_sinks,
             sliding_window=sliding_window,
             has_softcap=has_softcap,
             use_alibi=use_alibi,
@@ -432,15 +433,16 @@ def build_attention_reduce(
     return _build
 
 
-def build_attention_dense(arch, **over):
+def build_attention_dense(arch, *, geometry=None, **over):
     """Dense flash-attn prefill spec (library ``kernels/gfx950/attention_dense``).
 
-    ``over`` patches the shared base spec; a small Sq keeps the IR compact while
-    still exercising the full pipeline (both the default one-CTA-per-q-block grid
-    and the persistent grid-stride grid).
+    ``geometry`` selects a shared tile geometry and ``over`` patches the base spec;
+    a small Sq keeps the IR compact while still exercising the full pipeline (both
+    the default one-CTA-per-q-block grid and the persistent grid-stride grid).
     """
 
     def _build():
+        from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
         from kernels.gfx950.attention_dense import (
             Gfx950AttentionDenseSpec,
             build_attention_dense as _build_dense,
@@ -456,6 +458,8 @@ def build_attention_dense(arch, **over):
             causal=True,
             dtype="bf16",
         )
+        if geometry is not None:
+            spec.update(DENSE_TILE_GEOMETRIES[geometry])
         spec.update(over)
         return _build_dense(Gfx950AttentionDenseSpec(**spec))
 
@@ -985,6 +989,98 @@ def build_direct_depthwise(
     return _build
 
 
+def build_direct_conv_dgrad(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    cpg,
+    kpg,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_q=16,
+    block_groups=8,
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvDgradSpec,
+            DirectConvProblem,
+            build_direct_conv_dgrad as _build_dgrad,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=cpg,
+            kpg=kpg,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectConvDgradSpec(
+            problem=p,
+            name=name,
+            block_q=block_q,
+            block_groups=block_groups,
+        )
+        return _build_dgrad(spec, arch=arch)
+
+    return _build
+
+
+def build_direct_depthwise_dgrad(
+    name,
+    arch,
+    N,
+    H,
+    W,
+    groups,
+    KH=3,
+    KW=3,
+    PAD=1,
+    stride=1,
+    *,
+    block_w=8,
+    block_waves=1,
+):
+    def _build():
+        from kernels.common.conv_direct_grouped import (
+            DirectConvProblem,
+            DirectDepthwiseDgradSpec,
+            build_direct_depthwise_dgrad as _build_dw_dgrad,
+        )
+
+        p = DirectConvProblem(
+            N=N,
+            H=H,
+            W=W,
+            groups=groups,
+            cpg=1,
+            kpg=1,
+            KH=KH,
+            KW=KW,
+            PAD=PAD,
+            stride=stride,
+        )
+        spec = DirectDepthwiseDgradSpec(
+            problem=p,
+            name=name,
+            block_w=block_w,
+            block_waves=block_waves,
+        )
+        return _build_dw_dgrad(spec, arch=arch)
+
+    return _build
+
+
 def build_grouped_gemm_case(name, arch, m, n, k, e):
     def _build():
         from rocke.instances.gfx950.grouped_gemm import (
@@ -995,6 +1091,31 @@ def build_grouped_gemm_case(name, arch, m, n, k, e):
         spec = GroupedGemmSpec(M=m, N=n, K=k, E=e, name=name)
         kernel, _bs, _tm, _tn = build_grouped_gemm(spec)
         return kernel
+
+    return _build
+
+
+def build_mxfp8_gemm_case(dtype, matrix_path):
+    def _build():
+        from rocke.instances.gfx1250.block_scaled_gemm import (
+            BlockScaledGemmSpec,
+            build_block_scaled_gemm,
+        )
+
+        return build_block_scaled_gemm(
+            BlockScaledGemmSpec(
+                name=f"irhash_mxfp8_{dtype}_{matrix_path}",
+                M=32,
+                N=48,
+                K=256,
+                dtype_a=dtype,
+                dtype_b=dtype,
+                dtype_c="bf16",
+                scale_dtype="e8m0",
+                matrix_path=matrix_path,
+                block_k=16 if matrix_path == "wmma_scale16" else 32,
+            )
+        )
 
     return _build
 
@@ -1273,6 +1394,16 @@ def cases():
             32,
         ),
     )
+
+    # Homogeneous FP8/BF8 with E8M0 scales, shared by source and installed gates.
+    for dtype in ("fp8e4m3", "bf8e5m2"):
+        for matrix_path in ("wmma_scale", "wmma_scale16"):
+            add(
+                "gemm",
+                f"gemm/gfx1250/mxfp8/{matrix_path}/{dtype}",
+                "gfx1250",
+                build_mxfp8_gemm_case(dtype, matrix_path),
+            )
 
     # Conv: problem-shape and arch variants.
     conv1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
@@ -1586,8 +1717,8 @@ def cases():
             epilogue="cshuffle",
         ),
     )
-    # Grouped wgrad (grid-per-group, Gm=1) and group-merging (Gm=2). Guards the
-    # block-diagonal dW IR against silent drift. MFMA-only, so gfx942/gfx950.
+    # Grouped wgrad, grid-per-group (groups=4, cpg=kpg=16). Guards the per-group
+    # dW IR against silent drift. MFMA-only, so gfx942/gfx950.
     add(
         "conv_wgrad",
         "conv_wgrad/gfx942/n1h8c64k64r3_g4",
@@ -2250,6 +2381,57 @@ def cases():
             use_alibi=True,
         ),
     )
+    # fp16 + sinks COMBO: the transposed-32x32 combo spec `_enable_combo_2d`
+    # admits for fp16+sinks. The combo knobs are passed explicitly so the golden
+    # hashes the real combo kernel (matching emit parity idx54), not a plain 2D
+    # spec. fp16 cannot set use_fast_paged_kv_desc (bf16-only).
+    _sink_combo_kw = dict(
+        num_seqs=2,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="fp16",
+            use_sinks=True,
+            **_sink_combo_kw,
+        ),
+    )
+    # bf16 + sinks COMBO twin (adds use_fast_paged_kv_desc, bf16-only).
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d64_b32_gqa8_sinks_combo",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16_d64_sink_combo",
+            "gfx950",
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            use_fast_paged_kv_desc=True,
+            **_sink_combo_kw,
+        ),
+    )
     add(
         "attention",
         "attention/gfx950/3d_fp16_d128_b64",
@@ -2407,6 +2589,37 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
+        # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
+        # shifted-diagonal routes, the sink composition, and the BM128 geometry.
+        (
+            "bottom_right_sq512",
+            {"seqlen_kv": 1024, "causal_bottom_right": True},
+        ),
+        (
+            "ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+            },
+        ),
+        (
+            "bottom_right_sinks_sq512",
+            {
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "bottom_right_bm128_sq512",
+            {
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "geometry": "bm128",
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (
@@ -2558,7 +2771,10 @@ def cases():
     # The gfx950 16c cases exercise fold_k32=True (uses mfma_f32_16x16x32_f16).
     # The gfx942 16c case uses fold_k32=False (mfma_f32_16x16x16_f16 only).
     #
-    # C++ engine parity: not tracked — no C++ implementation exists yet.
+    # C++ engine parity: tracked for conv_direct_dgrad (see cases below);
+    # the 16c/4c/8c/32c/depthwise fprop variants have a C++ port but their
+    # golden is pinned to the Python emitter only (no separate cpp-vs-python
+    # differential gate for the fprop families in this harness).
 
     # --- 16c, gfx950, fold_k32=True (matches parity emit idx=0 and idx=1) ---
     add(
@@ -2765,6 +2981,94 @@ def cases():
             KW=3,
             PAD=1,
             block_w=16,
+            block_waves=1,
+        ),
+    )
+
+    # --- conv_direct_dgrad: grouped dgrad (scalar FMA, any cpg/kpg) ---
+    # Mirrors parity emit indices 12-14.  Both gfx950 and gfx942 are covered.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dgrad_n2h8_cpg16_bg8",
+        "gfx950",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_950_bg8",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dgrad_n2h8_cpg32_bg4",
+        "gfx950",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_950_cpg32_bg4",
+            "gfx950",
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=32,
+            kpg=32,
+            block_q=16,
+            block_groups=4,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx942/dgrad_n1h8_cpg16_bg8",
+        "gfx942",
+        build_direct_conv_dgrad(
+            "irhash_dgrad_942_bg8",
+            "gfx942",
+            N=1,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            block_q=16,
+            block_groups=8,
+        ),
+    )
+    # --- conv_direct_dgrad: depthwise dgrad (cpg=kpg=1) ---
+    # Mirrors parity emit indices 15-16.  stride=2 exercises divisibility checks.
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_n2h14_s1",
+        "gfx950",
+        build_direct_depthwise_dgrad(
+            "irhash_dw_dgrad_950_s1",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            stride=1,
+            block_w=8,
+            block_waves=1,
+        ),
+    )
+    add(
+        "conv_direct_dgrad",
+        "conv_direct_dgrad/gfx950/dw_dgrad_n2h14_s2",
+        "gfx950",
+        build_direct_depthwise_dgrad(
+            "irhash_dw_dgrad_950_s2",
+            "gfx950",
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            stride=2,
+            block_w=8,
             block_waves=1,
         ),
     )

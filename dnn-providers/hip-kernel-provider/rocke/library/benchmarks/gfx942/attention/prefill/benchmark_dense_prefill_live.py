@@ -34,9 +34,10 @@ Concretely: at the default ``--dtype bf16 --d 64`` the shipped ``waves_per_eu`` 
 (``..._persist304_...``) — neither of which this bench could reach before.
 
 Scope: dense self-attention (uniform batch via the ``[B, S, H, d]`` grid), causal +
-full, bf16/fp16, D64/D128, MHA + GQA (incl. non-pow-2), default AND persistent grid.
-Sliding-window / varlen are still follow-ups: their ``--mode`` values exit with the
-distinct skip code 3 (never 0 — a gate must not report success for no work).
+full + sliding-window (``--mode swa``), bf16/fp16, D64/D128, MHA + GQA (incl.
+non-pow-2), default AND persistent grid. varlen is still a follow-up: its ``--mode``
+value exits with the distinct skip code 3 (never 0 — a gate must not report success
+for no work).
 
 Run as a library module::
 
@@ -113,7 +114,7 @@ _EXIT_SKIP = 3
 
 # CLI modes the kernel genuinely cannot run yet. This is a UX shortcut only -- the
 # authoritative rejection is supports_attention_dense (ValueError from build).
-_DEFERRED_MODES = {"swa": "P1+ (sliding window)", "varlen": "P1+ (packed varlen)"}
+_DEFERRED_MODES = {"varlen": "P1+ (packed varlen)"}
 
 
 # --------------------------------------------------------------------------- #
@@ -202,6 +203,13 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
         stream=stream,
     )
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if spec.runtime_shape:
+        # Mirrors the three i32 params attention_dense_signature declares after
+        # scale on the runtime-shape path; omitting them under-fills the kernarg
+        # buffer for a kernel that reads them.
+        vals["batch"] = int(spec.batch)
+        vals["seqlen_q"] = int(spec.seqlen_q)
+        vals["seqlen_kv"] = int(spec.seqlen_kv)
 
     def call():
         lch(vals, config=cfg)
@@ -209,19 +217,29 @@ def bench_dense(spec: AttentionDenseSpec, *, warmup: int, iters: int, seed: int)
     call()
     torch.cuda.synchronize()
 
-    # correctness vs SDPA (batched, causal/full, GQA repeat).
+    # correctness vs SDPA (batched, causal/full/SWA, GQA repeat).
+    W = spec.sliding_window
     rep = Hq // Hkv
     qh = q.transpose(1, 2).float()
     kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
     vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        qh, kh, vh, is_causal=causal
-    ).transpose(1, 2)
+    if W and W > 0:
+        # banded causal: key j allowed for query i iff i-W < j <= i.
+        qi = torch.arange(S, device=dev).view(-1, 1)
+        ki = torch.arange(S, device=dev).view(1, -1)
+        m = (ki <= qi) & (ki > qi - W)
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            qh, kh, vh, attn_mask=m
+        ).transpose(1, 2)
+    else:
+        ref = torch.nn.functional.scaled_dot_product_attention(
+            qh, kh, vh, is_causal=causal
+        ).transpose(1, 2)
     max_err = (out.float() - ref).abs().max().item()
 
     ms = time_launches(call, warmup=warmup, iters=iters, stream=stream)
     synchronize_and_release(stream)
-    tf = _flops(B, S, causal, 0, Hq, D) / (ms * 1e-3) / 1e12
+    tf = _flops(B, S, causal, W, Hq, D) / (ms * 1e-3) / 1e12
     # gfx942_kernel_name, not spec.kernel_name(): the latter omits batch and
     # waves_per_eu, so a B=4 row would report the B=1 symbol -- the exact confusion
     # behind the cache-collision bug this field exists to make visible.
@@ -251,6 +269,16 @@ def _configs(mode: str, Hq: int, Hkv: int, D: int):
     if mode in ("full", "all"):
         for S in (2048, 4096):
             cfgs.append(("full", "non_causal", f"S={S}", S, 1, Hq, Hkv, False))
+    if mode == "swa":
+        # Banded-causal sweep (W multiple of block_n=64). W==0 (full causal) is the
+        # baseline; skip windows past the sequence. Emits a 9-tuple (trailing W);
+        # every other mode's 8-tuple keeps W=0 via the unpack in main().
+        for S in (2048, 4096, 8192):
+            for W in (0, 512, 1024, 2048):
+                if W and W > S:
+                    continue
+                tag = "full-causal" if W == 0 else f"W={W}"
+                cfgs.append(("swa", "gqa_swa", f"S={S} {tag}", S, 1, Hq, Hkv, True, W))
     if mode == "persistent":
         # The causal cohort with the persistent grid FORCED on (main() pins
         # dense_persistent="on" unless the user said otherwise). Under "all" the
@@ -287,6 +315,7 @@ def _record(mode, variant, label, S, B, Hq, Hkv, D, causal, spec, res, err_note=
         "Hkv": Hkv,
         "D": D,
         "causal": causal,
+        "sliding_window": None if spec is None else spec.sliding_window,
         # The tuning actually built, so a report can never be read as if it
         # described a different config than the one that was timed.
         "block_n": None if spec is None else spec.block_n,
@@ -381,7 +410,9 @@ def main() -> int:
 
     cfgs = _configs(args.mode, args.hq, args.hkv, args.d)
     results = []
-    for mode, variant, label, S, B, Hq, Hkv, causal in cfgs:
+    for cfg in cfgs:
+        mode, variant, label, S, B, Hq, Hkv, causal = cfg[:8]
+        W = cfg[8] if len(cfg) > 8 else 0
         tag = f"[{mode}/{variant}] {label} Hq={Hq} Hkv={Hkv} D={args.d}"
         spec = None
 
@@ -413,6 +444,7 @@ def main() -> int:
                 head_size=args.d,
                 causal=causal,
                 dtype=args.dtype,
+                sliding_window=W,
             )
             spec = resolve_dense_spec(req, overrides)
             if args.dry_run:
