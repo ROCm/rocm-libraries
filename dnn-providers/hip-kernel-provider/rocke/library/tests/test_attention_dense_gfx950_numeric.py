@@ -82,7 +82,7 @@ def _spec(
     # Imported lazily: keeps module import (and hence CPU collection of this
     # gpu-marked file) independent of the dispatch package.
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx950 import dense_spec_for_request
+    from dispatch.attention.gfx950_dense import dense_spec_for_request
 
     return dense_spec_for_request(
         AttentionRequest(

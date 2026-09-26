@@ -9,8 +9,9 @@ derivation and no ``sys.path`` mutation):
     python -m benchmarks.common.attention_combo_sweep --arch gfx942 --list-only
     rocke-attention-combo-sweep --candidate-prefix attention_gfx950_u2d_narrow
 
-The full unified-tuning space is millions of specs per shape, so each tuning
-candidate is randomly sampled (``--tuning-sample``, 0 walks everything). Host
+The full unified-tuning and dense knob spaces are millions of specs per shape,
+so at ``--sweep-level full`` each tuning or dense candidate is randomly sampled
+(``--tuning-sample``, 0 walks everything). Host
 validation (build + verify + lower) runs on ``--jobs`` worker processes, and
 isolated GPU runs are spread over ``--gpus``. Configs whose lowered IR matches
 one already validated for the shape are recorded as ``duplicate`` and not run.
@@ -42,6 +43,7 @@ from dispatch.attention import (
     iter_dispatch_attention_all,
 )
 from dispatch.attention.common import _problem
+from dispatch.attention.tuning_common import configure_sweep, dense_tuning_knobs
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 from benchmarks.common.attention_flops import attention_flops
 from kernels.common.attention_unified import UNIFIED_DTYPES
@@ -64,6 +66,11 @@ def _spec_kind(spec) -> str:
 
 def _spec_key(spec) -> str:
     return str(getattr(spec, "tuning_id", "") or _kernel_name(spec))
+
+
+def _spec_knobs(spec) -> dict:
+    """Readable dense knob settings; unified tuning specs carry ``tuning_id``."""
+    return dense_tuning_knobs(spec) if isinstance(spec, AttentionDenseSpec) else {}
 
 
 def _requests(args):
@@ -360,13 +367,30 @@ def _resolve_pinned(args):
     spec = candidate.select_spec(pinned)
     wanted = args.run_tuning_id or args.run_spec_key
     if wanted and _spec_key(spec) != wanted:
-        for item in candidate.sweep_space(pinned):
+        for item in _offered_specs(candidate, pinned, args):
             if _spec_key(item) == wanted:
                 spec = item
                 break
         else:
-            raise ValueError(f"{wanted!r} not on {candidate.name}")
+            raise ValueError(
+                f"{wanted!r} not on {candidate.name} at --sweep-level "
+                f"{getattr(args, 'sweep_level', 'production')} "
+                f"(--tuning-sample {getattr(args, 'tuning_sample', 0)}, "
+                f"--seed {getattr(args, 'seed', 0)})"
+            )
     return req, attention_dispatch_result(req, candidate, spec)
+
+
+def _offered_specs(candidate, request, args):
+    """The specs a sweep run with the same level / sample / seed offered for
+    ``candidate``, so a key printed by a ``full`` sampled run replays."""
+    sample = configure_sweep(
+        getattr(args, "sweep_level", "production"),
+        int(getattr(args, "tuning_sample", 0) or 0),
+    )
+    if sample > 0 and candidate.sample_space is not None:
+        return candidate.sample_space(request, sample, int(getattr(args, "seed", 0)))
+    return candidate.sweep_space(request)
 
 
 def _row_skeleton(req, candidate, spec, index: int) -> dict:
@@ -381,6 +405,7 @@ def _row_skeleton(req, candidate, spec, index: int) -> dict:
         kernel_name=_kernel_name(spec),
         kind=_spec_kind(spec),
         waves_per_eu=getattr(kernel_spec, "waves_per_eu", None),
+        knobs=_spec_knobs(spec),
     )
     return row
 
@@ -812,15 +837,18 @@ def main() -> int:
         "--sweep-level",
         choices=("production", "full"),
         default="production",
-        help="production walks the curated stacks exhaustively (no dead-end "
-        "knobs). full samples every kernel knob, dead ends included",
+        help="production walks the curated unified-tuning stacks (no dead-end "
+        "knobs) and sets each dense knob to every legal value one at a time "
+        "from the shipped spec. full samples every knob combination, dead "
+        "ends included",
     )
     ap.add_argument(
         "--tuning-sample",
         type=int,
         default=256,
-        help="with --sweep-level full: random legal specs per tuning candidate, "
-        "seeded by --seed (0 walks the full stream). Ignored for production",
+        help="with --sweep-level full: random legal specs per tuning or dense "
+        "candidate, seeded by --seed (0 walks the full stream). Ignored for "
+        "production. --run-spec-key replays against the same level/sample/seed",
     )
     ap.add_argument(
         "--jobs",

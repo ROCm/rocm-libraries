@@ -14,15 +14,16 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from itertools import islice
 
 from dispatch.attention import (
     AttentionMaskType,
     AttentionRequest,
     attention_candidates,
     dense_spec_for_request as routed_dense_spec_for_request,
-    registered_attention_combos,
+    iter_registered_attention_combos,
 )
-from dispatch.attention.gfx950 import dense_spec_for_request
+from dispatch.attention.gfx950_dense import dense_spec_for_request
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import (
@@ -101,12 +102,17 @@ class TestDenseWavesPerEuWiring(unittest.TestCase):
             dense_wide_lds_dma="off",
             dense_waves_per_eu=pin,
         )
+        # The full level streams millions of knob settings; the WPE loop runs
+        # inside each one, so the first knob set already carries every WPE.
         return {
             spec.waves_per_eu
-            for _candidate, spec in registered_attention_combos(
-                req,
-                candidate_prefix="attention_gfx950_dense_grid_default",
-                sweep_level=level,
+            for _candidate, spec in islice(
+                iter_registered_attention_combos(
+                    req,
+                    candidate_prefix="attention_gfx950_dense_grid_default",
+                    sweep_level=level,
+                ),
+                64,
             )
         }
 
@@ -899,7 +905,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
     """One registered candidate per frozen (tile x persist x wide-DMA) combo."""
 
     def test_six_dense_candidates_are_registered(self):
-        from dispatch.attention.gfx950 import GFX950_DENSE_VARIANTS
+        from dispatch.attention.gfx950_dense import GFX950_DENSE_VARIANTS
 
         names = [c.name for c in attention_candidates()]
         expected = [v.candidate_name for v in GFX950_DENSE_VARIANTS]
@@ -909,7 +915,7 @@ class TestGfx950DenseVariants(unittest.TestCase):
                 self.assertIn(name, names)
 
     def test_d128_admits_all_six_dense_variants(self):
-        from dispatch.attention.gfx950 import GFX950_DENSE_VARIANTS
+        from dispatch.attention.gfx950_dense import GFX950_DENSE_VARIANTS
 
         req = _gfx950_dense_req(
             hdim_q=128,

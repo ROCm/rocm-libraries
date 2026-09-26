@@ -1322,7 +1322,7 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """
     from dispatch.attention import AttentionRequest
     from dispatch.attention.gfx942 import _dense_spec
-    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 
     # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
     # default (owned by the gfx950 file) ever shifts, the "== 2" baseline below would
@@ -1435,7 +1435,7 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
     branch changed nothing for it."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention.gfx942 import _dense_spec
-    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 
     # Pin the shared default: every assertion below is relative to it, so a silent
     # upstream change to the pad amount must fail loudly here rather than downstream.
@@ -1597,7 +1597,7 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     and is otherwise untouched."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention.gfx942 import _dense_spec
-    from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
+    from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 
     def _req(sq, arch, persist="auto"):
         return AttentionRequest(

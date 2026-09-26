@@ -5,8 +5,16 @@
 from __future__ import annotations
 
 import contextvars
-from dataclasses import asdict, dataclass, is_dataclass, replace
-from typing import Iterable, Mapping, Optional, Sequence, Tuple
+from dataclasses import (
+    MISSING,
+    asdict,
+    dataclass,
+    fields as _dataclass_fields,
+    is_dataclass,
+    replace,
+)
+from functools import lru_cache
+from typing import Callable, Iterable, Mapping, Optional, Sequence, Tuple
 
 from .tuning_specs import (
     ExplicitAttention2DConfig,
@@ -213,12 +221,140 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
     _flag("use_wide_kv_load"),
 )
 
+# Dense-kernel spec fields the tuning space never varies. Problem fields come
+# from the request; variant fields are fixed by the registered dense candidate
+# (tile x persist x wide-DMA); ``waves_per_eu`` is walked by its own loop, as
+# on the unified paths.
+DENSE_PROBLEM_FIELDS = frozenset(
+    {
+        "batch",
+        "seqlen_q",
+        "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
+        "head_size",
+        "causal",
+        "dtype",
+        "sliding_window",
+        "ragged",
+        "varlen",
+        "paged",
+        "block_size",
+        "num_kv_blocks",
+        "use_sinks",
+        "causal_bottom_right",
+    }
+)
+DENSE_VARIANT_FIELDS = frozenset({"block_m", "block_n", "persistent", "wide_lds_dma"})
+DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
+# Knobs whose validator accepts a single value, so there is nothing to sweep.
+DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"lds_num_buffers"}),
+}
+
+_DENSE_LDS_PADS = (0, 8, 16, 24, 32)
+_DENSE_LAZY_THRESHOLDS = (1.0, 2.0, 4.0)
+_DENSE_EXP_PER_PV_STEP = (1, 2, 3, 4)
+_DENSE_PV_SCHED_DS_READS = (1, 2, 3, 4)
+_DENSE_FENCE_MASK_DEFAULT = 0
+_DENSE_DS_READ_DEFAULT = 2
+# Symbolic persistent-CTA counts, resolved against the problem by
+# :func:`resolve_dense_num_persistent` (the ``tile_policy="2x"`` pattern).
+_DENSE_NUM_PERSISTENT_POLICIES = ("half", "2x", "gqa_pair", "gqa_pair_2phase", "work")
+
+
+def _dense_pv_schedule_axis() -> KnobAxis:
+    """IGLP versus the manual PV fence / sched_group template, as one decision.
+
+    ``iglp_mode`` requires both manual knobs off, and a manual knob on a
+    wide-DMA variant requires ``iglp_mode=-1``. As separate axes, the
+    depth-first walk would prune legal settings depending on which axis came
+    first. ``None`` leaves a knob on its per-variant policy; the fence mask and
+    DS-read count ride along while their parent can resolve on, and the dense
+    duplicate check drops them where it does not.
+    """
+    choices: list[Knobs] = []
+    for iglp in (None, -1, 0, 1):
+        for fence in (None, True, False):
+            masks = (
+                (_DENSE_FENCE_MASK_DEFAULT,)
+                if fence is False
+                else _SCHED_BARRIER_MASKS
+            )
+            for template in (None, True, False):
+                ds_reads = (
+                    (_DENSE_DS_READ_DEFAULT,)
+                    if template is False
+                    else _DENSE_PV_SCHED_DS_READS
+                )
+                for mask in masks:
+                    for ds_read in ds_reads:
+                        choice = (
+                            ("iglp_mode", iglp),
+                            ("pv_sched_fence", fence),
+                            ("pv_sched_fence_mask", mask),
+                            ("pv_sched_group_template", template),
+                            ("pv_sched_group_ds_read", ds_read),
+                        )
+                        choices.append(
+                            tuple(
+                                (name, value)
+                                for name, value in choice
+                                if value is not None
+                                and not (
+                                    name == "pv_sched_fence_mask"
+                                    and value == _DENSE_FENCE_MASK_DEFAULT
+                                )
+                                and not (
+                                    name == "pv_sched_group_ds_read"
+                                    and value == _DENSE_DS_READ_DEFAULT
+                                )
+                            )
+                        )
+    return KnobAxis(
+        "pv_schedule", ((),) + tuple(c for c in dict.fromkeys(choices) if c)
+    )
+
+
+# Ordered prerequisites-first: persist_decode's gqa_pair modes require an exact
+# num_persistent, and interleave is read only on the resolved qb_major decode.
+_GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
+    KnobAxis(
+        "num_persistent",
+        ((),)
+        + tuple((("num_persistent", p),) for p in _DENSE_NUM_PERSISTENT_POLICIES),
+    ),
+    _values(
+        "persist_decode",
+        "auto",
+        ("qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"),
+    ),
+    _flag("interleave"),
+    KnobAxis(
+        "lazy_rescale",
+        ((), (("lazy_rescale", False),))
+        + tuple((("lazy_rescale_threshold", t),) for t in _DENSE_LAZY_THRESHOLDS),
+    ),
+    _dense_pv_schedule_axis(),
+    _values("lds_k_row_pad", 8, _DENSE_LDS_PADS),
+    _values("lds_v_row_pad", 32, _DENSE_LDS_PADS),
+    _values("lds_k_group_pad", 8, _DENSE_LDS_PADS),
+    _values("use_exp2_fast", True, (False,)),
+    _values("exp_per_pv_step", None, _DENSE_EXP_PER_PV_STEP),
+    _values("partial_vmcnt_prefetch", True, (False,)),
+    _values("pv_priority", 1, (0, 1, 2, 3)),
+    _values("pv_loop_order", None, ("d_major", "k_major")),
+    _values("causal_diag_split", True, (False,)),
+    _values("o_store_width", 4, (1, 2, 4)),
+)
+
 # Axes cover every tuning field; ones an arch rejects are pruned at once.
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
     ("gfx942", "2d"): _GFX942_2D_AXES,
     ("gfx950", "3d"): _3D_AXES,
     ("gfx942", "3d"): _3D_AXES,
+    ("gfx950", "dense"): _GFX950_DENSE_AXES,
 }
 
 # Knobs fixed by the geometry variant's codepath rather than enumerated.
@@ -411,9 +547,13 @@ _PROD_INTERLEAVE = {
 _PROD_WAVES_2D: Tuple[Optional[int], ...] = (None, 2, 4)
 
 
-def dense_waves_per_eu_sweep_values(default: int) -> Tuple[int, ...]:
-    """Dense WPE axis for the active sweep level, with shipped policy first."""
-    axis = _PROD_WAVES_2D if _SWEEP_LEVEL.get() == "production" else _SWEEP_WAVES
+def dense_waves_per_eu_sweep_values(
+    default: int, level: Optional[str] = None
+) -> Tuple[int, ...]:
+    """Dense WPE axis for ``level`` (the active sweep level by default), with
+    shipped policy first."""
+    level = _SWEEP_LEVEL.get() if level is None else level
+    axis = _PROD_WAVES_2D if level == "production" else _SWEEP_WAVES
     values = []
     for value in axis:
         resolved = int(default if value is None else value)
@@ -921,6 +1061,251 @@ def sample_tuning_specs(
         spec = _tuning_spec(problem, variant, knobs, rng.choice(_SWEEP_WAVES))
         if spec is not None and spec.tuning_id not in seen:
             seen.add(spec.tuning_id)
+            yield spec
+
+
+# Dense axes that exist only on some base specs, keyed by axis name. The kernel
+# reads the knob nowhere else, and the symbol drops it there, so offering it
+# would only re-emit the base kernel.
+_DENSE_AXIS_SCOPE: Mapping[str, Callable[[object], bool]] = {
+    "num_persistent": lambda s: bool(s.persistent),
+    # A request-pinned decode is request-owned, not swept.
+    "persist_decode": lambda s: bool(s.persistent) and s.persist_decode == "auto",
+    "interleave": lambda s: bool(s.persistent) and bool(s.causal),
+    # Wide DMA locks the K/V slab pads.
+    "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
+    "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
+    "lds_k_group_pad": lambda s: int(s.head_size) < 128,
+    # Sliding window keeps its own three-phase band loop.
+    "causal_diag_split": lambda s: bool(s.causal) and int(s.sliding_window) == 0,
+}
+# ``None`` knobs that resolve through a per-variant ``resolved_<name>()`` policy.
+_DENSE_POLICY_KNOBS = (
+    "exp_per_pv_step",
+    "pv_sched_fence",
+    "pv_sched_group_template",
+    "iglp_mode",
+    "pv_loop_order",
+)
+
+DenseSupports = Callable[..., Tuple[bool, str]]
+
+
+@lru_cache(maxsize=None)
+def _dense_field_defaults(spec_type: type) -> Mapping[str, object]:
+    return {f.name: f.default for f in _dataclass_fields(spec_type)}
+
+
+def dense_tuning_knobs(spec) -> dict:
+    """Every non-problem field of a dense spec that differs from its dataclass
+    default: variant geometry, WPE, and the swept knobs. The readable record of
+    what a ``cg<hash>`` kernel-name token stands for."""
+    knobs = {}
+    for f in _dataclass_fields(spec):
+        if f.name in DENSE_PROBLEM_FIELDS:
+            continue
+        value = getattr(spec, f.name)
+        if f.default is MISSING or value != f.default:
+            knobs[f.name] = value
+    return knobs
+
+
+def resolve_dense_num_persistent(spec, policy: str) -> int:
+    """Persistent-CTA count for one symbolic ``num_persistent`` policy.
+
+    ``gqa_pair`` / ``gqa_pair_2phase`` are the exact counts those decodes
+    require; ``work`` is one CTA per (query block, head, batch) work item.
+    """
+    nqb = -(-int(spec.seqlen_q) // int(spec.block_m))
+    pairs = nqb * int(spec.num_kv_heads) * int(spec.batch)
+    counts = {
+        "half": int(spec.num_persistent) // 2,
+        "2x": int(spec.num_persistent) * 2,
+        "gqa_pair": pairs,
+        "gqa_pair_2phase": pairs * int(spec.num_queries_per_kv) // 2,
+        "work": nqb * int(spec.num_query_heads) * int(spec.batch),
+    }
+    try:
+        return counts[policy]
+    except KeyError:
+        raise ValueError(
+            f"num_persistent policy must be one of {sorted(counts)}, got {policy!r}"
+        ) from None
+
+
+def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
+    """The declared dense axes that apply to ``base``, with concrete values."""
+    axes = []
+    for axis in tuning_axes(arch, "dense"):
+        scope = _DENSE_AXIS_SCOPE.get(axis.name)
+        if scope is not None and not scope(base):
+            continue
+        if axis.name == "num_persistent":
+            counts: list[int] = []
+            for choice in axis.choices:
+                for _name, policy in choice:
+                    n = resolve_dense_num_persistent(base, policy)
+                    if n > 0 and n != int(base.num_persistent) and n not in counts:
+                        counts.append(n)
+            axis = KnobAxis(
+                axis.name, ((),) + tuple((("num_persistent", n),) for n in counts)
+            )
+        axes.append(axis)
+    return tuple(axes)
+
+
+def _dense_policy_value(spec, name: str):
+    try:
+        return getattr(replace(spec, **{name: None}), f"resolved_{name}")()
+    except ValueError:
+        return None
+
+
+def _dense_redundant_knob(spec) -> Optional[str]:
+    """Why ``spec`` re-emits a kernel an earlier walk step already emits.
+
+    An explicit value equal to what its policy resolves to, or a knob the body
+    does not read for this spec, compiles to the same IR under a different
+    symbol. The walk treats such a prefix as invalid; every relation here
+    points at an earlier axis or at the base spec, so pruning is exact.
+    """
+    for name in _DENSE_POLICY_KNOBS:
+        value = getattr(spec, name)
+        if value is not None and value == _dense_policy_value(spec, name):
+            return f"{name}={value!r} restates its policy"
+    if not spec.persistent and (spec.persist_decode != "auto" or spec.interleave):
+        return "persist_decode and interleave are read only by the persistent body"
+    if (
+        spec.persist_decode != "auto"
+        and replace(spec, persist_decode="auto").resolved_persist_decode
+        == spec.persist_decode
+    ):
+        return f"persist_decode={spec.persist_decode!r} is what auto resolves to"
+    defaults = _dense_field_defaults(type(spec))
+    if (
+        not spec.lazy_rescale
+        and spec.lazy_rescale_threshold != defaults["lazy_rescale_threshold"]
+    ):
+        return "lazy_rescale_threshold is read only with lazy_rescale"
+    if (
+        not spec.resolved_pv_sched_fence()
+        and spec.pv_sched_fence_mask != defaults["pv_sched_fence_mask"]
+    ):
+        return "pv_sched_fence_mask is read only while the fence is on"
+    if (
+        not spec.resolved_pv_sched_group_template()
+        and spec.pv_sched_group_ds_read != defaults["pv_sched_group_ds_read"]
+    ):
+        return "pv_sched_group_ds_read is read only while the template is on"
+    if spec.interleave:
+        nqb = -(-int(spec.seqlen_q) // int(spec.block_m))
+        if not spec.causal or spec.resolved_persist_decode != "qb_major" or nqb < 2:
+            return "interleave is read only on the causal qb_major decode with NQB > 1"
+    return None
+
+
+def _dense_knob_spec(base, supports: DenseSupports, arch: str, knobs: Mapping):
+    """``base`` with ``knobs`` applied, or ``None`` if illegal or redundant."""
+    try:
+        spec = replace(base, **knobs)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
+    if _dense_redundant_knob(spec) is not None:
+        return None
+    ok, _why = supports(spec, arch=arch)
+    return spec if ok else None
+
+
+def _dense_waves(base, wpe_pinned: bool, level: str) -> Tuple[int, ...]:
+    if wpe_pinned:
+        return (int(base.waves_per_eu),)
+    return dense_waves_per_eu_sweep_values(int(base.waves_per_eu), level)
+
+
+def _one_knob_at_a_time(axes: Tuple[KnobAxis, ...], is_valid) -> Iterable[dict]:
+    """The base, then every legal non-default choice of each axis on its own."""
+    yield {}
+    for axis in axes:
+        for choice in axis.choices:
+            if choice and is_valid(dict(choice)):
+                yield dict(choice)
+
+
+def iter_dense_tuning_specs(
+    base,
+    *,
+    arch: str,
+    supports: DenseSupports,
+    wpe_pinned: bool,
+    level: Optional[str] = None,
+):
+    """Dense specs for one registered variant at ``level``, ``base`` first.
+
+    ``production`` sets every applicable knob to each of its legal values one at
+    a time from the shipped spec. ``full`` walks the pruned product of all
+    axes; consume it through :func:`sample_dense_tuning_specs` unless the space
+    is known to be small. Each knob set is crossed with the WPE loop.
+    """
+    level = _SWEEP_LEVEL.get() if level is None else level
+    if level not in SWEEP_LEVELS:
+        raise ValueError(f"sweep level must be one of {SWEEP_LEVELS}, got {level!r}")
+    axes = _dense_axes_for(base, arch)
+
+    def is_valid(knobs) -> bool:
+        return _dense_knob_spec(base, supports, arch, knobs) is not None
+
+    knob_sets = (
+        _one_knob_at_a_time(axes, is_valid)
+        if level == "production"
+        else _iter_knob_sets(axes, {}, is_valid)
+    )
+    waves = _dense_waves(base, wpe_pinned, level)
+    for knobs in knob_sets:
+        spec = _dense_knob_spec(base, supports, arch, knobs)
+        if spec is None:
+            continue
+        for waves_per_eu in waves:
+            yield replace(spec, waves_per_eu=waves_per_eu)
+
+
+def sample_dense_tuning_specs(
+    base,
+    n: int,
+    seed: int,
+    *,
+    arch: str,
+    supports: DenseSupports,
+    wpe_pinned: bool,
+    salt: str,
+):
+    """Up to ``n`` distinct random legal dense specs from the full knob space.
+
+    Same random walk as :func:`sample_tuning_specs`; ``salt`` (the candidate
+    name) keeps variants sharing a seed from drawing in lockstep.
+    """
+    import random
+
+    axes = _dense_axes_for(base, arch)
+
+    def is_valid(knobs) -> bool:
+        return _dense_knob_spec(base, supports, arch, knobs) is not None
+
+    rng = random.Random(f"{int(seed)}:{salt}")
+    waves = _dense_waves(base, wpe_pinned, "full")
+    seen: set[str] = set()
+    for _ in range(20 * int(n)):
+        if len(seen) >= n:
+            return
+        knobs = _random_knob_set(axes, {}, is_valid, rng)
+        if knobs is None:
+            continue
+        spec = _dense_knob_spec(base, supports, arch, knobs)
+        if spec is None:
+            continue
+        spec = replace(spec, waves_per_eu=rng.choice(waves))
+        name = spec.kernel_name()
+        if name not in seen:
+            seen.add(name)
             yield spec
 
 

@@ -1191,7 +1191,8 @@ library/dispatch/                         # library-owned kernels
     common.py          # shared request validation, problem adapter, features
     generic.py         # multi-arch unified_2d / unified_3d (explicit arch list)
     gfx942.py          # dense_pipe, tiled_2d/3d specializations
-    gfx950.py          # d256 prefill, attention_dense, ...
+    gfx950_dense.py    # attention_dense variants + dense ranker
+    gfx950_unified.py  # d256 prefill, unified tuning catalog
     gfx1250.py         # wmma_attention_fwd, tiled_2d/3d specializations
   gemm/  conv/  moe/  norm/               # when library gains arch kernels here
 
@@ -1221,10 +1222,10 @@ def register(registry: CandidateRegistry) -> None:
 
 ```python
 # library/dispatch/attention/__init__.py
-from . import generic, gfx942, gfx950, gfx1250
+from . import generic, gfx942, gfx950_dense, gfx950_unified, gfx1250
 
 ATTENTION_REGISTRY = CandidateRegistry("attention_unified")
-for _module in (generic, gfx942, gfx950, gfx1250):
+for _module in (generic, gfx942, gfx950_dense, gfx950_unified, gfx1250):
     _module.register(ATTENTION_REGISTRY)
 ```
 
