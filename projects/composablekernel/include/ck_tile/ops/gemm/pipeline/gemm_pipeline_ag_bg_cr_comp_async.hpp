@@ -222,6 +222,8 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
 
     // Packed scale dimensions
     static constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize / KXdlPackEff;
+    // Takes per-K-block scale DRAM windows in its tuple call (see PipelineImpl below)
+    static constexpr bool HasScaleWindowPath = true;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetPipelineName()
     {

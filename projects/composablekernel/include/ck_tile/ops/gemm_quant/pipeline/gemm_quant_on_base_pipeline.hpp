@@ -66,6 +66,47 @@ struct BlockGemmQuantRegAdaptor : QuantBlockGemm
     }
 };
 
+// For plain pipelines without a scale-window path (e.g. Mem, CompV4): the block gemm carries the
+// scale windows and loads the scales of the current K block on each (c, a, b) call. The pipelines
+// call the block gemm exactly once per K block in K order. a / b are either LDS windows (already
+// read by LocalPrefetch) or register tiles.
+template <typename QuantBlockGemm,
+          typename AQWindow,
+          typename BQWindow,
+          typename Policy,
+          typename Problem>
+struct BlockGemmQuantStreamAdaptor : BlockGemmQuantRegAdaptor<QuantBlockGemm>
+{
+    AQWindow aq_window_;
+    BQWindow bq_window_;
+
+    CK_TILE_DEVICE BlockGemmQuantStreamAdaptor(const AQWindow& aq, const BQWindow& bq)
+        : aq_window_{aq}, bq_window_{bq}
+    {
+    }
+
+    template <typename CBlockTensor, typename ABlock, typename BBlock>
+    CK_TILE_DEVICE void operator()(CBlockTensor& c, const ABlock& a, const BBlock& b)
+    {
+        constexpr auto steps = Policy::template GetScaleDramTileWindowSteps<Problem>();
+        auto scale_a         = load_tile(aq_window_);
+        auto scale_b         = load_tile(bq_window_);
+        move_tile_window(aq_window_, steps[number<0>{}]);
+        move_tile_window(bq_window_, steps[number<1>{}]);
+        if constexpr(is_tile_window_with_static_distribution_v<ABlock>)
+        {
+            if constexpr(is_null_tensor_v<decltype(scale_a)>)
+                QuantBlockGemm::operator()(c, scale_b, a, b);
+            else if constexpr(is_null_tensor_v<decltype(scale_b)>)
+                QuantBlockGemm::operator()(c, scale_a, a, b);
+            else
+                QuantBlockGemm::operator()(c, scale_a, scale_b, a, b);
+        }
+        else
+            BlockGemmQuantRegAdaptor<QuantBlockGemm>::operator()(c, a, b, scale_a, scale_b);
+    }
+};
+
 // Policy of the plain pipeline with the quant block gemm and quant scale-window steps.
 template <typename BasePolicy, typename QuantPolicy, QuantType QT>
 struct GemmQuantBasePolicy : BasePolicy
@@ -125,6 +166,11 @@ struct GemmQuantOnBasePipeline : QuantPipeline
         GemmQuantBasePolicy<typename rebind_policy<BasePipeline, void>::policy, QuantPolicy, QT>>::
         type;
 
+    template <typename P>
+    using scale_window_path_t = decltype(P::HasScaleWindowPath);
+    // Pipelines that stream per-K-block scale windows themselves (e.g. CompAsync)
+    static constexpr bool HasScaleWindowPath =
+        is_detected<scale_window_path_t, BasePipeline>::value;
     static constexpr index_t PrefetchStages = BasePipeline::PrefetchStages;
     static constexpr bool DoubleSmemBuffer  = BasePipeline::DoubleSmemBuffer;
     static constexpr index_t GetVectorSizeA() { return BasePipeline::GetVectorSizeA(); }
@@ -172,14 +218,38 @@ struct GemmQuantOnBasePipeline : QuantPipeline
                 return GemmBQuantPipelineAgBgCrImplBase<Problem, QuantPolicy>{}.GetBQDramLoadWindow(
                     bq);
         }();
-        return RebasedPipeline{}(make_tuple(a),
-                                 element_wise::PassThrough{},
-                                 make_tuple(b),
-                                 element_wise::PassThrough{},
-                                 make_tuple(aq_window),
-                                 make_tuple(bq_window),
-                                 num_loop,
-                                 p_smem);
+        if constexpr(HasScaleWindowPath)
+            return RebasedPipeline{}(make_tuple(a),
+                                     element_wise::PassThrough{},
+                                     make_tuple(b),
+                                     element_wise::PassThrough{},
+                                     make_tuple(aq_window),
+                                     make_tuple(bq_window),
+                                     num_loop,
+                                     p_smem);
+        else
+        {
+            using Policy    = typename rebind_policy<RebasedPipeline, void>::policy;
+            using BlockGemm = BlockGemmQuantStreamAdaptor<
+                remove_cvref_t<decltype(QuantPolicy::template GetBlockGemm<Problem>())>,
+                decltype(aq_window),
+                decltype(bq_window),
+                Policy,
+                Problem>;
+            const auto run = [&](auto hot_loop_, auto tail_num_) {
+                return typename RebasedPipeline::template PipelineImpl<RebasedPipeline::Scheduler>{}
+                    .template operator()<hot_loop_.value, tail_num_.value>(
+                        make_tuple(a),
+                        element_wise::PassThrough{},
+                        make_tuple(b),
+                        element_wise::PassThrough{},
+                        num_loop,
+                        p_smem,
+                        BlockGemm{aq_window, bq_window});
+            };
+            return RebasedPipeline::TailHandler(
+                run, BlockHasHotloop(num_loop), GetBlockLoopTailNum(num_loop));
+        }
     }
 
     // AQuant kernel call
