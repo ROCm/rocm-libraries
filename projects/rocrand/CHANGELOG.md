@@ -5,6 +5,24 @@ Documentation for rocRAND is available at
 
 ## rocRAND 5.1.0 for ROCm 10.1.0
 
+### Added
+
+* Generated Fortran bindings for rocRAND, as a single self-contained `rocrand` module
+  (`use rocrand`, link `roc::rocrand_fortran`). Built by default when a Fortran compiler is
+  available; controlled by `BUILD_FORTRAN_BINDINGS`, with `BUILD_FORTRAN_TESTS` and the
+  tri-state `FORTRAN_ARRAY_INTERFACES`. The package is found with
+  `find_package(rocrand-fortran)` and installs per compiler under
+  `lib/fortran/<compiler>` and `include/fortran/<compiler>`.
+
+### Removed
+
+* The deprecated hand-written Fortran wrapper (`library/src/fortran/rocrand_m.f90`), its
+  `BUILD_FORTRAN_WRAPPER` option and its FRUIT-based test suite, superseded by the generated
+  bindings above. The wrapper was deprecated in favour of hipfort in rocRAND 4.0.0 (ROCm 7.0)
+  and was never shipped enabled, so `rocrand_FORTRAN_FOUND` was already `NOTFOUND` and
+  `rocrand_FORTRAN_SRC_DIRS` was never set in a released package. Source builds that passed
+  `-DBUILD_FORTRAN_WRAPPER=ON` are affected and should move to `use rocrand`.
+
 ### Optimized
 
 * Added tuning configurations for gfx950 across rocRAND generators.

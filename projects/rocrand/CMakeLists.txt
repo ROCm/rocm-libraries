@@ -34,7 +34,10 @@ endif()
 # Build options
 include(CMakeDependentOption)
 
-option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
+# Declared here as well as in fortran/, so that print_configuration_summary()
+# below, which runs before add_subdirectory(fortran), has a value to report.
+# The second option() call in the subdirectory reuses this cache entry.
+option(BUILD_FORTRAN_BINDINGS "Build the rocRAND Fortran bindings" ON)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 cmake_dependent_option(BUILD_BENCHMARK_TUNING
@@ -194,15 +197,26 @@ include(cmake/Summary.cmake)
 print_configuration_summary()
 
 # The "tools" and "library" targets may be skipped under certain conditions when USE_SYSTEM_LIB=ON
-if ((NOT BUILD_BENCHMARK) AND (NOT BUILD_FORTRAN_WRAPPER) AND BUILD_TEST AND USE_SYSTEM_LIB)
+if ((NOT BUILD_BENCHMARK) AND BUILD_TEST AND USE_SYSTEM_LIB)
   message(STATUS "Skipping the 'tools' and 'library' targets as only BUILD_TEST=ON and USE_SYSTEM_LIB=ON were specified")
 else()
   # Tools
   add_subdirectory(tools)
 
-  # rocRAND library, adds library target "rocrand" and includes Fortran wrapper
+  # rocRAND library, adds library target "rocrand"
   add_subdirectory(library)
 endif()
+
+# Fortran bindings, generated from the headers above and committed next to them.
+# Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS is OFF
+# or when no Fortran compiler is available, so a C-only site is unaffected.
+#
+# Outside the branch above on purpose. That branch decides whether librocrand is
+# BUILT here or taken from the system under USE_SYSTEM_LIB; the bindings need it
+# linked, not built, and resolve it from the prefix path when the in-tree target
+# is absent. Inheriting the skip would silently drop bindings the build could
+# perfectly well produce and install.
+add_subdirectory(fortran)
 
 if(BUILD_TEST OR BUILD_BENCHMARK)
   rocm_package_setup_component(clients)
