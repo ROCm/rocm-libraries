@@ -360,6 +360,39 @@ TEST(TestGroupedConvndBwdDataWmmaOverwrite, Bf16)
 #endif
 }
 
+TEST(TestGroupedConvndBwdDataWmmaOverwrite, Bf16PointwiseAVector2RegisteredOnce)
+{
+    if(!ck::is_gfx125_supported())
+    {
+        GTEST_SKIP() << "This regression is specific to gfx1250";
+    }
+#ifdef CK_ENABLE_BF16
+    using DeviceOp       = ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD<2,
+                                                                                           NHWGK,
+                                                                                           GKYXC,
+                                                                                           ck::Tuple<>,
+                                                                                           NHWGC,
+                                                                                           ck::bhalf_t,
+                                                                                           ck::bhalf_t,
+                                                                                           ck::Tuple<>,
+                                                                                           ck::bhalf_t,
+                                                                                           PassThrough,
+                                                                                           PassThrough,
+                                                                                           PassThrough>;
+    const auto instances = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+    const std::string name = "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<128, "
+                             "128, 128, 32, 8, 8, Filter1x1Stride1Pad0, "
+                             "16, 16, 8, 2, 2, 4, 1, 1>";
+    EXPECT_EQ(std::count_if(instances.begin(),
+                            instances.end(),
+                            [&](const auto& op) { return op->GetTypeString() == name; }),
+              1);
+#else
+    GTEST_SKIP() << "BF16 instances are disabled";
+#endif
+}
+
 TEST(TestGroupedConvndBwdDataWmmaOverwrite, PairedSplitFp16)
 {
     if(!ck::is_gfx125_supported())

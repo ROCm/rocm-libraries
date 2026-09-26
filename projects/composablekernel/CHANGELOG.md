@@ -12,6 +12,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added opt-in raw complete-invocation timing and unique candidate numbering to the grouped-convolution profiler.
 * Added a gfx1250 FP16 factor-4 packed-weight grouped forward candidate for 2D channels-last convolutions.
 * Added a gfx1250 BF16 group-local depthwise backward-weight candidate for packed 2D channels-last 3x3 convolutions with at least 256 groups and short reductions.
+* Added a gfx1250 BF16 2D channels-last pointwise backward-data WMMA-v3 instance with paired A loads for even output-channel counts and split 1; the scalar instance remains available for odd channels.
 
 ### Optimized
 
