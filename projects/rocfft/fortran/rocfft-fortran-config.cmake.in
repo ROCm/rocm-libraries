@@ -1,0 +1,173 @@
+# Config package for the rocFFT Fortran bindings.
+#
+#   find_package(rocfft-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE roc::rocfft_fortran)
+#
+# The bindings ship as one static archive and one .mod set PER FORTRAN COMPILER,
+# because a .mod is not portable across compilers or even across versions of the
+# same compiler. This package therefore resolves which installed per-compiler
+# directory the consumer should use, preferring the consumer's own compiler and
+# falling back to the one recorded at install time, and fails with a named
+# diagnostic listing what IS installed rather than letting the build hit an
+# unreadable .mod much later.
+
+@PACKAGE_INIT@
+
+set(ROCFFT_FORTRAN_COMPILER_DIR "@ROCFFT_FORTRAN_COMPILER_DIR@")
+
+# A consumer asks "is a rocFFT Fortran binding available here?" through
+# rocfft_FORTRAN_FOUND, which is set whether this package is reached directly by
+# find_package(rocfft-fortran) or through an OPTIONAL include from
+# rocfft-config.cmake. It stays FALSE on every early return below.
+set(rocfft_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(rocfft-fortran_FOUND FALSE)
+  # One argument, not several. set() with multiple arguments builds a LIST, and
+  # find_package renders a list with a semicolon at every element boundary, so a
+  # message split across lines for readability comes out as
+  # "... find_package: ;add Fortran to ...".
+  string(CONCAT rocfft-fortran_NOT_FOUND_MESSAGE
+      "The rocFFT Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# Compared on the compiler EXECUTABLE name, the same key the install layout is
+# built from -- and derived the SAME way, from CMAKE_Fortran_COMPILER_ID mapped
+# back to the executable, so the check and the directory it guards cannot drift
+# apart. A plain basename here would reject a consumer building through an MPI
+# wrapper or a gfortran-13 binary whose .mod the installed bindings are perfectly
+# readable by. It catches the case that actually bites (gfortran reading an
+# amdflang .mod) and deliberately does not police version skew inside one
+# compiler, which amdflang itself can tolerate via -fmodule-mismatch-check=warn.
+#
+# This MUST mirror the mapping in projects/rocfft/fortran/CMakeLists.txt exactly.
+# The two cannot share code -- this file runs in a consumer's build, long after
+# ours is gone -- so they are kept in step by hand. Get it wrong and the check
+# never matches: the package then rejects EVERY consumer with a message claiming
+# a compiler mismatch that does not exist. Comparing against anything the
+# CMakeLists does not itself install under -- CMAKE_Fortran_COMPILER_ID, or an
+# "id-version" string like gnu-13.3.0 -- is exactly that bug.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(_rocfft_fc "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")     # Flang, LLVMFlang
+  set(_rocfft_fc "amdflang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+  set(_rocfft_fc "ftn")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+  set(_rocfft_fc "ifx")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(_rocfft_fc "ifort")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  set(_rocfft_fc "nvfortran")
+else()
+  get_filename_component(_rocfft_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+  string(TOLOWER "${_rocfft_fc}" _rocfft_fc)
+endif()
+
+# A site that installs several versions of one compiler side by side overrides
+# ROCFFT_FORTRAN_COMPILER_DIR with a suffixed name (gfortran-13.3.0), so the
+# recorded directory is accepted when it is the derived name, or that name
+# followed by a separator and anything. A strict equality would reject exactly
+# the sites that used the documented override. Note what this cannot do: the
+# layout records no version, so the package cannot tell gfortran 13 from
+# gfortran 15 by itself.
+#
+# Done by length and substring rather than by regex. _rocfft_fc comes from
+# CMAKE_Fortran_COMPILER's basename on the fallback branch above, so it is an
+# arbitrary file name; interpolating it into a regex would let a compiler called
+# g++.wrapper or flang(2) either mismatch silently or abort CMake with a regex
+# error. There is no regex-escape in CMake, so the comparison avoids regex.
+function(_rocfft_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+# Which per-compiler directory to use.
+#
+# The recorded ROCFFT_FORTRAN_COMPILER_DIR is the compiler the package was built
+# with, and it is only a default. A prefix can hold artifacts for several
+# compilers at once -- installing the bindings twice writes
+# include/fortran/gfortran and include/fortran/amdflang side by side -- but the
+# config package is written once, so the recorded value names whichever install
+# ran last. Trusting it blindly rejects a consumer whose .mod is present.
+#
+# So prefer the consumer's OWN compiler when its artifacts are installed here,
+# and fall back to the recorded directory when they are not.
+set(_rocfft_dir "")
+if(EXISTS "${PACKAGE_PREFIX_DIR}/include/fortran/${_rocfft_fc}/rocfft.mod")
+  set(_rocfft_dir "${_rocfft_fc}")
+else()
+  _rocfft_dir_matches("${ROCFFT_FORTRAN_COMPILER_DIR}" "${_rocfft_fc}" _rocfft_ok)
+  if(_rocfft_ok)
+    set(_rocfft_dir "${ROCFFT_FORTRAN_COMPILER_DIR}")
+  endif()
+endif()
+
+if(NOT _rocfft_dir)
+  # Name what IS installed, so the reader can see whether they need to rebuild
+  # or merely point at an existing directory.
+  file(GLOB _rocfft_avail RELATIVE "${PACKAGE_PREFIX_DIR}/include/fortran"
+       "${PACKAGE_PREFIX_DIR}/include/fortran/*")
+  set(rocfft-fortran_FOUND FALSE)
+  string(CONCAT rocfft-fortran_NOT_FOUND_MESSAGE
+      "This project builds with ${_rocfft_fc}, but no rocfft.mod for it is "
+      "installed under ${PACKAGE_PREFIX_DIR}/include/fortran. Available: "
+      "${_rocfft_avail}. A Fortran .mod cannot be shared across compilers; "
+      "rebuild the bindings with ${_rocfft_fc}, or set "
+      "ROCFFT_FORTRAN_COMPILER_DIR to the directory to use.")
+  return()
+endif()
+
+# The exported target carries roc::rocfft in its link interface, so that target
+# has to exist BEFORE the targets file is read -- otherwise CMake stops with "the
+# link interface of target roc::rocfft_fortran contains: roc::rocfft but the
+# target was not found", which reads like a packaging bug rather than a missing
+# find_package in the consumer.
+#
+# rocfft-config.cmake does find_dependency(hip), and hip-config.cmake reaches
+# FindThreads, which hard-errors unless C or CXX is enabled. A Fortran-only
+# consumer has neither, so C is enabled here. Enabling a language from a config
+# package is unusual, and it is done deliberately: the alternative is making
+# every Fortran consumer of these bindings write enable_language(C) for a reason
+# that has nothing to do with their code.
+if(NOT TARGET roc::rocfft)
+  if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+    enable_language(C)
+  endif()
+  include(CMakeFindDependencyMacro)
+  find_dependency(rocfft)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/rocfft-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was BUILT with. When the
+# consumer's compiler resolved to a different one above, repoint the imported
+# target at it, otherwise the .mod found and the archive linked would disagree.
+if(NOT _rocfft_dir STREQUAL "${ROCFFT_FORTRAN_COMPILER_DIR}")
+  set_target_properties(roc::rocfft_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include/fortran/${_rocfft_dir}")
+  get_target_property(_rocfft_cfgs roc::rocfft_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_rocfft_c IN LISTS _rocfft_cfgs)
+    set_target_properties(roc::rocfft_fortran PROPERTIES
+      IMPORTED_LOCATION_${_rocfft_c}
+        "${PACKAGE_PREFIX_DIR}/lib/fortran/${_rocfft_dir}/librocfft_fortran.a")
+  endforeach()
+endif()
+
+set(rocfft_FORTRAN_FOUND TRUE)
+
+check_required_components(rocfft-fortran)
