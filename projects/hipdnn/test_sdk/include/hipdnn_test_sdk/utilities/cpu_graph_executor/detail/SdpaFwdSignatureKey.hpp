@@ -115,11 +115,22 @@ struct SdpaFwdSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
-        // FP8 (E4M3) inputs with BF16 output — matches the ASM engine's fp8bf16 path.
-        // Requires q/k/v descales (enforced in SdpaFwdPlanBuilder::isApplicable).
+        // FP8 OCP E4M3 (bias 7) inputs with BF16 output. Retained for the forthcoming
+        // gfx950/MI350 OCP fp8 forward path (kernels to be added soon). Currently
+        // unreachable via the ASM engine, which accepts only FP8_E4M3_FNUZ and declines
+        // OCP fp8 (see SdpaFwdPlanBuilder::isApplicable); kept so the reference is ready
+        // once those kernels land. Dequant math is dtype-generic, so it stays correct.
+        // See the FNUZ registration just below.
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        // FP8 E4M3 FNUZ inputs with BF16 output — the gfx942/MI300 hardware fp8 encoding
+        // (exp bias 8, non-bit-compatible with OCP E4M3) that the vendored ASM fp8 kernels
+        // consume; registered so the reference dequantizes the same bytes as the device.
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
