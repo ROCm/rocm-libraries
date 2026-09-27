@@ -249,6 +249,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX94X)
+        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32.TestFloat/1026") # Disable flaky test ALMIOPEN-1926
         add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32.TestFloat/1095") # Disable flaky test ALMIOPEN-1926
     endif()
 
