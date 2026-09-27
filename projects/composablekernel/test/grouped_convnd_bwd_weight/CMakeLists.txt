@@ -34,6 +34,11 @@ if(GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA
       device_grouped_conv3d_bwd_weight_ndhwgc_instance)
 endif()
 
+if(GPU_TARGETS MATCHES "gfx1250" AND CK_ENABLE_BF16)
+   add_gtest_executable(test_grouped_convnd_bwd_weight_row_strip_bf16 test_grouped_convnd_bwd_weight_row_strip_bf16.cpp)
+   target_link_libraries(test_grouped_convnd_bwd_weight_row_strip_bf16 PRIVATE utility)
+endif()
+
 if(GPU_TARGETS MATCHES "gfx9|gfx1250")
   if(CK_EXPERIMENTAL_BUILDER AND NOT CK_TILE_DISPATCHER)
     add_gtest_executable(test_grouped_convnd_bwd_weight_tile test_grouped_convnd_bwd_weight_tile.cpp)
