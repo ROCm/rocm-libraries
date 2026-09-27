@@ -250,14 +250,19 @@ inline void registerReferenceValidationTests(const std::vector<LoadedBundle>& bu
             nullptr,
             __FILE__,
             __LINE__,
-            [loaded = bundle.bundle, path = bundle.jsonPath, referenceType]() -> ::testing::Test* {
-                // Only the GPU reference touches a device. Passing true for the CPU
-                // lane made SetUp() run SKIP_IF_NO_DEVICES() on work that reads and
-                // writes host memory, so CPU golden-data validation silently skipped
-                // on any runner without a GPU.
-                const bool requiresDevice = referenceType == ReferenceExecutorType::GPU;
+            [loaded = bundle.bundle,
+             path = bundle.jsonPath,
+             referenceType,
+             validator = TestConfig::get().getValidatorDevice()]() -> ::testing::Test* {
+                // Only the GPU reference — or a forced GPU validator — touches a
+                // device. Passing true for a plain CPU lane made SetUp() run
+                // SKIP_IF_NO_DEVICES() on work that reads and writes host memory, so
+                // CPU golden-data validation silently skipped on any runner without a
+                // GPU.
+                const bool requiresDevice = referenceType == ReferenceExecutorType::GPU
+                                            || validator == ValidatorDevice::GPU;
                 auto* test = new BundleReferenceValidationHarness(
-                    referenceType, requiresDevice, sharedReferenceExecutors());
+                    referenceType, requiresDevice, sharedReferenceExecutors(), validator);
                 test->setBundle(loaded, path);
                 return test;
             });

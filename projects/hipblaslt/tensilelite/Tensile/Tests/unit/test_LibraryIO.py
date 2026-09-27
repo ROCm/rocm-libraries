@@ -384,3 +384,40 @@ def test_reorder_solution_dict_for_dict_merge_sorts_internal_support_params() ->
     }
     out = LibraryIO.reorderSolutionDictForDictMerge(state)
     assert list(out["InternalSupportParams"].keys()) == ["a", "b"]
+
+
+def test_use_kd_tree_round_trips_through_list_format() -> None:
+    """``UseKdTree`` is carried from the header onto Library metadata, then re-emitted."""
+    header = {"Architecture": "gfx942", "CUCount": 228, "UseKdTree": True}
+    parsed = LibraryIO.parseLibraryLogicList(
+        [
+            {"MinimumRequiredVersion": "5.0.0"},
+            "aquavanjaram",
+            header,
+            ["Device 0049"],
+            {"OperationType": "GEMM"},
+            [{"SolutionIndex": 0}],
+            [2, 3, 0, 1],
+            [[[128, 128, 1, 128], [0, 0.0]]],
+            None,
+            None,
+            "DeviceEfficiency",
+            "GridBased",
+        ]
+    )
+    assert parsed["UseKdTree"] is True
+    assert parsed["Library"]["useKdTree"] is True
+    assert LibraryIO.rawLibraryLogic(parsed)[2] == header
+
+
+def test_prepare_library_logic_dict_use_kd_tree() -> None:
+    """``prepareLibraryLogicDict`` promotes ``UseKdTree`` for dict-format logic."""
+    data: dict[str, Any] = {
+        "LibraryType": "GridBased",
+        "IndexOrder": [2, 3, 0, 1],
+        "ExactLogic": [[[128, 128, 1, 128], [0, 0.0]]],
+        "Solutions": [{"SolutionIndex": 0}],
+        "UseKdTree": True,
+    }
+    LibraryIO.prepareLibraryLogicDict(data)
+    assert data["Library"]["useKdTree"] is True
