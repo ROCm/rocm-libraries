@@ -2459,7 +2459,8 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
                                                    int               ldb,
                                                    float*            X,
                                                    int               ldx,
-                                                   size_t*           lwork)
+                                                   size_t*           lwork,
+                                                   int               bc)
 {
     switch(API)
     {
@@ -2487,7 +2488,8 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
                                                    int               ldb,
                                                    double*           X,
                                                    int               ldx,
-                                                   size_t*           lwork)
+                                                   size_t*           lwork,
+                                                   int               bc)
 {
     switch(API)
     {
@@ -2515,7 +2517,8 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
                                                    int               ldb,
                                                    hipsolverComplex* X,
                                                    int               ldx,
-                                                   size_t*           lwork)
+                                                   size_t*           lwork,
+                                                   int               bc)
 {
     switch(API)
     {
@@ -2573,7 +2576,8 @@ inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t               API,
                                                    int                     ldb,
                                                    hipsolverDoubleComplex* X,
                                                    int                     ldx,
-                                                   size_t*                 lwork)
+                                                   size_t*                 lwork,
+                                                   int                     bc)
 {
     switch(API)
     {
@@ -2871,6 +2875,277 @@ inline hipsolverStatus_t hipsolver_gels(testAPI_t               API,
                                  lwork,
                                  niters,
                                  info);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+// batched
+inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
+                                                   hipsolverHandle_t handle,
+                                                   int               m,
+                                                   int               n,
+                                                   int               nrhs,
+                                                   float*            A[],
+                                                   int               lda,
+                                                   float*            B[],
+                                                   int               ldb,
+                                                   float*            X[],
+                                                   int               ldx,
+                                                   size_t*           lwork,
+                                                   int               bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverSgelsBatched_bufferSize(
+            handle, HIPBLAS_OP_N, m, n, nrhs, A, lda, B, ldb, lwork, bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
+                                                   hipsolverHandle_t handle,
+                                                   int               m,
+                                                   int               n,
+                                                   int               nrhs,
+                                                   double*           A[],
+                                                   int               lda,
+                                                   double*           B[],
+                                                   int               ldb,
+                                                   double*           X[],
+                                                   int               ldx,
+                                                   size_t*           lwork,
+                                                   int               bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverDgelsBatched_bufferSize(
+            handle, HIPBLAS_OP_N, m, n, nrhs, A, lda, B, ldb, lwork, bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t         API,
+                                                   hipsolverHandle_t handle,
+                                                   int               m,
+                                                   int               n,
+                                                   int               nrhs,
+                                                   hipsolverComplex* A[],
+                                                   int               lda,
+                                                   hipsolverComplex* B[],
+                                                   int               ldb,
+                                                   hipsolverComplex* X[],
+                                                   int               ldx,
+                                                   size_t*           lwork,
+                                                   int               bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverCgelsBatched_bufferSize(handle,
+                                                HIPBLAS_OP_N,
+                                                m,
+                                                n,
+                                                nrhs,
+                                                (hipFloatComplex**)A,
+                                                lda,
+                                                (hipFloatComplex**)B,
+                                                ldb,
+                                                lwork,
+                                                bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels_bufferSize(testAPI_t               API,
+                                                   hipsolverHandle_t       handle,
+                                                   int                     m,
+                                                   int                     n,
+                                                   int                     nrhs,
+                                                   hipsolverDoubleComplex* A[],
+                                                   int                     lda,
+                                                   hipsolverDoubleComplex* B[],
+                                                   int                     ldb,
+                                                   hipsolverDoubleComplex* X[],
+                                                   int                     ldx,
+                                                   size_t*                 lwork,
+                                                   int                     bc)
+{
+    switch(API)
+    {
+    case API_NORMAL:
+        return hipsolverZgelsBatched_bufferSize(handle,
+                                                HIPBLAS_OP_N,
+                                                m,
+                                                n,
+                                                nrhs,
+                                                (hipDoubleComplex**)A,
+                                                lda,
+                                                (hipDoubleComplex**)B,
+                                                ldb,
+                                                lwork,
+                                                bc);
+    default:
+        *lwork = 0;
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels(testAPI_t         API,
+                                        bool              INPLACE,
+                                        hipsolverHandle_t handle,
+                                        int               m,
+                                        int               n,
+                                        int               nrhs,
+                                        float*            A[],
+                                        int               lda,
+                                        int               stA,
+                                        float*            B[],
+                                        int               ldb,
+                                        int               stB,
+                                        float*            X[],
+                                        int               ldx,
+                                        int               stX,
+                                        float*            work,
+                                        size_t            lwork,
+                                        int*              niters,
+                                        int*              info,
+                                        int               bc)
+{
+    switch(api2marshal(API, INPLACE))
+    {
+    case C_NORMAL_ALT:
+        // use niters for hInfo
+        return hipsolverSgelsBatched(
+            handle, HIPBLAS_OP_N, m, n, nrhs, A, lda, B, ldb, work, lwork, niters, info, bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels(testAPI_t         API,
+                                        bool              INPLACE,
+                                        hipsolverHandle_t handle,
+                                        int               m,
+                                        int               n,
+                                        int               nrhs,
+                                        double*           A[],
+                                        int               lda,
+                                        int               stA,
+                                        double*           B[],
+                                        int               ldb,
+                                        int               stB,
+                                        double*           X[],
+                                        int               ldx,
+                                        int               stX,
+                                        double*           work,
+                                        size_t            lwork,
+                                        int*              niters,
+                                        int*              info,
+                                        int               bc)
+{
+    switch(api2marshal(API, INPLACE))
+    {
+    case C_NORMAL_ALT:
+        // use niters for hInfo
+        return hipsolverDgelsBatched(
+            handle, HIPBLAS_OP_N, m, n, nrhs, A, lda, B, ldb, work, lwork, niters, info, bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels(testAPI_t         API,
+                                        bool              INPLACE,
+                                        hipsolverHandle_t handle,
+                                        int               m,
+                                        int               n,
+                                        int               nrhs,
+                                        hipsolverComplex* A[],
+                                        int               lda,
+                                        int               stA,
+                                        hipsolverComplex* B[],
+                                        int               ldb,
+                                        int               stB,
+                                        hipsolverComplex* X[],
+                                        int               ldx,
+                                        int               stX,
+                                        hipsolverComplex* work,
+                                        size_t            lwork,
+                                        int*              niters,
+                                        int*              info,
+                                        int               bc)
+{
+    switch(api2marshal(API, INPLACE))
+    {
+    case C_NORMAL_ALT:
+        // use niters for hInfo
+        return hipsolverCgelsBatched(handle,
+                                     HIPBLAS_OP_N,
+                                     m,
+                                     n,
+                                     nrhs,
+                                     (hipFloatComplex**)A,
+                                     lda,
+                                     (hipFloatComplex**)B,
+                                     ldb,
+                                     work,
+                                     lwork,
+                                     niters,
+                                     info,
+                                     bc);
+    default:
+        return HIPSOLVER_STATUS_NOT_SUPPORTED;
+    }
+}
+
+inline hipsolverStatus_t hipsolver_gels(testAPI_t               API,
+                                        bool                    INPLACE,
+                                        hipsolverHandle_t       handle,
+                                        int                     m,
+                                        int                     n,
+                                        int                     nrhs,
+                                        hipsolverDoubleComplex* A[],
+                                        int                     lda,
+                                        int                     stA,
+                                        hipsolverDoubleComplex* B[],
+                                        int                     ldb,
+                                        int                     stB,
+                                        hipsolverDoubleComplex* X[],
+                                        int                     ldx,
+                                        int                     stX,
+                                        hipsolverDoubleComplex* work,
+                                        size_t                  lwork,
+                                        int*                    niters,
+                                        int*                    info,
+                                        int                     bc)
+{
+    switch(api2marshal(API, INPLACE))
+    {
+    case C_NORMAL_ALT:
+        // use niters for hInfo
+        return hipsolverZgelsBatched(handle,
+                                     HIPBLAS_OP_N,
+                                     m,
+                                     n,
+                                     nrhs,
+                                     (hipDoubleComplex**)A,
+                                     lda,
+                                     (hipDoubleComplex**)B,
+                                     ldb,
+                                     work,
+                                     lwork,
+                                     niters,
+                                     info,
+                                     bc);
     default:
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }

@@ -416,6 +416,30 @@ hipsolver<type><type>gels()
    :outline:
 .. doxygenfunction:: hipsolverSSgels
 
+.. _gels_batched_bufferSize:
+
+hipsolver<type>gelsBatched_bufferSize()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgelsBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverCgelsBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverDgelsBatched_bufferSize
+   :outline:
+.. doxygenfunction:: hipsolverSgelsBatched_bufferSize
+
+.. _gels_batched:
+
+hipsolver<type>gelsBatched()
+---------------------------------------------------
+.. doxygenfunction:: hipsolverZgelsBatched
+   :outline:
+.. doxygenfunction:: hipsolverCgelsBatched
+   :outline:
+.. doxygenfunction:: hipsolverDgelsBatched
+   :outline:
+.. doxygenfunction:: hipsolverSgelsBatched
+
 
 
 .. _eigens:
