@@ -36,6 +36,26 @@ target_include_directories(
 )
 target_link_libraries(hipdnn_data_sdk INTERFACE ${CMAKE_DL_LIBS})
 
+# Sanitizers.cmake applies the sanitizer flags with add_compile_options/add_link_options, which are
+# directory-scoped and so reach nothing outside this build. Every other hipDNN target reaches
+# hipdnn_data_sdk transitively, which makes it the one place that propagates them to consumers of
+# the installed package.
+#
+# The link flags are what let a consumer link at all: hipDNN's Linux ASAN build uses
+# -shared-libasan, and an application or plugin that links the default static runtime instead dies
+# at start-up with "Your application is linked against incompatible ASan runtimes" -- a message that
+# names neither hipDNN nor the flag. ADDRESS_SANITIZER is what makes the suppressions hook in
+# hipdnn_test_sdk compile to something rather than to an empty translation unit.
+if(BUILD_ADDRESS_SANITIZER
+   OR THEROCK_SANITIZER STREQUAL "ASAN"
+   OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"
+)
+    target_compile_definitions(hipdnn_data_sdk INTERFACE ADDRESS_SANITIZER)
+    if(SANITIZER_LINK_FLAGS)
+        target_link_options(hipdnn_data_sdk INTERFACE ${SANITIZER_LINK_FLAGS})
+    endif()
+endif()
+
 export(TARGETS hipdnn_data_sdk
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"
 )
