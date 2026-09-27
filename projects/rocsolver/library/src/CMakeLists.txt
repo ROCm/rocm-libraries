@@ -522,6 +522,11 @@ if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
 endif()
 
+# Feature flag: larfg setting tau=2 when norm(x)=0.
+if(ROCSOLVER_ENABLE_LARFG_TAU2)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_LARFG_TAU2)
+endif()
+
 if(ROCSOLVER_USE_INTERNAL_BLAS)
   target_compile_definitions(rocsolver PRIVATE USE_INTERNAL_GEMM USE_INTERNAL_TRSM)
 endif()
