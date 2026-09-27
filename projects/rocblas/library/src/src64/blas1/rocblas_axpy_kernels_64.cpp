@@ -96,7 +96,11 @@ rocblas_status rocblas_internal_axpy_launcher_64(rocblas_handle handle,
     }
     else
     {
-        // increments need 64 bits, can't ust 32-bit launcher
+        // increments need 64 bits, can't use 32-bit launcher.
+        // The kernel grid-strides its batch loop by c_YZ_grid_launch_limit, so it must be
+        // given the batch count for this launch. Passing the global count makes chunks
+        // past the first re-process batches the next chunk also covers, and index past
+        // the end of the batch.
         for(int64_t b = 0; b < batch_count; b += c_i64_grid_YZ_chunk)
         {
             auto    x_ptr         = adjust_ptr_batch(x, b, stride_x);
@@ -134,7 +138,7 @@ rocblas_status rocblas_internal_axpy_launcher_64(rocblas_handle handle,
                                           shifty,
                                           incy,
                                           stride_y,
-                                          batch_count);
+                                          batch_count32);
                 else
                     ROCBLAS_LAUNCH_KERNEL((rocblas_axpy_kernel<int64_t, NB, Tex>),
                                           grid,
@@ -152,7 +156,7 @@ rocblas_status rocblas_internal_axpy_launcher_64(rocblas_handle handle,
                                           shifty,
                                           incy,
                                           stride_y,
-                                          batch_count);
+                                          batch_count32);
             }
         }
     }

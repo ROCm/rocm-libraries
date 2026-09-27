@@ -1,0 +1,84 @@
+---
+include: rocblas_common.yaml
+
+# Regression for the axpy_64 chunked batch launch: the 64-bit-increment path
+# sized grid.z from the per-chunk batch count but passed the global batch_count
+# as the kernel argument, so each chunk's grid-strided batch sweep continued
+# into the next chunk's items and past the end of the batch.
+#
+# The shape is fixed in the C++ (n = 1, stride = 1, a 64-bit increment) because
+# it is dictated by the defect rather than being a parameter worth varying.
+# Only batch_count is data, because batch_count is what decides whether the
+# sweep repeats at all.
+#
+# n = 1 keeps this cheap. The span of one batch item is (n-1)*|incx| + 1, so at
+# n = 1 the 64-bit increment costs no memory and the whole case is a couple of
+# megabytes, which is why it belongs in pre_checkin rather than nightly.
+
+#
+# Every batch_count appears twice, once per pointer mode. The launcher has a
+# separate kernel launch for rocblas_pointer_mode_host and
+# rocblas_pointer_mode_device and the defect was in both, so covering one mode
+# would leave a fix that corrected only that launch looking complete. The mode
+# is in each row's name because the rows are otherwise identical.
+
+Tests:
+# Control. Two host chunks, 65520 + 15, but 0 + 65535 is not < 65535, so neither
+# chunk's sweep repeats and this passes before the fix as well as after it.
+# It is here to pin the threshold at 65536 rather than at the host chunk size of
+# 65520, which is the tempting misreading: a case written at 65530 would pass
+# against the broken kernel and be mistaken for coverage.
+- name: axpy_ilp64_chunk_control_host
+  category: pre_checkin
+  arguments:
+    - { batch_count: 65535, pointer_mode_device: false }
+  function:
+    - axpy_strided_batched_ilp64_chunk: *single_double_precisions
+  os_flags: [ LINUX ]
+
+- name: axpy_ilp64_chunk_control_device
+  category: pre_checkin
+  arguments:
+    - { batch_count: 65535, pointer_mode_device: true }
+  function:
+    - axpy_strided_batched_ilp64_chunk: *single_double_precisions
+  os_flags: [ LINUX ]
+
+# Smallest detector. Chunk 0 also processes its local item 65535, which is
+# global item 65535, and chunk 1 processes that same item as its local item 15,
+# so it receives alpha*x twice. Chunk 1's blockIdx.z == 0 additionally reaches
+# local 65535, i.e. global 131055, which is past the end of the batch.
+- name: axpy_ilp64_chunk_detect_host
+  category: pre_checkin
+  arguments:
+    - { batch_count: 65536, pointer_mode_device: false }
+  function:
+    - axpy_strided_batched_ilp64_chunk: *single_double_precisions
+  os_flags: [ LINUX ]
+
+- name: axpy_ilp64_chunk_detect_device
+  category: pre_checkin
+  arguments:
+    - { batch_count: 65536, pointer_mode_device: true }
+  function:
+    - axpy_strided_batched_ilp64_chunk: *single_double_precisions
+  os_flags: [ LINUX ]
+
+# Three host chunks, two of them saturated: tens of thousands of doubled items
+# and a deeper overrun.
+- name: axpy_ilp64_chunk_saturated_host
+  category: pre_checkin
+  arguments:
+    - { batch_count: 131070, pointer_mode_device: false }
+  function:
+    - axpy_strided_batched_ilp64_chunk: *single_double_precisions
+  os_flags: [ LINUX ]
+
+- name: axpy_ilp64_chunk_saturated_device
+  category: pre_checkin
+  arguments:
+    - { batch_count: 131070, pointer_mode_device: true }
+  function:
+    - axpy_strided_batched_ilp64_chunk: *single_double_precisions
+  os_flags: [ LINUX ]
+...
