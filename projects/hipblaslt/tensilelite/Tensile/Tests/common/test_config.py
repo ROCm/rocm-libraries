@@ -54,6 +54,7 @@ here.
 import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -85,11 +86,21 @@ def _call_helper_in_subprocess(
         f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
     )
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
-    subprocess.run(
+    # Own process group so a timeout interrupt can reap the child tree, not orphan it.
+    proc = subprocess.Popen(
         [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
-        check=True,
         env=env,
+        start_new_session=True,
     )
+    try:
+        returncode = proc.wait()
+    finally:
+        if proc.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, proc.args)
 
 
 def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
