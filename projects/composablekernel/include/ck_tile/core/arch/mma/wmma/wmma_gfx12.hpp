@@ -358,6 +358,7 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x4_f32";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -389,6 +390,7 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x32_bf16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -420,6 +422,7 @@ struct amdgcn_mma<bf16_t, bf16_t, bf16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_bf16_16x16x32_bf16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -451,6 +454,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -480,6 +484,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -509,6 +514,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -538,6 +544,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -567,6 +574,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -596,6 +604,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -625,6 +634,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -654,6 +664,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -683,6 +694,7 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 64u, CompilerTarget, MmaOpF
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_i32_16x16x64_iu8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -713,6 +725,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -742,6 +755,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -771,6 +785,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -800,6 +815,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -827,6 +843,7 @@ struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CompilerTarg
 : amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -887,6 +904,7 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CompilerTarget, Mm
 : amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -923,6 +941,7 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -952,6 +971,7 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -981,6 +1001,7 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1010,6 +1031,7 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1039,6 +1061,7 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x32_f16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -1070,6 +1093,7 @@ struct amdgcn_mma<fp16_t, fp16_t, fp16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x32_f16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
