@@ -194,6 +194,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # AISPARSE-669: distinct anchor to avoid stacked-branch merge conflicts.
+  # Launches rocsparse::csrsm (csrsm_device.h) directly on an undersized grid;
+  # header-only, so it needs no compile-in library TU.
+  unit_test_internal_level3_csrsm.cpp
 )
 
 # Host building-block library translation units under test by the
