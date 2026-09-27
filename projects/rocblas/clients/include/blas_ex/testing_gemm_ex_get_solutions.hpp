@@ -25,6 +25,18 @@
 #define ROCBLAS_BETA_FEATURES_API
 #include "testing_common.hpp"
 
+// Largest absolute element magnitude in a host matrix, used to scale the
+// per-solution numeric tolerance to the result magnitude. rocblas_abs handles
+// real, half, bfloat16 and complex element types (returning a real magnitude).
+template <typename T>
+double max_abs_element(const host_matrix<T>& mat)
+{
+    double max_abs = 0.0;
+    for(size_t i = 0; i < mat.size(); i++)
+        max_abs = std::max(max_abs, double(rocblas_abs(mat.data()[i])));
+    return max_abs;
+}
+
 template <typename Ti, typename To, typename Tc>
 void testing_gemm_ex_get_solutions(const Arguments& arg)
 {
@@ -52,6 +64,10 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     auto                 B_row  = transB == rocblas_operation_none ? std::max(K, 1) : N;
     auto                 B_col  = transB == rocblas_operation_none ? N : std::max(K, 1);
     auto                 d_type = arg.d_type;
+
+    // rocblas_local_handle{arg} already applied arg.math_mode; read it back to
+    // decide whether the CPU reference must down-cast A/B to xfloat32 (TF32).
+    rocblas_math_mode math_mode = rocblas_math_mode(arg.math_mode);
 
     // check for invalid sizes
     bool invalid_size = M < 0 || N < 0 || K < 0 || lda < A_row || ldb < B_row || ldc < M || ldd < M;
@@ -105,6 +121,73 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     DEVICE_MEMCHECK(device_vector<Tc>, d_alpha_Tc, (1));
     DEVICE_MEMCHECK(device_vector<Tc>, d_beta_Tc, (1));
 
+    // High-precision accumulate type for the CPU reference (matches testing_gemm_ex).
+    using To_hpa = std::conditional_t<std::is_same_v<To, rocblas_bfloat16>, float, To>;
+
+    // Host data + CPU reference for per-solution numeric validation. Enumerating
+    // solutions and only status-checking them (as this test historically did) cannot
+    // catch a solution that returns wrong numbers. Build the reference once and compare
+    // every solution's actual output against it below.
+    //
+    // Each solution reduces in its own tile/accumulation order, so the comparison uses a
+    // per-type near_check tolerance (not bit-exact) that ignores small precision
+    // differences while still failing on a gross error such as a dropped alpha or beta.
+    const bool check_results = arg.unit_check || arg.norm_check;
+    double     check_tol     = 0.0;
+
+    HOST_MEMCHECK(host_matrix<Ti>, hA, (A_row, A_col, lda));
+    HOST_MEMCHECK(host_matrix<Ti>, hB, (B_row, B_col, ldb));
+    HOST_MEMCHECK(host_matrix<To>, hC, (M, N, ldc));
+    HOST_MEMCHECK(host_matrix<To_hpa>, hD_gold, (M, N, ldd));
+    HOST_MEMCHECK(host_matrix<To>, hD, (M, N, ldd));
+
+    if(check_results)
+    {
+        // Initialize data on host memory
+        rocblas_init_matrix<Ti>(
+            hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true);
+        rocblas_init_matrix<Ti, true>(
+            hB, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, false, true);
+        rocblas_init_matrix<To, true>(
+            hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
+
+        // copy inputs to device (C is reset before each solution launch below)
+        CHECK_HIP_ERROR(dA.transfer_from(hA));
+        CHECK_HIP_ERROR(dB.transfer_from(hB));
+
+        // For the xf32 xdl math op, cast A/B from float to xfloat32 so the CPU
+        // reference matches the reduced-precision hardware inputs.
+        if(std::is_same<Ti, float>{} && math_mode == rocblas_xf32_xdl_math_op)
+        {
+            type_to_xdl_math_op_type<rocblas_xfloat32, float>(hA.data(), hA.size());
+            type_to_xdl_math_op_type<rocblas_xfloat32, float>(hB.data(), hB.size());
+        }
+
+        // D = alpha * op(A) * op(B) + beta * C, computed on the CPU.
+        copy_matrix_with_different_leading_dimensions(hC, hD_gold);
+        ref_gemm<Ti, To_hpa, Tc>(transA,
+                                 transB,
+                                 M,
+                                 N,
+                                 K,
+                                 h_alpha_Tc,
+                                 hA,
+                                 lda,
+                                 hB,
+                                 ldb,
+                                 h_beta_Tc,
+                                 (To_hpa*)hD_gold,
+                                 ldd,
+                                 rocblas_bfloat16::rocblas_truncate_t::rocblas_round_near_even);
+
+        // Magnitude-scaled tolerance. Each solution reduces in its own order, so valid
+        // results differ from the reference by roughly K*eps relative to the result
+        // magnitude. Scale an absolute near_check bound by the largest reference element
+        // so these small precision differences are ignored, while a gross error (e.g. a
+        // dropped alpha or beta term) stays well above the bound and still fails.
+        check_tol = max_abs_element(hD_gold) * K * sum_error_tolerance<Tc>;
+    }
+
 #define GEMM_EX_ARGS                                                                        \
     handle, transA, transB, M, N, K, &h_alpha_Tc, dA, arg.a_type, lda, dB, arg.b_type, ldb, \
         &h_beta_Tc, dC, arg.c_type, ldc, dDref, d_type, ldd, arg.compute_type, algo
@@ -141,16 +224,46 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
     EXPECT_EQ(ary[size], 0); // one past last index
     EXPECT_EQ(ary[size_large - 1], 0);
 
+    // Validate each solution. rocblas_gemm_flags_check_solution_index is query-only
+    // (it returns success without launching the kernel), so a status check alone
+    // cannot detect a wrong-result solution. When numeric checking is requested,
+    // actually execute the solution (flags_none) and compare against the CPU
+    // reference; otherwise fall back to the historical query-only status check.
+    auto check_solution = [&](int32_t sol) {
+        if(!check_results)
+        {
+            CHECK_ROCBLAS_ERROR(
+                rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_check_solution_index));
+            return;
+        }
+
+        // reset D (== C for in-place) before each launch, then run the solution
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
+        rocblas_init_nan<To>(hD, M, N, ldd);
+        if(arg.outofplace)
+            CHECK_HIP_ERROR(dDref.transfer_from(hD));
+
+        // The get_solutions query reports support without launching, so an enumerated
+        // solution can still error when actually run. Skip the numeric compare for such
+        // a solution rather than failing the whole test on it.
+        rocblas_status status = rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_none);
+        if(status != rocblas_status_success)
+            return;
+
+        CHECK_HIP_ERROR(hD.transfer_from(dDref));
+
+        // Compare against the CPU reference, ignoring small precision differences.
+        near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD, check_tol);
+    };
+
     for(auto sol : ary)
     {
-        CHECK_ROCBLAS_ERROR(
-            rocblas_gemm_exM(GEMM_EX_ARGS, sol, rocblas_gemm_flags_check_solution_index));
+        check_solution(sol);
     }
 
     // Testing 0 and -1 values work (uses default solution)
-    CHECK_ROCBLAS_ERROR(rocblas_gemm_exM(GEMM_EX_ARGS, 0, rocblas_gemm_flags_check_solution_index));
-    CHECK_ROCBLAS_ERROR(
-        rocblas_gemm_exM(GEMM_EX_ARGS, -1, rocblas_gemm_flags_check_solution_index));
+    check_solution(0);
+    check_solution(-1);
     // always have rocblas fallback
     // CHECK_ROCBLAS_ERROR(rocblas_gemm_exM(
     //     GEMM_EX_ARGS, c_rocblas_source_solution, rocblas_gemm_flags_check_solution_index));

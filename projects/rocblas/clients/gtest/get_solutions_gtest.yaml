@@ -25,6 +25,29 @@ Tests:
   precision : *real_precisions
   pointer_mode_device: false
 
+- name: gemm_ex_get_solutions_alpha_beta
+  category: pre_checkin
+  function: gemm_ex_get_solutions
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: f32_r
+  transA: N
+  transB: T
+  M: 128
+  N: 100
+  K: 128
+  lda: 128
+  ldb: 100
+  ldc: 128
+  ldd: 128
+  alpha: 1.2
+  beta: 1.0
+  math_mode: 1
+  initialization: rand_int
+  pointer_mode_device: false
+
 - name: gemm_strided_batched_ex_get_solutions
   category: pre_checkin
   function: gemm_strided_batched_ex_get_solutions
