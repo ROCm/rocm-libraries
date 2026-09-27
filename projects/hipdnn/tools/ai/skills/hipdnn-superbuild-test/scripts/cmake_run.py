@@ -16,13 +16,14 @@ HIP headers visible at runtime. hiprtc resolves those headers through
 ROCM_PATH; if it is unset, runtime compilation can fail with errors such as
 "hip/hip_fp16.h file not found".
 
-Why comgr is staged app-local: on Windows the loader resolves amd_comgr.dll
-from the .exe's directory, then System32, then PATH. The driver's stale
-System32 comgr outranks the wheel's copy on PATH and breaks MIOpen's runtime
-kernel JIT (GCN-assembly Winograd solvers are the common failure, but the
-mismatch is not limited to them), so this is done on every Windows run.
-Copying the wheel's amd_comgr.dll into <build>/bin (the test exe's own
-directory) before launch overrides it. See comgr_stage.py.
+Why shadowed DLLs are staged app-local: on Windows the loader resolves a DLL
+by name from the .exe's directory, then System32, then PATH. The driver's stale
+System32 copies of amd_comgr.dll and amdhip64_<N>.dll outrank the wheel's
+copies on PATH: stale comgr breaks MIOpen's runtime kernel JIT (GCN-assembly
+Winograd solvers are the common failure), and a stale HIP runtime makes the
+wheel's rocBLAS fault (access violation in MIOpen's GEMM conv solvers). So on
+every Windows run the wheel's copies are staged into <build>/bin (the test
+exe's own directory) before launch. See stage_shadowed_dlls.py.
 """
 
 import argparse
@@ -54,21 +55,21 @@ def resolve_rocm_bin(args, rocm_path):
     return None
 
 
-def stage_comgr_if_windows(args, rocm_bin):
-    """Stage the wheel's amd_comgr.dll into <build>/bin on Windows (best effort).
+def stage_shadowed_dlls_if_windows(args, rocm_bin):
+    """Stage the wheel's System32-shadowed DLLs into <build>/bin on Windows (best effort).
 
     Imported lazily and guarded so a missing helper or staging error never
-    blocks the actual test run; the worst case is the pre-existing comgr issue.
+    blocks the actual test run; the worst case is the pre-existing shadowing issue.
     """
-    if platform.system() != "Windows" or args.no_stage_comgr or not rocm_bin:
+    if platform.system() != "Windows" or args.no_stage_shadowed_dlls or not rocm_bin:
         return
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
-        from comgr_stage import stage_comgr
+        from stage_shadowed_dlls import stage_shadowed_dlls
 
-        stage_comgr(rocm_bin, Path(args.build_dir) / "bin", verbose=True)
+        stage_shadowed_dlls(rocm_bin, Path(args.build_dir) / "bin", verbose=True)
     except Exception as error:  # noqa: BLE001 - never fail the test run on staging
-        print(f"comgr-stage: skipped ({error})", file=sys.stderr)
+        print(f"shadowed-dll-stage: skipped ({error})", file=sys.stderr)
 
 
 def build_env(args):
@@ -107,9 +108,10 @@ def main():
         help="Windows: additional bin directory to prepend. Repeatable.",
     )
     p.add_argument(
-        "--no-stage-comgr",
+        "--no-stage-shadowed-dlls",
         action="store_true",
-        help="Windows: skip staging the wheel's amd_comgr.dll into <build>/bin",
+        help="Windows: skip staging the wheel's amd_comgr.dll and amdhip64_<N>.dll "
+        "into <build>/bin",
     )
     p.add_argument(
         "--extra-arg",
@@ -147,7 +149,7 @@ def main():
     env = build_env(args)
 
     rocm_path = resolve_rocm_path(args.rocm_path, args.rocm_bin)
-    stage_comgr_if_windows(args, resolve_rocm_bin(args, rocm_path))
+    stage_shadowed_dlls_if_windows(args, resolve_rocm_bin(args, rocm_path))
 
     if args.binary:
         cmd = [args.binary]

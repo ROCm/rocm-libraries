@@ -256,6 +256,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 # Setup testing dependencies
 include(Dependencies)
