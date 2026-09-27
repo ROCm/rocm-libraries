@@ -39,6 +39,12 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+# The benchmarks use primbench device monitoring, which links against amd-smi.
+# amd-smi is not available on Windows; it is required everywhere else.
+if(NOT WIN32)
+  find_package(amd_smi REQUIRED)
+endif()
+
 # Register a benchmark target
 function(add_benchmark benchmark_src)
   get_filename_component(BENCHMARK_TARGET ${benchmark_src} NAME_WE)
