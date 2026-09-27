@@ -16763,8 +16763,8 @@ class KernelWriterAssembly(KernelWriter):
     maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
                                                       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
     # Set occupancy limit for register pools
-    # TODO: Support gfx12
-    if kernel["ISA"][0] != 12:
+    # TODO: Support gfx12 and gfx117x
+    if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
       self.vgprPool.setOccupancyLimit(self.states.regCaps["MaxVgpr"], self.states.regCaps["PhysicalMaxVgpr"] // occupancy)
       self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
     return maxVgprs, occupancy
