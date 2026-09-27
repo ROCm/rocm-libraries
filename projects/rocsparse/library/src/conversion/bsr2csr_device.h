@@ -30,7 +30,12 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, typename T, typename I, typename J>
+    template <uint32_t BLOCK_SIZE,
+              uint32_t BLOCK_DIM,
+              bool     GRID_STRIDE,
+              typename T,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_2_7_kernel(rocsparse_direction  direction,
                                           J                    mb,
@@ -49,15 +54,6 @@ namespace rocsparse
         uint32_t BLOCK_DIM2 = fnp2(BLOCK_DIM);
 
         J tid = hipThreadIdx_x;
-        J bid = hipBlockIdx_x;
-
-        I start = bsr_row_ptr[bid] - bsr_base;
-        I end   = bsr_row_ptr[bid + 1] - bsr_base;
-
-        if(bid == 0 && tid == 0)
-        {
-            csr_row_ptr[0] = csr_base;
-        }
 
         J lid = tid & (BLOCK_DIM2 - 1);
         J wid = tid / BLOCK_DIM2;
@@ -69,33 +65,56 @@ namespace rocsparse
             return;
         }
 
-        I prev    = BLOCK_DIM * BLOCK_DIM * start + BLOCK_DIM * (end - start) * r;
-        I current = BLOCK_DIM * (end - start);
-
-        csr_row_ptr[BLOCK_DIM * bid + r + 1] = prev + current + csr_base;
-
-        for(I i = start + wid; i < end; i += (BLOCK_SIZE / BLOCK_DIM2))
+        for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
-            J col    = bsr_col_ind[i] - bsr_base;
-            I offset = prev + BLOCK_DIM * (i - start);
+            I start = bsr_row_ptr[bid] - bsr_base;
+            I end   = bsr_row_ptr[bid + 1] - bsr_base;
 
-            for(J j = 0; j < BLOCK_DIM; j++)
+            if(bid == 0 && tid == 0)
             {
-                csr_col_ind[offset + j] = BLOCK_DIM * col + j + csr_base;
+                csr_row_ptr[0] = csr_base;
+            }
 
-                if(direction == rocsparse_direction_row)
+            I prev    = BLOCK_DIM * BLOCK_DIM * start + BLOCK_DIM * (end - start) * r;
+            I current = BLOCK_DIM * (end - start);
+
+            csr_row_ptr[BLOCK_DIM * bid + r + 1] = prev + current + csr_base;
+
+            for(I i = start + wid; i < end; i += (BLOCK_SIZE / BLOCK_DIM2))
+            {
+                J col    = bsr_col_ind[i] - bsr_base;
+                I offset = prev + BLOCK_DIM * (i - start);
+
+                for(J j = 0; j < BLOCK_DIM; j++)
                 {
-                    csr_val[offset + j] = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r * BLOCK_DIM + j];
+                    csr_col_ind[offset + j] = BLOCK_DIM * col + j + csr_base;
+
+                    if(direction == rocsparse_direction_row)
+                    {
+                        csr_val[offset + j]
+                            = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r * BLOCK_DIM + j];
+                    }
+                    else
+                    {
+                        csr_val[offset + j]
+                            = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r + BLOCK_DIM * j];
+                    }
                 }
-                else
-                {
-                    csr_val[offset + j] = bsr_val[BLOCK_DIM * BLOCK_DIM * i + r + BLOCK_DIM * j];
-                }
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }
 
-    template <uint32_t BLOCK_SIZE, uint32_t BLOCK_DIM, typename T, typename I, typename J>
+    template <uint32_t BLOCK_SIZE,
+              uint32_t BLOCK_DIM,
+              bool     GRID_STRIDE,
+              typename T,
+              typename I,
+              typename J>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void bsr2csr_block_per_row_8_32_kernel(rocsparse_direction  direction,
                                            J                    mb,
@@ -111,15 +130,6 @@ namespace rocsparse
                                            J* __restrict__ csr_col_ind)
     {
         J tid = hipThreadIdx_x;
-        J bid = hipBlockIdx_x;
-
-        I start = bsr_row_ptr[bid] - bsr_base;
-        I end   = bsr_row_ptr[bid + 1] - bsr_base;
-
-        if(bid == 0 && tid == 0)
-        {
-            csr_row_ptr[0] = csr_base;
-        }
 
         J lid = tid & (BLOCK_DIM * BLOCK_DIM - 1);
         J wid = tid / (BLOCK_DIM * BLOCK_DIM);
@@ -132,25 +142,41 @@ namespace rocsparse
             return;
         }
 
-        I prev    = block_dim * block_dim * start + block_dim * (end - start) * r;
-        I current = block_dim * (end - start);
-
-        csr_row_ptr[block_dim * bid + r + 1] = prev + current + csr_base;
-
-        for(I i = start + wid; i < end; i += (BLOCK_SIZE / (BLOCK_DIM * BLOCK_DIM)))
+        for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
-            J col    = bsr_col_ind[i] - bsr_base;
-            I offset = prev + block_dim * (i - start) + c;
+            I start = bsr_row_ptr[bid] - bsr_base;
+            I end   = bsr_row_ptr[bid + 1] - bsr_base;
 
-            csr_col_ind[offset] = block_dim * col + c + csr_base;
-
-            if(direction == rocsparse_direction_row)
+            if(bid == 0 && tid == 0)
             {
-                csr_val[offset] = bsr_val[block_dim * block_dim * i + block_dim * r + c];
+                csr_row_ptr[0] = csr_base;
             }
-            else
+
+            I prev    = block_dim * block_dim * start + block_dim * (end - start) * r;
+            I current = block_dim * (end - start);
+
+            csr_row_ptr[block_dim * bid + r + 1] = prev + current + csr_base;
+
+            for(I i = start + wid; i < end; i += (BLOCK_SIZE / (BLOCK_DIM * BLOCK_DIM)))
             {
-                csr_val[offset] = bsr_val[block_dim * block_dim * i + block_dim * c + r];
+                J col    = bsr_col_ind[i] - bsr_base;
+                I offset = prev + block_dim * (i - start) + c;
+
+                csr_col_ind[offset] = block_dim * col + c + csr_base;
+
+                if(direction == rocsparse_direction_row)
+                {
+                    csr_val[offset] = bsr_val[block_dim * block_dim * i + block_dim * r + c];
+                }
+                else
+                {
+                    csr_val[offset] = bsr_val[block_dim * block_dim * i + block_dim * c + r];
+                }
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }
@@ -158,6 +184,7 @@ namespace rocsparse
     template <uint32_t BLOCK_SIZE,
               uint32_t BLOCK_DIM,
               uint32_t SUB_BLOCK_DIM,
+              bool     GRID_STRIDE,
               typename T,
               typename I,
               typename J>
@@ -176,60 +203,67 @@ namespace rocsparse
                                              J* __restrict__ csr_col_ind)
     {
         J tid = hipThreadIdx_x;
-        J bid = hipBlockIdx_x;
 
-        I start = bsr_row_ptr[bid] - bsr_base;
-        I end   = bsr_row_ptr[bid + 1] - bsr_base;
-
-        if(bid == 0 && tid == 0)
+        for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
-            csr_row_ptr[0] = csr_base;
-        }
+            I start = bsr_row_ptr[bid] - bsr_base;
+            I end   = bsr_row_ptr[bid + 1] - bsr_base;
 
-        for(J y = 0; y < (BLOCK_DIM / SUB_BLOCK_DIM); y++)
-        {
-            J r = (tid / SUB_BLOCK_DIM) + SUB_BLOCK_DIM * y;
-
-            if(r < block_dim)
+            if(bid == 0 && tid == 0)
             {
-                I prev    = block_dim * block_dim * start + block_dim * (end - start) * r;
-                I current = block_dim * (end - start);
-
-                csr_row_ptr[block_dim * bid + r + 1] = prev + current + csr_base;
+                csr_row_ptr[0] = csr_base;
             }
-        }
-
-        for(I i = start; i < end; i++)
-        {
-            J col = bsr_col_ind[i] - bsr_base;
 
             for(J y = 0; y < (BLOCK_DIM / SUB_BLOCK_DIM); y++)
             {
-                for(J x = 0; x < (BLOCK_DIM / SUB_BLOCK_DIM); x++)
+                J r = (tid / SUB_BLOCK_DIM) + SUB_BLOCK_DIM * y;
+
+                if(r < block_dim)
                 {
-                    J c = (tid & (SUB_BLOCK_DIM - 1)) + SUB_BLOCK_DIM * x;
-                    J r = (tid / SUB_BLOCK_DIM) + SUB_BLOCK_DIM * y;
+                    I prev    = block_dim * block_dim * start + block_dim * (end - start) * r;
+                    I current = block_dim * (end - start);
 
-                    if(r < block_dim && c < block_dim)
+                    csr_row_ptr[block_dim * bid + r + 1] = prev + current + csr_base;
+                }
+            }
+
+            for(I i = start; i < end; i++)
+            {
+                J col = bsr_col_ind[i] - bsr_base;
+
+                for(J y = 0; y < (BLOCK_DIM / SUB_BLOCK_DIM); y++)
+                {
+                    for(J x = 0; x < (BLOCK_DIM / SUB_BLOCK_DIM); x++)
                     {
-                        I prev = block_dim * block_dim * start + block_dim * (end - start) * r;
+                        J c = (tid & (SUB_BLOCK_DIM - 1)) + SUB_BLOCK_DIM * x;
+                        J r = (tid / SUB_BLOCK_DIM) + SUB_BLOCK_DIM * y;
 
-                        I offset = prev + block_dim * (i - start) + c;
-
-                        csr_col_ind[offset] = block_dim * col + c + csr_base;
-
-                        if(direction == rocsparse_direction_row)
+                        if(r < block_dim && c < block_dim)
                         {
-                            csr_val[offset]
-                                = bsr_val[block_dim * block_dim * i + block_dim * r + c];
-                        }
-                        else
-                        {
-                            csr_val[offset]
-                                = bsr_val[block_dim * block_dim * i + block_dim * c + r];
+                            I prev = block_dim * block_dim * start + block_dim * (end - start) * r;
+
+                            I offset = prev + block_dim * (i - start) + c;
+
+                            csr_col_ind[offset] = block_dim * col + c + csr_base;
+
+                            if(direction == rocsparse_direction_row)
+                            {
+                                csr_val[offset]
+                                    = bsr_val[block_dim * block_dim * i + block_dim * r + c];
+                            }
+                            else
+                            {
+                                csr_val[offset]
+                                    = bsr_val[block_dim * block_dim * i + block_dim * c + r];
+                            }
                         }
                     }
                 }
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }

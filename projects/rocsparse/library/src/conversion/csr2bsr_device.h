@@ -54,7 +54,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         static_assert(WFSIZE % BLOCKDIM == 0, "WFSIZE must be a multiple of BLOCKDIM.");
-        int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -65,100 +64,104 @@ namespace rocsparse
         int c = lid & (WFSIZE / BLOCKDIM - 1);
         int r = lid / (WFSIZE / BLOCKDIM);
 
-        J block_row = (BLOCKSIZE / WFSIZE) * bid + wid;
-        J row       = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
-
         __shared__ bool table[BLOCKSIZE / WFSIZE];
         __shared__ T    data[(BLOCKSIZE / WFSIZE) * BLOCKDIM * BLOCKDIM];
 
-        I row_begin = (row < m && r < block_dim) ? csr_row_ptr[row] - csr_base : 0;
-        I row_end   = (row < m && r < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
-
-        I block_row_begin = (block_row < mb) ? bsr_row_ptr[block_row] - bsr_base : 0;
-        I block_row_end   = (block_row < mb) ? bsr_row_ptr[block_row + 1] - bsr_base : 0;
-
-        I next_k = row_begin;
-
-        // Begin of the current row chunk (this is the column index of the current row)
-        I chunk_begin = 0;
-
-        // Loop over the row chunks until the end of the row has been reached (which is
-        // the number of total columns)
-        while(chunk_begin < nb)
+        for(J bid = hipBlockIdx_x; (BLOCKSIZE / WFSIZE) * bid < mb; bid += hipGridDim_x)
         {
-            // Initialize row nnz table and accumulator
-            table[wid] = 0;
-            for(uint32_t i = 0; i < BLOCKDIM; i += (WFSIZE / BLOCKDIM))
+            J block_row = (BLOCKSIZE / WFSIZE) * bid + wid;
+            J row       = (BLOCKSIZE / WFSIZE) * block_dim * bid + block_dim * wid + r;
+
+            I row_begin = (row < m && r < block_dim) ? csr_row_ptr[row] - csr_base : 0;
+            I row_end   = (row < m && r < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
+
+            I block_row_begin = (block_row < mb) ? bsr_row_ptr[block_row] - bsr_base : 0;
+            I block_row_end   = (block_row < mb) ? bsr_row_ptr[block_row + 1] - bsr_base : 0;
+
+            I next_k = row_begin;
+
+            // Begin of the current row chunk (this is the column index of the current row)
+            I chunk_begin = 0;
+
+            // Loop over the row chunks until the end of the row has been reached (which is
+            // the number of total columns)
+            while(chunk_begin < nb)
             {
-                data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + i + c] = static_cast<T>(0);
-            }
-
-            // Wait for all threads to finish initialization
-            __threadfence_block();
-
-            // Initialize the beginning of the next chunk
-            J min_block_col = nb;
-
-            I index_k = row_end;
-
-            for(I k = next_k + c; k < row_end; k += (WFSIZE / BLOCKDIM))
-            {
-                J col       = (csr_col_ind[k] - csr_base);
-                J block_col = col / block_dim;
-
-                if(block_col == chunk_begin)
-                {
-                    table[wid]                                                         = 1;
-                    data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (col % block_dim)] = csr_val[k];
-                }
-                else
-                {
-                    index_k       = k;
-                    min_block_col = rocsparse::min(min_block_col, block_col);
-                    break;
-                }
-            }
-
-            __threadfence_block();
-
-            rocsparse::wfreduce_min<(WFSIZE / BLOCKDIM)>(&index_k);
-            next_k = rocsparse::shfl(index_k, (WFSIZE / BLOCKDIM) - 1, (WFSIZE / BLOCKDIM));
-
-            int offset = 0;
-            if(table[wid] && block_row < mb && block_row_begin < block_row_end)
-            {
-                bsr_col_ind[block_row_begin] = chunk_begin + bsr_base;
-
+                // Initialize row nnz table and accumulator
+                table[wid] = 0;
                 for(uint32_t i = 0; i < BLOCKDIM; i += (WFSIZE / BLOCKDIM))
                 {
-                    if(r < block_dim && (c + i) < block_dim)
+                    data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + i + c] = static_cast<T>(0);
+                }
+
+                // Wait for all threads to finish initialization
+                __threadfence_block();
+
+                // Initialize the beginning of the next chunk
+                J min_block_col = nb;
+
+                I index_k = row_end;
+
+                for(I k = next_k + c; k < row_end; k += (WFSIZE / BLOCKDIM))
+                {
+                    J col       = (csr_col_ind[k] - csr_base);
+                    J block_col = col / block_dim;
+
+                    if(block_col == chunk_begin)
                     {
-                        if(dir == rocsparse_direction_row)
-                        {
-                            bsr_val[int64_t(block_dim) * block_dim * block_row_begin + block_dim * r
-                                    + (c + i)]
-                                = data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (c + i)];
-                        }
-                        else
-                        {
-                            bsr_val[int64_t(block_dim) * block_dim * block_row_begin
-                                    + block_dim * (c + i) + r]
-                                = data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (c + i)];
-                        }
+                        table[wid] = 1;
+                        data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (col % block_dim)]
+                            = csr_val[k];
+                    }
+                    else
+                    {
+                        index_k       = k;
+                        min_block_col = rocsparse::min(min_block_col, block_col);
+                        break;
                     }
                 }
 
-                offset++;
+                __threadfence_block();
+
+                rocsparse::wfreduce_min<(WFSIZE / BLOCKDIM)>(&index_k);
+                next_k = rocsparse::shfl(index_k, (WFSIZE / BLOCKDIM) - 1, (WFSIZE / BLOCKDIM));
+
+                int offset = 0;
+                if(table[wid] && block_row < mb && block_row_begin < block_row_end)
+                {
+                    bsr_col_ind[block_row_begin] = chunk_begin + bsr_base;
+
+                    for(uint32_t i = 0; i < BLOCKDIM; i += (WFSIZE / BLOCKDIM))
+                    {
+                        if(r < block_dim && (c + i) < block_dim)
+                        {
+                            if(dir == rocsparse_direction_row)
+                            {
+                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                        + block_dim * r + (c + i)]
+                                    = data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (c + i)];
+                            }
+                            else
+                            {
+                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                        + block_dim * (c + i) + r]
+                                    = data[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + (c + i)];
+                            }
+                        }
+                    }
+
+                    offset++;
+                }
+
+                __threadfence_block();
+
+                block_row_begin += offset;
+
+                rocsparse::wfreduce_min<WFSIZE>(&min_block_col);
+                chunk_begin = rocsparse::shfl(min_block_col, WFSIZE - 1, WFSIZE);
+
+                __threadfence_block();
             }
-
-            __threadfence_block();
-
-            block_row_begin += offset;
-
-            rocsparse::wfreduce_min<WFSIZE>(&min_block_col);
-            chunk_begin = rocsparse::shfl(min_block_col, WFSIZE - 1, WFSIZE);
-
-            __threadfence_block();
         }
     }
 
@@ -182,7 +185,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
         static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
-        int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -190,103 +192,107 @@ namespace rocsparse
         // Wavefront id
         int wid = tid / (BLOCKSIZE / BLOCKDIM);
 
-        J block_row = bid;
-        J row       = block_dim * bid + wid;
-
         __shared__ bool table;
         __shared__ T    data[BLOCKDIM * BLOCKDIM];
 
-        I row_begin = (row < m && wid < block_dim) ? csr_row_ptr[row] - csr_base : 0;
-        I row_end   = (row < m && wid < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
-
-        I block_row_begin = bsr_row_ptr[block_row] - bsr_base;
-
-        I next_k = row_begin;
-
-        // Begin of the current row chunk (this is the column index of the current row)
-        I chunk_begin = 0;
-
-        // Loop over the row chunks until the end of the row has been reached (which is
-        // the number of total columns)
-        while(chunk_begin < nb)
+        // The bound must stay block-uniform so the __syncthreads() below stay convergent.
+        for(J bid = hipBlockIdx_x; bid < mb; bid += hipGridDim_x)
         {
-            table = 0;
-            for(uint32_t i = 0; i < BLOCKDIM; i += BLOCKSIZE / BLOCKDIM)
+            J block_row = bid;
+            J row       = block_dim * bid + wid;
+
+            I row_begin = (row < m && wid < block_dim) ? csr_row_ptr[row] - csr_base : 0;
+            I row_end   = (row < m && wid < block_dim) ? csr_row_ptr[row + 1] - csr_base : 0;
+
+            I block_row_begin = bsr_row_ptr[block_row] - bsr_base;
+
+            I next_k = row_begin;
+
+            // Begin of the current row chunk (this is the column index of the current row)
+            I chunk_begin = 0;
+
+            // Loop over the row chunks until the end of the row has been reached (which is
+            // the number of total columns)
+            while(chunk_begin < nb)
             {
-                data[BLOCKDIM * wid + i + lid] = static_cast<T>(0);
-            }
-
-            // Wait for all threads to finish initialization
-            __syncthreads();
-
-            // Initialize the beginning of the next chunk
-            J min_block_col = nb;
-
-            I index_k = row_end;
-
-            for(I k = next_k + lid; k < row_end; k += (BLOCKSIZE / BLOCKDIM))
-            {
-                J col       = (csr_col_ind[k] - csr_base);
-                J block_col = col / block_dim;
-
-                if(block_col == chunk_begin)
-                {
-                    table                                    = 1;
-                    data[BLOCKDIM * wid + (col % block_dim)] = csr_val[k];
-                }
-                else
-                {
-                    index_k       = k;
-                    min_block_col = rocsparse::min(min_block_col, block_col);
-                    break;
-                }
-            }
-
-            __syncthreads();
-
-            rocsparse::wfreduce_min<BLOCKSIZE / BLOCKDIM>(&index_k);
-            next_k = rocsparse::shfl(index_k, (BLOCKSIZE / BLOCKDIM) - 1, BLOCKSIZE / BLOCKDIM);
-
-            int offset = 0;
-            if(table)
-            {
-                bsr_col_ind[block_row_begin] = chunk_begin + bsr_base;
-
+                table = 0;
                 for(uint32_t i = 0; i < BLOCKDIM; i += BLOCKSIZE / BLOCKDIM)
                 {
-                    if((i + lid) < block_dim && wid < block_dim)
+                    data[BLOCKDIM * wid + i + lid] = static_cast<T>(0);
+                }
+
+                // Wait for all threads to finish initialization
+                __syncthreads();
+
+                // Initialize the beginning of the next chunk
+                J min_block_col = nb;
+
+                I index_k = row_end;
+
+                for(I k = next_k + lid; k < row_end; k += (BLOCKSIZE / BLOCKDIM))
+                {
+                    J col       = (csr_col_ind[k] - csr_base);
+                    J block_col = col / block_dim;
+
+                    if(block_col == chunk_begin)
                     {
-                        if(dir == rocsparse_direction_row)
-                        {
-                            bsr_val[int64_t(block_dim) * block_dim * block_row_begin
-                                    + block_dim * wid + i + lid]
-                                = data[BLOCKDIM * wid + i + lid];
-                        }
-                        else
-                        {
-                            bsr_val[int64_t(block_dim) * block_dim * block_row_begin
-                                    + block_dim * (i + lid) + wid]
-                                = data[BLOCKDIM * wid + i + lid];
-                        }
+                        table                                    = 1;
+                        data[BLOCKDIM * wid + (col % block_dim)] = csr_val[k];
+                    }
+                    else
+                    {
+                        index_k       = k;
+                        min_block_col = rocsparse::min(min_block_col, block_col);
+                        break;
                     }
                 }
 
-                offset++;
+                __syncthreads();
+
+                rocsparse::wfreduce_min<BLOCKSIZE / BLOCKDIM>(&index_k);
+                next_k = rocsparse::shfl(index_k, (BLOCKSIZE / BLOCKDIM) - 1, BLOCKSIZE / BLOCKDIM);
+
+                int offset = 0;
+                if(table)
+                {
+                    bsr_col_ind[block_row_begin] = chunk_begin + bsr_base;
+
+                    for(uint32_t i = 0; i < BLOCKDIM; i += BLOCKSIZE / BLOCKDIM)
+                    {
+                        if((i + lid) < block_dim && wid < block_dim)
+                        {
+                            if(dir == rocsparse_direction_row)
+                            {
+                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                        + block_dim * wid + i + lid]
+                                    = data[BLOCKDIM * wid + i + lid];
+                            }
+                            else
+                            {
+                                bsr_val[int64_t(block_dim) * block_dim * block_row_begin
+                                        + block_dim * (i + lid) + wid]
+                                    = data[BLOCKDIM * wid + i + lid];
+                            }
+                        }
+                    }
+
+                    offset++;
+                }
+
+                __syncthreads();
+
+                J* shared = reinterpret_cast<J*>(data);
+
+                shared[tid] = min_block_col;
+
+                __syncthreads();
+                block_row_begin += offset;
+
+                rocsparse::blockreduce_min<BLOCKSIZE>(tid, shared);
+
+                chunk_begin = shared[0];
+                __syncthreads();
             }
-
-            __syncthreads();
-
-            J* shared = reinterpret_cast<J*>(data);
-
-            shared[tid] = min_block_col;
-
-            __syncthreads();
-            block_row_begin += offset;
-
-            rocsparse::blockreduce_min<BLOCKSIZE>(tid, shared);
-
-            chunk_begin = shared[0];
-            __syncthreads();
         }
     }
 
@@ -313,125 +319,123 @@ namespace rocsparse
     {
         static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
                       "BLOCKSIZE must be a power of two.");
-        J block_id = hipBlockIdx_x;
-        J lane_id  = hipThreadIdx_x;
+        J lane_id = hipThreadIdx_x;
 
-        J bsr_row_start = 0;
-
-        if(block_id < mb)
-        {
-            bsr_row_start = bsr_row_ptr[block_id] - bsr_base;
-        }
-
-        J csr_col       = 0;
-        J bsr_block_col = 0;
-        J nnzb_per_row  = 0;
-
-        // temp arrays used as global scratch pad
-
+        // temp arrays used as global scratch pad, partitioned by physical block index
+        // rather than by block row so that a clamped grid still gives each block its
+        // own slice.
+        J  phys = hipBlockIdx_x;
         I* row_start
-            = temp1 + (2 * rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
-        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * block_id)
+            = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
+        I* row_end = temp1 + (2 * rows_per_segment * BLOCKSIZE * phys)
                      + rows_per_segment * BLOCKSIZE + rows_per_segment * lane_id;
         J* csr_col_index
-            = temp2 + (rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
-        T* csr_value
-            = temp3 + (rows_per_segment * BLOCKSIZE * block_id) + rows_per_segment * lane_id;
+            = temp2 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
+        T* csr_value = temp3 + (rows_per_segment * BLOCKSIZE * phys) + rows_per_segment * lane_id;
 
-        for(J j = 0; j < rows_per_segment; j++)
+        for(J block_id = hipBlockIdx_x; block_id < mb; block_id += hipGridDim_x)
         {
-            row_start[j] = 0;
-            row_end[j]   = 0;
+            J bsr_row_start = bsr_row_ptr[block_id] - bsr_base;
 
-            J row_index = block_dim * block_id + BLOCKSIZE * j + lane_id;
-
-            if(row_index < m && (BLOCKSIZE * j + lane_id) < block_dim)
-            {
-                row_start[j] = csr_row_ptr[row_index] - csr_base;
-                row_end[j]   = csr_row_ptr[row_index + 1] - csr_base;
-            }
-        }
-
-        while(csr_col < n)
-        {
-            T min_csr_value     = 0;
-            J min_csr_col_index = n;
+            J csr_col       = 0;
+            J bsr_block_col = 0;
+            J nnzb_per_row  = 0;
 
             for(J j = 0; j < rows_per_segment; j++)
             {
-                csr_value[j]     = 0;
-                csr_col_index[j] = n;
+                row_start[j] = 0;
+                row_end[j]   = 0;
 
-                for(I i = row_start[j]; i < row_end[j]; i++)
+                J row_index = block_dim * block_id + BLOCKSIZE * j + lane_id;
+
+                if(row_index < m && (BLOCKSIZE * j + lane_id) < block_dim)
                 {
-                    csr_value[j]     = csr_val[i];
-                    csr_col_index[j] = csr_col_ind[i] - csr_base;
+                    row_start[j] = csr_row_ptr[row_index] - csr_base;
+                    row_end[j]   = csr_row_ptr[row_index + 1] - csr_base;
+                }
+            }
 
-                    if(csr_col_index[j] >= csr_col)
+            while(csr_col < n)
+            {
+                T min_csr_value     = 0;
+                J min_csr_col_index = n;
+
+                for(J j = 0; j < rows_per_segment; j++)
+                {
+                    csr_value[j]     = 0;
+                    csr_col_index[j] = n;
+
+                    for(I i = row_start[j]; i < row_end[j]; i++)
                     {
-                        if(csr_col_index[j] <= min_csr_col_index)
+                        csr_value[j]     = csr_val[i];
+                        csr_col_index[j] = csr_col_ind[i] - csr_base;
+
+                        if(csr_col_index[j] >= csr_col)
                         {
-                            min_csr_value     = csr_value[j];
-                            min_csr_col_index = csr_col_index[j];
+                            if(csr_col_index[j] <= min_csr_col_index)
+                            {
+                                min_csr_value     = csr_value[j];
+                                min_csr_col_index = csr_col_index[j];
+                            }
+
+                            row_start[j] = i;
+
+                            break;
                         }
-
-                        row_start[j] = i;
-
-                        break;
                     }
                 }
-            }
 
-            // find minimum CSR column index across all threads in this segment and store in last thread of segment
-            rocsparse::wfreduce_min<BLOCKSIZE>(&min_csr_col_index);
+                // find minimum CSR column index across all threads in this segment and store in last thread of segment
+                rocsparse::wfreduce_min<BLOCKSIZE>(&min_csr_col_index);
 
-            // have last thread in segment write to BSR column indices array
-            if(min_csr_col_index < n && lane_id == BLOCKSIZE - 1)
-            {
-                if((min_csr_col_index / block_dim) >= bsr_block_col)
+                // have last thread in segment write to BSR column indices array
+                if(min_csr_col_index < n && lane_id == BLOCKSIZE - 1)
                 {
-                    bsr_col_ind[bsr_row_start + nnzb_per_row]
-                        = min_csr_col_index / block_dim + bsr_base;
+                    if((min_csr_col_index / block_dim) >= bsr_block_col)
+                    {
+                        bsr_col_ind[bsr_row_start + nnzb_per_row]
+                            = min_csr_col_index / block_dim + bsr_base;
 
-                    nnzb_per_row++;
-                    bsr_block_col = (min_csr_col_index / block_dim) + 1;
+                        nnzb_per_row++;
+                        bsr_block_col = (min_csr_col_index / block_dim) + 1;
+                    }
                 }
-            }
 
-            // broadcast CSR minimum column index from last thread in segment to all threads in segment
-            min_csr_col_index = rocsparse::shfl(min_csr_col_index, BLOCKSIZE - 1, BLOCKSIZE);
+                // broadcast CSR minimum column index from last thread in segment to all threads in segment
+                min_csr_col_index = rocsparse::shfl(min_csr_col_index, BLOCKSIZE - 1, BLOCKSIZE);
 
-            // broadcast nnzb_per_row from last thread in segment to all threads in segment
-            nnzb_per_row = rocsparse::shfl(nnzb_per_row, BLOCKSIZE - 1, BLOCKSIZE);
+                // broadcast nnzb_per_row from last thread in segment to all threads in segment
+                nnzb_per_row = rocsparse::shfl(nnzb_per_row, BLOCKSIZE - 1, BLOCKSIZE);
 
-            // Write BSR values
-            for(J j = 0; j < rows_per_segment; j++)
-            {
-                if(csr_col_index[j] < n
-                   && csr_col_index[j] / block_dim == min_csr_col_index / block_dim)
+                // Write BSR values
+                for(J j = 0; j < rows_per_segment; j++)
                 {
-                    if(direction == rocsparse_direction_row)
+                    if(csr_col_index[j] < n
+                       && csr_col_index[j] / block_dim == min_csr_col_index / block_dim)
                     {
-                        int64_t k
-                            = int64_t(bsr_row_start + nnzb_per_row - 1) * block_dim * block_dim
-                              + (BLOCKSIZE * j + lane_id) * block_dim
-                              + csr_col_index[j] % block_dim;
+                        if(direction == rocsparse_direction_row)
+                        {
+                            int64_t k
+                                = int64_t(bsr_row_start + nnzb_per_row - 1) * block_dim * block_dim
+                                  + (BLOCKSIZE * j + lane_id) * block_dim
+                                  + csr_col_index[j] % block_dim;
 
-                        bsr_val[k] = csr_value[j];
-                    }
-                    else
-                    {
-                        int64_t k
-                            = int64_t(bsr_row_start + nnzb_per_row - 1) * block_dim * block_dim
-                              + (csr_col_index[j] % block_dim) * block_dim
-                              + (BLOCKSIZE * j + lane_id);
-                        bsr_val[k] = csr_value[j];
+                            bsr_val[k] = csr_value[j];
+                        }
+                        else
+                        {
+                            int64_t k
+                                = int64_t(bsr_row_start + nnzb_per_row - 1) * block_dim * block_dim
+                                  + (csr_col_index[j] % block_dim) * block_dim
+                                  + (BLOCKSIZE * j + lane_id);
+                            bsr_val[k] = csr_value[j];
+                        }
                     }
                 }
-            }
 
-            // update csr_col for all threads in segment
-            csr_col = min_csr_col_index + 1;
+                // update csr_col for all threads in segment
+                csr_col = min_csr_col_index + 1;
+            }
         }
     }
 
