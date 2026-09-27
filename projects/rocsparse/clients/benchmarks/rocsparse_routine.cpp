@@ -331,6 +331,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_sparse_to_dense_csr.hpp"
 #include "testing_sparse_to_sparse.hpp"
 #include "testing_spsort_coo.hpp"
+#include "testing_spsort_csr.hpp"
 
 // Reordering
 #include "testing_csrcolor.hpp"
@@ -536,6 +537,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IAXYT_X(coomv, testing_spmv_coo);
         DEFINE_CASE_T_FLOAT_ONLY(coosort);
         DEFINE_CASE_IT(spsort_coo);
+        DEFINE_CASE_IJT(spsort_csr);
         DEFINE_CASE_IT_X(coosv, testing_spsv_coo);
 #ifdef ROCSPARSE_WITH_ELL_TRSV
         DEFINE_CASE_IT_X(ellsv, testing_spsv_ell);
