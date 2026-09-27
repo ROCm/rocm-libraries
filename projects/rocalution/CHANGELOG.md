@@ -18,6 +18,12 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Added the matrix-matrix based interpolation operators `MMExtPI` and `MMExtPE` to the `InterpolationType` enumeration, selectable through `RugeStuebenAMG::SetInterpolationType()`.
 * Added `RugeStuebenAMG::SetInterpolationTruncationFactor()` and `RugeStuebenAMG::SetInterpolationMaxElmts()` to truncate the interpolation operator, dropping entries that are small relative to the largest entry of their row and capping the number of entries per row.
 
+## (Unreleased) rocALUTION
+
+### Added
+* Added `BaseAMG::SetMaxLevels()` to limit the number of levels of an AMG hierarchy. Combined with passing another AMG solver as the coarse grid solver, this allows hybrid hierarchies such as unsmoothed aggregation on the finest levels followed by Ruge-Stueben AMG on the coarser levels.
+* Added the `cg-uaamg-rsamg` sample demonstrating a hybrid unsmoothed aggregation / Ruge-Stueben AMG preconditioner.
+
 ## rocALUTION 4.1.0 for ROCm 7.2.0
 
 ### Added
