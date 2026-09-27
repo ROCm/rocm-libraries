@@ -29,7 +29,8 @@ namespace rocsparse
 {
     // General GEBSRMV that works for any GEBSR block dimensions
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_general_device(rocsparse_direction dir,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_general_device(rocsparse_int       row,
+                                                      rocsparse_direction dir,
                                                       T                   alpha,
                                                       const rocsparse_int* __restrict__ bsr_row_ptr,
                                                       const rocsparse_int* __restrict__ bsr_col_ind,
@@ -50,8 +51,9 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes a BSR row
-        const rocsparse_int row = hipBlockIdx_x;
+        // `row` is the block row this block handles. The kernel wrapper supplies it
+        // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
+        // every block row.
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -108,7 +110,8 @@ namespace rocsparse
 
     // GEBSRMV kernel for GEBSR block dimension of 1 x n
     template <uint32_t BLOCKSIZE, uint32_t COLBSRDIM, uint32_t WFSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_1xn_device(rocsparse_int       mb,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_1xn_device(rocsparse_int       row_base,
+                                                  rocsparse_int       mb,
                                                   rocsparse_direction dir,
                                                   T                   alpha,
                                                   const rocsparse_int* __restrict__ bsr_row_ptr,
@@ -128,14 +131,20 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows
-        const rocsparse_int row = hipBlockIdx_x * (BLOCKSIZE / WFSIZE) + wid;
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
+        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
+        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
+        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
+        // largest representable rocsparse_int.
+        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row >= mb)
+        if(row64 >= mb)
         {
             return;
         }
+
+        const rocsparse_int row = static_cast<rocsparse_int>(row64);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -179,7 +188,8 @@ namespace rocsparse
 
     // GEBSRMV kernel for GEBSR block dimension of 2 x n
     template <uint32_t BLOCKSIZE, uint32_t COLBSRDIM, uint32_t WFSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_2xn_device(rocsparse_int       mb,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_2xn_device(rocsparse_int       row_base,
+                                                  rocsparse_int       mb,
                                                   rocsparse_direction dir,
                                                   T                   alpha,
                                                   const rocsparse_int* __restrict__ bsr_row_ptr,
@@ -202,14 +212,20 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows
-        const rocsparse_int row = hipBlockIdx_x * (BLOCKSIZE / WFSIZE) + wid;
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
+        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
+        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
+        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
+        // largest representable rocsparse_int.
+        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row >= mb)
+        if(row64 >= mb)
         {
             return;
         }
+
+        const rocsparse_int row = static_cast<rocsparse_int>(row64);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -284,7 +300,8 @@ namespace rocsparse
 
     // GEBSRMV kernel for GEBSR block dimension of 3 x n
     template <uint32_t BLOCKSIZE, uint32_t COLBSRDIM, uint32_t WFSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_3xn_device(rocsparse_int       mb,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_3xn_device(rocsparse_int       row_base,
+                                                  rocsparse_int       mb,
                                                   rocsparse_direction dir,
                                                   T                   alpha,
                                                   const rocsparse_int* __restrict__ bsr_row_ptr,
@@ -307,14 +324,20 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows
-        const rocsparse_int row = hipBlockIdx_x * (BLOCKSIZE / WFSIZE) + wid;
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
+        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
+        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
+        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
+        // largest representable rocsparse_int.
+        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row >= mb)
+        if(row64 >= mb)
         {
             return;
         }
+
+        const rocsparse_int row = static_cast<rocsparse_int>(row64);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -400,7 +423,8 @@ namespace rocsparse
 
     // GEBSRMV kernel for GEBSR block dimension of 4 x n
     template <uint32_t BLOCKSIZE, uint32_t COLBSRDIM, uint32_t WFSIZE, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_4xn_device(rocsparse_int       mb,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_4xn_device(rocsparse_int       row_base,
+                                                  rocsparse_int       mb,
                                                   rocsparse_direction dir,
                                                   T                   alpha,
                                                   const rocsparse_int* __restrict__ bsr_row_ptr,
@@ -423,14 +447,20 @@ namespace rocsparse
         // Wavefront id
         const rocsparse_int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows
-        const rocsparse_int row = hipBlockIdx_x * (BLOCKSIZE / WFSIZE) + wid;
+        // Each thread block processes (BLOCKSIZE / WFSIZE) BSR rows starting at
+        // row_base, which the kernel wrapper supplies from a grid-stride loop so that
+        // a grid.x clamped to maxGridSize[0] still covers every block row. The sum is
+        // formed in 64 bit: row_base is only known to be below mb, and mb can be the
+        // largest representable rocsparse_int.
+        const int64_t row64 = static_cast<int64_t>(row_base) + wid;
 
         // Do not run out of bounds
-        if(row >= mb)
+        if(row64 >= mb)
         {
             return;
         }
+
+        const rocsparse_int row = static_cast<rocsparse_int>(row64);
 
         // BSR row entry and exit point
         const rocsparse_int row_begin = bsr_row_ptr[row] - idx_base;
@@ -526,7 +556,8 @@ namespace rocsparse
 
     // GEBSRMV kernel for GEBSR block dimension of m x n where m and n <= 8
     template <uint32_t BLOCKSIZE, uint32_t ROWBSRDIM, uint32_t COLBSRDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_mxn_device(rocsparse_int       mb,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_mxn_device(rocsparse_int       row,
+                                                  rocsparse_int       mb,
                                                   rocsparse_direction dir,
                                                   T                   alpha,
                                                   const rocsparse_int* __restrict__ bsr_row_ptr,
@@ -543,8 +574,9 @@ namespace rocsparse
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
 
-        // Each thread block processes a single BSR row
-        const rocsparse_int row = hipBlockIdx_x;
+        // `row` is the block row this block handles. The kernel wrapper supplies it
+        // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
+        // every block row.
 
         // Offset into x vector
         const rocsparse_int idx = (dir == rocsparse_direction_column)
@@ -759,7 +791,8 @@ namespace rocsparse
 
     // GEBSRMV kernel for GEBSR block dimension of m x n where m and n <= 16
     template <uint32_t BLOCKSIZE, uint32_t ROWBSRDIM, uint32_t COLBSRDIM, typename T>
-    ROCSPARSE_DEVICE_ILF void gebsrmvn_mxn_16_device(rocsparse_int       mb,
+    ROCSPARSE_DEVICE_ILF void gebsrmvn_mxn_16_device(rocsparse_int       row,
+                                                     rocsparse_int       mb,
                                                      rocsparse_direction dir,
                                                      T                   alpha,
                                                      const rocsparse_int* __restrict__ bsr_row_ptr,
@@ -776,8 +809,9 @@ namespace rocsparse
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
 
-        // Each thread block processes a single BSR row
-        const rocsparse_int row = hipBlockIdx_x;
+        // `row` is the block row this block handles. The kernel wrapper supplies it
+        // from a grid-stride loop, so a grid.x clamped to maxGridSize[0] still covers
+        // every block row.
 
         // Offset into x vector
         const rocsparse_int idx = (dir == rocsparse_direction_column)

@@ -182,6 +182,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_extras.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  # --- gebsrmv / gebsr2csr / bsrgeam grid.x clamp regression [AISPARSE-705] --
+  # Deliberately anchored here, in the middle of the conversion/extra group,
+  # rather than at the end of the list: AISPARSE-696, 699/700 and 702 all append
+  # their leaves immediately after unit_test_host_level2.cpp, so anything placed
+  # there conflicts with all three. Verified conflict-free with git merge-tree.
+  unit_test_internal_gebsr_grid_clamp.cpp
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
