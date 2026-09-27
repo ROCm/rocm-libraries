@@ -34,12 +34,7 @@ The RPP project is located in https://github.com/ROCm/rocm-libraries/tree/develo
     * :doc:`RPP environment variables <./reference/rpp-env-variables>`
     * :doc:`Supported RPP functionalities and variants <./reference/rpp-supported-functionalities>`
     * :doc:`RPP functionality and variant example outputs <./reference/rpp-supported-func-and-var-examples>`
-
-    * RPP API reference
-
-      * :doc:`RPP header files <./doxygen/html/files>`
-      * :doc:`RPP common definitions <./doxygen/html/group__group__rppdefs>`
-      * :doc:`RPP data structures <./doxygen/html/annotated>`
+    * :doc:`RPP API reference guide <./reference/rpp-api-reference>`
 
 To contribute to the documentation refer to :doc:`Contributing to ROCm  <rocm:contribute/contributing>`.
 
