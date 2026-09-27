@@ -411,6 +411,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             workdir=run_root_str,
             devices=args.devices,
             n_slots=args.n_slots,
+            up_thr=args.up_thr,
             retry=args.retry,
             verbose=args.verbose,
             bench_freq=args.bench_freq,
