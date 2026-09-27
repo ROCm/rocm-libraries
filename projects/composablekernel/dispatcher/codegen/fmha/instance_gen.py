@@ -1457,6 +1457,8 @@ MODES = ["batch", "group"]
 _MASK_MAP = {"no": "no", "causal": "top_left", "generic": "generic"}
 _BIAS_MAP = {"no": "no", "bias": "bias", "alibi": "alibi"}
 
+GFX11_WARP_SIZE = 32
+
 
 def _pad_val(s: str) -> int:
     if s == "f":
@@ -2376,6 +2378,17 @@ def _expand_appendkv(arch, dtypes, receipt, restrict_hdims=None):
     return configs
 
 
+# gfx1100 batch_prefill: each head-dim pair maps to the one M0 that has device
+# evidence. Block size is M0 * 2 here, so M0=128 lands on Gfx11Policy's
+# Independent-V path (block 256) and M0=64 lands on the fallback gemm1, which
+# the pipeline reaches by permuting P into that gemm's A distribution.
+GFX11_BATCH_PREFILL_M0 = {
+    (128, 128): 128,
+    (96, 96): 64,
+    (64, 64): 64,
+}
+
+
 def _expand_batch_prefill(
     arch, dtypes, receipt, allowed_masks, allowed_biases, restrict_hdims=None
 ):
@@ -2389,13 +2402,26 @@ def _expand_batch_prefill(
 
     for dtype in dtypes:
         hdims = SUPPORTED_HDIMS.get(dtype, [])
+        if arch == "gfx1100":
+            # (96, 96) is not a global supported_hdims pair; it is emitted only
+            # here, for this arch and family, as an exact-head-dim instance.
+            hdims = list(GFX11_BATCH_PREFILL_M0)
         if restrict_hdims is not None:
             hdims = [hv for hv in hdims if hv in restrict_hdims]
         for hq, hv in hdims:
+            if arch == "gfx1100" and (hq, hv) not in GFX11_BATCH_PREFILL_M0:
+                continue
             tiles = generate_splitkv_tiles(arch, dtype, hq, hv)
             bp_specs = get_batch_prefill_pipelines(dtype, hq, receipt)
             for tc in tiles:
                 bk1 = _bp_bk1(tc.bm0, tc.bn0, tc.bk0, hq)
+                if arch == "gfx1100" and (
+                    tc.rm0 * GFX11_WARP_SIZE != GFX11_BATCH_PREFILL_M0[(hq, hv)] * 2
+                    or tc.bn0 != 32
+                    or tc.bn1 != hv
+                    or bk1 != 32
+                ):
+                    continue
 
                 # qr_async stages K into LDS through a bk1-major descriptor while the gemm0
                 # loop reads bk0 chunks, therefore the pipeline requires bk0 == bk1
@@ -2403,6 +2429,15 @@ def _expand_batch_prefill(
                     continue
 
                 for spec in bp_specs:
+                    # gfx1100 compiles with CK_TILE_FMHA_FWD_FAST_EXP2=0
+                    # (fmha_utils.fmha_compile_flags), and the pipeline asserts
+                    # soft cap requires fast-exp2, so these cannot be built.
+                    if arch == "gfx1100" and (
+                        spec.kv_memory_layout != "linear"
+                        or spec.dropout == "t"
+                        or spec.logits == "t"
+                    ):
+                        continue
                     mm = _MASK_MAP.get(spec.mask, spec.mask)
                     mb = _BIAS_MAP.get(spec.bias, spec.bias)
                     if allowed_masks is not None and mm not in allowed_masks:
@@ -2421,13 +2456,17 @@ def _expand_batch_prefill(
                                 mode="group",
                                 hdim_q=hq,
                                 hdim_v=hv,
-                                pipeline="qr_async",
+                                pipeline="batch_prefill_gfx11"
+                                if arch == "gfx1100"
+                                else "qr_async",
                                 tile_m0=tc.bm0,
                                 tile_n0=tc.bn0,
                                 tile_k0=tc.bk0,
                                 tile_n1=tc.bn1,
                                 tile_k1=bk1,
-                                tile_k0max=tc.bk0max,
+                                # Exact head dim, not ceil_to_qualified_tile_length:
+                                # that is what makes these native rather than padded.
+                                tile_k0max=hq if arch == "gfx1100" else tc.bk0max,
                                 wave_m0=tc.rm0,
                                 wave_n0=1,
                                 wave_k0=1,
