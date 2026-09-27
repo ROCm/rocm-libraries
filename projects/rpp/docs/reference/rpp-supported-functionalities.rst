@@ -10,7 +10,7 @@ The following tables show the CPU and GPU support for ROCm Performance Primitive
 
 CPU support is also referred to as HOST support, and GPU support is provided through the HIP backend.
 
-The functionalities are grouped to match the RPP API headers described in the :doc:`API reference <./rpp-api-reference>`.
+The functionalities are grouped to match the RPP API headers described in the :doc:`API reference <./rpp-api-reference>`. For call syntax, see :doc:`Run an RPP tensor augmentation <../how-to/rpp-run-tensor-augmentation>`.
 
 Color augmentations
 -----------------------------------------------------------------------------------------------
