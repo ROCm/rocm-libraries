@@ -108,7 +108,7 @@ constexpr auto rocblas_datatype2string(rocblas_datatype type)
     case rocblas_datatype_f64_r:
         return "f64_r";
     case rocblas_datatype_f16_c:
-        return "f16_k";
+        return "f16_c";
     case rocblas_datatype_f32_c:
         return "f32_c";
     case rocblas_datatype_f64_c:

@@ -292,4 +292,14 @@ INST(rocblas_bfloat16* const*);
 INST(rocblas_bfloat16 const*);
 INST(rocblas_bfloat16 const* const*);
 
+INST(rocblas_half_complex*);
+INST(rocblas_half_complex* const*);
+INST(rocblas_half_complex const*);
+INST(rocblas_half_complex const* const*);
+
+INST(rocblas_bfloat16_complex*);
+INST(rocblas_bfloat16_complex* const*);
+INST(rocblas_bfloat16_complex const*);
+INST(rocblas_bfloat16_complex const* const*);
+
 #undef INST

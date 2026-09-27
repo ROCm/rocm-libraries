@@ -43,6 +43,8 @@ constexpr auto rocblas_type2datatype()
     if(std::is_same_v<T, rocblas_double>)
         return rocblas_datatype_f64_r;
     // rocblas_datatype_f16_c  = 153
+    if(std::is_same_v<T, rocblas_half_complex>)
+        return rocblas_datatype_f16_c;
     // rocblas_datatype_f32_c  = 154
     if(std::is_same_v<T, rocblas_float_complex>)
         return rocblas_datatype_f32_c;
@@ -69,6 +71,8 @@ constexpr auto rocblas_type2datatype()
     if(std::is_same_v<T, rocblas_bfloat16>)
         return rocblas_datatype_bf16_r;
     // rocblas_datatype_bf16_c = 169
+    if(std::is_same_v<T, rocblas_bfloat16_complex>)
+        return rocblas_datatype_bf16_c;
 
     return rocblas_datatype_f32_r; // testing purposes we default to f32 ex
 }
@@ -98,12 +102,14 @@ auto rocblas_simple_dispatch(const Arguments& arg)
         return TEST<float>{}(arg);
     case rocblas_datatype_f64_r:
         return TEST<double>{}(arg);
-    // case rocblas_datatype_f16_c:
-    //     return TEST<rocblas_half_complex>{}(arg);
+    case rocblas_datatype_f16_c:
+        return TEST<rocblas_half_complex>{}(arg);
     case rocblas_datatype_f32_c:
         return TEST<rocblas_float_complex>{}(arg);
     case rocblas_datatype_f64_c:
         return TEST<rocblas_double_complex>{}(arg);
+    case rocblas_datatype_bf16_c:
+        return TEST<rocblas_bfloat16_complex>{}(arg);
     default:
         return TEST<void>{}(arg);
     }
