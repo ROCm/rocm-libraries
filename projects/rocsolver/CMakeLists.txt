@@ -254,6 +254,10 @@ add_subdirectory(common)
 
 if(BUILD_LIBRARY)
   add_subdirectory(library)
+  # Fortran bindings, generated from the headers above and committed next to
+  # them. Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS
+  # is OFF or when no Fortran compiler is available, so a C-only site is unaffected.
+  add_subdirectory(fortran)
 endif()
 
 if(BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_SAMPLES)
