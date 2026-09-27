@@ -391,6 +391,17 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0",
                           isDebug);
+    // Packed 2xBF16 atomic add (gfx950 / gfx1250+). gfx950 takes the literal 0
+    // soffset form, gfx1250 requires null, so probe both as HasAtomicAdd does.
+    rv["HasAtomicPkAddBF16"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], 0 offen offset:0",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_atomic_pk_add_bf16 v0, v1, s[0:3], null offen offset:0",
+                          isDebug);
     rv["HasGLCModifier"]
         = tryAssembler(isaVersion,
                        assemblerPath,
