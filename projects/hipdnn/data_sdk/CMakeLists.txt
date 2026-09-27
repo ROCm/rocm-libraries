@@ -9,6 +9,8 @@ hipdnn_setup_version(hipdnn_data_sdk)
 # Set project with version
 project(hipdnn_data_sdk VERSION ${HIPDNN_DATA_SDK_VERSION} LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+
 set(HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/data_sdk")
 set(HIP_DNN_DATA_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -34,7 +36,7 @@ target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
 )
-target_link_libraries(hipdnn_data_sdk INTERFACE ${CMAKE_DL_LIBS})
+target_link_libraries(hipdnn_data_sdk INTERFACE ${CMAKE_DL_LIBS} Threads::Threads)
 
 export(TARGETS hipdnn_data_sdk
        FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_data_sdk/hipdnn_data_sdkTargets.cmake"

@@ -1287,6 +1287,18 @@ private:
             detail::hipdnnBackend()->backendFinalize(variantPackDesc.get()),
             "Failed to finalize variant pack descriptor");
 
+        // One profiling context for the whole comparison: every candidate in every pass
+        // (including a stalled-timeout restart's unstalled rerun) resets and reuses this
+        // same descriptor via executeWithPlanTimed(), instead of allocating a fresh one
+        // per timed iteration.
+        const detail::ScopedHipdnnBackendDescriptor profilingDesc(
+            HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
+        if(!profilingDesc.valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create profiling control descriptor."};
+        }
+
         const std::unordered_set<int64_t> selectedEngineIdFilterSet(config.engineIdFilter.begin(),
                                                                     config.engineIdFilter.end());
 
@@ -1814,172 +1826,222 @@ private:
         size_t benchmarkCount = 0;
         const size_t benchmarkTotal = planBenchmarkDetails.size();
 
-        for(const auto& info : planBenchmarkDetails)
+        // One sweep must compare like with like. A stall-gate watchdog timeout, or a
+        // valid UNSTALLED result during a stalled pass, means the stall could not hold
+        // for this candidate: device-only timing is no longer comparable against
+        // whatever ran before it in this pass. The candidate/sweep loops break
+        // immediately on that signal -- costing at most one stalled attempt -- discard
+        // every score measured so far, and rerun every candidate unstalled. The unstalled
+        // pass never arms, so it cannot itself trigger another restart, and this runs at
+        // most twice.
+        bool sweepStalled = true;
+        for(;;)
         {
-            ++benchmarkCount;
+            allResults.clear();
+            benchmarkCount = 0;
+            bool restartUnstalledRequested = false;
 
-            auto& plan = _compiledPlans[info.planIndex];
-
-            // Identity resolved at map-build time (same for both paths).
-            AutotuneResult result
-                = autotune::detail::makeBenchmarkResult(info.engineId,
-                                                        info.knobSettings,
-                                                        info.estimatedWorkspaceSize,
-                                                        info.compiledWorkspaceSize,
-                                                        config,
-                                                        engineNameFor(handle, info.engineId));
-
+            for(const auto& info : planBenchmarkDetails)
             {
-                const char* iterLabel = "max";
-                int iterCount = config.maxIterations;
+                ++benchmarkCount;
+
+                auto& plan = _compiledPlans[info.planIndex];
+
+                // Identity resolved at map-build time (same for both paths).
+                AutotuneResult result
+                    = autotune::detail::makeBenchmarkResult(info.engineId,
+                                                            info.knobSettings,
+                                                            info.estimatedWorkspaceSize,
+                                                            info.compiledWorkspaceSize,
+                                                            config,
+                                                            engineNameFor(handle, info.engineId));
+
+                {
+                    const char* iterLabel = "max";
+                    int iterCount = config.maxIterations;
+                    if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
+                    {
+                        iterLabel = "timed";
+                        iterCount = config.timedIterations;
+                    }
+                    HIPDNN_FE_LOG_INFO("autotune: ["
+                                       << benchmarkCount << "/" << benchmarkTotal
+                                       << "] benchmarking engine " << result.engineName
+                                       << " (warmup=" << config.warmupIterations << ", "
+                                       << iterLabel << " iterations=" << iterCount << ")");
+                }
+
+                result.supportsExhaustive = info.supportsExhaustive;
+                result.ranExhaustive = info.ranExhaustive;
+                result.exhaustiveNotRunReason = info.exhaustiveNotRunReason;
+
+                // --- Warmup iterations ---
+                // A candidate that failed or restarted the previous measurement always
+                // leaves the profiling context reset (drained, gate released) before
+                // returning, so this raw-stream warmup can never block on a stall left
+                // over from it.
+                bool warmupFailed = false;
+                for(int w = 0; w < config.warmupIterations; ++w)
+                {
+                    auto execErr
+                        = detail::executeWithPlan(handle, *plan.executionPlanDesc, variantPackDesc);
+                    if(execErr.is_bad())
+                    {
+                        warmupFailed = true;
+                        result.errorMessage = "Warmup failed: " + execErr.get_message();
+                        break;
+                    }
+                }
+                if(warmupFailed)
+                {
+                    allResults.push_back(std::move(result));
+                    continue;
+                }
+
+                // --- Device sync before timed iterations ---
+                auto syncErr = autotune::detail::syncDevice();
+                if(syncErr.is_bad())
+                {
+                    HIPDNN_FE_LOG_ERROR(
+                        "autotune: engine "
+                        << result.engineName << ": device synchronization before timing failed - "
+                        << syncErr.get_message() << "; skipping plan to avoid unreliable timing");
+                    if(!result.errorMessage.empty())
+                    {
+                        result.errorMessage += "; ";
+                    }
+                    result.errorMessage += "Device synchronization before timed benchmark failed "
+                                           "(timing unreliable): "
+                                           + syncErr.get_message();
+                    allResults.push_back(std::move(result));
+                    continue;
+                }
+
+                // --- Timed iterations ---
+                std::vector<float> timings;
+                bool benchmarkFailed = false;
+                bool restartUnstalled = false;
+                auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
+
+                // One lambda for both strategies: it just runs the reusable profiling
+                // sequence against this comparison's shared context; the loop helpers
+                // classify the result (record / restart-unstalled / malformed).
+                auto timeOnce = [&](::hipdnn_frontend::ExecutionTiming& timing) -> Error {
+                    return ::hipdnn_frontend::detail::executeWithPlanTimed(handle,
+                                                                           *plan.executionPlanDesc,
+                                                                           variantPackDesc,
+                                                                           profilingDesc,
+                                                                           timing,
+                                                                           sweepStalled);
+                };
+
                 if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
                 {
-                    iterLabel = "timed";
-                    iterCount = config.timedIterations;
+                    auto onIteration = [&](int t, float elapsed) {
+                        HIPDNN_FE_LOG_INFO("autotune: engine "
+                                           << result.engineName << ": iter " << (t + 1) << "/"
+                                           << config.timedIterations << ", time=" << elapsed
+                                           << "ms");
+                    };
+                    auto outcome = autotune::detail::runFixedAverage(
+                        config.timedIterations, sweepStalled, timeOnce, onIteration);
+                    timings = std::move(outcome.timings);
+                    benchmarkFailed = outcome.benchmarkFailed;
+                    restartUnstalled = outcome.restartUnstalled;
+                    candidateQuality = outcome.finalQuality;
+                    if(benchmarkFailed)
+                    {
+                        result.errorMessage = outcome.errorMessage;
+                    }
+                    result.iterationsRun = static_cast<int>(timings.size());
+                    result.converged = outcome.converged;
                 }
-                HIPDNN_FE_LOG_INFO("autotune: [" << benchmarkCount << "/" << benchmarkTotal
-                                                 << "] benchmarking engine " << result.engineName
-                                                 << " (warmup=" << config.warmupIterations << ", "
-                                                 << iterLabel << " iterations=" << iterCount
-                                                 << ")");
-            }
-
-            result.supportsExhaustive = info.supportsExhaustive;
-            result.ranExhaustive = info.ranExhaustive;
-            result.exhaustiveNotRunReason = info.exhaustiveNotRunReason;
-
-            // --- Warmup iterations ---
-            bool warmupFailed = false;
-            for(int w = 0; w < config.warmupIterations; ++w)
-            {
-                auto execErr
-                    = detail::executeWithPlan(handle, *plan.executionPlanDesc, variantPackDesc);
-                if(execErr.is_bad())
+                else // RUN_UNTIL_STABLE
                 {
-                    warmupFailed = true;
-                    result.errorMessage = "Warmup failed: " + execErr.get_message();
+                    auto onIteration = [&](int t, float elapsed, float cov, bool covValid) {
+                        const std::string covStr = covValid ? std::to_string(cov) : "N/A";
+                        HIPDNN_FE_LOG_INFO("autotune: engine "
+                                           << result.engineName << ": iter " << (t + 1) << "/"
+                                           << config.maxIterations << ", time=" << elapsed
+                                           << "ms, CoV=" << covStr
+                                           << " (threshold=" << config.stabilityThreshold << ")");
+                    };
+                    auto outcome = autotune::detail::runUntilStable(config.maxIterations,
+                                                                    config.windowSize,
+                                                                    config.stabilityThreshold,
+                                                                    sweepStalled,
+                                                                    timeOnce,
+                                                                    onIteration);
+                    timings = std::move(outcome.timings);
+                    benchmarkFailed = outcome.benchmarkFailed;
+                    restartUnstalled = outcome.restartUnstalled;
+                    candidateQuality = outcome.finalQuality;
+                    if(benchmarkFailed)
+                    {
+                        result.errorMessage = outcome.errorMessage;
+                    }
+                    result.iterationsRun = static_cast<int>(timings.size());
+                    result.converged = outcome.converged;
+                }
+
+                if(restartUnstalled)
+                {
+                    HIPDNN_FE_LOG_WARN(
+                        "autotune: engine "
+                        << result.engineName
+                        << ": stall watchdog fired or stalling was declined mid-sweep; "
+                           "discarding this pass and re-measuring every candidate unstalled.");
+                    restartUnstalledRequested = true;
                     break;
                 }
-            }
-            if(warmupFailed)
-            {
-                allResults.push_back(std::move(result));
-                continue;
-            }
 
-            // --- Device sync before timed iterations ---
-            auto syncErr = autotune::detail::syncDevice();
-            if(syncErr.is_bad())
-            {
-                HIPDNN_FE_LOG_ERROR(
-                    "autotune: engine "
-                    << result.engineName << ": device synchronization before timing failed - "
-                    << syncErr.get_message() << "; skipping plan to avoid unreliable timing");
-                if(!result.errorMessage.empty())
-                {
-                    result.errorMessage += "; ";
-                }
-                result.errorMessage += "Device synchronization before timed benchmark failed "
-                                       "(timing unreliable): "
-                                       + syncErr.get_message();
-                allResults.push_back(std::move(result));
-                continue;
-            }
-
-            // --- Timed iterations ---
-            std::vector<float> timings;
-            bool benchmarkFailed = false;
-
-            if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
-            {
-                auto timeOnce = [&](float& elapsed) -> Error {
-                    return autotune::detail::benchmarkOnce(
-                        handle, *plan.executionPlanDesc, variantPackDesc, elapsed);
-                };
-                auto onIteration = [&](int t, float elapsed) {
-                    HIPDNN_FE_LOG_INFO("autotune: engine "
-                                       << result.engineName << ": iter " << (t + 1) << "/"
-                                       << config.timedIterations << ", time=" << elapsed << "ms");
-                };
-                auto outcome = autotune::detail::runFixedAverage(
-                    config.timedIterations, timeOnce, onIteration);
-                timings = std::move(outcome.timings);
-                benchmarkFailed = outcome.benchmarkFailed;
                 if(benchmarkFailed)
                 {
-                    result.errorMessage = outcome.errorMessage;
+                    HIPDNN_FE_LOG_WARN("autotune: engine " << result.engineName
+                                                           << ": benchmark failed - "
+                                                           << result.errorMessage);
+                    allResults.push_back(std::move(result));
+                    continue;
                 }
-                result.iterationsRun = static_cast<int>(timings.size());
-                result.converged = outcome.converged;
-            }
-            else // RUN_UNTIL_STABLE
-            {
-                auto timeOnce = [&](float& elapsed) -> Error {
-                    return autotune::detail::benchmarkOnce(
-                        handle, *plan.executionPlanDesc, variantPackDesc, elapsed);
-                };
-                auto onIteration = [&](int t, float elapsed, float cov, bool covValid) {
-                    const std::string covStr = covValid ? std::to_string(cov) : "N/A";
-                    HIPDNN_FE_LOG_INFO("autotune: engine "
-                                       << result.engineName << ": iter " << (t + 1) << "/"
-                                       << config.maxIterations << ", time=" << elapsed
-                                       << "ms, CoV=" << covStr
-                                       << " (threshold=" << config.stabilityThreshold << ")");
-                };
-                auto outcome = autotune::detail::runUntilStable(config.maxIterations,
-                                                                config.windowSize,
-                                                                config.stabilityThreshold,
-                                                                timeOnce,
-                                                                onIteration);
-                timings = std::move(outcome.timings);
-                benchmarkFailed = outcome.benchmarkFailed;
-                if(benchmarkFailed)
+
+                // --- Compute statistics ---
+                result.succeeded = true;
+                result.timingQuality = candidateQuality;
+                result.compiledPlanIndex = static_cast<int>(info.planIndex);
+                result.minTimeMs = *std::min_element(timings.begin(), timings.end());
+                result.avgTimeMs = hipdnn_data_sdk::utilities::detail::mean(timings);
+                result.robustTimeMs = hipdnn_data_sdk::utilities::detail::robustMean(timings);
+                if(timings.size() > 1)
                 {
-                    result.errorMessage = outcome.errorMessage;
+                    result.stddevMs = hipdnn_data_sdk::utilities::detail::stddev(timings);
                 }
-                result.iterationsRun = static_cast<int>(timings.size());
-                result.converged = outcome.converged;
-            }
 
-            if(benchmarkFailed)
-            {
-                HIPDNN_FE_LOG_WARN("autotune: engine " << result.engineName
-                                                       << ": benchmark failed - "
-                                                       << result.errorMessage);
+                // --- Log per-engine result ---
+                if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
+                {
+                    HIPDNN_FE_LOG_INFO("autotune: engine "
+                                       << result.engineName << ": robust=" << result.robustTimeMs
+                                       << "ms min=" << result.minTimeMs << "ms avg="
+                                       << result.avgTimeMs << "ms stddev=" << result.stddevMs
+                                       << "ms iters=" << result.iterationsRun);
+                }
+                else // RUN_UNTIL_STABLE
+                {
+                    HIPDNN_FE_LOG_INFO("autotune: engine "
+                                       << result.engineName << ": robust=" << result.robustTimeMs
+                                       << "ms min=" << result.minTimeMs << "ms avg="
+                                       << result.avgTimeMs << "ms iters=" << result.iterationsRun
+                                       << " converged=" << (result.converged ? "true" : "false"));
+                }
+
                 allResults.push_back(std::move(result));
-                continue;
             }
 
-            // --- Compute statistics ---
-            result.succeeded = true;
-            result.compiledPlanIndex = static_cast<int>(info.planIndex);
-            result.minTimeMs = *std::min_element(timings.begin(), timings.end());
-            result.avgTimeMs = hipdnn_data_sdk::utilities::detail::mean(timings);
-            result.robustTimeMs = hipdnn_data_sdk::utilities::detail::robustMean(timings);
-            if(timings.size() > 1)
+            if(!restartUnstalledRequested)
             {
-                result.stddevMs = hipdnn_data_sdk::utilities::detail::stddev(timings);
+                break;
             }
-
-            // --- Log per-engine result ---
-            if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
-            {
-                HIPDNN_FE_LOG_INFO("autotune: engine "
-                                   << result.engineName << ": robust=" << result.robustTimeMs
-                                   << "ms min=" << result.minTimeMs << "ms avg=" << result.avgTimeMs
-                                   << "ms stddev=" << result.stddevMs
-                                   << "ms iters=" << result.iterationsRun);
-            }
-            else // RUN_UNTIL_STABLE
-            {
-                HIPDNN_FE_LOG_INFO("autotune: engine "
-                                   << result.engineName << ": robust=" << result.robustTimeMs
-                                   << "ms min=" << result.minTimeMs << "ms avg=" << result.avgTimeMs
-                                   << "ms iters=" << result.iterationsRun
-                                   << " converged=" << (result.converged ? "true" : "false"));
-            }
-
-            allResults.push_back(std::move(result));
+            sweepStalled = false;
         }
 
         // Append workspace-skipped results
@@ -4670,6 +4732,143 @@ public:
                                          "Execute failed.");
 
         return {ErrorCode::OK, ""};
+    }
+
+    /**
+     * @brief Execute the graph with tensor pointers mapped by tensor handles, while
+     *        measuring gap-free device execution time
+     *
+     * Tensor-attribute-keyed counterpart of execute_timed_ext(handle, variantPack,
+     * workspace, timing); see that overload for the timing contract.
+     *
+     * @param handle The hipDNN handle
+     * @param tensorLookup Map from std::shared_ptr<TensorAttributes> (tensor handles) to
+     * device memory pointers
+     * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
+     * @param[out] timing The device-time measurement and its quality
+     * @return ErrorCode::OK on success (whatever the timing quality), ErrorCode::INVALID_VALUE
+     *         if a tensor in the lookup is null or missing a UID, or
+     *         ErrorCode::HIPDNN_BACKEND_ERROR on backend failure. Call get_message() for the
+     *         specific failure reason.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error execute_timed_ext(
+        hipdnnHandle_t handle,
+        const std::unordered_map<std::shared_ptr<TensorAttributes>, void*>& tensorLookup,
+        void* workspace,
+        ExecutionTiming& timing) const
+    {
+        timing.elapsedMs.reset();
+        timing.quality = TimingQuality::INVALID;
+        timing.timedOut = false;
+
+        std::unordered_map<int64_t, void*> variantPack;
+        HIPDNN_CHECK_ERROR(detail::tensorLookupToVariantPack(tensorLookup, variantPack));
+
+        return execute_timed_ext(handle, variantPack, workspace, timing);
+    }
+
+    /**
+     * @brief Execute the graph with tensor pointers mapped by UID, while measuring
+     *        gap-free device execution time
+     *
+     * Introduced in hipdnn_frontend 0.4.0.
+     *
+     * Executes the active plan exactly once -- no warmup, no replay -- bracketed by the
+     * backend's stall-gate profiling sequence (arm -> start -> execute -> stop -> release
+     * -> finalize), and reports the elapsed device time plus how it was obtained. This
+     * call blocks until the measurement completes.
+     *
+     * `timing` is reset to an empty elapsedMs / TimingQuality::INVALID / timedOut=false
+     * before any validation, and is only published once every step below has succeeded;
+     * a bad Error always leaves it at that reset state. Otherwise:
+     * - TimingQuality::DEVICE_ONLY: the stream was stalled, so elapsedMs excludes host
+     *   submission overhead.
+     * - TimingQuality::UNSTALLED: stalling was not used (unsupported device, or declined
+     *   for this one measurement). The measurement was taken without the stall gate, so
+     *   it may or may not include host submission overhead, and must not be ranked
+     *   against a DEVICE_ONLY measurement.
+     * - TimingQuality::INVALID with timedOut=true and an OK Error: the stall watchdog
+     *   fired -- execution completed, but the measurement did not, so elapsedMs is empty.
+     *   This call does not retry unstalled; a caller who needs a comparable-cost
+     *   measurement despite a timeout should invoke this method again. autotune() applies
+     *   its own unstalled-restart policy internally; that policy is not shared with this
+     *   public entry point.
+     * - TimingQuality::INVALID with timedOut=false and an OK Error: the backend reported a
+     *   finite negative elapsed time. This is a bad reading, not a failure -- execution
+     *   still ran exactly once, and this call does not retry or replay it. A non-finite
+     *   (NaN/Inf) reading is instead reported as a bad Error.
+     *
+     * @param handle The hipDNN handle
+     * @param variantPack Map from tensor UID to device memory pointers
+     * @param workspace Pointer to workspace memory (can be nullptr if size is 0)
+     * @param[out] timing The device-time measurement and its quality
+     * @return ErrorCode::OK on success (whatever the timing quality), or an error from the
+     *         same active-plan validation and backend-execution paths as execute(). Call
+     *         get_message() for the specific failure reason.
+     *
+     * @code{.cpp}
+     * ExecutionTiming timing;
+     * graph.execute_timed_ext(handle, variantPack, workspace, timing);
+     * if(timing.quality == TimingQuality::DEVICE_ONLY) {
+     *     std::cout << "device time: " << *timing.elapsedMs << " ms\n";
+     * }
+     * @endcode
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error execute_timed_ext(hipdnnHandle_t handle,
+                            const std::unordered_map<int64_t, void*>& variantPack,
+                            void* workspace,
+                            ExecutionTiming& timing) const
+    {
+        timing.elapsedMs.reset();
+        timing.quality = TimingQuality::INVALID;
+        timing.timedOut = false;
+
+        HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with timing");
+
+        if(!_compiledPlans.empty() && _activePlanIndex < _compiledPlans.size()
+           && _compiledPlans[_activePlanIndex].barred)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Active plan is barred and cannot be executed. "
+                    "Select a different plan with build_plan_at_index()."};
+        }
+
+        const auto* execPlan = activeExecutionPlanPtr();
+        if(execPlan == nullptr || !execPlan->valid())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no compiled execution plan. Call build() or "
+                    "from_compiled_plan_binary() first."};
+        }
+
+        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+            HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
+        if(!variantPackDesc || !variantPackDesc->valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create variant pack descriptor."};
+        }
+
+        HIPDNN_CHECK_ERROR(
+            detail::populateBaseVariantPackDescriptor(*variantPackDesc, variantPack, workspace));
+
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendFinalize(variantPackDesc->get()),
+            "Failed to finalize variant pack descriptor");
+
+        // One-shot local profiling context: this call measures exactly once and never
+        // reuses it, unlike autotuneImpl()'s comparison-scoped descriptor.
+        const detail::ScopedHipdnnBackendDescriptor profilingDesc(
+            HIPDNN_BACKEND_PROFILING_CONTROL_EXT);
+        if(!profilingDesc.valid())
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Failed to create profiling control descriptor."};
+        }
+
+        return detail::executeWithPlanTimed(
+            handle, *execPlan, *variantPackDesc, profilingDesc, timing);
     }
 
 #ifdef HIPDNN_ENABLE_SDPA

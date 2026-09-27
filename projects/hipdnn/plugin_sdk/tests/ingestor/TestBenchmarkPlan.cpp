@@ -4,7 +4,9 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -15,6 +17,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/StallGate.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -32,6 +35,65 @@
 
 #include "IngestorMocks.hpp"
 #include "KernelIngestorTestFixtures.hpp"
+
+#ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
+namespace
+{
+struct HipStreamWaitFaults
+{
+    bool enabled = false;
+    bool unsupported = false;
+    int capabilityQueries = 0;
+    int armCalls = 0;
+    int failFromArm = 0;
+    int rejectedArms = 0;
+    hipError_t lastError = hipSuccess;
+};
+
+thread_local HipStreamWaitFaults gStreamWaitFaults;
+} // namespace
+
+// GNU ld requires these symbol names for test-only HIP call wrapping.
+// NOLINTBEGIN(readability-identifier-naming, bugprone-reserved-identifier)
+extern "C" hipError_t __real_hipStreamWaitValue32(
+    hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask);
+extern "C" hipError_t
+    __real_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device);
+
+extern "C" hipError_t __wrap_hipStreamWaitValue32(
+    hipStream_t stream, void* ptr, uint32_t value, unsigned int flags, uint32_t mask)
+{
+    if(gStreamWaitFaults.enabled)
+    {
+        ++gStreamWaitFaults.armCalls;
+        if(gStreamWaitFaults.failFromArm > 0
+           && gStreamWaitFaults.armCalls >= gStreamWaitFaults.failFromArm)
+        {
+            // HIP rejects nullptr before enqueueing anything. Exercise a real runtime
+            // error while preserving the valid stream for ordinary event timing.
+            gStreamWaitFaults.lastError
+                = __real_hipStreamWaitValue32(stream, nullptr, value, flags, mask);
+            ++gStreamWaitFaults.rejectedArms;
+            return gStreamWaitFaults.lastError;
+        }
+    }
+    return __real_hipStreamWaitValue32(stream, ptr, value, flags, mask);
+}
+
+extern "C" hipError_t
+    __wrap_hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attribute, int device)
+{
+    if(gStreamWaitFaults.enabled && gStreamWaitFaults.unsupported
+       && attribute == hipDeviceAttributeCanUseStreamWaitValue)
+    {
+        ++gStreamWaitFaults.capabilityQueries;
+        *value = 0;
+        return hipSuccess;
+    }
+    return __real_hipDeviceGetAttribute(value, attribute, device);
+}
+// NOLINTEND(readability-identifier-naming, bugprone-reserved-identifier)
+#endif
 
 /**
  * @file TestBenchmarkPlan.cpp
@@ -162,29 +224,50 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 // ---------------------------------------------------------------------------
 
 /// A handle satisfying HasGetStream, which BenchmarkPlan's constructor static_asserts.
-/// StubHandle (used by the oracle above) has no getStream(). The injected timer never
-/// records an event, so the null stream's behaviour never matters.
+/// StubHandle (used by the oracle above) has no getStream(). Defaults to the null stream,
+/// which never matters for the injected timers; the watchdog case below passes a real one,
+/// because the default timer arms the stall gate on whatever stream it is given.
 struct BenchmarkTestHandle
 {
+    hipStream_t stream = nullptr;
+
     // Non-static: models a real handle's instance accessor, which is what HasGetStream
     // detects.
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     hipStream_t getStream() const
     {
-        return nullptr;
+        return stream;
     }
 };
 
+/// Bytes of same-stream scratch a real-GPU-work FakePlan memsets per execute(). 4 MiB
+/// clears hipEventElapsedTime's ~1 us resolution floor on every supported GPU with
+/// margin, so bracketing this work with real HIP events cannot report a sub-resolution
+/// or negative duration purely from having nothing to measure.
+constexpr size_t GPU_WORK_SCRATCH_BYTES = size_t{4} * 1024 * 1024;
+
 /// A minimal IPlan double recording every execute() call's arguments and count.
 /// Throws on the first @p throwForCalls invocations (default 0, never throws), then
-/// succeeds and counts a "launch".
+/// succeeds and counts a "launch". @p enqueueGpuWork additionally memsets a same-stream
+/// scratch buffer on every execute(): the real-HIP-timer tests need actual device work
+/// between the timer's start and stop events, or hipEventElapsedTime has nothing to
+/// measure and can report a sub-resolution or negative duration.
 class FakePlan : public hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>
 {
 public:
-    explicit FakePlan(size_t workspaceSize = 0, int throwForCalls = 0)
+    explicit FakePlan(size_t workspaceSize = 0, int throwForCalls = 0, bool enqueueGpuWork = false)
         : _workspaceSize(workspaceSize)
         , _throwForCalls(throwForCalls)
     {
+        if(enqueueGpuWork)
+        {
+            void* raw = nullptr;
+            if(hipMalloc(&raw, GPU_WORK_SCRATCH_BYTES) != hipSuccess || raw == nullptr)
+            {
+                throw std::runtime_error("FakePlan: GPU scratch allocation failed");
+            }
+            _gpuScratch = {raw, [](void* ptr) { static_cast<void>(hipFree(ptr)); }};
+        }
     }
 
     size_t getWorkspaceSize(const BenchmarkTestHandle& /*handle*/) const override
@@ -192,7 +275,7 @@ public:
         return _workspaceSize;
     }
 
-    void execute(const BenchmarkTestHandle& /*handle*/,
+    void execute(const BenchmarkTestHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override
@@ -201,6 +284,12 @@ public:
         _lastDeviceBuffers = deviceBuffers;
         _lastNumDeviceBuffers = numDeviceBuffers;
         _lastWorkspace = workspace;
+        if(!_gpuScratch.isEmpty()
+           && hipMemsetAsync(_gpuScratch.get(), 0, GPU_WORK_SCRATCH_BYTES, handle.getStream())
+                  != hipSuccess)
+        {
+            throw std::runtime_error("FakePlan: GPU work enqueue failed");
+        }
         if(_callCount <= _throwForCalls)
         {
             throw std::runtime_error("FakePlan: simulated failure");
@@ -231,11 +320,37 @@ public:
 private:
     size_t _workspaceSize;
     int _throwForCalls;
+    hipdnn_data_sdk::utilities::ScopedResource<void*> _gpuScratch;
     mutable int _callCount = 0;
     mutable int _launchCount = 0;
     mutable const hipdnnPluginDeviceBuffer_t* _lastDeviceBuffers = nullptr;
     mutable uint32_t _lastNumDeviceBuffers = 0;
     mutable void* _lastWorkspace = nullptr;
+};
+
+/// Blocks the host on the handle's own stream from inside execute(). The GPU work
+/// stays behind the stall gate until release; synchronizing it before the caller's
+/// release still requires the watchdog. The same work gives the unstalled rerun a
+/// meaningful interval to time.
+class StreamSyncingPlan : public FakePlan
+{
+public:
+    StreamSyncingPlan()
+        : FakePlan(/*workspaceSize=*/0, /*throwForCalls=*/0, /*enqueueGpuWork=*/true)
+    {
+    }
+
+    void execute(const BenchmarkTestHandle& handle,
+                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                 uint32_t numDeviceBuffers,
+                 void* workspace = nullptr) const override
+    {
+        FakePlan::execute(handle, deviceBuffers, numDeviceBuffers, workspace);
+        if(hipStreamSynchronize(handle.getStream()) != hipSuccess)
+        {
+            throw std::runtime_error("StreamSyncingPlan: stream synchronization failed");
+        }
+    }
 };
 
 using TestBenchmarkPlan = BenchmarkPlan<BenchmarkTestHandle>;
@@ -412,11 +527,7 @@ TEST(TestIngestorBenchmarkPlan, TheReductionTrimsASingleSlowOutlier)
               uint32_t numDeviceBuffers,
               void* workspace) -> std::optional<double> {
         plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
-        if(&plan == steadyRaw)
-        {
-            return STEADY_SAMPLE;
-        }
-        return SPIKY_SAMPLES.at(spikySampleIndex++);
+        return &plan == steadyRaw ? STEADY_SAMPLE : SPIKY_SAMPLES.at(spikySampleIndex++);
     };
 
     const BenchmarkTestHandle handle;
@@ -454,10 +565,9 @@ TEST(TestIngestorBenchmarkPlan, AnUntimeableCandidateIsScoredUnusableAndLosesToA
     EXPECT_EQ(timedRaw->launchCount(), SAMPLING_LAUNCHES + 1);
 }
 
-/// The only case exercising the DEFAULT timer: no timer argument, so makeHipEventTimer()
-/// runs for real against HIP. Every other case here injects a fake, which would let a
-/// regression in event creation, event reuse across samples, the record/synchronize
-/// pair, or the elapsed-time read pass unnoticed.
+/// The default timer runs against real HIP events and same-stream GPU work.
+/// This case verifies event creation, reuse, recording, synchronization, and elapsed
+/// readback without an injected timer; the watchdog and fault tests cover recovery.
 ///
 /// Asserting the exact count is what makes it meaningful: the timer must have returned a
 /// duration on all BENCHMARK_ITERATIONS samples. A single nullopt would score the
@@ -466,16 +576,23 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
 {
     SKIP_IF_NO_DEVICES();
 
-    auto sub = std::make_unique<FakePlan>(64);
+    // Unsupported stream-wait devices must use ordinary event timing from the
+    // first sample, without an extra discarded pass.
+    auto sub = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
     const auto* subRaw = sub.get();
 
     std::vector<TestBenchmarkPlan::Candidate> candidates;
     candidates.push_back({testId(0x01), std::move(sub)});
 
     const BenchmarkTestHandle handle;
-    const TestBenchmarkPlan plan(std::move(candidates), handle);
+    std::vector<RankedEntry> recorded;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
 
     plan.execute(handle, nullptr, 0, nullptr);
+    ASSERT_EQ(recorded.size(), 1U) << "the HIP-event timer did not produce a usable ranking";
 
     EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 1)
         << "the HIP-event timer failed a sample; the candidate was scored unusable";
@@ -485,6 +602,204 @@ TEST(TestIngestorBenchmarkPlan, TheDefaultTimerTimesEverySampleAgainstRealHipEve
     plan.execute(handle, nullptr, 0, nullptr);
     EXPECT_EQ(subRaw->launchCount(), SAMPLING_LAUNCHES + 2);
 }
+
+/// A watchdog timeout says the candidate cannot be measured with the stream stalled; it
+/// says nothing about how fast the candidate is. The comparison aborts sampling the
+/// instant the timeout is seen -- a candidate ordered after the deadlocking one is never
+/// sampled stalled at all -- then re-measures every candidate unstalled from scratch, so
+/// all three end up ranked.
+///
+/// This is the real default timer against real HIP: the middle candidate synchronizes
+/// the very stream the gate stalls, which is the self-inflicted deadlock the watchdog
+/// exists for. No module-wide latch is consulted or reset: this policy is local to each
+/// comparison, proven by running a second, independent comparison afterward and seeing
+/// its own gate stall and time out too.
+TEST(TestIngestorBenchmarkPlan, AWatchdogTimeoutAbortsThePassImmediatelyAndRerunsUnstalled)
+{
+    SKIP_IF_NO_DEVICES();
+
+    int canWaitValue = 0;
+    int device = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWaitValue, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWaitValue == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    // One run of a [normal, deadlocking, normal] comparison against a fresh stream and
+    // plan: how long plan.execute() took, what the ranking recorded, and how many times
+    // the candidates before/after the deadlocking one launched. Returned by value rather
+    // than through out-params so two calls below cannot share any state.
+    struct ComparisonResult
+    {
+        std::vector<RankedEntry> recorded;
+        std::chrono::milliseconds wallTime;
+        int beforeLaunches;
+        int afterLaunches;
+    };
+
+    const auto runComparison = []() -> ComparisonResult {
+        hipStream_t rawStream = nullptr;
+        EXPECT_EQ(hipStreamCreate(&rawStream), hipSuccess);
+        // ScopedResource, the same RAII pattern the default HIP-event timer uses for its
+        // events: destroys the stream on every exit path instead of only fall-through.
+        const hipdnn_data_sdk::utilities::ScopedResource<hipStream_t> stream(
+            rawStream, [](hipStream_t s) { static_cast<void>(hipStreamDestroy(s)); });
+        const BenchmarkTestHandle handle{stream.get()};
+
+        auto before = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        auto after = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        const auto* beforeRaw = before.get();
+        const auto* afterRaw = after.get();
+
+        std::vector<TestBenchmarkPlan::Candidate> candidates;
+        candidates.push_back({testId(0x01), std::move(before), testId(0xF0), testId(0xD0)});
+        candidates.push_back(
+            {testId(0x02), std::make_unique<StreamSyncingPlan>(), testId(0xF0), testId(0xD0)});
+        candidates.push_back({testId(0x03), std::move(after), testId(0xF0), testId(0xD0)});
+
+        std::vector<RankedEntry> recorded;
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
+            handle,
+            TestBenchmarkPlan::Timer{},
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        const auto start = std::chrono::steady_clock::now();
+        plan.execute(handle, nullptr, 0U, nullptr);
+        const auto wallTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+
+        return {std::move(recorded), wallTime, beforeRaw->launchCount(), afterRaw->launchCount()};
+    };
+
+    // plan.execute() samples every candidate and then delegates once more to whichever
+    // one the ranking crowned the winner, so that candidate's launch count is one higher
+    // than a pure sampling count. Compare against the actual winner rather than assuming
+    // one: real HIP timing decides which candidate wins.
+    const auto delegatedBonus
+        = [](const std::vector<RankedEntry>& recorded, DescriptorId id) -> int {
+        return !recorded.empty() && recorded.front().kernelId == id ? 1 : 0;
+    };
+
+    const auto first = runComparison();
+
+    EXPECT_GE(first.wallTime, hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "the watchdog never fired, so this case proved nothing";
+    EXPECT_EQ(first.recorded.size(), 3U)
+        << "the timed-out candidate was dropped instead of re-measured unstalled";
+
+    // Immediate abort: the candidate ordered after the deadlocking one accrues exactly
+    // one pass's launches (the unstalled rerun only), because the stalled pass never
+    // reaches it. The candidate ordered before it finishes its stalled pass normally and
+    // is then resampled unstalled, so it accrues two passes' worth. Either count gains
+    // one more launch if that candidate turned out to be the delegated winner.
+    EXPECT_EQ(first.beforeLaunches,
+              2 * SAMPLING_LAUNCHES + delegatedBonus(first.recorded, testId(0x01)))
+        << "the candidate before the timeout must be sampled once per pass";
+    EXPECT_EQ(first.afterLaunches, SAMPLING_LAUNCHES + delegatedBonus(first.recorded, testId(0x03)))
+        << "the candidate after the timeout must not be sampled during the aborted stalled "
+           "pass, only during the unstalled rerun";
+
+    // A second, wholly independent comparison must still be able to stall and time out:
+    // nothing about the first comparison's fallback may have disabled stalling for it.
+    const auto second = runComparison();
+
+    EXPECT_GE(second.wallTime, hipdnn_data_sdk::utilities::StallGate::DEFAULT_TIMEOUT)
+        << "a prior comparison's fallback suppressed stalling for this independent one";
+    EXPECT_EQ(second.recorded.size(), 3U);
+    EXPECT_EQ(second.afterLaunches,
+              SAMPLING_LAUNCHES + delegatedBonus(second.recorded, testId(0x03)));
+}
+
+#ifdef HIPDNN_TEST_HIP_STREAM_WAIT_FAILURES
+class TestIngestorHipTimerFaults : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        gStreamWaitFaults = {};
+        SKIP_IF_NO_DEVICES();
+        gStreamWaitFaults.enabled = true;
+    }
+
+    void TearDown() override
+    {
+        gStreamWaitFaults = {};
+        static_cast<void>(hipGetLastError());
+    }
+};
+
+TEST_F(TestIngestorHipTimerFaults, ArmErrorRestartsTheWholeComparisonUnstalled)
+{
+    int device = 0;
+    int canWait = 0;
+    ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+    ASSERT_EQ(hipDeviceGetAttribute(&canWait, hipDeviceAttributeCanUseStreamWaitValue, device),
+              hipSuccess);
+    if(canWait == 0)
+    {
+        GTEST_SKIP() << "Device does not support hipStreamWaitValue32";
+    }
+
+    std::array<const FakePlan*, 3> plans{};
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    for(size_t index = 0; index < plans.size(); ++index)
+    {
+        auto candidate
+            = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+        plans[index] = candidate.get();
+        candidates.push_back({testId(static_cast<uint8_t>(index + 1)), std::move(candidate)});
+    }
+
+    // The first candidate finishes stalled. The next arm and any later attempts
+    // fail in HIP, so recovery must stop arming and remeasure every candidate.
+    gStreamWaitFaults.failFromArm = BENCHMARK_ITERATIONS + 1;
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    EXPECT_EQ(gStreamWaitFaults.lastError, hipErrorInvalidValue);
+    EXPECT_EQ(gStreamWaitFaults.rejectedArms, 1);
+    ASSERT_EQ(recorded.size(), plans.size());
+    const std::array<int, 3> expectedLaunches{
+        2 * SAMPLING_LAUNCHES, SAMPLING_LAUNCHES + BENCHMARK_WARMUP_RUNS + 1, SAMPLING_LAUNCHES};
+    for(size_t index = 0; index < plans.size(); ++index)
+    {
+        const int delegated
+            = recorded.front().kernelId == testId(static_cast<uint8_t>(index + 1)) ? 1 : 0;
+        EXPECT_EQ(plans[index]->launchCount(), expectedLaunches[index] + delegated);
+    }
+}
+
+TEST_F(TestIngestorHipTimerFaults, UnsupportedDeviceStartsUnstalledWithoutDiscardingSamples)
+{
+    gStreamWaitFaults.unsupported = true;
+    auto candidate = std::make_unique<FakePlan>(64, /*throwForCalls=*/0, /*enqueueGpuWork=*/true);
+    const auto* candidatePtr = candidate.get();
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(1), std::move(candidate)});
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates),
+                                 handle,
+                                 TestBenchmarkPlan::Timer{},
+                                 [&recorded](auto ranking) { recorded = std::move(ranking); });
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_GT(gStreamWaitFaults.capabilityQueries, 0);
+    EXPECT_EQ(gStreamWaitFaults.armCalls, 0);
+    ASSERT_EQ(recorded.size(), 1U);
+    EXPECT_EQ(candidatePtr->launchCount(), SAMPLING_LAUNCHES + 1);
+}
+#endif
 
 /// A one-candidate composite still samples before delegating to the only candidate.
 TEST(TestIngestorBenchmarkPlan, ASingleCandidateCompositeExecutesThatOne)
@@ -613,7 +928,11 @@ inline TestBenchmarkPlan::Timer
             return std::nullopt;
         }
         const auto index = static_cast<size_t>(std::distance(order.begin(), found));
-        return index < times.size() ? times[index] : std::nullopt;
+        if(index < times.size())
+        {
+            return times[index];
+        }
+        return std::nullopt;
     };
 }
 
@@ -679,6 +998,132 @@ TEST(TestIngestorBenchmarkPlan, ACandidateThatFailedSamplingNeverAppearsInTheRan
             << "a known-broken kernel recorded as a fallback would be served ahead of the "
                "normal ranked path on a later run";
     }
+}
+
+/// A malformed sample from the timer must never enter robustMean() or the ranking. NaN
+/// and infinite samples score the candidate unusable immediately, with no retry. A
+/// negative sample is instead retried in place, so a candidate that is persistently
+/// negative -- this deterministic timer keeps returning the same malformed value on
+/// every retry -- still exhausts MAX_NEGATIVE_SAMPLE_RETRIES and ends up scored unusable
+/// exactly like a nullopt return, just after paying the retry budget first rather than
+/// on the very first sample. Zero is a valid sample and stays in the ranking.
+TEST(TestIngestorBenchmarkPlan, MalformedTimerSamplesScoreTheCandidateUnusable)
+{
+    constexpr double NEGATIVE = -1.0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    for(const double malformed : {NEGATIVE, nan, inf})
+    {
+        std::vector<RankedEntry> recorded;
+        const BenchmarkTestHandle handle;
+        auto candidates = threeCandidates();
+        const auto* malformedCandidate = candidates[1].plan.get();
+        auto timer = makeDeterministicTimer(candidates, {5.0, malformed, 3.0});
+        int malformedCalls = 0;
+        const TestBenchmarkPlan plan(
+            std::move(candidates),
+            handle,
+            [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& subPlan,
+                const BenchmarkTestHandle& planHandle,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* workspace) {
+                if(&subPlan == malformedCandidate)
+                {
+                    ++malformedCalls;
+                }
+                return timer(subPlan, planHandle, deviceBuffers, numDeviceBuffers, workspace);
+            },
+            [&recorded](std::vector<RankedEntry> ranking) { recorded = std::move(ranking); });
+
+        plan.execute(handle, nullptr, 0U, nullptr);
+        EXPECT_EQ(malformedCalls, malformed < 0.0 ? MAX_NEGATIVE_SAMPLE_RETRIES + 1 : 1);
+
+        ASSERT_EQ(recorded.size(), 2U);
+        for(const auto& entry : recorded)
+        {
+            EXPECT_NE(entry.kernelId, testId(0x02))
+                << "a malformed measurement recorded as a fallback would be served ahead of "
+                   "the normal ranked path on a later run";
+        }
+    }
+}
+
+/// A single transient negative sample must not disqualify the candidate: sampleCandidate()
+/// discards it and re-measures the same slot, so a candidate that only stumbles once
+/// still accrues its full BENCHMARK_ITERATIONS valid samples and can win the sweep. This
+/// is the case a naive "any negative sample means unusable" check would defeat.
+TEST(TestIngestorBenchmarkPlan, ATransientNegativeSampleIsReplacedAndTheCandidateCanStillWin)
+{
+    auto flaky = std::make_unique<FakePlan>(64);
+    auto steady = std::make_unique<FakePlan>(64);
+    const auto* flakyRaw = flaky.get();
+    const auto* steadyRaw = steady.get();
+
+    std::vector<TestBenchmarkPlan::Candidate> candidates;
+    candidates.push_back({testId(0x01), std::move(flaky)});
+    candidates.push_back({testId(0x02), std::move(steady)});
+
+    constexpr double FLAKY_SAMPLE = 1.0;
+    constexpr double STEADY_SAMPLE = 10.0;
+
+    // Only the very first timed sample is negative; every retry after it is a real,
+    // valid measurement.
+    int flakyCallIndex = 0;
+    const TestBenchmarkPlan::Timer timer
+        = [&](const hipdnn_plugin_sdk::IPlan<BenchmarkTestHandle>& plan,
+              const BenchmarkTestHandle& planHandle,
+              const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+              uint32_t numDeviceBuffers,
+              void* workspace) -> std::optional<double> {
+        plan.execute(planHandle, deviceBuffers, numDeviceBuffers, workspace);
+        if(&plan == steadyRaw)
+        {
+            return STEADY_SAMPLE;
+        }
+        return flakyCallIndex++ == 0 ? -1.0 : FLAKY_SAMPLE;
+    };
+
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const TestBenchmarkPlan plan(std::move(candidates), handle, timer, [&recorded](auto ranking) {
+        recorded = std::move(ranking);
+    });
+
+    plan.execute(handle, nullptr, 0, nullptr);
+
+    ASSERT_EQ(recorded.size(), 2U) << "the transient negative must not drop the candidate";
+    EXPECT_EQ(recorded.front().kernelId, testId(0x01))
+        << "the candidate that recovered from a transient negative must still win on its "
+           "real, faster time";
+    EXPECT_EQ(recorded.front().timeMs, FLAKY_SAMPLE)
+        << "a full set of BENCHMARK_ITERATIONS valid samples, all equal to FLAKY_SAMPLE, "
+           "must reduce to exactly that value: the discarded negative sample never enters "
+           "the reduction";
+
+    // One retry beyond the normal sampling launches for the recovered candidate, plus
+    // the delegated winner execute.
+    EXPECT_EQ(flakyRaw->launchCount(), SAMPLING_LAUNCHES + 1 + 1);
+    EXPECT_EQ(steadyRaw->launchCount(), SAMPLING_LAUNCHES);
+}
+
+/// Zero is a valid measurement (an unmeasurably fast launch): it must win and be cached
+/// like any other real sample, not be treated as malformed.
+TEST(TestIngestorBenchmarkPlan, ZeroTimerSampleIsValidAndCanWin)
+{
+    std::vector<RankedEntry> recorded;
+    const BenchmarkTestHandle handle;
+    const auto plan = makeDeterministicPlan(
+        threeCandidates(), handle, {5.0, 0.0, 3.0}, [&recorded](std::vector<RankedEntry> ranking) {
+            recorded = std::move(ranking);
+        });
+
+    plan.execute(handle, nullptr, 0U, nullptr);
+
+    ASSERT_EQ(recorded.size(), 3U);
+    EXPECT_EQ(recorded.front().kernelId, testId(0x02));
+    EXPECT_EQ(recorded.front().timeMs, 0.0);
 }
 
 TEST(TestIngestorBenchmarkPlan, AnAllUnusableSweepRecordsNothing)
