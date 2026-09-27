@@ -22,6 +22,7 @@
 
 #include "benchmark_block_reduce.hpp"
 
+#include "benchmark_utils.hpp"
 #include "primbench.hpp"
 
 #define CREATE_BENCHMARK(T, BS, IPT) \
@@ -36,47 +37,40 @@
     CREATE_BENCHMARK(type, block, 11) \
     CREATE_BENCHMARK(type, block, 16)
 
+#define QUEUE_BENCHMARKS(queue_type, block) \
+    queue_type(executor,                    \
+               [&](auto type_tag) { BENCHMARK_TYPE(typename decltype(type_tag)::type, block) });
+
+#define QUEUE_BENCHMARK(queue_type, block, ipt) \
+    queue_type(executor,                        \
+               [&](auto type_tag)               \
+               { CREATE_BENCHMARK(typename decltype(type_tag)::type, block, ipt) });
+
 template<typename Benchmark>
 void add_benchmarks(primbench::executor& executor)
 {
     // When block size is less than or equal to warp size
-    BENCHMARK_TYPE(int32_t, 64)
-    BENCHMARK_TYPE(float, 64)
-    BENCHMARK_TYPE(double, 64)
-    BENCHMARK_TYPE(int8_t, 64)
-    BENCHMARK_TYPE(uint8_t, 64)
-    BENCHMARK_TYPE(rocprim::half, 64)
-    BENCHMARK_TYPE(rocprim::int128_t, 64)
-    BENCHMARK_TYPE(rocprim::uint128_t, 64)
+    QUEUE_BENCHMARKS(benchmark_types::queue_type<(benchmark_types::Type_Category::warp)>, 64)
 
-    BENCHMARK_TYPE(int32_t, 256)
-    BENCHMARK_TYPE(float, 256)
-    BENCHMARK_TYPE(double, 256)
-    BENCHMARK_TYPE(int8_t, 256)
-    BENCHMARK_TYPE(uint8_t, 256)
-    BENCHMARK_TYPE(rocprim::half, 256)
-    BENCHMARK_TYPE(rocprim::int128_t, 256)
-    BENCHMARK_TYPE(rocprim::uint128_t, 256)
+    QUEUE_BENCHMARKS(benchmark_types::queue_type<(benchmark_types::Type_Category::warp)>, 256)
 
-    CREATE_BENCHMARK(custom_f32_f32, 256, 1)
-    CREATE_BENCHMARK(custom_f32_f32, 256, 4)
-    CREATE_BENCHMARK(custom_f32_f32, 256, 8)
+    QUEUE_BENCHMARK(
+        benchmark_types::queue_type<(benchmark_types::Type_Category::rocprim_vector
+                                     | benchmark_types::Type_Category::custom_floating_point)>,
+        256,
+        1)
 
-    CREATE_BENCHMARK(float2, 256, 1)
-    CREATE_BENCHMARK(float2, 256, 4)
-    CREATE_BENCHMARK(float2, 256, 8)
+    QUEUE_BENCHMARK(
+        benchmark_types::queue_type<(benchmark_types::Type_Category::rocprim_vector
+                                     | benchmark_types::Type_Category::custom_floating_point)>,
+        256,
+        4)
 
-    CREATE_BENCHMARK(custom_f64_f64, 256, 1)
-    CREATE_BENCHMARK(custom_f64_f64, 256, 4)
-    CREATE_BENCHMARK(custom_f64_f64, 256, 8)
-
-    CREATE_BENCHMARK(double2, 256, 1)
-    CREATE_BENCHMARK(double2, 256, 4)
-    CREATE_BENCHMARK(double2, 256, 8)
-
-    CREATE_BENCHMARK(float4, 256, 1)
-    CREATE_BENCHMARK(float4, 256, 4)
-    CREATE_BENCHMARK(float4, 256, 8)
+    QUEUE_BENCHMARK(
+        benchmark_types::queue_type<(benchmark_types::Type_Category::rocprim_vector
+                                     | benchmark_types::Type_Category::custom_floating_point)>,
+        256,
+        8)
 }
 
 int main(int argc, char* argv[])

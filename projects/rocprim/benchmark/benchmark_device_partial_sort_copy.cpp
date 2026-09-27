@@ -46,21 +46,9 @@ int main(int argc, char* argv[])
     settings.size = 128 * primbench::MiB;
     primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-    CREATE_BENCHMARK(int32_t)
-    CREATE_BENCHMARK(int64_t)
-    CREATE_BENCHMARK(int8_t)
-    CREATE_BENCHMARK(uint8_t)
-    CREATE_BENCHMARK(rocprim::half)
-    CREATE_BENCHMARK(int16_t)
-    CREATE_BENCHMARK(float)
-    CREATE_BENCHMARK(rocprim::int128_t)
-    CREATE_BENCHMARK(rocprim::uint128_t)
-
-    CREATE_BENCHMARK(custom_f32_f32)
-    CREATE_BENCHMARK(custom_f64_f64)
-    CREATE_BENCHMARK(custom_i32_i32)
-    CREATE_BENCHMARK(custom_i8_f64)
-    CREATE_BENCHMARK(custom_i64_f64)
+    benchmark_types::queue_type<(benchmark_types::Type_Category::device_sort)>(
+        executor,
+        [&](auto type_tag) { CREATE_BENCHMARK(typename decltype(type_tag)::type) });
 
     executor.run();
 }
