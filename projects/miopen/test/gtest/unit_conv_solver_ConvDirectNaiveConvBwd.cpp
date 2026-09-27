@@ -152,6 +152,20 @@ const auto& GetTestParams()
     return params;
 }
 
+// Bwd-data grid-overflow (subbatch) test case
+// Bwd-data launch grid ∝ n·c; need n·c > MAX_GRID_SIZE (16M) to trigger overflow.
+// n=16777217, c=1 → n·c = 16777217 > 16M → exercises the unhandled overflow path.
+auto GetSubbatchTestCaseBwd()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        // n·c > 16M: triggers grid-dimension overflow in naive Bwd-data kernel launch
+        TestCase{{16777217, 1, 1, 1}, {1, 1, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenHalf},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveBwd_FP16  = GPU_UnitTestConvSolverBwd_FP16;
@@ -224,3 +238,17 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
+
+// Bwd-data grid-overflow suite — disabled pending ROCM-28047 fix.
+// To re-enable: drop this alias+TEST_P block and add a Standard instantiation
+// to GPU_UnitTestConvSolverDirectNaiveBwd_FP16 directly.
+using GPU_UnitTestConvSolverDirectNaiveBwdSubbatch_FP16 = GPU_UnitTestConvSolverDirectNaiveBwd_FP16;
+TEST_P(GPU_UnitTestConvSolverDirectNaiveBwdSubbatch_FP16, DISABLED_ConvDirectNaiveConvBwd)
+{
+    this->RunTest(miopen::solver::conv::ConvDirectNaiveConvBwd{});
+}
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_UnitTestConvSolverDirectNaiveBwdSubbatch_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetSubbatchTestCaseBwd())));

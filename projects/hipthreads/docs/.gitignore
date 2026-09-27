@@ -1,0 +1,7 @@
+/_build
+/_doxygen
+/doxygen/html/
+/doxygen/xml/
+/sphinx/_toc.yml
+/.venv
+/hipThreads*

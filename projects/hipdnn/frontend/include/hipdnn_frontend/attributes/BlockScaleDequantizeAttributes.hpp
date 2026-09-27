@@ -174,6 +174,23 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Custom CRTP hook for matching block sizing configurations logically.
+     */
+    bool logicallyEqualsImpl(const BlockScaleDequantizeAttributes& other) const
+    {
+        return (this->block_size == other.block_size)
+               && (this->is_negative_scale == other.is_negative_scale);
+    }
+
+    /**
+    * @brief Custom CRTP hook for matching block sizing configurations strictly.
+    */
+    bool strictEqualsImpl(const BlockScaleDequantizeAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
+
 private:
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::vector<int32_t> block_size;

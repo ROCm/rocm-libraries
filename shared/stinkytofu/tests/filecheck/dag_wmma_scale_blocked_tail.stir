@@ -1,0 +1,72 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# HwInstDesc::blockedTailCycles -- window cycles nothing at all can be issued into.
+#
+# v_wmma_scale_* / v_wmma_scale16_* (VOP3PX2 / VOP3PX3) encode a back-to-back VOP3P
+# pair: the WMMA plus an LD_SCALE that hardware runs in the last cycle of the latency
+# window. .coissue only gates VALU, so on its own it would still let SALU and memory
+# ops slot into that cycle; the MXWMMA_SCALE* formats therefore also carry
+# .blockedTail = 1.
+#
+# Both functions below use a latency-8 co-issue window with the same 0x00C8 co-issue
+# mask and eight independent SALU fillers. The only difference is the scale pair, and
+# it costs exactly one filler: the plain WMMA fits 7 before the next WMMA opens its
+# window, the scale WMMA fits 6.
+
+#===----------------------------------------------------------------------===#
+# Plain v_wmma (.blockedTail = 0): fillers occupy cycles 1..7 of the window.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @plain_wmma_fills_whole_window
+# CHECK: v_wmma_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: v_wmma_f32_16x16x128_f8f6f4
+st.func @plain_wmma_fills_whole_window() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[20:35], v[36:51], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_f32_16x16x128_f8f6f4"(v[52:67], v[68:83], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  s10 = "st.s_add_u32"(s100, s101) { issueCycles = 1, latencyCycles = 1 }
+  s11 = "st.s_add_u32"(s102, s103) { issueCycles = 1, latencyCycles = 1 }
+  s12 = "st.s_add_u32"(s104, s105) { issueCycles = 1, latencyCycles = 1 }
+  s13 = "st.s_add_u32"(s106, s107) { issueCycles = 1, latencyCycles = 1 }
+  s14 = "st.s_add_u32"(s108, s109) { issueCycles = 1, latencyCycles = 1 }
+  s15 = "st.s_add_u32"(s110, s111) { issueCycles = 1, latencyCycles = 1 }
+  s16 = "st.s_add_u32"(s112, s113) { issueCycles = 1, latencyCycles = 1 }
+  s17 = "st.s_add_u32"(s114, s115) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#===----------------------------------------------------------------------===#
+# Scale pair (.blockedTail = 1): cycle 7 is LD_SCALE, so only 1..6 take a filler.
+# A SALU is not gated by .coissue, so without blockedTailCycles a 7th would land here.
+#===----------------------------------------------------------------------===#
+
+# CHECK-LABEL: @scale_wmma_tail_takes_no_filler
+# CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: s_add_u32
+# CHECK-NEXT: v_wmma_scale_f32_16x16x128_f8f6f4
+st.func @scale_wmma_tail_takes_no_filler() {
+^entry:
+  v[0:7] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[20:35], v[36:51], v[0:7]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  v[8:15] = "st.v_wmma_scale_f32_16x16x128_f8f6f4"(v[52:67], v[68:83], v[8:15]) { mod.matrix_fmt = { fmtA = MATRIX_FMT_FP8, fmtB = MATRIX_FMT_FP8 } }
+  s10 = "st.s_add_u32"(s100, s101) { issueCycles = 1, latencyCycles = 1 }
+  s11 = "st.s_add_u32"(s102, s103) { issueCycles = 1, latencyCycles = 1 }
+  s12 = "st.s_add_u32"(s104, s105) { issueCycles = 1, latencyCycles = 1 }
+  s13 = "st.s_add_u32"(s106, s107) { issueCycles = 1, latencyCycles = 1 }
+  s14 = "st.s_add_u32"(s108, s109) { issueCycles = 1, latencyCycles = 1 }
+  s15 = "st.s_add_u32"(s110, s111) { issueCycles = 1, latencyCycles = 1 }
+  s16 = "st.s_add_u32"(s112, s113) { issueCycles = 1, latencyCycles = 1 }
+  s17 = "st.s_add_u32"(s114, s115) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}

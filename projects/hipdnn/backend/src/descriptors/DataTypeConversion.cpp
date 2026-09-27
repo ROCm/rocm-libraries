@@ -569,6 +569,8 @@ hipdnn_flatbuffers_sdk::data_objects::PaddingMode toSdkPaddingMode(hipdnnPadding
 
     switch(mode)
     {
+    case HIPDNN_PADDING_NOT_SET:
+        return PaddingMode::PADDING_NOT_SET;
     case HIPDNN_PADDING_NEG_INF_PAD:
         return PaddingMode::NEG_INF_PAD;
     case HIPDNN_PADDING_ZERO_PAD:
@@ -584,6 +586,8 @@ hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::Pad
 
     switch(mode)
     {
+    case PaddingMode::PADDING_NOT_SET:
+        return HIPDNN_PADDING_NOT_SET;
     case PaddingMode::NEG_INF_PAD:
         return HIPDNN_PADDING_NEG_INF_PAD;
     case PaddingMode::ZERO_PAD:
@@ -593,4 +597,41 @@ hipdnnPaddingMode_t fromSdkPaddingMode(hipdnn_flatbuffers_sdk::data_objects::Pad
     }
 }
 
+hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode
+    toSdkMoeGroupedMatmulMode(hipdnnMoeGroupedMatmulMode_t mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
+
+    switch(mode)
+    {
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE:
+        return MoeGroupedMatmulMode::NONE;
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER:
+        return MoeGroupedMatmulMode::GATHER;
+    case HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER:
+        return MoeGroupedMatmulMode::SCATTER;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported hipdnnMoeGroupedMatmulMode_t value");
+    }
+}
+
+hipdnnMoeGroupedMatmulMode_t
+    fromSdkMoeGroupedMatmulMode(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
+
+    switch(mode)
+    {
+    case MoeGroupedMatmulMode::NONE:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_NONE;
+    case MoeGroupedMatmulMode::GATHER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_GATHER;
+    case MoeGroupedMatmulMode::SCATTER:
+        return HIPDNN_MOE_GROUPED_MATMUL_MODE_SCATTER;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Unsupported SDK MoeGroupedMatmulMode value");
+    }
+}
 } // namespace hipdnn_backend

@@ -9,7 +9,9 @@
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::utilities
@@ -24,16 +26,40 @@ struct GraphTensorBundle
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        for(const auto& [id, attr] : tensorMap)
+        for(const auto& tensorEntry : tensorMap)
         {
+            const auto* attr = tensorEntry.second;
             if(attr->virtual_())
             {
                 continue;
             }
 
-            auto tensor = detail::createTensorFromAttribute(*attr);
-            tensors.emplace(id, std::move(tensor));
+            addTensor(*attr, detail::createTensorFromAttribute(*attr));
         }
+    }
+
+    bool addTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes,
+                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
+    {
+        const int64_t uid = attributes.uid();
+        const bool inserted = tensors.emplace(uid, std::move(tensor)).second;
+        if(inserted && attributes.is_runtime_pass_by_value())
+        {
+            _runtimePassByValueTensorIds.insert(uid);
+        }
+        return inserted;
+    }
+
+    bool addTensor(const hipdnn_frontend::graph::TensorAttributes& attributes,
+                   std::unique_ptr<hipdnn_data_sdk::utilities::ITensor> tensor)
+    {
+        const int64_t uid = attributes.get_uid();
+        const bool inserted = tensors.emplace(uid, std::move(tensor)).second;
+        if(inserted && attributes.get_is_runtime_pass_by_value())
+        {
+            _runtimePassByValueTensorIds.insert(uid);
+        }
+        return inserted;
     }
 
     void randomizeTensor(int64_t uid, float min, float max, unsigned int seed)
@@ -46,6 +72,8 @@ struct GraphTensorBundle
         it->second->fillTensorWithRandomValues(min, max, seed);
     }
 
+    /// Returns host pointers for every tensor. Runtime pass-by-value tensors use
+    /// the same host storage here and in toDeviceVariantPack().
     std::unordered_map<int64_t, void*> toHostVariantPack()
     {
         std::unordered_map<int64_t, void*> variantPack;
@@ -56,12 +84,16 @@ struct GraphTensorBundle
         return variantPack;
     }
 
+    /// Returns the execute-time variant pack. Despite the historical name,
+    /// runtime pass-by-value entries are host pointers as required by RFC 0016;
+    /// ordinary tensor entries remain device pointers.
     std::unordered_map<int64_t, void*> toDeviceVariantPack()
     {
         std::unordered_map<int64_t, void*> variantPack;
         for(auto& [id, tensorPtr] : tensors)
         {
-            variantPack[id] = tensorPtr->rawDeviceData();
+            variantPack[id] = selectVariantPackPointer(
+                *tensorPtr, /*useDevice=*/true, _runtimePassByValueTensorIds.count(id) != 0);
         }
         return variantPack;
     }
@@ -111,6 +143,9 @@ struct GraphTensorBundle
 
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
     std::unordered_set<int64_t> outputTensorIds;
+
+private:
+    std::unordered_set<int64_t> _runtimePassByValueTensorIds;
 };
 
 }

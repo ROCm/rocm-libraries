@@ -29,7 +29,7 @@ struct SdpaBwdParams
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dqAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dkAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dvAttributes,
-                  std::optional<float> attnScaleValue,
+                  std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scale,
                   int64_t leftBound,
                   int64_t rightBound,
                   bool topLeftAlignment,
@@ -44,7 +44,7 @@ struct SdpaBwdParams
         , dqTensor(unpackTensorAttributes(dqAttributes))
         , dkTensor(unpackTensorAttributes(dkAttributes))
         , dvTensor(unpackTensorAttributes(dvAttributes))
-        , attnScaleValue(attnScaleValue)
+        , scaleTensor(std::move(scale))
         , leftBound(leftBound)
         , rightBound(rightBound)
         , topLeftAlignment(topLeftAlignment)
@@ -63,7 +63,7 @@ struct SdpaBwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dqTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dkTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dvTensor;
-    std::optional<float> attnScaleValue;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
     int64_t leftBound;
     int64_t rightBound;
     bool topLeftAlignment;
@@ -119,6 +119,13 @@ public:
                 *_params.attnMaskTensor, variantPack.at(_params.attnMaskTensor->uid));
         }
 
+        std::optional<float> effectiveScale;
+        if(_params.scaleTensor.has_value())
+        {
+            effectiveScale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
+                _params.scaleTensor.value(), variantPack, "SDPA scale");
+        }
+
         utilities::CpuFpReferenceSdpa::backward<QDataType,
                                                 KDataType,
                                                 VDataType,
@@ -135,7 +142,7 @@ public:
                                                        *shallowDQTensor,
                                                        *shallowDKTensor,
                                                        *shallowDVTensor,
-                                                       _params.attnScaleValue,
+                                                       effectiveScale,
                                                        shallowStatsTensor.get(),
                                                        shallowAttnMaskTensor.get(),
                                                        _params.leftBound,
@@ -215,6 +222,8 @@ public:
             return false;
         }
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 
@@ -240,6 +249,11 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        const auto* scalePtr = nodeAttributes->scale_tensor_uid().has_value()
+                                   ? tensorMap.at(nodeAttributes->scale_tensor_uid().value())
+                                   : nullptr;
+        auto scale = foldSdpaScale(scalePtr, attnScaleValue);
+
         auto [leftBound, rightBound, isTopLeft]
             = extractDiagonalBandParams(*nodeAttributes, "SdpaBwdPlan");
 
@@ -252,7 +266,7 @@ public:
                              *tensorMap.at(nodeAttributes->dq_tensor_uid()),
                              *tensorMap.at(nodeAttributes->dk_tensor_uid()),
                              *tensorMap.at(nodeAttributes->dv_tensor_uid()),
-                             attnScaleValue,
+                             std::move(scale),
                              leftBound,
                              rightBound,
                              isTopLeft,

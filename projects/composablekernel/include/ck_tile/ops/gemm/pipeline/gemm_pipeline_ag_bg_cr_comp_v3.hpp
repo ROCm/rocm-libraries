@@ -13,7 +13,7 @@ namespace ck_tile {
 //  A Tile Window: global memory
 //  B Tile Window: global memory
 //  C Distributed tensor: register
-template <typename Problem>
+template <typename Problem, bool Force8WarpSchedule = false>
 struct BaseGemmPipelineAgBgCrCompV3
 {
     static constexpr index_t PrefetchStages   = 2;
@@ -21,9 +21,24 @@ struct BaseGemmPipelineAgBgCrCompV3
     static constexpr index_t GlobalBufferNum  = 1;
     static constexpr bool UsePersistentKernel = Problem::Traits::UsePersistentKernel;
 
+    // The special eight-warp schedule was written for wave64 512-thread blocks.
+    // Ordinary comp_v3 on wave32 WMMA targets (gfx11/gfx12) must use the standard
+    // schedule: the wave64 path executes an extra block_gemm on a nonexistent
+    // K-tile (ROCm/rocm-libraries#11161). The dedicated eight-wave async pipeline
+    // opts in through Force8WarpSchedule because its ping/pong implementation
+    // requires all five tail cases on both gfx950 and gfx1250.
+    // core/config.hpp defines the lowercase family guards; __gfx12__ includes
+    // gfx1250. Do not use the nonexistent uppercase __GFX12__ guard.
+#if defined(__gfx11__) || defined(__gfx12__)
+    static constexpr bool Use8WarpSchedule = Force8WarpSchedule;
+#else
+    static constexpr bool Use8WarpSchedule =
+        Force8WarpSchedule || (Problem::BlockGemmShape::NumWarps == 8);
+#endif
+
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
-        if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+        if constexpr(Use8WarpSchedule)
             return num_loop > 3;
         else
             return num_loop > PrefetchStages;
@@ -32,14 +47,14 @@ struct BaseGemmPipelineAgBgCrCompV3
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetBlockLoopTailNum(index_t num_loop)
     {
         if(BlockHasHotloop(num_loop) || num_loop == 3)
-            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+            if constexpr(Use8WarpSchedule)
                 return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
             else
                 return TailNumber::Odd;
         else if(num_loop == 2)
             return TailNumber::Even;
         else
-            return (Problem::BlockGemmShape::NumWarps == 8) ? TailNumber::One : TailNumber::Odd;
+            return Use8WarpSchedule ? TailNumber::One : TailNumber::Odd;
     }
 
     template <size_t I = 0, typename RunFunction>
@@ -54,7 +69,7 @@ struct BaseGemmPipelineAgBgCrCompV3
         const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
 
         constexpr auto scenarios = []() {
-            if constexpr(Problem::BlockGemmShape::NumWarps == 8)
+            if constexpr(Use8WarpSchedule)
                 return std::array<std::pair<bool, ck_tile::TailNumber>, 5>{
                     std::make_pair(false, TailNumber::One),  // 1 loop
                     std::make_pair(false, TailNumber::Even), // 2 loop

@@ -179,6 +179,18 @@ public:
     {
         return setOutput(OutputNames::Y, std::move(value));
     }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool logicallyEqualsImpl(
+        [[maybe_unused]] const BatchnormInferenceAttributesVarianceExt& other) const
+    {
+        return true;
+    }
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+    bool strictEqualsImpl(
+        [[maybe_unused]] const BatchnormInferenceAttributesVarianceExt& other) const
+    {
+        return true;
+    }
 
 private:
     std::shared_ptr<TensorAttributes> getInput(InputNames name) const

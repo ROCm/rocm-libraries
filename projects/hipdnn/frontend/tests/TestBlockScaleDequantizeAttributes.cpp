@@ -205,3 +205,77 @@ TEST(TestBlockScaleDequantizeAttributes, BlockSizeRawPointerZeroLengthIgnored)
     attrs.set_block_size(&val, 0);
     EXPECT_TRUE(attrs.get_block_size().empty());
 }
+
+TEST(TestBlockScaleDequantizeAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::BlockScaleDequantizeAttributes attrA;
+    hipdnn_frontend::graph::BlockScaleDequantizeAttributes attrB;
+    hipdnn_frontend::graph::BlockScaleDequantizeAttributes attrC;
+    hipdnn_frontend::graph::BlockScaleDequantizeAttributes attrD;
+
+    // Core shared sub-objects with explicit matching DataType
+    auto xShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    xShared->set_uid(100)
+        .set_name("input_tensor")
+        .set_dim({1, 256, 16, 16})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto scaleShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scaleShared->set_uid(200)
+        .set_name("scale_tensor")
+        .set_dim({1, 256, 1, 1})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto yShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    yShared->set_uid(300)
+        .set_name("output_tensor")
+        .set_dim({1, 256, 16, 16})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    // Setup identical base properties
+    attrA.set_x(xShared)
+        .set_scale(scaleShared)
+        .set_y(yShared)
+        .set_block_size(32)
+        .set_is_negative_scale(false);
+
+    attrB.set_x(xShared)
+        .set_scale(scaleShared)
+        .set_y(yShared)
+        .set_block_size(32)
+        .set_is_negative_scale(false);
+
+    EXPECT_TRUE(attrA.logicallyEquals(attrB));
+    EXPECT_TRUE(attrA == attrB);
+    EXPECT_FALSE(attrA != attrB);
+
+    // Setup structural metadata divergence (Diverging UID and name, but exact same DataType/Dims)
+    auto xMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    xMetaDiff->set_uid(999)
+        .set_name("altered_name")
+        .set_dim({1, 256, 16, 16})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    attrC.set_x(xMetaDiff)
+        .set_scale(scaleShared)
+        .set_y(yShared)
+        .set_block_size(32)
+        .set_is_negative_scale(false);
+
+    EXPECT_TRUE(attrA.logicallyEquals(attrC));
+    EXPECT_FALSE(attrA == attrC);
+    EXPECT_TRUE(attrA != attrC);
+
+    // Setup structural property mismatch
+    attrD.set_x(xShared)
+        .set_scale(scaleShared)
+        .set_y(yShared)
+        .set_block_size(16)
+        .set_is_negative_scale(false);
+
+    ASSERT_NE(attrA.get_block_size(), attrD.get_block_size());
+
+    EXPECT_FALSE(attrA.logicallyEquals(attrD));
+    EXPECT_FALSE(attrA == attrD);
+    EXPECT_TRUE(attrA != attrD);
+}

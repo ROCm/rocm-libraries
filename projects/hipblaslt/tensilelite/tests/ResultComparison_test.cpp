@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -150,31 +151,34 @@ namespace
     }
 } // namespace
 
-template <typename T>
+template <typename Tuple>
 struct ResultComparisonTest : public ::testing::Test
 {
+    using TypeParam = typename std::tuple_element<0, Tuple>::type;
 };
 
-using SupportedTypes = ::testing::Types<float,
-                                        double,
-                                        std::complex<float>,
-                                        std::complex<double>,
-                                        Half,
-                                        BFloat16,
-                                        Float8,
-                                        BFloat8,
-                                        Float8_fnuz,
-                                        BFloat8_fnuz,
-                                        int8_t,
-                                        int32_t>;
+// Wrap each type in std::tuple so gtest emits typeinfo for _Float16 (Half).
+using SupportedTypes = ::testing::Types<std::tuple<float>,
+                                        std::tuple<double>,
+                                        std::tuple<std::complex<float>>,
+                                        std::tuple<std::complex<double>>,
+                                        std::tuple<Half>,
+                                        std::tuple<BFloat16>,
+                                        std::tuple<Float8>,
+                                        std::tuple<BFloat8>,
+                                        std::tuple<Float8_fnuz>,
+                                        std::tuple<BFloat8_fnuz>,
+                                        std::tuple<int8_t>,
+                                        std::tuple<int32_t>>;
 
 TYPED_TEST_SUITE(ResultComparisonTest, SupportedTypes);
 
 // Test: mismatches present, printing enabled — output should be identical.
 TYPED_TEST(ResultComparisonTest, WithErrors_SameOutput)
 {
-    auto ref = makeVec<TypeParam>({1, 2, 3, 4, 5});
-    auto res = makeVec<TypeParam>({1, 9, 3, 8, 5});
+    using T = typename TestFixture::TypeParam;
+    auto ref = makeVec<T>({1, 2, 3, 4, 5});
+    auto res = makeVec<T>({1, 9, 3, 8, 5});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
@@ -186,8 +190,9 @@ TYPED_TEST(ResultComparisonTest, WithErrors_SameOutput)
 // Test: mismatches with printValids=true — output should be identical.
 TYPED_TEST(ResultComparisonTest, WithErrors_PrintValids_SameOutput)
 {
-    auto ref = makeVec<TypeParam>({1, 2, 3, 4});
-    auto res = makeVec<TypeParam>({1, 9, 3, 4});
+    using T = typename TestFixture::TypeParam;
+    auto ref = makeVec<T>({1, 2, 3, 4});
+    auto res = makeVec<T>({1, 9, 3, 4});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), true, 10, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), true, 10, -1.0);
@@ -199,8 +204,9 @@ TYPED_TEST(ResultComparisonTest, WithErrors_PrintValids_SameOutput)
 // Test: no mismatches — both flows should produce no output.
 TYPED_TEST(ResultComparisonTest, NoErrors_SameOutput)
 {
-    auto ref = makeVec<TypeParam>({1, 2, 3});
-    auto res = makeVec<TypeParam>({1, 2, 3});
+    using T = typename TestFixture::TypeParam;
+    auto ref = makeVec<T>({1, 2, 3});
+    auto res = makeVec<T>({1, 2, 3});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), false, 10, -1.0);
@@ -212,8 +218,9 @@ TYPED_TEST(ResultComparisonTest, NoErrors_SameOutput)
 // Test: mismatches present but printMax=0 — both flows should produce no output.
 TYPED_TEST(ResultComparisonTest, PrintMaxZero_SameOutput)
 {
-    auto ref = makeVec<TypeParam>({1, 2, 3});
-    auto res = makeVec<TypeParam>({1, 9, 3});
+    using T = typename TestFixture::TypeParam;
+    auto ref = makeVec<T>({1, 2, 3});
+    auto res = makeVec<T>({1, 9, 3});
 
     auto oldOutput = runSinglePassFlow(ref.data(), res.data(), ref.size(), false, 0, -1.0);
     auto newOutput = runTwoPassFlow(ref.data(), res.data(), ref.size(), false, 0, -1.0);

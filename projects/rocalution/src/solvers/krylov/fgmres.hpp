@@ -34,18 +34,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class FGMRES
-  * \brief Flexible Generalized Minimum Residual Method
-  * \details
-  * The Flexible Generalized Minimum Residual method (FGMRES) is a projection method for
-  * solving sparse (non) symmetric linear systems \f$Ax=b\f$. It is similar to the GMRES
-  * method with the only difference, the FGMRES is based on a window shifting of the
-  * Krylov subspace and thus allows the preconditioner \f$M^{-1}\f$ to be not a constant
-  * operator. This can be especially helpful if the operation \f$M^{-1}x\f$ is the result
-  * of another iterative process and not a constant operator.
-  * \cite SAAD
-  *
-  * The Krylov subspace basis
-  * size can be set using SetBasisSize(). The default size is 30.
+  * \brief Flexible Generalized Minimum Residual method with variable preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix, GlobalMatrix or LocalStencil
   * \tparam VectorType - can be LocalVector or GlobalVector

@@ -24,7 +24,7 @@
 #include "../../config.hpp"
 #include "../../detail/merge_path.hpp"
 #include "../../detail/various.hpp"
-#include "../../warp/detail/warp_sort_stable.hpp"
+#include "../../warp/warp_sort_stable.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -45,7 +45,7 @@ class block_sort_merge
     static constexpr const bool with_values = !std::is_same<Value, rocprim::empty_type>::value;
     // stable sort gives superior performance over the non-stable variant
     using warp_sort_type
-        = rocprim::detail::warp_sort_stable<Key, BlockSize, WarpSortSize, ItemsPerThread, Value>;
+        = rocprim::warp_sort_stable<Key, BlockSize, WarpSortSize, ItemsPerThread, Value>;
 
     static_assert(rocprim::detail::is_power_of_two(BlockSize),
                   "BlockSize must be a power of two for block_sort_merge!");

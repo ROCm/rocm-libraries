@@ -27,6 +27,13 @@
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# The 'amdgpu-waves-per-eu' diagnostic that -Wno-pass-failed hides is re-emitted by lld, where
+# that flag does not reach, so the device linker is silenced as well. This lives here rather than
+# at the top level because the option is only meaningful while compiling device code: on a host
+# only translation unit clang never runs the offload linker and warns that the argument is unused.
+# The CK kernels that provoke the diagnostic are all built from this directory.
+add_compile_options("SHELL: -Xoffload-linker -w")
+
 # Create test executables and deploy
 function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
 
@@ -86,6 +93,15 @@ function(create_hiptensor_shared_library)
 
     # Create alias for users
     add_library(hiptensor::hiptensor ALIAS hiptensor)
+
+    # Embed Windows version resource so hiptensor.dll exposes file metadata
+    # (description, version, product name, copyright) in Explorer properties.
+    if(WIN32)
+        target_sources(hiptensor PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+        # Adding a .rc source can lead CMake to infer RC as the linker language;
+        # pin it to CXX so the link step is correct.
+        set_target_properties(hiptensor PROPERTIES LINKER_LANGUAGE CXX)
+    endif()
 
     # Add driver mode to both cxx and link flags
     target_compile_options(hiptensor PRIVATE ${CMAKE_CXX_FLAGS} ${CLANG_DRIVER_MODE})

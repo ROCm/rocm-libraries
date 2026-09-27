@@ -16,6 +16,7 @@ namespace testing
 
 using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::PaddingMode;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 using hipdnn_flatbuffers_sdk::data_objects::ReductionMode;
 
@@ -102,6 +103,12 @@ TEST(TestDataTypeConversion, ToSdkDataTypeInt4)
 TEST(TestDataTypeConversion, FromSdkDataTypeInt4)
 {
     ASSERT_EQ(fromSdkDataType(DataType::INT4), HIPDNN_DATA_INT4);
+}
+
+TEST(TestDataTypeConversion, PaddingNotSetRoundTrip)
+{
+    EXPECT_EQ(toSdkPaddingMode(HIPDNN_PADDING_NOT_SET), PaddingMode::PADDING_NOT_SET);
+    EXPECT_EQ(fromSdkPaddingMode(PaddingMode::PADDING_NOT_SET), HIPDNN_PADDING_NOT_SET);
 }
 
 TEST(TestDataTypeConversion, ToSdkDataTypeFp6E2M3)

@@ -2,44 +2,54 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <nlohmann/json.hpp>
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace hipdnn_backend::heuristics::config
 {
+namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
+namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 /// Dimension value meaning "match any value in this slot".
 inline constexpr int64_t WILDCARD_DIM = -1;
 
-/// View into one tensor: pointers to the live dim and stride vectors.
-/// The matcher does not own this data; callers must keep the underlying
-/// vectors alive for the duration of the match call.
+inline constexpr int NLOHMANN_TYPE_MISMATCH_ERROR_ID = 302;
+
+/// View into one logical tensor: its schema tensor field name plus pointers to
+/// live dim and stride vectors. The matcher does not own this data; callers
+/// must keep the underlying vectors alive for the duration of the match call.
 struct TensorView
 {
+    std::string_view tensorId;
     const std::vector<int64_t>* dim;
     const std::vector<int64_t>* stride;
 };
 
-/// Pattern for a single tensor: a list of expected dimensions and optional strides,
-/// with -1 as a per-slot wildcard. When `stride` is empty no stride matching is
-/// performed.
+/// Pattern for a single tensor: an optional schema tensor field name, a list of
+/// expected dimensions, and optional strides, with -1 as a per-slot wildcard.
+/// When `stride` is empty no stride matching is performed.
 struct TensorPattern
 {
+    std::optional<std::string> tensorId;
     std::vector<int64_t> dim;
     std::vector<int64_t> stride;
-
     bool matches(const TensorView& tensor) const
     {
         const auto& tdim = *tensor.dim;
@@ -47,84 +57,88 @@ struct TensorPattern
         {
             return false;
         }
-        for(size_t i = 0; i < dim.size(); ++i)
+
+        const auto matchesElement = [](int64_t expected, int64_t actual) {
+            return expected == WILDCARD_DIM || expected == actual;
+        };
+        if(!std::equal(dim.begin(), dim.end(), tdim.begin(), matchesElement))
         {
-            if(dim[i] != WILDCARD_DIM && dim[i] != tdim[i])
-            {
-                return false;
-            }
+            return false;
         }
-        if(!stride.empty())
-        {
-            const auto& tstride = *tensor.stride;
-            if(stride.size() != tstride.size())
-            {
-                return false;
-            }
-            for(size_t i = 0; i < stride.size(); ++i)
-            {
-                if(stride[i] != WILDCARD_DIM && stride[i] != tstride[i])
-                {
-                    return false;
-                }
-            }
-        }
-        return true;
+
+        const auto& tstride = *tensor.stride;
+        return stride.empty()
+               || (stride.size() == tstride.size()
+                   && std::equal(stride.begin(), stride.end(), tstride.begin(), matchesElement));
     }
 };
+struct Criterion
+{
+    std::string key;
+    int64_t value = 0;
+};
 
-/// A single engine-override rule (one operation, one engine, ordered tensor patterns).
+/// A single engine-override rule (one operation, one criteria set, one engine,
+/// ordered tensor patterns).
 struct OperationRule
 {
     std::string op;
     std::string engineName;
+    std::vector<Criterion> criteria;
     std::vector<TensorPattern> tensors;
+    bool useNamedTensorIds = false;
 
-    bool matches(const std::vector<TensorView>& inputs) const
+    bool matches(const std::vector<Criterion>& actualCriteria,
+                 const std::vector<TensorView>& inputs) const
     {
-        if(tensors.size() != inputs.size())
+        if(criteria.size() != actualCriteria.size() || tensors.size() != inputs.size())
         {
             return false;
         }
-        for(size_t i = 0; i < tensors.size(); ++i)
-        {
-            if(!tensors[i].matches(inputs[i]))
-            {
-                return false;
-            }
-        }
-        return true;
+        return std::equal(criteria.begin(),
+                          criteria.end(),
+                          actualCriteria.begin(),
+                          [](const Criterion& lhs, const Criterion& rhs) {
+                              return lhs.key == rhs.key && lhs.value == rhs.value;
+                          })
+               && matchesTensors(inputs);
     }
-};
 
-namespace detail
-{
-
-/// FNV-1a hash over a flat vector<int64_t> key.
-struct DimKeyHash
-{
-    size_t operator()(const std::vector<int64_t>& key) const noexcept
+private:
+    bool matchesTensors(const std::vector<TensorView>& inputs) const
     {
-        size_t h = 14695981039346656037ULL;
-        for(int64_t v : key)
+        if(!useNamedTensorIds)
         {
-            const auto* p = reinterpret_cast<const unsigned char*>(&v);
-            for(size_t b = 0; b < sizeof(int64_t); ++b)
-            {
-                h ^= static_cast<size_t>(p[b]);
-                h *= 1099511628211ULL;
-            }
+            return matchesLegacyPositional(inputs);
         }
-        return h;
+
+        return std::all_of(tensors.begin(), tensors.end(), [&](const TensorPattern& pattern) {
+            return pattern.tensorId.has_value() && matchesNamed(pattern, inputs);
+        });
+    }
+
+    bool matchesLegacyPositional(const std::vector<TensorView>& inputs) const
+    {
+        return std::equal(tensors.begin(),
+                          tensors.end(),
+                          inputs.begin(),
+                          [](const TensorPattern& pattern, const TensorView& input) {
+                              return pattern.matches(input);
+                          });
+    }
+
+    static bool matchesNamed(const TensorPattern& pattern, const std::vector<TensorView>& inputs)
+    {
+        const auto it = std::find_if(inputs.begin(), inputs.end(), [&](const TensorView& input) {
+            return input.tensorId == *pattern.tensorId && pattern.matches(input);
+        });
+        return it != inputs.end();
     }
 };
-
-} // namespace detail
 
 /// Loaded set of engine-override rules (process-lifetime cache around
 /// HIPDNN_HEUR_CONFIG_PATH). Rules are evaluated in declaration order;
-/// first match wins. Internally split per-op into an exact hash bucket and
-/// an order-preserving wildcard list, reconciled by declaration index.
+/// first match wins.
 class EngineOverrideConfig
 {
 public:
@@ -132,10 +146,13 @@ public:
 
     explicit EngineOverrideConfig(std::vector<OperationRule> rules)
     {
-        for(size_t i = 0; i < rules.size(); ++i)
-        {
-            indexRule(std::move(rules[i]), i);
-        }
+        std::transform(
+            rules.begin(), rules.end(), std::back_inserter(_rules), [](OperationRule& rule) {
+                normalizeRule(rule);
+                const int64_t resolvedId
+                    = hipdnn_data_sdk::utilities::engineNameOrIdToId(rule.engineName);
+                return IndexedRule{std::move(rule), resolvedId};
+            });
     }
 
     static std::optional<EngineOverrideConfig> load(const std::string& filepath)
@@ -187,152 +204,133 @@ public:
     std::optional<int64_t> matchOperation(const std::string& op,
                                           const std::vector<TensorView>& tensors) const
     {
-        const auto opIt = _index.find(op);
-        if(opIt == _index.end())
-        {
-            return std::nullopt;
-        }
-        const OpBucket& bucket = opIt->second;
+        return matchOperation(op, {}, tensors);
+    }
 
-        std::optional<ExactEntry> exactHit;
+    /// Scan rules in declaration order with operation-specific criteria.
+    std::optional<int64_t> matchOperation(const std::string& op,
+                                          const std::vector<Criterion>& criteria,
+                                          const std::vector<TensorView>& tensors) const
+    {
+        const auto normalizedCriteria = normalizeCriteria(criteria);
+        for(const auto& entry : _rules)
         {
-            const auto key = buildDimKey(tensors);
-            const auto eit = bucket.exact.find(key);
-            if(eit != bucket.exact.end())
+            if(entry.rule.op != op)
             {
-                exactHit = eit->second;
+                continue;
             }
-        }
-
-        for(const auto& entry : bucket.wildcards)
-        {
-            if(exactHit && entry.order > exactHit->order)
-            {
-                break;
-            }
-            if(entry.rule.matches(tensors))
+            if(entry.rule.matches(normalizedCriteria, tensors))
             {
                 return entry.engineId;
             }
-        }
-
-        if(exactHit)
-        {
-            return exactHit->engineId;
         }
         return std::nullopt;
     }
 
     size_t ruleCount() const
     {
-        size_t n = 0;
-        for(const auto& [op, bucket] : _index)
-        {
-            n += bucket.exact.size() + bucket.wildcards.size();
-        }
-        return n;
+        return _rules.size();
     }
 
 private:
-    struct ExactEntry
-    {
-        int64_t engineId;
-        size_t order;
-    };
-
-    struct WildcardEntry
+    struct IndexedRule
     {
         OperationRule rule;
         int64_t engineId;
-        size_t order;
     };
 
-    struct OpBucket
+    std::vector<IndexedRule> _rules;
+
+    static std::vector<Criterion> normalizeCriteria(std::vector<Criterion> criteria)
     {
-        std::unordered_map<std::vector<int64_t>, ExactEntry, detail::DimKeyHash> exact;
-        std::vector<WildcardEntry> wildcards;
-    };
+        std::sort(criteria.begin(), criteria.end(), [](const Criterion& lhs, const Criterion& rhs) {
+            return lhs.key < rhs.key;
+        });
+        return criteria;
+    }
 
-    std::unordered_map<std::string, OpBucket> _index;
+    static void normalizeRule(OperationRule& rule)
+    {
+        rule.criteria = normalizeCriteria(std::move(rule.criteria));
+    }
+
+    static int64_t getConfigVersion(const nlohmann::json& j)
+    {
+        if(j.contains(config_json::VERSION))
+        {
+            return j.at(config_json::VERSION).get<int64_t>();
+        }
+        return config_version::DEFAULT;
+    }
+
+    static bool usesNamedTensorIds(int64_t configVersion)
+    {
+        return configVersion >= config_version::NAMED_TENSOR_IDS;
+    }
 
     static EngineOverrideConfig parseJson(const nlohmann::json& j)
     {
+        const bool useNamedTensorIds = usesNamedTensorIds(getConfigVersion(j));
         std::vector<OperationRule> rules;
-        for(const auto& entry : j.at("engine_overrides"))
+        for(const auto& entry : j.at(config_json::ENGINE_OVERRIDES))
         {
             OperationRule rule;
-            rule.op = entry.at("op").get<std::string>();
-            rule.engineName = entry.at("engine_name").get<std::string>();
-            for(const auto& t : entry.at("tensors"))
+            rule.useNamedTensorIds = useNamedTensorIds;
+            rule.op = entry.at(config_json::OP).get<std::string>();
+            rule.engineName = entry.at(config_json::ENGINE_NAME).get<std::string>();
+            if(entry.contains(config_json::CRITERIA))
+            {
+                const auto& criteria = entry.at(config_json::CRITERIA);
+                if(!criteria.is_object())
+                {
+                    throw nlohmann::json::type_error::create(
+                        NLOHMANN_TYPE_MISMATCH_ERROR_ID, "criteria must be an object", &criteria);
+                }
+                for(const auto& item : criteria.items())
+                {
+                    rule.criteria.push_back(Criterion{item.key(), item.value().get<int64_t>()});
+                }
+            }
+            const auto& tensors = entry.at(config_json::TENSORS);
+            std::unordered_set<std::string_view> tensorIds;
+            tensorIds.reserve(tensors.size());
+            for(const auto& t : tensors)
             {
                 TensorPattern pat;
-                pat.dim = t.at("dim").get<std::vector<int64_t>>();
-                if(t.contains("stride"))
+                if(useNamedTensorIds)
                 {
-                    pat.stride = t.at("stride").get<std::vector<int64_t>>();
+                    if(!t.contains(config_json::TENSOR_ID))
+                    {
+                        throw nlohmann::json::type_error::create(
+                            NLOHMANN_TYPE_MISMATCH_ERROR_ID,
+                            "versioned tensor entry must contain tensor_id",
+                            &t);
+                    }
+                    const auto& tensorId
+                        = t.at(config_json::TENSOR_ID).get_ref<const std::string&>();
+                    if(!tensorIds.emplace(tensorId.data(), tensorId.size()).second)
+                    {
+                        throw nlohmann::json::type_error::create(
+                            NLOHMANN_TYPE_MISMATCH_ERROR_ID,
+                            "versioned tensor_id entries must be unique",
+                            &t);
+                    }
+                    pat.tensorId = tensorId;
+                }
+                else if(t.contains(config_json::TENSOR_ID))
+                {
+                    pat.tensorId = t.at(config_json::TENSOR_ID).get<std::string>();
+                }
+                pat.dim = t.at(config_json::DIM).get<std::vector<int64_t>>();
+                if(t.contains(config_json::STRIDE))
+                {
+                    pat.stride = t.at(config_json::STRIDE).get<std::vector<int64_t>>();
                 }
                 rule.tensors.push_back(std::move(pat));
             }
             rules.push_back(std::move(rule));
         }
         return EngineOverrideConfig(std::move(rules));
-    }
-
-    static bool hasWildcard(const std::vector<TensorPattern>& patterns)
-    {
-        for(const auto& p : patterns)
-        {
-            for(const int64_t d : p.dim)
-            {
-                if(d == WILDCARD_DIM)
-                {
-                    return true;
-                }
-            }
-            if(!p.stride.empty())
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    static std::vector<int64_t> buildDimKey(const std::vector<TensorPattern>& patterns)
-    {
-        std::vector<int64_t> key;
-        for(const auto& p : patterns)
-        {
-            key.push_back(static_cast<int64_t>(p.dim.size()));
-            key.insert(key.end(), p.dim.begin(), p.dim.end());
-        }
-        return key;
-    }
-
-    static std::vector<int64_t> buildDimKey(const std::vector<TensorView>& tensors)
-    {
-        std::vector<int64_t> key;
-        for(const auto& t : tensors)
-        {
-            const auto& d = *t.dim;
-            key.push_back(static_cast<int64_t>(d.size()));
-            key.insert(key.end(), d.begin(), d.end());
-        }
-        return key;
-    }
-
-    void indexRule(OperationRule rule, size_t order)
-    {
-        const int64_t resolvedId = hipdnn_data_sdk::utilities::engineNameToId(rule.engineName);
-        OpBucket& bucket = _index[rule.op];
-        if(hasWildcard(rule.tensors))
-        {
-            bucket.wildcards.push_back(WildcardEntry{std::move(rule), resolvedId, order});
-        }
-        else
-        {
-            const auto key = buildDimKey(rule.tensors);
-            bucket.exact.try_emplace(key, ExactEntry{resolvedId, order});
-        }
     }
 };
 

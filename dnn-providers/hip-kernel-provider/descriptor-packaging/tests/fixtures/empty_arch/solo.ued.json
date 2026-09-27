@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-solo",
+  "name": "test_fixture:solo",
+  "heuristic": "uhd-solo",
+  "metadata": "kmd-solo"
+}

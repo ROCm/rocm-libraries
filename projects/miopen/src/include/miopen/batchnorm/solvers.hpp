@@ -31,7 +31,7 @@
 
 #include <utility>
 
-/// W/A for build error for OCL BN kernels when datatype is FP16 and MIO_BN_VARIANT=1. See:
+/// W/A for build error for BN kernels when datatype is FP16 and MIO_BN_VARIANT=1. See:
 /// https://github.com/ROCm/MIOpen/issues/1549#issuecomment-1152644636
 #define WORKAROUND_ISSUE_1549_FP16_BUILD_ERROR 1
 

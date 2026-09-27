@@ -146,6 +146,33 @@ def test_reset_clears_state(snapshot):
     assert {"before_reset": before, "after_reset": after} == snapshot
 
 
+def test_report_false_is_side_effect_free(capsys, snapshot):
+    # A rejecting solution validated with report=False still returns False but
+    # neither prints nor bumps the per-file dedup counter -- so re-validating a
+    # documented known bug cannot swallow a later *real* XCC failure's message.
+    reset_reported_failures()
+    ret = _validateWorkGroupMappingXCC(
+        {"WorkGroupMappingXCC": 0, "SolutionIndex": 0}, _CU_DIR, report=False
+    )
+    assert capsys.readouterr().out == ""
+    assert {"returned": ret, "reported_failures": _state()} == snapshot
+
+
+@pytest.mark.parametrize("solution", [
+    pytest.param({"WorkGroupMappingXCC": 3, "SolutionIndex": 0}, id="not_power_of_two"),
+    pytest.param({"WorkGroupMappingXCC": 4, "SolutionIndex": 0}, id="does_not_divide_cu"),
+    pytest.param(None, id="exception_path"),
+])
+def test_report_false_is_side_effect_free_on_later_reject_paths(capsys, solution):
+    # Each reject branch carries its own `if report:` guard, so suppression has to
+    # be pinned per branch; the test above only reaches the non-positive one.
+    reset_reported_failures()
+    ret = _validateWorkGroupMappingXCC(solution, _CU_DIR, report=False)
+    assert ret is False
+    assert capsys.readouterr().out == ""
+    assert _state() == {}
+
+
 # --- _cu_count_from_path ----------------------------------------------------
 
 @pytest.mark.parametrize("name,parts", [

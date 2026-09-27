@@ -1,0 +1,7 @@
+# CODEOWNERS for hipThreads
+#
+# These owners are automatically requested for review on any pull request.
+# See https://docs.github.com/articles/about-code-owners for syntax.
+
+# Default owners for everything in the repository.
+*       @DanielMcIntosh @marsavicc @aleksandrasavicc

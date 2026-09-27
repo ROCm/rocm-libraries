@@ -255,6 +255,29 @@ Tests:
   filename: [qc2534]
 
 # ##############################
+# QUICK - coverage widening
+# ##############################
+
+# NT row-split num_cols dispatch chain: sweep N (=num_cols) across the full
+# 16..64 range so every "num_cols >= X" branch of csrmmnt_template_row_split
+# is selected, plus a few larger N to exercise the <=8 / <=16 remainder paths.
+- name: csrmm
+  category: quick
+  function: csrmm
+  precision: *single_double_precisions
+  M: [37]
+  N: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+      32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+      48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+      64, 70, 75, 79]
+  K: [16]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+# ##############################
 # NIGHTLY
 # ##############################
 

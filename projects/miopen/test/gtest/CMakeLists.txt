@@ -25,10 +25,6 @@ if(MIOPEN_BACKEND_HIP)
   list(APPEND SOURCES main_hip.cpp)
 endif()
 
-if(MIOPEN_BACKEND_OPENCL)
-  list(APPEND SKIP_TESTS dumpTensorTest.cpp)
-endif()
-
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
 if(THEROCK_SANITIZER STREQUAL "ASAN")
@@ -41,6 +37,7 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
         miopendriver_conv_immed.cpp
         miopendriver_regression_half_gfx9.cpp
         unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvDepthwiseBwdData2D_test.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
         unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp
@@ -51,14 +48,11 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # test_drive<> framework disabled).  These did not actually launch CK kernels
     # during gfx942 testing but are kept skipped pending more extensive testing.
     list(APPEND SKIP_TESTS
-        conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
         conv_hip_igemm_xdlops.cpp
         conv_igemm_mlir_xdlops_bwd_wrw.cpp
         conv_igemm_mlir_xdlops_fwd.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp
         smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp
-        smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp
-        unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp
         unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp
@@ -102,12 +96,29 @@ function(add_gtest TEST_NAME TEST_CPP)
   if(WIN32)
     target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
   endif()
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # Tests that assert on logged/traced API names need to know which library
+    # layout they are running against: when MIOpen is built as a public wrapper
+    # over a private implementation, the public entry points are renamed with an
+    # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
+    # so the logged name carries that suffix.
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
+    # src/private is deliberately not on the include path: wrapper_routing.cpp is
+    # the only test that needs the routing header and reaches it by relative
+    # path. Adding it would also expose miopen_private_rename.h, which rewrites
+    # the public miopenFoo names to their _impl form -- a name collision waiting
+    # to happen in tests that have no business seeing it.
+  endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
   add_dependencies(miopen-check ${TEST_NAME})
 
   target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
   target_include_directories(${TEST_NAME} PRIVATE ../ ../../src/kernels)
+
+  if(MIOPEN_USE_HIPCONV)
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_USE_HIPCONV=1)
+  endif()
 
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
   if(MIOPEN_ENABLE_AI_KERNEL_TUNING)
@@ -129,6 +140,29 @@ function(add_gtest TEST_NAME TEST_CPP)
   target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen_with_plugins hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
+  endif()
+
+  # CK setup for any test target that compiles CK-including sources. This must
+  # be applied to every test executable so the test objects use the same CK
+  # macro set as MIOpen and the CK plugins.
+  if(MIOPEN_USE_COMPOSABLEKERNEL)
+    if(MIOPEN_BUILD_CK)
+      # The include directories also don't propagate correctly when using the
+      # non-aliased targets. Manually including them fixes this for inline builds.
+      target_include_directories(${TEST_NAME} SYSTEM PRIVATE
+          ${MIOPEN_CK_INCLUDE_DIR}
+          ${MIOPEN_CK_BUILD_INCLUDE_DIR}
+          ${MIOPEN_CK_LIBRARY_INCLUDE_DIR}
+      )
+    else()
+      # While building on TheRock we are missing CK include headers; pull them in
+      # via the utility component (needed by CK utility gtests).
+      if(NOT TARGET composable_kernel::utility)
+        find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS utility)
+      endif()
+      target_link_libraries(${TEST_NAME} composable_kernel::utility)
+    endif()
+    miopen_apply_ck_compile_definitions(${TEST_NAME})
   endif()
 
   if(MIOPEN_TEST_DISCRETE)
@@ -177,7 +211,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Note: Due to the following cmake issue with gtest_discover_tests https://gitlab.kitware.com/cmake/cmake/-/issues/17812 you cannot pass PROPERTIES as a list.
     #       To work around this limitation, we are passing the environment variables in the format ENVIRONMENT;value1=${value1};ENVIRONMENT;value2=${value2}.
     # bn tests are run sequentially since running tests in parallel was causing large tensor case fail with insufficient memory error.
-    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run")
+    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run" OR "${TEST_NAME}" STREQUAL "test_hip_graph_exist")
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES RUN_SERIAL TRUE ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     else()
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
@@ -221,6 +255,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
 
+    # HipGraphExist OOMs (LLVM JIT) when shards share one GPU; filtered here, re-added below as RUN_SERIAL.
+    add_gtest_negative_filter("*HipGraphExist*")
+
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
@@ -240,6 +277,22 @@ function(add_gtest TEST_NAME TEST_CPP)
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=${GTEST_PARALLEL_LEVEL};GTEST_SHARD_INDEX=${SHARD_INDEX}"
       )
     endforeach()
+
+    # HipGraphExist was filtered out of the shards above (LLVM JIT OOM under concurrent GPU memory
+    # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
+    # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
+    if(NOT MIOPEN_NO_GPU)
+      add_test(NAME ${TEST_NAME}_hip_graph_serial
+        COMMAND ${TEST_NAME}
+          --gtest_filter=*HipGraphExist*
+          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml
+        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
+      )
+      set_tests_properties(${TEST_NAME}_hip_graph_serial PROPERTIES
+        RUN_SERIAL TRUE
+        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
+      )
+    endif()
 
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)
@@ -267,6 +320,20 @@ endforeach()
 add_library(miopen_gtest_common STATIC ${SOURCES})
 target_include_directories(miopen_gtest_common PRIVATE ../ ../../src/kernels)
 target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOpen)
+
+# libMIOpen.so does not export the routing seam's symbols, so a test cannot link
+# against them. Compile the source in here instead.
+#
+# Each test executable therefore carries its own copy of the seam, with its own
+# GetForwardingMode() cache. These tests cover the seam's logic, not whether the
+# wrapper stubs actually consult it.
+#
+# No include directory is needed: routing.cpp includes its own header by relative
+# path, and adding src/private here would expose miopen_private_rename.h to every
+# test-common source.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+  target_sources(miopen_gtest_common PRIVATE ${PROJECT_SOURCE_DIR}/src/private/routing.cpp)
+endif()
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
   target_compile_options(miopen_gtest_common PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
@@ -285,22 +352,8 @@ else()
   endforeach()
 
   add_gtest(miopen_gtest "${TESTS_CPP}")
-
-  if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # The include directories also dont propagate correctly when using the non aliased targets.
-        # Manually including them fixes this problem for inline builds.
-        target_include_directories(miopen_gtest SYSTEM PRIVATE
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
-    else()
-        # While building on TheRock we are missing CK include headers for miopen_gtest target
-        # But we need them, for example, for unit_implicitgemm_ck_util.cpp gtest, which is part of miopen_gtest target
-        find_package(composable_kernel 1.0.0 COMPONENTS utility)
-        target_link_libraries(miopen_gtest composable_kernel::utility)
-    endif()
-  endif()
+  # CK include dirs / utility linkage / compile definitions for miopen_gtest
+  # are applied inside add_gtest() (shared with discrete test executables).
 
   add_custom_command(
     OUTPUT test_list
@@ -321,6 +374,13 @@ else()
     install(TARGETS miopen_gtest
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT clients)
+    # GPU-free dbsync (StaticFDBSync) rocjitsu runner. Ships in the MIOpen dist so TheRock's
+    # `miopen-dbsync` test component can invoke it from share/miopen/bin/ (pulled via the --miopen
+    # artifact) and run dbsync GPU-free on a CPU runner. See the script header for the mechanism.
+    install(FILES dbsync/run_dbsync_rocjitsu.py
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        DESTINATION ${DATA_INSTALL_DIR}/bin
         COMPONENT clients)
   endif()
 endif()

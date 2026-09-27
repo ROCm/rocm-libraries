@@ -315,8 +315,9 @@ RppStatus hip_exec_slice_tensor(T* srcPtr, RpptGenericDescPtr srcGenericDescPtr,
     /* if enabledPadding is set to true, launch kernel to fill the output buffers with fill value
     specified. This will be only done if shapeTensor[d] > roiTensor[d] where d is the dimension*/
     if (enablePadding) {
-        hip_exec_fill_value_tensor(dstPtr, dstGenericDescPtr, anchorTensor, shapeTensor, fillValue,
-                                   roiTensor, handle, numDims);
+        RPP_RETURN_IF_ERROR(hip_exec_fill_value_tensor(dstPtr, dstGenericDescPtr, anchorTensor,
+                                                       shapeTensor, fillValue, roiTensor, handle,
+                                                       numDims));
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
     }
 

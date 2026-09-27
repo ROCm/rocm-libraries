@@ -35,6 +35,8 @@ subtrees:
     title: Use Stream-K with hipBLASLt
   - file: how-to/how-to-detect-nan
     title: Detect NaN in GEMM output
+  - file: how-to/how-to-general-batched-gemm
+    title: Use general batched GEMM
 
 - caption: Examples
   entries:

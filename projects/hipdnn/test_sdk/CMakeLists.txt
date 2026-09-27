@@ -18,19 +18,26 @@ hipdnn_get_component_version(hipdnn_plugin_sdk HIPDNN_TEST_SDK_PLUGIN_SDK_MIN_VE
 set(HIP_DNN_TEST_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 add_library(hipdnn_test_sdk INTERFACE)
+add_library(hipdnn_test_sdk_dynamic INTERFACE)
 
 # Generate version header
 hipdnn_generate_version_header(hipdnn_test_sdk)
 
 find_package(hip REQUIRED)
 target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hipdnn_frontend hip::host)
+target_link_libraries(
+    hipdnn_test_sdk_dynamic INTERFACE hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hipdnn_frontend_dynamic hip::host
+)
 
 set(HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/test_sdk")
 
-target_include_directories(
-    hipdnn_test_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_TEST_SDK_INCLUDE_DIR}>
-                              $<INSTALL_INTERFACE:${HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR}>
-)
+foreach(_hipdnn_test_sdk_target hipdnn_test_sdk hipdnn_test_sdk_dynamic)
+    target_include_directories(
+        ${_hipdnn_test_sdk_target}
+        INTERFACE $<BUILD_INTERFACE:${HIP_DNN_TEST_SDK_INCLUDE_DIR}>
+                  $<INSTALL_INTERFACE:${HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR}>
+    )
+endforeach()
 
 # Generate the config file from template
 configure_package_config_file(
@@ -40,11 +47,11 @@ configure_package_config_file(
 )
 
 export(
-    TARGETS hipdnn_test_sdk
+    TARGETS hipdnn_test_sdk hipdnn_test_sdk_dynamic
     FILE "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_test_sdk/hipdnn_test_sdkTargets.cmake"
 )
 
-install(TARGETS hipdnn_test_sdk EXPORT hipdnn_test_sdk_targets COMPONENT Development)
+install(TARGETS hipdnn_test_sdk hipdnn_test_sdk_dynamic EXPORT hipdnn_test_sdk_targets COMPONENT Development)
 
 # cmake-lint: disable=E1122
 install(

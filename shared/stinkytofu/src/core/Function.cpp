@@ -22,9 +22,53 @@
 #include <iostream>
 #include <ostream>
 
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
+Function::Function(const std::string& name)
+    : name(name), ssaArena_(std::make_unique<SSAArena>(this)), basicBlocks(this) {}
+
+Function::~Function() {
+    clearAttachedSSA();
+}
+
+void Function::clear() {
+    clearAttachedSSA();
+    basicBlocks.clear();
+}
+
+SSAArena& Function::ssaArena() {
+    return *ssaArena_;
+}
+
+const SSAArena& Function::ssaArena() const {
+    return *ssaArena_;
+}
+
+bool Function::hasAttachedSSA() const {
+    for (const BasicBlock& bb : *this) {
+        if (bb.hasSSAArguments()) return true;
+        for (const IRBase& ir : bb) {
+            const auto* inst = dyn_cast<StinkyInstruction>(&ir);
+            if (inst != nullptr && inst->hasAttachedSSA()) return true;
+        }
+    }
+    return false;
+}
+
+void Function::clearAttachedSSA() {
+    for (BasicBlock& bb : *this) {
+        bb.clearSSAArguments();
+        for (IRBase& ir : bb) {
+            if (auto* inst = dyn_cast<StinkyInstruction>(&ir)) inst->clearAttachedSSA();
+        }
+    }
+    if (ssaArena_) ssaArena_->clear();
+}
+
 void Function::dump(std::ostream& out) const {
     AsmPrinter printer(out, AsmPrinterOptions());
     printer.print(*this);

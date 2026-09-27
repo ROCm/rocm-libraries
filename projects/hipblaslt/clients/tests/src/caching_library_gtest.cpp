@@ -59,7 +59,7 @@
 // only C++ test binary TheRock builds, ships, and runs for hipBLASLt is this client
 // `hipblaslt-test`
 // (HIPBLASLT_BUILD_TESTING), executed by test/therock/test_hipblaslt.py. Because
-// hipblaslt-test already links tensilelite::tensilelite-host (via
+// hipblaslt-test already links roc::tensilelite-host (via
 // hipblaslt-clients-common), this white-box unit test can include
 // <Tensile/CachingLibrary.hpp> directly and run with no new build dependency.
 // Placing the regression here is what makes it actually execute in CI and guard

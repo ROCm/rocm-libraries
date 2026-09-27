@@ -263,7 +263,7 @@ def test_att_compute_total_latency(hardware):
     problem = create_attention_problem(2048, 2048, 128)
     config = create_attention_config(128, 128, 64)
 
-    latency = origami.att_compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.att_compute_total_latency(problem, hardware, config)
     assert latency > 0.0
 
 
@@ -279,7 +279,7 @@ def test_att_gqa_scenario(hardware):
     assert work_util > 0.0
 
     # Total latency should be positive
-    latency = origami.att_compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.att_compute_total_latency(problem, hardware, config)
     assert latency > 0.0
 
 
@@ -295,7 +295,7 @@ def test_att_mqa_scenario(hardware):
     assert work_util > 0.0
 
     # Total latency should be positive
-    latency = origami.att_compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.att_compute_total_latency(problem, hardware, config)
     assert latency > 0.0
 
 
@@ -328,7 +328,7 @@ def test_att_various_sequence_lengths(hardware):
         problem = create_attention_problem(q_len, kv_len, head_dim, q_heads=8)
         config = create_attention_config(128, 128, 64)
 
-        latency = origami.att_compute_total_latency(problem, hardware, config, hardware.N_CU)
+        latency = origami.att_compute_total_latency(problem, hardware, config)
         assert latency > 0.0, f"Failed for dims ({q_len}, {kv_len}, {head_dim})"
 
 
@@ -339,7 +339,7 @@ def test_att_various_dtypes(hardware, dtype):
     problem = create_attention_problem(1024, 1024, 128, dtype=dtype)
     config = create_attention_config(128, 128, 64)
 
-    latency = origami.att_compute_total_latency(problem, hardware, config, hardware.N_CU)
+    latency = origami.att_compute_total_latency(problem, hardware, config)
     assert latency > 0.0
 
 
@@ -356,7 +356,7 @@ def test_att_different_block_sizes(hardware):
 
     for mt_m, mt_n, mt_k in block_sizes:
         config = create_attention_config(mt_m, mt_n, mt_k)
-        latency = origami.att_compute_total_latency(problem, hardware, config, hardware.N_CU)
+        latency = origami.att_compute_total_latency(problem, hardware, config)
         assert latency > 0.0, f"Failed for block size ({mt_m}, {mt_n}, {mt_k})"
 
 

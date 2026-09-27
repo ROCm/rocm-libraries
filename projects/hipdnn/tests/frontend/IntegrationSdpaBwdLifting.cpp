@@ -199,6 +199,16 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdTensorSharingPreserved)
 {
     auto originalGraph = buildSdpaBwdGraph();
 
+    auto& originalNodes = originalGraph->getSubNodes();
+    ASSERT_EQ(originalNodes.size(), 1u);
+    auto* originalNode = dynamic_cast<SdpaBwdNode*>(originalNodes[0].get());
+    ASSERT_NE(originalNode, nullptr);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_SDPA_BWD_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_value(0.125f);
+    originalNode->attributes.set_attn_scale(scale);
+
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -213,12 +223,20 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdTensorSharingPreserved)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 10u);
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SCALE_UID), 0u);
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
 
     auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
+    // Verify the tensor scale is restored and shared with the tensor map.
+    ASSERT_NE(sdpaNode->attributes.get_attn_scale(), nullptr);
+    EXPECT_EQ(sdpaNode->attributes.get_attn_scale()->get_uid(), K_SDPA_BWD_TENSOR_SCALE_UID);
+    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID].get(),
+              sdpaNode->attributes.get_attn_scale().get());
+    EXPECT_FALSE(sdpaNode->attributes.attn_scale_value.has_value());
     // Verify UIDs on node attributes
     EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_BWD_TENSOR_Q_UID);
     EXPECT_EQ(sdpaNode->attributes.get_k()->get_uid(), K_SDPA_BWD_TENSOR_K_UID);
@@ -242,9 +260,9 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdTensorSharingPreserved)
     EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_DV_UID].get(), sdpaNode->attributes.get_dv().get());
 }
 
-// Builds an SDPA backward graph with all optional tensors, boolean flags, and scalar
+// Builds an SDPA backward graph with all compatible optional tensors, boolean flags, and scalar
 // parameters set, lowers via the C-API, lifts back, and verifies every attribute survives.
-TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
+TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithCompatibleOptionalAttributesViaCApi)
 {
     auto originalGraph = buildSdpaBwdGraph();
 
@@ -253,10 +271,7 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
     auto* sdpaNode = dynamic_cast<SdpaBwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
-    // Optional input tensors
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_SDPA_BWD_TENSOR_SCALE_UID).set_name("SCALE");
-    scale->set_value(0.125f); // pass-by-value scalar
+    // Compatible optional input tensors; attention scale is set as a scalar below.
 
     auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_BWD_TENSOR_ATTN_MASK_UID)
@@ -311,8 +326,7 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
     dBias->set_dim(toVec(K_SDPA_BWD_TENSOR_DBIAS_DIMS))
         .set_stride(toVec(K_SDPA_BWD_TENSOR_DBIAS_STRIDES));
 
-    sdpaNode->attributes.set_attn_scale(scale)
-        .set_bias(attnMask)
+    sdpaNode->attributes.set_bias(attnMask)
         .set_seq_len_q(seqLenQ)
         .set_seq_len_kv(seqLenKv)
         .set_dropout(0.1f, seed, offset)
@@ -324,7 +338,7 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
         .set_padding_mask(true)
         .set_causal_mask(true)
         .set_causal_mask_bottom_right(true)
-        .set_attn_scale_value(0.125f)
+        .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
@@ -342,20 +356,15 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // 9 required + 10 optional (all serialized as tensors through the C-API)
+    // 9 required + 9 compatible optional tensors; attention scale is a scalar attribute.
     auto tensorMap = liftedGraph->getTensorsByUid();
-    ASSERT_EQ(tensorMap.size(), 19u) << "Expected 9 required + 10 optional tensors";
+    ASSERT_EQ(tensorMap.size(), 18u) << "Expected 9 required + 9 compatible optional tensors";
 
     // Verify all optional tensor UIDs are present and their properties match.
     const auto scalarDims = toVec(K_SDPA_BWD_TENSOR_SCALAR_DIMS);
     const auto scalarStrides = toVec(K_SDPA_BWD_TENSOR_SCALAR_STRIDES);
     const auto seqLenDims = toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_DIMS);
     const auto seqLenStrides = toVec(K_SDPA_BWD_TENSOR_SEQ_LEN_STRIDES);
-
-    // scale — scalar tensor
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SCALE_UID), 0u);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID]->get_dim(), scalarDims);
-    EXPECT_EQ(tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID]->get_stride(), scalarStrides);
 
     // attn_mask — [batch, num_heads, seq_q, seq_kv]
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_ATTN_MASK_UID), 0u);
@@ -421,9 +430,8 @@ TEST_F(IntegrationSdpaBwdLifting, SdpaBwdWithAllOptionalAttributesViaCApi)
 
     const auto& attrs = liftedNode->attributes;
 
-    // Optional tensor UIDs on the node
-    ASSERT_NE(attrs.get_attn_scale(), nullptr);
-    EXPECT_EQ(attrs.get_attn_scale()->get_uid(), K_SDPA_BWD_TENSOR_SCALE_UID);
+    // Attention scale is represented by the scalar attribute below.
+    EXPECT_EQ(attrs.get_attn_scale(), nullptr);
     ASSERT_NE(attrs.get_bias(), nullptr);
     EXPECT_EQ(attrs.get_bias()->get_uid(), K_SDPA_BWD_TENSOR_ATTN_MASK_UID);
     ASSERT_NE(attrs.get_seq_len_q(), nullptr);

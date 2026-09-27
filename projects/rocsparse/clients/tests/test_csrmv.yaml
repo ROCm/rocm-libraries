@@ -129,7 +129,6 @@ Tests:
   precision: *single_double_precisions
   M: [512]
   N: [128, 256]
-  percentage: [1.0]
   alpha_beta: *alpha_beta_range_1
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]

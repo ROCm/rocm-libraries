@@ -119,7 +119,7 @@ namespace rocisa
                 t += "  /// " + comment;
             }
             t += "\n";
-            if(getAsmCaps()["HasVgprMSB"])
+            if(capOrDefault(getAsmCaps(), "HasVgprMSB"))
             {
                 rocIsa::getInstance().setVgprMsb(-1);
             }
@@ -166,6 +166,10 @@ namespace rocisa
     {
         std::vector<std::shared_ptr<Item>> itemList;
         std::shared_ptr<Container>         tempVgpr = nullptr;
+        // Metadata-only callable marker for consumers that preserve function
+        // boundaries (for example StinkyTofu). This does not affect toString().
+        bool                               isCallable = false;
+        std::string                        callableName;
         bool                               _isNoOpt;
 
         Module(const std::string& name = "")
@@ -177,6 +181,8 @@ namespace rocisa
         Module(const Module& other)
             : Item(other)
             , tempVgpr(other.tempVgpr ? other.tempVgpr->clone() : nullptr)
+            , isCallable(other.isCallable)
+            , callableName(other.callableName)
             , _isNoOpt(other._isNoOpt)
         {
             itemList = cloneItemList(other.itemList);
@@ -239,14 +245,12 @@ namespace rocisa
 
         std::string toString() const override
         {
-            std::string prefix = 0 ? "// " + name + "{\n" : "";
-            std::string suffix = 0 ? "// } " + name + "\n" : "";
             std::string s;
             for(const auto& item : itemList)
             {
                 s += item->toString();
             }
-            return prefix + s + suffix;
+            return s;
         }
 
         void addSpaceLine()
@@ -874,7 +878,7 @@ namespace rocisa
             : ValueSet(name, value, offset)
             , regType(regType)
         {
-            if(getAsmCaps()["HasVgprMSB"] && regType == "v")
+            if(capOrDefault(getAsmCaps(), "HasVgprMSB") && regType == "v")
                 setIdx(value, offset);
         }
 
@@ -885,7 +889,7 @@ namespace rocisa
             : ValueSet(name, value, offset)
             , regType(regType)
         {
-            if(getAsmCaps()["HasVgprMSB"] && regType == "v")
+            if(capOrDefault(getAsmCaps(), "HasVgprMSB") && regType == "v")
                 setIdx(value, offset);
         }
 
@@ -905,7 +909,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            if(regType == "v" && getAsmCaps()["HasVgprMSB"]){
+            if(regType == "v" && capOrDefault(getAsmCaps(), "HasVgprMSB")){
                 if(ref)
                 {
                     setIdx(ref.value(), offset);
@@ -1366,7 +1370,7 @@ namespace rocisa
             , originalTotalVgprs(totalVgprs)
             , numSgprPreload(numSgprPreload)
         {
-            if(getArchCaps()["ArchAccUnifiedRegs"])
+            if(capOrDefault(getArchCaps(), "ArchAccUnifiedRegs"))
             {
                 accumOffset      = std::ceil(totalVgprs / 8.0) * 8;
                 this->totalVgprs = accumOffset + totalAgprs;
@@ -1380,7 +1384,7 @@ namespace rocisa
 
         void setGprs(int totalVgprs, int totalAgprs, int totalSgprs)
         {
-            if(getArchCaps()["ArchAccUnifiedRegs"])
+            if(capOrDefault(getArchCaps(), "ArchAccUnifiedRegs"))
             {
                 accumOffset      = std::ceil(totalVgprs / 8.0) * 8;
                 this->totalVgprs = accumOffset + totalAgprs;
@@ -1430,7 +1434,7 @@ namespace rocisa
                     + " // sgprs\n";
             kStr += kdIndent + ".amdhsa_group_segment_fixed_size " + std::to_string(groupSegSize)
                     + " // lds bytes\n";
-            if(getArchCaps()["HasWave32"])
+            if(capOrDefault(getArchCaps(), "HasWave32"))
             {
                 if(kernel().wavefront == 32)
                 {

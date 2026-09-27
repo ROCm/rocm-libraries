@@ -152,7 +152,7 @@ reduction_t select_reduction(const problem_t& problem,
   if (algorithm == grid_selection_t::k_split_aware) {
     size_t tiles = compute_number_of_output_tiles(
         config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
-    size_t cu_count       = hardware.N_CU;
+    size_t cu_count       = resolve_num_cus(problem.num_cus, hardware.N_CU);
     size_t iters_per_tile = std::max(size_t(1), num_iters_per_tile(config.mt.k, problem.size.k));
 
     if (tiles < cu_count) {
@@ -286,8 +286,7 @@ size_t grid_data_parallel(const problem_t& problem, const config_t& config) {
 size_t grid_analytical(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
-                       size_t biggest_allowable_split,
-                       size_t max_cus) {
+                       size_t biggest_allowable_split) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -301,14 +300,16 @@ size_t grid_analytical(const problem_t& problem,
   // then multiply to get total grid size:
   size_t grid = ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N) * batch;
 
-  size_t max_hw_split = std::floor(hardware.N_CU / grid);
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
+  const size_t cu_count = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  size_t max_hw_split = std::floor(cu_count / grid);
   size_t MAX_SPLIT    = std::min(biggest_allowable_split, max_hw_split);
 
   size_t best_split   = 1;
   double best_latency = std::numeric_limits<double>::infinity();
 
   for (size_t split = 1; split <= MAX_SPLIT; ++split) {
-    double latency = gemm::compute_total_latency(problem, hardware, config, max_cus);
+    double latency = gemm::compute_total_latency(problem, hardware, config);
 
     if (latency < best_latency) {
       best_latency = latency;
@@ -325,15 +326,20 @@ size_t grid_analytical(const problem_t& problem,
   return best_grid;
 }
 
+// @param cu_budget Internal genuine-cap budget: the resolved CU cap when the
+//        caller supplied a genuine cap (problem.num_cus is positive and below
+//        the physical N_CU), else 0 ("no genuine cap / use all CUs"). Computed
+//        by select_grid_size so this file-local helper keeps its original
+//        max_cus-driven grid-cap and occupancy-multiplier semantics.
 size_t grid_k_split_aware(const problem_t& problem,
                           const config_t& config,
                           size_t cu_count,
-                          size_t max_cus) {
+                          size_t cu_budget) {
   size_t tiles = compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
 
   size_t sk_grid = tiles;  // Fallback if no good fractional tile is found
-  if (max_cus > 0) sk_grid = std::min(sk_grid, max_cus);
+  if (cu_budget > 0) sk_grid = std::min(sk_grid, cu_budget);
 
   const size_t iters_per_tile = num_iters_per_tile(config.mt.k, problem.size.k);
 
@@ -366,7 +372,7 @@ size_t grid_k_split_aware(const problem_t& problem,
   // Split remaining tiles as evenly as possible for better caching
   if (tiles > cu_count) {
     size_t virt_cu_count = cu_count;
-    if (config.occupancy > 1 && max_cus == 0) virt_cu_count *= config.occupancy;
+    if (config.occupancy > 1) virt_cu_count *= config.occupancy;
 
     const std::vector<double> tile_fractions = {
         0.0, 1.0 / 2.0, 1.0 / 8.0, 1.0 / 5.0, 1.0 / 4.0, 1.0 / 3.0};
@@ -437,10 +443,17 @@ size_t grid_k_split_aware(const problem_t& problem,
 size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
-                        grid_selection_t algorithm,
-                        size_t max_cus) {
-  size_t cu_count = hardware.N_CU;
-  if (max_cus > 0) cu_count = std::min(cu_count, max_cus);
+                        grid_selection_t algorithm) {
+  // Single source of truth for the CU budget: problem.num_cus (0 or >= physical
+  // N_CU means "use all CUs").
+  size_t cu_count = resolve_num_cus(problem.num_cus, hardware.N_CU);
+
+  // Internal genuine-cap budget for grid_k_split_aware: the resolved cap only
+  // when the caller supplied a genuine cap (num_cus positive and below physical
+  // N_CU), otherwise 0. Preserves the legacy semantic that the grid cap applies
+  // iff there is a genuine cap and the occupancy multiplier applies iff there is
+  // not (num_cus == 0 or num_cus >= physical N_CU).
+  const size_t cu_budget = (cu_count < hardware.N_CU) ? cu_count : 0;
 
   switch (algorithm) {
     case grid_selection_t::min_resources:
@@ -455,13 +468,13 @@ size_t select_grid_size(const problem_t& problem,
     case grid_selection_t::data_parallel: return streamk::grid_data_parallel(problem, config);
 
     case grid_selection_t::analytical:
-      return streamk::grid_analytical(problem, hardware, config, 10, max_cus);
+      return streamk::grid_analytical(problem, hardware, config, 10);
 
     case grid_selection_t::k_split_aware:
-      return streamk::grid_k_split_aware(problem, config, cu_count, max_cus);
+      return streamk::grid_k_split_aware(problem, config, cu_count, cu_budget);
 
     case grid_selection_t::number_of_cus:
-    default: return hardware.N_CU;
+    default: return cu_count;
   }
 }
 
@@ -469,40 +482,47 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  // The hybrid-mode thresholds were derived from a regression over random
-  // problems on MI350X (gfx950). Other architectures keep the static (SK3)
-  // sub-path until they are tuned in a follow-up PR.
+  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
+  // until tuned in a follow-up PR.
   if (hardware.arch != hardware_t::architecture_t::gfx950)
     return hybrid_mode_t::static_;
 
-  const size_t MT_M = config.mt.m;
-  const size_t MT_N = config.mt.n;
+  const size_t MT_M  = config.mt.m;
+  const size_t MT_N  = config.mt.n;
+  const size_t batch = std::max<size_t>(problem.batch, 1);
+  const size_t tiles = compute_number_of_output_tiles(
+      MT_M, MT_N, problem.size.m, problem.size.n, batch);
 
-  // Small macrotiles always use the static sub-path: dynamic per-XCD work
-  // queueing is not beneficial at these tile sizes.
-  if (MT_M == 16 && MT_N == 16) return hybrid_mode_t::static_;
-  if (MT_M == 32 && MT_N == 32) return hybrid_mode_t::static_;
+  // Too little work in the grid for dynamic rebalancing to be worth its
+  // overhead.
+  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
 
   size_t available_cus = (sm_count_target > 0)
                              ? std::min<size_t>(sm_count_target, hardware.N_CU)
                              : hardware.N_CU;
   if (available_cus == 0) available_cus = hardware.N_CU;
 
-  const size_t batch = std::max<size_t>(problem.batch, 1);
-  const size_t tiles = compute_number_of_output_tiles(
-      MT_M, MT_N, problem.size.m, problem.size.n, batch);
+  // No cotenant means static already matches the full CU count -- nothing
+  // left for dynamic to rebalance.
+  const bool has_cotenant = available_cus < hardware.N_CU;
+  if (!has_cotenant) return hybrid_mode_t::static_;
+
+  // Few wavefronts resident per CU means little overlap to absorb a
+  // cotenant's CU-count mismatch on its own, so dynamic rebalancing helps
+  // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
+  // through to the tiles_per_cu check instead.)
+  if (config.occupancy > 0 &&
+      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
+    return hybrid_mode_t::dynamic;
+
+  // At higher occupancy that overlap already absorbs small mismatches, so
+  // dynamic only pays off once the grid is heavily overloaded relative to
+  // the CUs actually available to it.
   const double tiles_per_cu =
       static_cast<double>(tiles) / static_cast<double>(available_cus);
-
-  double threshold;
-  if      (MT_M ==  64 && MT_N ==  64) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_64X64;
-  else if (MT_M == 128 && MT_N == 128) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_128X128;
-  else if (MT_M == 128 && MT_N == 256) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_128X256;
-  else if (MT_M == 256 && MT_N == 128) threshold = streamk_hybrid_defaults_t::THRESHOLD_MT_256X128;
-  else                                 threshold = streamk_hybrid_defaults_t::THRESHOLD_DEFAULT;
-
-  return (tiles_per_cu < threshold) ? hybrid_mode_t::static_
-                                    : hybrid_mode_t::dynamic;
+  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
+             ? hybrid_mode_t::dynamic
+             : hybrid_mode_t::static_;
 }
 }  // namespace streamk
 }  // namespace origami

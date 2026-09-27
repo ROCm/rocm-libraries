@@ -26,7 +26,7 @@
 #include <string>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 
 namespace stinkytofu {
 class StinkyAsmModule;
@@ -34,8 +34,8 @@ class StinkyAsmModule;
 /// Architecture-specific optimization entry point.
 ///
 /// Bound to a single StinkyAsmModule. Looks up the registered PipelineBuilder
-/// for the module's architecture, creates a PassManager, calls the builder to
-/// populate it with ScopeAdaptor passes, configures, and runs.
+/// for the module's architecture, creates a ModulePassManager, calls the builder
+/// to populate it, configures, and runs on the module.
 ///
 /// @code
 /// Backend backend(module);
@@ -56,9 +56,9 @@ class STINKYTOFU_EXPORT Backend {
     bool runOptimization();
 
    private:
-    /// Configure the PassManager with GemmTileConfig, PassFeatureConfig,
+    /// Configure the ModulePassManager with GemmTileConfig, AsmCapsConfig,
     /// and debug options derived from the module.
-    void configurePassManager(PassManager& pm);
+    void configurePassManager(ModulePassManager& mpm);
 
     StinkyAsmModule& module;
 };

@@ -111,15 +111,30 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
         TestCase{{datatype, miopenTensorNCHW, {64, 3, 112, 112}},
                  {datatype, miopenTensorNCHW, {3, 1, 3, 3}},
                  datatype, {{1, 1}, {2, 2}, {1, 1}, 3}},
+        // 7x7 stride-1 pad-3 (convnext depthwise stages)
+        TestCase{{datatype, miopenTensorNCHW, {64, 1, 7, 7}},
+                 {datatype, miopenTensorNCHW, {1, 1, 7, 7}},
+                 datatype, {{3, 3}, {1, 1}, {1, 1}, 1}},
+        TestCase{{datatype, miopenTensorNCHW, {64, 2, 14, 14}},
+                 {datatype, miopenTensorNCHW, {2, 1, 7, 7}},
+                 datatype, {{3, 3}, {1, 1}, {1, 1}, 2}},
+        TestCase{{datatype, miopenTensorNCHW, {64, 2, 28, 28}},
+                 {datatype, miopenTensorNCHW, {2, 1, 7, 7}},
+                 datatype, {{3, 3}, {1, 1}, {1, 1}, 2}},
+        TestCase{{datatype, miopenTensorNCHW, {64, 2, 56, 56}},
+                 {datatype, miopenTensorNCHW, {2, 1, 7, 7}},
+                 datatype, {{3, 3}, {1, 1}, {1, 1}, 2}},
         // clang-format on
     };
 }
 
 auto GetTestParams(miopenDataType_t /*datatype*/)
 {
-// Solution requires 64-lane wavefronts and depends on the CK dynamic library
+// Depends on the CK dynamic library. Runs on CDNA (64-lane) and RDNA (32-lane)
+// wavefronts; the matching depthwise instance set is selected per arch at build time.
 #if MIOPEN_BACKEND_HIP
-    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
+                           Gpu::gfx115X | Gpu::gfx120X;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
@@ -178,3 +193,24 @@ INSTANTIATE_TEST_SUITE_P(
     CPU_UnitTestConvSolverConvDepthwiseFwd2DeterministicApplicability_NONE,
     testing::Combine(testing::Values(Gpu::None),
                      testing::Values(GetConvDeterministicTestCases(miopenHalf)[0])));
+
+// bf16 (the instance factories are dtype-templated; on gfx950 this uses the hardware bf16 dot)
+using GPU_UnitTestConvSolverConvDepthwiseFwd2D_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
+
+TEST_P(GPU_UnitTestConvSolverConvDepthwiseFwd2D_BFP16, ConvDepthwiseFwd2D)
+{
+    this->RunTest(miopen::solver::conv::ConvDepthwiseFwd2D{});
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverConvDepthwiseFwd2D_BFP16,
+    testing::Combine(testing::Values(GetTestParams(miopenBFloat16)),
+                     testing::Values(miopenConvolutionAlgoDirect),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_UnitTestConvSolverConvDepthwiseFwd2D_BFP16,
+                         testing::Combine(testing::Values(GetTestParams(miopenBFloat16)),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetConvFullTestCases(miopenBFloat16))));

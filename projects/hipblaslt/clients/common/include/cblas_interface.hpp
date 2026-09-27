@@ -37,6 +37,10 @@
  * not part of the GPU library
  */
 
+#ifdef HIPBLASLT_ENABLE_BLIS
+void setup_blis();
+#endif
+
 // gemm
 template <typename Tc>
 void cblas_gemm(hipblasOperation_t       transA,
@@ -97,6 +101,10 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                        bool                     isScaleAMXFormat = false,
                        bool                     isScaleBMXFormat = false)
 {
+#ifdef HIPBLASLT_ENABLE_BLIS
+    // Runs once, lazily, on the first CPU reference call.
+    [[maybe_unused]] static const bool blis_configured = [] { setup_blis(); return true; }();
+#endif
 
     if(tiA == HIP_C_32F || tiA == HIP_C_64F)
     {

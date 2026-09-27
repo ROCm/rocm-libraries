@@ -158,7 +158,13 @@ template <typename ALayout,
           typename LDSTypeB                           = BDataType,
           bool DoElementwiseBeforeCShuffle            = false,
           bool DirectLoad                             = false,
-          bool LargeTensors                           = false>
+          bool LargeTensors                           = false,
+          // When true, skip the logical M*K/N*K/M*N <= 2GB validity check below.
+          // Callers that address memory via non-trivial grid descriptors (e.g. the
+          // implicit-GEMM view of a convolution) validate the actual descriptor span
+          // separately (AreDescriptorsSmallerThan2GB); for them the logical GEMM matrix
+          // size (im2col) far exceeds the real footprint and must not gate int32 support.
+          bool SkipGemmSizeCheck = false>
 struct GridwiseGemmMultiD_xdl_cshuffle_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -1064,6 +1070,11 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
 
         if constexpr(NXdlPerWave % CShuffleNXdlPerWavePerShuffle != 0)
         {
+#if DEBUG_LOG
+            std::cout << "NXdlPerWave mod CShuffleNXdlPerWavePerShuffle != 0 in" << __FILE__ << ":"
+                      << __LINE__ << ", in function: " << __func__ << std::endl;
+
+#endif // DEBUG_LOG
             return false;
         }
         constexpr index_t ldsBufferCount =
@@ -1137,6 +1148,11 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             auto KReadPadSplited    = math::integer_divide_ceil(karg.K, K_t) * KReadVec;
             if((KReadPadSplited * (karg.KBatch - 1)) >= karg.K)
             {
+#if DEBUG_LOG
+                std::cout << "(KReadPadSplited * (karg.KBatch - 1)) >= karg.K in" << __FILE__ << ":"
+                          << __LINE__ << ", in function: " << __func__ << std::endl;
+
+#endif // DEBUG_LOG
                 return false;
             }
         }
@@ -1241,7 +1257,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
             }
         }
 
-        if constexpr(!LargeTensors)
+        if constexpr(!LargeTensors && !SkipGemmSizeCheck)
         {
             constexpr long_index_t TwoGB = (long_index_t{1} << 31);
             if(!(karg.M * karg.K * sizeof(ADataType) <= TwoGB &&

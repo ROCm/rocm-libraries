@@ -795,8 +795,52 @@ namespace DGen
             convertBlockScaledRNE<ocp_e2m1_mxfp4>(outBytes, values, blockSize, scaleExp);
         }
 
+        // Device-side OCP MX FP6 nibble packing (mirrors fp6.hpp setDataPackedF6).
+        __device__ __forceinline__ void setDataPackedF6Device(uint8_t* outBytes,
+                                                              int      index,
+                                                              uint8_t  mask)
+        {
+            int cellIndex = (index / 4) * 3;
+            int rem       = index % 4;
+            uint8_t l = 0, r = 0;
+            switch(rem)
+            {
+            case 0:
+                outBytes[cellIndex] &= 0xc0;
+                outBytes[cellIndex] |= mask;
+                break;
+            case 1:
+                outBytes[cellIndex] &= 0x3f;
+                outBytes[cellIndex + 1] &= 0xf0;
+                l = (mask & 0x03) << 6;
+                r = (mask & 0x3c) >> 2;
+                outBytes[cellIndex] |= l;
+                outBytes[cellIndex + 1] |= r;
+                break;
+            case 2:
+                outBytes[cellIndex + 1] &= 0x0f;
+                outBytes[cellIndex + 2] &= 0xfc;
+                l = (mask & 0x0f) << 4;
+                r = (mask & 0x30) >> 4;
+                outBytes[cellIndex + 1] |= l;
+                outBytes[cellIndex + 2] |= r;
+                break;
+            case 3:
+                outBytes[cellIndex + 2] &= 0x03;
+                outBytes[cellIndex + 2] |= (mask << 2);
+                break;
+            }
+        }
+
         // FP6 / BF6: one __amd_cvt_floatx32_to_fp6x32_scale call covers a full
         // 32-element group. Pad inputs and trim outputs for blockSize < 32.
+        //
+        // On gfx950/gfx1250 the hardware __amd_fp6x32_storage_t layout (six
+        // uint32 lanes) is not byte-identical to the OCP 4-in-3-byte stream
+        // that mxDataGenerator/hipblaslt use (getDataFromPackedF6). Quantise
+        // with the native convert, round-trip through float, then repack each
+        // element into OCP layout so getReferenceFloat and downstream kernels
+        // see the same bytes the CPU generator emits.
         template <__amd_fp6_interpretation_t Interp>
         __device__ __forceinline__ void convertBlockScaledRNEFp6(uint8_t*      outBytes,
                                                                  float const*  values,
@@ -808,10 +852,27 @@ namespace DGen
                 in[i] = (i < blockSize) ? values[i] : 0.0f;
             __amd_fp6x32_storage_t out
                 = __amd_cvt_floatx32_to_fp6x32_scale(in, Interp, scaleExp);
-            auto const* bytes  = reinterpret_cast<uint8_t const*>(&out);
-            int const   outLen = blockSize * 6 / 8;
+            int const outLen = blockSize * 6 / 8;
+#if defined(__gfx950__) || defined(__gfx1250__)
+            for(int b = 0; b < outLen; ++b)
+                outBytes[b] = 0;
+            __amd_floatx32_storage_t decoded
+                = __amd_cvt_fp6x32_to_floatx32_scale(out, Interp, scaleExp);
+            for(int i = 0; i < blockSize; ++i)
+            {
+                __amd_floatx32_storage_t pin{};
+                pin[0] = decoded[i];
+                __amd_fp6x32_storage_t pout
+                    = __amd_cvt_floatx32_to_fp6x32_scale(pin, Interp, scaleExp);
+                uint8_t const* pb  = reinterpret_cast<uint8_t const*>(&pout);
+                uint8_t        code = pb[0] & 0x3fu;
+                setDataPackedF6Device(outBytes, i, code);
+            }
+#else
+            auto const* bytes = reinterpret_cast<uint8_t const*>(&out);
             for(int b = 0; b < outLen; ++b)
                 outBytes[b] = bytes[b];
+#endif
         }
 
         template <>

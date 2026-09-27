@@ -1,0 +1,77 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "float",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "BatchnormBackwardTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "dy_tensor_uid": 3,
+        "inv_variance_tensor_uid": null,
+        "mean_tensor_uid": null,
+        "peer_stats_tensor_uid": [],
+        "scale_tensor_uid": 4,
+        "x_tensor_uid": 5
+      },
+      "name": "BatchnormBackward_0",
+      "outputs": {
+        "dbias_tensor_uid": 0,
+        "dscale_tensor_uid": 1,
+        "dx_tensor_uid": 2
+      },
+      "type": "BatchnormBackwardAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormBackward_0::DBIAS",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormBackward_0::DSCALE",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "BatchnormBackward_0::DX",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "dy",
+      "strides": "${case.strides}",
+      "uid": 3,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "scale",
+      "strides": "${case.strides}",
+      "uid": 4,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "x",
+      "strides": "${case.strides}",
+      "uid": 5,
+      "virtual": false
+    }
+  ]
+}

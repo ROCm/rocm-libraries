@@ -49,6 +49,12 @@ template<> struct Dispatcher<float, float, float, 32, 32,  8, false> { using Typ
 template<> struct Dispatcher<float, float, float, 32, 32,  8, false, false, false, EDouble> { using Type = WarpGemmMfmaF32F32F32M32N32K8<EDouble>; };
 template<> struct Dispatcher<float, float, float, 16, 16, 16,  true> { using Type = WarpGemmMfmaF32F32F32M16N16K16TransposedCDistribution<>; };
 
+// fp64
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
+template<> struct Dispatcher<fp64_t, fp64_t, fp64_t, 16, 16, 4, false> { using Type = WarpGemmMfmaF64F64F64M16N16K4; };
+template<> struct Dispatcher<fp64_t, fp64_t, fp64_t, 16, 16, 16, false> { using Type = WarpGemmMfmaF64F64F64M16N16K16<>; };
+#endif
+
 // tf32 (on gfx950: uses 3x bf16 MFMA emulation)
 // ADataType, BDataType, AccDataType, MPerWave, NPerWave, KPerWave, TransposeC, SwizzleA, UseStructuredSparsity
 #if defined(CK_GFX950_SUPPORT)
@@ -67,7 +73,7 @@ template<> struct Dispatcher<tf32_t, tf32_t, float, 16, 16, 32, false, false, fa
 // WMMA cases
 #if defined(__gfx125__)
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess>
-struct Dispatcher<float, float, float, 16, 16, 4, TransposeC, false, false, AttrNumAccess, AttrNumAccess> 
+struct Dispatcher<float, float, float, 16, 16, 4, TransposeC, false, false, AttrNumAccess, AttrNumAccess>
     : WmmaTag { using Type = WarpGemmWmma_f32_16x16x4_f32<TransposeC, AttrNumAccess>;};
 #else
 template<> struct Dispatcher<float, float, float, 16, 16, 4, false> { using Type = WarpGemmMfmaF32F32F32M16N16K4; };
@@ -84,7 +90,7 @@ template<> struct Dispatcher<half_t, half_t, float, 32, 32, 16, false, false, fa
 template<> struct Dispatcher<half_t, half_t, float, 32, 32, 16, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfmaF16F16F32M32N32K16<ESingle, EDouble>; };
 template<> struct Dispatcher<half_t, half_t, float, 32, 32, 16,  true, false, false, EDouble> { using Type = WarpGemmMfmaF16F16F32M32N32K16TransposedCDistribution<EDouble>; };
 #if defined(__gfx125__)
-template<bool TransposeC> struct Dispatcher<half_t, half_t, float, 16, 16, 32, TransposeC, false, false, EDouble> : WmmaTag 
+template<bool TransposeC> struct Dispatcher<half_t, half_t, float, 16, 16, 32, TransposeC, false, false, EDouble> : WmmaTag
        { using Type = WarpGemmWmma_f32_16x16x32_f16_f16<TransposeC, EDouble>;};
 #else
 template<> struct Dispatcher<half_t, half_t, float, 16, 16, 32, false, false, false, EDouble> { using Type = WarpGemmMfmaF16F16F32M16N16K32<EDouble>; };
@@ -96,7 +102,7 @@ template<> struct Dispatcher<half_t, half_t, float,  4, 64, 16, false> { using T
 template<> struct Dispatcher<half_t, half_t, float, 64,  4, 16, false> { using Type = WarpGemmMfmaF16F16F32M64N4K16; };
 // WMMA cases
 #if defined(__gfx11__) || defined(__gfx120__)
-template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<half_t, half_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> 
+template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<half_t, half_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess>
     : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_f16_f16<TransposeC, AttrNumAccess>;};
 #else
 template<> struct Dispatcher<half_t, half_t, float, 16, 16, 16, false> { using Type = WarpGemmMfmaF16F16F32M16N16K16; };
@@ -104,7 +110,7 @@ template<> struct Dispatcher<half_t, half_t, float, 16, 16, 16,  true>  { using 
 #endif
 
 #if defined(__gfx125__)
-template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<half_t, half_t, float, 16, 16, 32, TransposeC, false, false, AttrNumAccess, AttrNumAccess> 
+template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<half_t, half_t, float, 16, 16, 32, TransposeC, false, false, AttrNumAccess, AttrNumAccess>
     : WmmaTag { using Type = WarpGemmWmma_f32_16x16x32_f16_f16<TransposeC, AttrNumAccess>;};
 #else
 template<> struct Dispatcher<half_t, half_t, float, 16, 16, 32, false> { using Type = WarpGemmMfmaF16F16F32M16N16K32<>; };
@@ -138,7 +144,7 @@ template<> struct Dispatcher<bf16_t, bf16_t, float, 16, 16, 64, false, false, fa
 template<> struct Dispatcher<bf16_t, bf16_t, float, 16, 16, 64, false, false, false, EQuad> { using Type = WarpGemmMfmaBf16Bf16F32M16N16K64<EQuad>; };
 template<> struct Dispatcher<bf16_t, bf16_t, float, 16, 16, 64, false> { using Type = WarpGemmMfmaBf16Bf16F32M16N16K64<>; };
 #if defined(__gfx125__)
-template<bool TransposeC> struct Dispatcher<bf16_t, bf16_t, float, 16, 16, 32, TransposeC, false, false, EDouble> : WmmaTag 
+template<bool TransposeC> struct Dispatcher<bf16_t, bf16_t, float, 16, 16, 32, TransposeC, false, false, EDouble> : WmmaTag
     { using Type = WarpGemmWmma_f32_16x16x32_bf16_bf16<TransposeC, EDouble>;};
 #else
 template<> struct Dispatcher<bf16_t, bf16_t, float, 16, 16, 32, false, false, false, EDouble> { using Type = WarpGemmMfmaBf16Bf16F32M16N16K32<EDouble>; };
@@ -238,6 +244,17 @@ template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false> { using Ty
 template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<EDouble>; };
 
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<EDouble>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<EDouble>; };
+#if defined(__gfx950__)
+template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<ESingle, EDouble>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<EDouble, ESingle>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<ESingle, EDouble>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<EDouble, ESingle>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  32, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_fp8_fp8<ESingle, EDouble>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  32, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_32x32x32_fp8_fp8<EDouble, ESingle>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<ESingle, EDouble>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<EDouble, ESingle>; };
+#endif // defined(__gfx950__)
 
 //WMMA cases
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<fp8_t, fp8_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_f8_f8<TransposeC, AttrNumAccess>; };
@@ -266,7 +283,7 @@ template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAcc
 template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAccessA, WGAttrNumAccessEnum AttrNumAccessB> struct Dispatcher<A, B, float, 16, 16, 128, TransposeC, false, false, AttrNumAccessA, AttrNumAccessB, true> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x128_f8f6f4_scale16<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>; };
 #else
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<>; };
-template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<>; };
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, true> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8_CTransposed; };
 template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, true> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8_CTransposed; };
 #endif
@@ -350,23 +367,42 @@ template <typename AType,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
-          bool IsScale16                     = false>
+          bool IsScale16                     = false,
+          bool UsePackedNumAccess            = false,
+          bool UseMxScale                    = false>
 #if USE_NEW_UNIFIED_FRAMEWORK
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::UnificationDispatcher<
+// Note that we convert the SwizzleA bool to a SwizzleFactor. This used to be hardcoded in a number
+// of places in the original Dispatcher / WarpGemms, always ending up with SFactor = 2 for the
+// cases where the Dispatcher was used. The rare SFactor = 4 cases never went through the
+// Dispatcher.
+using WarpGemmDispatcher =
+    typename impl::warp_gemm_dispatcher::UnificationDispatcher<AType,
+                                                               BType,
+                                                               AccType,
+                                                               MPerWave,
+                                                               NPerWave,
+                                                               KPerWave,
+                                                               TransposeC,
+                                                               SwizzleA ? 2 : 1,
+                                                               UseStructuredSparsity,
+                                                               AttrNumAccessA,
+                                                               AttrNumAccessB,
+                                                               IsScale16,
+                                                               UsePackedNumAccess,
+                                                               UseMxScale>::Type;
 #else
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<AType,
+                                                                           BType,
+                                                                           AccType,
+                                                                           MPerWave,
+                                                                           NPerWave,
+                                                                           KPerWave,
+                                                                           TransposeC,
+                                                                           SwizzleA,
+                                                                           UseStructuredSparsity,
+                                                                           AttrNumAccessA,
+                                                                           AttrNumAccessB,
+                                                                           IsScale16>::Type;
 #endif
-    AType,
-    BType,
-    AccType,
-    MPerWave,
-    NPerWave,
-    KPerWave,
-    TransposeC,
-    SwizzleA,
-    UseStructuredSparsity,
-    AttrNumAccessA,
-    AttrNumAccessB,
-    IsScale16>::Type;
 
 } // namespace ck_tile

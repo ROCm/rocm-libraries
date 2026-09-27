@@ -119,6 +119,9 @@ add_rocsparse_example(example_spgemm.cpp)
 add_rocsparse_example(example_spgeam.cpp)
 add_rocsparse_example(example_spgeam_2.cpp)
 add_rocsparse_example(example_spgeam_3.cpp)
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  add_rocsparse_example(example_spmat_scale.cpp)
+endif()
 
 # Managed
 add_rocsparse_example(example_csrmv_managed.cpp)
@@ -179,13 +182,18 @@ endif()
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
 
-if(NOT BUILD_WITH_ILDLT0)
-  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX ".*example_rocsparse_spildlt0\\.cpp$")
-endif()
-
 foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})
 endforeach()
+
+# This documentation example intentionally demonstrates the deprecated
+# rocsparse_spmv API (see example_rocsparse_v2_spmv for the replacement),
+# so silence -Wdeprecated-declarations for it.
+set_source_files_properties(
+  documentation_examples/generic/example_rocsparse_spmv.cpp
+  PROPERTIES
+  COMPILE_FLAGS "-Wno-deprecated-declarations"
+)
 
 foreach(file ${DOCUMENTATION_EXAMPLES2})
     add_rocsparse_example(${file})

@@ -67,6 +67,9 @@ _doxygen/
 .idea/
 cmake-build*/
 build*/
+# `build*/` also matches the `library/builders/` SOURCE tree; keep it tracked.
+!rocke/library/builders/
+!rocke/library/builders/**
 CMakeUserPresets.json
 
 # Python virtualenv

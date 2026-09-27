@@ -1,31 +1,28 @@
 .. meta::
-   :description: Building and installing rocALUTION on Windows
-   :keywords: rocALUTION, ROCm, library, API, tool, Windows, installation, building, HIP SDK
+   :description: Use rocALUTION as a prebuilt package
+   :keywords: rocALUTION, ROCm, library, API, tool, Linux, install, CMake, HIP SDK
 
-*****************************************
-Using rocALUTION as a prebuilt packages
-*****************************************
+******************************************
+Use rocALUTION as a prebuilt package
+******************************************
 
-rocALUTION can be installed on Windows 11 or Windows 10 using the AMD HIP SDK installer.
+You can install rocALUTION from the ROCm software stack on Linux.
+Install it with your distribution package manager or as part of a ROCm installation.
 
-The simplest way to use rocALUTION in your code is to use ``CMake`` that requires you to add the SDK installation location to your
-`DCMAKE_PREFIX_PATH`. Note that you need to use quotes as the path contains a space, e.g.,
+The simplest way to use rocALUTION in your code is with CMake.
+Add the ROCm installation location to ``CMAKE_PREFIX_PATH``:
 
-.. code:: shell
+.. code-block:: shell
 
-    -DCMAKE_PREFIX_PATH="C:\Program Files\AMD\ROCm\5.5"
+   -DCMAKE_PREFIX_PATH=/opt/rocm
 
+In your ``CMakeLists.txt``:
 
-After CMake configuration, in your ``CMakeLists.txt`` use:
+.. code-block:: cmake
 
-.. code:: shell
+   find_package(rocalution)
+   target_link_libraries(your_exe PRIVATE roc::rocalution)
 
-    find_package(rocalution)
-
-    target_link_libraries( your_exe PRIVATE roc::rocalution )
-
-Once rocALUTION is installed, you can find ``rocalution.hpp`` in the HIP SDK ``\\include\\rocalution``
-directory. Use only the installed file in the user application if needed.
-You must include ``rocalution.hpp`` header file in the user code to make calls
-into rocALUTION, so that the rocALUTION import library and dynamic link library become the respective link-time and run-time
-dependencies for the user application.
+After you install rocALUTION, include ``rocalution.hpp`` in your source code.
+The rocALUTION shared library becomes a link-time and run-time dependency
+for your application.

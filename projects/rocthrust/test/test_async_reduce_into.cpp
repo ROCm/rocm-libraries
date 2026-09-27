@@ -422,6 +422,10 @@ TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy)
 
 TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   test_async_reduce_into<T, reduce_into_async_invoker_device_allocator, reduce_sync_invoker>();
@@ -436,6 +440,10 @@ TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_on)
 
 TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_on, reduce_sync_invoker>();
@@ -443,6 +451,10 @@ TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on)
 
 TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_init)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   test_async_reduce_into<T, reduce_into_async_invoker_init, reduce_sync_invoker_init>();
@@ -492,6 +504,10 @@ TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_init_plus)
 
 TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_init_plus)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_init_plus, reduce_sync_invoker_init_plus>();
@@ -513,6 +529,10 @@ TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on_init
 
 TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_init_custom_plus)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   test_async_reduce_into<T, reduce_into_async_invoker_init_custom_plus, reduce_sync_invoker_init_custom_plus>();

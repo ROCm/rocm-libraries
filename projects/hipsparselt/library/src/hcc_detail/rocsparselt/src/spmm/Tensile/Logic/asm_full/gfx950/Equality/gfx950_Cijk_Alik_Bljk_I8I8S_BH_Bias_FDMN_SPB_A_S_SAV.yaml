@@ -98,7 +98,7 @@
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0
@@ -136,7 +136,7 @@
     ISA: [9, 5, 0]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly

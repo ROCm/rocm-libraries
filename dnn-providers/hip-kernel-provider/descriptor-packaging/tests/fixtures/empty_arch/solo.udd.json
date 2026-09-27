@@ -1,0 +1,6 @@
+{
+  "version": "0.1",
+  "id": "udd-solo",
+  "name": "Solo dispatch",
+  "dispatch_symbol": "hipkernel.solo.dispatch"
+}

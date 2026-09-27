@@ -31,11 +31,24 @@ namespace hipdnn_frontend
  *
  * @see IntConstraint, FloatConstraint, StringConstraint
  */
+/// RTTI-free discriminator for the concrete constraint type, so callers in
+/// -fno-rtti public headers can downcast without dynamic_cast.
+enum class ConstraintKind
+{
+    INT,
+    FLOAT,
+    STRING,
+    EMPTY
+};
+
 class IConstraint
 {
 public:
     /// @brief Virtual destructor
     virtual ~IConstraint() = default;
+
+    /// @brief Concrete constraint kind, for RTTI-free downcasting.
+    virtual ConstraintKind kind() const = 0;
 
     /**
      * @brief Validate a knob setting against this constraint
@@ -78,6 +91,11 @@ public:
         , _step(step)
         , _validValues(std::move(validValues))
     {
+    }
+
+    ConstraintKind kind() const override
+    {
+        return ConstraintKind::INT;
     }
 
     Error validateKnobSetting(const KnobSetting& setting) const override
@@ -189,6 +207,11 @@ public:
     {
     }
 
+    ConstraintKind kind() const override
+    {
+        return ConstraintKind::FLOAT;
+    }
+
     Error validateKnobSetting(const KnobSetting& setting) const override
     {
         auto value = std::get_if<double>(&setting.value());
@@ -252,6 +275,11 @@ public:
         : _maxLength(maxLength)
         , _validValues(std::move(validValues))
     {
+    }
+
+    ConstraintKind kind() const override
+    {
+        return ConstraintKind::STRING;
     }
 
     Error validateKnobSetting(const KnobSetting& setting) const override
@@ -328,6 +356,11 @@ class EmptyConstraint : public IConstraint
 {
 public:
     EmptyConstraint() = default;
+
+    ConstraintKind kind() const override
+    {
+        return ConstraintKind::EMPTY;
+    }
 
     Error validateKnobSetting(const KnobSetting& /*setting*/) const override
     {

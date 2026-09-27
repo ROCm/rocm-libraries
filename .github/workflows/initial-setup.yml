@@ -3,6 +3,9 @@ name: Setup Monorepo
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   MONOREPO_URL: github.com/ROCm/rocm-libraries.git
   MONOREPO_BRANCH: develop

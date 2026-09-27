@@ -37,13 +37,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class MultiColoredSGS
-  * \brief Multi-Colored Symmetric Gauss-Seidel / SSOR Preconditioner
-  * \details
-  * The Multi-Colored Symmetric Gauss-Seidel / SSOR preconditioner is based on the
-  * splitting of the original matrix. Higher parallelism in solving the forward and
-  * backward substitution is obtained by performing a multi-colored decomposition.
-  * Details on the Symmetric Gauss-Seidel / SSOR algorithm can be found in the SGS
-  * preconditioner.
+  * \brief Multi-colored Symmetric Gauss-Seidel / SSOR preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector
@@ -82,12 +76,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class MultiColoredGS
-  * \brief Multi-Colored Gauss-Seidel / SOR Preconditioner
-  * \details
-  * The Multi-Colored Symmetric Gauss-Seidel / SOR preconditioner is based on the
-  * splitting of the original matrix. Higher parallelism in solving the forward
-  * substitution is obtained by performing a multi-colored decomposition. Details on the
-  * Gauss-Seidel / SOR algorithm can be found in the GS preconditioner.
+  * \brief Multi-colored Gauss-Seidel / SOR preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

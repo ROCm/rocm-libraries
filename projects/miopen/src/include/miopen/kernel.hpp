@@ -38,18 +38,6 @@ std::string_view GetKernelInc(const fs::path& name);
 const std::vector<std::reference_wrapper<const fs::path>>& GetKernelIncList();
 } // namespace miopen
 
-#if MIOPEN_BACKEND_OPENCL
-#include <miopen/clhelper.hpp>
-#include <miopen/oclkernel.hpp>
-
-namespace miopen {
-using Kernel       = OCLKernel;
-using KernelInvoke = OCLKernelInvoke;
-using Program      = SharedProgramPtr;
-
-} // namespace miopen
-
-#elif MIOPEN_BACKEND_HIP
 #include <miopen/hipoc_kernel.hpp>
 
 namespace miopen {
@@ -58,6 +46,5 @@ using KernelInvoke = HIPOCKernelInvoke;
 using Program      = HIPOCProgram;
 
 } // namespace miopen
-#endif
 
 #endif

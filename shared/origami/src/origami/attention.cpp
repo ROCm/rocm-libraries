@@ -612,10 +612,12 @@ double compute_timestep_latency(const problem_t& problem,
  */
 double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
-                             const config_t& config,
-                             size_t max_cus) {
+                             const config_t& config) {
   assert(config.is_valid());
   bool debug = runtime_options::get().debug_enabled;
+
+  // Usable CU count: honor the caller's budget (problem.num_cus); 0 = all CUs.
+  const size_t max_cus = resolve_num_cus(problem.num_cus, hardware.N_CU);
 
   OLOG_DEBUG("=== Attention compute_total_latency START ===");
   OLOG_DEBUG("Evaluating config: MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k

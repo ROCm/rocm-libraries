@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,10 @@
 #include "load_store_ops.h"
 #include "rocfft_mpi.h"
 #include "tree_node.h"
+
+#ifdef ROCFFT_RCCL_ENABLE
+#include "rccl_wrapper.h"
+#endif
 
 // Calculate the maximum pow number with the given base number
 template <int base>
@@ -402,6 +406,15 @@ struct rocfft_plan_t
 
     rocfft_plan_description_t desc;
 
+#ifdef ROCFFT_RCCL_ENABLE
+    // RCCL communicator used by GlobalTransposeRCCL.  Populated only
+    // when the plan runs in a single process (local_comm_size == 1)
+    // and has >= 2 local devices; empty otherwise, in which case
+    // GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
+    // Value-semantic handle; copies share state via shared_ptr<Impl>.
+    rocfft_rccl_comm_t rccl;
+#endif
+
     rocfft_plan_t() = default;
 
     // Add a multi-plan item for execution.  Returns the index of the
@@ -430,6 +443,14 @@ struct rocfft_plan_t
     // returns `true` iff a successful multi-device computing plan configuration
     // was set up
     bool BuildMultiDevicePlan();
+
+#ifdef ROCFFT_RCCL_ENABLE
+    // populate the rccl communicator from the description's local devices,
+    // before any plan-building path is chosen,  empty when not applicable.
+    // any failure is swallowed internally, leaving rccl empty so
+    // the caller falls back to the P2P / A2A paths
+    void InitRCCLCommunicator() noexcept;
+#endif
 
     // check log level, log the topologically sorted plan if plan
     // logging is enabled
@@ -484,6 +505,12 @@ private:
     void TopologicalSortDFS(size_t               idx,
                             std::vector<bool>&   visited,
                             std::vector<size_t>& sorted) const;
+
+    // Shared handler for the Build*MultiDevicePlan function-try-blocks: log the
+    // in-flight exception and discard any partial plan state so plan creation
+    // can fall back to another path.  `except_what` is null for unknown
+    // (non-std::exception) throws.
+    void discard_failed_multi_device_plan(const std::string& calling_func, const char* except_what);
 
     // Temp buffers allocated during plan creation for multi-device
     // plans are remembered here.  Mapped per-location.  Individual
@@ -775,6 +802,15 @@ private:
     std::vector<size_t> GlobalTransposeA2A(const field_view_t&        input,
                                            const field_view_t&        output,
                                            const std::vector<size_t>& antecedents);
+
+#ifdef ROCFFT_RCCL_ENABLE
+    // RCCL-based global transpose for single-process multi-GPU plans.
+    // Dispatches to ncclAllToAll for uniform NxN patterns and to a
+    // grouped ncclSend/ncclRecv path for everything else.
+    std::vector<size_t> GlobalTransposeRCCL(const field_view_t&        input,
+                                            const field_view_t&        output,
+                                            const std::vector<size_t>& antecedents);
+#endif
 
     // fallback case for global transpose that uses point-to-point
     // communications, for when all-to-all isn't possible.

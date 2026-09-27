@@ -12,21 +12,18 @@ fi
 binary_dir="${1%/}/"
 config_dir="${2%/}/"
 
-# Check if the folders exist
-if [ -d "$binary_dir" ] && [ -d "$config_dir" ]; then
-    echo "Both folders exist:"
-    echo "$binary_dir"
-    echo "$config_dir"
-else
-    echo "One or both folders do not exist."
-    if [ ! -d "$binary_dir" ]; then
-        echo "$binary_dir does not exist."
-    fi
-    if [ ! -d "$config_dir" ]; then
-        echo "$config_dir does not exist."
-    fi
+# Both directories must exist; fail early (and loudly) otherwise. The config
+# directory is passed in, so this works whether the benchmark yamls come from
+# the source tree (test/02_elementwise/configs/bench) or the install tree
+# (bin/hiptensor/configs/bench/02_elementwise).
+if [ ! -d "$binary_dir" ]; then
+    echo "ERROR: binary directory does not exist: $binary_dir" >&2
+    exit 1
 fi
-
+if [ ! -d "$config_dir" ]; then
+    echo "ERROR: config directory does not exist: $config_dir" >&2
+    exit 1
+fi
 
 output_dir="${3%/}/"
 

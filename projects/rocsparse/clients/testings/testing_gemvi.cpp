@@ -59,9 +59,39 @@ void testing_gemvi_bad_arg(const Arguments& arg)
 
     select_bad_arg_analysis(rocsparse_gemvi<T>, nargs_to_exclude, args_to_exclude, PARAMS);
 
+    // buffer_size is required by the buffer-size query.
+    EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi_buffer_size<T>(handle, trans, m, n, nnz, nullptr),
+                            rocsparse_status_invalid_pointer);
+
+    // temp_buffer is required when the corresponding buffer-size query reports
+    // nonzero workspace.
+    rocsparse_int m_requires_workspace   = 1;
+    rocsparse_int n_requires_workspace   = 1024;
+    rocsparse_int lda_requires_workspace = 1;
+    rocsparse_int nnz_requires_workspace = 1024;
+    EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi<T>(handle,
+                                               trans,
+                                               m_requires_workspace,
+                                               n_requires_workspace,
+                                               alpha_device_host,
+                                               A,
+                                               lda_requires_workspace,
+                                               nnz_requires_workspace,
+                                               x_val,
+                                               x_ind,
+                                               beta_device_host,
+                                               y,
+                                               idx_base,
+                                               nullptr),
+                            rocsparse_status_invalid_pointer);
+
     {
         auto tmp = trans;
         trans    = rocsparse_operation_transpose;
+        size_t buffer_size;
+        EXPECT_ROCSPARSE_STATUS(
+            rocsparse_gemvi_buffer_size<T>(handle, trans, m, n, nnz, &buffer_size),
+            rocsparse_status_not_implemented);
         EXPECT_ROCSPARSE_STATUS(rocsparse_gemvi<T>(PARAMS), rocsparse_status_not_implemented);
         trans = tmp;
     }
@@ -97,19 +127,22 @@ void testing_gemvi_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_gemvi(const Arguments& arg)
 {
-    rocsparse_int        M     = arg.M;
-    rocsparse_int        N     = arg.N;
+    rocsparse_int M = arg.M;
+    rocsparse_int N = arg.N;
+
     rocsparse_operation  trans = arg.transA;
     rocsparse_index_base base  = arg.baseA;
 
     T h_alpha = arg.get_alpha<T>();
     T h_beta  = arg.get_beta<T>();
 
+    floating_data_t<T> percentage = arg.get_percentage<T>();
+
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
 
-    // Vector sparsity of 33%
-    rocsparse_int nnz = N * 0.33;
+    // Vector sparsity of percentage%
+    rocsparse_int nnz = N * (percentage / floating_data_t<T>(100));
     rocsparse_int lda = (trans == rocsparse_operation_none) ? M : N;
 
     // Allocate host memory

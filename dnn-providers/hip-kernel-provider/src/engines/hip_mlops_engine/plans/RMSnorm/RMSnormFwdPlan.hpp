@@ -11,11 +11,13 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "core/Utils.hpp"
 
 #include <memory>
 
 namespace hip_kernel_provider
 {
+
 using namespace compilation;
 
 namespace rmsnorm
@@ -26,6 +28,13 @@ class RMSnormFwdParams
 public:
     RMSnormFwdParams(
         const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap);
+
+    RMSnormFwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& attributes,
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
@@ -41,7 +50,11 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invRMS() const;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
+
+    const std::optional<core::utils::ActivationParams>& optActivation() const;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* activationOut() const;
 
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
@@ -49,7 +62,10 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invRMS;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
+
+    std::optional<core::utils::ActivationParams> _optActivation;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
 class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
@@ -78,7 +94,11 @@ private:
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;
     std::unique_ptr<IRunnableKernel> _runnableKernel;
+
+    float _activationAlpha = 0.0f;
+    float _activationBeta = 0.0f;
 };
 
-}
-}
+} // namespace rmsnorm
+
+} // namespace hip_kernel_provider

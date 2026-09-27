@@ -32,7 +32,9 @@ def _check_venv():
         )
 
 
-def cmake_build_args(install_prefix=None, tests=True, python=True, examples=True, shared=True):
+def cmake_build_args(
+    install_prefix=None, tests=True, python=True, examples=True, shared=True
+):
     """Canonical cmake args for a stinkytofu build.
 
     Single source of truth for build flags — import this in downstream tasks
@@ -106,6 +108,25 @@ def _detect_rocm() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _parse_vcvars_env(stdout):
+    """Parse `KEY=VALUE` lines from `vcvarsall.bat ... && set` output.
+
+    Tolerant of stray U+FFFD replacement characters: when the process's active
+    code page can't represent a byte in vcvarsall.bat's banner text (e.g. a
+    JIS/Shift-JIS system locale with an English-language VS install),
+    `_setup_msvc_env()` decodes with errors="replace" rather than crashing, so
+    a banner line may come through full of �. Such lines either fail the
+    "=" check below or produce a garbage key that's harmless to set; the real
+    KEY=VALUE environment lines are plain ASCII and parse normally either way.
+    """
+    env = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env[key] = value
+    return env
+
+
 def _setup_msvc_env():
     """Initialize the full MSVC build environment from vcvarsall.bat."""
     if sys.platform != "win32":
@@ -127,13 +148,11 @@ def _setup_msvc_env():
         capture_output=True,
         text=True,
         encoding="mbcs",
+        errors="replace",
         shell=True,
     )
     original_lib = os.environ.get("LIB", "")
-    for line in result.stdout.splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            os.environ[key] = value
+    os.environ.update(_parse_vcvars_env(result.stdout))
     # Restore original LIB entries so vcvarsall doesn't drop existing SDK paths
     if original_lib:
         existing = os.environ.get("LIB", "")
@@ -204,6 +223,7 @@ def _rmtree(path: Path):
         "reconfigure": "Delete CMake cache to force a fresh configure (keeps compiled objects).",
         "gcc": "Use GCC instead of amdclang.",
         "coverage": "Build with code coverage instrumentation (use `invoke coverage` instead for the full report flow).",
+        "asan": "Build with AddressSanitizer instrumentation (use `invoke asan` instead for the full build+test flow).",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -219,6 +239,7 @@ def build(
     reconfigure=False,
     gcc=False,
     coverage=False,
+    asan=False,
     rocm_path=None,
 ):
     _check_venv()
@@ -245,12 +266,14 @@ def build(
         *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
         f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
+        f"-DSTINKYTOFU_ENABLE_ASAN={'ON' if asan else 'OFF'}",
     ]
 
     if not no_python:
         cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
 
-    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    # Locate ROCmCMakeBuildTools (version TWEAK git hash) and the SDK cmake prefix
+    # so find_package(amd_comgr CONFIG) can locate the devel package's config.
     _rocm_sdk = shutil.which("rocm-sdk")
     if _rocm_sdk:
         try:
@@ -267,6 +290,33 @@ def build(
                     cmake_opts.append(
                         f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
                     )
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            _sdk_cmake = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake}")
+        except subprocess.CalledProcessError:
+            pass
+
+        # Point CMake's find_package(amd_comgr CONFIG) at the SDK's cmake configs
+        # (rocm-sdk pip installs don't populate ROCM_PATH/CMAKE_PREFIX_PATH themselves).
+        try:
+            _sdk_cmake_prefix = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake_prefix:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake_prefix}")
         except subprocess.CalledProcessError:
             pass
 
@@ -379,6 +429,27 @@ def tidy(c, build_dir=None):
         f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
     )
     c.run(f'cmake --build "{bld.as_posix()}" --target tidy')
+
+
+@task(
+    help={
+        "build_dir": "Build directory to use (default: build/).",
+        "open_report": "Open the generated HTML docs in a browser when finished.",
+    }
+)
+def docs(c, build_dir=None, open_report=False):
+    """Build the Doxygen + Sphinx documentation site. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not bld.exists():
+        print("No build directory found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(f'cmake --build "{bld.as_posix()}" --target sphinx_docs')
+    html_index = bld / "docs" / "html" / "index.html"
+    print(f"\nHTML docs: {html_index.as_posix()}")
+    if open_report:
+        import webbrowser
+
+        webbrowser.open(html_index.as_uri())
 
 
 @task(
@@ -513,3 +584,40 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         import webbrowser
 
         webbrowser.open((html_dir / "index.html").as_uri())
+
+
+@task(
+    help={
+        "build_dir": "ASan build directory (default: build-asan/).",
+        "jobs": "Number of parallel build jobs (default: all cores).",
+        "clean": "Remove the build directory before configuring.",
+        "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
+    }
+)
+def asan(c, build_dir=None, jobs=None, clean=False, rocm_path=None):
+    """Build with AddressSanitizer instrumentation.
+
+    Uses a RelWithDebInfo build (keeps -g for symbolized reports without the
+    runtime cost of a full Debug build) with -fsanitize=address baked into
+    every target (library, tools, unit_tests, api_tests) so violations
+    anywhere in the call chain are caught, not just in test code.
+
+    Run the test suite separately, e.g.:
+        cd build-asan && ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 ctest --output-on-failure -LE python
+
+    The `-LE python` excludes the Python-binding tests: loading an
+    ASan-instrumented .so into a Python interpreter that wasn't itself
+    started with the ASan runtime preloaded fails with "undefined symbol:
+    __asan_option_detect_stack_use_after_return".
+    """
+    bld = Path(build_dir).resolve() if build_dir else (ROOT_PATH / "build-asan")
+
+    build(
+        c,
+        build_dir=str(bld),
+        build_type="RelWithDebInfo",
+        asan=True,
+        jobs=jobs,
+        clean=clean,
+        rocm_path=rocm_path,
+    )

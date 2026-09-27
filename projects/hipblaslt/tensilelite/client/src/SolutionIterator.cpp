@@ -104,6 +104,20 @@ namespace TensileLite
                 return false;
             }
 
+            // The all-solutions benchmark path selects kernels by index instead
+            // of going through a SolutionLibrary search. Apply the dynamic
+            // StreamK topology predicate explicitly so this path has the same
+            // support boundary as normal library selection. In particular, a
+            // gfx942 MI300A reports six XCDs while these kernels bake eight
+            // per-XCD queues; launching one is invalid, but static StreamK and
+            // non-StreamK solutions in the same config remain runnable.
+            if(!solution.streamKDynamicQueueSupported(problem, *m_hardware))
+            {
+                if(isReportValid)
+                    m_reporter->report(ResultKey::Validation, "UNSUPPORTED_XCD_TOPOLOGY");
+                return false;
+            }
+
             // Test if the persistent kernel is eligible for the current hw and solution
             problem.checkPersistentKernelEligibility(solution, *m_hardware);
             Task task(*m_hardware, problem, solution);
@@ -345,6 +359,21 @@ namespace TensileLite
         {
             m_firstSolutionIdx = firstSolutionIdx;
 
+            // Indexes library->solutions. For an indexed library that map is
+            // empty until caches are parsed and published; materializeAllSolutions()
+            // does both. The cache's own materializeAll() only parses, and
+            // leaves the reads below on an empty map.
+            //
+            // Best/Top iterators must not call this: they measure selection
+            // latency and should stay lazy.
+            library->materializeAllSolutions();
+
+            if(library->solutions.empty())
+            {
+                throw std::runtime_error(
+                    "[AllSolutionsIterator] library contains no solutions to enumerate");
+            }
+
             if(m_firstSolutionIdx < 0)
                 m_firstSolutionIdx = library->solutions.begin()->first;
 
@@ -546,7 +575,10 @@ namespace TensileLite
             }
             if(m_currentSolution == nullptr)
             {
-                m_currentSolution = m_library->solutions.find(0)->second;
+                // Goes through the resolver rather than solutions.find(0):
+                // indexed libraries have not materialized index 0 yet, and the
+                // old form dereferenced end() when it was missing.
+                m_currentSolution = m_library->resolveSolutionByIndex(0);
             }
             m_usedCurrentSolution = false;
         }
@@ -619,7 +651,9 @@ namespace TensileLite
             }
             if(m_solutions.size() == 0)
             {
-                m_solutions.push_back(m_library->solutions.find(0)->second);
+                // See the note in BestSolutionIterator::preProblem.
+                if(auto fallback = m_library->resolveSolutionByIndex(0))
+                    m_solutions.push_back(fallback);
             }
 
             if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))

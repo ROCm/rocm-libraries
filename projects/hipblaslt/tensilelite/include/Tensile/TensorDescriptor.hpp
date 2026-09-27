@@ -37,10 +37,9 @@
 
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Debug.hpp>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/Utils.hpp>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     template <typename SizeIter>
@@ -157,7 +156,7 @@ namespace TensileLite
  *
  * Provides functions for indexing and otherwise iterating through a tensor.
  */
-    class TENSILE_API TensorDescriptor
+    class TENSILELITEHOST_EXPORT TensorDescriptor
     {
     public:
         static const size_t UseDefaultStride;
@@ -429,7 +428,8 @@ namespace TensileLite
 
         std::string ToString() const;
 
-        friend std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
+        friend TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&           stream,
+                                                               const TensorDescriptor& t);
 
     private:
         std::string         m_name;
@@ -444,7 +444,7 @@ namespace TensileLite
         bool m_isOutput = false;
     };
 
-    std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
 
     template <typename T>
     void WriteTensor1D(std::ostream&           stream,
@@ -545,4 +545,3 @@ namespace TensileLite
     }
 
 } // namespace TensileLite
-TENSILE_HIDDEN_END

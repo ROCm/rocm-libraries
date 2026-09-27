@@ -446,6 +446,24 @@ void copy_matrix_with_different_leading_dimensions(T&      hB,
 }
 
 template <typename T, typename U>
+void copy_matrix_with_different_leading_dimensions(T& hB, U& hC)
+{
+    const int64_t M           = hB.m();
+    const int64_t N           = hB.n();
+    const size_t  ldb         = hB.lda();
+    const size_t  ldc         = hC.lda();
+    const int64_t batch_count = hB.batch_count();
+    for(int64_t b = 0; b < batch_count; b++)
+    {
+        auto* B = hB[b];
+        auto* C = hC[b];
+        for(int64_t i = 0; i < M; i++)
+            for(int64_t j = 0; j < N; j++)
+                C[i + j * ldc] = B[i + j * ldb];
+    }
+}
+
+template <typename T, typename U>
 void copy_matrix_with_different_leading_dimensions_batched(
     T& hB, U& hC, int64_t M, int64_t N, size_t ldb, size_t ldc)
 {

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_plugin_sdk/DeviceQuery.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -21,10 +22,10 @@ inline hipDeviceProp_t getDeviceProperties(hipStream_t stream)
 {
     hipDevice_t deviceId = -1;
     hipDeviceProp_t props;
-    auto status = hipStreamGetDevice(stream, &deviceId);
+    auto status = hipdnn_plugin_sdk::getDeviceFromStream(stream, &deviceId);
     if(status != hipSuccess)
     {
-        throw std::runtime_error("hipStreamGetDevice failed with error code: "
+        throw std::runtime_error("Stream device query failed with error code: "
                                  + std::to_string(status));
     }
 

@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "model": "gpt-oss-120b/20b",
+    "arch": "gfx942",
+    "dtype": "bf16",
+    "num_query_heads": 64,
+    "num_kv_heads": 8,
+    "head_size": 64,
+    "block_size": 16,
+    "use_sinks": true,
+    "note": "gpt-oss sink-bias decode (seqlen_q=1). Two mask families: full-causal (sliding_window=0) and sliding-window SWA-128. bf16/D64/64-8 GQA. AOTriton has no sink kernel, so the Triton column is blank by design (DSL-only). kv_len sweep short->long; batch sweep to fill the GPU (decode is bandwidth-bound only once batched)."
+  },
+  "shapes": [
+    {"batch": 1,   "seqlen_q": 1, "seqlen_k": 2048,  "sliding_window": 0,   "label": "full_sink_b1_kv2048"},
+    {"batch": 64,  "seqlen_q": 1, "seqlen_k": 2048,  "sliding_window": 0,   "label": "full_sink_b64_kv2048"},
+    {"batch": 128, "seqlen_q": 1, "seqlen_k": 2048,  "sliding_window": 0,   "label": "full_sink_b128_kv2048"},
+    {"batch": 64,  "seqlen_q": 1, "seqlen_k": 8192,  "sliding_window": 0,   "label": "full_sink_b64_kv8192"},
+    {"batch": 1,   "seqlen_q": 1, "seqlen_k": 2048,  "sliding_window": 128, "label": "swa_sink_b1_kv2048"},
+    {"batch": 64,  "seqlen_q": 1, "seqlen_k": 2048,  "sliding_window": 128, "label": "swa_sink_b64_kv2048"},
+    {"batch": 128, "seqlen_q": 1, "seqlen_k": 2048,  "sliding_window": 128, "label": "swa_sink_b128_kv2048"},
+    {"batch": 64,  "seqlen_q": 1, "seqlen_k": 8192,  "sliding_window": 128, "label": "swa_sink_b64_kv8192"}
+  ]
+}

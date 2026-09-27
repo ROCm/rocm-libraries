@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,8 @@
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
+#include "rocblas_utility.hpp"
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 /*
@@ -56,18 +58,21 @@ __device__ __host__ inline int64_t
     return j * lda + i * inca;
 }
 
-__device__ __host__ inline int32_t ceil(const int32_t n, const int32_t nb)
-{
-    return ((n - 1) / nb) + 1;
-}
-
-__device__ __host__ inline int64_t ceil(const int64_t n, const int64_t nb)
+template <typename I1, typename I2>
+__device__ __host__ inline I1 ceil(const I1 n, const I2 nb)
 {
     return ((n - 1) / nb) + 1;
 }
 
 template <typename T>
 T const* cast2constType(T* array)
+{
+    return array;
+}
+
+// keep existing const
+template <typename T>
+T const* cast2constType(T const* array)
 {
     return array;
 }

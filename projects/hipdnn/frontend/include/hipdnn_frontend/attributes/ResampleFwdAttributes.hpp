@@ -166,6 +166,14 @@ public:
         return *this;
     }
 
+    // cuDNN frontend spells this setter `set_resampling_mode`; provide that
+    // spelling for API compatibility. Same field, same semantics.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    ResampleFwdAttributes& set_resampling_mode(ResampleMode value)
+    {
+        return set_resample_mode(value);
+    }
+
     // NOLINTNEXTLINE(readability-identifier-naming)
     PaddingMode get_padding_mode() const
     {
@@ -191,8 +199,35 @@ public:
         generate_index = value;
         return *this;
     }
+
+    /**
+     * @brief Custom equality hook for resample-forward-specific attributes
+     *
+     * Compares padding, stride, window, resample mode, padding mode, and
+     * the generate-index flag — all of which define the semantics of the
+     * resample operation rather than tensor layout, so logical and strict
+     * equality coincide here.
+     */
+    bool logicallyEqualsImpl(const ResampleFwdAttributes& other) const
+    {
+        return pre_padding == other.pre_padding && post_padding == other.post_padding
+               && stride == other.stride && window == other.window
+               && resample_mode == other.resample_mode && padding_mode == other.padding_mode
+               && generate_index == other.generate_index;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const ResampleFwdAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 
 typedef ResampleFwdAttributes Resample_fwd_attributes; // NOLINT(readability-identifier-naming)
+
+// cuDNN frontend spells the (forward-only, in hipDNN) resample node
+// `Resample_attributes`; provide that spelling for API compatibility.
+typedef ResampleFwdAttributes Resample_attributes; // NOLINT(readability-identifier-naming)
 
 } // namespace hipdnn_frontend::graph

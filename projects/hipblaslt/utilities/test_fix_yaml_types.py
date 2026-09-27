@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for fix_yaml_types.py."""
 
+import io
 import os
 import subprocess
 import sys
@@ -11,12 +12,15 @@ import pytest
 
 from fix_yaml_types import (
     BOOL_TO_INT_PARAMS,
+    FLOAT_TO_INT_PARAMS,
     INT_TO_BOOL_PARAMS,
     INT_TO_FLOAT_PARAMS,
     count_mismatches,
     fix_content,
     fix_file,
+    fix_files,
     find_yaml_files,
+    find_yaml_files_in_roots,
 )
 
 
@@ -111,6 +115,36 @@ class TestFixContentGroupC:
         assert fix_content(content) == content
 
 
+class TestFixContentGroupD:
+    """Group D: Float -> Int (256.0 -> 256)."""
+
+    @pytest.mark.parametrize("param", FLOAT_TO_INT_PARAMS)
+    def test_integral_float_to_int(self, param):
+        content = f"    {param}: 256.0\n"
+        result = fix_content(content)
+        assert result == f"    {param}: 256\n"
+
+    @pytest.mark.parametrize("param", FLOAT_TO_INT_PARAMS)
+    def test_integral_float_list_to_int_list(self, param):
+        content = f"    {param}: [256.0]\n"
+        result = fix_content(content)
+        assert result == f"    {param}: [256]\n"
+
+    @pytest.mark.parametrize("param", FLOAT_TO_INT_PARAMS)
+    def test_int_value_unchanged(self, param):
+        content = f"    {param}: 256\n"
+        assert fix_content(content) == content
+
+    @pytest.mark.parametrize("param", FLOAT_TO_INT_PARAMS)
+    def test_non_integral_float_unchanged(self, param):
+        content = f"    {param}: 256.5\n"
+        assert fix_content(content) == content
+
+    def test_unrelated_float_param_unchanged(self):
+        content = "    SomeOtherParam: 256.0\n"
+        assert fix_content(content) == content
+
+
 # ── Tests for idempotency ────────────────────────────────────────────────────
 
 class TestIdempotency:
@@ -123,6 +157,7 @@ class TestIdempotency:
             ExpandPointerSwap: 0
             SourceSwap: 1
             GlobalReadPerMfma: 1
+            StaggerUStride: 256.0
         """)
         first = fix_content(content)
         second = fix_content(first)
@@ -133,6 +168,7 @@ class TestIdempotency:
             UseCustomMainLoopSchedule: 0
             ExpandPointerSwap: true
             GlobalReadPerMfma: 1.0
+            StaggerUStride: 256
         """)
         assert fix_content(content) == content
 
@@ -167,48 +203,62 @@ class TestCountMismatches:
 
     def test_no_mismatches(self):
         content = "    UseCustomMainLoopSchedule: 0\n    ExpandPointerSwap: true\n"
-        assert count_mismatches(content) == (0, 0, 0, 0)
+        assert count_mismatches(content) == (0, 0, 0, 0, 0)
 
     def test_group_a_counts(self):
         content = "    DirectToLds: false\n    DirectToLds: true\n"
-        a, b, c, d = count_mismatches(content)
+        a, b, c, d, e = count_mismatches(content)
         assert a == 2
         assert b == 0
         assert c == 0
         assert d == 0
+        assert e == 0
 
     def test_group_b_counts(self):
         content = "    ExpandPointerSwap: 0\n    SourceSwap: 1\n"
-        a, b, c, d = count_mismatches(content)
+        a, b, c, d, e = count_mismatches(content)
         assert a == 0
         assert b == 2
         assert c == 0
         assert d == 0
+        assert e == 0
 
     def test_group_c_counts(self):
         content = "    GlobalReadPerMfma: 1\n"
-        a, b, c, d = count_mismatches(content)
+        a, b, c, d, e = count_mismatches(content)
         assert a == 0
         assert b == 0
         assert c == 1
         assert d == 0
+        assert e == 0
 
     def test_group_d_counts(self):
-        content = "    CodeObjectVersion: 4\n"
-        a, b, c, d = count_mismatches(content)
+        content = "    StaggerUStride: 256.0\n"
+        a, b, c, d, e = count_mismatches(content)
         assert a == 0
         assert b == 0
         assert c == 0
         assert d == 1
+        assert e == 0
+
+    def test_group_e_counts(self):
+        content = "    CodeObjectVersion: 4\n"
+        a, b, c, d, e = count_mismatches(content)
+        assert a == 0
+        assert b == 0
+        assert c == 0
+        assert d == 0
+        assert e == 1
 
     def test_mixed_groups(self):
         content = textwrap.dedent("""\
             DirectToLds: false
             ExpandPointerSwap: 0
             GlobalReadPerMfma: 1
+            StaggerUStride: 256.0
             CodeObjectVersion: 4
         """)
-        assert count_mismatches(content) == (1, 1, 1, 1)
+        assert count_mismatches(content) == (1, 1, 1, 1, 1)
 
 
 # ── Tests for fix_file ───────────────────────────────────────────────────────
@@ -258,6 +308,67 @@ class TestFindYamlFiles:
     def test_empty_directory(self, tmp_path):
         result = find_yaml_files(str(tmp_path))
         assert result == []
+
+
+class TestFindYamlFilesInRoots:
+
+    def test_duplicate_directories_not_double_processed(self, tmp_path):
+        subdir = tmp_path / "arch"
+        subdir.mkdir()
+        yaml_file = subdir / "test.yaml"
+        yaml_file.write_text("content\n")
+        result = find_yaml_files_in_roots([str(tmp_path), str(tmp_path)], jobs=2)
+        assert result == [str(yaml_file)]
+
+
+class TestFixFiles:
+
+    def test_parallel_fix_files_reports_modified_count(self, tmp_path):
+        yaml_a = tmp_path / "a.yaml"
+        yaml_b = tmp_path / "b.yaml"
+        yaml_a.write_text("    DirectToLds: false\n")
+        yaml_b.write_text("    DirectToLds: 0\n")
+        assert fix_files([str(yaml_a), str(yaml_b)], jobs=2) == 1
+        assert yaml_a.read_text() == "    DirectToLds: 0\n"
+        assert yaml_b.read_text() == "    DirectToLds: 0\n"
+
+    def test_serial_fix_files_reports_progress(self, tmp_path):
+        yaml_a = tmp_path / "a.yaml"
+        yaml_b = tmp_path / "b.yaml"
+        yaml_a.write_text("    DirectToLds: false\n")
+        yaml_b.write_text("    DirectToLds: 0\n")
+        progress = io.StringIO()
+
+        assert fix_files(
+            [str(yaml_a), str(yaml_b)],
+            jobs=1,
+            progress=True,
+            progress_stream=progress,
+        ) == 1
+
+        output = progress.getvalue()
+        assert "Fixing files:" in output
+        assert "2/2" in output
+        assert "modified=1" in output
+
+    def test_parallel_fix_files_reports_progress(self, tmp_path):
+        yaml_a = tmp_path / "a.yaml"
+        yaml_b = tmp_path / "b.yaml"
+        yaml_a.write_text("    DirectToLds: false\n")
+        yaml_b.write_text("    DirectToLds: 0\n")
+        progress = io.StringIO()
+
+        assert fix_files(
+            [str(yaml_a), str(yaml_b)],
+            jobs=2,
+            progress=True,
+            progress_stream=progress,
+        ) == 1
+
+        output = progress.getvalue()
+        assert "Fixing files:" in output
+        assert "2/2" in output
+        assert "modified=1" in output
 
 
 # ── Tests for mixed correct/incorrect values ─────────────────────────────────
@@ -316,33 +427,37 @@ class TestCLI:
         subdir.mkdir()
         (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--jobs", "1", str(tmp_path)],
             capture_output=True, text=True)
         assert result.returncode == 0
-        assert "No mismatches to fix" in result.stdout
+        assert "Done. Modified 0 files." in result.stdout
 
     def test_fixes_and_reports_success(self, tmp_path):
         subdir = tmp_path / "arch"
         subdir.mkdir()
         (subdir / "test.yaml").write_text("    DirectToLds: false\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--jobs", "1", str(tmp_path)],
             capture_output=True, text=True)
         assert result.returncode == 0
-        assert "SUCCESS" in result.stdout
+        assert "Fixing files:" in result.stdout
+        assert "1/1" in result.stdout
+        assert "Done. Modified 1 files." in result.stdout
         assert (subdir / "test.yaml").read_text() == "    DirectToLds: 0\n"
 
-    def test_reports_counts(self, tmp_path):
+    def test_no_longer_reports_counts(self, tmp_path):
         subdir = tmp_path / "arch"
         subdir.mkdir()
         (subdir / "test.yaml").write_text(
             "    DirectToLds: false\n    ExpandPointerSwap: 0\n    GlobalReadPerMfma: 1\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--jobs", "1", str(tmp_path)],
             capture_output=True, text=True)
-        assert "Group A (bool->int):   1" in result.stdout
-        assert "Group B (int->bool):   1" in result.stdout
-        assert "Group C (int->float):  1" in result.stdout
+        assert result.returncode == 0
+        assert "Group A" not in result.stdout
+        assert "Group B" not in result.stdout
+        assert "Group C" not in result.stdout
+        assert "Done. Modified 1 files." in result.stdout
 
     def test_mode_flag_input(self, tmp_path):
         """--mode input is reported in the output."""
@@ -350,7 +465,7 @@ class TestCLI:
         subdir.mkdir()
         (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, "--mode", "input", str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--mode", "input", "--jobs", "1", str(tmp_path)],
             capture_output=True, text=True)
         assert result.returncode == 0
         assert "Mode: input" in result.stdout
@@ -360,7 +475,7 @@ class TestCLI:
         subdir.mkdir()
         (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, "--mode", "logic", str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--mode", "logic", "--jobs", "1", str(tmp_path)],
             capture_output=True, text=True)
         assert result.returncode == 0
         assert "Mode: logic" in result.stdout
@@ -370,10 +485,26 @@ class TestCLI:
         subdir.mkdir()
         (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--jobs", "1", str(tmp_path)],
             capture_output=True, text=True)
         assert result.returncode == 0
         assert "Mode: both" in result.stdout
+
+    def test_jobs_flag_reported(self, tmp_path):
+        subdir = tmp_path / "arch"
+        subdir.mkdir()
+        (subdir / "test.yaml").write_text("    DirectToLds: 0\n")
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "--jobs", "2", str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode == 0
+        assert "Workers: 2" in result.stdout
+
+    def test_jobs_invalid_rejected(self, tmp_path):
+        result = subprocess.run(
+            [sys.executable, self.SCRIPT, "--jobs", "0", str(tmp_path)],
+            capture_output=True, text=True)
+        assert result.returncode != 0
 
     def test_mode_invalid_rejected(self, tmp_path):
         result = subprocess.run(
@@ -390,7 +521,7 @@ class TestCLI:
         (a / "x.yaml").write_text("    DirectToLds: false\n")
         (b / "y.yaml").write_text("    ExpandPointerSwap: 0\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, str(a), str(b)],
+            [sys.executable, self.SCRIPT, "--jobs", "2", str(a), str(b)],
             capture_output=True, text=True)
         assert result.returncode == 0
         assert (a / "x.yaml").read_text() == "    DirectToLds: 0\n"
@@ -402,7 +533,7 @@ class TestCLI:
         subdir.mkdir()
         (subdir / "test.yaml").write_text("    DirectToLds: false\n")
         result = subprocess.run(
-            [sys.executable, self.SCRIPT, str(tmp_path), str(tmp_path)],
+            [sys.executable, self.SCRIPT, "--jobs", "2", str(tmp_path), str(tmp_path)],
             capture_output=True, text=True)
         assert result.returncode == 0
         assert "YAML files found: 1" in result.stdout

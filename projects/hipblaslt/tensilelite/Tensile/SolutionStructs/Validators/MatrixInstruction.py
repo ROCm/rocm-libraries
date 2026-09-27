@@ -25,9 +25,12 @@
 import pprint
 from typing import Dict, Optional
 
-from Tensile.Common import IsaVersion, IsaInfo, print2, elineno
+import rocisa
+
+from Tensile.Common import IsaVersion, IsaInfo, print2, elineno, effectiveMatrixInstMN
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.DataType import DataType
+from Tensile.Common.MatrixInstructionNaming import backendCapsLoaded, matrixInstructionMnemonic
 from Tensile.Common.ValidParameters import makeValidMatrixInstructions, makeValidMFMA, makeValidSMFMA, makeValidWMMA, makeValidSWMMAC
 
 from ..Utilities import reject
@@ -41,7 +44,8 @@ def matrixInstructionToMIParameters(
       wavefrontSize: int,
       problemType: dict,
       workGroup: Optional[list],
-      isaInfoMap: Dict[IsaVersion, IsaInfo]
+      isaInfoMap: Dict[IsaVersion, IsaInfo],
+      sourceSwap: bool = False
     ):
     """
     Converts a 9-item matrix instruction into the associated 4-item representation and
@@ -52,6 +56,8 @@ def matrixInstructionToMIParameters(
         isa: The ISA tuple.
         wavefrontSize: The wavefront size. Typically "WavefrontSize" in a solution.
         problemType: The problem type dictionary. Typically "ProblemType" in a solution.
+        sourceSwap: The solution's SourceSwap flag. When set on a non-square MI the
+            stored MatrixInstM/N are the effective (transposed) extents.
     """
     print2(f">> Converting MatrixInstruction {mi} to MI parameters")
 
@@ -148,8 +154,77 @@ def matrixInstructionToMIParameters(
       result['MIInputPerThreadMXSB'] = result['MIInputPerThreadB'] // problemType["MXBlockB"] * duplicateFactor
     result['MIInputPerThreadMetadata'] = result['MIInputPerThread'] if not isSparse else result['MIInputPerThread'] // 8
 
+    # Every derivation above intentionally uses the physical mi[0]/mi[1] (opcode dims,
+    # MX duplicateFactor, MIInputPerThreadA/B); only the final stored M/N flip.
+    # MIBlock[0]/[1] stays physical.
+    result["MatrixInstM"], result["MatrixInstN"] = effectiveMatrixInstMN(mi[0], mi[1], sourceSwap)
+
     print2(f">> MI Parameters: {pprint.pformat(result)}")
     return result
+
+
+def useF32XEmulationFor(solution, archCaps) -> bool:
+    """Whether the emitter will emulate f32 with bf16 halves for *solution*.
+
+    ``Solution.assignDerivedParameters`` sets ``UseF32XEmulation``, but
+    ``BenchmarkProblems`` validates before it constructs the ``Solution``, and
+    ``matrixInstructionToMIParameters`` derives only ``EnableF32XdlMathOp``. On that
+    path the key is missing rather than False, and reading the miss as False names
+    the xf32 instruction -- which has no WMMA opcode -- for every xf32 solution the
+    emitter would have emitted as bf16. Derive it the way Solution does instead.
+    """
+    stored = solution.get("UseF32XEmulation")
+    if stored is not None:
+        return bool(stored)
+    return bool(solution.get("EnableF32XdlMathOp", False)) and bool(
+        archCaps["HasF32XEmulation"]
+    )
+
+
+def unsupportedMatrixInstructionMnemonic(
+    solution, isa, mi4, miInputTypeA, miInputTypeB, computeDataType, isSparse, hasMFMA,
+    useF32XEmulation=False
+):
+    """Return the mnemonic this MatrixInstruction emits if StinkyTofu cannot lower it.
+
+    Returns None when the mnemonic is supported or when the architecture has no
+    StinkyTofu backend to lower through. Kernels on an architecture StinkyTofu owns
+    are rejected here instead of reaching a mnemonic it has no definition for.
+
+    Data types with no matrix-instruction spelling at all (complex, which is emulated
+    with real matrix ops) make the backend raise while naming the instruction. That is
+    not this check's call to make, so those are left to the checks that cover them --
+    but only that one failure is absorbed, so a wrong argument still surfaces.
+    """
+    if not rocisa.isSupportedByStinkyTofu(tuple(isa)):
+        return None
+    if not backendCapsLoaded(isa):
+        # Naming the instruction here would read capability defaults and could reject
+        # a solution the emitter compiles fine, so decline rather than guess.
+        return None
+
+    ptype = solution["ProblemType"]
+    try:
+        mnemonic = matrixInstructionMnemonic(
+            isa,
+            solution["WavefrontSize"],
+            mi4,
+            miInputTypeA,
+            miInputTypeB,
+            computeDataType,
+            sourceSwap=solution.get("SourceSwap", False),
+            isSparse=isSparse,
+            hasMFMA=hasMFMA,
+            mfma1k=solution.get("MFMA_BF16_1K", False),
+            useF32XEmulation=useF32XEmulation,
+            mxBlock=max(ptype.get("MXBlockA", 0) or 0, ptype.get("MXBlockB", 0) or 0),
+        )
+    except RuntimeError:
+        return None
+
+    if rocisa.isMnemonicSupportedByStinkyTofu(mnemonic, tuple(isa)):
+        return None
+    return mnemonic
 
 
 def validateMIParameters(
@@ -239,10 +314,13 @@ def validateMIParameters(
         assert miEnabled == False, elineno()
         return True
 
-    assert solution["MatrixInstM"] == mi4[0]
-    assert solution["MatrixInstN"] == mi4[1]
-    assert solution["MatrixInstK"] == mi4[2]
-    assert solution["MatrixInstB"] == mi4[3]
+    # Compare M/N in effective space: solution's MatrixInstM/N are already effective
+    # (SourceSwap-transposed), and we derive the same from the physical mi4.
+    expM, expN = effectiveMatrixInstMN(mi4[0], mi4[1], solution.get("SourceSwap", False))
+    assert solution["MatrixInstM"] == expM, elineno()
+    assert solution["MatrixInstN"] == expN, elineno()
+    assert solution["MatrixInstK"] == mi4[2], elineno()
+    assert solution["MatrixInstB"] == mi4[3], elineno()
 
     assert mi4 in validMatrixInstructions, f"{elineno()} : invalid MI4: {str(mi4)} for type {miDataType.toChar()}"
 
@@ -285,10 +363,25 @@ def validateMIParameters(
                         printSolutionRejectionReason,
                         f"Invalid MFMA configuration: {solution}",
                     )
-        elif hasWMMA and (not mi4 in validWMMA):
-            return not reject(
-                solution, printSolutionRejectionReason, f"Invalid WMMA configuration: {solution}"
-            )
+        elif hasWMMA:
+            if not mi4 in validWMMA:
+                return not reject(
+                    solution, printSolutionRejectionReason, f"Invalid WMMA configuration: {solution}"
+                )
+            # macDataTypeA/B are already the MI input types: F32XdlMathOp-substituted
+            # and coerced from the raw enum ints library-logic YAML stores.
+            unsupported = unsupportedMatrixInstructionMnemonic(
+                solution, isa, mi4, macDataTypeA, macDataTypeB,
+                _as_mac_dtype(ptype.get("ComputeDataType", miDataType)), isSparse, hasMFMA,
+                useF32XEmulation=useF32XEmulationFor(solution, isaInfoMap[isa].archCaps))
+            if unsupported is not None:
+                return not reject(
+                    solution,
+                    printSolutionRejectionReason,
+                    f"Invalid WMMA configuration: MatrixInstruction {mi4} with input data types "
+                    f"{macDataTypeA}/{macDataTypeB} emits '{unsupported}', which StinkyTofu has no "
+                    f"instruction definition for on {isa}",
+                )
     else:
         if hasSMFMA and not (miDataTypeKey in validSMFMA and mi4 in validSMFMA[miDataTypeKey]):
             return not reject(

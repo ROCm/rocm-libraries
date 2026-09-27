@@ -33,7 +33,6 @@ const char* rocsparse_indextype_name(rocsparse_indextype value)
 {
     switch(value)
     {
-        CASE(rocsparse_indextype_u16);
         CASE(rocsparse_indextype_i32);
         CASE(rocsparse_indextype_i64);
     }

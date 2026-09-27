@@ -54,9 +54,29 @@ Existing files that still carry the legacy verbose MIT block MAY be migrated to 
 
 ## Pull requests
 
-Always write PR descriptions using the rocm-libraries PR template. Fill in every section (use "N/A" or "Docs only, no testing needed" where a section genuinely does not apply rather than deleting it):
+Always write PR descriptions using the rocm-libraries PR template. Fill in every section (use "N/A" or "Docs only, no testing needed" where a section genuinely does not apply rather than deleting it).
+
+PR titles **must** follow [Conventional Commits](https://www.conventionalcommits.org/) style:
+
+```
+type(optional-scope): short description
+```
+
+Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+
+The PR body **must** include a JIRA or issue reference line (before or after the template sections):
+
+```
+JIRA ID : PROJECT-1234
+```
+
+See the [Libraries PR Bot Policy FAQ](https://github.com/ROCm/rocm-libraries/blob/develop/docs/LIBRARIES_PR_BOT_FAQ.md) for the full set of automated checks enforced on every PR.
+
+### PR body template
 
 ```markdown
+JIRA ID : <JIRA key or N/A>
+
 ## Motivation
 <why this change is needed: the problem, bug, or feature being addressed>
 
@@ -70,12 +90,10 @@ Always write PR descriptions using the rocm-libraries PR template. Fill in every
 <outcome of the test plan: passing suites, benchmark numbers, before/after>
 
 ## Submission Checklist
-- [ ] Look over the contributing guidelines at https://github.com/ROCm/ROCm/blob/develop/CONTRIBUTING.md#pull-requests.
+- [ ] Look over the contributing guidelines at https://github.com/ROCm/TheRock/blob/main/GOVERNANCE.md#pull-requests.
 
 ## Risk level
 <None/Low/Medium/High, with a short justification>
-
-**Associated ticket**: <JIRA/issue id, or N/A>
 ```
 
 Use the `users/<github-username>/<branch-name>` branch convention and base PRs on `develop`.

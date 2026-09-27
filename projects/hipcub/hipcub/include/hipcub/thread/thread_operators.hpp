@@ -30,6 +30,8 @@
 #ifndef HIBCUB_THREAD_THREAD_OPERATORS_HPP_
 #define HIBCUB_THREAD_THREAD_OPERATORS_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/thread/thread_operators.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

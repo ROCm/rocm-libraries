@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "ck_tile/host/device_prop.hpp"
-#include "ck_tile/ops/gemm_mx.hpp"
 #include "gemm/gemm_profiler.hpp"
 #include "mx_gemm_benchmark.hpp"
+#include <type_traits>
 
 class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHostArgs>
 {
@@ -49,15 +49,13 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
             gemm_problem.m_, gemm_problem.n_, gemm_problem.stride_c_, is_row_major(layout_c)));
 
         const ck_tile::index_t scale_k_size = gemm_problem.k_ / 32;
-        const ck_tile::index_t stride_scale_a =
-            ck_tile::get_default_stride(gemm_problem.m_, scale_k_size, 0, is_row_major(layout_a));
-        const ck_tile::index_t stride_scale_b =
-            ck_tile::get_default_stride(scale_k_size, gemm_problem.n_, 0, is_row_major(layout_b));
 
-        ck_tile::HostTensor<ScaleType> scale_a_host(ck_tile::host_tensor_descriptor(
-            gemm_problem.m_, scale_k_size, stride_scale_a, is_row_major(layout_a)));
-        ck_tile::HostTensor<ScaleType> scale_b_host(ck_tile::host_tensor_descriptor(
-            scale_k_size, gemm_problem.n_, stride_scale_b, is_row_major(layout_b)));
+        ck_tile::HostTensor<ScaleType> scale_a_host(
+            {static_cast<std::size_t>(gemm_problem.m_), static_cast<std::size_t>(scale_k_size)},
+            {static_cast<std::size_t>(scale_k_size), static_cast<std::size_t>(1)});
+        ck_tile::HostTensor<ScaleType> scale_b_host(
+            {static_cast<std::size_t>(gemm_problem.n_), static_cast<std::size_t>(scale_k_size)},
+            {static_cast<std::size_t>(scale_k_size), static_cast<std::size_t>(1)});
 
         if(setting_.init_method == 0)
         {
@@ -90,6 +88,35 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
             scale_b_host.SetZero();
         }
 
+        if constexpr(SelectedKernel::Preshuffle)
+        {
+            if(gemm_problem.n_ % SelectedKernel::WarpTileN != 0 ||
+               gemm_problem.k_ % SelectedKernel::TileK != 0)
+                throw std::runtime_error(
+                    "MX weight preshuffle requires complete N warp tiles and K divisible by TileK");
+        }
+#if defined(CK_USE_GFX1250)
+        if(gemm_problem.split_k_ != 1)
+            throw std::runtime_error("gfx1250 MX GEMM supports only split_k=1");
+        if(gemm_problem.k_ % 128 != 0 || gemm_problem.k_ % SelectedKernel::TileK != 0)
+            throw std::runtime_error("gfx1250 MX GEMM requires K divisible by 128 and TileK");
+        auto shuffle_scales = [&](const ck_tile::HostTensor<ScaleType>& input, auto is_a) {
+            constexpr bool IsA     = decltype(is_a)::value;
+            constexpr auto tile_mn = IsA ? SelectedKernel::TileM : SelectedKernel::TileN;
+            constexpr auto warp_mn = IsA ? SelectedKernel::WarpTileM : SelectedKernel::WarpTileN;
+            const auto mn          = IsA ? gemm_problem.m_ : gemm_problem.n_;
+            const auto padded_mn   = ck_tile::integer_divide_ceil(mn, tile_mn) * tile_mn;
+            ck_tile::HostTensor<ScaleType> padded(
+                {static_cast<std::size_t>(padded_mn), static_cast<std::size_t>(scale_k_size)});
+            std::copy(input.mData.begin(), input.mData.end(), padded.mData.begin());
+            ck_tile::HostTensor<ScaleType> shuffled(padded.mDesc);
+            ck_tile::preShuffleScaleBuffer_gfx1250<ScaleType, 32, true>(
+                padded.data(), shuffled.data(), padded_mn, scale_k_size, warp_mn);
+            return shuffled;
+        };
+        auto scale_a_shuffled = shuffle_scales(scale_a_host, std::true_type{});
+        auto scale_b_shuffled = shuffle_scales(scale_b_host, std::false_type{});
+#else
         constexpr ck_tile::index_t m_per_xdl = SelectedKernel::WarpTileM;
         constexpr ck_tile::index_t n_per_xdl = SelectedKernel::WarpTileN;
         constexpr ck_tile::index_t k_per_xdl = SelectedKernel::WarpTileK;
@@ -109,31 +136,56 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
         constexpr ck_tile::index_t xdl_mn_thread = SelectedKernel::WarpTileM;
         constexpr ck_tile::index_t xdl_k_thread  = 64 / xdl_mn_thread;
 
-        auto scale_a_packed =
-            pack_mx_scales_mn_x_k<m_xdl_pack, k_xdl_pack, xdl_mn_thread, xdl_k_thread>(scale_a_host,
-                                                                                       true);
-        auto scale_b_packed =
-            pack_mx_scales_mn_x_k<n_xdl_pack, k_xdl_pack, xdl_mn_thread, xdl_k_thread>(scale_b_host,
-                                                                                       false);
+        ck_tile::HostTensor<ScaleType> scale_a_shuffled(
+            {static_cast<std::size_t>(gemm_problem.m_ / m_xdl_pack * 2),
+             static_cast<std::size_t>(scale_k_size / k_xdl_pack * 2)},
+            {static_cast<std::size_t>(scale_k_size / k_xdl_pack * 2), static_cast<std::size_t>(1)});
+
+        ck_tile::HostTensor<ScaleType> scale_b_shuffled(
+            {static_cast<std::size_t>(gemm_problem.n_ / n_xdl_pack * 2),
+             static_cast<std::size_t>(scale_k_size / k_xdl_pack * 2)},
+            {static_cast<std::size_t>(scale_k_size / k_xdl_pack * 2), static_cast<std::size_t>(1)});
+
+        ck_tile::preShuffleScaleBuffer_gfx950<m_xdl_pack, k_xdl_pack, xdl_mn_thread, xdl_k_thread>(
+            scale_a_host.mData.data(),
+            scale_a_shuffled.mData.data(),
+            gemm_problem.m_,
+            scale_k_size,
+            true);
+
+        ck_tile::preShuffleScaleBuffer_gfx950<n_xdl_pack, k_xdl_pack, xdl_mn_thread, xdl_k_thread>(
+            scale_b_host.mData.data(),
+            scale_b_shuffled.mData.data(),
+            gemm_problem.n_,
+            scale_k_size,
+            true);
+
+#endif
+
+        const auto b_host_for_device = [&]() {
+            if constexpr(SelectedKernel::Preshuffle)
+                return ck_tile::shuffle_b<SelectedKernel>(b_k_n);
+            else
+                return b_k_n;
+        }();
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
         ck_tile::DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
-        ck_tile::DeviceMem scale_a_dev_buf(scale_a_packed.size() * sizeof(int32_t));
-        ck_tile::DeviceMem scale_b_dev_buf(scale_b_packed.size() * sizeof(int32_t));
+        ck_tile::DeviceMem scale_a_dev_buf(scale_a_shuffled.get_element_space_size_in_bytes());
+        ck_tile::DeviceMem scale_b_dev_buf(scale_b_shuffled.get_element_space_size_in_bytes());
 
         a_m_k_dev_buf.ToDevice(a_m_k.data());
-        b_k_n_dev_buf.ToDevice(b_k_n.data());
+        b_k_n_dev_buf.ToDevice(b_host_for_device.data());
         c_m_n_dev_buf.SetZero();
         c_m_n_dev_result.SetZero();
-        scale_a_dev_buf.ToDevice(scale_a_packed.data());
-        scale_b_dev_buf.ToDevice(scale_b_packed.data());
-
-        ScaleM scale_m(reinterpret_cast<ScaleType*>(scale_a_dev_buf.GetDeviceBuffer()));
-        ScaleN scale_n(reinterpret_cast<ScaleType*>(scale_b_dev_buf.GetDeviceBuffer()));
+        scale_a_dev_buf.ToDevice(scale_a_shuffled.data());
+        scale_b_dev_buf.ToDevice(scale_b_shuffled.data());
 
         MxGemmHostArgs gemm_args({a_m_k_dev_buf.GetDeviceBuffer()},
+                                 {scale_a_dev_buf.GetDeviceBuffer()},
                                  {b_k_n_dev_buf.GetDeviceBuffer()},
+                                 {scale_b_dev_buf.GetDeviceBuffer()},
                                  {},
                                  c_m_n_dev_buf.GetDeviceBuffer(),
                                  gemm_problem.split_k_,
@@ -143,17 +195,26 @@ class MXGemmProfiler : public GemmProfiler<MXGemmProfiler, GemmProblem, MxGemmHo
                                  {gemm_problem.stride_a_},
                                  {gemm_problem.stride_b_},
                                  {},
-                                 gemm_problem.stride_c_,
-                                 scale_m,
-                                 scale_n);
+                                 gemm_problem.stride_c_);
 
         ck_tile::HostTensor<CDataType> c_m_n_host_result(ck_tile::host_tensor_descriptor(
             gemm_problem.m_, gemm_problem.n_, gemm_problem.stride_c_, is_row_major(layout_c)));
 
         if(setting_.verify)
         {
+            // Host reference computation using reference_mx_gemm
+            // reference_mx_gemm expects scale_a(M, K/ScaleBlockSize) and scale_b(K/ScaleBlockSize,
+            // N) We need to create scale_b in (K/ScaleBlockSize, N) format for the reference
+            ck_tile::HostTensor<ScaleType> scale_b_ref(
+                {static_cast<std::size_t>(scale_k_size), static_cast<std::size_t>(gemm_problem.n_)},
+                {static_cast<std::size_t>(1), static_cast<std::size_t>(scale_k_size)});
+            // Copy scale_b data (our scale_b is (N, scale_k_size) row-major,
+            // reference expects (scale_k_size, N) col-major, which is the same memory layout)
+            std::copy(
+                scale_b_host.mData.begin(), scale_b_host.mData.end(), scale_b_ref.mData.begin());
+
             mx_gemm_host_reference(
-                setting_.verify, a_m_k, b_k_n, c_m_n_host_result, scale_a_host, scale_b_host);
+                setting_.verify, a_m_k, b_k_n, c_m_n_host_result, scale_a_host, scale_b_ref);
         }
 
         for(auto& callable : callables)

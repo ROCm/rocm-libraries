@@ -102,12 +102,12 @@ namespace rocwmma
             {
             };
 
-            ROCWMMA_DEVICE constexpr static inline decltype(auto) strideCounts()
+            ROCWMMA_HOST_DEVICE constexpr static inline decltype(auto) strideCounts()
             {
                 return MatrixLayout::strideCounts();
             }
 
-            ROCWMMA_DEVICE constexpr static inline decltype(auto) strides()
+            ROCWMMA_HOST_DEVICE constexpr static inline decltype(auto) strides()
             {
                 constexpr auto t            = MatrixLayout::strides();
                 constexpr auto swap_strides = [](auto&&... args) {

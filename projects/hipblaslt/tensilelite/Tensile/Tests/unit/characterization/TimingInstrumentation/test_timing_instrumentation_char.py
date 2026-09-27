@@ -12,7 +12,7 @@ import contextlib
 import pytest
 
 from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from Tensile.Common.TimingInstrumentation import flush_timing_buffer, timing_context
 
 pytestmark = pytest.mark.unit
 
@@ -40,9 +40,10 @@ def test_timing_context_disabled_yields():
 
 
 def test_timing_context_enabled_times_and_logs():
-    # Flag on -> the timing path; body runs and a TIMING line is emitted. The
-    # "tensile.timing" logger has propagate=False, so attach a capture handler
-    # directly to it (caplog/capsys can't see it).
+    # Flag on -> the timing path; body runs and a TIMING line is buffered until
+    # flush_timing_buffer() emits it. The "tensile.timing" logger has
+    # propagate=False, so attach a capture handler directly to it (caplog/capsys
+    # can't see it).
     import logging
 
     messages = []
@@ -53,6 +54,7 @@ def test_timing_context_enabled_times_and_logs():
 
     logger = logging.getLogger("tensile.timing")
     handler = _Capture()
+    flush_timing_buffer()
     logger.addHandler(handler)
     try:
         with _timing_flag(True):
@@ -60,6 +62,9 @@ def test_timing_context_enabled_times_and_logs():
             with timing_context("mycat"):
                 ran.append(1)
             assert ran == [1]
+            assert not any("TIMING:mycat:" in m for m in messages)
+            flush_timing_buffer()
     finally:
         logger.removeHandler(handler)
+        flush_timing_buffer()
     assert any("TIMING:mycat:" in m for m in messages)

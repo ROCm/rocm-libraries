@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -87,7 +87,7 @@ class PlaceholderLibrary:
 
 class MatchingLibrary:
     Tag = "Matching"
-    StateKeys = [("type", "tag"), "properties", "table", "distance"]
+    StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
     def FromOriginalState(cls, d, solutions):
@@ -136,7 +136,7 @@ class MatchingLibrary:
 
         table.sort(key=lambda r: r["key"])
 
-        return cls(properties, table, distance)
+        return cls(properties, table, distance, d.get("useKdTree", False))
 
     @property
     def tag(self):
@@ -149,15 +149,22 @@ class MatchingLibrary:
 
         self.table += other.table
 
+        # useKdTree is a property of the merged table, not of either contributor. OR rather
+        # than assert: logic files that share a key are written independently, and requiring
+        # them to agree on an index-only flag would make adding the key to one of them a
+        # build error rather than an opt-in.
+        self.useKdTree = self.useKdTree or other.useKdTree
+
         self.table.sort(key=lambda r: r["key"])
 
     def remapSolutionIndices(self, indexMap):
         pass
 
-    def __init__(self, properties, table, distance):
+    def __init__(self, properties, table, distance, useKdTree=False):
         self.properties = properties
         self.table = table
         self.distance = distance
+        self.useKdTree = useKdTree
 
 class FreeSizeLibrary:
     Tag = "FreeSize"
@@ -537,7 +544,8 @@ class MasterSolutionLibrary:
                     placeholderName += '_M' + str(problemType.f32XdlMathOp)
                 if problemType.supportDeviceUserArguments:
                     placeholderName += '_UA'
-
+                if getattr(problemType, 'useGateResidual', False):
+                    placeholderName += '_GateRes'
             return library, placeholderName
 
         # end library creation functions

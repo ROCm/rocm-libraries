@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,27 +46,27 @@ ROCSOLVER_BEGIN_NAMESPACE
 ***************************************************************************/
 
 /** STERF_SQ_E squares the elements of E **/
-template <typename T>
-__device__ __host__ void sterf_sq_e(const rocblas_int start, const rocblas_int end, T* E)
+template <typename T, typename I>
+__device__ __host__ void sterf_sq_e(const I start, const I end, T* E)
 {
-    for(int i = start; i < end; i++)
+    for(I i = start; i < end; i++)
         E[i] = E[i] * E[i];
 }
 
-template <typename T>
-__device__ __host__ void run_sterf(const rocblas_int n,
+template <typename T, typename I>
+__device__ __host__ void run_sterf(const I n,
                                    T* D,
                                    T* E,
-                                   rocblas_int* info,
-                                   rocblas_int* stack,
-                                   const rocblas_int max_iters,
+                                   I* info,
+                                   I* stack,
+                                   const I max_iters,
                                    const T eps,
                                    const T ssfmin,
                                    const T ssfmax)
 {
-    rocblas_int m, l, lsv, lend, lendsv;
-    rocblas_int l1 = 0;
-    rocblas_int iters = 0;
+    I m, l, lsv, lend, lendsv;
+    I l1 = 0;
+    I iters = 0;
     T anorm, p;
 
     while(l1 < n && iters < max_iters)
@@ -157,7 +157,7 @@ __device__ __host__ void run_sterf(const rocblas_int n,
                     gamma = D[m] - sigma;
                     p = gamma * gamma;
 
-                    for(int i = m - 1; i >= l; i--)
+                    for(I i = m - 1; i >= l; i--)
                     {
                         T bb = E[i];
                         r = p + bb;
@@ -233,7 +233,7 @@ __device__ __host__ void run_sterf(const rocblas_int n,
                     gamma = D[m] - sigma;
                     p = gamma * gamma;
 
-                    for(int i = m; i <= l - 1; i++)
+                    for(I i = m; i <= l - 1; i++)
                     {
                         T bb = E[i];
                         r = p + bb;
@@ -266,7 +266,7 @@ __device__ __host__ void run_sterf(const rocblas_int n,
     }
 
     // Check for convergence
-    for(int i = 0; i < n - 1; i++)
+    for(I i = 0; i < n - 1; i++)
         if(E[i] != 0)
             (*info)++;
 
@@ -277,12 +277,12 @@ __device__ __host__ void run_sterf(const rocblas_int n,
         could be implemented) **/
     //lasrt_increasing(n, D, stack);
 
-    for(int ii = 1; ii < n; ii++)
+    for(I ii = 1; ii < n; ii++)
     {
         l = ii - 1;
         m = l;
         p = D[l];
-        for(int j = ii; j < n; j++)
+        for(I j = ii; j < n; j++)
         {
             if(D[j] < p)
             {
@@ -301,33 +301,31 @@ __device__ __host__ void run_sterf(const rocblas_int n,
 /** STERF_KERNEL implements the main loop of the sterf algorithm
     to compute the eigenvalues of a symmetric tridiagonal matrix given by D
     and E **/
-template <typename T>
-ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
+template <typename T, typename I>
+ROCSOLVER_KERNEL void sterf_kernel(const I n,
                                    T* DD,
                                    const rocblas_stride strideD,
                                    T* EE,
                                    const rocblas_stride strideE,
-                                   rocblas_int* infoA,
-                                   rocblas_int* stackA,
-                                   const rocblas_int max_iters,
+                                   I* infoA,
+                                   I* stackA,
+                                   const I max_iters,
                                    const T eps,
                                    const T ssfmin,
                                    const T ssfmax)
 {
-    rocblas_int bid = hipBlockIdx_x;
+    I bid = hipBlockIdx_x;
 
     T* D = DD + (bid * strideD);
     T* E = EE + (bid * strideE);
-    rocblas_int* info = infoA + bid;
-    rocblas_int* stack = stackA + bid * (2 * 32);
+    I* info = infoA + bid;
+    I* stack = stackA + bid * (2 * 32);
 
     run_sterf<T>(n, D, E, info, stack, max_iters, eps, ssfmin, ssfmax);
 }
 
-template <typename T>
-void rocsolver_sterf_getMemorySize(const rocblas_int n,
-                                   const rocblas_int batch_count,
-                                   size_t* size_stack)
+template <typename T, typename I>
+void rocsolver_sterf_getMemorySize(const I n, const I batch_count, size_t* size_stack)
 {
     // if quick return no workspace needed
     if(n == 0 || !batch_count)
@@ -336,13 +334,12 @@ void rocsolver_sterf_getMemorySize(const rocblas_int n,
         return;
     }
 
-    // size of stack (for lasrt)
-    *size_stack = sizeof(rocblas_int) * (2 * 32) * batch_count;
+    // size of stack (for lasrt); indexed as I* in sterf_kernel
+    *size_stack = sizeof(I) * (2 * 32) * batch_count;
 }
 
-template <typename T>
-rocblas_status
-    rocsolver_sterf_argCheck(rocblas_handle handle, const rocblas_int n, T D, T E, rocblas_int* info)
+template <typename T, typename I>
+rocblas_status rocsolver_sterf_argCheck(rocblas_handle handle, const I n, T D, T E, I* info)
 {
     // order is important for unit tests:
 
@@ -363,18 +360,18 @@ rocblas_status
     return rocblas_status_continue;
 }
 
-template <typename T, typename U>
+template <typename T, typename U, typename I>
 rocblas_status rocsolver_sterf_template(rocblas_handle handle,
-                                        const rocblas_int n,
+                                        const I n,
                                         U D,
-                                        const rocblas_int shiftD,
+                                        const rocblas_stride shiftD,
                                         const rocblas_stride strideD,
                                         U E,
-                                        const rocblas_int shiftE,
+                                        const rocblas_stride shiftE,
                                         const rocblas_stride strideE,
-                                        rocblas_int* info,
-                                        const rocblas_int batch_count,
-                                        rocblas_int* stack)
+                                        I* info,
+                                        const I batch_count,
+                                        I* stack)
 {
     ROCSOLVER_ENTER("sterf", "n:", n, "shiftD:", shiftD, "shiftE:", shiftE, "bc:", batch_count);
 
@@ -388,7 +385,7 @@ rocblas_status rocsolver_sterf_template(rocblas_handle handle,
     rocsolver_alg_mode alg_mode;
     ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &alg_mode));
 
-    rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
+    I blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
 
@@ -407,18 +404,18 @@ rocblas_status rocsolver_sterf_template(rocblas_handle handle,
 
     if(alg_mode == rocsolver_alg_mode_hybrid)
     {
-        rocsolver_hybrid_storage<T, rocblas_int, U> hD;
-        rocsolver_hybrid_storage<T, rocblas_int, U> hE;
-        rocsolver_hybrid_storage<rocblas_int, rocblas_int, rocblas_int*> hInfo;
+        rocsolver_hybrid_storage<T, I, U> hD;
+        rocsolver_hybrid_storage<T, I, U> hE;
+        rocsolver_hybrid_storage<I, I, I*> hInfo;
 
         ROCBLAS_CHECK(hD.init_async(n, D, shiftD, strideD, batch_count, stream));
         ROCBLAS_CHECK(hE.init_async(n - 1, E, shiftE, strideE, batch_count, stream));
         ROCBLAS_CHECK(hInfo.init_async(1, info, 0, 1, batch_count, stream));
         HIP_CHECK(hipStreamSynchronize(stream));
 
-        for(rocblas_int b = 0; b < batch_count; b++)
+        for(I b = 0; b < batch_count; b++)
         {
-            run_sterf<T>(n, hD[b], hE[b], hInfo[b], nullptr, 30 * n, eps, ssfmin, ssfmax);
+            run_sterf<T>(n, hD[b], hE[b], hInfo[b], (I*)nullptr, 30 * n, eps, ssfmin, ssfmax);
         }
 
         ROCBLAS_CHECK(hD.write_to_device_async(stream));

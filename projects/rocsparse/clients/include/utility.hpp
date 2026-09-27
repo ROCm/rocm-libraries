@@ -49,12 +49,6 @@ inline rocsparse_datatype get_datatype(void);
 
 /*! \brief  Return \ref rocsparse_indextype */
 template <>
-inline rocsparse_indextype get_indextype<uint16_t>(void)
-{
-    return rocsparse_indextype_u16;
-}
-
-template <>
 inline rocsparse_indextype get_indextype<int32_t>(void)
 {
     return rocsparse_indextype_i32;
@@ -131,10 +125,6 @@ inline constexpr size_t rocsparse_indextype_sizeof(rocsparse_indextype indextype
 {
     switch(indextype_)
     {
-    case rocsparse_indextype_u16:
-    {
-        return sizeof(uint16_t);
-    }
     case rocsparse_indextype_i32:
     {
         return sizeof(int32_t);
@@ -257,6 +247,14 @@ public:
 
         CHECK_HIP_ERROR(hipStreamCreate(&this->graph_stream));
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(*this, &this->old_stream));
+
+        // Flush any pending pre-capture work on the current stream before capturing
+        // on the fresh graph stream. A preprocess/analysis phase (e.g. SpMM/SpMV)
+        // runs on this stream and produces data the captured compute reads; since
+        // the graph is launched on a different stream, without this sync that setup
+        // work would race the graph and can be read stale/uninitialized.
+        CHECK_HIP_ERROR(hipStreamSynchronize(this->old_stream));
+
         CHECK_ROCSPARSE_ERROR(rocsparse_set_stream(*this, this->graph_stream));
 
         // BEGIN GRAPH CAPTURE
@@ -772,11 +770,14 @@ public:
 
     template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
     explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        // bell_matrix stores scalar rows/cols and a scalar ell_cols, which are exactly what
+        // rocsparse_create_bell_descr expects (value array of length m*ell_cols, column index
+        // array of length (m/bdim)*(ell_cols/bdim)).
         : rocsparse_local_spmat(h.m,
                                 h.n,
-                                h.bdir,
+                                rocsparse_direction_row,
                                 h.bdim,
-                                h.width,
+                                h.ell_cols,
                                 h.ind,
                                 h.val,
                                 get_indextype<I>(),

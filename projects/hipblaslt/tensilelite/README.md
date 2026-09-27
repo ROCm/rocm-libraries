@@ -42,6 +42,30 @@ tox -e coverage-unit
 
 Runs only Python unit tests.
 
+### Pre-commit hook (affected tests)
+
+An opt-in git pre-commit hook runs the unit + characterization tests affected by
+your staged TensileLite changes and blocks the commit on real failures (it falls
+back to the full unit + characterization suite when it cannot narrow the set). It
+runs `uv run pytest`, which imports rocisa (a HIP native extension), so install and
+commit from inside a ROCm dev container (HIP at `/opt/rocm`, a Python with dev
+headers). Editable rocisa currently rebuilds on import for compatibility, but
+that behavior is deprecated; use `invoke rocisa --no-rebuild-on-import` to opt
+out now, and use the explicit `invoke build --rebuild-rocisa` path after native
+changes. Mount the repo at the same absolute path inside the container as on the
+host — git worktrees use an absolute gitdir pointer, so a different mount breaks
+git.
+
+```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+uv sync                          # provisions deps, rocisa, and the pre-commit app
+uv run invoke precommit-install  # writes the git hook (once per clone)
+```
+
+`git commit` from inside the container then runs the affected tests. Bypass once
+with `git commit --no-verify`. On a snapshot mismatch the hook prints a
+`--snapshot-update` command scoped to the failing file(s).
+
 ### Build client with invoke and Run a Test (Default Path)
 
 This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
@@ -141,15 +165,13 @@ TENSILE_NUM_PYTEST_WORKERS=1 tox -e py3 -- Tensile/Tests -m common
 ```
 
 `invoke build-client` follows the existing `tensilelite` CMake preset by default.
-In this repo, that means `/opt/rocm` compiler settings come from the preset, and
-`CMAKE_EXPORT_COMPILE_COMMANDS` and `HIPBLASLT_BUNDLE_PYTHON_DEPS` are already enabled
-by default.
+In this repo, `/opt/rocm` compiler settings come from the preset,
+`CMAKE_EXPORT_COMPILE_COMMANDS` is enabled by default, and the client build includes rocisa.
 
 Use these flags when you want to override or make that behavior explicit:
 
 * `--rocm-path <path>`: Override the compiler toolchain to use `<path>/bin/amdclang` and `<path>/bin/amdclang++`
 * `--export-compile-commands`: Explicitly force `CMAKE_EXPORT_COMPILE_COMMANDS=ON`
-* `--bundle-python-deps`: Explicitly force `HIPBLASLT_BUNDLE_PYTHON_DEPS=ON`
 * `--enable-rocprof`: Sets `TENSILELITE_CLIENT_ENABLE_ROCPROFSDK=ON`
 
 ### Speeding Up Builds with ccache

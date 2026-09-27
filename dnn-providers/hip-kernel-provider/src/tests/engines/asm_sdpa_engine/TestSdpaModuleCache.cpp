@@ -23,7 +23,7 @@ namespace
 
 TEST(TestSdpaModuleCache, EmptyOnConstruction)
 {
-    SdpaModuleCache cache;
+    const SdpaModuleCache cache;
     EXPECT_EQ(cache.size(), 0u);
 }
 
@@ -81,14 +81,14 @@ TEST(TestSdpaModuleCache, DifferentInvalidPathsReturnNull)
 
 TEST(TestSdpaModuleCache, ContainsReturnsFalseForUnknownKey)
 {
-    SdpaModuleCache cache;
+    const SdpaModuleCache cache;
     EXPECT_FALSE(cache.contains("/does/not/exist.co", "noFunc"));
 }
 
 TEST(TestSdpaModuleCache, SeparateInstancesAreIsolated)
 {
     SdpaModuleCache cacheA;
-    SdpaModuleCache cacheB;
+    const SdpaModuleCache cacheB;
 
     // Operations on one cache should not affect the other
     cacheA.getOrLoad("/invalid/path.co", "func");

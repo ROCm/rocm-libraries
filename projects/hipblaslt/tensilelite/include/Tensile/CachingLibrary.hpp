@@ -37,9 +37,7 @@
 #include <Tensile/ContractionProblem_Detail.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -336,20 +334,4 @@ namespace TensileLite
         mutable std::atomic<bool> lastFindTopRetAll = false;
     };
 
-#if 0
-    struct ContractionCachingLibrary: public CachingLibrary<ContractionProblemGemm>
-    {
-        using Super = CachingLibrary<ContractionProblemGemm>;
-        using Library = typename Super::Library;
-        using Key = typename Super::Key;
-
-        ContractionCachingLibrary(std::shared_ptr<Library> subLibrary)
-            : CachingLibrary<ContractionProblemGemm>(subLibrary)
-        {}
-
-    };
-#endif
-
 } // namespace TensileLite
-
-TENSILE_HIDDEN_END

@@ -81,24 +81,6 @@ ActivationParams
     }
 }
 
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers)
-{
-    for(uint32_t i = 0; i < numDeviceBuffers; i++)
-    {
-        if(uid == deviceBuffers[i].uid)
-        {
-            return deviceBuffers[i];
-        }
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "Device buffer with the uid: " + std::to_string(uid)
-            + " not found in the provided device buffers.");
-}
-
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&

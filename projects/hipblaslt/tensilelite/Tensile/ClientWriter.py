@@ -33,7 +33,7 @@ from enum import Enum
 from glob import glob
 
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
-from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs
+from Tensile.SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
 from Tensile.Toolchain.Component import Assembler
 
 import rocisa
@@ -42,10 +42,10 @@ from . import ROOT_PATH
 from . import LibraryIO
 from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
-from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .TensileCreateLibrary import computeOutputArchNames, copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -89,7 +89,68 @@ class ClientLogLevel(Enum):
 ################################################################################
 # Main
 ################################################################################
-def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str):
+def buildTargetGfx(isaInfoMap, archNames=None) -> str:
+  """The architecture to ask TensileCreateLibrary for when rebuilding the client library.
+
+  The rebuild is a fresh process whose only statement of what to build is
+  ``--architecture=``, so it must carry any distinction the ISA cannot express --
+  currently gfx1250's stepping, where deriving the name from the ISA would rebuild
+  v0's client library with the shipping stepping's capabilities.
+
+  Only names that need an alias to reach the compiler are consulted, and they are
+  looked up by ISA rather than by position: a requested qualifier such as
+  ``gfx942:xnack+`` names an architecture the ISA already describes, and forwarding
+  it would build the client library for one xnack setting instead of an
+  xnack-agnostic one. Qualifiers are compared and returned stripped, so that
+  ``gfx1250v0[cu=64]`` still rebuilds for v0 while the predicate -- which the
+  rebuild resolves for itself -- is left behind. Entry paths that never learn a
+  name (config ISA, auto-detect) fall back to the ISA-derived name. Only the first
+  ISA is rebuilt, as before.
+
+  Args:
+      isaInfoMap: The build's capability map, keyed by ISA version.
+      archNames: The gfx names this build was asked for, for the entry points that
+          know them; the config-ISA and auto-detect paths do not.
+
+  Returns:
+      The gfx name to pass to ``--architecture=``.
+  """
+  isa = list(isaInfoMap.keys())[0]
+  requested = {
+      gfxToIsa(name): baseArchName(name)
+      for name in archNames or []
+      if baseArchName(name) in ARCH_COMPILER_TARGET
+  }
+  return requested.get(isa, isaToGfx(isa))
+
+
+def clientLibraryFiles(clientLibraryPath, archs, outArchNames=None):
+  """Return the code objects and master library files built for `archs`.
+
+  Kernels fan out into one per-base subdir per arch, so the lists are unioned
+  across them. `outArchNames` maps an ISA-derived arch to the subdir it was
+  written to (see computeOutputArchNames): a stepping such as gfx1250v0 lands
+  in `library/gfx1250v0/` while its master keeps the `gfx1250` suffix. The
+  master is matched by its exact name because lazy-loading shards share the
+  `TensileLibrary_` prefix. Msgpack is written to disk as `<name>.dat.zlib`,
+  but the client must be given the logical `.dat` name; it probes for the
+  `.zlib` variant itself.
+  """
+  libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+  masterPrefix = "TensileLibrary_lazy_" if globalParameters["LazyLibraryLoading"] else "TensileLibrary_"
+  outArchNames = outArchNames or {}
+  coList = []
+  libraryList = []
+  for arch in archs:
+    archDir = libraryDir(clientLibraryPath, outArchNames.get(arch, arch))
+    coList.extend(glob(os.path.join(archDir, "*.co")))
+    master = os.path.join(archDir, masterPrefix + arch + libraryExt)
+    if os.path.exists(master) or os.path.exists(master + ".zlib"):
+      libraryList.append(master)
+  return coList, libraryList
+
+
+def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: Path, deviceId: int, gfxName: str, archNames=None):
 
   libraryLogicPath = ensurePath(outputPath / LIBRARY_LOGIC_DIR)
   clientLibraryPath = ensurePath(outputPath / LIBRARY_CLIENT_DIR)
@@ -116,17 +177,11 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
   else:
     env["PYTHONPATH"] = module_path
 
-  targetGfx = isaToGfx(list(isaInfoMap.keys())[0])
+  targetGfx = buildTargetGfx(isaInfoMap, archNames)
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, str(assembler.path), targetGfx)
   subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   archs = [isaToGfx(isa) for isa in isaInfoMap.keys()]
-  # Kernels fan out into one per-base subdir per arch; union the globs across them.
-  coList = []
-  yamlList = []
-  for arch in archs:
-    archDir = libraryDir(clientLibraryPath, arch)
-    coList.extend(glob(os.path.join(archDir, "*.co")))
-    yamlList.extend(glob(os.path.join(archDir, "*.yaml")))
+  coList, libraryList = clientLibraryFiles(clientLibraryPath, archs, computeOutputArchNames([targetGfx]))
 
   clientParametersPaths = []
   splitGSU = False
@@ -149,7 +204,10 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
       biasTypeArgs = BiasTypeArgs(problemType, [problemType["BiasDataTypeList"][0]])
     else:
       biasTypeArgs = ""
-
+    if len(problemType["GateResidualDataTypeList"]) > 0:
+      gateTypeArgs = GateTypeArgs(problemType, [problemType["GateResidualDataTypeList"][0]])
+    else:
+      gateTypeArgs = ""
     activationEnums = [[{'Enum': 'relu'}]]
     factorDimEnums = [0]
     # Reading the activation args from the LibraryClient section in the config YAML.
@@ -189,7 +247,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
                                   deviceId=deviceId,
                                   gfxName=gfxName,
                                   tileAwareSelection=False,
-                                  libraryFile=yamlList[0]))
+                                  libraryFile=libraryList[0]))
 
   forBenchmark = False
   problemSizes = None
@@ -487,7 +545,8 @@ def problemSizeParams(problemType, problem, factorDim):
             "Invalid number of problem type indices: {0} - Indices: {1}, problemSize: {2}".format(len(problem.sizes), numIndices,
             ', '.join(map(str, problem.sizes))))
 
-    problemSizeArg = ('problem-size', ','.join(map(str, problem.sizes[:numIndices])))
+    sizes = list(problem.sizes[:numIndices])
+    problemSizeArg = ('problem-size', ','.join(map(str, sizes)))
     rv.insert(0, problemSizeArg)
 
     rv.append(('a-strides', ",".join(map(str, astrides))))
@@ -520,6 +579,16 @@ def problemSizeParams(problemType, problem, factorDim):
               (biasstrides[2], err_str, length))
       rv.append(('bias-strides', ",".join(map(str, biasstrides))))
 
+    if problemType.useGateResidual:
+      if problem.stridesGate:
+        gatestrides = list(problem.stridesGate)
+      else:
+        gatestrides = [-1] * problemType.dDims
+      for sc in problemType.setConstStrideGate:
+        index = problemType.indices[sc[0]]
+        gatestrides[index.d] = sc[1]
+      rv.append(('gate-strides', ",".join(map(str, gatestrides))))
+
     return rv
 
 def dataInitParams(problemType):
@@ -531,6 +600,7 @@ def dataInitParams(problemType):
     initAlpha = globalParameters['DataInitTypeAlpha']
     initBeta  = globalParameters['DataInitTypeBeta']
     initBias  = globalParameters['DataInitTypeBias']
+    initGate  = globalParameters['DataInitTypeGate']
     initScaleA  = globalParameters['DataInitTypeScaleA']
     initScaleB  = globalParameters['DataInitTypeScaleB']
     initScaleC  = globalParameters['DataInitTypeScaleC']
@@ -553,6 +623,7 @@ def dataInitParams(problemType):
             ('init-alpha',         DataInitName(initAlpha).name),
             ('init-beta',          DataInitName(initBeta).name),
             ('init-bias',          DataInitName(initBias).name),
+            ('init-gate',          DataInitName(initGate).name),
             ('init-scaleA',        DataInitName(initScaleA).name),
             ('init-scaleB',        DataInitName(initScaleB).name),
             ('init-scaleC',        DataInitName(initScaleC).name),
@@ -577,7 +648,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, gateTypeArgs="", probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
     # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
@@ -616,12 +687,14 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-bias',   problemType.useBias)
         param('bias-source',   problemType.biasSrcWhiteList[0])
         param('use-e', problemType.useE)
+        param('use-gate-residual', problemType.useGateResidual)
         param('output-amaxD', problemType.outputAmaxD)
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
+        param('fused-gemm-a2a', problemType.fusedGemmA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
             param('mx-a-type', problemType.mxTypeA.toName())
@@ -635,7 +708,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         if factorDimArgs:
           for fdim in factorDimArgs.factorDims:
             param('factor-dim-args', fdim)
-
+        if gateTypeArgs:
+          for gtype in gateTypeArgs.gateTypes:
+            param('gate-type-args',  gtype.toName())
 
         if icacheFlushArgs:
           for opt in icacheFlushArgs:
@@ -645,6 +720,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('metadata-layout', problemType.metadataLayout)
         param('high-precision-accumulate', problemType.highPrecisionAccumulate)
         param('strided-batched', problemType.stridedBatched)
+        if globalParameters["BatchMode"] != 0:
+          param('batch-mode', globalParameters["BatchMode"])
         param('grouped-gemm', problemType.groupedGemm)
 
         probIdx = 0
@@ -700,6 +777,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           param("dump-tensors",           1)
         if globalParameters["ExitOnFails"] > 1:
           param("exit-on-error", 1)
+        if globalParameters["PrintTensorGate"]:
+          param("print-tensor-gate",      1)          
 
         param('prune-mode',               pruneModeName(int(globalParameters["PruneSparseMode"])))
         param("bounds-check",             boundsCheckName(int(globalParameters["BoundsCheck"])))
@@ -766,6 +845,7 @@ def writeClientConfig(
       configBase = "ClientParameters",
       *,
       libraryFile,
+      gateTypeArgs = "",
       probSolMap = {},
       sourceDir = None
     ):
@@ -788,7 +868,7 @@ def writeClientConfig(
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, gateTypeArgs, probSolMap)
 
     return filename
 

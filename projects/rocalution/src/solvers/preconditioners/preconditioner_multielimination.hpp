@@ -36,23 +36,7 @@ namespace rocalution
 
     /** \ingroup precond_module
   * \class MultiElimination
-  * \brief Multi-Elimination Incomplete LU Factorization Preconditioner
-  * \details
-  * The Multi-Elimination Incomplete LU preconditioner is based on the following
-  * decomposition
-  * \f[
-  *   A = \begin{pmatrix} D & F \\ E & C \end{pmatrix}
-  *     = \begin{pmatrix} I & 0 \\ ED^{-1} & I \end{pmatrix} \times
-  *       \begin{pmatrix} D & F \\ 0 & \hat{A} \end{pmatrix},
-  * \f]
-  * where \f$\hat{A} = C - ED^{-1} F\f$. To make the inversion of \f$D\f$ easier, we
-  * permute the preconditioning before the factorization with a permutation \f$P\f$ to
-  * obtain only diagonal elements in \f$D\f$. The permutation here is based on a maximal
-  * independent set. This procedure can be applied to the block matrix \f$\hat{A}\f$, in
-  * this way we can perform the factorization recursively. In the last level of the
-  * recursion, we need to provide a solution procedure. By the design of the library,
-  * this can be any kind of solver.
-  * \cite SAAD
+  * \brief Multi-elimination Incomplete LU factorization preconditioner.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

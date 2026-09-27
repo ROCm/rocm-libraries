@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include "SdpaPlanUtils.hpp"
+
 #include <cstdint>
 #include <string>
+
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -65,10 +69,12 @@ struct SdpaFwdParams
     std::string archString;
 
     // Mask type
-    bool noMask;
+    plan_utils::MaskType maskType;
 
-    // Attention scale
-    float attnScale;
+    // Attention scale — resolved at execute via resolveScalarOperand().
+    // Supports compile-time constant, runtime-with-default, and pure runtime
+    // user-supplied (RFC 0016 pass-by-value) states.
+    hipdnn_plugin_sdk::ScalarOperand attnScale;
 };
 
 } // namespace asm_sdpa_engine

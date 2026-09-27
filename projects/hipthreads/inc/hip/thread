@@ -1,0 +1,111 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef __LIBHIPTHREADS_THREAD__
+#define __LIBHIPTHREADS_THREAD__
+
+/*
+
+    wthread synopsis
+
+namespace std
+{
+
+class wthread
+{
+public:
+    class id;
+    typedef pthread_t native_handle_type;
+
+    wthread() noexcept;
+    template <class F, class ...Args> explicit wthread(F&& f, Args&&... args);
+    ~wthread();
+
+    wthread(const wthread&) = delete;
+    wthread(wthread&& t) noexcept;
+
+    wthread& operator=(const wthread&) = delete;
+    wthread& operator=(wthread&& t) noexcept;
+
+    void swap(wthread& t) noexcept;
+
+    bool joinable() const noexcept;
+    void join();
+    void detach();
+    id get_id() const noexcept;
+    native_handle_type native_handle();
+
+    static unsigned hardware_concurrency() noexcept;
+};
+
+void swap(wthread& x, wthread& y) noexcept;
+
+class wthread::id
+{
+public:
+    id() noexcept;
+};
+
+bool operator==(wthread::id x, wthread::id y) noexcept;
+bool operator!=(wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator< (wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator<=(wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator> (wthread::id x, wthread::id y) noexcept;             // removed in C++20
+bool operator>=(wthread::id x, wthread::id y) noexcept;             // removed in C++20
+strong_ordering operator<=>(wthread::id x, wthread::id y) noexcept; // C++20
+
+template<class charT, class traits>
+basic_ostream<charT, traits>&
+operator<<(basic_ostream<charT, traits>& out, wthread::id id);
+
+template<class charT>
+struct formatter<wthread::id, charT>;
+
+namespace this_thread
+{
+
+wthread::id get_id() noexcept;
+
+void yield() noexcept;
+
+template <class Clock, class Duration>
+void sleep_until(const chrono::time_point<Clock, Duration>& abs_time);
+
+template <class Rep, class Period>
+void sleep_for(const chrono::duration<Rep, Period>& rel_time);
+
+}  // this_thread
+
+}  // std
+
+*/
+
+#include "hip/thread_config"
+
+#include "hip/__thread/thread.h"
+#include "hip/__thread/this_thread.h"
+
+#endif // __LIBHIPTHREADS_THREAD__

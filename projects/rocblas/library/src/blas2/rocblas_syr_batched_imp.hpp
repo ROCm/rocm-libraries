@@ -92,7 +92,9 @@ namespace
                                  "--lda",
                                  lda,
                                  "--batch_count",
-                                 batch_count);
+                                 batch_count,
+                                 "--alpha_stride",
+                                 handle->get_stride_alpha());
 
             if(layer_mode & rocblas_layer_mode_log_profile)
                 logger.log_profile(handle,
@@ -106,11 +108,25 @@ namespace
                                    "lda",
                                    lda,
                                    "batch_count",
-                                   batch_count);
+                                   batch_count,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha());
         }
 
-        rocblas_status arg_status = rocblas_syr_arg_check<API_INT, T>(
-            handle, uplo, n, alpha, 0, x, 0, incx, 0, A, 0, lda, 0, batch_count);
+        rocblas_status arg_status = rocblas_syr_arg_check<API_INT, T>(handle,
+                                                                      uplo,
+                                                                      n,
+                                                                      alpha,
+                                                                      handle->get_stride_alpha(),
+                                                                      x,
+                                                                      0,
+                                                                      incx,
+                                                                      0,
+                                                                      A,
+                                                                      0,
+                                                                      lda,
+                                                                      0,
+                                                                      batch_count);
         if(arg_status != rocblas_status_continue)
             return arg_status;
 
@@ -137,8 +153,21 @@ namespace
                 return syr_check_numerics_status;
         }
 
-        rocblas_status status = ROCBLAS_API(rocblas_internal_syr_template)<T>(
-            handle, uplo, n, alpha, 0, x, 0, incx, 0, A, 0, lda, 0, batch_count);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_syr_template)<T>(handle,
+                                                            uplo,
+                                                            n,
+                                                            alpha,
+                                                            handle->get_stride_alpha(),
+                                                            x,
+                                                            0,
+                                                            incx,
+                                                            0,
+                                                            A,
+                                                            0,
+                                                            lda,
+                                                            0,
+                                                            batch_count);
         if(status != rocblas_status_success)
             return status;
         if(check_numerics)

@@ -91,6 +91,10 @@ public:
      * Creates an IPlan instance and stores it on the execution context.
      * The plan should be ready for execution after this call.
      *
+     * Called after initializeExecutionSettings() for the same @p engineConfig: an
+     * implementation may read the settings already on @p executionContext instead of
+     * parsing the config a second time, so calling this first may build against defaults.
+     *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph to build a plan for.
      * @param engineConfig The engine configuration containing knob settings.

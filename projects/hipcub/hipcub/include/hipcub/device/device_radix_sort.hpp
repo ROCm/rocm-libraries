@@ -30,6 +30,8 @@
 #ifndef HIPCUB_DEVICE_DEVICE_RADIX_SORT_HPP_
 #define HIPCUB_DEVICE_DEVICE_RADIX_SORT_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/device/device_radix_sort.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

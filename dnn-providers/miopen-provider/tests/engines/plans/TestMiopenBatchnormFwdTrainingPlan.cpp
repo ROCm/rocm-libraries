@@ -40,7 +40,7 @@ TEST(TestBatchnormFwdTrainingParams, ExtractsEpsilonValueCorrectly)
     const BatchnormFwdTrainingParams params(*attrs, graph.getTensorMap());
 
     // Epsilon should be extracted as double
-    EXPECT_NEAR(params.epsilonValue(), 1e-5, 1e-10);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 TEST(TestBatchnormFwdTrainingParams, HandlesMeanVariancePresent)

@@ -26,6 +26,7 @@
 
 namespace stinkytofu {
 class Function;
+class StinkyAsmModule;
 class PassContext;
 
 /// Callback interface for observing PassManager pass execution.
@@ -44,6 +45,12 @@ class PassInstrumentation {
 
     /// Called once at the end of PassManager::run(), after all passes have executed.
     virtual void runEnd(Function& F, PassContext& ctx) {}
+
+    /// Module-level equivalents, fired by ModulePassManager around each ModulePass.
+    virtual void beforeModulePass(const std::string& passName, StinkyAsmModule& M,
+                                  PassContext& ctx) {}
+    virtual void afterModulePass(const std::string& passName, StinkyAsmModule& M,
+                                 PassContext& ctx) {}
 };
 
 }  // namespace stinkytofu

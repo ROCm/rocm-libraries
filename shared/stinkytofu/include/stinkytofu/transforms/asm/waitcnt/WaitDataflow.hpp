@@ -34,9 +34,9 @@
 //
 // Per-pred queues are KEPT at block exit (not collapsed) so the optimizer
 // layer can read each predecessor's path length for shallow-pred
-// promotion. Each queue is capped at the hardware counter window
-// (kMaxInFlight) so a self-loop with an undrained counter still reaches a
-// fixed point instead of growing the queue every iteration.
+// promotion. Each queue keeps a bounded tail plus a saturated producer set,
+// so wait-count immediates are capped to the hardware maximum while the
+// dataflow lattice remains finite.
 //
 // PHIs of pseudo-reg memtokens are summarised into a PhiSummary so
 // downstream consumers look up a single representative wait per counter.
@@ -50,6 +50,7 @@
 #include <functional>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -64,27 +65,63 @@ struct StinkyInstruction;
 namespace waitcnt {
 
 /// Hardware counters we track. Index matches arrays in DataflowState.
-enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_KM = 2, CK_Tensor = 3, CK_Count = 4 };
+enum CounterKind { CK_DS = 0, CK_Load = 1, CK_KM = 2, CK_Tensor = 3, CK_Async = 4, CK_Count = 5 };
 
 /// Map a tracked async memop to its hardware counter. Returns CK_Count when
 /// `inst` is not tracked by the waitcnt pass.
 CounterKind classifyMemOp(const StinkyInstruction& inst);
 
+/// Who, if anyone, regenerates a given wait instruction after it is stripped.
+enum class WaitReconstruction {
+    /// StinkyWaitCntInsertionPass re-derives it from this dataflow. Every
+    /// counter in WaitCountSpec lands here.
+    WaitCntInsertion,
+    /// Gfx1250HazardPass re-derives it from its XNACK replay-group model, by its
+    /// own rules rather than from this dataflow. s_wait_xcnt only.
+    HazardPass,
+    /// Nothing rebuilds it, so stripping one silently drops the hazard it
+    /// guarded. Today: anything naming STOREcnt, which is not modelled.
+    None,
+};
+
+/// Classify a wait instruction by who can rebuild it.
+///
+/// This is the legality condition StinkyRemoveWaitCntPass is built on: removing
+/// a `None` is never legal, so the pass has no code path that does it.
+/// Unrecognised wait opcodes classify as `None`, making a newly added one
+/// preserved-by-default rather than silently dropped.
+///
+/// Keep in lockstep with StinkyWaitCntInsertionPass::emitOneSpec -- that
+/// function is what "WaitCntInsertion" promises.
+WaitReconstruction waitReconstruction(const StinkyInstruction& inst);
+
+/// Wait immediate that guarantees the op sitting `countFrom` positions from a
+/// queue's tail (i.e. PerPredQueue::countFrom(op), so 1 == tail) has completed.
+/// Returns kUnused for countFrom <= 0 (op not in flight).
+///
+/// This is the ONLY place a queue position becomes a wait immediate. Whether
+/// that conversion is possible at all is a per-counter property: an in-order
+/// counter may leave the countFrom - 1 newest ops in flight, while on an
+/// out-of-order counter (kmcnt) a nonzero immediate names no particular op, so
+/// the answer is a full drain. Never derive a wait from a queue index directly.
+int waitToDrain(CounterKind c, int countFrom);
+
 /// One queue of in-flight memops on a given counter, tagged by the CFG
-/// predecessor it was seeded from. For an op OP at index I in a queue of
-/// size N, the wait value is N - I - 1.
+/// predecessor it was seeded from. For an op OP, the wait value is
+/// waitToDrain(counter, countFrom(OP)). Ops older than the bounded tail are
+/// remembered in saturatedOps and report the maximum count.
 ///
 /// At block entry there is one entry per CFG predecessor; these are kept
 /// (not collapsed) at block exit so a successor's mergeFromPredecessors can
-/// recover each predecessor's path length. Queue length is capped at the
-/// hardware counter window so the lattice has finite height.
+/// recover each predecessor's path length.
 struct PerPredQueue {
     BasicBlock* pred = nullptr;
     std::deque<StinkyInstruction*> ops;
+    std::unordered_set<StinkyInstruction*> saturatedOps;
 
     int countFrom(StinkyInstruction* op) const;
     bool operator==(const PerPredQueue& other) const {
-        return pred == other.pred && ops == other.ops;
+        return pred == other.pred && ops == other.ops && saturatedOps == other.saturatedOps;
     }
 };
 
@@ -94,7 +131,7 @@ struct PerPredQueue {
 /// that counter (e.g. all incoming sources were VALU).
 struct PhiSummary {
     int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                           WaitCountSpec::kUnused};
+                           WaitCountSpec::kUnused, WaitCountSpec::kUnused};
 
     bool operator==(const PhiSummary& other) const {
         for (int c = 0; c < CK_Count; ++c) {
@@ -199,13 +236,11 @@ class WaitDataflow {
     unsigned iterationCap = 0;
     bool loopCarriedTokenDepsEnabled = false;
 
-    /// (block, counter) pairs whose per-pred queue overflowed the hardware
-    /// in-flight window (kMaxInFlight) during a solver sweep -- i.e. the
-    /// counter was issued past its window without draining and
-    /// appendToAllPaths had to drop the oldest (provably-complete) ops.
+    /// (block, counter) pairs whose per-pred queue exceeded the bounded
+    /// hardware-count window during a solver sweep. Older producers are
+    /// preserved in PerPredQueue::saturatedOps, so this is a diagnostic only.
     /// Cleared at the start of every sweep so that, at the fixed point, it
-    /// holds exactly the steady-state overflows. Surfaced by solve() as a
-    /// non-fatal warning; it never changes the emitted plan.
+    /// holds exactly the steady-state saturations.
     std::set<std::pair<const BasicBlock*, CounterKind>> overflowSites;
 
     /// Emit a non-fatal diagnostic (in RPO order) for every (block, counter)
@@ -226,7 +261,8 @@ class WaitDataflow {
         const std::unordered_map<const BasicBlock*, DataflowState>& exitState) const;
 
     /// Walk BB in program order, mutating STATE. Per-pred queues are kept
-    /// (not collapsed) at exit; each is capped at kMaxInFlight.
+    /// (not collapsed) at exit; wait immediates computed from them are
+    /// capped to the hardware maximum.
     void transferBlock(BasicBlock& bb, DataflowState& state);
 };
 

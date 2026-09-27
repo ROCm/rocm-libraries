@@ -68,6 +68,9 @@ void testing_scal_batched(const Arguments& arg)
     U       h_alpha     = arg.get_alpha<U>();
     int64_t batch_count = arg.batch_count;
 
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+
     rocblas_local_handle handle{arg};
 
     // argument sanity check before allocating invalid memory
@@ -82,11 +85,13 @@ void testing_scal_batched(const Arguments& arg)
     // Allocate host memory
     HOST_MEMCHECK(host_batch_vector<T>, hx, (N, incx, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hx_gold, (N, incx, batch_count));
-    HOST_MEMCHECK(host_vector<U>, halpha, (1));
-    halpha[0] = h_alpha;
+    HOST_MEMCHECK(host_vector<U>, halpha, (batch_count, alpha_stride));
 
     // Allocate device memory
-    DEVICE_MEMCHECK(device_vector<U>, d_alpha, (1));
+    DEVICE_MEMCHECK(device_vector<U>, d_alpha, (batch_count, alpha_stride));
+
+    // Assign host alpha (per-batch when alpha striding is enabled).
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
 
     // Initialize memory on host.
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, true);
@@ -106,13 +111,14 @@ void testing_scal_batched(const Arguments& arg)
 
         CHECK_HIP_ERROR(dx.transfer_from(hx));
 
-        if(arg.pointer_mode_host)
+        // Per-batch alpha (alpha striding) is only supported in device pointer mode.
+        if(arg.pointer_mode_host && !ab_striding)
         {
             // GPU BLAS, rocblas_pointer_mode_host
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
             handle.pre_test(arg);
             DAPI_CHECK(rocblas_scal_batched_fn,
-                       (handle, N, &h_alpha, dx.ptr_on_device(), incx, batch_count));
+                       (handle, N, halpha, dx.ptr_on_device(), incx, batch_count));
             handle.post_test(arg);
 
             // Transfer output from device to CPU
@@ -151,7 +157,7 @@ void testing_scal_batched(const Arguments& arg)
 
                     // Allocate device memory in new device
                     DEVICE_MEMCHECK(device_batch_vector<T>, dx_copy, (N, incx, batch_count));
-                    DEVICE_MEMCHECK(device_vector<U>, d_alpha_copy, (1));
+                    DEVICE_MEMCHECK(device_vector<U>, d_alpha_copy, (batch_count, alpha_stride));
 
                     CHECK_HIP_ERROR(d_alpha_copy.transfer_from(halpha));
 
@@ -180,11 +186,11 @@ void testing_scal_batched(const Arguments& arg)
         cpu_time_used = get_time_us_no_sync();
         for(size_t b = 0; b < batch_count; b++)
         {
-            ref_scal(N, h_alpha, (T*)hx_gold[b], incx);
+            ref_scal(N, halpha[b * alpha_stride], (T*)hx_gold[b], incx);
         }
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
-        if(arg.pointer_mode_host)
+        if(arg.pointer_mode_host && !ab_striding)
         {
             if(arg.unit_check)
             {
@@ -229,16 +235,24 @@ void testing_scal_batched(const Arguments& arg)
         int number_cold_calls = arg.cold_iters;
         int total_calls       = number_cold_calls + arg.iters;
 
-        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
-
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+
+        // Per-batch alpha (alpha striding) is only supported in device pointer mode.
+        const U* alpha = halpha;
+        if(ab_striding)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            alpha = d_alpha;
+            handle.pre_test(arg);
+        }
 
         auto lambda_to_benchmark = [&](int flush_index) {
             DAPI_DISPATCH(rocblas_scal_batched_fn,
                           (handle,
                            N,
-                           &h_alpha,
+                           alpha,
                            (dx.ptr_on_device() + (flush_index * batch_count)),
                            incx,
                            batch_count));
@@ -248,6 +262,9 @@ void testing_scal_batched(const Arguments& arg)
             lambda_to_benchmark, stream, arg, flush_batch_count);
 
         benchmark_scal_batched.run_timer();
+
+        if(ab_striding)
+            handle.post_test(arg);
 
         ArgumentModel<e_N, e_alpha, e_incx, e_batch_count>{}.log_args<T>(
             rocblas_cout,

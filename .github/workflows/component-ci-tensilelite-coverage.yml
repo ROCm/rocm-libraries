@@ -1,0 +1,129 @@
+name: "Component CI: TensileLite coverage"
+
+# Why this lane exists
+#
+# This is a lightweight (CPU-only, ~7 min), from-source coverage generator for
+# the TensileLite Python suite. It is deliberately separate from the functional
+# test jobs (which answer "does it work"). This lane only measures coverage: it
+# enforces the whole-project floor and the per-file ratchet and renders the
+# characterization-vs-unit migration card.
+#
+# It exists to support the characterization-to-unit refactor and is expected to
+# retire once that conversion is done, so it is intentionally a small, standalone
+# lane that is a clean delete later. It is not a general test run: the functional
+# suites, and the TheRock foothold that runs the suite on GPU archs from installed
+# artifacts, stay as they are.
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install tox
+        shell: bash
+        run: pip install tox
+
+      # Runs the characterization suite and the pure unit suite under coverage
+      # (once each) and unions them, producing the combined coverage.json /
+      # coverage.xml the next two steps consume. As a byproduct it emits
+      # per-suite reports (char.json / unit.json) that feed the split-summary
+      # card below - no duplicate runs. This step measures only; the floors are
+      # enforced by the coverage-gate step that follows.
+      # No GPU or client build is needed - coverage-unit skips the client build;
+      # the compiler env below is only so rocisa builds during the tox run.
+      #
+      # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
+      # but not PATH, and several characterization tests resolve the assembler
+      # via shutil.which("amdclang++"). Without it on PATH they initialize the
+      # process-wide rocisa singleton with a bogus compiler, which caches
+      # all-false gfx942 capabilities and cascades into ~200 Solution/codegen
+      # failures across the xdist workers (AIHPBLAS-3877).
+      - name: Run coverage-unit (measure)
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        env:
+          CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
+          CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+          CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+          CMAKE_GENERATOR: Ninja
+          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        run: |
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
+          tox -e coverage-unit
+
+      # This job owns the two coverage gates (AIHPBLAS-3877 / AIHPBLAS-3878), so
+      # it names them explicitly here rather than having them fire inside
+      # coverage-unit. The Math CI Jenkins job tensilelite-unit-codecov runs the
+      # same coverage-unit env to produce its Codecov upload and must not be
+      # failed by a gate it does not own; keeping enforcement in its own env is
+      # what decouples the two. It also means removing this gate requires
+      # deleting a visible step, rather than dropping a variable and going
+      # quietly green.
+      #
+      # Judges the artifacts the step above wrote, so it needs no ROCm, no
+      # rocisa build and no test run: it takes seconds.
+      - name: Enforce coverage floors (whole-project + per-file ratchet)
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        run: tox -e coverage-gate
+
+      # Informational (non-gating): attribute coverage to the two suites that
+      # make up the unit lane - characterization tests (the characterization/
+      # subtree) vs the pure unit tests - and rank the largest source files by
+      # each suite's coverage of them, so the card names the next refactor
+      # targets and their characterization-only debt. The gating step above
+      # already runs each suite exactly once and drops char.json / unit.json
+      # (plus their JUnit reports) alongside the combined coverage.json, so this
+      # step only renders the job-summary card from those artifacts - no extra
+      # test runs. Never fails the job.
+      - name: Coverage split summary (characterization vs unit)
+        if: always()
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        run: |
+          PY=.tox/coverage-unit/bin/python
+          "$PY" Tensile/Tests/unit/characterization/tools/coverage_split_summary.py \
+            --characterization char.json --unit unit.json --combined coverage.json \
+            --characterization-junit char_tests.xml --unit-junit unit_tests.xml || true
+          exit 0
+
+      # Best-effort: the reports are diagnostic artifacts, not a gate, so a
+      # transient artifact-service hiccup (e.g. an ENOTFOUND while finalizing the
+      # upload on a self-hosted runner) must not red an otherwise-green lane.
+      - name: Upload coverage reports
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tensilelite-coverage
+          path: |
+            projects/hipblaslt/tensilelite/coverage.xml
+            projects/hipblaslt/tensilelite/coverage.json
+            projects/hipblaslt/tensilelite/char.json
+            projects/hipblaslt/tensilelite/unit.json
+            projects/hipblaslt/tensilelite/htmlcov
+          if-no-files-found: ignore
+          retention-days: 7

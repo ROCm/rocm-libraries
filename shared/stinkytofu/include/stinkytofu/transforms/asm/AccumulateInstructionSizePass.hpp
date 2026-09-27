@@ -28,6 +28,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 
 namespace stinkytofu {
@@ -68,9 +69,9 @@ class BasicBlock;
 ///
 /// **Callers.**  **`AccumulateInstructionSizePass`** (kernel-wide totals and
 /// optional debug dump) and
-/// **`SwPrefetchInsertionPass`** (post-insertion walk so
-/// **`m_labelByteOffset`** / byte totals match IR after **`s_mov_b32` +
-/// `s_prefetch_inst_pc_rel`**) share this one implementation.
+/// **`SwInstructionPrefetchRelStaticPass`** (post-insertion walk so
+/// **`m_labelByteOffset`** / byte totals match IR after **`s_prefetch_inst_pc_rel`
+/// (`0, null, 31`)** share this one implementation.
 ///
 /// **SW prefetch / thresholds.**  **`pcBefore`** and **`outLabelByteOffset`**
 /// line up with SW prefetch
@@ -88,7 +89,9 @@ class BasicBlock;
 ///                              **`label_SWprefetch_<k>`**).
 /// \param debugOut              If non-null, prints per-instruction **`[cost=…
 /// cycles, size=…]`** lines
-///                              and **`inst.dump`** output.
+///                              and **`inst.dump`** output. Debug **`total=`**
+///                              is **global** (`baseByteOffset +` block-local
+///                              bytes); **`totalBytes in BB=`** is block-local.
 /// \param outCount              If non-null, set to the number of instructions
 /// that contributed cycles
 ///                              (excludes PHI, LABEL, directives).
@@ -135,7 +138,12 @@ int64_t accumulateInstructionSize(
 ///
 /// Enables debug and dumps pass output (per-instruction lines + summary) to the
 /// given file path when \p debugOutputPath is non-empty.
-std::unique_ptr<Pass> createAccumulateInstructionSizePass(const std::string& debugOutputPath);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createAccumulateInstructionSizePass(
+    const std::string& debugOutputPath);
+
+/// Same as default factory but enables per-instruction debug on stderr (for
+/// stinkytofu-check / FileCheck on `total=` lines).
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createAccumulateInstructionSizePassWithDebug();
 
 /// Binds the pass to \p module: after the pipeline runs, sets
 /// StinkyAsmModule::setTotalInstructionBytes from the pass total (whole
@@ -143,6 +151,7 @@ std::unique_ptr<Pass> createAccumulateInstructionSizePass(const std::string& deb
 /// (see StinkyAsmModule::setOutputDir), also enables debug and writes pass
 /// output to
 /// `<outputDir>/<kernel_basename>/accumulate_instruction_size_pass_debug.txt`.
-std::unique_ptr<Pass> createAccumulateInstructionSizePass(StinkyAsmModule& module);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createAccumulateInstructionSizePass(
+    StinkyAsmModule& module);
 
 }  // namespace stinkytofu

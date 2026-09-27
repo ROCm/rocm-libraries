@@ -255,6 +255,30 @@ public:
     std::optional<float> elu_alpha = std::nullopt; ///< ELU alpha parameter
     std::optional<float> softplus_beta = std::nullopt; ///< Softplus beta parameter
     // NOLINTEND(readability-identifier-naming)
+
+    /**
+     * @brief Custom equality hook for pointwise-specific attributes
+     *
+     * Compares the operation mode and its associated numeric parameters
+     * (clip bounds, slope, axis, and activation-specific constants) — all
+     * of which define the mathematical semantics of the pointwise op rather
+     * than tensor layout, so logical and strict equality coincide here.
+     */
+    bool logicallyEqualsImpl(const PointwiseAttributes& other) const
+    {
+        return mode == other.mode && relu_lower_clip == other.relu_lower_clip
+               && relu_upper_clip == other.relu_upper_clip
+               && relu_lower_clip_slope == other.relu_lower_clip_slope && axis == other.axis
+               && swish_beta == other.swish_beta && elu_alpha == other.elu_alpha
+               && softplus_beta == other.softplus_beta;
+    }
+
+    /// @brief Strict equality delegates to logical equality; no layout-only
+    ///        fields exist in this class to distinguish the two checks.
+    bool strictEqualsImpl(const PointwiseAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
+    }
 };
 typedef PointwiseAttributes Pointwise_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph

@@ -40,6 +40,10 @@ add_library(
     hip/HipRunnableKernel.cpp
 )
 
+# HipCompiledProgram.cpp includes the generated headers. This target is a sibling of
+# example_provider_impl_kernel_sources, not a dependent, so it needs its own edge.
+add_dependencies(example_provider_impl example_provider_kernel_embed)
+
 target_include_directories(example_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(example_provider_impl PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/../kernels)
 target_link_libraries(example_provider_impl PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hip::host hiprtc::hiprtc)

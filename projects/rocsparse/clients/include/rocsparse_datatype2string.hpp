@@ -98,8 +98,6 @@ constexpr auto rocsparse_indextype2string(rocsparse_indextype type)
 {
     switch(type)
     {
-    case rocsparse_indextype_u16:
-        return "u16";
     case rocsparse_indextype_i32:
         return "i32";
     case rocsparse_indextype_i64:

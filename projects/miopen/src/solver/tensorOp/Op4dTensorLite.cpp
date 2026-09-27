@@ -77,13 +77,6 @@ bool Op4dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
     return false;
 }
 
-std::size_t Op4dTensorLite::GetWorkspaceSize(
-    [[maybe_unused]] const ExecutionContext& context,
-    [[maybe_unused]] const miopen::tensorOp::ProblemDescription& problem) const
-{
-    return 0;
-}
-
 ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext& context,
                                          const miopen::tensorOp::ProblemDescription& problem) const
 {
@@ -107,7 +100,7 @@ ConvSolution Op4dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
 
     KernelBuildParameters build_params = KernelBuildParameters{};
 
-    GetCommonParams(build_params, problem, false);
+    GetCommonParams(build_params, problem, true);
 
     build_params.Define("USE_4D_TENSOR_LITE");
     build_params.Define("RD_BLCK", std::to_string(RD_BLCK));

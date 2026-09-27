@@ -32,15 +32,13 @@
 
 #include <hip/hip_runtime.h>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
     namespace hip
     {
-        struct HipAMDGPU : public AMDGPU
+        struct TENSILELITEHOST_EXPORT HipAMDGPU : public AMDGPU
         {
             HipAMDGPU() = default;
             HipAMDGPU(hipDeviceProp_t const& prop,
@@ -61,10 +59,9 @@ namespace TensileLite
             virtual std::string archName() const override;
         };
 
-        std::shared_ptr<Hardware> GetCurrentDevice();
-        std::shared_ptr<Hardware> GetDevice(int deviceId);
-        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
+        TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetCurrentDevice();
+        TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetDevice(int deviceId);
+        TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
     } // namespace hip
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -265,21 +265,23 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
     {
         y_p         = (T*)temp_buffer;
         temp_buffer = (void*)(y_p + m);
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             ptr_end = csr_row_ptr + 1;
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             ptr_end = csr_row_ptr;
+            break;
         }
 
         switch(diag_type)
         {
         case rocsparse_diag_type_non_unit:
         {
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 for(J i = 0; i < m; ++i)
                 {
                     const J j = csr_col_ind[csr_row_ptr[i + 1] - base - 1] - base;
@@ -289,9 +291,8 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
                         break;
                     }
                 }
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 for(J i = 0; i < m; ++i)
                 {
                     const J j = csr_col_ind[csr_row_ptr[i] - base] - base;
@@ -301,6 +302,7 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
                         break;
                     }
                 }
+                break;
             }
             break;
         }

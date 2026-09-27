@@ -49,10 +49,10 @@ inline Error
                                              static_cast<const void*>(&graphDesc)),
         "Failed to set operation graph on the engine heuristic descriptor.");
 
-    // TODO
-    // Currently we only handle the first mode in the vector.  Once we add heuristics we will need
-    // to handle using all modes that are passed in.  We currently only have 1 mode so there
-    // is only 1 possibility.
+    // Only the first mode in the vector is forwarded to the backend today.
+    // When multiple heuristic modes are supported (e.g. HIPDNN_HEUR_MODE_A
+    // combined with a fallback mode), this loop should set all modes on the
+    // descriptor rather than just backendModes.data()[0].
     std::vector<hipdnnBackendHeurMode_t> backendModes;
     backendModes.reserve(modes.size());
     for(const auto& mode : modes)

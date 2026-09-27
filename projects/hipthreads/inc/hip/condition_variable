@@ -1,0 +1,131 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef __LIBHIPTHREADS_CONDITION_VARIABLE__
+#define __LIBHIPTHREADS_CONDITION_VARIABLE__
+
+/*
+    condition_variable synopsis
+
+namespace std
+{
+
+enum class ::std::cv_status { no_timeout, timeout };
+
+class condition_variable
+{
+public:
+    condition_variable();
+    ~condition_variable();
+
+    condition_variable(const condition_variable&) = delete;
+    condition_variable& operator=(const condition_variable&) = delete;
+
+    void notify_one() noexcept;
+    void notify_all() noexcept;
+
+    void wait(unique_lock<mutex>& lock);
+    template <class Predicate>
+        void wait(unique_lock<mutex>& lock, Predicate pred);
+
+    template <class Clock, class Duration>
+        ::std::cv_status
+        wait_until(unique_lock<mutex>& lock,
+                   const chrono::time_point<Clock, Duration>& abs_time);
+
+    template <class Clock, class Duration, class Predicate>
+        bool
+        wait_until(unique_lock<mutex>& lock,
+                   const chrono::time_point<Clock, Duration>& abs_time,
+                   Predicate pred);
+
+    template <class Rep, class Period>
+        ::std::cv_status
+        wait_for(unique_lock<mutex>& lock,
+                 const chrono::duration<Rep, Period>& rel_time);
+
+    template <class Rep, class Period, class Predicate>
+        bool
+        wait_for(unique_lock<mutex>& lock,
+                 const chrono::duration<Rep, Period>& rel_time,
+                 Predicate pred);
+
+    typedef pthread_cond_t* native_handle_type;
+    native_handle_type native_handle();
+};
+
+void notify_all_at_thread_exit(condition_variable& cond, unique_lock<mutex> lk);
+
+class condition_variable_any
+{
+public:
+    condition_variable_any();
+    ~condition_variable_any();
+
+    condition_variable_any(const condition_variable_any&) = delete;
+    condition_variable_any& operator=(const condition_variable_any&) = delete;
+
+    void notify_one() noexcept;
+    void notify_all() noexcept;
+
+    template <class Lock>
+        void wait(Lock& lock);
+    template <class Lock, class Predicate>
+        void wait(Lock& lock, Predicate pred);
+
+    template <class Lock, class Clock, class Duration>
+        ::std::cv_status
+        wait_until(Lock& lock,
+                   const chrono::time_point<Clock, Duration>& abs_time);
+
+    template <class Lock, class Clock, class Duration, class Predicate>
+        bool
+        wait_until(Lock& lock,
+                   const chrono::time_point<Clock, Duration>& abs_time,
+                   Predicate pred);
+
+    template <class Lock, class Rep, class Period>
+        ::std::cv_status
+        wait_for(Lock& lock,
+                 const chrono::duration<Rep, Period>& rel_time);
+
+    template <class Lock, class Rep, class Period, class Predicate>
+        bool
+        wait_for(Lock& lock,
+                 const chrono::duration<Rep, Period>& rel_time,
+                 Predicate pred);
+};
+
+}  // std
+
+*/
+
+#include "hip/thread_config"
+
+#include "hip/__condition_variable/condition_variable_any.h"
+#include "hip/__condition_variable/spin_condition_variable.h"
+
+#endif // __LIBHIPTHREADS_CONDITION_VARIABLE__

@@ -25,20 +25,30 @@
 
 This RFC adds a **per-graph engine-support claim** to the golden reference validation
 framework defined in [RFC 0011](0011_GoldenReferenceValidation.md). Each golden bundle
-gains an optional machine-managed companion, `{Name}.support.json`, that records — per
-`(engine, arch, platform)` — whether the engine is expected to support that exact graph.
+gains an optional machine-managed companion — `{Name}.support.json` for a single-graph bundle,
+or a co-located per-case `support.json` for a template-sweep bundle (§5.4) — that records, per
+claimed graph and per `(engine, arch, platform)`, whether the engine is expected to support that
+exact graph.
 At test time the runner queries live engine support for the graph and fails the build when
 a graph the bundle **claims** as supported is no longer supported on a claimed
 `(arch, platform)`.
 
-Because every claimed graph is an on-disk bundle, the claim key **is that bundle**: the
-verdict lives next to the bundle's `{Name}.json` (which conforms to the
-[`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema and carries exact dims,
-strides, per-tensor dtypes, layout, and op parameters), and enforcement re-queries that
+Because every claimed graph is an on-disk bundle, the claim key **is that graph**: the verdict
+lives next to the graph it pins — the bundle's `{Name}.json` for a single-graph bundle, or the
+sweep's `cases[].id` expanded from `graph.template.json` (§5.4) for a template-sweep case, both
+conforming to the [`graph.fbs`](../../flatbuffers_sdk/schemas/graph.fbs) schema that carries exact
+dims, strides, per-tensor dtypes, layout, and op parameters — and enforcement re-queries that
 same graph. There is no separate fingerprint, no pattern language, no glob matching, and no
 region/condensation engine. A regression is a claimed engine flipping from supported to
 *declined* (dropping out of the bundle's live support query) for a claimed
 `(engine, arch, platform)`.
+
+A claimed graph comes in two on-disk forms, both defined by RFC 0011: a **single-graph bundle**
+(one `{Name}.json`) and a **template-sweep case** (one `cases[].id` expanded from a shared
+`graph.template.json` via `sweep.json`). The claim mechanism is identical for both — the key is
+always the exact graph, and for a sweep that graph is the expanded case, disambiguated by its
+`cases[].id` (§5.4). A single-graph bundle carries a `{Name}.support.json`; a template-sweep
+bundle carries one co-located `support.json` whose claims are keyed per case id.
 
 Enforcement is layered as a **three-rung ladder**, each rung a strictly stronger signal than
 the one below and each building on it:
@@ -105,7 +115,6 @@ This section is the contract boundary. Reviewers should anchor here.
 |------------|-----------------|
 | A graph that a bundle claims `supported` loses engine support for a claimed `(engine, arch, platform)`. | The claimed engine is *declined* — absent from the resolved support query's ranked list (`GRAPH_NOT_SUPPORTED` when it is the sole/last engine) → **FAIL** (replaces the silent `GTEST_SKIP`). See §5.2 / §7.1 for how "declined" is distinguished from "errored". |
 | A graph with a `supported` claim hits an unresolved query (build failure, infrastructure fault) before its verdict can be evaluated. | The claim could not be assessed → **FAIL** ("errored before the claim could be checked; fix the error first"). Distinct from the *declined* verdict above, which is the real-regression case. |
-| A graph claimed `unsupported` unexpectedly becomes supported. | Live support query returns supported → **note** ("claimed support != actual support"), not a failure. |
 
 ### 3.2 Deliberately not detected
 
@@ -113,7 +122,6 @@ This section is the contract boundary. Reviewers should anchor here.
 |----------------|-----------|
 | A whole bundle is deleted, removing its claim. | Catalog shrinkage is a code-review concern; the per-tier floor (§7.2, once available) catches whole-bundle loss, and version-control history records it. |
 | A claim is eroded *within* a surviving bundle — `support.json` deleted, or a verdict downgraded from `supported` to absent. | **Not** caught by the bundle-count floor (the bundle still discovers and queries). This is accepted declared-graphs-only tail-risk, mitigated only by code review and version-control history. |
-| A stale `unsupported` claim masks a later re-loss of support. | If support is granted then lost again while the claim still reads `unsupported`, the loss is by design not gated until `--write-support-claims` is re-run. Consistent with principle 2. |
 | An arch has no claim for a graph yet. | New-arch bring-up: absence is "not enforced." The engineer runs `--write-support-claims` once on the new hardware. |
 
 **The narrowness is the load-bearing property.** This framework trades symmetric,
@@ -124,9 +132,11 @@ missed detection.
 
 ## 4. Design Overview
 
-The unit of claim is the **golden bundle** from RFC 0011. A bundle is a directory with a
-graph definition (`{Name}.json`) and, for `full` bundles, one `.tensor{uid}.bin` per
-tensor. This RFC adds one optional file:
+The unit of claim is the **claimed graph** from RFC 0011, which exists in two on-disk forms.
+A **single-graph bundle** is a directory with a graph definition (`{Name}.json`) and, for
+`full` bundles, one `.tensor{uid}.bin` per tensor. A **template-sweep bundle** is a directory
+with a shared `graph.template.json` and a `sweep.json` whose `cases[]` each expand to one graph
+(RFC 0011). This RFC adds one optional machine-managed file to each kind:
 
 ```
 {Name}/
@@ -136,43 +146,60 @@ tensor. This RFC adds one optional file:
   {Name}.support.json      # NEW: machine-managed engine-support claim
 ```
 
-`{Name}.support.json` is **machine-owned**: it is written wholesale by
-`--write-support-claims` (§9) and is never hand-edited, keeping it cleanly separate from the
-human-authored `meta.json`. The runner reads it at test time and compares its recorded
-verdict against a live engine support query for the exact graph the bundle contains.
+For a template-sweep bundle the single sidecar is co-located with the sweep files and keyed by
+case id (§5.4):
+
+```
+{TopologyName}/
+  graph.template.json      # shared topology (RFC 0011, unchanged)
+  sweep.json               # case matrix + inline per-case meta (RFC 0011, human + tooling)
+  golden/{CaseId}/...      # per-case tensor data (RFC 0011, full cases only)
+  support.json             # NEW: machine-managed claims, keyed by cases[].id
+```
+
+The support sidecar is **machine-owned**: written wholesale by `--write-support-claims` (§9),
+never hand-edited, and kept separate from the human-authored `meta.json` (and, for a sweep, from
+`sweep.json`). The runner reads it at test time and compares its recorded verdict against a live
+engine support query for the exact graph — the expanded case, for a sweep.
 
 Claim evaluation is built on RFC 0011's existing machinery:
 
-- **Discovery must exclude the new sidecar.** Bundle discovery (`scanBundleJsonFiles` in
-  `test_sdk/.../FileUtilities.hpp`) recursively scans for `*.json` and registers one test per
-  match, already skipping the `meta.json` sidecar by an exact-filename filter. The new
-  `support.json` is a third `*.json` in the bundle directory, so the filter **must be extended
-  to skip it too** — otherwise a spurious test registers per claim-bearing bundle and tries to
-  `loadGraphAndTensors()` on a support file. A `support.json` annotates a bundle that is
-  already discovered; it must never create or remove a test. *Acceptance criterion:* a bundle
-  directory containing `{Name}.json` + `{Name}.support.json` registers exactly one test, and
-  the support sidecar is never loaded as a graph.
-- **The claim key is the on-disk bundle**, not a content hash. RFC 0011 derives only a
-  *suite name* from `(operation, layout, dtype)` and disambiguates scenarios by the bundle
-  directory name; it does not produce a unique per-graph identity. This RFC therefore keys a
-  claim to a specific bundle (its `{Name}.json` plus the co-located `support.json`), and
-  enforcement re-queries *that bundle's* graph. Two byte-identical graphs in two bundles are
-  intentionally two claims. No new naming, pattern, or fingerprint mechanism is introduced —
-  the bundle's location is the key, and the graph it holds is what gets re-queried.
+- **Discovery must exclude the new sidecar.** Bundle discovery (`discoverBundles` in
+  `dnn-providers/integration-tests/src/harness/bundle/BundleDiscovery.hpp`) registers one test per
+  single-graph `{Name}.json` and one per template-sweep `cases[].id`, already skipping companion
+  `meta.json` and treating `graph.template.json` + `sweep.json` as a sweep root. The two sidecar
+  kinds are excluded by different mechanisms. A single-graph `{Name}.support.json` sits in an
+  ordinary bundle dir, so it reaches `isGraphFile()` and — because its final dotted segment
+  `support` is not yet a companion kind — would register as a spurious second test; the fix is to
+  add `"support"` to `companionKinds()` (currently `{"meta"}`), the companion-suffix exclusion list
+  `isGraphFile()` consults. A sweep's bare `support.json` needs no code change: `discoverBundles`
+  already skips every `.json` under a sweep root (the `isDescendantOf(sweepDir)` guard), and
+  `discoverSweepCases()` looks only at `sweep.json` and `graph.template.json`, so the sidecar is
+  never a discovery candidate — the claim loader reads it later. *Acceptance:* a single-graph dir
+  with `{Name}.json` + `{Name}.support.json` registers exactly one test; a sweep dir registers
+  exactly one per `cases[].id`; the sidecar is never loaded as a graph.
+- **The claim key is the on-disk graph**, not a content hash. For a single-graph bundle it is
+  that bundle (`{Name}.json` + co-located `{Name}.support.json`); for a template sweep it is the
+  **expanded case** — the `cases[].id` applied to `graph.template.json`, plus that case's verdict
+  in the co-located `support.json` (§5.4). RFC 0011 already treats each `cases[].id` as its own
+  logical test/graph (keyed `sweep.json#caseId`), so no new identity mechanism is needed:
+  enforcement re-expands the case and re-queries it, and two byte-identical graphs are two claims.
 - **The verdict** is produced offline on hardware and committed; enforcement is a pure
   comparison at test time.
 
 ## 5. Claim Schema
 
-`{Name}.support.json` maps `engine -> arch -> platform -> verdict`:
+A single-graph bundle's `{Name}.support.json` lists, per engine and arch, the **platforms on
+which the graph is claimed supported** (template sweeps wrap this same per-engine map under
+per-case groups — §5.4):
 
 ```json
 {
   "version": 1,
   "claims": {
     "MIOPEN_ENGINE": {
-      "gfx942":  { "linux": "supported", "windows": "supported" },
-      "gfx90a":  { "linux": "unsupported" }
+      "gfx942": ["linux", "windows"],
+      "gfx90a": ["linux"]
     }
   }
 }
@@ -183,11 +210,10 @@ Claim evaluation is built on RFC 0011's existing machinery:
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `version` | yes | Schema version of the support file. A reader refuses a version it does not understand (loud, not silent) and the engineer regenerates. |
-| `claims` | yes | Map of engine name → arch → platform → verdict. |
+| `claims` | yes | Map of engine name → arch → **array of supported platforms**. |
 | engine key | — | Exact engine name as reported by `getEngineInfo`. |
 | arch key | — | Exact match against the arch token — the prefix before the first `:` of the raw `gcnArchName` (e.g. `gfx942:sramecc+:xnack-` → `gfx942`).
-| platform key | — | Exact `"linux"` or `"windows"`. |
-| verdict value | — | `"supported"` or `"unsupported"`. |
+| platform entry | — | Exact `"linux"` or `"windows"` in the arch's array. **Presence = a `supported` claim** for that `(engine, arch, platform)`; there is no *unsupported* value — an omitted platform is simply *not enforced* (never *asserted-declined*). |
 
 ### 5.2 Verdict meaning
 
@@ -217,29 +243,97 @@ The status code separates *resolved* from *unknown*; membership separates *suppo
 discriminator — an empty list and an error status are different things, and a non-empty list
 must still be attributed per engine).
 
-Verdict semantics:
+Claim semantics:
 
-- `supported` claim → the engine **must** return *supported*. A *declined* result → **claim
-  broken FAIL** (§7). An *unknown* result → **errored-before-assert FAIL** (§7.1) — the claim
-  could not be checked; fix the error.
-- `unsupported` claim → the engine is expected to return *declined*. Returning *supported*
-  emits a **note** (§7), never a failure — capability growth must not break CI. An *unknown*
-  result → note, claim left unevaluated.
-- A missing `(engine, arch, platform)` entry → **not enforced** for that combination.
+- A claim (an `(engine, arch, platform)` **listed** as supported) → the engine **must** return
+  *supported*. A *declined* result → **claim broken FAIL** (§7). An *unknown* result →
+  **errored-before-assert FAIL** (§7.1) — the claim could not be checked; fix the error.
+- A **missing** `(engine, arch, platform)` (platform not listed, arch/engine absent, or no file)
+  → **not enforced** for that combination. This is *not* an assertion that the engine declines
+  it — the combination simply is not gated. Capability appearing on an unlisted combination of a
+  **claim-bearing** bundle is surfaced by the end-of-run "unclaimed support" summary (§7.1) and,
+  across runs, by the CI harvest (§12), which proposes adding the claim; neither is a failure.
 
 ### 5.3 Loader rules
 
 - All keys are matched exact-string. No `*`, no `?`, no fnmatch.
-- Unknown verdict values are rejected (catches typos / schema drift).
+- Malformed entries are rejected: an arch value that is not an array, or a platform token other
+  than `"linux"`/`"windows"` (catches typos / schema drift).
 - An empty `claims` map is legal (a bundle with no current claims).
 - The file is optional; a bundle with no `support.json` is simply not support-gated.
 
+### 5.4 Template-sweep claim files
+
+A template-sweep bundle holds many cases (`cases[].id`) that share one `graph.template.json`
+but differ by dtype, dims, strides, layout, or attributes (RFC 0011). Support can differ case to
+case, but many cases usually share the same footprint across ASICs, so a sweep's claims are
+organized **engine-first, then grouped by shared support footprint** rather than repeating a
+full arch/platform matrix per case. The sweep's machine-owned sidecar is a single
+**`support.json`** co-located with `sweep.json` (bare name, matching the sweep directory's
+`graph.template.json` / `sweep.json` convention), shaped as:
+
+```json
+{
+  "version": 1,
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": ["small_fp16_nchw", "small_fp32_nchw", "small_fp32_ncdhw"],
+        "support": {
+          "gfx942": ["linux", "windows"],
+          "gfx90a": ["linux"]
+        }
+      },
+      {
+        "cases": ["big_fp8_nhwc"],
+        "support": {
+          "gfx942": ["linux"]
+        }
+      }
+    ]
+  }
+}
+```
+
+- **`claims` is keyed by engine** (canonical JSON sorts these keys — §9.2); each engine maps to an
+  **array of claim groups**. A group is `{ cases, support }`: `cases` lists `cases[].id`s and
+  `support` is the `arch -> [supported platforms]` map — identical in shape and meaning to a
+  single-graph `{Name}.support.json`'s per-engine map (§5.1–5.2) — applied to **every** case in
+  the group. Listing a platform claims *supported*; omitting it means *not enforced*. Resolution
+  (§5.2) and outcomes (§7) are evaluated **per `(case, engine, arch, platform)`**.
+- **The grouping is the compression the sweep buys.** All cases whose support footprint is
+  identical share one group — the "common set supported across many ASICs" is one array entry,
+  and cases whose footprint differs (the outliers) fall into their own entries. Two cases group
+  iff their `support` map is identical.
+- **Every case is claimed at most once per engine.** A `cases[].id` may appear in **exactly one**
+  group within a given engine's array; the same id in two groups for one engine is a
+  **pre-commit error** (ambiguous claim). The same id may appear under different engines.
+- **Case ids must exist in the sibling `sweep.json`.** A `cases` entry naming a case absent from
+  `sweep.json` is a **pre-commit error** (a renamed or deleted case must not leave an orphaned
+  claim). A `sweep.json` case named in **no** group for an engine is simply **not support-gated**
+  for that engine — the per-case analog of a single-graph bundle with no `support.json`.
+- **Canonical ordering (for idempotent writes).** Within a group `cases` is sorted
+  lexicographically, and the groups within an engine's array are ordered by their first case id.
+  With canonical-JSON key sorting this makes `--write-support-claims` output deterministic, so a
+  re-run with unchanged observations is a zero diff (§9.2).
+- The file, any engine array, and any group are optional. An empty `claims` map is legal.
+- All other loader rules from §5.3 hold unchanged (exact-string keys, platform arrays of
+  `"linux"`/`"windows"` only, rejected unknown `version`).
+
+The claim key is still the exact graph (§4) — for a sweep, the case expanded from
+`graph.template.json` by its `cases[].id`, whose verdict is read from the group listing it. A
+`support.json` entry only annotates a case `sweep.json` already defines; it never adds, removes,
+or renames one.
+
 ## 6. Enforcement Levels
 
-A bundle's enforcement level is selected by a new **`enforcement_level`** field in
-`meta.json` (RFC 0011's companion schema is extended to carry it), defaulting to `full`. The
-name is deliberately *not* `verification`, to avoid colliding with RFC 0011's runtime
-`--verification-mode` CLI flag — they are orthogonal axes (see §6.1).
+A bundle's enforcement level is selected by a new **`enforcement_level`** field, defaulting to
+`full`. For a single-graph bundle it lives in the companion **`meta.json`** (RFC 0011's schema is
+extended to carry it). For a template-sweep case it lives in that case's **inline metadata**
+(`cases[].metadata.enforcement_level` in `sweep.json`, RFC 0011's per-case metadata), so each
+case in one sweep may sit at a different rung. The name is deliberately *not* `verification`, to
+avoid colliding with RFC 0011's runtime `--verification-mode` CLI flag — they are orthogonal axes
+(see §6.1).
 
 The three levels are a **stacking ladder**: each runs every check of the level below it and
 then one more, so a higher level is a strictly stronger signal. Each level maps directly onto
@@ -299,10 +393,12 @@ verification-modes section when that schema extension lands.
 
 ### 6.2 Acceptance criteria
 
-- [ ] `meta.json` carries `enforcement_level` ∈ {`applicability`, `buildable`, `full`};
-      default is `full` when absent **for non-claim-bearing bundles**, and a **hard pre-commit
-      error** when a `support.json` exists but `enforcement_level` is missing or invalid (a typo
-      must never silently flip how far up the ladder a claim-bearing bundle is checked).
+- [ ] `enforcement_level` ∈ {`applicability`, `buildable`, `full`} is read from `meta.json`
+      (single-graph) or `cases[].metadata` (sweep case); default is `full` when absent **for
+      non-claim-bearing bundles/cases**, and a **hard pre-commit error** when a claim exists
+      (a `{Name}.support.json`, or a `support.json` `cases` entry) but `enforcement_level` is
+      missing or invalid (a typo must never silently flip how far up the ladder a claim-bearing
+      graph is checked).
 - [ ] A claim-bearing bundle at any level returning *declined* at that level's stop-point FAILs
       (not skips) under every `--verification-mode`, and the failure names the rung that broke.
 - [ ] A `buildable` bundle queries support and builds plans but never generates inputs,
@@ -327,11 +423,16 @@ query, using the per-engine verdict of §5.2 (status code → *resolved* vs *unk
   failure, backend error, OOM, device lost), or whose graph build itself crashes → **FAIL**
   ("fix the underlying error first"). Distinct from *declined*: the verdict could not be
   evaluated, so this is not a coverage-loss verdict but it still must not pass green.
-- **Support unknown.** For an `unsupported` (or unclaimed) graph, an unresolved query → **note**,
-  claim left unevaluated. Support is *unknown*, not *declined*; it must never be treated as a
-  verdict.
-- **Unexpected support.** An `unsupported` claim whose engine is *supported* (present in the
-  list) → **note** ("claimed support != actual support; update the claim if intentional").
+- **Support unknown.** For an unclaimed `(engine, arch, platform)`, an unresolved query →
+  **note**, nothing evaluated. Support is *unknown*, not *declined*; it must never be treated as
+  a verdict.
+- **Unclaimed support (informational).** For a **claim-bearing** bundle/sweep (one that carries a
+  `support.json`), a graph the engine *supported* on an `(engine, arch, platform)` the file does
+  **not** list → collected and printed in an **end-of-run summary** ("supported but unclaimed;
+  run `--write-support-claims` to record it"), never a FAIL and never a SKIP change. It is the
+  within-run, human-readable twin of the §12 CI harvest, which emits the same observation as
+  structured data for offline claim proposals. A graph with no `support.json` at all is out of
+  scope — surfacing every unclaimed graph would be the rejected default-deny noise (§13.4).
 
 The split between *declined* and *unknown* is the whole reason §5.2/§8 key on the status code
 for the first step: collapsing an error status into "declined" would force a choice between
@@ -398,8 +499,7 @@ not-enforced bring-up case (§3.2), not a refuse-to-run.
       query) → claim-broken FAIL.
 - [ ] An unresolved query (non-decline error status) on a `supported` claim →
       errored-before-assert FAIL.
-- [ ] Unresolved query on an `unsupported`/unclaimed graph → note, not FAIL.
-- [ ] *supported* (present in list) on an `unsupported` claim → note, not FAIL.
+- [ ] Unresolved query on an unclaimed `(engine, arch, platform)` → note, not FAIL.
 - [ ] Enforcement with zero observed queries → FAIL (empty-query guard).
 - [ ] New-arch run with no claims for the loaded engine on that arch → not-enforced, not a
       refuse-to-run.
@@ -407,6 +507,8 @@ not-enforced bring-up case (§3.2), not a refuse-to-run.
       from one query (no refuse-to-run); one engine *declined* while another is *supported*
       yields a FAIL for the first and a pass for the second.
 - [ ] A claim for an engine not loaded in the current run is not enforced.
+- [ ] A claim-bearing bundle whose engine *supports* an unlisted `(engine, arch, platform)` is
+      listed in the end-of-run unclaimed-support summary, not FAILed.
 
 ## 8. Required Harness Capability
 
@@ -467,21 +569,25 @@ Every step of this is an **existing frontend capability** — no spike is requir
 ```bash
 # Mode C — one engine of one plugin
 ./hipdnn_integration_tests \
-    --golden-data-dir dnn-providers/integration-tests/integration_test_bundles \
+    --golden-data-dir dnn-providers/integration-tests/integration-test-bundles \
     --test-article <plugin-lib> --test-engine MIOPEN_ENGINE \
     --write-support-claims
 
 # Mode B — every engine the plugin exposes, run sequentially
 ./hipdnn_integration_tests \
-    --golden-data-dir dnn-providers/integration-tests/integration_test_bundles \
+    --golden-data-dir dnn-providers/integration-tests/integration-test-bundles \
     --test-article <plugin-lib> \
     --write-support-claims
 ```
 
-Discovers bundles, observes live support on the **current** hardware, and writes each bundle's
-`support.json` verdict for the exercised `(engine, arch, platform)` only. Every other key in the
-file — other engines, arches, and platforms — is left byte-untouched. The main bundle, its
-graph, `.bin` files, and `meta.json` are never modified.
+Discovers bundles (single-graph and template-sweep cases alike), observes live support on the
+**current** hardware, and writes each claimed graph's verdict for the exercised
+`(engine, arch, platform)` only — into `{Name}.support.json` for a single-graph bundle, or into
+the sweep `support.json`'s engine array under the group covering that `cases[].id` (§5.4) for a
+sweep case. Every verdict the run does not observe — other engines, arches, platforms, and sweep
+cases — is left unchanged (§9.2 details how a sweep's grouped array is preserved when only some
+cells change). The graph JSON (`{Name}.json` / `graph.template.json`), `sweep.json`, `.bin`
+files, and `meta.json` are never modified.
 
 Generation requires a **pinned engine**, so it runs in **mode B or C** (§7.3), never mode A: a
 `buildable`/`full` verdict means compiling (and executing) one specific engine's plan, and even
@@ -503,16 +609,24 @@ the actor and cadence differ.
 - **Machine-owned, engineer-driven.** CI never runs this tool — auto-applying it would
   silently rewrite the contract. The engineer runs it on target hardware, reviews the
   `git diff`, and commits.
-- **Surgical, idempotent writes.** A write reads the current `support.json`, updates only the
-  current `(engine, arch, platform)` keys, and re-emits the whole file with canonical JSON
-  (sorted keys, fixed number formatting, stable newline) so sibling keys are byte-identical
-  and re-running with no change produces a zero diff. Because different engines, arches, and
-  platforms write disjoint keys, per-engine and per-arch regeneration on separate checkouts
-  produces git diffs that merge cleanly. No multi-writer coordination is needed: only one
-  integration-test binary runs at a time, so concurrent writes from multiple threads/processes
-  are not a scenario.
-- **Written at end of sweep.** The tool writes each bundle's `support.json` directly after the
-  test sweep completes. If a target file cannot be opened for writing (e.g. it is locked), the
+- **Surgical, idempotent writes.** For a single-graph `{Name}.support.json` the write updates only
+  the current `(engine, arch, platform)` keys, leaving siblings byte-identical. A sweep's grouped
+  array (§5.4) can't be patched in place — a changed cell may move a case between groups — so the
+  tool **flattens, overlays, then re-groups canonically**: it expands `support.json` to
+  per-`(engine, case, arch, platform)` cells, overlays only the cells this run observed, leaves the
+  rest as-is, and re-derives the canonical grouped form (§5.4). Both paths re-emit canonical JSON
+  (sorted keys, fixed number formatting, stable newline), so an unchanged run is a **zero diff**
+  and untouched engines stay byte-identical. Because engines, arches, and platforms are disjoint
+  cells, separate per-engine/per-arch regenerations merge cleanly; only one binary runs at a time,
+  so no multi-writer coordination is needed.
+- **Change churn is bounded and safe.** The zero-diff guarantee is for an *unchanged* run; when a
+  support value actually changes, canonical regrouping may merge or split groups, so the diff can
+  be larger than the one changed cell. Canonical formatting keeps this granular — one case id per
+  line, so a membership change reads as per-case line adds/removes — and any genuine regression (a
+  claimed `supported` becoming `declined`) surfaces independently as an enforcement FAIL (§7.1), so
+  diff churn can never silently mask a lost claim.
+- **Written at end of the run.** The tool writes each claimed graph's support sidecar directly
+  after the test run completes. If a target file cannot be opened for writing (e.g. it is locked), the
   tool reports a clear error naming the file rather than silently dropping the verdict; it does
   not need the tmp-file/atomic-rename machinery a concurrent writer would.
 - **DVC-independent.** Querying support needs only the graph (`.json`), never the
@@ -526,15 +640,21 @@ the actor and cadence differ.
 
 The RFC 0011 pre-commit bundle verifier is extended to:
 
-- **Require an explicit `enforcement_level` on claim-bearing bundles.** A bundle that carries a
-  `support.json` must declare `enforcement_level` ∈ {`applicability`, `buildable`, `full`};
-  missing or invalid is a **hard error** (never silently defaulted), so a typo cannot flip how
-  far up the ladder the bundle is checked. RFC 0011's existing `.bin` data-integrity
-  checks are unchanged and apply per its own rules (e.g. a bundle that ships `.bin` files must
-  ship them for every tensor UID); this RFC adds no new `.bin` presence/absence requirement.
-- Validate `support.json` against the schema (§5): known `version`, well-formed
-  `engine/arch/platform` keys, verdict values in the allowed set. A bad `version` or unknown
-  verdict is a pre-commit FAIL (not a runtime surprise).
+- **Require an explicit `enforcement_level` on every claim-bearing graph.** A single-graph
+  bundle that carries a `{Name}.support.json`, or a sweep case that has an entry in the sweep's
+  `support.json`, must declare `enforcement_level` ∈ {`applicability`, `buildable`, `full`} (in
+  `meta.json` or `cases[].metadata` respectively); missing or invalid is a **hard error** (never
+  silently defaulted), so a typo cannot flip how far up the ladder the graph is checked. RFC
+  0011's existing `.bin` data-integrity checks are unchanged and apply per its own rules (e.g. a
+  bundle/case that ships `.bin` files must ship them for every tensor UID); this RFC adds no new
+  `.bin` presence/absence requirement.
+- Validate every support sidecar against the schema (§5, §5.4): known `version`, well-formed
+  engine/arch keys, and platform arrays containing only `"linux"`/`"windows"`. For a sweep
+  `support.json` additionally: `claims` maps each engine to an **array** of `{ cases, support }`
+  groups; every `cases` id resolves to a real `cases[].id` in the sibling `sweep.json` (no
+  orphaned claims); and **no case id appears in more than one group for the same engine** (no
+  ambiguous claim). A bad `version`, malformed key/platform, orphaned case id, or a case claimed
+  twice for one engine is a pre-commit FAIL (not a runtime surprise).
 
 ### 9.4 Test registration (CMake)
 
@@ -580,6 +700,11 @@ fits).
       for each; a mode-C run writes only the named engine's keys; a mode-A run writes nothing.
 - [ ] The all-engines CMake helper registers one ctest that exercises every engine the plugin
       exposes, sequentially.
+- [ ] A sweep case's verdict is written into the group covering that `cases[].id` under the
+      correct engine, other engines' arrays are left byte-identical, and the emitted grouping is
+      canonical (cases sorted, groups ordered by first case id).
+- [ ] A sweep `support.json` fails pre-commit if a `cases` id has no matching `sweep.json` case,
+      or if a case id appears in more than one group for the same engine.
 
 ## 10. Oversized and Golden-Infeasible Graphs
 
@@ -601,8 +726,10 @@ the claim is meant to gate.
 ## 11. Support Matrix Generation and Documentation
 
 **Generated from committed data, not a hardware run.** The engine support matrix is generated
-**purely from the data checked into the repo** — each bundle's `{Name}.json` (for the row
-identity: operation, layout, dtype, scenario) and its `{Name}.support.json` (for the
+**purely from the data checked into the repo** — each single-graph bundle's `{Name}.json`, or a
+template-sweep case (`graph.template.json` + the `cases[].id` from `sweep.json`), for the row
+identity (operation, layout, dtype, scenario), and its support sidecar (`{Name}.support.json`, or
+the sweep `support.json` group covering the case, §5.4) for the
 per-`(engine, arch, platform)` verdict). This **replaces** generating the matrix from a
 runtime `SupportMatrixCollector` populated during a live test run: because every claimed
 graph already carries its verdict on disk (§4), the committed bundles and their `support.json`
@@ -611,9 +738,11 @@ regenerate or diff the matrix from a plain checkout with no GPU, no plugin, and 
 (only `.json`/`.support.json` are needed, and both live in git — §9.2).
 
 **Renderer.** `dnn-providers/integration-tests/tools/render_support_matrix.py` discovers every
-`{Name}.support.json` under the golden-data tree, joins each to its co-located `{Name}.json`,
-and emits one combined markdown matrix: engine columns, one row per bundle keyed by
-`(operation, layout, dtype, scenario)`, each cell showing the verdict per `(arch, platform)`.
+support sidecar under the golden-data tree — each `{Name}.support.json` and each sweep
+`support.json` — joins each to its graph (`{Name}.json`, or the expanded `cases[].id` from
+`graph.template.json` + `sweep.json`), and emits one combined markdown matrix: engine columns,
+one row per claimed graph keyed by `(operation, layout, dtype, scenario)`, each cell showing the
+verdict per `(arch, platform)`.
 The matrix is a **view** of the committed claims, not a second state to maintain.
 
 **Sidecar as source of truth.** The `support.json` sidecars are authoritative; the matrix is
@@ -622,11 +751,12 @@ committed matrix differs from a re-render of the current sidecars — so the com
 never silently drift from the claims.
 
 Two clarifications. (1) The matrix row key `(operation, layout, dtype, scenario)` is
-*coarser* than the actual claim key (the on-disk bundle / exact graph, §4): two bundles
+*coarser* than the actual claim key (the on-disk graph, §4): two bundles — or two sweep cases —
 sharing that 4-tuple but differing in exact shape are distinct claims that would collapse to
 one matrix row. This is a presentation simplification, not a contract — the per-bundle
-`support.json` files remain the source of truth; the matrix should make the bundle path
-reachable per row so the full claim set is recoverable. (2) A runtime `SupportMatrixCollector`
+`{Name}.support.json` and per-case sweep `support.json` entries remain the source of truth; the
+matrix should make the bundle path (and case id, for a sweep) reachable per row so the full
+claim set is recoverable. (2) A runtime `SupportMatrixCollector`
 already exists on the live-compute harness; this renderer reads the committed `support.json`
 sidecars instead, a deliberately separate source of truth — the two must not be conflated
 into divergent matrices.
@@ -676,12 +806,15 @@ offline consumer needs to attribute and apply it:
 
 ```jsonl
 {"schema":"support_observation/1","bundle":"quick/ConvFwd/nhwc/fp16/resnet50_layer3","engine":"MIOPEN_ENGINE","arch":"gfx942","platform":"linux","verdict":"supported","enforcement_level":"full","rocm_version":"6.4.0","commit":"<sha>","run_id":"<ci-run>","timestamp":"<iso8601>"}
+{"schema":"support_observation/1","bundle":"quick/BatchnormFwdInference/Inference#small_fp16_nchw","engine":"MIOPEN_ENGINE","arch":"gfx942","platform":"linux","verdict":"declined","enforcement_level":"applicability","rocm_version":"6.4.0","commit":"<sha>","run_id":"<ci-run>","timestamp":"<iso8601>"}
 ```
 
 - `verdict` ∈ `supported | declined | unknown`, using the per-engine mapping of §5.2
   (status code → resolved/unknown; ranked-list membership → supported/declined).
-- `bundle` is the repo-relative bundle path — the same on-disk key a claim attaches to (§4) —
-  so the consumer can locate the exact `support.json` to update.
+- `bundle` is the repo-relative on-disk key a claim attaches to (§4): the bundle path for a
+  single-graph bundle, or `{sweep-path}#{caseId}` for a template-sweep case (the same
+  `sweep.json#caseId` diagnostic key discovery already uses). This lets the consumer locate the
+  exact support sidecar and, for a sweep, the engine group that lists that case id, to update.
 - Provenance (`rocm_version`, `commit`, `run_id`, `timestamp`) lets the consumer break ties
   (prefer the newest observation) and audit where a claim came from.
 
@@ -711,9 +844,9 @@ An offline consumer (`tools/harvest_support_observations.py`) ingests observatio
 one or more CI runs and proposes `support.json` updates:
 
 - **Newly-supported graphs (the stream).** A bundle observed `supported` whose `support.json`
-  has no entry — or an `unsupported` entry — for that `(engine, arch, platform)` → propose
-  setting it to `supported`. This is the continuous gain stream from nightly CI: as an engine
-  picks up coverage on an ASIC, the next nightly run observes it and the harvest surfaces it.
+  does not yet list that `(engine, arch, platform)` → propose adding it. This is the continuous
+  gain stream from nightly CI: as an engine picks up coverage on an ASIC, the next nightly run
+  observes it and the harvest surfaces it.
 - **Monotonic by policy — harvest only adds/upgrades, never silently removes.** A
   `supported → declined` flip is either a real regression (already a CI **FAIL** under §7.1, so
   it surfaces loudly, not via silent harvest) or needs human judgement; the harvest never
@@ -798,8 +931,8 @@ fallback (§15) — still with no region matching.
 ### 13.4 Default-deny on unclaimed graphs
 
 Failing when an engine supports a graph that no bundle claims would force a bundle for every
-new capability and churn CI constantly. **Rejected** in favour of the note in §7.1
-("unexpected support"): absence of a claim is "not enforced," and capability growth is
+new capability and churn CI constantly. **Rejected** in favour of the end-of-run "unclaimed
+support" summary (§7.1): absence of a claim is "not enforced," and capability growth is
 surfaced, not punished.
 
 ### 13.5 Glob/pattern matching over test names
@@ -856,13 +989,17 @@ run. **Rejected** — the claim attaches to the graph, never to a test name.
 
 ## 16. Glossary
 
-- **Bundle.** A golden data directory (`{Name}.json` + optional `.tensor{uid}.bin` +
-  `meta.json`) as defined by [RFC 0011](0011_GoldenReferenceValidation.md). The unit a
-  support claim attaches to.
-- **Support claim.** A `{Name}.support.json` entry asserting, per `(engine, arch,
-  platform)`, that the engine is expected to support (or not support) the bundle's graph.
-- **Claimed graph.** A graph whose bundle has a `supported` verdict for the current
-  `(engine, arch, platform)`.
+- **Bundle.** A golden data directory as defined by
+  [RFC 0011](0011_GoldenReferenceValidation.md), in one of two forms: a **single-graph bundle**
+  (`{Name}.json` + optional `.tensor{uid}.bin` + `meta.json`) or a **template-sweep bundle**
+  (`graph.template.json` + `sweep.json` + `golden/{CaseId}/...`). The unit a support claim
+  attaches to; for a sweep the claim attaches per `cases[].id`.
+- **Support claim.** A support-sidecar entry listing an `(engine, arch, platform)` as *supported*
+  for a claimed graph — under `{Name}.support.json` for a single-graph bundle, or in the sweep
+  `support.json`'s engine group that lists the case id (§5.4). There is no *unsupported* claim;
+  an unlisted combination is simply not enforced.
+- **Claimed graph.** A graph listed as `supported` for the current `(engine, arch, platform)` —
+  a single-graph bundle, or a template-sweep case (§4, §5.4).
 - **Claim broken.** A `supported`-claimed `(engine, arch, platform)` whose live support query
   *resolved* but whose engine came back *declined*. The headline failure.
 - **Resolved query.** A support query whose status is `OK` or `GRAPH_NOT_SUPPORTED` — the

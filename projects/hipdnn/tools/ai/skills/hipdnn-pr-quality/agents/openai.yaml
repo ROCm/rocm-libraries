@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN PR Quality"
+  short_description: "Author, review, or pre-merge gate hipDNN PRs"
+  default_prompt: "Use $hipdnn-pr-quality to author, review, or pre-merge gate a hipDNN pull request. It extends the rocm-pr-quality base skill and binds it to hipDNN: scope buckets, the Libraries PR Bot title/tracking gate, the hipDNN PR body format, RAII/resource ownership, provider behavior, cuDNN compatibility, FlatBuffers schema compatibility, and ASIC/multi-arch coverage."

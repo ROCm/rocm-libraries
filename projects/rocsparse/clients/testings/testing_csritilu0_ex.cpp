@@ -259,7 +259,7 @@ void testing_csritilu0_ex(const Arguments& arg)
     options |= rocsparse_itilu0_option_stopping_criteria; // Add stopping criteria.
     options |= rocsparse_itilu0_option_compute_nrm_residual; // Compute the norm of the residual.
     // options |= rocsparse_itilu0_option_verbose; // Put verbose.
-    // options |= rocsparse_itilu0_option_convergence_history; // Get convergence history.
+    options |= rocsparse_itilu0_option_convergence_history; // Get convergence history.
     // options |= rocsparse_itilu0_option_compute_nrm_correction; // Compute the norm of the correction.
     // options |= rocsparse_itilu0_option_coo_format; // Use internal sparse coordinate format.
 
@@ -518,7 +518,8 @@ void testing_csritilu0_ex(const Arguments& arg)
             return;
         }
 
-        if((p.options & rocsparse_itilu0_option_convergence_history) > 0)
+        if((dA.m > 0) && (dA.nnz > 0)
+           && (p.options & rocsparse_itilu0_option_convergence_history) > 0)
         {
             floating_data_t<T>* history       = new floating_data_t<T>[p.maxiter * 2];
             rocsparse_int       history_niter = 0;

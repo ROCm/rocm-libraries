@@ -24,7 +24,7 @@
 #include "test.hpp"
 #include "testing_spmv_bsr.hpp"
 
-#if defined(HIPSPARSE_WITH_SPMV_BSR) && !defined(CUDART_VERSION)
+#if !defined(CUDART_VERSION)
 TEST_ROUTINE_WITH_CONFIG(spmv_bsr,
                          generic,
                          hipsparse_test_config_ijabct_spmv,
@@ -38,5 +38,6 @@ TEST_ROUTINE_WITH_CONFIG(spmv_bsr,
                          arg.baseA,
                          arg.spmv_alg,
                          arg.block_dim,
-                         arg.dirA);
+                         arg.dirA,
+                         arg.call_preprocess);
 #endif

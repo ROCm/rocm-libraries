@@ -1,0 +1,32 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
+#
+# LiftAsmRegistersToSSAPass: register ranges are lifted one DWORD at a time.
+#
+# A wide operand binds one SSA value per DWORD, in operand order, so a partial
+# redefinition replaces only the units it writes. Keeping units separate is what
+# makes that visible; a whole-range value would have to pretend the narrow write
+# clobbered all four DWORDs. ssaForm brackets a multi-unit operand so its
+# grouping stays distinguishable from separate operands.
+#
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_ranges
+#
+# The 4-DWORD load defines four values, bound to v4 through v7.
+# CHECK-NEXT: ^entry(%1:v):
+# CHECK-NEXT: [%2:v, %3:v, %4:v, %5:v] = "st.ds_load_b128"(%1:v)
+#
+# A 2-DWORD store consumes only the first two units of that range.
+# CHECK-NEXT: "st.ds_store_b64"(%1:v, [%2:v, %3:v])
+#
+# Overwriting v4 alone creates one new value.
+# CHECK-NEXT: %6:v = "st.v_add_f32"(%1:v, %1:v)
+#
+# Reading the whole range now mixes the new v4 with the surviving v5, v6, v7.
+# CHECK-NEXT: "st.ds_store_b128"(%1:v, [%6:v, %3:v, %4:v, %5:v])
+
+st.func @lift_asm_registers_to_ssa_ranges() {
+^entry:
+  v[4:7] = "st.ds_load_b128"(v0)
+  "st.ds_store_b64"(v0, v[4:5])
+  v4 = "st.v_add_f32"(v0, v0)
+  "st.ds_store_b128"(v0, v[4:7])
+}

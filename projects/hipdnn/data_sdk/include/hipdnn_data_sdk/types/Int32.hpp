@@ -38,4 +38,9 @@ inline int32_t min(int32_t a, int32_t b)
     return std::min(a, b);
 }
 
+inline int32_t sqrt(int32_t x)
+{
+    return static_cast<int32_t>(std::sqrt(x));
+}
+
 } // namespace hipdnn_data_sdk::types

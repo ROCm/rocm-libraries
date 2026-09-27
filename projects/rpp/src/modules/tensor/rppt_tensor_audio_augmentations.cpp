@@ -49,14 +49,14 @@ RppStatus rppt_non_silent_region_detection(RppPtr_t srcPtr, RpptDescPtr srcDescP
     //     return RPP_ERROR_INVALID_SRC_DIMS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if (srcDescPtr->dataType == RpptDataType::F32) {
-            non_silent_region_detection_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                                    srcLengthTensor, detectedIndexTensor,
-                                                    detectionLengthTensor, cutOffDB, windowLength,
-                                                    referencePower, resetInterval, handle);
+            return non_silent_region_detection_host_tensor(
+                static_cast<Rpp32f*>(srcPtr), srcDescPtr, srcLengthTensor, detectedIndexTensor,
+                detectionLengthTensor, cutOffDB, windowLength, referencePower, resetInterval,
+                handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -90,7 +90,7 @@ RppStatus rppt_to_decibels(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
     if (!multiplier) return RPP_ERROR_ZERO_DIVISION;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -101,9 +101,9 @@ RppStatus rppt_to_decibels(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            to_decibels_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                    static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDims, cutOffDB,
-                                    multiplier, referenceMagnitude, handle);
+            return to_decibels_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                           static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDims,
+                                           cutOffDB, multiplier, referenceMagnitude, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
 
@@ -116,9 +116,9 @@ RppStatus rppt_to_decibels(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         if (tensorDims != 1 && tensorDims != 2) return RPP_ERROR_INVALID_SRC_DIMS;
 
         if (srcDescPtr->dataType == RpptDataType::F32) {
-            hip_exec_to_decibels_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDims, cutOffDB,
-                                        multiplier, referenceMagnitude, handle);
+            return hip_exec_to_decibels_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                               static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDims,
+                                               cutOffDB, multiplier, referenceMagnitude, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -135,7 +135,7 @@ RppStatus rppt_pre_emphasis_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppP
                                    Rpp32f* coeffTensor, RpptAudioBorderType borderType,
                                    rppHandle_t rppHandle, RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -145,9 +145,9 @@ RppStatus rppt_pre_emphasis_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppP
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            pre_emphasis_filter_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                            static_cast<Rpp32f*>(dstPtr), dstDescPtr,
-                                            srcLengthTensor, coeffTensor, borderType, handle);
+            return pre_emphasis_filter_host_tensor(
+                static_cast<Rpp32f*>(srcPtr), srcDescPtr, static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                srcLengthTensor, coeffTensor, borderType, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -177,7 +177,7 @@ RppStatus rppt_down_mixing(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
                            RpptDescPtr dstDescPtr, Rpp32s* srcDimsTensor, bool normalizeWeights,
                            rppHandle_t rppHandle, RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -188,9 +188,9 @@ RppStatus rppt_down_mixing(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            down_mixing_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                    static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDimsTensor,
-                                    normalizeWeights, handle);
+            return down_mixing_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                           static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDimsTensor,
+                                           normalizeWeights, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -204,9 +204,9 @@ RppStatus rppt_down_mixing(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_down_mixing_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDimsTensor,
-                                        normalizeWeights, handle);
+            return hip_exec_down_mixing_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                               static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                                               srcDimsTensor, normalizeWeights, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -227,7 +227,7 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
         return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this checks for now.
@@ -241,10 +241,10 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            spectrogram_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                    static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor,
-                                    centerWindows, reflectPadding, windowFunction, nfft, power,
-                                    windowLength, windowStep, handle);
+            return spectrogram_host_tensor(
+                static_cast<Rpp32f*>(srcPtr), srcDescPtr, static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                srcLengthTensor, centerWindows, reflectPadding, windowFunction, nfft, power,
+                windowLength, windowStep, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -260,10 +260,10 @@ RppStatus rppt_spectrogram(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dst
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_spectrogram_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor,
-                                        centerWindows, reflectPadding, windowFunction, nfft, power,
-                                        windowLength, windowStep, handle);
+            return hip_exec_spectrogram_tensor(
+                static_cast<Rpp32f*>(srcPtr), srcDescPtr, static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                srcLengthTensor, centerWindows, reflectPadding, windowFunction, nfft, power,
+                windowLength, windowStep, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -284,7 +284,7 @@ RppStatus rppt_mel_filter_bank(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
     if (dstDescPtr->layout != RpptLayout::NFT) return RPP_ERROR_INVALID_DST_LAYOUT;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -296,10 +296,10 @@ RppStatus rppt_mel_filter_bank(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            mel_filter_bank_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcDimsTensor,
-                                        maxFreq, minFreq, melFormula, numFilter, sampleRate,
-                                        normalize, handle);
+            return mel_filter_bank_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                               static_cast<Rpp32f*>(dstPtr), dstDescPtr,
+                                               srcDimsTensor, maxFreq, minFreq, melFormula,
+                                               numFilter, sampleRate, normalize, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -334,7 +334,7 @@ RppStatus rppt_resample(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                         Rpp32s* srcDimsTensor, RpptResamplingWindow& window, rppHandle_t rppHandle,
                         RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         // Disabled this check for now.
@@ -345,9 +345,9 @@ RppStatus rppt_resample(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
 
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            resample_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                 static_cast<Rpp32f*>(dstPtr), dstDescPtr, inRateTensor,
-                                 outRateTensor, srcDimsTensor, window, handle);
+            return resample_host_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                        static_cast<Rpp32f*>(dstPtr), dstDescPtr, inRateTensor,
+                                        outRateTensor, srcDimsTensor, window, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -360,9 +360,9 @@ RppStatus rppt_resample(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
         if (tensorDims != 1 && tensorDims != 2) return RPP_ERROR_INVALID_SRC_DIMS;
 
         if (srcDescPtr->dataType == RpptDataType::F32) {
-            hip_exec_resample_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
-                                     static_cast<Rpp32f*>(dstPtr), dstDescPtr, inRateTensor,
-                                     outRateTensor, srcDimsTensor, window, handle);
+            return hip_exec_resample_tensor(static_cast<Rpp32f*>(srcPtr), srcDescPtr,
+                                            static_cast<Rpp32f*>(dstPtr), dstDescPtr, inRateTensor,
+                                            outRateTensor, srcDimsTensor, window, handle);
         } else {
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
@@ -379,12 +379,12 @@ RppStatus rppt_audio_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptD
                                        Rpp32s* srcLengthTensor, rppHandle_t rppHandle,
                                        RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            audio_tensor_add_tensor_host(
+            return audio_tensor_add_tensor_host(
                 static_cast<Rpp32f*>(srcPtr1), static_cast<Rpp32f*>(srcPtr2), srcDescPtr,
                 static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor, handle);
         } else {
@@ -397,7 +397,7 @@ RppStatus rppt_audio_tensor_add_tensor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptD
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_audio_tensor_add_tensor(
+            return hip_exec_audio_tensor_add_tensor(
                 static_cast<Rpp32f*>(srcPtr1), static_cast<Rpp32f*>(srcPtr2), srcDescPtr,
                 static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor, handle);
         } else {
@@ -416,14 +416,14 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
                                        Rpp32s* srcLengthTensor, rppHandle_t rppHandle,
                                        RppBackend executionBackend) {
     rpp::Handle& handle = rpp::deref(rppHandle);
-    RppBackend handleBackend = handle.GetBackend();
+    [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            audio_tensor_mul_scalar_host(static_cast<Rpp32f*>(srcPtr), scalarValue, srcDescPtr,
-                                         static_cast<Rpp32f*>(dstPtr), dstDescPtr, srcLengthTensor,
-                                         handle);
+            return audio_tensor_mul_scalar_host(static_cast<Rpp32f*>(srcPtr), scalarValue,
+                                                srcDescPtr, static_cast<Rpp32f*>(dstPtr),
+                                                dstDescPtr, srcLengthTensor, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
 
@@ -434,9 +434,9 @@ RppStatus rppt_audio_tensor_mul_scalar(RppPtr_t srcPtr, Rpp32f scalarValue, Rppt
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
         if ((srcDescPtr->dataType == RpptDataType::F32) &&
             (dstDescPtr->dataType == RpptDataType::F32)) {
-            hip_exec_audio_tensor_mul_scalar(static_cast<Rpp32f*>(srcPtr), scalarValue, srcDescPtr,
-                                             static_cast<Rpp32f*>(dstPtr), dstDescPtr,
-                                             srcLengthTensor, handle);
+            return hip_exec_audio_tensor_mul_scalar(static_cast<Rpp32f*>(srcPtr), scalarValue,
+                                                    srcDescPtr, static_cast<Rpp32f*>(dstPtr),
+                                                    dstDescPtr, srcLengthTensor, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
 

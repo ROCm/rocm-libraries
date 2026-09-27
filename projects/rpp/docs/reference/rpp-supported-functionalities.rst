@@ -8,10 +8,11 @@ ROCm Performance Primitives supported functionalities and variants
 
 The following tables show the CPU and GPU support for ROCm Performance Primitives (RPP) functionalities and variants.
 
-CPU support is also referred to as HOST support.
+CPU support is also referred to as HOST support, and GPU support is provided through the HIP backend.
 
+The functionalities are grouped to match the RPP API headers described in the :doc:`API reference <./rpp-api-reference>`.
 
-Image augmentations
+Color augmentations
 -----------------------------------------------------------------------------------------------
 
 .. csv-table::
@@ -21,79 +22,75 @@ Image augmentations
   "brightness", "✅", "✅"
   "gamma correction", "✅", "✅"
   "blend", "✅", "✅"
-  "blur", "✅", "✅"
-  "contrast", "✅", "✅"
-  "pixelate", "✅", "✅"
-  "jitter", "✅", "✅"
-  "snow", "✅", "✅"
-  "noise", "✅", "✅"
-  "random shadow", "✅", "✅"
-  "fog", "✅", "✅"
-  "rain", "✅", "✅"
-  "random crop letterbox", "✅", "✅"
-  "exposure", "✅", "✅"
-  "histogram balance", "✅", "❌"
-
-Statistical functions
------------------------------------------------------------------------------------------------
-
-.. csv-table::
-  :widths: 7, 3, 3
-  :header: "Type", "CPU", "GPU"
-
-  "thresholding", "✅", "✅"
-  "min", "✅", "✅"
-  "max", "✅", "✅"
-  "min max loc", "✅", "❌"
-  "integral", "✅", "❌"
-  "histogram_equalization", "✅", "❌"
-  "mean stddev", "✅", "❌"
-
-Geometry transforms
------------------------------------------------------------------------------------------------
-
-.. csv-table::
-  :widths: 7, 3, 3
-  :header: "Type", "CPU", "GPU"
-
-  "flip", "✅", "✅"
-  "resize", "✅", "✅"
-  "resize crop", "✅", "✅"
-  "rotate", "✅", "✅"
-  "warp affine", "✅", "✅"
-  "fisheye", "✅", "✅"
-  "lens correction", "✅", "✅"
-  "scale", "✅", "✅"
-  "warp perspective", "✅", "✅"
-
-Advanced augmentations
------------------------------------------------------------------------------------------------
-
-.. csv-table::
-  :widths: 7, 3, 3
-  :header: "Type", "CPU", "GPU"
-
-  "water", "✅", "✅"
-  "non-linear blend", "✅", "✅"
-  "color cast", "✅", "✅"
-  "erase", "✅", "✅"
-  "crop and patch", "✅", "✅"
-  "lut", "✅", "✅"
-  "glitch", "✅", "✅"
-
-Fused functions
------------------------------------------------------------------------------------------------
-
-.. csv-table::
-  :widths: 7, 3, 3
-  :header: "Type", "CPU", "GPU"
-
+  "hue", "✅", "✅"
+  "saturation", "✅", "✅"
   "color twist", "✅", "✅"
+  "color jitter", "✅", "❌"
+  "color cast", "✅", "✅"
+  "exposure", "✅", "✅"
+  "contrast", "✅", "✅"
+  "lut", "✅", "✅"
+  "color temperature", "✅", "✅"
+  "histogram equalize", "✅", "✅"
+
+Effects augmentations
+-----------------------------------------------------------------------------------------------
+
+.. csv-table::
+  :widths: 7, 3, 3
+  :header: "Type", "CPU", "GPU"
+
+  "gridmask", "✅", "✅"
+  "spatter", "✅", "✅"
+  "salt and pepper noise", "✅", "✅"
+  "shot noise", "✅", "✅"
+  "gaussian noise", "✅", "✅"
+  "non-linear blend", "✅", "✅"
+  "water", "✅", "✅"
+  "ricap", "✅", "✅"
+  "vignette", "✅", "✅"
+  "jitter", "✅", "✅"
+  "erase", "✅", "✅"
+  "random erase", "✅", "✅"
+  "glitch", "✅", "✅"
+  "rain", "✅", "✅"
+  "pixelate", "✅", "✅"
+  "fog", "✅", "✅"
+  "posterize", "✅", "✅"
+  "solarize", "✅", "✅"
+  "snow", "✅", "✅"
+  "channel dropout", "✅", "✅"
+  "cutout dropout", "✅", "✅"
+  "grid dropout", "✅", "✅"
+  "coarse dropout", "✅", "✅"
+
+Geometric augmentations
+-----------------------------------------------------------------------------------------------
+
+.. csv-table::
+  :widths: 7, 3, 3
+  :header: "Type", "CPU", "GPU"
+
   "crop", "✅", "✅"
   "crop mirror normalize", "✅", "✅"
+  "crop and patch", "✅", "✅"
+  "flip", "✅", "✅"
+  "resize", "✅", "✅"
+  "resize mirror normalize", "✅", "✅"
   "resize crop mirror", "✅", "✅"
+  "rotate", "✅", "✅"
+  "warp affine", "✅", "✅"
+  "warp perspective", "✅", "✅"
+  "lens correction", "✅", "✅"
+  "fisheye", "✅", "✅"
+  "phase", "✅", "✅"
+  "slice", "✅", "✅"
+  "remap", "✅", "✅"
+  "transpose", "✅", "✅"
+  "concat", "✅", "✅"
+  "jpeg compression distortion", "✅", "✅"
 
-Morphological transforms
+Morphological operations
 -----------------------------------------------------------------------------------------------
 
 .. csv-table::
@@ -103,24 +100,7 @@ Morphological transforms
   "erode", "✅", "✅"
   "dilate", "✅", "✅"
 
-Color model conversions
------------------------------------------------------------------------------------------------
-
-.. csv-table::
-  :widths: 7, 3, 3
-  :header: "Type", "CPU", "GPU"
-
-  "hue", "✅", "✅"
-  "saturation", "✅", "✅"
-  "color convert", "✅", "✅"
-  "color temperature", "✅", "✅"
-  "vignette", "✅", "✅"
-  "channel extract", "✅", "❌"
-  "channel combine", "✅", "❌"
-  "lookup table", "✅", "✅"
-  "tensor table lookup", "✅", "❌"
-
-Filter operations
+Filter augmentations
 -----------------------------------------------------------------------------------------------
 
 .. csv-table::
@@ -128,12 +108,10 @@ Filter operations
   :header: "Type", "CPU", "GPU"
 
   "box filter", "✅", "✅"
-  "sobel filter", "✅", "✅"
   "median filter", "✅", "✅"
-  "custom convolution", "✅", "❌"
-  "non-max suppression", "✅", "✅"
   "gaussian filter", "✅", "✅"
-  "non-linear filter", "✅", "✅"
+  "sobel filter", "✅", "✅"
+  "emboss", "✅", "✅"
 
 Arithmetic operations
 -----------------------------------------------------------------------------------------------
@@ -142,18 +120,32 @@ Arithmetic operations
   :widths: 7, 3, 3
   :header: "Type", "CPU", "GPU"
 
-  "absolute difference", "✅", "✅"
-  "accumulate weighted", "✅", "✅"
-  "accumulate", "✅", "✅"
-  "add", "✅", "✅"
-  "subtract", "✅", "✅"
+  "add scalar", "✅", "✅"
+  "subtract scalar", "✅", "✅"
+  "multiply scalar", "✅", "✅"
+  "fused multiply add scalar", "✅", "✅"
   "magnitude", "✅", "✅"
-  "multiply", "✅", "✅"
-  "phase", "✅", "✅"
+  "log", "✅", "✅"
+  "log1p", "✅", "✅"
   "tensor add", "✅", "✅"
   "tensor subtract", "✅", "✅"
   "tensor multiply", "✅", "✅"
-  "accumulate squared", "✅", "✅"
+  "tensor divide", "✅", "✅"
+
+Statistical operations
+-----------------------------------------------------------------------------------------------
+
+.. csv-table::
+  :widths: 7, 3, 3
+  :header: "Type", "CPU", "GPU"
+
+  "tensor sum", "✅", "✅"
+  "tensor min", "✅", "✅"
+  "tensor max", "✅", "✅"
+  "tensor mean", "✅", "✅"
+  "tensor stddev", "✅", "✅"
+  "normalize", "✅", "✅"
+  "threshold", "✅", "✅"
 
 Bitwise operations
 -----------------------------------------------------------------------------------------------
@@ -163,44 +155,56 @@ Bitwise operations
   :header: "Type", "CPU", "GPU"
 
   "bitwise ``AND``", "✅", "✅"
+  "bitwise ``OR``", "✅", "✅"
+  "bitwise ``XOR``", "✅", "✅"
   "bitwise ``NOT``", "✅", "✅"
-  "exclusive ``OR``", "✅", "✅"
-  "inclusive ``OR``", "✅", "✅"
+  "tensor ``AND`` tensor", "✅", "✅"
+  "tensor ``OR`` tensor", "✅", "✅"
+  "tensor ``XOR`` tensor", "✅", "✅"
 
-Computer vision
+Data exchange operations
 -----------------------------------------------------------------------------------------------
 
 .. csv-table::
   :widths: 7, 3, 3
   :header: "Type", "CPU", "GPU"
 
-  "local binary pattern", "✅", "✅"
-  "data object copy", "✅", "✅"
-  "gaussian image pyramid", "✅", "✅"
-  "laplacian image pyramid", "✅", "✅"
-  "canny edge detector", "✅", "✅"
-  "harris corner detector", "✅", "✅"
-  "tensor convert bit depth", "✅", "❌"
-  "fast corner detector", "✅", "❌"
-  "reconstruction laplacian image pyramid", "✅", "❌"
-  "control flow", "✅", "✅"
-  "hough lines", "✅", "❌"
-  "hog", "✅", "❌"
-  "remap", "✅", "❌"
-  "tensor matrix multiply", "✅", "✅"
-  "tensor transpose", "✅", "✅"
+  "copy", "✅", "✅"
+  "channel permute", "✅", "✅"
+  "color to greyscale", "✅", "✅"
+  "YUV to RGB", "❌", "✅"
+  "YUV to RGB (cubic vertical upsampling)", "❌", "✅"
+  "YUV to RGB (linear vertical upsampling)", "❌", "✅"
 
-Audio
+Audio augmentations
 -----------------------------------------------------------------------------------------------
 
 .. csv-table::
   :widths: 7, 3, 3
   :header: "Type", "CPU", "GPU"
 
-  "non Silent Region Detection", "✅", "✅"
-  "to Decibels", "✅", "✅"
-  "downmixing", "✅", "✅"
-  "pre-emphasis Filter", "✅", "✅"
-  "resample", "✅", "✅"
-  "mel Filter Bank", "✅", "✅"
+  "non-silent region detection", "✅", "✅"
+  "to decibels", "✅", "✅"
+  "pre-emphasis filter", "✅", "✅"
+  "down mixing", "✅", "✅"
   "spectrogram", "✅", "✅"
+  "mel filter bank", "✅", "✅"
+  "resample", "✅", "✅"
+  "audio tensor add tensor", "✅", "✅"
+  "audio tensor multiply scalar", "✅", "✅"
+
+3D image (voxel) augmentations
+-----------------------------------------------------------------------------------------------
+
+.. csv-table::
+  :widths: 7, 3, 3
+  :header: "Type", "CPU", "GPU"
+
+  "flip (voxel)", "✅", "✅"
+  "gaussian noise (voxel)", "✅", "✅"
+  "add scalar", "✅", "✅"
+  "subtract scalar", "✅", "✅"
+  "multiply scalar", "✅", "✅"
+  "fused multiply add scalar", "✅", "✅"
+  "slice", "✅", "✅"
+  "normalize", "✅", "✅"

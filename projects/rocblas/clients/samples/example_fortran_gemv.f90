@@ -58,10 +58,10 @@ program example_fortran_gemv
     ! TODO: hip workaround until plugin is ready.
     interface
         function hipMalloc(ptr, size) &
-                result(c_int) &
                 bind(c, name = 'hipMalloc')
             use iso_c_binding
             implicit none
+            integer(c_int) :: hipMalloc
             type(c_ptr), value :: ptr
             integer(c_size_t), value :: size
         end function hipMalloc
@@ -69,20 +69,20 @@ program example_fortran_gemv
 
     interface
         function hipFree(ptr) &
-                result(c_int) &
                 bind(c, name = 'hipFree')
             use iso_c_binding
             implicit none
+            integer(c_int) :: hipFree
             type(c_ptr), value :: ptr
         end function hipFree
     end interface
 
     interface
         function hipMemcpy(dst, src, size, kind) &
-                result(c_int) &
                 bind(c, name = 'hipMemcpy')
             use iso_c_binding
             implicit none
+            integer(c_int) :: hipMemcpy
             type(c_ptr), value :: dst
             type(c_ptr), intent(in), value :: src
             integer(c_size_t), value :: size
@@ -92,10 +92,10 @@ program example_fortran_gemv
 
     interface
         function hipMemset(dst, val, size) &
-                result(c_int) &
                 bind(c, name = 'hipMemset')
             use iso_c_binding
             implicit none
+            integer(c_int) :: hipMemset
             type(c_ptr), value :: dst
             integer(c_int), value :: val
             integer(c_size_t), value :: size
@@ -104,19 +104,19 @@ program example_fortran_gemv
 
     interface
         function hipDeviceSynchronize() &
-                result(c_int) &
                 bind(c, name = 'hipDeviceSynchronize')
             use iso_c_binding
             implicit none
+            integer(c_int) :: hipDeviceSynchronize
         end function hipDeviceSynchronize
     end interface
 
     interface
         function hipDeviceReset() &
-                result(c_int) &
                 bind(c, name = 'hipDeviceReset')
             use iso_c_binding
             implicit none
+            integer(c_int) :: hipDeviceReset
         end function hipDeviceReset
     end interface
     ! TODO end

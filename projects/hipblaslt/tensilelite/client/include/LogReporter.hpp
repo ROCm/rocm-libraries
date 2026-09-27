@@ -126,6 +126,7 @@ namespace TensileLite
                                                                      Validation,
                                                                      TimeUS,
                                                                      perfUnit,
+                                                                     GbpsBW,
                                                                      Empty,
                                                                      TotalGranularity,
                                                                      TilesPerCu,
@@ -214,6 +215,8 @@ namespace TensileLite
                 else if(value == "WRONG_HARDWARE")
                     m_rowLevel = LogLevel::Terse;
                 else if(value == "DID_NOT_SATISFY_ASSERTS")
+                    m_rowLevel = LogLevel::Terse;
+                else if(value == "UNSUPPORTED_XCD_TOPOLOGY")
                     m_rowLevel = LogLevel::Terse;
                 else if(value == "INVALID")
                 {

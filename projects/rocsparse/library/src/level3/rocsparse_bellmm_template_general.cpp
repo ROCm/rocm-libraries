@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,70 @@
  * ************************************************************************ */
 
 #include "bellmm_device_general.h"
+#include "rocsparse_float16.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
+    //
+    // Compile-time launch geometry for the general blocked-ELL SpMM kernel.
+    //
+    // The kernel maps one thread to one output element C[C_row, n]:
+    // hipThreadIdx_x selects the row inside the A block (stepping by
+    // BELL_BLOCK_DIM to cover block dimensions larger than the thread block)
+    // and hipThreadIdx_y selects the dense column (tiled by BLK_SIZE_Y). There
+    // is no cross-thread reduction, so the kernel is correct for any square
+    // TILE x TILE workgroup: rows beyond block_dim and columns beyond N are
+    // simply skipped by the in-kernel guards.
+    //
+    // Historically TILE was the fixed magic number 32 (=> 32x32 = 1024 threads).
+    // That is a poor fit for small ELL block dimensions: a block_dim of 8 still
+    // launches a 1024-thread (32-wave on wave32) workgroup in which every thread
+    // with hipThreadIdx_x >= 8 (i.e. 3/4 of the x-lanes) early-outs, wasting wave
+    // slots and capping occupancy of this memory-bound kernel.
+    //
+    // We derive TILE from hardware properties instead of hard-coding it:
+    //   * t_max   = largest power-of-two whose square still fits in
+    //               maxThreadsPerBlock (== 32 on every arch rocSPARSE targets,
+    //               since 32*32 = 1024). This reproduces the historical tile
+    //               exactly and is what wave64 (CDNA) keeps unconditionally.
+    //   * min_tile= smallest power-of-two whose square covers at least one full
+    //               wavefront (== 8 on wave32: 8*8 = 64 = 2 wavefronts), so the
+    //               shrunk workgroup is always a whole number of wavefronts.
+    // On wave32 we then pick the smallest power-of-two tile that still covers
+    // block_dim, clamped to [min_tile, t_max]. wave64 and anything we cannot
+    // validate here fall back to t_max, i.e. the historical 32-wide tile, so
+    // CDNA behaviour is unchanged by construction.
+    //
+    static rocsparse_int bellmm_general_tile_size(rocsparse_handle handle, int64_t block_dim)
+    {
+        rocsparse_int t_max = 1;
+        while((t_max * 2) * (t_max * 2) <= handle->properties.maxThreadsPerBlock)
+        {
+            t_max *= 2;
+        }
+
+        // Gate the shrink on the only wavefront width we can validate here
+        // (wave32 / RDNA). On wave64 keep the historical full tile.
+        if(handle->wavefront_size != 32)
+        {
+            return t_max;
+        }
+
+        rocsparse_int min_tile = 1;
+        while(min_tile * min_tile < handle->wavefront_size)
+        {
+            min_tile *= 2;
+        }
+
+        rocsparse_int t = min_tile;
+        while(t < block_dim && t < t_max)
+        {
+            t *= 2;
+        }
+        return t;
+    }
+
     template <rocsparse_int BELL_BLOCK_DIM,
               rocsparse_int BLK_SIZE_Y,
               typename T,
@@ -37,12 +97,11 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
-                                        rocsparse_direction dir_A,
                                         I                   Mb,
                                         I                   N,
                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                         I bell_cols,
-                                        I block_dim,
+                                        I bell_block_dim,
                                         const I* __restrict__ bell_col_ind,
                                         const A* __restrict__ bell_val,
                                         const B* __restrict__ dense_B,
@@ -65,12 +124,11 @@ namespace rocsparse
 
         rocsparse::bellmm_general_blockdim_device<BELL_BLOCK_DIM, BLK_SIZE_Y, T>(trans_A,
                                                                                  trans_B,
-                                                                                 dir_A,
                                                                                  Mb,
                                                                                  N,
                                                                                  alpha,
                                                                                  bell_cols,
-                                                                                 block_dim,
+                                                                                 bell_block_dim,
                                                                                  bell_col_ind,
                                                                                  bell_val,
                                                                                  dense_B,
@@ -87,12 +145,11 @@ namespace rocsparse
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
-                                             rocsparse_direction       dir_A,
                                              I                         mb,
                                              I                         n,
                                              I                         kb,
                                              I                         bell_cols,
-                                             I                         block_dim,
+                                             I                         bell_block_dim,
                                              const T*                  alpha,
                                              const rocsparse_mat_descr descr,
                                              const I*                  bell_col_ind,
@@ -108,8 +165,6 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
 
         hipStream_t stream = handle->stream;
-        dim3        bellmm_blocks((mb - 1) / 1 + 1, (n - 1) / 32 + 1);
-        dim3        bellmm_threads(32, 32, 1);
 
         if(trans_A != rocsparse_operation_none)
         {
@@ -118,33 +173,55 @@ namespace rocsparse
                 "This function is designed for trans_A = rocsparse_operation_none.");
         }
 
-        //
-        // What happends if A needs to be transposed?
-        //
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bellmm_general_blockdim_kernel<32, 32, T>),
-                                           bellmm_blocks,
-                                           bellmm_threads,
-                                           0,
-                                           stream,
-                                           trans_A,
-                                           trans_B,
-                                           dir_A,
-                                           mb,
-                                           n,
-                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-                                           bell_cols,
-                                           block_dim,
-                                           bell_col_ind,
-                                           bell_val,
-                                           dense_B,
-                                           ldb,
-                                           order_B,
-                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),
-                                           dense_C,
-                                           ldc,
-                                           order_C,
-                                           descr->base,
-                                           handle->pointer_mode == rocsparse_pointer_mode_host);
+        // Device-derived, wave-relative square tile edge (see
+        // rocsparse::bellmm_general_tile_size). On wave64 this is the historical
+        // 32; on wave32 it shrinks to fit small block dimensions.
+        const rocsparse_int tile = rocsparse::bellmm_general_tile_size(handle, bell_block_dim);
+
+#define ROCSPARSE_LAUNCH_BELLMM_GENERAL(TILE)                               \
+    {                                                                       \
+        dim3 bellmm_blocks((mb - 1) / 1 + 1, (n - 1) / (TILE) + 1);         \
+        dim3 bellmm_threads((TILE), (TILE), 1);                             \
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                 \
+            (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), T>), \
+            bellmm_blocks,                                                  \
+            bellmm_threads,                                                 \
+            0,                                                              \
+            stream,                                                         \
+            trans_A,                                                        \
+            trans_B,                                                        \
+            mb,                                                             \
+            n,                                                              \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),               \
+            bell_cols,                                                      \
+            bell_block_dim,                                                 \
+            bell_col_ind,                                                   \
+            bell_val,                                                       \
+            dense_B,                                                        \
+            ldb,                                                            \
+            order_B,                                                        \
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                \
+            dense_C,                                                        \
+            ldc,                                                            \
+            order_C,                                                        \
+            descr->base,                                                    \
+            handle->pointer_mode == rocsparse_pointer_mode_host);           \
+    }
+
+        switch(tile)
+        {
+        case 8:
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL(8);
+            break;
+        case 16:
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL(16);
+            break;
+        default:
+            ROCSPARSE_LAUNCH_BELLMM_GENERAL(32);
+            break;
+        }
+
+#undef ROCSPARSE_LAUNCH_BELLMM_GENERAL
 
         return rocsparse_status_success;
     }
@@ -154,7 +231,6 @@ namespace rocsparse
     template rocsparse_status rocsparse::bellmm_template_general(rocsparse_handle    handle,         \
                                                                  rocsparse_operation trans_A,        \
                                                                  rocsparse_operation trans_B,        \
-                                                                 rocsparse_direction dir_A,          \
                                                                  ITYPE               mb,             \
                                                                  ITYPE               n,              \
                                                                  ITYPE               kb,             \

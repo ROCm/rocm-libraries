@@ -26,6 +26,12 @@
 
 #include "internal/generic/rocsparse_spildlt0.h"
 
+// rocsparse_spildlt0_input_diag is deprecated but must still be handled so callers that set it
+// keep working. Referencing the [[deprecated]] enumerator directly would raise
+// -Wdeprecated-declarations under -Wall, so use its integer value instead (mirrors
+// deprecated_rocsparse_indextype_u16 in rocsparse_indextype_utils.hpp).
+#define deprecated_rocsparse_spildlt0_input_diag static_cast<rocsparse_spildlt0_input>(7)
+
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spildlt0_input value)
 {
@@ -38,7 +44,8 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spildlt0_input value)
     case rocsparse_spildlt0_input_boost_value:
     case rocsparse_spildlt0_input_boost_tolerance:
     case rocsparse_spildlt0_input_singularity_tolerance:
-    case rocsparse_spildlt0_input_diag:
+    // Deprecated, but still recognized as a valid input.
+    case deprecated_rocsparse_spildlt0_input_diag:
     {
         return false;
     }
@@ -174,7 +181,9 @@ try
         return rocsparse_status_success;
     }
 
-    case rocsparse_spildlt0_input_diag:
+    // Deprecated, but still handled so callers that set it keep working (D is additionally
+    // copied into the provided vector).
+    case deprecated_rocsparse_spildlt0_input_diag:
     {
         ROCSPARSE_CHECKARG(4,
                            data_size_in_bytes,

@@ -71,6 +71,28 @@ struct generator_prng_tests_params
     static inline constexpr rocrand_ordering ordering = Ordering;
 };
 
+// Produces names such as "Lfsr113_Default" / "Mrg31k3p_Dynamic".
+struct generator_prng_test_name
+{
+    template<class Params>
+    static std::string GetName(int)
+    {
+        std::string name = rocrand_rng_name(Params::generator_t::type());
+        name += Params::ordering == ROCRAND_ORDERING_PSEUDO_DYNAMIC ? "_Dynamic" : "_Default";
+        return name;
+    }
+};
+
+// Produces names such as "Mrg31k3p" / "Mrg32k3a".
+struct generator_type_test_name
+{
+    template<class Generator>
+    static std::string GetName(int)
+    {
+        return rocrand_rng_name(Generator::type());
+    }
+};
+
 TYPED_TEST_SUITE_P(generator_prng_tests);
 
 TYPED_TEST_P(generator_prng_tests, init_test)

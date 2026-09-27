@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyRemoveWaitCntPass --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyRemoveWaitCntPass + StinkyWaitCntInsertionPass run as a strip-then-
+# reinsert pair whenever EnableWaitCntInsertion is on (Gfx1250Backend.cpp). A
+# returning atomic's wait must survive that round trip: the strip pass
+# deletes the hand-placed (now redundant) wait guarding the atomic's result,
+# and the insertion pass must regenerate it from classifyMemOp() alone, or
+# the consumer would read the atomic's destination register before the
+# hardware retired it.
+#
+# CHECK-LABEL: @waitcnt_insertion_returning_atomic_strip_reinsert
+# CHECK: global_atomic_inc_u32
+# CHECK-NEXT: s_wait_loadcnt
+# CHECK-SAME: vlcnt = 0
+# CHECK-NEXT: v_readfirstlane_b32
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_kmcnt
+
+st.func @waitcnt_insertion_returning_atomic_strip_reinsert() {
+^entry:
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  "st.s_wait_loadcnt"() { issueCycles = 1, latencyCycles = 1, mod.waitcnt = { vlcnt = 0 } }
+  s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+}

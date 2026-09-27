@@ -16,6 +16,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/asm/StinkyRegister.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/InstructionSizeCosting.hpp"
 
 using namespace stinkytofu;
@@ -174,15 +175,15 @@ TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src383_Mod256_Logical127_Stays4Byt
     EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src384_Mod256_Logical128_PromotesTo8Bytes) {
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Src384_Mod256_Logical128_Stays4ByteBase) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
     ASSERT_NE(d, nullptr);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("v", 0, 1));
     inst->addSrcReg(StinkyRegister("v", 384, 1));
-    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
-    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
 TEST_F(InstructionSizeCostingTest, VCvtF32F16_V132_PromotesTo8Bytes) {
@@ -207,26 +208,48 @@ TEST_F(InstructionSizeCostingTest, VCvtF32F16_V12_Stays4ByteBase) {
     EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst128_Src127_OnlySrcCounts_Stays4ByteBase) {
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst128_Src127_DestCounts_PromotesTo8Bytes) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
     ASSERT_NE(d, nullptr);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("v", 128, 1));
     inst->addSrcReg(StinkyRegister("v", 127, 1));
-    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
-    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
 }
 
-TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst127_Src128_OnlySrcCounts_PromotesTo8Bytes) {
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst127_Src128_DestCounts_Stays4ByteBase) {
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
     ASSERT_NE(d, nullptr);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("v", 127, 1));
     inst->addSrcReg(StinkyRegister("v", 128, 1));
-    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 8);
-    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 8);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst0_Src132_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+TEST_F(InstructionSizeCostingTest, VCvtF16F32_Dst256_Src132_DestCounts_Stays4ByteBase) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::v_cvt_f16_f32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("v", 256, 1));
+    inst->addSrcReg(StinkyRegister("v", 132, 1));
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
 }
 
 TEST_F(InstructionSizeCostingTest, VCndmask_LastSrcVcc_Stays4ByteBase) {
@@ -451,20 +474,56 @@ TEST_F(InstructionSizeCostingTest, BufferOOB_String_Plus4) {
     EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, LabelString_AddrFromMap) {
+TEST_F(InstructionSizeCostingTest, LabelString_AlwaysPlus4) {
+    // A label operand is always a FK_PCRel_4 relocation: the assembler uses the
+    // 0xff inline-literal slot and reserves a 32-bit literal word, regardless of
+    // the label's resolved address or its position. Verified with
+    // `llvm-mc -mcpu=gfx1250 -show-encoding` (s_add_i32 s66, label, 0 -> 8 bytes).
+    // So +4 in every case, independent of labelByteOffset / current offset.
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("s", 0, 1));
     inst->addSrcReg(litStr("label_foo"));
 
+    // Far label address.
     std::unordered_map<std::string, int64_t> m;
     m["label_foo"] = 100;
     EXPECT_EQ(getLiteralExtraBytes(*inst, &m, 0, nullptr), 4);
 
+    // Near label address (<= 64): still +4 (the old > 64 heuristic was wrong).
     std::unordered_map<std::string, int64_t> m2;
     m2["label_foo"] = 8;
-    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 4);
+
+    // Label not in the map (forward reference) and near current offset: still +4.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
+}
+
+// A label operand paired with a short inline immediate: the short immediate
+// contributes 0, but the label still forces the 32-bit literal (+4). Mirrors
+// `llvm-mc -mcpu=gfx1250`: `s_add_i32 s66, label, 0` -> [0xff,0x80,...,A,A,A,A]
+// (8 bytes = 4 base + 4 literal), whereas `s_add_i32 s66, 0, 0` is 4 bytes.
+TEST_F(InstructionSizeCostingTest, LabelWithShortImmediate_OnlyLabelAddsLiteral) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_add_i32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litStr("label_SW_PrefetchAbs_0"));  // -> +4 (FK_PCRel_4)
+    inst->addSrcReg(litInt(0));                         // short inline -> +0
+
+    // Forward reference (label unknown) must still be +4 total.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst, nullptr, 0, nullptr),
+              getEffectiveBaseSizeInBytes(*inst) + 4);
+
+    // Sanity: two short immediates add no literal word.
+    StinkyInstruction* plain = b.create(d);
+    plain->addDestReg(StinkyRegister("s", 0, 1));
+    plain->addSrcReg(litInt(0));
+    plain->addSrcReg(litInt(0));
+    EXPECT_EQ(getLiteralExtraBytes(*plain), 0);
 }
 
 // VALU *_f32: hex `0x........` is float32 bits — same literal-extra as decimal
@@ -502,4 +561,119 @@ TEST_F(InstructionSizeCostingTest, SMovB32_Hex40800000_StillPlus4_NotValuF32Rule
     inst->addSrcReg(litStr("0x40800000"));
 
     EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
+}
+
+// ---------------------------------------------------------------------------
+// Pseudo instructions: no encoding, therefore no bytes
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, Fence_EmitsNoAssembly_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* fence = b.createFence();
+    ASSERT_NE(fence, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*fence), 0);
+    EXPECT_EQ(getEffectiveBaseSizeInBytes(*fence), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*fence), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*fence), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, FunctionAsmPlacementMarker_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* marker = b.createFunctionAsmPlacementMarker("label_Activation_None_VW8");
+    ASSERT_NE(marker, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*marker), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*marker), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, Label_CostsZeroBytes) {
+    auto b = makeBuilder();
+    StinkyInstruction* lbl = b.createLabel("label_LoopBeginL", 16);
+    ASSERT_NE(lbl, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*lbl), 0);
+    EXPECT_EQ(totalInstructionEncodingBytes(*lbl), 0);
+}
+
+TEST_F(InstructionSizeCostingTest, RealOpcodeWithoutTablegenEncoding_KeepsFourByteDefault) {
+    // A real opcode with no tablegen .encoding still costs 4 B.
+    auto b = makeBuilder();
+    static const HwInstDesc noEncoding{GFX::s_nop,           GFX::s_nop,     0, 0, 0, 0,
+                                       "s_nop_no_encoding_", makeFlagSet({})};
+    StinkyInstruction* inst = b.create(&noEncoding);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(hardwareEncodingBytes(*inst), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst), 4);
+}
+
+// ---------------------------------------------------------------------------
+// accumulateInstructionSize: pseudo instructions must not move the byte cursor
+// ---------------------------------------------------------------------------
+
+TEST_F(InstructionSizeCostingTest, Accumulate_FenceCostsNothing) {
+    auto b = makeBuilder();
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+    b.createFence();
+    b.createFence();
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+    EXPECT_EQ(totalBytes, 8);  // two s_nop; the fences are free
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_FencesDoNotPadAnAlreadyAlignedLabel) {
+    // Pseudo ops must not move the byte cursor (would credit padding the assembler never emits).
+    auto b = makeBuilder();
+    for (int i = 0; i < 4; ++i) b.create(getMCIDByUOp(GFX::s_nop, arch));  // 16 B: 16-aligned
+    b.createFence();
+    b.createFence();
+    b.createLabel("label_LoopBeginL", 16);
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+
+    EXPECT_EQ(labelOff["label_LoopBeginL"], 16);  // already aligned -> zero padding
+    EXPECT_EQ(totalBytes, 20);                    // five s_nop, no padding
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_MisalignedLabelStillPadsWithFencesPresent) {
+    // Pseudo ops not moving the cursor must not disable label alignment: 12 B + .align 16 owes 4 B.
+    auto b = makeBuilder();
+    for (int i = 0; i < 3; ++i) b.create(getMCIDByUOp(GFX::s_nop, arch));  // 12 B
+    b.createFence();
+    b.createLabel("label_TailLoopBeginL", 16);
+    b.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    std::unordered_map<std::string, int64_t> labelOff;
+    int64_t totalBytes = -1;
+    accumulateInstructionSize(*bb, labelOff, nullptr, nullptr, &totalBytes);
+
+    EXPECT_EQ(labelOff["label_TailLoopBeginL"], 16);  // 12 -> pad 4
+    EXPECT_EQ(totalBytes, 20);                        // 12 + 4 padding + 4
+}
+
+TEST_F(InstructionSizeCostingTest, Accumulate_LabelOffsetsUnaffectedByFenceCount) {
+    // Extra fences must not change label offsets or the total.
+    auto run = [this](int fences) {
+        Function f("fence_invariance");
+        BasicBlock* block = f.createBasicBlock("entry");
+        AsmIRBuilder b(*block, arch);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        for (int i = 0; i < fences; ++i) b.createFence();
+        b.createLabel("label_A", 1);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        b.createLabel("label_B", 16);
+        b.create(getMCIDByUOp(GFX::s_nop, arch));
+        std::unordered_map<std::string, int64_t> off;
+        int64_t total = -1;
+        accumulateInstructionSize(*block, off, nullptr, nullptr, &total);
+        return std::make_pair(off, total);
+    };
+    auto none = run(0);
+    auto many = run(7);
+    EXPECT_EQ(none.second, many.second);
+    EXPECT_EQ(none.first["label_A"], many.first["label_A"]);
+    EXPECT_EQ(none.first["label_B"], many.first["label_B"]);
 }

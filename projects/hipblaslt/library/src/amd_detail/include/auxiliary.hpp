@@ -158,6 +158,22 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     return "invalid";
 }
 
+// Returns true for sub-byte MX-style data types (fp6/fp4).
+// Used to reject features that require byte-addressable elements.
+HIPBLASLT_EXPORT
+constexpr bool hip_datatype_is_mxtype(hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_6F_E2M3:
+    case HIP_R_6F_E3M2:
+    case HIP_R_4F_E2M1:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // return precision string for hipDataType
 HIPBLASLT_EXPORT
 constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
@@ -380,14 +396,4 @@ __host__ __device__ inline bool hipblaslt_isinf(hipblasLtHalf arg)
         uint16_t      data;
     } x = {arg};
     return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) == 0;
-}
-
-/*******************************************************************************
- * \brief  returns true if arg is zero
- ********************************************************************************/
-
-template <typename T>
-__host__ __device__ inline bool hipblaslt_iszero(T arg)
-{
-    return arg == 0;
 }

@@ -1,4 +1,4 @@
-{% from "macros.j2" import vector_const_name %}
+{% from "macros.j2" import assign_frontend_data_field, baseline_mode_name, baseline_scalar_value, cpp_literal, vector_const_name %}
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -46,7 +47,39 @@ class Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifti
 {
 protected:
     /// Builds a standard {{ op.name }} graph for round-trip testing.
-    static std::shared_ptr<TestableGraphLifting> buildGraph()
+    static {{ op.frontend.attributes_class }}
+        createAttributes(DataType operationComputeDataType = DataType::NOT_SET)
+    {
+        {{ op.frontend.attributes_class }} attrs;
+        attrs.set_name("test_op");
+{% if op.mode_fields %}
+{% set mf = op.mode_fields[0] %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
+        {{ assign_frontend_data_field("attrs", mf, value) }}
+{% endif %}
+{% for df in op.data_fields if df.is_vector and df.required %}
+{% if df.name in op.test_data.field_values %}
+{% set const_name = vector_const_name(df, op) %}
+        {{ assign_frontend_data_field("attrs", df, "toVec(" ~ const_name ~ ")") }}
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = baseline_scalar_value(op, df) %}
+        {{ assign_frontend_data_field("attrs", df, value) }}
+{% endfor %}
+        if(operationComputeDataType != DataType::NOT_SET)
+        {
+            attrs.set_compute_data_type(operationComputeDataType);
+        }
+        return attrs;
+    }
+
+    static std::shared_ptr<TestableGraphLifting> buildGraph(
+        {{ op.frontend.attributes_class }} attrs
+{% for param in op.frontend.graph_method_params if param.optional %}
+        , bool include{{ param.name[0] | upper }}{{ param.name[1:] }} = false
+{% endfor %}
+        )
     {
         auto graph = std::make_shared<TestableGraphLifting>();
         graph->set_name("{{ op.name }}LiftingTestGraph")
@@ -58,51 +91,50 @@ protected:
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
+{% if param.optional %}
+        std::shared_ptr<TensorAttributes> {{ param.name }};
+        if(include{{ param.name[0] | upper }}{{ param.name[1:] }})
+        {
+            {{ param.name }} = std::make_shared<TensorAttributes>();
+            {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
+                .set_name("{{ param.tensor_name }}")
+                .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
+{% if tc %}
+            {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS))
+                .set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
+        }
+{% else %}
         auto {{ param.name }} = std::make_shared<TensorAttributes>();
         {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
             .set_name("{{ param.tensor_name }}")
-            .set_data_type(DataType::FLOAT);
+            .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
 {% if tc %}
-        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+        {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS))
+            .set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
 {% endif %}
 
 {% endfor %}
-        {{ op.frontend.attributes_class }} attrs;
-        attrs.set_name("test_op");
-{% if op.mode_fields %}
-{% set mf = op.mode_fields[0] %}
-{% if non_sentinel %}
-        attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
-{% endif %}
-{% for df in op.data_fields if df.is_vector and df.required %}
-{% if df.name in op.test_data.field_values %}
-{% set const_name = vector_const_name(df, op) %}
-        attrs.{{ df.frontend_setter_name }}(toVec({{ const_name }}));
-{% endif %}
-{% endfor %}
-
 {% if op.frontend.graph_return_type == 'single' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
-{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
         auto {{ out_name }} = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
             {{ param.name }},
 {% endfor %}
-            attrs);
+            std::move(attrs));
         {{ out_name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
 {% elif op.frontend.graph_return_type == 'array' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
 {% set out_tf_name = rmap.get(out_name, out_name) %}
-{% set out_tc = op.test_data.tensor_configs.get(out_tf_name) %}
         auto results = graph->{{ op.frontend.graph_method_name }}(
 {% for param in op.frontend.graph_method_params %}
             {{ param.name }},
 {% endfor %}
-            attrs);
+            std::move(attrs));
         results[0]->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ out_tf_name | upper }}_UID)
             .set_output(true)
             .set_name("{{ out_name }}");
@@ -117,7 +149,7 @@ protected:
 // validation of graph data types, tensor attributes, and operation parameters.
 TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, Basic{{ op.name }}RoundTrip)
 {
-    auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph(createAttributes());
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -141,7 +173,9 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
-    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_data_type(), DataType::FLOAT);
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_data_type(), DataType::{{ tc.data_type if tc else "FLOAT" }});
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_name(), "{{ ft.name if ft else tf.name }}");
 
 {% endfor %}
     // Verify sub-node count and type
@@ -154,9 +188,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
     // Verify mode
-{% if non_sentinel %}
-    EXPECT_EQ(opNode->attributes.{{ mf.frontend_getter }}, {{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
+    EXPECT_EQ(opNode->attributes.{{ mf.frontend_getter }}, {{ mf.effective_frontend_type }}::{{ baseline_mode_name(op, mf) }});
 {% endif %}
 
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -166,16 +198,152 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, toVec({{ const_name }}));
 {% endif %}
 {% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = baseline_scalar_value(op, df) %}
+    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, {{ value }});
+{% endfor %}
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+{% if op.has_compute_data_type %}
+// Verifies an operation-level compute type survives descriptor lifting.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, OperationComputeDataTypeSurvivesLifting)
+{
+    auto originalGraph = buildGraph(createAttributes(DataType::HALF));
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<{{ op.frontend.node_class }}*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.get_compute_data_type(), DataType::HALF);
+}
+{% endif %}
+
+{% for scenario in op.mode_integration_scenarios %}
+// Verifies {{ scenario.mode }} mode survives lowering and descriptor lifting.
+// Mode-irrelevant frontend attributes are intentionally canonicalized away,
+// matching cuDNN's mode-gated descriptor packing.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, ModeScenario{{ scenario.pascal_name }})
+{
+    auto attrs = createAttributes();
+    attrs.set_name("test_{{ scenario.name }}");
+{% set mf = op.mode_fields[0] %}
+    {{ assign_frontend_data_field("attrs", mf, mf.effective_frontend_type ~ "::" ~ scenario.mode) }}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = scenario.scalar_overrides.get(df.name, df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0)) %}
+    {{ assign_frontend_data_field("attrs", df, cpp_literal(value)) }}
+{% endfor %}
+
+    auto originalGraph = buildGraph(
+        std::move(attrs)
+{% for param in op.frontend.graph_method_params if param.optional %}
+        , {{ "true" if (param.tensor_name or param.name) in scenario.provided_optional_inputs else "false" }}
+{% endfor %}
+        );
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+
+    const auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), {{ (op.required_tensor_fields | length) + (scenario.expected_optional_inputs | length) }}u);
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+    auto* opNode = dynamic_cast<{{ op.frontend.node_class }}*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+    EXPECT_EQ(opNode->attributes.{{ mf.frontend_getter }}, {{ mf.effective_frontend_type }}::{{ scenario.mode }});
+{% for tf in op.optional_tensor_fields %}
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+{% if ft %}
+{% set uid_const = op.tensor_const_prefix ~ "TENSOR_" ~ (tf.name | upper) ~ "_UID" %}
+{% if tf.name in scenario.expected_optional_inputs %}
+    ASSERT_NE(opNode->attributes.{{ ft.effective_getter_name }}(), nullptr);
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_data_type(), DataType::{{ op.test_data.tensor_configs[tf.name].data_type }});
+    EXPECT_EQ(tensorMap.at({{ uid_const }}).get(), opNode->attributes.{{ ft.effective_getter_name }}().get());
+{% else %}
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}(), nullptr);
+{% endif %}
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set input_value = scenario.scalar_overrides.get(df.name, df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0)) %}
+{% set expected_value = scenario.expected_scalar_values.get(df.name, input_value) %}
+    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, {{ cpp_literal(expected_value) }});
+{% endfor %}
+}
+{% endfor %}
+
+// Exercises JSON serialization and deserialization for each mode, including
+// canonicalization of mode-irrelevant frontend attributes.
+TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, JsonRoundTripsAllModeScenarios)
+{
+{% set mf = op.mode_fields[0] %}
+{% for scenario in op.mode_integration_scenarios %}
+    {
+        auto attrs = createAttributes();
+        attrs.set_name("test_json_{{ scenario.name }}");
+        {{ assign_frontend_data_field("attrs", mf, mf.effective_frontend_type ~ "::" ~ scenario.mode) }}
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = scenario.scalar_overrides.get(df.name, df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0)) %}
+        {{ assign_frontend_data_field("attrs", df, cpp_literal(value)) }}
+{% endfor %}
+
+        auto originalGraph = buildGraph(
+            std::move(attrs)
+{% for param in op.frontend.graph_method_params if param.optional %}
+            , {{ "true" if (param.tensor_name or param.name) in scenario.provided_optional_inputs else "false" }}
+{% endfor %}
+            );
+
+        auto result = originalGraph->validate();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        std::string jsonData;
+        result = originalGraph->serialize(jsonData);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_FALSE(jsonData.empty());
+
+        auto liftedGraph = std::make_shared<TestableGraphLifting>();
+        result = liftedGraph->deserialize(_handle, jsonData);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const auto tensorMap = liftedGraph->getTensorsByUid();
+        ASSERT_EQ(tensorMap.size(), {{ (op.required_tensor_fields | length) + (scenario.expected_optional_inputs | length) }}u);
+        auto& subNodes = liftedGraph->getSubNodes();
+        ASSERT_EQ(subNodes.size(), 1u);
+        auto* opNode = dynamic_cast<{{ op.frontend.node_class }}*>(subNodes[0].get());
+        ASSERT_NE(opNode, nullptr);
+        EXPECT_EQ(opNode->attributes.{{ mf.frontend_getter }},
+                  {{ mf.effective_frontend_type }}::{{ scenario.mode }});
+{% for tf in op.optional_tensor_fields %}
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+{% if ft %}
+{% if tf.name in scenario.expected_optional_inputs %}
+        ASSERT_NE(opNode->attributes.{{ ft.effective_getter_name }}(), nullptr);
+{% else %}
+        EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}(), nullptr);
+{% endif %}
+{% endif %}
+{% endfor %}
+{% for df in op.data_fields if df.is_scalar %}
+{% set input_value = scenario.scalar_overrides.get(df.name, df.test_value if df.test_value is not none else op.test_data.field_values.get(df.name, 0)) %}
+{% set expected_value = scenario.expected_scalar_values.get(df.name, input_value) %}
+        EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }},
+                  {{ cpp_literal(expected_value) }});
+{% endfor %}
+    }
+{% endfor %}
 }
 
 // After lifting, verifies tensor objects in the node attributes are the same
 // shared_ptr instances as in the tensor map (pointer equality).
 TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ op.name }}TensorSharingPreserved)
 {
-    auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph(createAttributes());
 
     auto liftedGraph = liftGraph(*originalGraph, _handle);
     ASSERT_NE(liftedGraph, nullptr);
@@ -205,7 +373,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 // all fields survive the backend C API serialization path.
 TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLifting, {{ op.name }}LiftWithoutFinalization)
 {
-    auto originalGraph = buildGraph();
+    auto originalGraph = buildGraph(createAttributes());
 
     auto liftedGraph = liftGraphWithoutFinalization(*originalGraph);
     ASSERT_NE(liftedGraph, nullptr);
@@ -225,9 +393,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
     // Verify mode
-{% if non_sentinel %}
-    EXPECT_EQ(opNode->attributes.{{ mf.frontend_getter }}, {{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
+    EXPECT_EQ(opNode->attributes.{{ mf.frontend_getter }}, {{ mf.effective_frontend_type }}::{{ baseline_mode_name(op, mf) }});
 {% endif %}
 
 {% for df in op.data_fields if df.is_vector and df.required %}
@@ -238,6 +404,10 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% endif %}
 {% endfor %}
 
+{% for df in op.data_fields if df.is_scalar %}
+{% set value = baseline_scalar_value(op, df) %}
+    EXPECT_EQ(opNode->attributes.{{ df.frontend_getter }}, {{ value }});
+{% endfor %}
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 
@@ -253,6 +423,8 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_DIMS));
     EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_STRIDES));
 {% endif %}
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+    EXPECT_EQ(tensorMap[{{ op.tensor_const_prefix }}TENSOR_{{ tf_upper }}_UID]->get_name(), "{{ ft.name if ft else tf.name }}");
 {% endfor %}
 }
 
@@ -279,12 +451,16 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
+{% if param.optional %}
+    const std::shared_ptr<TensorAttributes> {{ param.name }};
+{% else %}
     auto {{ param.name }} = std::make_shared<TensorAttributes>();
     {{ param.name }}->set_uid({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_UID)
         .set_name("{{ param.tensor_name }}")
-        .set_data_type(DataType::FLOAT);
+        .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
 {% if tc %}
     {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
 {% endif %}
 
 {% endfor %}
@@ -292,17 +468,16 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     attrs.set_name("test_{{ df.name }}");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% if non_sentinel %}
-    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
+{% set value = mf.effective_frontend_type ~ '::' ~ mf.test_enum_value %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}
 {% if vf.name in op.test_data.field_values %}
 {% set const_name = vector_const_name(vf, op) %}
-    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
+    {{ assign_frontend_data_field("attrs", vf, "toVec(" ~ const_name ~ ")") }}
 {% endif %}
 {% endfor %}
-    attrs.{{ df.frontend_setter_name }}({{ test_val }});
+    {{ assign_frontend_data_field("attrs", df, test_val) }}
 
 {% if op.frontend.graph_return_type == 'single' %}
 {% set out_name = op.frontend.graph_return_outputs[0] %}
@@ -363,11 +538,15 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% for param in op.frontend.graph_method_params %}
 {% set tf_name = rmap.get(param.tensor_name, param.tensor_name) %}
 {% set tc = op.test_data.tensor_configs.get(tf_name) %}
+{% if param.optional %}
+    const std::shared_ptr<TensorAttributes> {{ param.name }};
+{% else %}
     auto {{ param.name }} = std::make_shared<TensorAttributes>();
     {{ param.name }}->set_name("{{ param.tensor_name }}")
-        .set_data_type(DataType::FLOAT);
+        .set_data_type(DataType::{{ tc.data_type if tc else "FLOAT" }});
 {% if tc %}
     {{ param.name }}->set_dim(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_DIMS)).set_stride(toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf_name | upper }}_STRIDES));
+{% endif %}
 {% endif %}
 
 {% endfor %}
@@ -375,15 +554,18 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     attrs.set_name("test_auto_uid");
 {% if op.mode_fields %}
 {% set mf = op.mode_fields[0] %}
-{% if non_sentinel %}
-    attrs.{{ mf.frontend_setter_name }}({{ mf.effective_frontend_type }}::{{ non_sentinel[0].effective_frontend_name }});
-{% endif %}
+{% set value = mf.effective_frontend_type ~ '::' ~ baseline_mode_name(op, mf) %}
+    {{ assign_frontend_data_field("attrs", mf, value) }}
 {% endif %}
 {% for vf in op.data_fields if vf.is_vector and vf.required %}
 {% if vf.name in op.test_data.field_values %}
 {% set const_name = vector_const_name(vf, op) %}
-    attrs.{{ vf.frontend_setter_name }}(toVec({{ const_name }}));
+    {{ assign_frontend_data_field("attrs", vf, "toVec(" ~ const_name ~ ")") }}
 {% endif %}
+{% endfor %}
+{% for vf in op.data_fields if vf.is_scalar %}
+{% set value = baseline_scalar_value(op, vf) %}
+    {{ assign_frontend_data_field("attrs", vf, value) }}
 {% endfor %}
 
 {% if op.frontend.graph_return_type == 'single' %}
@@ -418,7 +600,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
     uids.reserve(tensorMap.size());
     for(const auto& [uid, tensor] : tensorMap)
     {
-        EXPECT_GT(uid, 0) << "Auto-assigned UID should be positive"; // NOLINT(readability-implicit-bool-conversion)
+        EXPECT_GE(uid, 0) << "Auto-assigned UID should be non-negative"; // NOLINT(readability-implicit-bool-conversion)
         uids.push_back(uid);
     }
     std::sort(uids.begin(), uids.end());
@@ -451,6 +633,7 @@ TEST_F(Integration{{ op.frontend.attributes_filename or op.name }}DescriptorLift
 {% if ft and tc %}
     EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_dim(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_DIMS));
     EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_stride(), toVec({{ op.tensor_const_prefix }}TENSOR_{{ tf.name | upper }}_STRIDES));
+    EXPECT_EQ(opNode->attributes.{{ ft.effective_getter_name }}()->get_name(), "{{ ft.name }}");
 {% endif %}
 {% endfor %}
 }

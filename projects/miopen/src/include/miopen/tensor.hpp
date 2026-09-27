@@ -47,14 +47,6 @@
 namespace miopen {
 
 template <class T, std::size_t... Ns>
-constexpr auto tie_array_impl(T&& x, std::index_sequence<Ns...>)
-    MIOPEN_RETURNS(std::array{x[Ns]...});
-
-template <std::size_t N, class T>
-constexpr auto tien_array(T&& x)
-    MIOPEN_RETURNS(tie_array_impl(std::forward<T>(x), std::make_index_sequence<N>()));
-
-template <class T, std::size_t... Ns>
 auto tie_impl(T&& x, std::index_sequence<Ns...>) -> decltype(std::tie(x[Ns]...))
 {
     assert(x.size() >= sizeof...(Ns));

@@ -53,6 +53,8 @@ def vram_detect():
     if os.name == "nt":
         cmd = "hipinfo.exe"
         process = subprocess.run([cmd], stdout=subprocess.PIPE)
+        if process.returncode != 0:
+            print(f"Warning: {cmd} exited with code {process.returncode}, VRAM detection may be inaccurate")
         for line_in in process.stdout.decode().splitlines():
             if 'totalGlobalMem' in line_in:
                 OS_info["VRAM"] = float(line_in.split()[1])
@@ -60,6 +62,8 @@ def vram_detect():
     else:
         cmd = "rocminfo"
         process = subprocess.run([cmd], stdout=subprocess.PIPE)
+        if process.returncode != 0:
+            print(f"Warning: {cmd} exited with code {process.returncode}, VRAM detection may be inaccurate")
         for line_in in process.stdout.decode().splitlines():
             match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
             if match:

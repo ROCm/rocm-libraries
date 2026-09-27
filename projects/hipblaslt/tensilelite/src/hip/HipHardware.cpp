@@ -58,8 +58,11 @@ namespace TensileLite
                 // hipDeviceAttributePhysicalMultiProcessorCount on multi-XCC
                 // architectures) are preserved. The int-only overload re-queries
                 // `hipGetDeviceProperties` and would discard those adjustments.
+                //
+                // Pass PCI chip ID when known (e.g. from hipDeviceAttributePciChipId upstream);
+                // Origami does not query PCI chip ID itself—nullopt selects gfx950 id75a0.
                 analyticalHardware = std::make_shared<origami::hardware_t>(
-                    origami::hardware_t::get_hardware_for_device(deviceId, prop));
+                    origami::hardware_t::get_hardware_for_device(deviceId, prop, pciChipId));
             }
         }
 
@@ -79,7 +82,6 @@ namespace TensileLite
         {
             hipDeviceProp_t prop;
             HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
-#if HIP_VERSION >= 50220730
             int hip_version;
             HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
             if(hip_version >= 50220730)
@@ -88,7 +90,6 @@ namespace TensileLite
                                                     hipDeviceAttributePhysicalMultiProcessorCount,
                                                     deviceId));
             }
-#endif
             return GetDevice(prop, deviceId);
         }
 

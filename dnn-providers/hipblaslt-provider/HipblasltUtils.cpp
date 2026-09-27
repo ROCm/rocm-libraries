@@ -3,6 +3,8 @@
 
 #include "HipblasltUtils.hpp"
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+
 namespace hipblaslt_plugin::hipblaslt_utils
 {
 
@@ -82,30 +84,22 @@ hipDataType
         return HIP_R_16BF;
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
         return HIP_R_8I;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3:
+        return HIP_R_8F_E4M3;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
+        return HIP_R_8F_E5M2;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1:
+        return HIP_R_4F_E2M1;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3:
+        return HIP_R_6F_E2M3;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2:
+        return HIP_R_6F_E3M2;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported data type for hipBLASLt: "
                 + std::string(hipdnn_flatbuffers_sdk::data_objects::toString(dataType)));
     }
-}
-
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers)
-{
-    for(uint32_t i = 0; i < numDeviceBuffers; i++)
-    {
-        if(uid == deviceBuffers[i].uid)
-        {
-            return deviceBuffers[i];
-        }
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "Device buffer with the uid: " + std::to_string(uid)
-            + " not found in the provided device buffers.");
 }
 
 hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensorAttributes(
@@ -123,6 +117,24 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                    "Failed to find tensor with UID in tensorMap: "
                                                        + std::to_string(uid));
+}
+
+bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2;
+}
+
+bool isTypeFp6Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2;
+}
+
+bool isTypeMxOcp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return isTypeFp8Ocp(dataType) || isTypeFp6Ocp(dataType)
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1;
 }
 
 } // namespace hipblaslt_plugin::hipblaslt_utils

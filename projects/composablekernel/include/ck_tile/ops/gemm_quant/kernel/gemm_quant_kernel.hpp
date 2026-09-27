@@ -107,32 +107,16 @@ struct is_preshuffleB_enabled<T, std::void_t<decltype(T::PreshuffleB)>>
 };
 } // namespace detail
 
-struct QuantGemmProblem
+template <index_t NumDTensor>
+struct QuantGemmMultiDHostArgs
 {
-    CK_TILE_HOST QuantGemmProblem() = default;
-    CK_TILE_HOST QuantGemmProblem(index_t M_,
-                                  index_t N_,
-                                  index_t K_,
-                                  index_t QK_A_,
-                                  index_t QK_B_,
-                                  index_t stride_A_,
-                                  index_t stride_B_,
-                                  index_t stride_C_,
-                                  index_t stride_AQ_,
-                                  index_t stride_BQ_)
-        : M(M_),
-          N(N_),
-          K(K_),
-          QK_A(QK_A_),
-          QK_B(QK_B_),
-          stride_A(stride_A_),
-          stride_B(stride_B_),
-          stride_C(stride_C_),
-          stride_AQ(stride_AQ_),
-          stride_BQ(stride_BQ_)
-    {
-    }
-
+    const void* a_ptr;
+    const void* b_ptr;
+    std::array<const void*, NumDTensor> ds_ptr;
+    void* c_ptr;
+    const void* aq_ptr;
+    const void* bq_ptr;
+    index_t k_batch;
     index_t M;
     index_t N;
     index_t K;
@@ -140,56 +124,20 @@ struct QuantGemmProblem
     index_t QK_B;
     index_t stride_A;
     index_t stride_B;
+    std::array<index_t, NumDTensor> stride_Ds;
     index_t stride_C;
     index_t stride_AQ;
     index_t stride_BQ;
 };
 
-struct QuantGemmHostArgs : public QuantGemmProblem
-{
-    CK_TILE_HOST QuantGemmHostArgs() = default;
-    CK_TILE_HOST QuantGemmHostArgs(const void* a_ptr_,
-                                   const void* b_ptr_,
-                                   void* c_ptr_,
-                                   const void* aq_ptr_,
-                                   const void* bq_ptr_,
-                                   index_t k_batch_,
-                                   index_t M_,
-                                   index_t N_,
-                                   index_t K_,
-                                   index_t QK_A_,
-                                   index_t QK_B_,
-                                   index_t stride_A_,
-                                   index_t stride_B_,
-                                   index_t stride_C_,
-                                   index_t stride_AQ_,
-                                   index_t stride_BQ_)
-        : QuantGemmProblem(
-              M_, N_, K_, QK_A_, QK_B_, stride_A_, stride_B_, stride_C_, stride_AQ_, stride_BQ_),
-          a_ptr(a_ptr_),
-          b_ptr(b_ptr_),
-          aq_ptr(aq_ptr_),
-          bq_ptr(bq_ptr_),
-          c_ptr(c_ptr_),
-          k_batch(k_batch_)
-    {
-    }
-
-    const void* a_ptr  = nullptr;
-    const void* b_ptr  = nullptr;
-    const void* aq_ptr = nullptr;
-    const void* bq_ptr = nullptr;
-    void* c_ptr        = nullptr;
-    // k_batch must be a positive integer; defaults to 1 (no split-K).
-    index_t k_batch = 1;
-};
-
-struct QuantGemmKernelArgs
+template <index_t NumDTensor>
+struct QuantGemmMultiDKernelArgs
 {
     const void* a_ptr;
     const void* b_ptr;
     const void* aq_ptr;
     const void* bq_ptr;
+    std::array<const void*, NumDTensor> ds_ptr;
     void* c_ptr;
     index_t M;
     index_t N;
@@ -198,6 +146,7 @@ struct QuantGemmKernelArgs
     index_t QK_B;
     index_t stride_A;
     index_t stride_B;
+    std::array<index_t, NumDTensor> stride_Ds;
     index_t stride_C;
     index_t stride_AQ;
     index_t stride_BQ;
@@ -233,7 +182,7 @@ template <typename TilePartitioner_,
           typename EpiloguePipeline_,
           QuantType QuantType_,
           bool RuntimeSplitKTail_ = false>
-struct QuantGemmKernel
+struct QuantGemmMultiDKernel
 {
     using TilePartitioner  = remove_cvref_t<TilePartitioner_>;
     using GemmPipeline     = remove_cvref_t<GemmPipeline_>;
@@ -241,6 +190,7 @@ struct QuantGemmKernel
     using ALayout          = remove_cvref_t<typename GemmPipeline::ALayout>;
     using BLayout          = remove_cvref_t<typename GemmPipeline::BLayout>;
     using CLayout          = remove_cvref_t<typename GemmPipeline::CLayout>;
+    using DsLayout         = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
 
     using AQLayout = remove_cvref_t<
         typename detail::get_aq_layout_or<GemmPipeline, typename GemmPipeline::ALayout>::type>;
@@ -257,6 +207,7 @@ struct QuantGemmKernel
     using ADataType   = remove_cvref_t<typename GemmPipeline::ADataType>;
     using BDataType   = remove_cvref_t<typename GemmPipeline::BDataType>;
     using CDataType   = remove_cvref_t<typename EpiloguePipeline::ODataType>;
+    using DsDataType  = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
     using AccDataType = remove_cvref_t<typename EpiloguePipeline::AccDataType>;
 
     using AQDataType =
@@ -264,14 +215,22 @@ struct QuantGemmKernel
     using BQDataType =
         remove_cvref_t<typename detail::get_bq_data_type_or<GemmPipeline, AccDataType>::type>;
 
-    static constexpr auto I0 = number<0>(); // A Tensor
-    static constexpr auto I1 = number<1>(); // AQ Tensor
-    static constexpr auto I2 = number<2>(); // B Tensor
-    static constexpr auto I3 = number<3>(); // BQ Tensor
-    static constexpr auto I4 = number<4>(); // C Tensor
+    static_assert(is_detected<is_tuple, DsLayout>::value &&
+                      is_detected<is_tuple, DsDataType>::value &&
+                      DsLayout::size() == DsDataType::size(),
+                  "DsLayout and DsDataType must be tuples and must have the same size.");
+
+    static constexpr index_t NumDTensor = DsDataType::size();
+
+    static constexpr auto I0 = number<0>();
+    static constexpr auto I1 = number<1>();
+    static constexpr auto I2 = number<2>();
 
     static constexpr auto kQuantType        = QuantType_;
     static constexpr bool RuntimeSplitKTail = RuntimeSplitKTail_;
+
+    using HostArgs   = QuantGemmMultiDHostArgs<NumDTensor>;
+    using KernelArgs = QuantGemmMultiDKernelArgs<NumDTensor>;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
@@ -290,25 +249,26 @@ struct QuantGemmKernel
         return is_wave32() ? dim3(kBlockSize / 2) : dim3(kBlockSize);
     }
 
-    CK_TILE_HOST static constexpr QuantGemmKernelArgs
-    MakeKernelArgs(const QuantGemmHostArgs& hostArgs)
+    CK_TILE_HOST static constexpr KernelArgs MakeKernelArgs(const HostArgs& hostArgs)
     {
-        return QuantGemmKernelArgs{hostArgs.a_ptr,
-                                   hostArgs.b_ptr,
-                                   hostArgs.aq_ptr,
-                                   hostArgs.bq_ptr,
-                                   hostArgs.c_ptr,
-                                   hostArgs.M,
-                                   hostArgs.N,
-                                   hostArgs.K,
-                                   hostArgs.QK_A,
-                                   hostArgs.QK_B,
-                                   hostArgs.stride_A,
-                                   hostArgs.stride_B,
-                                   hostArgs.stride_C,
-                                   hostArgs.stride_AQ,
-                                   hostArgs.stride_BQ,
-                                   hostArgs.k_batch};
+        return KernelArgs{hostArgs.a_ptr,
+                          hostArgs.b_ptr,
+                          hostArgs.aq_ptr,
+                          hostArgs.bq_ptr,
+                          hostArgs.ds_ptr,
+                          hostArgs.c_ptr,
+                          hostArgs.M,
+                          hostArgs.N,
+                          hostArgs.K,
+                          hostArgs.QK_A,
+                          hostArgs.QK_B,
+                          hostArgs.stride_A,
+                          hostArgs.stride_B,
+                          hostArgs.stride_Ds,
+                          hostArgs.stride_C,
+                          hostArgs.stride_AQ,
+                          hostArgs.stride_BQ,
+                          hostArgs.k_batch};
     }
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
@@ -408,8 +368,8 @@ struct QuantGemmKernel
     public:
     struct SplitKBatchOffset
     {
-        __device__ SplitKBatchOffset(const QuantGemmKernelArgs& kargs,
-                                     const std::size_t k_id = blockIdx.z)
+        CK_TILE_DEVICE SplitKBatchOffset(const KernelArgs& kargs,
+                                         const std::size_t k_id = blockIdx.z)
         {
             constexpr auto K1 =
                 GemmPipeline::BlockGemmShape::WarpTile::at(I2); // smallest unit of K work per block
@@ -542,16 +502,48 @@ struct QuantGemmKernel
         index_t splitted_k;
     };
 
+    // Pad/guard sequence for a 2D block tile. The leading (strided) dimension carries the
+    // 64-bit global-path OOB guard (that path has no hardware bounds check); the contiguous
+    // dimension carries its tile pad, plus the guard when it is the contraction (K) dimension
+    // on the global path -- the prefetch-past-end case the ColumnMajor-B fault hit.
+    template <bool GlobalLoad,
+              bool LeadingIsDim0,
+              bool PadContiguous,
+              bool ContiguousIsContractionK>
+    CK_TILE_DEVICE static constexpr auto MakeBlockPadSequence()
+    {
+        constexpr bool leading_pad    = GlobalLoad;
+        constexpr bool contiguous_pad = (ContiguousIsContractionK && GlobalLoad) || PadContiguous;
+        if constexpr(LeadingIsDim0)
+        {
+            return sequence<leading_pad, contiguous_pad>{};
+        }
+        else
+        {
+            return sequence<contiguous_pad, leading_pad>{};
+        }
+    }
+
     CK_TILE_DEVICE static auto MakeABlockWindow(const ADataType* a_ptr,
-                                                const QuantGemmKernelArgs& kargs,
+                                                const KernelArgs& kargs,
                                                 const index_t k_size,
                                                 const index_t i_m)
     {
+        // Route A through 64-bit global load/store when the large-tensor global path is
+        // active: ColumnMajor A for large M, and RowMajor A for large K (its per-M-tile view
+        // spans the full K extent, whose far offset (MPerBlock-1)*stride_A + (K-1) overflows
+        // 32-bit index_t past ~2^31). RowMajor A still rides the M base-shift; the widened
+        // offsets compose with it exactly as the C store already does.
+        [[maybe_unused]] constexpr bool kAGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor view for A
         const auto& a_tensor_view = [&]() {
             if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
             {
-                return make_naive_tensor_view<address_space_enum::global>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              memory_operation_enum::set,
+                                              amd_buffer_coherence_enum::coherence_default,
+                                              kAGlobalLoad>(
                     a_ptr,
                     make_tuple(kargs.M, k_size),
                     make_tuple(kargs.stride_A, 1),
@@ -560,7 +552,10 @@ struct QuantGemmKernel
             }
             else
             {
-                return make_naive_tensor_view<address_space_enum::global>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              memory_operation_enum::set,
+                                              amd_buffer_coherence_enum::coherence_default,
+                                              kAGlobalLoad>(
                     a_ptr,
                     make_tuple(k_size, kargs.M),
                     make_tuple(kargs.stride_A, 1),
@@ -573,17 +568,19 @@ struct QuantGemmKernel
         const auto& a_pad_view = [&]() {
             if constexpr(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
             {
-                return pad_tensor_view(a_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::KPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadK>{});
+                return pad_tensor_view(
+                    a_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::KPerBlock>{}),
+                    MakeBlockPadSequence<kAGlobalLoad, true, GemmPipeline::kPadK, true>());
             }
             else
             {
-                return pad_tensor_view(a_tensor_view,
-                                       make_tuple(number<TilePartitioner::KPerBlock>{},
-                                                  number<TilePartitioner::MPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadM>{});
+                return pad_tensor_view(
+                    a_tensor_view,
+                    make_tuple(number<TilePartitioner::KPerBlock>{},
+                               number<TilePartitioner::MPerBlock>{}),
+                    MakeBlockPadSequence<kAGlobalLoad, true, GemmPipeline::kPadM, false>());
             }
         }();
 
@@ -609,7 +606,7 @@ struct QuantGemmKernel
     }
 
     CK_TILE_DEVICE static auto MakeAQBlockWindow(const AQDataType* aq_ptr,
-                                                 const QuantGemmKernelArgs& kargs,
+                                                 const KernelArgs& kargs,
                                                  const index_t i_m,
                                                  const index_t i_n,
                                                  const index_t aq_group_offset = 0)
@@ -796,10 +793,14 @@ struct QuantGemmKernel
     }
 
     CK_TILE_DEVICE static auto MakeBBlockWindow(const BDataType* b_ptr,
-                                                const QuantGemmKernelArgs& kargs,
+                                                const KernelArgs& kargs,
                                                 const index_t k_size,
                                                 const index_t i_n)
     {
+        // Route B through 64-bit global load/store when the large-tensor global path is
+        // active (covers large N for both ColumnMajor and RowMajor B).
+        [[maybe_unused]] constexpr bool kBGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor view for B
         const auto& b_tensor_view = [&]() {
             if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>)
@@ -824,7 +825,10 @@ struct QuantGemmKernel
                 }
                 else
                 {
-                    return make_naive_tensor_view<address_space_enum::global>(
+                    return make_naive_tensor_view<address_space_enum::global,
+                                                  memory_operation_enum::set,
+                                                  amd_buffer_coherence_enum::coherence_default,
+                                                  kBGlobalLoad>(
                         b_ptr,
                         make_tuple(k_size, kargs.N),
                         make_tuple(kargs.stride_B, 1),
@@ -859,8 +863,15 @@ struct QuantGemmKernel
                         constexpr auto warp_k = GemmPipeline::BlockGemmShape::WarpTile::at(I2);
                         index_t kFlatKSplit   = GemmPipeline::flatKPerWarp * (k_size / warp_k);
                         index_t kFlatK        = GemmPipeline::flatKPerWarp * (kargs.K / warp_k);
-                        index_t kFlatN        = kargs.N * kargs.K / kFlatK;
-                        return make_naive_tensor_view<address_space_enum::global>(
+                        // Widen to 64-bit before the divide so N*K does not overflow int32 for
+                        // B tensors whose element count exceeds 2^31.
+                        index_t kFlatN =
+                            static_cast<index_t>(static_cast<long_index_t>(kargs.N) *
+                                                 static_cast<long_index_t>(kargs.K) / kFlatK);
+                        return make_naive_tensor_view<address_space_enum::global,
+                                                      memory_operation_enum::set,
+                                                      amd_buffer_coherence_enum::coherence_default,
+                                                      kBGlobalLoad>(
                             b_ptr,
                             make_tuple(kFlatN, kFlatKSplit),
                             make_tuple(kFlatK, 1),
@@ -869,7 +880,10 @@ struct QuantGemmKernel
                     }
                     else
                     {
-                        return make_naive_tensor_view<address_space_enum::global>(
+                        return make_naive_tensor_view<address_space_enum::global,
+                                                      memory_operation_enum::set,
+                                                      amd_buffer_coherence_enum::coherence_default,
+                                                      kBGlobalLoad>(
                             b_ptr,
                             make_tuple(kargs.N, k_size),
                             make_tuple(kargs.stride_B, 1),
@@ -888,17 +902,21 @@ struct QuantGemmKernel
             }
             else if constexpr(std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>)
             {
-                return pad_tensor_view(b_tensor_view,
-                                       make_tuple(number<TilePartitioner::NPerBlock>{},
-                                                  number<TilePartitioner::KPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadK>{});
+                // ColumnMajor B is (N, K), so K is dim1; on the unmasked 64-bit global path
+                // it must also carry the pad guard or the reduction-loop tail read faults.
+                return pad_tensor_view(
+                    b_tensor_view,
+                    make_tuple(number<TilePartitioner::NPerBlock>{},
+                               number<TilePartitioner::KPerBlock>{}),
+                    MakeBlockPadSequence<kBGlobalLoad, true, GemmPipeline::kPadK, true>());
             }
             else
             {
-                return pad_tensor_view(b_tensor_view,
-                                       make_tuple(number<TilePartitioner::KPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadN>{});
+                return pad_tensor_view(
+                    b_tensor_view,
+                    make_tuple(number<TilePartitioner::KPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<kBGlobalLoad, true, GemmPipeline::kPadN, false>());
             }
         }();
 
@@ -935,7 +953,7 @@ struct QuantGemmKernel
     }
 
     CK_TILE_DEVICE static auto MakeBQBlockWindow(const BQDataType* bq_ptr,
-                                                 const QuantGemmKernelArgs& kargs,
+                                                 const KernelArgs& kargs,
                                                  const index_t bq_group_offset,
                                                  const index_t i_m,
                                                  const index_t i_n)
@@ -1125,17 +1143,123 @@ struct QuantGemmKernel
         return bq_block_window;
     }
 
+    template <typename DLayout, index_t VectorSizeD>
+    CK_TILE_DEVICE static auto
+    MakeDTensorDescriptor(const index_t M, const index_t N, const index_t stride)
+    {
+        if constexpr(std::is_same_v<DLayout, tensor_layout::gemm::RowMajor>)
+        {
+            return make_naive_tensor_descriptor(
+                make_tuple(M, N), make_tuple(stride, 1), number<VectorSizeD>{}, number<1>{});
+        }
+        else
+        {
+            return make_naive_tensor_descriptor(
+                make_tuple(N, M), make_tuple(stride, 1), number<VectorSizeD>{}, number<1>{});
+        }
+    }
+
+    template <typename DsTensorDesc>
+    CK_TILE_DEVICE static auto MakeDBlockWindows(const std::array<const void*, NumDTensor>& ds_ptr,
+                                                 const DsTensorDesc& ds_desc,
+                                                 const index_t i_m,
+                                                 const index_t i_n)
+    {
+        // Route Ds through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kDGlobalLoad = UseLargeTensorGlobalLoad();
+
+        // Step 1: Create tensor views
+        const auto& ds_tensor_view = generate_tuple(
+            [&](auto i) {
+                using DDataType_ = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::SYSTEM_NT1,
+                                        kDGlobalLoad>(static_cast<const DDataType_*>(ds_ptr[i]),
+                                                      ds_desc[i]);
+            },
+            number<NumDTensor>{});
+
+        // Step 2: Create padded views
+        const auto& ds_pad_view = generate_tuple(
+            [&](auto i) {
+                using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
+                {
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::MPerBlock>{},
+                                   number<TilePartitioner::NPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadN, false>());
+                }
+                else
+                {
+                    return pad_tensor_view(
+                        ds_tensor_view[i],
+                        make_tuple(number<TilePartitioner::NPerBlock>{},
+                                   number<TilePartitioner::MPerBlock>{}),
+                        MakeBlockPadSequence<kDGlobalLoad, true, GemmPipeline::kPadM, false>());
+                }
+            },
+            number<NumDTensor>{});
+
+        // Step 3: Create tile windows
+        const auto& ds_block_window = generate_tuple(
+            [&](auto i) {
+                using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
+                {
+                    return make_tile_window(ds_pad_view[i],
+                                            make_tuple(number<TilePartitioner::MPerBlock>{},
+                                                       number<TilePartitioner::NPerBlock>{}),
+                                            {i_m, i_n});
+                }
+                else
+                {
+                    return make_tile_window(ds_pad_view[i],
+                                            make_tuple(number<TilePartitioner::NPerBlock>{},
+                                                       number<TilePartitioner::MPerBlock>{}),
+                                            {i_n, i_m});
+                }
+            },
+            number<NumDTensor>{});
+
+        return ds_block_window;
+    }
+
+    CK_TILE_DEVICE static auto MakeDBlockWindows(const std::array<const void*, NumDTensor>& ds_ptr,
+                                                 const KernelArgs& kargs,
+                                                 const index_t i_m,
+                                                 const index_t i_n)
+    {
+        const auto& ds_tensor_desc = generate_tuple(
+            [&](auto i) {
+                using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                return MakeDTensorDescriptor<DiLayout, EpiloguePipeline::GetVectorSizeD(i)>(
+                    kargs.M, kargs.N, kargs.stride_Ds[i]);
+            },
+            number<NumDTensor>{});
+
+        return MakeDBlockWindows(ds_ptr, ds_tensor_desc, i_m, i_n);
+    }
+
     template <memory_operation_enum DstInMemOp = memory_operation_enum::set>
     CK_TILE_DEVICE static auto MakeCBlockWindow(CDataType* c_ptr,
-                                                const QuantGemmKernelArgs& kargs,
+                                                const KernelArgs& kargs,
                                                 const index_t i_m,
                                                 const index_t i_n)
     {
+        // Route C through 64-bit global load/store when the large-tensor global path is active.
+        [[maybe_unused]] constexpr bool kCGlobalLoad = UseLargeTensorGlobalLoad();
+
         // Step 1: Create tensor view for C
         const auto& c_tensor_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
-                return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              DstInMemOp,
+                                              amd_buffer_coherence_enum::SYSTEM_NT1,
+                                              kCGlobalLoad>(
                     c_ptr,
                     make_tuple(kargs.M, kargs.N),
                     make_tuple(kargs.stride_C, 1),
@@ -1144,12 +1268,14 @@ struct QuantGemmKernel
             }
             else
             {
-                return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
-                    c_ptr,
-                    make_tuple(kargs.M, kargs.N),
-                    make_tuple(1, kargs.stride_C),
-                    number<1>{},
-                    number<1>{});
+                return make_naive_tensor_view<address_space_enum::global,
+                                              DstInMemOp,
+                                              amd_buffer_coherence_enum::SYSTEM_NT1,
+                                              kCGlobalLoad>(c_ptr,
+                                                            make_tuple(kargs.M, kargs.N),
+                                                            make_tuple(1, kargs.stride_C),
+                                                            number<1>{},
+                                                            number<1>{});
             }
         }();
 
@@ -1157,17 +1283,19 @@ struct QuantGemmKernel
         const auto& c_pad_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
-                return pad_tensor_view(c_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<false, GemmPipeline::kPadN>{});
+                return pad_tensor_view(
+                    c_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<kCGlobalLoad, true, GemmPipeline::kPadN, false>());
             }
             else
             {
-                return pad_tensor_view(c_tensor_view,
-                                       make_tuple(number<TilePartitioner::MPerBlock>{},
-                                                  number<TilePartitioner::NPerBlock>{}),
-                                       sequence<GemmPipeline::kPadM, false>{});
+                return pad_tensor_view(
+                    c_tensor_view,
+                    make_tuple(number<TilePartitioner::MPerBlock>{},
+                               number<TilePartitioner::NPerBlock>{}),
+                    MakeBlockPadSequence<kCGlobalLoad, false, GemmPipeline::kPadM, false>());
             }
         }();
 
@@ -1180,7 +1308,62 @@ struct QuantGemmKernel
         return c_block_window;
     }
 
-    CK_TILE_HOST static bool IsSupportedArgument(const QuantGemmKernelArgs& kargs)
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorMOffsettingSupported()
+    {
+        // Large tensor support (when M is large, N and K are relatively small)
+        // Quantization methods other than RowColQuant may require changes
+        bool suitable = kQuantType == QuantType::RowColQuant;
+        suitable      = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, ALayout>;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+            suitable       = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, DiLayout>;
+        });
+        suitable = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, CLayout>;
+        return suitable;
+    }
+
+    // Large single-dimension support (M or N whose byte extent exceeds the 2GB buffer
+    // limit) for layouts the M base-shift path cannot express: ColumnMajor A (large M),
+    // ColumnMajor/RowMajor B (large N) and the correspondingly large C/D outputs.  These
+    // are routed through 64-bit global load/store (the LargeTensor path) instead of
+    // buffer addressing.  Restricted to the RowColQuant, non-preshuffled, non-permuted B
+    // configuration whose A/B are loaded through the plain global views.
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorGlobalLoadSupported()
+    {
+        // RowColQuant, non-preshuffled, non-permuted B loaded through the plain global views.
+        const bool rowcol_ok = kQuantType == QuantType::RowColQuant && !PreshuffleB &&
+                               !GemmPipeline::BlockGemmShape::PermuteB;
+        // BQuant preshuffle-B: the flat B window is addressed in 64-bit when the LargeTensors
+        // opt-in is active.  Requires ColumnMajor, non-permuted B.  Restricted to BQuantGrouped
+        // because that path always resolves to the WP pipeline (which exposes LargeTensors),
+        // whereas ABQuantGrouped can resolve to the eight-waves pipeline that does not.
+        const bool bquant_preshuffle_b_ok =
+            kQuantType == QuantType::BQuantGrouped && PreshuffleB &&
+            !GemmPipeline::BlockGemmShape::PermuteB &&
+            std::is_same_v<BLayout, tensor_layout::gemm::ColumnMajor>;
+        return rowcol_ok || bquant_preshuffle_b_ok;
+    }
+
+    // Whether the compile-time LargeTensors opt-in is active and the configuration is one
+    // the global load/store path supports.  Read on the RowColQuant path (plain gemm pipeline)
+    // and on the BQuant preshuffle-B path (WP pipeline); both expose LargeTensors.
+    CK_TILE_HOST_DEVICE static constexpr bool UseLargeTensorGlobalLoad()
+    {
+        if constexpr(kQuantType == QuantType::RowColQuant)
+        {
+            return GemmPipeline::LargeTensors && IsLargeTensorGlobalLoadSupported();
+        }
+        else if constexpr(kQuantType == QuantType::BQuantGrouped && PreshuffleB)
+        {
+            return GemmPipeline::LargeTensors && IsLargeTensorGlobalLoadSupported();
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
         // k_batch must be a positive integer.
         if(kargs.k_batch <= 0)
@@ -1438,6 +1621,64 @@ struct QuantGemmKernel
             }
         }
 
+        bool ds_are_valid = true;
+        static_for<0, NumDTensor, 1>{}([&](auto index) {
+            using DiLayout = remove_cvref_t<std::tuple_element_t<index.value, DsLayout>>;
+            // TODO: different layouts of C and Ds are not tested and may require changes
+            if(!std::is_same_v<DiLayout, CLayout>)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Tensors D and C have different layouts");
+                }
+                ds_are_valid = false;
+            }
+            if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
+            {
+                if(kargs.N % TilePartitioner::NPerBlock != 0 && GemmPipeline::kPadN == false)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("Can't support N for tensor D that is not a multiple of "
+                                      "NPerBlock without padding!");
+                    }
+                    ds_are_valid = false;
+                }
+                if(kargs.N % EpiloguePipeline::GetVectorSizeD(index) != 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("N is not a multiple of vector load size for D tensor!");
+                    }
+                    ds_are_valid = false;
+                }
+            }
+            else
+            {
+                if(kargs.M % TilePartitioner::MPerBlock != 0 && GemmPipeline::kPadM == false)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("Can't support M for tensor D that is not a multiple of "
+                                      "MPerBlock without padding!");
+                    }
+                    ds_are_valid = false;
+                }
+                if(kargs.M % EpiloguePipeline::GetVectorSizeD(index) != 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("M is not a multiple of vector load size for D tensor!");
+                    }
+                    ds_are_valid = false;
+                }
+            }
+        });
+        if(!ds_are_valid)
+        {
+            return false;
+        }
+
         if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
         {
             // For RowMajor C, M is the row dimension - check M alignment here because
@@ -1491,6 +1732,70 @@ struct QuantGemmKernel
                 return false;
             }
         }
+
+        auto is_large_tensor =
+            [](auto layout, index_t rows, index_t cols, index_t stride, auto data_type) {
+                constexpr size_t SizeLimit = (size_t{1} << 31);
+                constexpr size_t PackedSize =
+                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
+
+                const size_t n =
+                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
+                        ? rows
+                        : cols;
+                return n * stride * sizeof(data_type) / PackedSize >= SizeLimit;
+            };
+
+        const bool any_large_tensor = [&] {
+            bool r = false;
+
+            r = r || is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{});
+            r = r || is_large_tensor(BLayout{}, kargs.K, kargs.N, kargs.stride_B, BDataType{});
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+
+                r = r ||
+                    is_large_tensor(DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
+            });
+            r = r || is_large_tensor(CLayout{}, kargs.M, kargs.N, kargs.stride_C, CDataType{});
+            return r;
+        }();
+
+        if(any_large_tensor)
+        {
+            // Two paths can service a large single dimension:
+            //   * M base-shift (RowMajor A/Ds/C): bounds large M/N per M-tile.
+            //   * 64-bit global load/store: addresses large A/B/C/D (any layout) in 64-bit.
+            // RowMajor A rides both: the base-shift bounds M while its 64-bit view covers
+            // large K. Reject only the configurations that neither path can cover.
+            if constexpr(!IsLargeTensorMOffsettingSupported() && !UseLargeTensorGlobalLoad())
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Can't support large tensors with the provided layouts!");
+                }
+                return false;
+            }
+            else if constexpr(!IsLargeTensorMOffsettingSupported() && UseLargeTensorGlobalLoad() &&
+                              std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
+            {
+                // A's own 64-bit view could address a large RowMajor A, but the RowColQuant
+                // AQ scale is an (M, N) broadcast addressed with 32-bit offsets that only the M
+                // base-shift bounds. Without RowMajor Ds/C that base-shift is unavailable, so a
+                // large RowMajor A (large M in particular) would overflow the AQ offset. Reject.
+                if(is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{}))
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("Large RowMajor A requires RowMajor Ds/C so the M "
+                                      "base-shift can bound the AQ scale offset!");
+                    }
+                    return false;
+                }
+            }
+        }
+
         return true;
     }
 
@@ -1585,9 +1890,10 @@ struct QuantGemmKernel
                                        const BDataType* b_ptr,
                                        const AQDataType* aq_ptr,
                                        const BQDataType* bq_ptr,
+                                       const std::array<const void*, NumDTensor>& ds_ptr,
                                        CDataType* c_ptr,
                                        void* smem_ptr,
-                                       const QuantGemmKernelArgs& kargs,
+                                       const KernelArgs& kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
                                        const index_t block_idx_n)
@@ -1605,6 +1911,7 @@ struct QuantGemmKernel
         // the remaining K-groups from the split-K offset position.
         const auto& bq_block_window = MakeBQBlockWindow(
             bq_ptr, kargs, splitk_batch_offset.bq_group_offset, block_idx_m, block_idx_n);
+        const auto& ds_block_window = MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
 
         const index_t num_loop =
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
@@ -1667,13 +1974,13 @@ struct QuantGemmKernel
                          kQuantType == QuantType::AQuantGrouped ||
                          kQuantType == QuantType::BQuantGrouped)
             {
-                EpiloguePipeline{}(c_block_window, c_block_tile, c_block_window, smem_ptr);
+                EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
             else if constexpr(kQuantType == QuantType::RowColQuant)
             {
                 EpiloguePipeline{}(c_block_window,
                                    c_block_tile,
-                                   c_block_window,
+                                   ds_block_window,
                                    smem_ptr,
                                    aq_block_window,
                                    bq_block_window);
@@ -1683,7 +1990,7 @@ struct QuantGemmKernel
                 const AccDataType aq_scale = type_convert<AccDataType>(*aq_ptr);
                 const AccDataType bq_scale = type_convert<AccDataType>(*bq_ptr);
                 EpiloguePipeline{}(
-                    c_block_window, c_block_tile, c_block_window, smem_ptr, aq_scale, bq_scale);
+                    c_block_window, c_block_tile, ds_block_window, smem_ptr, aq_scale, bq_scale);
             }
         }
         else
@@ -1695,13 +2002,13 @@ struct QuantGemmKernel
                          kQuantType == QuantType::AQuantGrouped ||
                          kQuantType == QuantType::BQuantGrouped)
             {
-                EpiloguePipeline{}(c_block_window, c_block_tile, c_block_window, smem_ptr);
+                EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
             else if constexpr(kQuantType == QuantType::RowColQuant)
             {
                 EpiloguePipeline{}(c_block_window,
                                    c_block_tile,
-                                   c_block_window,
+                                   ds_block_window,
                                    smem_ptr,
                                    aq_block_window,
                                    bq_block_window);
@@ -1711,16 +2018,16 @@ struct QuantGemmKernel
                 const AccDataType aq_scale = type_convert<AccDataType>(*aq_ptr);
                 const AccDataType bq_scale = type_convert<AccDataType>(*bq_ptr);
                 EpiloguePipeline{}(
-                    c_block_window, c_block_tile, c_block_window, smem_ptr, aq_scale, bq_scale);
+                    c_block_window, c_block_tile, ds_block_window, smem_ptr, aq_scale, bq_scale);
             }
         }
     }
 
-    CK_TILE_DEVICE void Run_(const QuantGemmKernelArgs& kargs) const
+    CK_TILE_DEVICE void Run_(KernelArgs kargs) const
     {
         const auto blockId  = amd_wave_read_first_lane(blockIdx.x);
         const auto [iM, iN] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockId);
-        const index_t i_m   = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
+        index_t i_m         = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
         const index_t i_n   = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
         const SplitKBatchOffset splitk_batch_offset(kargs);
 
@@ -1737,10 +2044,38 @@ struct QuantGemmKernel
             static_cast<const BQDataType*>(kargs.bq_ptr) + splitk_batch_offset.bq_k_split_offset;
         CDataType* c_ptr = static_cast<CDataType*>(kargs.c_ptr);
 
+        std::array<const void*, NumDTensor> ds_ptr = kargs.ds_ptr;
+
+        if constexpr(IsLargeTensorMOffsettingSupported())
+        {
+            // Offset pointers in the M dimension
+            a_ptr += static_cast<std::ptrdiff_t>(i_m) * kargs.stride_A;
+            aq_ptr += i_m;
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DDataType_ = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                ds_ptr[i] =
+                    static_cast<const char*>(ds_ptr[i]) +
+                    sizeof(DDataType_) * static_cast<std::ptrdiff_t>(i_m) * kargs.stride_Ds[i];
+            });
+            c_ptr += static_cast<std::ptrdiff_t>(i_m) * kargs.stride_C;
+
+            kargs.M = std::min(kargs.M - i_m, TilePartitioner::MPerBlock);
+            i_m     = 0;
+        }
+
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
-        RunGemm(
-            a_ptr, b_ptr, aq_ptr, bq_ptr, c_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
+        RunGemm(a_ptr,
+                b_ptr,
+                aq_ptr,
+                bq_ptr,
+                ds_ptr,
+                c_ptr,
+                smem_ptr,
+                kargs,
+                splitk_batch_offset,
+                i_m,
+                i_n);
     }
 
     template <typename T, typename = void>
@@ -1749,7 +2084,7 @@ struct QuantGemmKernel
     static constexpr bool kIsAvailableV<T, std::void_t<decltype(T::kIsAvailable)>> =
         T::kIsAvailable;
 
-    CK_TILE_DEVICE void operator()(const QuantGemmKernelArgs& kargs) const
+    CK_TILE_DEVICE void operator()(const KernelArgs& kargs) const
     {
         if constexpr(!kIsAvailableV<GemmPipeline>)
             ignore = kargs;
@@ -1757,6 +2092,99 @@ struct QuantGemmKernel
             Run_(kargs);
     }
 };
+
+struct QuantGemmHostArgs : public QuantGemmMultiDHostArgs<0>
+{
+    CK_TILE_HOST QuantGemmHostArgs() = default;
+    CK_TILE_HOST QuantGemmHostArgs(const void* a_ptr_,
+                                   const void* b_ptr_,
+                                   void* c_ptr_,
+                                   const void* aq_ptr_,
+                                   const void* bq_ptr_,
+                                   index_t k_batch_,
+                                   index_t M_,
+                                   index_t N_,
+                                   index_t K_,
+                                   index_t QK_A_,
+                                   index_t QK_B_,
+                                   index_t stride_A_,
+                                   index_t stride_B_,
+                                   index_t stride_C_,
+                                   index_t stride_AQ_,
+                                   index_t stride_BQ_)
+        : QuantGemmMultiDHostArgs{a_ptr_,
+                                  b_ptr_,
+                                  std::array<const void*, 0>{},
+                                  c_ptr_,
+                                  aq_ptr_,
+                                  bq_ptr_,
+                                  k_batch_,
+                                  M_,
+                                  N_,
+                                  K_,
+                                  QK_A_,
+                                  QK_B_,
+                                  stride_A_,
+                                  stride_B_,
+                                  std::array<index_t, 0>{},
+                                  stride_C_,
+                                  stride_AQ_,
+                                  stride_BQ_}
+    {
+    }
+};
+
+struct QuantGemmKernelArgs : public QuantGemmMultiDKernelArgs<0>
+{
+    CK_TILE_HOST QuantGemmKernelArgs() = default;
+    CK_TILE_HOST QuantGemmKernelArgs(const void* a_ptr_,
+                                     const void* b_ptr_,
+                                     const void* aq_ptr_,
+                                     const void* bq_ptr_,
+                                     void* c_ptr_,
+                                     index_t M_,
+                                     index_t N_,
+                                     index_t K_,
+                                     index_t QK_A_,
+                                     index_t QK_B_,
+                                     index_t stride_A_,
+                                     index_t stride_B_,
+                                     index_t stride_C_,
+                                     index_t stride_AQ_,
+                                     index_t stride_BQ_,
+                                     index_t k_batch_)
+        : QuantGemmMultiDKernelArgs<0>{a_ptr_,
+                                       b_ptr_,
+                                       aq_ptr_,
+                                       bq_ptr_,
+                                       std::array<const void*, 0>{},
+                                       c_ptr_,
+                                       M_,
+                                       N_,
+                                       K_,
+                                       QK_A_,
+                                       QK_B_,
+                                       stride_A_,
+                                       stride_B_,
+                                       std::array<index_t, 0>{},
+                                       stride_C_,
+                                       stride_AQ_,
+                                       stride_BQ_,
+                                       k_batch_}
+    {
+    }
+};
+
+template <typename TilePartitioner_,
+          typename GemmPipeline_,
+          typename EpiloguePipeline_,
+          QuantType QuantType_,
+          bool RuntimeSplitKTail_ = false>
+using QuantGemmKernel = QuantGemmMultiDKernel<TilePartitioner_,
+                                              GemmPipeline_,
+                                              EpiloguePipeline_,
+                                              QuantType_,
+                                              RuntimeSplitKTail_>;
 
 } // namespace ck_tile
 #if __clang_major__ >= 23

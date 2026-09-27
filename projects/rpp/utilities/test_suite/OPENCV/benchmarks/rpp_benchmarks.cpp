@@ -738,8 +738,8 @@ void benchmark_RPP_Erode(const vector<Mat>& imgs, bool isColor, int kernelSize,
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k) {
         for (int i = 0; i < num_images; ++i) {
-            CHECK_RPP_STATUS(rppt_erode_host(imgs[i].data, &srcDescs[i], out[i].data, &dstDescs[i],
-                                             kernelSize, &rois[i], RpptRoiType::XYWH, handle),
+            CHECK_RPP_STATUS(rppt_erode(imgs[i].data, &srcDescs[i], out[i].data, &dstDescs[i],
+                                             kernelSize, &rois[i], RpptRoiType::XYWH, handle, RppBackend::RPP_HOST_BACKEND,
                              "erode_host");
         }
     }
@@ -768,9 +768,10 @@ void benchmark_RPP_Dilate(const vector<Mat>& imgs, bool isColor, int kernelSize,
     auto start = high_resolution_clock::now();
     for (int k = 0; k < NUM_RUNS; ++k) {
         for (int i = 0; i < num_images; ++i) {
-            CHECK_RPP_STATUS(rppt_dilate_host(imgs[i].data, &srcDescs[i], out[i].data, &dstDescs[i],
-                                              kernelSize, &rois[i], RpptRoiType::XYWH, handle),
-                             "dilate_host");
+            CHECK_RPP_STATUS(
+                rppt_dilate(imgs[i].data, &srcDescs[i], out[i].data, &dstDescs[i], kernelSize,
+                            &rois[i], RpptRoiType::XYWH, handle, RppBackend::RPP_HOST_BACKEND),
+                "dilate_host");
         }
     }
     auto end = high_resolution_clock::now();

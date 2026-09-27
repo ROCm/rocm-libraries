@@ -1,0 +1,27 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+[build-system]
+requires = [
+  "setuptools>=70.2.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hipdnn-frontend"
+version = "0.2.0"
+requires-python = ">=3.12"
+description = "Python bindings for the hipDNN frontend library"
+readme = "README.md"
+license = "MIT"
+
+[[project.authors]]
+name = "Advanced Micro Devices, Inc."
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: marks tests requiring GPU",
+]

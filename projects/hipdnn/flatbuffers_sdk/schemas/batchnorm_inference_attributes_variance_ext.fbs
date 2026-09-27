@@ -1,6 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 // Note
@@ -9,11 +12,11 @@ namespace hipdnn_flatbuffers_sdk.data_objects;
 
 // The long attributes are keys to the tensor_attributes->uid
 table BatchnormInferenceAttributesVarianceExt {
-    x_tensor_uid: long;
-    mean_tensor_uid: long;
-    variance_tensor_uid: long;
-    scale_tensor_uid: long;
-    bias_tensor_uid: long;
-    y_tensor_uid: long;
-    epsilon_tensor_uid: long;
+    x_tensor_uid: long (cache_uid);
+    mean_tensor_uid: long (cache_uid);
+    variance_tensor_uid: long (cache_uid);
+    scale_tensor_uid: long (cache_uid);
+    bias_tensor_uid: long (cache_uid);
+    y_tensor_uid: long (cache_uid);
+    epsilon_tensor_uid: long (cache_uid);
 }

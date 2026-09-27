@@ -28,6 +28,17 @@ import math
 from Tensile.Common.DataType import DataType
 from rocisa.enum import DataTypeEnum
 
+# Largest LdsBlockSizePerPad (bytes) the TDM pad_interval field can encode.
+TDM_PAD_INTERVAL_LIMIT = 1024
+
+def isSubtileIterateMode(state, tc):
+    """True when subtile DepthU * bpeGR exceeds the 1024B pad_interval HW limit."""
+    return (state.get("UseSubtileImpl", False)
+            and state.get("enableTDM%s" % tc, False)
+            and state["DepthU"] * state["ProblemType"]["DataType%s" % tc].numBytes()
+                > TDM_PAD_INTERVAL_LIMIT)
+
+
 def getMiInputType(kernel: dict):
   """Select the effective MI operand type for MFMA latency lookup.
 

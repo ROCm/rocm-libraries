@@ -283,3 +283,134 @@ TEST(TestPointwiseAttributes, OptionalParameterDefaults)
     EXPECT_FALSE(pointwiseAttributes.get_elu_alpha().has_value());
     EXPECT_FALSE(pointwiseAttributes.get_softplus_beta().has_value());
 }
+
+TEST(TestPointwiseAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::PointwiseAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
+    attr1.set_relu_lower_clip(0.0f);
+    attr1.set_relu_upper_clip(6.0f);
+    attr1.set_relu_lower_clip_slope(0.01f);
+    attr1.set_axis(1);
+    attr1.set_swish_beta(1.0f);
+    attr1.set_elu_alpha(1.0f);
+    attr1.set_softplus_beta(1.0f);
+
+    auto in01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    in01->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_input_0(in01);
+
+    auto out01 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    out01->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_output_0(out01);
+
+    hipdnn_frontend::graph::PointwiseAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
+    attr2.set_relu_lower_clip(0.0f);
+    attr2.set_relu_upper_clip(6.0f);
+    attr2.set_relu_lower_clip_slope(0.01f);
+    attr2.set_axis(1);
+    attr2.set_swish_beta(1.0f);
+    attr2.set_elu_alpha(1.0f);
+    attr2.set_softplus_beta(1.0f);
+
+    auto in02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    in02->set_uid(1).set_name("IN_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_input_0(in02);
+
+    auto out02 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    out02->set_uid(2).set_name("OUT_0").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_output_0(out02);
+
+    // Initial check: everything matches exactly
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Structural tensor mismatch: different UID/name/type entirely
+    auto structuralMismatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchIn0->set_uid(99).set_name("MismatchedIn0");
+    attr2.set_input_0(structuralMismatchIn0);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/type gap implies logical inequality
+    attr2.set_input_0(in02); // Revert
+
+    // Mode mismatch: semantic, must fail both checks
+    attr2.set_mode(hipdnn_frontend::PointwiseMode::SIGMOID_FWD);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD); // Revert
+
+    // relu_lower_clip mismatch: semantic, must fail both checks
+    attr2.set_relu_lower_clip(0.5f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_relu_lower_clip(0.0f); // Revert
+
+    // relu_upper_clip mismatch: semantic, must fail both checks
+    attr2.set_relu_upper_clip(3.0f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_relu_upper_clip(6.0f); // Revert
+
+    // relu_lower_clip_slope mismatch: semantic, must fail both checks
+    attr2.set_relu_lower_clip_slope(0.02f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_relu_lower_clip_slope(0.01f); // Revert
+
+    // axis mismatch: semantic, must fail both checks
+    attr2.set_axis(2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_axis(1); // Revert
+
+    // swish_beta mismatch: semantic, must fail both checks
+    attr2.set_swish_beta(2.0f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_swish_beta(1.0f); // Revert
+
+    // elu_alpha mismatch: semantic, must fail both checks
+    attr2.set_elu_alpha(2.0f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_elu_alpha(1.0f); // Revert
+
+    // softplus_beta mismatch: semantic, must fail both checks
+    attr2.set_softplus_beta(2.0f);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2));
+    attr2.set_softplus_beta(1.0f); // Revert
+
+    // Unset-vs-unset optional fields: two attrs with the same field left
+    // unset should still compare equal (std::optional::operator== on two
+    // disengaged optionals is true)
+    hipdnn_frontend::graph::PointwiseAttributes sparse1;
+    sparse1.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+    hipdnn_frontend::graph::PointwiseAttributes sparse2;
+    sparse2.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+    EXPECT_TRUE(sparse1 == sparse2);
+    EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
+
+    // Set-vs-unset should differ
+    sparse2.set_axis(0);
+    EXPECT_FALSE(sparse1 == sparse2);
+    EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
+
+    // Change metadata (UID/Name) on a tensor while keeping mathematical layout intact
+    auto logicalMatchIn0 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchIn0
+        ->set_uid(555) // Diverges from attr1's in01 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's in01 ("IN_0")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Layout matches
+    attr2.set_input_0(logicalMatchIn0);
+
+    // Expecting: strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}

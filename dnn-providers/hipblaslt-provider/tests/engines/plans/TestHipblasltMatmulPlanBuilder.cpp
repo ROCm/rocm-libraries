@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
+#include "TestWorkarounds.hpp"
 #include "engines/plans/HipblasltMatmulPlanBuilder.hpp"
 
 using namespace hipblaslt_plugin;
@@ -21,6 +22,7 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        SKIP_IF_WORKAROUND_ISSUE_9962(_handle);
         ASSERT_EQ(hipblasLtCreate(&_handle.hipblasltHandle), HIPBLAS_STATUS_SUCCESS);
     }
 

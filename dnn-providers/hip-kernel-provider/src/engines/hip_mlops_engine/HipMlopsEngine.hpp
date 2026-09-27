@@ -5,6 +5,7 @@
 
 #include <memory>
 
+#include "HipMlopsKernelCompiler.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
@@ -41,10 +42,16 @@ public:
     void addPlanBuilder(
         std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>> planBuilder);
 
+    const compilation::IKernelCompiler& getKernelCompiler() const
+    {
+        return _kernelCompiler;
+    }
+
 private:
     int64_t _id;
     std::vector<std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>>>
         _planBuilders;
+    HipMlopsKernelCompiler _kernelCompiler;
 };
 
 }

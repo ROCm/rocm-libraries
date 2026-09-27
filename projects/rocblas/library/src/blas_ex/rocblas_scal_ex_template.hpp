@@ -32,14 +32,14 @@ template <typename API_INT, int NB, bool BATCHED, typename Ta, typename Tx = Ta,
 rocblas_status rocblas_scal_ex_typecasting(rocblas_handle handle,
                                            API_INT        n,
                                            const void*    alpha_void,
+                                           rocblas_stride stride_alpha,
                                            void*          x,
                                            API_INT        incx,
                                            rocblas_stride stride_x,
                                            API_INT        batch_count)
 {
-    const Ta*            alpha        = (const Ta*)alpha_void;
-    const rocblas_stride stride_alpha = 0;
-    const rocblas_stride offset_x     = 0;
+    const Ta*            alpha    = (const Ta*)alpha_void;
+    const rocblas_stride offset_x = 0;
 
     if(!alpha_void)
         return rocblas_status_invalid_pointer;
@@ -158,6 +158,7 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
                                         API_INT          n,
                                         const void*      alpha,
                                         rocblas_datatype alpha_type,
+                                        rocblas_stride   stride_alpha,
                                         void*            x,
                                         rocblas_datatype x_type,
                                         API_INT          incx,
@@ -174,7 +175,8 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
 
     rocblas_status status = rocblas_status_not_implemented;
 
-#define rocblas_scal_ex_typecasting_PARAM handle, n, alpha, x, incx, stride_x, batch_count
+#define rocblas_scal_ex_typecasting_PARAM \
+    handle, n, alpha, stride_alpha, x, incx, stride_x, batch_count
 
     if(alpha_type == rocblas_datatype_f16_r && x_type == rocblas_datatype_f16_r
        && execution_type == rocblas_datatype_f32_r)
@@ -288,6 +290,7 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
         TI_              n,                                             \
         const void*      alpha,                                         \
         rocblas_datatype alpha_type,                                    \
+        rocblas_stride   stride_alpha,                                  \
         void*            x,                                             \
         rocblas_datatype x_type,                                        \
         TI_              incx,                                          \

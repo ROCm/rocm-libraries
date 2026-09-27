@@ -61,3 +61,10 @@
 #include <hipdnn_frontend/HeuristicPolicyInfo.hpp>
 #include <hipdnn_frontend/PluginPaths.hpp>
 #include <hipdnn_frontend/Types.hpp>
+
+// The backend-library path setter steers runtime resolution of the backend. A
+// direct-link build satisfies the backend at link time, so it has no resolution to
+// steer and the header stays out of the umbrella.
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+#include <hipdnn_frontend/BackendLibraryPath.hpp>
+#endif

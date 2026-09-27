@@ -181,6 +181,9 @@ typedef enum rocsolver_alg_mode_
     = 291, /**< Computations are all performed on the GPU. This is the default mode. */
     rocsolver_alg_mode_hybrid = 292, /**< Computations are performed on the CPU and GPU. */
     rocsolver_alg_mode_mixed = 293, /**< Nested functions use a mixture of hybrid and GPU-only modes. */
+    rocsolver_alg_mode_1stage = 294, /**< Use 1-stage bi/tri-diagonalization. */
+    rocsolver_alg_mode_2stage = 295, /**< Use 2-stage bi/tri-diagonalization. */
+    rocsolver_alg_mode_auto = 296, /**< Automatically select the algorithm based on problem size. */
 } rocsolver_alg_mode;
 
 /*! \brief Used to specify the type of matrix norm to compute.
@@ -193,6 +196,15 @@ typedef enum rocsolver_norm_type_
     rocsolver_norm_type_max = 304, /**< Maximum absolute value of any element. */
 } rocsolver_norm_type;
 
+/*! \brief Used by cholqr to specify the shift mode.
+ ********************************************************************************/
+typedef enum rocsolver_cholqr_shift_
+{
+    rocsolver_cholqr_shift_none = 311, /**< No shift is used (equivalent to sigma = 0). */
+    rocsolver_cholqr_shift_computed = 312, /**< An optimal value of sigma is computed internally. */
+    rocsolver_cholqr_shift_provided = 313, /**< Sigma must be provided by the user. */
+} rocsolver_cholqr_shift;
+
 /*! \brief Used to specify a function with multiple supported algorithm modes.
  ********************************************************************************/
 typedef enum rocsolver_function_
@@ -201,7 +213,16 @@ typedef enum rocsolver_function_
     rocsolver_function_gesvd = 402, /**< Affected by bdsqr. */
     rocsolver_function_sterf = 403,
     rocsolver_function_steqr = 404,
+
     rocsolver_function_syev_heev = 405, /**< Affected by sterf and steqr. */
+    rocsolver_function_syev = rocsolver_function_syev_heev, /**< Affected by sterf and steqr. (Alias) */
+    rocsolver_function_heev = rocsolver_function_syev_heev, /**< Affected by sterf and steqr. (Alias) */
+
+    rocsolver_function_sytrd_hetrd = 406, /**< 1-stage vs 2-stage tridiagonalization. */
+    rocsolver_function_sytrd = rocsolver_function_sytrd_hetrd,
+    /**< 1-stage vs 2-stage tridiagonalization. (Alias) */
+    rocsolver_function_hetrd = rocsolver_function_sytrd_hetrd,
+    /**< 1-stage vs 2-stage tridiagonalization. (Alias) */
 } rocsolver_function;
 
 #endif /* ROCSOLVER_EXTRA_TYPES_H */

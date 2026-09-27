@@ -51,6 +51,7 @@ def test_defaults(monkeypatch):
     assert a["UseCompression"] is True  # NoCompress default False
     assert a["LogicFilter"] == "*"
     assert a["Experimental"] is False
+    assert a["EnableGemmA2AFusion"] is False
     assert a["GenSolTable"] is True
 
 
@@ -69,6 +70,7 @@ def test_quirk_input_param_ignored(monkeypatch):
     "flag,key",
     [
         ("--experimental", "Experimental"),
+        ("--enable-gemm-a2a-fusion", "EnableGemmA2AFusion"),
         ("--enable-marker", "EnableMarker"),
         ("--asm-debug", "AsmDebug"),
         ("--address-sanitizer", "AsanBuild"),
@@ -150,6 +152,12 @@ def test_cmake_cxx_compiler_sets_env(monkeypatch):
 # ---------------------------------------------------------------------------
 def test_invalid_runtime_language_exits(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "/logic", "/out", "CUDA"])
+    with pytest.raises(SystemExit):
+        PA.parseArguments()
+
+
+def test_ocl_runtime_language_exits(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "/logic", "/out", "OCL"])
     with pytest.raises(SystemExit):
         PA.parseArguments()
 

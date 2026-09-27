@@ -191,10 +191,10 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel   = handle_.Run(kernels.front());
-            const auto& invoke_ctx  = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
-            const auto& bot_ocl_buf = invoke_ctx.in;
-            const auto& top_ocl_buf = invoke_ctx.out;
+            decltype(auto) kernel  = handle_.Run(kernels.front());
+            const auto& invoke_ctx = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
+            const auto& bot_buf    = invoke_ctx.in;
+            const auto& top_buf    = invoke_ctx.out;
             const auto& bn_invoke =
                 dynamic_cast<miopen::fusion::BatchNormFwdTrainingOpInvokeParam&>(
                     *invoke_ctx.op_args.params[0]);
@@ -225,8 +225,8 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             kern_args.push_back({bn_invoke.epsilon});
             if(savePopStats)
                 kern_args.push_back({bn_invoke.expAvgFactor});
-            kern_args.push_back({bot_ocl_buf});
-            kern_args.push_back({top_ocl_buf});
+            kern_args.push_back({bot_buf});
+            kern_args.push_back({top_buf});
             kern_args.push_back({bn_invoke.bnBias});
             kern_args.push_back({bn_invoke.bnScale});
             if(savePopStats)

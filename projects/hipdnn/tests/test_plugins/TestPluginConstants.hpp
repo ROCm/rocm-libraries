@@ -59,6 +59,29 @@ inline const std::string& testExecuteFailsPluginPath()
     return s_testExecuteFailsPluginPath;
 }
 
+// The hashed-name plugin is consumed only by the frontend engine-filtering
+// integration tests, so only targets that define TEST_HASHED_NAME_PLUGIN_NAME get
+// this accessor.
+#ifdef TEST_HASHED_NAME_PLUGIN_NAME
+inline const std::string& testHashedNamePluginPath()
+{
+    static const std::string s_testHashedNamePluginPath
+        = getTestCustomFilepathForPlugin(TEST_HASHED_NAME_PLUGIN_NAME);
+    return s_testHashedNamePluginPath;
+}
+#endif
+
+// The mismatched-name plugin is consumed only by the backend plugin-loading
+// integration tests, so the accessor is guarded the same way.
+#ifdef TEST_MISMATCHED_NAME_PLUGIN_NAME
+inline const std::string& testMismatchedNamePluginPath()
+{
+    static const std::string s_testMismatchedNamePluginPath
+        = getTestCustomFilepathForPlugin(TEST_MISMATCHED_NAME_PLUGIN_NAME);
+    return s_testMismatchedNamePluginPath;
+}
+#endif
+
 inline const std::string& testNoApplicableEnginesAPluginPath()
 {
     static const std::string s_testNoApplicableEnginesPluginPath
@@ -123,6 +146,25 @@ inline const std::string& testOverrideImplementingPluginPath()
     return s_path;
 }
 
+// Runtime pass-by-value fake reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+inline const std::string& testPassByValuePluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_PASS_BY_VALUE_PLUGIN_NAME);
+    return s_path;
+}
+
+// Runtime pass-by-value RECORDER fake reports "1.2.0" and records the host scalar
+// it resolves from device_buffers at execute, for delivery verification.
+#ifdef TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME
+inline const std::string& testPassByValueRecorderPluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME);
+    return s_path;
+}
+#endif
+
 inline const std::string& testOverrideOmittingPluginPath()
 {
     static const std::string s_path
@@ -170,4 +212,17 @@ inline const std::string& testGoodHeuristicPluginPath()
         = getTestCustomFilepathForPlugin(TEST_GOOD_HEURISTIC_PLUGIN_NAME);
     return s_testGoodHeuristicPluginPath;
 }
+
+// The autotune plugin is consumed only by the frontend autotune integration
+// tests. Only targets that define TEST_AUTOTUNE_PLUGIN_NAME (the frontend test
+// target) get this accessor; the backend test target deliberately carries no
+// autotune-plugin wiring, so the macro is absent there and this is compiled out.
+#ifdef TEST_AUTOTUNE_PLUGIN_NAME
+inline const std::string& testAutotunePluginPath()
+{
+    static const std::string s_testAutotunePluginPath
+        = getTestCustomFilepathForPlugin(TEST_AUTOTUNE_PLUGIN_NAME);
+    return s_testAutotunePluginPath;
+}
+#endif
 } // namespace hipdnn_tests::plugin_constants

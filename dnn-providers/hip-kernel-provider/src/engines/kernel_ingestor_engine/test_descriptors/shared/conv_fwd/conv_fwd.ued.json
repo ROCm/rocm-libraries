@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "4e06e981-aaf2-4fe1-836d-09c221009a0c",
+  "name": "hipkernel:ConvFwd",
+  "graph_match": { "native": "hipkernel.conv_fwd.graph_match" },
+  "heuristic": "e8066dca-b56e-4dfa-8755-a1e1bcadf09f",
+  "metadata": "a7745b41-dcd5-4b4f-89ca-a98f608dba38",
+  "knobs": [
+    "block_size"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

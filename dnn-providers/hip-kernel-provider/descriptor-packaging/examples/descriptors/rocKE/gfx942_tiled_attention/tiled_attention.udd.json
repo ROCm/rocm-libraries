@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "3db8dc42-af4a-50cc-97ce-b64e75044021",
+  "name": "example tiled-attention dispatch",
+  "dispatch_symbol": "hipkernel.pointwise.dispatch"
+}

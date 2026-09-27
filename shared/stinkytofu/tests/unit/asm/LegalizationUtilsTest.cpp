@@ -174,8 +174,10 @@ TEST_F(LegalizationUtilsTest, VCmpXExpandsWhenNoCMPXWritesSGPR) {
 
     std::string cmpMnemonic(cmpInst->getHwInstDesc()->mnemonic);
     std::string movMnemonic(movInst->getHwInstDesc()->mnemonic);
-    EXPECT_NE(cmpMnemonic.find("_cmp_"), std::string::npos) << "Expected v_cmp_* got: " << cmpMnemonic;
-    EXPECT_NE(movMnemonic.find("s_mov"), std::string::npos) << "Expected s_mov_* got: " << movMnemonic;
+    EXPECT_NE(cmpMnemonic.find("_cmp_"), std::string::npos)
+        << "Expected v_cmp_* got: " << cmpMnemonic;
+    EXPECT_NE(movMnemonic.find("s_mov"), std::string::npos)
+        << "Expected s_mov_* got: " << movMnemonic;
 
     // Original v_cmpx removed
     EXPECT_EQ(countByMnemonic("v_cmpx_lt_f32"), 0);
@@ -187,9 +189,10 @@ TEST_F(LegalizationUtilsTest, VCmpXExpandsWhenNoCMPXWritesSGPR) {
 // ---------------------------------------------------------------------------
 
 TEST_F(LegalizationUtilsTest, WaitCntNonGfx1250IsNoOp) {
-    // Only Gfx1250 is registered in this build; pass a synthetic non-1250 archId
-    // to exercise the early-return path without needing a second arch setup.
-    auto nonGfx1250 = static_cast<GfxArchID>(static_cast<uint32_t>(GfxArchID::Gfx1250) + 1);
+    // Pass an archId past the end of the per-build arch list so getArchInfo() returns null and
+    // isGfx125() is false, exercising the early-return path. A small offset from Gfx1250 would now
+    // collide with the Gfx1250v0 stepping (a real gfx12.5 arch), so use an id no build registers.
+    auto nonGfx1250 = static_cast<GfxArchID>(1u << 20);
 
     StinkyInstruction* inst = createInst(GFX::s_waitcnt);
     inst->addModifier<SWaitCntData>(SWaitCntData(/*vlcnt=*/0));
@@ -254,8 +257,8 @@ TEST_F(LegalizationUtilsTest, WaitCntKmcntOnlyEmitsKmcnt) {
 
 TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
     StinkyInstruction* inst = createInst(GFX::ds_load_b192);
-    inst->addDestReg(StinkyRegister("v", 0, 6));   // v[0:5]
-    inst->addSrcReg(StinkyRegister("v", 40, 1));   // addr
+    inst->addDestReg(StinkyRegister("v", 0, 6));  // v[0:5]
+    inst->addSrcReg(StinkyRegister("v", 40, 1));  // addr
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/32));
 
     AsmIRBuilder builder(*bb, arch);
@@ -293,8 +296,8 @@ TEST_F(LegalizationUtilsTest, DSLoadB192SplitsIntoB128AndB64) {
 
 TEST_F(LegalizationUtilsTest, DSStoreB192SplitsIntoB128AndB64) {
     StinkyInstruction* inst = createInst(GFX::ds_store_b192);
-    inst->addSrcReg(StinkyRegister("v", 50, 1));   // addr
-    inst->addSrcReg(StinkyRegister("v", 0, 6));    // data v[0:5]
+    inst->addSrcReg(StinkyRegister("v", 50, 1));  // addr
+    inst->addSrcReg(StinkyRegister("v", 0, 6));   // data v[0:5]
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);
@@ -328,8 +331,8 @@ TEST_F(LegalizationUtilsTest, DSStoreB256SplitsIntoTwoB128) {
     // ds_store_b256 is not registered as a GFX opcode on gfx1250; use ds_store_b128
     // as a surrogate — legalizeDSStoreB256 only requires 0 dests and 2 srcs.
     StinkyInstruction* inst = createInst(GFX::ds_store_b128);
-    inst->addSrcReg(StinkyRegister("v", 60, 1));   // addr
-    inst->addSrcReg(StinkyRegister("v", 0, 8));    // data v[0:7]
+    inst->addSrcReg(StinkyRegister("v", 60, 1));  // addr
+    inst->addSrcReg(StinkyRegister("v", 0, 8));   // data v[0:7]
     inst->addModifier<DSModifiers>(DSModifiers(1, /*offset=*/0));
 
     AsmIRBuilder builder(*bb, arch);

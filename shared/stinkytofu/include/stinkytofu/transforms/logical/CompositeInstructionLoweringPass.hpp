@@ -49,6 +49,22 @@ class Pass;
  *   - If supported: Single v_lshl_or_b32 instruction
  *   - Fallback: v_lshlrev_b32 + v_or_b32
  *
+ * - SAddU64:
+ *   - If supported: Single s_add_u64 instruction
+ *   - Fallback: s_add_u32 + s_addc_u32 (carry via SCC)
+ *
+ * - VAddNCU64:
+ *   - If supported: Single v_add_nc_u64 instruction
+ *   - Fallback: v_add_co_u32 + v_add_co_ci_u32 (carry via VCC)
+ *
+ * - VAddLShiftLeftU32:
+ *   - If supported: Single v_add_lshl_u32 instruction
+ *   - Fallback: v_add_u32 + v_lshlrev_b32
+ *
+ * - VLShiftLeftAddU32:
+ *   - If supported: Single v_lshl_add_u32 instruction
+ *   - Fallback: v_lshlrev_b32 + v_add_u32
+ *
  * This pass runs BEFORE ToStinkyAsmPass and operates on IRList,
  * expanding composite instructions in-place.
  *

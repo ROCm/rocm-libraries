@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported yet
 
 GlobalParameters:
+  SyncsPerBenchmark: 1
   # SyncsPerBenchmark is not set to 0: this test uses LibraryLogic which
   # requires benchmark data to build the library table.
   MinimumRequiredVersion: 5.0.0
@@ -37,6 +38,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 8, 1,  1,   2, 2,  2,2 ]
@@ -87,6 +89,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 8, 1,  1,   2, 2,  2,2 ]
@@ -135,6 +138,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 8, 1,  1,   2, 2,  2,2 ]
@@ -183,6 +187,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [32, 32, 8, 1,  1,   2, 2,  2,2 ]

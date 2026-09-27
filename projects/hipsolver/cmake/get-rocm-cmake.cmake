@@ -13,7 +13,12 @@ if(NOT ROCmCMakeBuildTools_FOUND)
   if(NOT ROCM_FOUND)
     include(FetchContent)
     message(STATUS "ROCmCMakeBuildTools not found. Fetching...")
-    set(rocm_cmake_tag "develop" CACHE STRING "rocm-cmake tag to download")
+    # pinned-dep rocm-cmake: immutable commit (was the mutable "develop" branch).
+    # Fallback only, used when rocm-cmake isn't already installed at /opt/rocm, so the exact
+    # version rarely matters. Pinned to a known-good rocm-cmake commit from the rocm-6.4.0 tag
+    # for reproducible builds. Bump when the fallback actually needs a newer rocm-cmake.
+    # grep "pinned-dep" to find all pins.
+    set(rocm_cmake_tag "ecc716b97c2239cff00422ed7a43cd52a0839a0e" CACHE STRING "rocm-cmake commit to download (rocm-6.4.0)")
     FetchContent_Declare(
       rocm-cmake
       GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git

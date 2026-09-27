@@ -1,35 +1,26 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-// All content below is gated so the header is harmless to include when the
-// feature is disabled (the entire translation unit collapses to nothing).
-// Callers that actually invoke `generateMXInput` must guard their use sites
-// on the same macro.
+enum class MXScaleLayout
+{
+    None    = 0,
+    GFX950  = 1,
+    GFX1250 = 2,
+};
+
+#include "hipblaslt_scaling_format.hpp"
+#include <string_view>
+
+MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
+
+// Maps a block-scaling format and device arch to the client scale swizzle layout.
+// Only Block_32_UE8M0_32_8_EXT uses GFX950 swizzle; gfx1250 uses GFX1250 for other
+// block formats; everything else stays natural-packed (None).
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
+                                     std::string_view       archName);
+
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include <hip/hip_bfloat16.h>
@@ -38,24 +29,39 @@
 #include <hipblaslt/hipblaslt-types.h>
 #include <stdint.h>
 
-#include <string_view>
 #include <vector>
 
-std::vector<float> generateMXInput(hipDataType                dataType,
-                                   hipDataType                scaleType,
-                                   void*                      data,
-                                   void*                      scale,
-                                   uint64_t                   row,
-                                   uint64_t                   col,
-                                   uint64_t                   stride,
-                                   bool                       isTranspose,
-                                   const std::vector<size_t>& preSwizzleTile,
-                                   const std::vector<size_t>& preTile,
-                                   int const                  scaleBlockRowSize,
-                                   int const                  scaleBlockColSize,
-                                   bool                       isMatrixA,
-                                   std::string_view const     initMethod = "Bounded",
-                                   float                      min_val    = -1.0f,
-                                   float                      max_val    = 1.0f);
+std::vector<float> generateMXInput(hipDataType            dataType,
+                                   hipDataType            scaleType,
+                                   void*                  data,
+                                   void*                  scale,
+                                   uint64_t               row,
+                                   uint64_t               col,
+                                   uint64_t               stride,
+                                   bool                   isTranspose,
+                                   int const              scaleBlockRowSize,
+                                   int const              scaleBlockColSize,
+                                   bool                   isMatrixA,
+                                   MXScaleLayout          scaleLayout = MXScaleLayout::None,
+                                   std::string_view const initMethod  = "Bounded",
+                                   float                  min_val     = -1.0f,
+                                   float                  max_val     = 1.0f,
+                                   std::string_view const scaleInitMethod = "");
+
+// generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
+// on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this
+// in-place restride before scale swizzle / H2D (see tensile DataInitialization).
+void restrideMXScaleBufferKFast(uint8_t* buffer,
+                                size_t   compactFreeDim,
+                                size_t   compactKBlocks,
+                                size_t   paddedKBlocks,
+                                size_t   elemBytes);
+
+void applyMXScaleLayoutInPlace(uint8_t*      scale,
+                               size_t        scaleElemCount,
+                               MXScaleLayout scaleLayout,
+                               size_t        slowDim,
+                               size_t        fastDim,
+                               size_t        mxBlock);
 
 #endif

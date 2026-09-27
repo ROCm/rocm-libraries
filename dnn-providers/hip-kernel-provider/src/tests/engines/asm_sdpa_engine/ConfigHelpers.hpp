@@ -22,9 +22,12 @@ namespace asm_sdpa_engine
  * Supports all MaskType values and BATCH/GROUP modes.
  *
  * @param config The fmha_v3_fwdConfig containing kernel configuration
+ * @param withStats When true, adds an FP32 stats tensor [B, H, Sq, 1]
+ *                  and sets generate_stats=true
  * @return flatbuffers::FlatBufferBuilder A builder containing the graph
  */
-flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config);
+flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
+                                                       bool withStats = false);
 
 /**
  * @brief Retrieves all configurations matching a specific GPU architecture.

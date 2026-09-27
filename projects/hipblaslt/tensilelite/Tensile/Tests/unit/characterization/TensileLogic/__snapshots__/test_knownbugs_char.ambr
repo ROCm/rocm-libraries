@@ -1,9 +1,9 @@
 # serializer version: 1
 # name: test_is_known_bug_hit_and_miss
   dict({
-    'hit_same': True,
-    'hit_str_index': True,
-    'miss_index': False,
+    'hit': True,
+    'miss_name': False,
+    'miss_none': False,
     'miss_path': False,
   })
 # ---
@@ -27,11 +27,11 @@
   list([
     tuple(
       'baz/qux.yaml',
-      12,
+      'NameB',
     ),
     tuple(
       'foo/bar.yaml',
-      3,
+      'NameA',
     ),
   ])
 # ---

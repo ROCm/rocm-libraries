@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <functional>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -738,6 +739,25 @@ TEST(TestSdpaBwdNode, PreValidateFailsPaddingMaskSeqLenKvWrongDataType)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
+TEST(TestSdpaBwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+
+    // Rule 10: attn_scale tensor and attn_scale_value are mutually exclusive.
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1}).set_is_pass_by_value(true);
+    attrs.set_attn_scale(scale);
+    attrs.attn_scale_value = 1.0f;
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+}
+
 //==============================================================================
 // infer_properties_node tests
 //==============================================================================
@@ -862,4 +882,83 @@ TEST(TestSdpaBwdNode, GetNodeTypeReturnsSdpaBwd)
     const GraphAttributes graphAttrs;
     const SdpaBwdNode node(SdpaBackwardAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::SDPA_BWD);
+}
+
+//==============================================================================
+// Fail-loudly drain of unsupported cuDNN-compat setters
+//==============================================================================
+
+TEST(TestSdpaBwdNode, PreValidateFailsUnsupportedDeterministic)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_deterministic_algorithm(true);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("Deterministic"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaBwdNode, PreValidateDrainRunsBeforeShapeChecks)
+{
+    // Q is rank-3 (shape-invalid) AND an unsupported setter is present. The drain
+    // must run first, so the surfaced message is the unsupported one.
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_dim({2, 8, 16});
+    auto k = makeTensor4D(2, 8, 32, 64);
+    auto v = makeTensor4D(2, 8, 32, 64);
+    auto attrs = makeMinimalAttrs(q, k, v);
+    attrs.set_deterministic_algorithm(true);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(err.err_msg.find("Deterministic"), std::string::npos) << err.err_msg;
+    EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsEachUnsupportedSetter)
+{
+    const auto expectUnsupported
+        = [](const std::function<void(SdpaBackwardAttributes&)>& applyUnsupported,
+             const std::string& expectedFragment) {
+              auto q = makeTensor4D(2, 8, 16, 64);
+              auto k = makeTensor4D(2, 8, 32, 64);
+              auto v = makeTensor4D(2, 8, 32, 64);
+              auto attrs = makeMinimalAttrs(q, k, v);
+              applyUnsupported(attrs);
+
+              const GraphAttributes graphAttrs;
+              const SdpaBwdNode node(std::move(attrs), graphAttrs);
+              auto err = node.pre_validate_node();
+              EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << expectedFragment;
+              EXPECT_NE(err.err_msg.find(expectedFragment), std::string::npos) << err.err_msg;
+          };
+
+    expectUnsupported(
+        [](SdpaBackwardAttributes& a) { a.set_score_mod([](auto, auto t) { return t; }); },
+        "score modifier");
+    expectUnsupported(
+        [](SdpaBackwardAttributes& a) { a.set_score_mod_bprop([](auto, auto t) { return t; }); },
+        "score-modifier backprop");
+    expectUnsupported([](SdpaBackwardAttributes& a) { a.set_max_total_seq_len_q(128); },
+                      "max_total_seq_len_q");
+    expectUnsupported([](SdpaBackwardAttributes& a) { a.set_max_total_seq_len_kv(128); },
+                      "max_total_seq_len_kv");
+    expectUnsupported([](SdpaBackwardAttributes& a) { a.set_deterministic_algorithm(true); },
+                      "Deterministic");
+    expectUnsupported(
+        [](SdpaBackwardAttributes& a) { a.set_rng_dump(std::make_shared<TensorAttributes>()); },
+        "RNG dump");
+    expectUnsupported(
+        [](SdpaBackwardAttributes& a) { a.set_sink_token(std::make_shared<TensorAttributes>()); },
+        "sink token");
+    expectUnsupported(
+        [](SdpaBackwardAttributes& a) { a.set_dsink_token(std::make_shared<TensorAttributes>()); },
+        "sink-token gradient");
 }

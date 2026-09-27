@@ -1,0 +1,62 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb8 --InsertVgprMsbPass --print-output
+#
+# Verify preferInsertAfter anchors s_set_vgpr_msb after SALU/VALU/Matrix
+# instructions, and when all three appear, the insertion anchor tracks the
+# last prefer type.
+
+# CHECK-LABEL: @prefer_after_salu
+# CHECK: s_mov_b32
+# CHECK-NEXT: s_set_vgpr_msb
+# CHECK-NEXT: buffer_load_b32
+st.func @prefer_after_salu() {
+^entry:
+  s12 = "st.s_mov_b32"(s13) { issueCycles = 1, latencyCycles = 2 }
+  v10 = "st.buffer_load_b32"(v300) { issueCycles = 1, latencyCycles = 100 }
+}
+
+# CHECK-LABEL: @prefer_after_valu
+# CHECK: v_add_f32
+# CHECK-NEXT: s_set_vgpr_msb
+# CHECK-NEXT: buffer_load_b32
+st.func @prefer_after_valu() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v300) { issueCycles = 1, latencyCycles = 100 }
+}
+
+# CHECK-LABEL: @prefer_after_matrix
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_set_vgpr_msb
+# CHECK-NEXT: buffer_load_b32
+st.func @prefer_after_matrix() {
+^entry:
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v10 = "st.buffer_load_b32"(v300) { issueCycles = 1, latencyCycles = 100 }
+}
+
+# CHECK-LABEL: @prefer_after_all_types_use_last_anchor
+# CHECK: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_set_vgpr_msb
+# CHECK-NEXT: buffer_load_b32
+st.func @prefer_after_all_types_use_last_anchor() {
+^entry:
+  s12 = "st.s_mov_b32"(s13) { issueCycles = 1, latencyCycles = 2 }
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v10 = "st.buffer_load_b32"(v300) { issueCycles = 1, latencyCycles = 100 }
+}
+
+# CHECK-LABEL: @computable_class_consumes_anchor_without_emit
+# CHECK: s_set_vgpr_msb"(0)
+# CHECK-NEXT: v_add_f32
+# CHECK-NEXT: v_mul_f32
+# CHECK-NEXT: buffer_load_b32
+# CHECK-NEXT: s_set_vgpr_msb"(69)
+# CHECK-NEXT: v_mul_f32
+st.func @computable_class_consumes_anchor_without_emit() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v20) { issueCycles = 1, latencyCycles = 100 }
+  v256 = "st.v_mul_f32"(v257, v258) { issueCycles = 1, latencyCycles = 5 }
+}

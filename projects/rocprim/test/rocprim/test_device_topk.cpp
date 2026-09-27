@@ -32,6 +32,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 #include "test_utils_sort_comparator.hpp"
 
 // required rocprim headers
@@ -86,16 +87,6 @@ void inline compare_k(InputVector input, OutputVector output, SizeOut k)
 
     // Only check that first k coincide
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input, k));
-}
-
-// Get the free memory size with a coefficient.
-size_t get_current_free_mem_size(float coefficient)
-{
-    size_t free_mem;
-    [[maybe_unused]]
-    size_t total_mem;
-    HIP_CHECK(hipMemGetInfo(&free_mem, &total_mem));
-    return static_cast<size_t>(static_cast<float>(free_mem) * coefficient);
 }
 
 namespace utils
@@ -814,31 +805,28 @@ void topk_large_sizes_test(bool debug_synchronous)
             HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
         }
 
-        // This test needs to allocate 2 buffers of size: sizeof(key_type) * size, plus temporary storage.
-        // Check if there could be no enough memory space
-        if((2 * sizeof(key_type) * size) > get_current_free_mem_size(0.7))
-        {
-            std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
-            return;
-        }
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         const size_out_type k = 1;
 
         SCOPED_TRACE(testing::Message() << "with k = " << k);
 
+        test_utils::MemCheck memcheck;
+
         // Generate data
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> input(size);
         test_utils::iota(input.begin(), input.end(), 0);
 
         common::device_ptr<key_type> d_input;
         common::device_ptr<key_type> d_output;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, k)
         if(!d_input.resize_with_memory_check(size) || !d_output.resize_with_memory_check(k))
         {
             std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
-            return;
+            break;
         }
         d_input.store(input);
 
@@ -866,10 +854,11 @@ void topk_large_sizes_test(bool debug_synchronous)
         // allocate temporary storage
         common::device_ptr<void> d_temp_storage;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
         {
             std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
-            return;
+            break;
         }
 
         test_utils::GraphHelper gHelper;

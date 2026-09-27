@@ -58,6 +58,7 @@ DEFINE_SCALAR_MAPPING(unsigned int)
 
 DEFINE_VECTOR_MAPPING(float, 2)
 DEFINE_VECTOR_MAPPING(float, 4)
+DEFINE_VECTOR_MAPPING(float, 8)
 
 DEFINE_VECTOR_MAPPING(_Float16, 2)
 DEFINE_VECTOR_MAPPING(_Float16, 4)
@@ -149,22 +150,23 @@ __forceinline__ __device__ __host__ OutType cast(InType input)
 
     constexpr auto inSize  = InTypeInfo::size;
     constexpr auto outSize = OutTypeInfo::size;
+    static_assert(outSize == 1 || outSize == 2 || outSize == 4 || outSize == 8,
+                  "Unsupported miopen vector cast.");
 
-    if constexpr(inSize == outSize && outSize == 4)
-    {
-        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
-                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
-                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.z),
-                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.w)};
-    }
-    else if constexpr(inSize == outSize && outSize == 2)
-    {
-        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
-                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y)};
-    }
-    else if constexpr(inSize == outSize && outSize == 1)
+    if constexpr(inSize == outSize && outSize == 1)
     {
         return detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input);
+    }
+    else if constexpr(inSize == outSize && outSize > 1)
+    {
+        using OutScalar = typename OutTypeInfo::UnderlyingType;
+        using InScalar  = typename InTypeInfo::UnderlyingType;
+        OutType out;
+        auto* outp      = reinterpret_cast<OutScalar*>(&out);
+        const auto* inp = reinterpret_cast<const InScalar*>(&input);
+        for(int i = 0; i < static_cast<int>(outSize); ++i)
+            outp[i] = detail::scalarcast<OutScalar>(inp[i]);
+        return out;
     }
     else if constexpr(inSize == 1 && outSize > 1)
     {

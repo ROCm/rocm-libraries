@@ -26,6 +26,7 @@
 
 #include <miopen/find_db.hpp>
 
+#include <miopen/db_path.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/perf_field.hpp>
@@ -86,6 +87,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathEmbed(const Handle& handle,
 
             const auto db_id        = handle.GetTargetProperties().DbId();
             const int real_cu_count = handle.GetMaxComputeUnits();
+            const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
             int closest_cu          = std::numeric_limits<int>::max();
             fs::path best_path;
             for(const auto& entry : all_files)
@@ -108,10 +110,10 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathEmbed(const Handle& handle,
                         cur_count = std::stoi(fname.substr(pos + 1));
                     else
                         cur_count = std::stoi(fname.substr(db_id.length()), nullptr, 16);
-                    if(abs(cur_count - real_cu_count) < (closest_cu))
+                    if(abs(cur_count - target_cu) < (closest_cu))
                     {
                         best_path  = entry;
-                        closest_cu = abs(cur_count - real_cu_count);
+                        closest_cu = abs(cur_count - target_cu);
                     }
                 }
             }
@@ -154,14 +156,18 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
         std::copy(fs::directory_iterator(root_path),
                   fs::directory_iterator(),
                   std::back_inserter(contents));
+        // Note: fs::path::extension() returns only the final ".txt" component, so it can
+        // never equal the multi-dot ".fdb.txt"; match against the full filename instead.
+        const auto fdb_ext = path_suffix + ".fdb.txt";
         for(auto const& filepath : contents)
         {
-            if(fs::is_regular_file(filepath) && filepath.extension() == path_suffix + ".fdb.txt")
+            if(fs::is_regular_file(filepath) && EndsWith(filepath.filename().string(), fdb_ext))
                 all_files.push_back(filepath);
         }
 
         const auto db_id        = handle.GetTargetProperties().DbId();
         const int real_cu_count = handle.GetMaxComputeUnits();
+        const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
         int closest_cu          = std::numeric_limits<int>::max();
 
         for(const auto& entry : all_files)
@@ -188,10 +194,10 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
                     cur_count = std::stoi(fname.substr(pos + 1));
                 else
                     cur_count = std::stoi(fname.substr(db_id.length()), nullptr, 16);
-                if(abs(cur_count - real_cu_count) < (closest_cu))
+                if(abs(cur_count - target_cu) < (closest_cu))
                 {
                     file_path  = entry;
-                    closest_cu = abs(cur_count - real_cu_count);
+                    closest_cu = abs(cur_count - target_cu);
                 }
             }
         }
@@ -205,6 +211,12 @@ template <class TDb>
 fs::path FindDbRecord_t<TDb>::GetInstalledPath(const Handle& handle, const std::string& path_suffix)
 {
 #if !MIOPEN_DISABLE_SYSDB
+    // An empty installed path disables the system find-db; the user find-db is unaffected.
+    if(IsSystemDbDisabled())
+    {
+        MIOPEN_LOG_I2("System find-db is disabled");
+        return "";
+    }
 #if MIOPEN_EMBED_DB
     return GetInstalledPathEmbed(handle, path_suffix);
 #else

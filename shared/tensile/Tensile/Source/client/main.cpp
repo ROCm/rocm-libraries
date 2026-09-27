@@ -26,6 +26,7 @@
 
 #include <Tensile/ArithmeticUnitTypes.hpp>
 #include <Tensile/Contractions.hpp>
+#include <Tensile/DataTypes.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
@@ -279,7 +280,24 @@ namespace Tensile
 
             HIP_CHECK_EXC(hipSetDevice(deviceIdx));
 
-            return hip::GetCurrentDevice();
+            auto hardware = hip::GetCurrentDevice();
+
+            // f8 encoding differs by arch: gfx942 uses FNUZ (the default here),
+            // while gfx950/gfx1200/gfx1201 use OCP (bias 7/15, IEEE inf/NaN).
+            // The host f8 reference defaults to FNUZ, so switch it to OCP on the
+            // OCP archs. Without this, the CPU reference decodes f8 bytes under
+            // the wrong format and every f8 validation fails on gfx950.
+            if(auto* gpu = dynamic_cast<AMDGPU*>(hardware.get()))
+            {
+                if(gpu->processor == AMDGPU::Processor::gfx950
+                   || gpu->processor == AMDGPU::Processor::gfx1200
+                   || gpu->processor == AMDGPU::Processor::gfx1201)
+                {
+                    set_hip_f8_bias_mode_ieee();
+                }
+            }
+
+            return hardware;
         }
 
         hipStream_t GetStream(po::variables_map const& args)

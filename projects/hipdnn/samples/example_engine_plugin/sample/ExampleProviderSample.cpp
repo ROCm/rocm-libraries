@@ -56,6 +56,19 @@
 
 using namespace hipdnn_frontend;
 
+// Gracefully skip the sample when no GPU is present: prints a skip message and
+// returns 0 from the enclosing function.
+#define RETURN_SUCCESS_IF_NO_DEVICE()                                         \
+    do                                                                        \
+    {                                                                         \
+        int deviceCount = 0;                                                  \
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0) \
+        {                                                                     \
+            std::cout << "SKIPPED: No GPU devices available.\n";              \
+            return 0;                                                         \
+        }                                                                     \
+    } while(0)
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -271,7 +284,7 @@ static bool verifyPluginPresence(hipdnnHandle_t handle, const std::string& modeL
 // ============================================================================
 // Scenario 1: ReLU Forward with Engine Selection and Knob Modification
 // ============================================================================
-static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths, bool hasGpu)
+static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths)
 {
     std::cout << "\n=== Scenario 1: ReLU Forward with Engine Selection and Knob Modification ===\n";
     std::cout
@@ -382,12 +395,6 @@ static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths, bo
 
     std::cout << "  Graph built successfully.\n";
 
-    if(!hasGpu)
-    {
-        std::cout << "  GPU execution skipped (no GPU detected).\n";
-        return true;
-    }
-
     // GPU execution and verification
     std::vector<float> input = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 1.5f};
     std::vector<float> output(input.size(), -999.0f);
@@ -460,7 +467,7 @@ static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths, bo
 // ============================================================================
 // Scenario 2: Convolution Forward with Engine Selection
 // ============================================================================
-static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths, bool hasGpu)
+static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths)
 {
     std::cout << "\n=== Scenario 2: Convolution Forward with Engine Selection ===\n";
     std::cout
@@ -535,12 +542,6 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths, bo
     }
 
     std::cout << "  Graph built successfully.\n";
-
-    if(!hasGpu)
-    {
-        std::cout << "  GPU execution skipped (no GPU detected).\n";
-        return true;
-    }
 
     // 4x4 input matrix (values 1..16), managed by Tensor class
     // clang-format off
@@ -620,7 +621,7 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths, bo
 // ============================================================================
 // Scenario 3: Plugin Loading Modes
 // ============================================================================
-static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPaths, bool hasGpu)
+static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPaths)
 {
     std::cout << "\n=== Scenario 3: Plugin Loading Modes ===\n";
     std::cout << "Demonstrates ADDITIVE and ABSOLUTE loading modes with presence verification "
@@ -684,40 +685,33 @@ static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPa
         }
 
         // Run a quick ReLU execution to confirm the loaded plugin is functional
-        if(hasGpu)
+        std::cout << "\n  Running quick ReLU to confirm plugin functionality...\n";
+        std::vector<float> input = {-2.0f, 0.0f, 3.0f};
+        std::vector<float> output;
+        if(!runReluGraph(*handle, "Scenario3_QuickReLU", input, output))
         {
-            std::cout << "\n  Running quick ReLU to confirm plugin functionality...\n";
-            std::vector<float> input = {-2.0f, 0.0f, 3.0f};
-            std::vector<float> output;
-            if(!runReluGraph(*handle, "Scenario3_QuickReLU", input, output))
-            {
-                return false;
-            }
+            return false;
+        }
 
-            // Verify the output
-            bool correct = true;
-            for(size_t i = 0; i < input.size(); ++i)
+        // Verify the output
+        bool correct = true;
+        for(size_t i = 0; i < input.size(); ++i)
+        {
+            const float expected = std::max(0.0f, input[i]);
+            if(output[i] != expected)
             {
-                const float expected = std::max(0.0f, input[i]);
-                if(output[i] != expected)
-                {
-                    std::cerr << "  MISMATCH at [" << i << "]: expected " << expected << ", got "
-                              << output[i] << "\n";
-                    correct = false;
-                }
+                std::cerr << "  MISMATCH at [" << i << "]: expected " << expected << ", got "
+                          << output[i] << "\n";
+                correct = false;
             }
-            if(correct)
-            {
-                std::cout << "  Quick ReLU verification passed.\n";
-            }
-            else
-            {
-                return false;
-            }
+        }
+        if(correct)
+        {
+            std::cout << "  Quick ReLU verification passed.\n";
         }
         else
         {
-            std::cout << "\n  GPU execution skipped (no GPU detected).\n";
+            return false;
         }
     }
 
@@ -760,21 +754,10 @@ int main(int argc, char* argv[])
         std::cout << "hipDNN Example Plugin Sample Application\n";
         std::cout << "=========================================\n";
 
-        // Check GPU availability
-        bool hasGpu = false;
-        int deviceCount = 0;
-        if(hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0)
-        {
-            hasGpu = true;
-            hipDeviceProp_t props;
-            static_cast<void>(hipGetDeviceProperties(&props, 0));
-            std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";
-        }
-        else
-        {
-            std::cout << "No GPU detected. Skipping GPU execution scenarios.\n"
-                      << "Running non-GPU portions only.\n";
-        }
+        RETURN_SUCCESS_IF_NO_DEVICE();
+        hipDeviceProp_t props;
+        static_cast<void>(hipGetDeviceProperties(&props, 0));
+        std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";
 
         // Determine plugin path: CLI argument > HIPDNN_PLUGIN_DIR > executable directory.
 #ifdef _WIN32
@@ -846,9 +829,9 @@ int main(int argc, char* argv[])
 
         bool allPassed = true;
 
-        allPassed = scenario1ReluForward(pluginPaths, hasGpu) && allPassed;
-        allPassed = scenario2ConvForward(pluginPaths, hasGpu) && allPassed;
-        allPassed = scenario3PluginLoadingModes(pluginPaths, hasGpu) && allPassed;
+        allPassed = scenario1ReluForward(pluginPaths) && allPassed;
+        allPassed = scenario2ConvForward(pluginPaths) && allPassed;
+        allPassed = scenario3PluginLoadingModes(pluginPaths) && allPassed;
 
         std::cout << "\n=========================================\n";
         if(allPassed)

@@ -4,7 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/Visibility.hpp>
@@ -94,6 +96,11 @@ public:
                                                    hipdnnPluginLoadingMode_ext_t mode)
         = 0;
 
+    virtual hipdnnStatus_t setHeuristicPluginPathsExt(size_t numPaths,
+                                                      const char* const* pluginPaths,
+                                                      hipdnnPluginLoadingMode_ext_t mode)
+        = 0;
+
     virtual hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
                                                          size_t* numPluginPaths,
                                                          char** pluginPaths,
@@ -116,11 +123,60 @@ public:
                                                   size_t* apiVersionLen)
         = 0;
 
+    virtual hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t callback,
+                                                 hipdnnSeverity_t minLevel,
+                                                 hipdnnLogCallbackMode_t mode,
+                                                 hipdnnUserLogCallbackHandle_t userHandle)
+        = 0;
+    virtual hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t level) = 0;
+    virtual hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) = 0;
+
+    /// Resolves a loaded engine's ID to the name it carries, following the two-call
+    /// pattern of hipdnnGetEngineNameById_ext.
+    ///
+    /// Declared last, and not pure, so an implementation written against an earlier
+    /// header keeps compiling. What it inherits is HIPDNN_STATUS_NOT_SUPPORTED, which
+    /// callers read as "this backend cannot name engines" and answer from the built-in
+    /// registry instead.
+    virtual hipdnnStatus_t getEngineNameByIdExt(hipdnnHandle_t /*handle*/,
+                                                int64_t /*engineId*/,
+                                                char* /*engineName*/,
+                                                size_t* /*engineNameLen*/)
+    {
+        return HIPDNN_STATUS_NOT_SUPPORTED;
+    }
+
+    // Declared last and non-pure so an older backend still satisfies the interface.
+    virtual hipdnnStatus_t
+        writeEngineRankingResultsExt([[maybe_unused]] hipdnnHandle_t handle,
+                                     [[maybe_unused]] hipdnnBackendDescriptor_t graphDescriptor,
+                                     [[maybe_unused]] const int64_t* engineIdsInRankOrder,
+                                     [[maybe_unused]] size_t engineIdCount,
+                                     [[maybe_unused]] hipdnnAutotuneCacheWriteOutcome_ext_t* outcome
+                                     = nullptr)
+    {
+        return HIPDNN_STATUS_NOT_SUPPORTED;
+    }
+
     // HIPDNN_HIDDEN on accessor functions ensures each shared object has its own backendInstance
     HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend> getInstance()
     {
         const std::lock_guard<std::mutex> lock(backendMutex());
         return backendInstance();
+    }
+
+    template <typename BackendFactory>
+    HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend>
+        getOrCreateInstance(BackendFactory&& factory)
+    {
+        const std::lock_guard<std::mutex> lock(backendMutex());
+        auto& instance = backendInstance();
+        if(!instance)
+        {
+            instance = std::forward<BackendFactory>(factory)();
+        }
+
+        return instance;
     }
 
     HIPDNN_HIDDEN static void setInstance(std::shared_ptr<IHipdnnBackend> instance)

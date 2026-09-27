@@ -114,12 +114,22 @@ public:
                 (size_t num_paths,
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
-                ());
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                setHeuristicPluginPathsExt,
+                (size_t num_paths,
+                 const char* const* plugin_paths,
+                 hipdnnPluginLoadingMode_ext_t mode),
+                (override));
     MOCK_METHOD(
         hipdnnStatus_t,
         getLoadedEnginePluginPathsExt,
         (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
         ());
+    MOCK_METHOD(hipdnnStatus_t,
+                getEngineNameByIdExt,
+                (hipdnnHandle_t handle, int64_t engineId, char* engineName, size_t* engineNameLen),
+                (override));
     MOCK_METHOD(hipdnnStatus_t,
                 getHeuristicPolicyCount,
                 (hipdnnHandle_t handle, size_t* numPolicies),
@@ -137,6 +147,18 @@ public:
                  size_t* pluginVersionLen,
                  char* apiVersion,
                  size_t* apiVersionLen),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                setUserLogCallbackExt,
+                (hipdnnUserLogCallback_t callback,
+                 hipdnnSeverity_t minLevel,
+                 hipdnnLogCallbackMode_t mode,
+                 hipdnnUserLogCallbackHandle_t userHandle),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t, backendSetGlobalLogLevelExt, (hipdnnSeverity_t level), (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                backendGetGlobalLogLevelExt,
+                (hipdnnSeverity_t * level),
                 (override));
 };
 

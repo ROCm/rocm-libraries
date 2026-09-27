@@ -1,5 +1,5 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-! Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+! Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,17 @@ module rocsparse
             integer(kind(rocsparse_status_success)) :: rocsparse_create_handle
             type(c_ptr) :: handle
         end function rocsparse_create_handle
+
+        function rocsparse_handle_create(handle, stream, p_error) &
+                bind(c, name = 'rocsparse_handle_create')
+            use rocsparse_enums
+            use iso_c_binding
+            implicit none
+            integer(kind(rocsparse_status_success)) :: rocsparse_handle_create
+            type(c_ptr) :: handle
+            type(c_ptr), value :: stream
+            type(c_ptr), value :: p_error
+        end function rocsparse_handle_create
 
         function rocsparse_destroy_handle(handle) &
                 bind(c, name = 'rocsparse_destroy_handle')

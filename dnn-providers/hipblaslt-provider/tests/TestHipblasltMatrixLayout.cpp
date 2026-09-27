@@ -55,6 +55,17 @@ TEST(TestHipblasltMatrixLayout, CanCreateAndDestroyDefaultMatrix)
     });
 }
 
+TEST(TestHipblasltMatrixLayout, RawDimensionsCreatesValidLayout)
+{
+    EXPECT_NO_THROW({
+        // Byte (R_8I) layout from explicit dims, as used for scale transposes.
+        HipblasltMatrixLayout const matLayout(HIP_R_8I, 4, 16, 4);
+        // No associated tensor, so uid defaults to 0 while the handle is valid.
+        EXPECT_EQ(matLayout.uid(), 0);
+        EXPECT_NE(matLayout.matrixLayout(), nullptr);
+    });
+}
+
 TEST(TestHipblasltMatrixLayout, TensorWithEmptyShape)
 {
     std::vector<int64_t> const strides = {1};

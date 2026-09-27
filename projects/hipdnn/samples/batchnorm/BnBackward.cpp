@@ -27,21 +27,25 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running batch normalization backwards graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    const int64_t n = 16; // BATCH SIZE
-    const int64_t c = 16; // CHANNELS (FEATURES)
-    const int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    const int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = config.dims.size() > 0 ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    setPreferredEngine(graph, config);
+
     auto dy = createTensor({n, c, h, w}, inputType, layout);
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto savedMean = createTensor({1, c, 1, 1}, intermediateType);
     auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType);
+
     auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
     bnBwdAttributes.set_name("bn_backward_node");
     bnBwdAttributes.set_saved_mean_and_inv_variance(savedMean, savedInvVariance);
@@ -52,6 +56,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_output(true).set_data_type(intermediateType);
 
     HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
@@ -112,17 +117,20 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                       &savedInvVarTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
-        auto floatTolerance = static_cast<float>(tolerance);
+        const auto floatTolerance = static_cast<float>(tolerance);
 
         auto dxValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+
         auto dscaleDbiasValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
         std::cout << "CPU reference validation:\n";
+
         const bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
             std::cout, "dx", dxValidator, dxRefTensor, dxTensor, floatTolerance, floatTolerance);
+
         const bool dscaleValid
             = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
                                                                               "dscale",
@@ -131,6 +139,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                               dscaleTensor,
                                                                               floatTolerance,
                                                                               floatTolerance);
+
         const bool dbiasValid
             = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
                                                                               "dbias",
@@ -148,19 +157,19 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     {
         std::cout << static_cast<float>(dxHostPtr[i]) << " ";
     }
+
     std::cout << "\nFirst 10 dscale values: ";
     for(int i = 0; i < 10; ++i)
     {
         std::cout << static_cast<float>(dscaleHostPtr[i]) << " ";
     }
+
     std::cout << "\nFirst 10 dbias values: ";
     for(int i = 0; i < 10; ++i)
     {
         std::cout << static_cast<float>(dbiasHostPtr[i]) << " ";
     }
 
-    std::cout << "\nBatch normalization backward graph execution complete for " << inputType
-              << ".\n\n";
     return validationPassed;
 }
 
@@ -168,6 +177,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();
@@ -180,6 +191,7 @@ int main(int argc, char* argv[])
             std::cout << "All batch normalization backward runs completed successfully.\n";
             return 0;
         }
+
         std::cout << "One or more batch normalization backward runs failed validation.\n";
         return 1;
     }

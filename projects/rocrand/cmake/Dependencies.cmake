@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -128,28 +128,6 @@ if(BUILD_TEST)
       GIT_TAG        v1.15.2
     )
     FetchContent_MakeAvailable(googletest)
-  endif()
-endif()
-
-# Benchmark dependencies
-if(BUILD_BENCHMARK)
-  # Google Benchmark (https://github.com/google/benchmark)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(benchmark 1.9.1 QUIET)
-  endif()
-
-  if(NOT TARGET benchmark::benchmark)
-    message(STATUS "Google Benchmark not found or force download on. Fetching...")
-    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library" OFF)
-    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark" OFF)
-    FetchContent_Declare(
-      googlebenchmark
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.9.1
-    )
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
-    FetchContent_MakeAvailable(googlebenchmark)
   endif()
 endif()
 

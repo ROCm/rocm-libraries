@@ -1,0 +1,54 @@
+{
+  "compute_data_type": "float",
+  "intermediate_data_type": "${case.intermediate_data_type}",
+  "io_data_type": "${case.io_data_type}",
+  "is_override_shape_enabled": false,
+  "name": "ConvolutionBackwardDataTest",
+  "nodes": [
+    {
+      "compute_data_type": "float",
+      "inputs": {
+        "dy_tensor_uid": 1,
+        "w_tensor_uid": 2
+      },
+      "name": "ConvolutionDgrad_0",
+      "outputs": {
+        "dx_tensor_uid": 0
+      },
+      "parameters": {
+        "conv_mode": "CROSS_CORRELATION",
+        "dilation": "${case.attributes.parameters__dilation}",
+        "post_padding": "${case.attributes.parameters__post_padding}",
+        "pre_padding": "${case.attributes.parameters__pre_padding}",
+        "stride": "${case.attributes.parameters__stride}"
+      },
+      "type": "ConvolutionBwdAttributes"
+    }
+  ],
+  "tensors": [
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "ConvolutionDgrad_0::DX",
+      "strides": "${case.strides}",
+      "uid": 0,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "dy",
+      "strides": "${case.strides}",
+      "uid": 1,
+      "virtual": false
+    },
+    {
+      "data_type": "${case.data_type}",
+      "dims": "${case.dims}",
+      "name": "w",
+      "strides": "${case.strides}",
+      "uid": 2,
+      "virtual": false
+    }
+  ]
+}

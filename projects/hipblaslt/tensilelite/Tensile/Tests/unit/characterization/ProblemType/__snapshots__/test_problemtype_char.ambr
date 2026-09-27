@@ -28,6 +28,9 @@
     'DataTypeMetadata': '<DataType Int8>',
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
+    'FusedGemmA2A': False,
+    'GateResidualDataTypeList': list([
+    ]),
     'Gradient': False,
     'GroupedGemm': False,
     'HighPrecisionAccumulate': False,
@@ -95,6 +98,8 @@
     ]),
     'SetConstStrideBias': list([
     ]),
+    'SetConstStrideGate': list([
+    ]),
     'SilentHighPrecisionAccumulate': False,
     'Sparse': 1,
     'StochasticRounding': False,
@@ -116,6 +121,7 @@
     'UseBeta': True,
     'UseBias': 0,
     'UseE': False,
+    'UseGateResidual': False,
     'UseInitialStridesAB': False,
     'UseInitialStridesCD': False,
     'UseScaleAB': '',
@@ -149,6 +155,9 @@
     'DataTypeMXSB': '<DataType E8>',
     'DestDataType': '<DataType Float>',
     'F32XdlMathOp': '<DataType Float>',
+    'FusedGemmA2A': False,
+    'GateResidualDataTypeList': list([
+    ]),
     'Gradient': False,
     'GroupedGemm': False,
     'HighPrecisionAccumulate': False,
@@ -215,6 +224,8 @@
     ]),
     'SetConstStrideBias': list([
     ]),
+    'SetConstStrideGate': list([
+    ]),
     'SilentHighPrecisionAccumulate': False,
     'Sparse': 0,
     'StochasticRounding': False,
@@ -235,6 +246,7 @@
     'UseBeta': True,
     'UseBias': 0,
     'UseE': False,
+    'UseGateResidual': False,
     'UseInitialStridesAB': False,
     'UseInitialStridesCD': False,
     'UseScaleAB': '',
@@ -251,7 +263,7 @@
     'getitem_datatype': 'Float',
     'is_mapping_iter_sorted': True,
     'keys_is_list': True,
-    'len': 86,
+    'len': 90,
   })
 # ---
 # name: test_no_data_type_raises
@@ -283,6 +295,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -349,6 +364,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -369,6 +386,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -405,6 +423,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -471,6 +492,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -491,6 +514,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -527,6 +551,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -593,6 +620,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -613,6 +642,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -649,6 +679,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -715,6 +748,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -735,6 +770,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -771,6 +807,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -837,6 +876,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -857,6 +898,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -894,6 +936,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': True,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -960,6 +1005,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -980,6 +1027,7 @@
       'UseBeta': True,
       'UseBias': 1,
       'UseE': True,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1016,6 +1064,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1082,6 +1133,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1102,6 +1155,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1138,6 +1192,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1204,6 +1261,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1224,6 +1283,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1260,6 +1320,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1326,6 +1389,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1346,6 +1411,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1382,6 +1448,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1448,6 +1517,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1468,6 +1539,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1504,6 +1576,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1574,6 +1649,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1594,6 +1671,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1630,6 +1708,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType BFloat16>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': True,
@@ -1696,6 +1777,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1716,6 +1799,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1753,6 +1837,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1819,6 +1906,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1839,6 +1928,7 @@
       'UseBeta': True,
       'UseBias': 1,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1876,6 +1966,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -1942,6 +2035,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -1962,6 +2057,7 @@
       'UseBeta': True,
       'UseBias': 3,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -1999,6 +2095,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2065,6 +2164,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2085,6 +2186,7 @@
       'UseBeta': True,
       'UseBias': 2,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2122,6 +2224,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2188,6 +2293,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2208,6 +2315,7 @@
       'UseBeta': True,
       'UseBias': 1,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2246,6 +2354,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2312,6 +2423,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2332,6 +2445,7 @@
       'UseBeta': True,
       'UseBias': 1,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2368,6 +2482,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2434,6 +2551,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2454,6 +2573,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2490,6 +2610,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType ComplexFloat>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2556,6 +2679,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2576,6 +2701,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2612,6 +2738,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2678,6 +2807,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2698,6 +2829,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2734,6 +2866,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Double>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2800,6 +2935,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2820,6 +2957,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2856,6 +2994,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType XFloat32>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -2922,6 +3063,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -2942,6 +3085,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -2978,6 +3122,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -3044,6 +3191,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3064,6 +3213,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3101,6 +3251,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': True,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -3167,6 +3320,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3187,6 +3342,7 @@
       'UseBeta': True,
       'UseBias': 1,
       'UseE': True,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3223,6 +3379,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': True,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -3289,6 +3448,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3309,6 +3470,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3345,6 +3507,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': True,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -3411,6 +3576,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3431,6 +3598,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3467,6 +3635,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': True,
       'HighPrecisionAccumulate': False,
@@ -3533,6 +3704,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3553,6 +3726,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3589,6 +3763,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': True,
@@ -3655,6 +3832,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3675,6 +3854,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3711,6 +3891,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': True,
@@ -3777,6 +3960,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3797,6 +3982,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3835,6 +4021,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': True,
@@ -3901,6 +4090,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -3921,6 +4112,7 @@
       'UseBeta': True,
       'UseBias': 1,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -3957,6 +4149,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Int8>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': True,
@@ -4023,6 +4218,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4043,6 +4240,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -4079,6 +4277,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4145,6 +4346,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4165,6 +4368,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': True,
       'UseInitialStridesCD': True,
       'UseScaleAB': '',
@@ -4201,6 +4405,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4279,6 +4486,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4301,6 +4510,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -4337,6 +4547,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4403,6 +4616,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4423,6 +4638,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -4459,6 +4675,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4525,6 +4744,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4545,6 +4766,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': 'Scalar',
@@ -4581,6 +4803,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4647,6 +4872,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4667,6 +4894,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': 'Vector',
@@ -4703,6 +4931,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4769,6 +5000,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4789,6 +5022,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -4825,6 +5059,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -4891,6 +5128,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -4911,6 +5150,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -4947,6 +5187,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Half>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': True,
@@ -5013,6 +5256,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': True,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -5033,6 +5278,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5070,6 +5316,9 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5137,6 +5386,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 1,
       'StochasticRounding': False,
@@ -5158,6 +5409,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5195,6 +5447,9 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5262,6 +5517,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 1,
       'StochasticRounding': False,
@@ -5283,6 +5540,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5320,6 +5578,9 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5387,6 +5648,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 2,
       'StochasticRounding': False,
@@ -5408,6 +5671,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5445,6 +5709,9 @@
       'DataTypeMetadata': '<DataType Int8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5512,6 +5779,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 2,
       'StochasticRounding': False,
@@ -5533,6 +5802,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5569,6 +5839,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5635,6 +5908,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -5655,6 +5930,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5691,6 +5967,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5757,6 +6036,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -5777,6 +6058,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5813,6 +6095,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -5879,6 +6164,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -5899,6 +6186,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -5935,6 +6223,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -6001,6 +6292,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -6021,6 +6314,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': True,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',
@@ -6057,6 +6351,9 @@
       'DataTypeMXSB': '<DataType E8>',
       'DestDataType': '<DataType Float>',
       'F32XdlMathOp': '<DataType Float>',
+      'FusedGemmA2A': False,
+      'GateResidualDataTypeList': list([
+      ]),
       'Gradient': False,
       'GroupedGemm': False,
       'HighPrecisionAccumulate': False,
@@ -6123,6 +6420,8 @@
       ]),
       'SetConstStrideBias': list([
       ]),
+      'SetConstStrideGate': list([
+      ]),
       'SilentHighPrecisionAccumulate': False,
       'Sparse': 0,
       'StochasticRounding': False,
@@ -6143,6 +6442,7 @@
       'UseBeta': True,
       'UseBias': 0,
       'UseE': False,
+      'UseGateResidual': False,
       'UseInitialStridesAB': False,
       'UseInitialStridesCD': False,
       'UseScaleAB': '',

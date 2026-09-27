@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -807,18 +807,15 @@ namespace rocalution
             format += sstr.str() + "/" + _matrix_format_names[this->matrix_ghost_.GetFormat()];
         }
 
-        LOG_INFO("GlobalMatrix"
-                 << " name=" << this->object_name_ << ";"
-                 << " rows=" << this->GetM() << ";"
-                 << " cols=" << this->GetN() << ";"
-                 << " nnz=" << this->GetNnz() << ";"
-                 << " prec=" << 8 * sizeof(ValueType) << "bit;"
-                 << " format=" << format << ";"
-                 << " subdomains=" << ((this->pm_ != NULL) ? this->pm_->num_procs_ : 1) << ";"
-                 << " host backend={" << _rocalution_host_name[0] << "};"
-                 << " accelerator backend={"
-                 << _rocalution_backend_name[this->local_backend_.backend] << "};"
-                 << " current=" << current_backend_name);
+        LOG_INFO("GlobalMatrix" << " name=" << this->object_name_ << ";" << " rows=" << this->GetM()
+                                << ";" << " cols=" << this->GetN() << ";" << " nnz="
+                                << this->GetNnz() << ";" << " prec=" << 8 * sizeof(ValueType)
+                                << "bit;" << " format=" << format << ";" << " subdomains="
+                                << ((this->pm_ != NULL) ? this->pm_->num_procs_ : 1) << ";"
+                                << " host backend={" << _rocalution_host_name[0] << "};"
+                                << " accelerator backend={"
+                                << _rocalution_backend_name[this->local_backend_.backend] << "};"
+                                << " current=" << current_backend_name);
     }
 
     template <typename ValueType>
@@ -4039,6 +4036,125 @@ namespace rocalution
 #ifdef DEBUG_MODE
         prolong->Check();
 #endif
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSMMExtPIInterpolation(const LocalVector<int>&  CFmap,
+                                                         const LocalVector<bool>& S,
+                                                         GlobalMatrix<ValueType>* prolong) const
+    {
+        log_debug(this,
+                  "GlobalMatrix::RSMMExtPIInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        assert(prolong != NULL);
+        assert(this != prolong);
+
+        assert(prolong->GetFormat() == CSR);
+
+        assert(this->is_host_() == prolong->is_host_());
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // The matrix-matrix formulation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSMMExtPIInterpolation() is not implemented for more than "
+                     "one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSMMExtPIInterpolation(CFmap, S, &prolong->matrix_interior_);
+
+        // Prolongation PM
+        prolong->CreateParallelManager_();
+        prolong->pm_self_->SetMPICommunicator(this->pm_->comm_);
+
+        prolong->pm_self_->SetGlobalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetGlobalNcol(prolong->matrix_interior_.GetN());
+
+        prolong->pm_self_->SetLocalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetLocalNcol(prolong->matrix_interior_.GetN());
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSInterpolationTruncation(float trunc_factor, int max_elmts)
+    {
+        log_debug(this, "GlobalMatrix::RSInterpolationTruncation()", trunc_factor, max_elmts);
+
+        if(trunc_factor <= 0.0f && max_elmts <= 0)
+        {
+            return;
+        }
+
+        // Truncation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSInterpolationTruncation() is not implemented for more "
+                     "than one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSInterpolationTruncation(trunc_factor, max_elmts);
+
+        this->nnz_ = this->matrix_interior_.GetNnz();
+    }
+
+    template <typename ValueType>
+    void GlobalMatrix<ValueType>::RSMMExtPEInterpolation(const LocalVector<int>&  CFmap,
+                                                         const LocalVector<bool>& S,
+                                                         GlobalMatrix<ValueType>* prolong) const
+    {
+        log_debug(this,
+                  "GlobalMatrix::RSMMExtPEInterpolation()",
+                  (const void*&)CFmap,
+                  (const void*&)S,
+                  prolong);
+
+        assert(prolong != NULL);
+        assert(this != prolong);
+
+        assert(prolong->GetFormat() == CSR);
+
+        assert(this->is_host_() == prolong->is_host_());
+        assert(this->is_host_() == CFmap.is_host_());
+        assert(this->is_host_() == S.is_host_());
+
+#ifdef DEBUG_MODE
+        this->Check();
+#endif
+
+        // The matrix-matrix formulation has no distributed implementation yet
+        // LCOV_EXCL_START
+        if(this->pm_ != NULL && this->pm_->num_procs_ > 1)
+        {
+            LOG_INFO("GlobalMatrix::RSMMExtPEInterpolation() is not implemented for more than "
+                     "one process");
+            FATAL_ERROR(__FILE__, __LINE__);
+        }
+        // LCOV_EXCL_STOP
+
+        this->matrix_interior_.RSMMExtPEInterpolation(CFmap, S, &prolong->matrix_interior_);
+
+        // Prolongation PM
+        prolong->CreateParallelManager_();
+        prolong->pm_self_->SetMPICommunicator(this->pm_->comm_);
+
+        prolong->pm_self_->SetGlobalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetGlobalNcol(prolong->matrix_interior_.GetN());
+
+        prolong->pm_self_->SetLocalNrow(prolong->matrix_interior_.GetM());
+        prolong->pm_self_->SetLocalNcol(prolong->matrix_interior_.GetN());
     }
 
     template <typename ValueType>
