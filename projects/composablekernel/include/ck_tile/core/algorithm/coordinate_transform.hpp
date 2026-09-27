@@ -1352,14 +1352,18 @@ struct xor_t : public base_transform<2, 2>
 
         idx_low(number<0>{}) = idx_up[number<0>{}];
 
+        // Bi-directional symplectic permutation over GF(2)^5 to eliminate
+        // fixed-point diagonal and anti-diagonal LDS bank collisions.
+        const auto r      = idx_up[number<0>{}];
+        const auto perm_r = (r ^ (r >> 2) ^ (r << 3)) & 0x1F;
+
         if constexpr(ApplyModulo)
         {
-            idx_low(number<1>{}) =
-                idx_up[number<1>{}] ^ (idx_up[number<0>{}] % up_lengths_[number<1>{}]);
+            idx_low(number<1>{}) = idx_up[number<1>{}] ^ (perm_r % up_lengths_[number<1>{}]);
         }
         else
         {
-            idx_low(number<1>{}) = idx_up[number<1>{}] ^ (idx_up[number<0>{}]);
+            idx_low(number<1>{}) = idx_up[number<1>{}] ^ perm_r;
         }
     }
 
