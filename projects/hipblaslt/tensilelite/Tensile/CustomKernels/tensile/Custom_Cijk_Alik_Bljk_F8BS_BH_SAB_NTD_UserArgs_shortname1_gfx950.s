@@ -313,7 +313,7 @@ label_ASM_Start:  /// Main body of the asm kernel
 .set SrdShiftLeftB, 16
 /* 2GB limit - set offsets to -1 to exceed this and clamp */
 .set BufferLimit, 0xffffffff
-.set BufferOOB, 0x80000000
+.set BufferOOB, 0xfffff000
 
 /******************************************/
 /* Bits 127:96 of SRD.                    */
