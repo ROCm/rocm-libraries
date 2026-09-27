@@ -194,6 +194,7 @@ class CommonTypeMappings:
         # gfx1250 only (Tensor Data Mover); always paired with the tdm epilogue.
         "comp_tdm": "GemmPipelineAgBgCrCompTDMV1",
         "comp_tdm_v2": "GemmPipelineAgBgCrCompTDMV2",
+        "preshuffle_tdm": "WeightPreshufflePipelineAGmemBGmemCRegTDM",
     }
 
     PIPELINE_TO_BASE = {
@@ -205,6 +206,7 @@ class CommonTypeMappings:
         "comp_async": "BaseGemmPipelineAgBgCrCompAsync",
         "comp_tdm": "BaseGemmPipelineAgBgCrCompTDM",
         "comp_tdm_v2": "BaseGemmPipelineAgBgCrCompTDM",
+        "preshuffle_tdm": "BaseWeightPreshufflePipelineAGmemBGmemCRegTDM",
     }
 
     PIPELINE_TO_DISPATCHER = {
@@ -216,6 +218,7 @@ class CommonTypeMappings:
         "comp_async": "Pipeline::CompAsync",
         "comp_tdm": "Pipeline::CompTDMV1",
         "comp_tdm_v2": "Pipeline::CompTDMV2",
+        "preshuffle_tdm": "Pipeline::PreShuffleTDM",
     }
 
     SCHEDULER_TO_CK = {
@@ -836,9 +839,9 @@ def gfx1250_pipeline_reject_reason(
     immediately, so existing kernel sets are unchanged.
 
     ``variant_supported`` is False for GEMM variants the pipelines do not
-    support (only plain and batched GEMM are). ``pads`` is (pad_m, pad_n,
-    pad_k); None means unknown and skips the pad rules. An empty ``layout``
-    skips the comp_async layout rule and empty dtypes skip the 8-bit
+    support (only plain, batched and preshuffle GEMM are). ``pads`` is
+    (pad_m, pad_n, pad_k); None means unknown and skips the pad rules. An empty
+    ``layout`` skips the comp_async layout rule and empty dtypes skip the 8-bit
     warp_tile_k rule.
     """
     is_tdm = pipeline in TDM_PIPELINES
@@ -885,6 +888,88 @@ def rcr_only_layout_guard(layout: str) -> Optional[str]:
     if layout != "rcr":
         return f"Unsupported layout {layout} (only rcr) -- skipping"
     return None
+
+
+# ============================================================================
+# gfx1250 preshuffle pipelines
+# ============================================================================
+# preshufflev2 / preshuffle_tdm read B packed by the host shuffle_b_v0; the
+# gfx1250 compute pipelines read ordinary B (Preshuffle=false) and follow the
+# plain GEMM gfx1250 rules above. Mirrors preshuffle_pipeline_reject_reason in
+# tile_engine/ops/gemm/gemm_validation_utils.py (tile_engine cannot be imported
+# here, see normalize_gfx_arch); tests/test_preshuffle_gfx1250_pipelines.py
+# pins the two copies to identical behaviour.
+PACKED_B_PIPELINES = ("preshufflev2", "preshuffle_tdm")
+PRESHUFFLE_GFX1250_PIPELINES = ("preshuffle_tdm",) + GFX1250_ONLY_PIPELINES
+PRESHUFFLE_GFX1250_LAYOUT = "rcr"
+# The host shuffle_b_v0 packs whole N x K tiles: a partial N tile overflows the
+# packed buffer and a partial K tile packs the wrong elements.
+PRESHUFFLE_PAD_NK_REJECT_REASON = (
+    "preshuffled B holds whole N/K tiles, so gfx1250 preshuffle requires pad_n=pad_k=False"
+)
+
+
+def _is_true(value) -> bool:
+    """Accept both JSON booleans and their string spellings."""
+    return value is True or str(value).lower() == "true"
+
+
+def preshuffle_pipeline_reject_reason(
+    pipeline: str,
+    gpu_target: str = "",
+    layout: str = "",
+    pad_m=None,
+    pad_n=None,
+    pad_k=None,
+    num_waves: Optional[int] = None,
+    dtype: str = "",
+    scheduler: str = "",
+    epilogue: str = "",
+    persistent: bool = False,
+    warp_tile_k: Optional[int] = None,
+) -> str:
+    """Reason string if a gemm_preshuffle pipeline config is not allowed, else "".
+
+    Pipelines outside PRESHUFFLE_GFX1250_PIPELINES (preshufflev2) only get the
+    scheduler and tdm-epilogue checks, plus the pad_n/pad_k check on gfx1250.
+    Empty gpu_target / layout / dtype / scheduler / epilogue and None pads /
+    num_waves / warp_tile_k mean "not known yet" and are not checked, so the
+    helper can run at trait level and at tile level.
+    """
+    # comp_* pipelines are Intrawave-only, the weight-preshuffle ones Default.
+    want_scheduler = "intrawave" if pipeline.startswith("comp_") else "default"
+    if scheduler and scheduler != want_scheduler:
+        return f"preshuffle {pipeline} requires scheduler {want_scheduler!r}, got {scheduler!r}"
+    if epilogue == "tdm" and pipeline not in TDM_PIPELINES:
+        return f"preshuffle {pipeline} cannot use the tdm epilogue"
+    arch = normalize_gfx_arch(gpu_target)
+    pads = (pad_m, pad_n, pad_k)
+    if pipeline not in PRESHUFFLE_GFX1250_PIPELINES:
+        pad_nk = _is_true(pad_n) or _is_true(pad_k)
+        return PRESHUFFLE_PAD_NK_REJECT_REASON if pad_nk and arch == GFX1250_ARCH else ""
+    if arch and arch != GFX1250_ARCH:
+        return f"pipeline {pipeline!r} requires {GFX1250_ARCH}, got {arch!r}"
+    # rcr also covers the comp_async A row-major / B col-major requirement.
+    if layout and layout != PRESHUFFLE_GFX1250_LAYOUT:
+        return f"preshuffle {pipeline} requires layout {PRESHUFFLE_GFX1250_LAYOUT!r}, got {layout!r}"
+    if persistent:
+        return f"preshuffle {pipeline} has no persistent kernel"
+    want_epilogue = "tdm" if pipeline in TDM_PIPELINES else "cshuffle"
+    if epilogue and epilogue != want_epilogue:
+        return f"preshuffle {pipeline} requires epilogue {want_epilogue!r}, got {epilogue!r}"
+    if pipeline != "comp_async" and any(_is_true(p) for p in pads):
+        return TDM_PAD_REJECT_REASON
+    if pipeline == "comp_async" and None not in pads and not all(_is_true(p) for p in pads):
+        return GFX1250_COMP_ASYNC_PAD_REJECT_REASON
+    if pipeline == "comp_tdm_v2" and num_waves is not None and num_waves != 4:
+        return f"comp_tdm_v2 requires exactly 4 waves, got {num_waves}"
+    if (
+        pipeline == "comp_async"
+        and warp_tile_k is not None
+        and gfx1250_comp_async_8bit_warp_tile_k_rejected(dtype, dtype, warp_tile_k)
+    ):
+        return GFX1250_COMP_ASYNC_8BIT_WARP_TILE_K_REJECT_REASON
+    return ""
 
 
 def iter_quant_axes(

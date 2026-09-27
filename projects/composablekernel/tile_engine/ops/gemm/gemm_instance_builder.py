@@ -32,6 +32,7 @@ is_trait_combination_valid = _validation_utils.is_trait_combination_valid
 get_abc_layouts = _validation_utils.get_abc_layouts
 get_abcd_layouts = _validation_utils.get_abcd_layouts
 get_dtype_string = _validation_utils.get_dtype_string
+GEMM_PACKED_B_PIPELINES = _validation_utils.GEMM_PACKED_B_PIPELINES
 
 # gfx1250 pipelines. Only the ops listed here may emit them; every other op
 # raises instead of silently generating an unsupported kernel.
@@ -500,6 +501,10 @@ class GemmKernelBuilder:
         pipeline,
     ):
         """Validate that tile configuration is reasonable"""
+        # The newly bridged gfx1250 pipelines use the native non-permuteN form.
+        if self.kernel_name_prefix == "gemm_preshuffle" and pipeline != "preshufflev2" and self.config.get("permute_n", False):
+            return False
+
         # Validate preshuffle specific constraints
         if (
             self.config.get("permute_n") is not None
@@ -591,9 +596,10 @@ class GemmKernelBuilder:
                 persistent_or_preshuffle_quant,
                 self.kernel_name_prefix,
                 self.layout,
-                pad_m,
-                pad_n,
-                pad_k,
+                pad_m=pad_m,
+                pad_n=pad_n,
+                pad_k=pad_k,
+                gpu_target=self.gpu_target,
             ):
                 combinations.append(combo)
             else:
@@ -653,10 +659,18 @@ class GemmKernelBuilder:
             # Map pipeline names to the correct pipeline implementation
             pipeline_impl_map = {
                 "preshufflev2": "ck_tile::WeightPreshufflePipelineAGmemBGmemCRegV2",
+                "preshuffle_tdm": "ck_tile::WeightPreshufflePipelineAGmemBGmemCRegTDM",
+                "comp_tdm": "ck_tile::GemmPipelineAgBgCrCompTDMV1",
+                "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
+                "comp_async": "ck_tile::GemmPipelineAgBgCrCompAsync",
             }
             # Map pipeline names to base pipeline for hot loop detection
             base_pipeline_map = {
                 "preshufflev2": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
+                "preshuffle_tdm": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegTDM",
+                "comp_tdm": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_async": "ck_tile::BaseGemmPipelineAgBgCrCompAsync",
             }
         elif self.kernel_name_prefix == "mx_gemm":
             pipeline_impl_map = {
@@ -741,7 +755,12 @@ class GemmKernelBuilder:
 #include "ck_tile/ops/epilogue/default_2d_epilogue.hpp"
 #include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
 """
-        if self.kernel_name_prefix == "grouped_gemm":
+        if self.kernel_name_prefix == "gemm_preshuffle":
+            instance_code += """#include "ck_tile/ops/epilogue/permuten_epilogue.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
+#include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_tdm.hpp"
+"""
+        elif self.kernel_name_prefix == "grouped_gemm":
             instance_code += """#include <vector>
 #include <hip/hip_runtime.h>
 #include "ck_tile/ops/gemm/kernel/grouped_gemm_kernel.hpp"
@@ -876,7 +895,7 @@ struct SelectedKernel {{
     static constexpr bool kPadN = {"true" if pad_n in [True, "true"] else "false"};
     static constexpr bool kPadK = {"true" if pad_k in [True, "true"] else "false"};
     static constexpr bool TransposeC = {"std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> && WarpTileM == WarpTileN" if self.kernel_name_prefix == "mx_gemm" and self.gpu_target.split(":")[0] == "gfx1250" else "false"};
-    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async", "comp_tdm", "comp_tdm_v2", "comp_async_eight_waves", "weight_preshuffle"] else "false"};"""
+    static constexpr bool DoubleSmemBuffer = {"true" if pipeline in ["compv4", "preshufflev2", "comp_async", "comp_tdm", "comp_tdm_v2", "comp_async_eight_waves", "weight_preshuffle", "preshuffle_tdm"] else "false"};"""
 
         if self.kernel_name_prefix == "gemm_aquant":
             instance_code += f"""
@@ -906,8 +925,8 @@ struct SelectedKernel {{
 
             if self.kernel_name_prefix == "gemm_preshuffle":
                 instance_code += f"""
-    static constexpr bool Preshuffle = true;
-    static constexpr bool PermuteN     = {"true" if self.config.get("permute_n") else "false"};"""
+    static constexpr bool Preshuffle = {"true" if pipeline in GEMM_PACKED_B_PIPELINES else "false"};
+    static constexpr bool PermuteN = Preshuffle && {"true" if self.config.get("permute_n") else "false"};"""
             elif self.kernel_name_prefix == "mx_gemm":
                 instance_code += f"""
     static constexpr bool Preshuffle = {"true" if pipeline == "weight_preshuffle" else "false"};
@@ -1103,6 +1122,13 @@ struct SelectedKernel {{
     // Launch function
     static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream) {"""
 
+        if self.kernel_name_prefix == "gemm_preshuffle" and pipeline in ("comp_tdm", "comp_tdm_v2"):
+            instance_code += """
+        if (args.k_batch != 1 || args.N % TileN != 0 || args.K % TileK != 0) {
+            throw std::runtime_error("Compute TDM requires complete N/K tiles and k_batch=1");
+        }
+"""
+
         # Scheduler initialization
         if self.kernel_name_prefix in [
             "gemm_preshuffle",
@@ -1241,10 +1267,17 @@ struct SelectedKernel {{
 """
 
         elif self.kernel_name_prefix in ["gemm_universal", "gemm_preshuffle"]:
+            persistent_check = (
+                'static_assert(GemmKernel::UniversalGemmKernel::PersistentKernel == UsePersistentKernel, '
+                '"Pipeline and launch disagree on persistent mode");'
+                if self.kernel_name_prefix == "gemm_preshuffle" else ""
+            )
             instance_code += f"""
 
         // Kernel type
         using GemmKernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+
+        {persistent_check}
 
         // Kernel arguments
         auto kargs = GemmKernel::MakeKernelArgs(args);{self._tdm_k_batch_guard(pipeline)}
@@ -1588,7 +1621,10 @@ struct SelectedKernel {{
             )
         double_smem = pipeline in DOUBLE_SMEM_EPILOGUE_PIPELINES
 
-        if epilogue == "tdm" and self.kernel_name_prefix == "gemm_universal":
+        if epilogue == "tdm" and self.kernel_name_prefix in [
+            "gemm_universal",
+            "gemm_preshuffle",
+        ]:
             instance_code += self.populate_tdm_gemm_universal()
         elif epilogue == "tdm" and self.kernel_name_prefix == "batched_gemm":
             instance_code += self.populate_tdm_batched_gemm()
@@ -1769,8 +1805,14 @@ struct SelectedKernel {{
         return instance_code
 
     def populate_cshuffle_gemm_preshuffle(self):
-        instance_code = """
-        using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<
+        # Match the native preshuffle example's output permutation. The old
+        # trailing PermuteN argument now occupies BlockedXDLN_PerWarp, where
+        # false becomes zero and causes a compile-time division by zero.
+        permute_n = self.config.get("permute_n", False)
+        epilogue = "PermuteNEpilogue" if permute_n else "CShuffleEpilogue"
+        tail = "TransposeC" if permute_n else "TransposeC, NumWaveGroups"
+        instance_code = f"""
+        using EpilogueProblem = ck_tile::{epilogue}Problem<
             ADataType,
             BDataType,
             ck_tile::tuple<>,  // DsDataType
@@ -1786,13 +1828,9 @@ struct SelectedKernel {{
             WarpTileM,                   // MPerXdl_
             WarpTileN,                   // NPerXdl_
             WarpTileK,                   // KPerXdl_
-            TransposeC,                  // isCTransposed_
-            NumWaveGroups,               // kNumWaveGroups_
-            false,                       // FixedVectorSize_
-            1,                           // VectorSizeC_
-            PermuteN>;                   // isPermuteN_
+            {tail}>;
 
-        using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;"""
+        using GemmEpilogue = ck_tile::{epilogue}<EpilogueProblem>;"""
         return instance_code
 
     def populate_cshuffle_mx_gemm(self, tdm=False, pipeline=None):
@@ -1882,6 +1920,9 @@ struct SelectedKernel {{
         return instance_code
 
     def populate_default_gemm_preshuffle(self):
+        # Permuted B requires the matching N store order for either epilogue.
+        if self.config.get("permute_n", False):
+            return self.populate_cshuffle_gemm_preshuffle()
         instance_code = """
         using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<
             ADataType,

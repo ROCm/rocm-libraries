@@ -53,16 +53,9 @@ _LAYOUT_WORD = {"r": "row", "c": "col"}
 # Supported GPU architectures for the bridge (single source of truth).
 _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950", "gfx1250")
 
-# Single source of truth for the preshuffle B-shuffle permutation used by the
-# bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
-# (WeightPreshufflePipelineAGmemBGmemCRegV2), whose device-side B packing matches
-# ck_tile::shuffle_b (permute_n=False). Old-TE's default_config.json /
-# default_ci_config.json set permute_n=true, but that is a HOST-marker that
-# selects a distinct (permuteN) TE pipeline the bridge does not generate -- it
-# does NOT map to a separate bridged device kernel. Honoring true here would
-# mis-shuffle B (GPU-verified max_rel ~1.25 vs ~5e-4). So every bridge pin reads
-# this one constant. TODO: to support permute_n=True, emit the permuteN pipeline
-# in unified_gemm_codegen and set this to a swept/config-driven value.
+# The packed-B pipelines (preshufflev2, preshuffle_tdm) read B packed with
+# shuffle_b_v0; comp_async, comp_tdm and comp_tdm_v2 read B in ordinary layout.
+# PermuteN is not bridged; preserve the non-permuteN contract for packed B.
 BRIDGE_PERMUTE_N = False
 
 
@@ -371,7 +364,7 @@ class GemmKernelConfig:
     reduction_strategy: str = "atomic"
 
     # --- Preshuffle only ---------------------------------------------------
-    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b).
+    # Selects the B-preshuffle permutation (shuffle_b_permuteN vs shuffle_b_v0).
     # Mirrors Old-TE's permute_n config knob; participates in the kernel name so
     # it must match unified_gemm_codegen.py::key_name. Ignored by other variants.
     permute_n: bool = False
@@ -523,7 +516,7 @@ class GemmKernelConfig:
                 "persistent": [self.persistent],
             },
             # Top-level knob read by unified_gemm_codegen for the preshuffle
-            # variant (selects shuffle_b_permuteN vs shuffle_b). Harmless for
+            # variant (selects shuffle_b_permuteN vs shuffle_b_v0). Harmless for
             # other variants, which ignore it.
             "permute_n": self.permute_n,
         }
@@ -601,6 +594,7 @@ class GemmKernelConfig:
             pad_k=self.pad_k,
             gfx_arch=self.gfx_arch,
             variant=self.variant,
+            persistent=self.persistent,
         )
 # ============================================================================
 # Problem
@@ -2453,7 +2447,7 @@ def _gfx1250_pipeline_supported(
         dtype_a=dtype,
         dtype_b=dtype,
         layout=layout,
-        variant_supported=variant in ("standard", "batched"),
+        variant_supported=variant in ("standard", "batched", "preshuffle"),
         variant_name=variant,
         persistent=bool(persistent),
         pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
@@ -2786,6 +2780,19 @@ def expand_sweep(
                 val = _cu.validate_kernel_config(c.to_ctypes_config())
                 if not val.is_valid:
                     continue
+                # gfx1250 preshuffle pipelines (arch/layout/pad/wave/dtype
+                # rules): same helper the
+                # codegen applies, so the sweep never hands back a config whose
+                # header is never emitted. validate_kernel_config() above has
+                # put the codegen dir on sys.path.
+                if variant == "preshuffle":
+                    from codegen_common import preshuffle_pipeline_reject_reason
+
+                    if preshuffle_pipeline_reject_reason(
+                        pipe, arch, layout[:3], pm, pn, pk, wm * wn * wk, dtype,
+                        warp_tile_k=wtk,
+                    ):
+                        continue
                 seen.add(c.name)
                 configs.append(c)
 

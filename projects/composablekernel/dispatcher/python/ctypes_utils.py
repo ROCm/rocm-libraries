@@ -253,7 +253,7 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
     epilogue = config.epilogue
     scheduler = config.scheduler
     dtype = config.dtype_a
-    arch = config.gfx_arch
+    arch = config.gfx_arch.split(":", 1)[0]
     variant = getattr(config, "variant", "standard")
 
     wave_m = config.wave_m
@@ -266,6 +266,21 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
 
     # Variant-specific tile constraints
     if variant == "preshuffle":
+        from arch_filter import ArchFilter, KernelConfig as ArchKernelConfig, OperatorType
+        result = ArchFilter(arch).validate_kernel(ArchKernelConfig(
+            datatype_a=dtype, datatype_b=config.dtype_b, datatype_c=config.dtype_acc,
+            tile_m=config.tile_m, tile_n=config.tile_n, tile_k=config.tile_k,
+            warp_m=wave_m, warp_n=wave_n, warp_k=wave_k,
+            warp_tile_m=warp_m, warp_tile_n=warp_n, warp_tile_k=warp_k,
+            pipeline=pipeline, epilogue=epilogue, scheduler=scheduler,
+            layout=config.layout, operator=OperatorType.GEMM_PRESHUFFLE,
+        ))
+        errors.extend(result.errors)
+        # ArchFilter has no persistent flag; the shared rules cover it.
+        from codegen_common import preshuffle_pipeline_reject_reason
+        reason = preshuffle_pipeline_reject_reason(pipeline, persistent=getattr(config, "persistent", False))
+        if reason:
+            errors.append(reason)
         # Preshuffle requires larger minimum tiles for efficiency
         if config.tile_m < 64:
             errors.append(f"Preshuffle requires tile_m >= 64, got {config.tile_m}")
@@ -321,13 +336,15 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
         "int32" if dtype == "int8" else "fp32"
     )
     dtype_key = f"{dtype}_{dtype_b}_{dtype_acc}"
-    # Preshuffle consults its own (smaller) whitelist; other variants use the
-    # standard GEMM warp-tile table.
-    table_key = (
-        "preshuffle_warp_tile_combos"
-        if variant == "preshuffle"
-        else "warp_tile_combos"
-    )
+    # Packed-B preshuffle pipelines consult their own (smaller) whitelist; the
+    # ordinary-B gfx1250 compute pipelines and other variants use the standard
+    # GEMM warp-tile table.
+    packed_b = False
+    if variant == "preshuffle":
+        from codegen_common import PACKED_B_PIPELINES
+
+        packed_b = pipeline in PACKED_B_PIPELINES
+    table_key = "preshuffle_warp_tile_combos" if packed_b else "warp_tile_combos"
     warp_tile_combos = (
         arch_data.get(table_key, {})
         .get(arch, {})
@@ -1162,6 +1179,14 @@ def _parse_gemm_header_metadata(header: Path) -> Optional[Dict[str, Any]]:
     if len(parts) < 13 or parts[0] != "gemm":
         return None
 
+    try:
+        flag_index = next(i for i in range(3, len(parts)) if parts[i].lower() in ("true", "false"))
+    except StopIteration:
+        return None
+    # Collapse the variable-length pipeline token to retain the canonical field positions.
+    parts = parts[:3] + ["_".join(parts[3:flag_index - 2])] + parts[flag_index - 2:]
+    if len(parts) < 13:
+        return None
     tile = _parse_triplet(parts[10])
     wave = _parse_triplet(parts[11])
     warp = _parse_triplet(parts[12])
@@ -1436,6 +1461,7 @@ class KernelConfig:
     # GEMM variant (affects arch filter validation)
     # "standard", "preshuffle", "multi_d", or "stream_k"
     variant: str = "standard"
+    persistent: bool = False
 
     @property
     def layout(self) -> str:
