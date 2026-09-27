@@ -43,6 +43,10 @@ struct get_wgattr_num_access
         {
             return 4;
         }
+        else if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Octa)
+        {
+            return 8;
+        }
         else
         {
             static_assert(false, "unsupported AttrNumAccess");
