@@ -14,7 +14,7 @@ general usage questions. Below are usage examples to get started.
 
 > [!NOTE]
 > When using presets, assumptions are made about search paths, built-in CMake variables, and output directories. Consult [CMakePresets.json](./CMakePresets.json) to understand which variables are set, or refer to [Using CMake variables directly](#using-cmake-variables-directly) for a fully custom configuration.
-
+hello
 ```bash
 # show available presets
 cmake --list-presets
