@@ -371,6 +371,7 @@ rocblas_status rocsolver_trevc3_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
+// (side does not change the sizes; it is kept for symmetry with the other arguments)
 template <bool BATCHED, typename T, typename I>
 void rocsolver_trevc3_getMemorySize(const rocblas_side side,
                                     const rocsolver_eigenvectors howmny,

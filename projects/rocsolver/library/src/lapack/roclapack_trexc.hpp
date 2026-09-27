@@ -43,7 +43,8 @@ ROCSOLVER_BEGIN_NAMESPACE
     row ilst, following LAPACK ZTREXC (a sequence of swaps of adjacent diagonal
     entries by plane rotations).
 
-    It must be called by all the threads of a thread-block of BS threads. The indices
+    On the device it must be called by all the threads of a thread-block of BS threads;
+    on the host (the hybrid mode of HSEQR), with BS = 1. The indices
     ifst and ilst are 1-based, as in LAPACK, and must satisfy 1 <= ifst, ilst <= n.
     The rotations of each swap are computed redundantly by all the threads, and their
     application to the rows and columns of T and Q is distributed among the threads. **/

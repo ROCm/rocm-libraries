@@ -41,7 +41,8 @@ ROCSOLVER_BEGIN_NAMESPACE
  * ===========================================================================
  *    GEBAL follows the reference implementation of LAPACK 3.12 step by step,
  *    so that ilo, ihi, scale and the balanced matrix match those of the host
- *    LAPACK. Each matrix of the batch is processed by a single thread-block;
+ *    LAPACK, except for rounding in the row and column norms (and in the presence
+ *    of NaN, see below). Each matrix of the batch is processed by a single thread-block;
  *    the loops over rows and columns are sequential (as in LAPACK) and the
  *    work on a single row or column is spread over the threads of the block.
  * ===========================================================================
@@ -117,6 +118,8 @@ struct gebal_vec_info
     __device__ void add(const T a, const I pos, const bool in_range)
     {
         S v = aabs<S>(a);
+        // (a NaN is never the maximum here; LAPACK IZAMAX returns it when it is the first
+        // entry of its range, which then makes the balancing stop with info = -3)
         if(v > amax)
         {
             amax = v;

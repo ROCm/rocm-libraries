@@ -524,7 +524,7 @@ struct hseqr_workT_layout
     number of shifts per sweep is capped likewise, and the number of steps of the chase
     grows as nh^2 / (number of shifts), so that larger windows pay off as nh grows,
     sooner in hybrid mode, where the Schur form of the window is computed on the host.
-    The thresholds were measured on MI300X (zhseqr of random matrices). **/
+    The thresholds were chosen from timings of zhseqr on random matrices. **/
 template <typename I>
 I hseqr_aed_window_cap(const I nh, const bool hybrid)
 {
@@ -940,8 +940,8 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 // With accum, the chunk kernel works on a compact copy of the part of H that
                 // it reads, H(r0:r1, r0:r1) (with leading dimension layout.ldw): with the leading dimension of
                 // a large H, the columns of the window span so much memory that most of its
-                // accesses miss the address translation caches (on MI300X, the time per step
-                // doubles when they span more than about 64 MB). It only reads and writes
+                // accesses miss the address translation caches (the time per step can grow
+                // several-fold when they span more than a few tens of MB). It only reads and writes
                 // entries (i, j) with i <= j + 3 (the Hessenberg part and the bulges), and
                 // writes only within H(lo:r1, lo:r1), so only that band is copied in and back:
                 // the entries further below are the workspace of the off-window products,

@@ -19088,12 +19088,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle 
     \f]
 
     The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
-    scale[j] is the (1-based) index of the row and column that was interchanged with row and column j,
-    and for \f$ilo \leq j \leq ihi\f$, scale[j] is the j-th diagonal entry of \f$D\f$. The
+    the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
+    interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
+    entry of \f$D\f$. The
     permutations are applied in the order n, n-1, ..., ihi+1, followed by 1, 2, ..., ilo-1.
 
     The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
-    (version 3.12), except for rounding in the computation of the row and column norms.
+    (version 3.12), except for rounding in the computation of the row and column norms, and in
+    the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
+    (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
+    describe them), where LAPACK returns an error (info = -3).
 
     @param[in]
     handle      rocblas_handle.
@@ -19188,12 +19192,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal(rocblas_handle handle,
     \f]
 
     The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
-    scale[j] is the (1-based) index of the row and column that was interchanged with row and column j,
-    and for \f$ilo \leq j \leq ihi\f$, scale[j] is the j-th diagonal entry of \f$D\f$. The
+    the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
+    interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
+    entry of \f$D\f$. The
     permutations are applied in the order n, n-1, ..., ihi+1, followed by 1, 2, ..., ilo-1.
 
     The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
-    (version 3.12), except for rounding in the computation of the row and column norms.
+    (version 3.12), except for rounding in the computation of the row and column norms, and in
+    the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
+    (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
+    describe them), where LAPACK returns an error (info = -3).
 
     @param[in]
     handle      rocblas_handle.
@@ -19302,12 +19310,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_batched(rocblas_handle handle,
     \f]
 
     The permutation and scaling factors are recorded in scale: for \f$j < ilo\f$ or \f$j > ihi\f$,
-    scale[j] is the (1-based) index of the row and column that was interchanged with row and column j,
-    and for \f$ilo \leq j \leq ihi\f$, scale[j] is the j-th diagonal entry of \f$D\f$. The
+    the j-th entry of scale (with 1-based j) is the (1-based) index of the row and column that was
+    interchanged with row and column j, and for \f$ilo \leq j \leq ihi\f$, it is the j-th diagonal
+    entry of \f$D\f$. The
     permutations are applied in the order n, n-1, ..., ihi+1, followed by 1, 2, ..., ilo-1.
 
     The results (A, ilo, ihi and scale) are the same as those of the LAPACK routine
-    (version 3.12), except for rounding in the computation of the row and column norms.
+    (version 3.12), except for rounding in the computation of the row and column norms, and in
+    the presence of NaN: if a row or column norm is NaN during the scaling, the balancing stops
+    (the permutations and the scaling factors found so far are applied, and ilo, ihi and scale
+    describe them), where LAPACK returns an error (info = -3).
 
     @param[in]
     handle      rocblas_handle.
@@ -19424,7 +19436,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebal_strided_batched(rocblas_handle 
     @param[in]
     side        rocblas_side.
                 If rocblas_side_right, V contains right eigenvectors. If rocblas_side_left,
-                V contains left eigenvectors.
+                V contains left eigenvectors. (rocblas_side_both is not supported.)
     @param[in]
     n           rocblas_int. n >= 0.
                 The number of rows of the matrix V.
@@ -19519,7 +19531,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak(rocblas_handle handle,
     @param[in]
     side        rocblas_side.
                 If rocblas_side_right, V contains right eigenvectors. If rocblas_side_left,
-                V contains left eigenvectors.
+                V contains left eigenvectors. (rocblas_side_both is not supported.)
     @param[in]
     n           rocblas_int. n >= 0.
                 The number of rows of the matrices V_l.
@@ -19629,7 +19641,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_batched(rocblas_handle handle,
     @param[in]
     side        rocblas_side.
                 If rocblas_side_right, V contains right eigenvectors. If rocblas_side_left,
-                V contains left eigenvectors.
+                V contains left eigenvectors. (rocblas_side_both is not supported.)
     @param[in]
     n           rocblas_int. n >= 0.
                 The number of rows of the matrices V_l.
@@ -19801,7 +19813,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_strided_batched(rocblas_handle 
     @param[out]
     info        pointer to a rocblas_int on the GPU.
                 If info = 0, successful exit. If info = i > 0, the algorithm failed to compute all
-                the eigenvalues: the entries i+1:ihi of W contain those that have been computed.
+                the eigenvalues: the entries 1:ilo-1 and i+1:n of W contain those that have been
+                computed (as in LAPACK).
     ********************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_chseqr(rocblas_handle handle,
@@ -19911,7 +19924,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr(rocblas_handle handle,
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for matrix H_l. If info[l] = i > 0, the algorithm
-                failed to compute all the eigenvalues of H_l.
+                failed to compute all the eigenvalues of H_l: the entries 1:ilo[l]-1 and i+1:n of W_l
+                contain those that have been computed (as in LAPACK).
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
@@ -20036,7 +20050,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_batched(rocblas_handle handle,
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for matrix H_l. If info[l] = i > 0, the algorithm
-                failed to compute all the eigenvalues of H_l.
+                failed to compute all the eigenvalues of H_l: the entries 1:ilo[l]-1 and i+1:n of W_l
+                contain those that have been computed (as in LAPACK).
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
@@ -20590,6 +20605,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ztrevc3_strided_batched(rocblas_handle
     If the algorithm alg_mode of rocsolver_function_hseqr (or rocsolver_function_geev) is set to
     rocsolver_alg_mode_hybrid, the Schur factorization uses the hybrid mode of HSEQR.
 
+    \note
+    GEEV reads the balancing ranges back to the host (to reduce together the matrices with the
+    same range), so that it synchronizes the stream and cannot be captured in a HIP graph.
+
     @param[in]
     handle      rocblas_handle.
     @param[in]
@@ -20611,8 +20630,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ztrevc3_strided_batched(rocblas_handle
                 Specifies the leading dimension of A.
     @param[out]
     W           pointer to type. Array on the GPU of dimension n.
-                The eigenvalues of A. If info = i > 0, only the eigenvalues i+1:n (and 1:ilo-1,
-                where ilo is given by GEBAL) have been computed.
+                The eigenvalues of A. If info = i > 0, only the eigenvalues i+1:n (and those
+                isolated by the balancing, if any) have been computed.
     @param[out]
     VL          pointer to type. Array on the GPU of dimension ldvl*n.
                 If jobvl = rocblas_evect_original, the left eigenvectors: column j of VL is u_j. If
@@ -20682,6 +20701,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev(rocblas_handle handle,
     If the algorithm alg_mode of rocsolver_function_hseqr (or rocsolver_function_geev) is set to
     rocsolver_alg_mode_hybrid, the Schur factorization uses the hybrid mode of HSEQR.
 
+    \note
+    GEEV reads the balancing ranges back to the host (to reduce together the matrices with the
+    same range), so that it synchronizes the stream and cannot be captured in a HIP graph.
+
     @param[in]
     handle      rocblas_handle.
     @param[in]
@@ -20703,8 +20726,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev(rocblas_handle handle,
                 Specifies the leading dimension of matrices A_l.
     @param[out]
     W           pointer to type. Array on the GPU (the size depends on the value of strideW).
-                The eigenvalues of matrices A_l. If info_l = i > 0, only the eigenvalues i+1:n (and 1:ilo-1,
-                where ilo is given by GEBAL) have been computed.
+                The eigenvalues of matrices A_l. If info_l = i > 0, only the eigenvalues i+1:n (and those
+                isolated by the balancing, if any) have been computed.
     @param[in]
     strideW     rocblas_stride.
                 Stride from the start of one vector W_l to the next one W_(l+1).
@@ -20785,6 +20808,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev_batched(rocblas_handle handle,
     If the algorithm alg_mode of rocsolver_function_hseqr (or rocsolver_function_geev) is set to
     rocsolver_alg_mode_hybrid, the Schur factorization uses the hybrid mode of HSEQR.
 
+    \note
+    GEEV reads the balancing ranges back to the host (to reduce together the matrices with the
+    same range), so that it synchronizes the stream and cannot be captured in a HIP graph.
+
     @param[in]
     handle      rocblas_handle.
     @param[in]
@@ -20810,8 +20837,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeev_batched(rocblas_handle handle,
                 There is no restriction for the value of strideA. Normal use case is strideA >= lda*n.
     @param[out]
     W           pointer to type. Array on the GPU (the size depends on the value of strideW).
-                The eigenvalues of matrices A_l. If info_l = i > 0, only the eigenvalues i+1:n (and 1:ilo-1,
-                where ilo is given by GEBAL) have been computed.
+                The eigenvalues of matrices A_l. If info_l = i > 0, only the eigenvalues i+1:n (and those
+                isolated by the balancing, if any) have been computed.
     @param[in]
     strideW     rocblas_stride.
                 Stride from the start of one vector W_l to the next one W_(l+1).

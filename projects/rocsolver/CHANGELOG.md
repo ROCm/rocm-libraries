@@ -8,16 +8,24 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Added
 
 * Eigenvalues and Schur factorization of Hessenberg matrices
-    * HSEQR (complex precisions)
+    * HSEQR (complex precisions; also in hybrid mode, with rocsolver_function_hseqr)
+
+* Reordering of the Schur factorization
     * TREXC (complex precisions)
+
+* Eigenvectors of upper triangular matrices
     * TREVC3 (complex precisions)
 
 * Eigensolver for general matrices
-    * GEEV (complex precisions)
+    * GEEV (complex precisions; also in hybrid mode, with rocsolver_function_geev)
 
 * Balancing routines for general matrices
-    * GEBAL
-    * GEBAK
+    * GEBAL (all precisions)
+    * GEBAK (all precisions)
+
+* New enumerations rocsolver_balance, rocsolver_schur_job, rocsolver_schur_vectors and
+  rocsolver_eigenvectors, and the values rocsolver_function_hseqr and rocsolver_function_geev
+  of rocsolver_function
 
 * Orthonormal/Unitary matrix generator routines from Hessenberg reduction
     * ORGHR and UNGHR

@@ -78,6 +78,8 @@ __device__ int geev_lascl_factors(S cfrom, S cto, S* mul)
     const S bignum = S(1) / smlnum;
     int nmul = 0;
     bool done = false;
+    // (the scalings of GEEV, between anrm and smlnum or bignum, need at most two or three
+    // factors; 8 bounds the loop)
     while(!done && nmul < 8)
     {
         const S cfrom1 = cfrom * smlnum;
