@@ -127,6 +127,10 @@ Generate into an empty scratch directory, never over the live engine:
 "$PY" "$GEN/generate.py" --config "$CONFIG" --output-dir "$GENERATED"
 ```
 
+Run both against the revision you are about to splice; a render from an earlier revision
+is not evidence for this one. The config loader rejects a YAML mapping that repeats a key,
+including a repeated `<<`, and reports both source positions.
+
 The verification root follows the configured dialect (see **Descriptor placement**):
 `direct_load` emits under `test_descriptors/`, `packaged` under `descriptors/`. A root
 holding no `*.kdp.json` is a hard failure, so the wrong root fails immediately:
@@ -275,9 +279,9 @@ If the profile declares a launch-surface audit, also run:
 "$PY" "$GEN/tools/launch_surface.py" "$PROFILE" --check
 ```
 
-**Gate:** final authored inventory, completed hooks and source/test splices, no
-selected-path placeholders, and reviewed structural/field/ABI results. None proves
-native loading or numerical dispatch.
+**Gate:** a current-revision dry-run and render, final authored inventory, completed hooks
+and source/test splices, no selected-path placeholders, and reviewed structural/field/ABI
+results. None proves native loading or numerical dispatch.
 
 ## 4. Build, pack, install and prove the host boundary
 
@@ -649,3 +653,43 @@ Report [SKILL.md](SKILL.md)'s completion evidence and exact limitations. Keep ex
 copies and probes disposable and retain their inputs/results in the evidence directory
 defined under **Paths and interpreters**. For blocked work, name the last completed
 stage and missing prerequisite; do not substitute a proposed command or queued job for proof.
+
+Open the handoff with a scope/proof cover sheet that binds each claim to the reports
+proving it:
+
+- **Source.** The exact commit SHA. For an uncommitted candidate, add a fingerprint of
+  its dirty state, for example digests of the diff against `HEAD` and of every untracked
+  input.
+- **Engine and scope.** The installed engine ID (`$ENGINE`) and the families and
+  architectures the claims cover.
+- **Catalog and artifact.** The digest of the descriptor catalog the claims are about,
+  and separately the `sha256sum` of each tested artifact (packed archive, installed
+  plugin). The catalog digest is the sha256 of the `sha256sum` lines
+  (`<sha256>  ./<relative path>`) of every `*.json` under the compared root, in byte
+  order of path. The recipe exits non-zero and prints no digest when the root is missing
+  or holds no `*.kdp.json`:
+
+  ```bash
+  CATALOG_ROOT=/absolute/path/to/compared-descriptor-root
+  (
+    set -euo pipefail
+    cd "$CATALOG_ROOT"
+    [ -n "$(find . -name '*.kdp.json' -type f -print -quit)" ] ||
+      { echo "no *.kdp.json under $CATALOG_ROOT" >&2; exit 1; }
+    lines=$(find . -name '*.json' -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum)
+    printf '%s\n' "$lines" | sha256sum
+  )
+  ```
+- **Evidence.** Links to the tools' unedited reports and logs; every count is derived
+  from them, never retyped into a hand-maintained table.
+- **Proof rung per claim.** Constructed/static, compiled, loaded/censused or GPU-served:
+  the rung the linked evidence observed for that claim. A rung not run is written as not
+  run; a missing report is missing, not implied by a lower or older one.
+- **Outcome accounting.** Served, skipped and declined counts taken from the reports,
+  with each intentional decline named as intentional.
+
+No tool records a report's source revision or dirty-state fingerprint, or its catalog
+digest in this format; record them beside the report in the evidence directory when it is
+produced. A report is current proof only when its source, engine, catalog digest,
+families/arches and artifact digest match the current candidate; otherwise it is
+historical, cited as such and never as proof of the current catalog.
