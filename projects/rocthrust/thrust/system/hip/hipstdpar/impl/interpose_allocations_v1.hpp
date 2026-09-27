@@ -35,12 +35,14 @@
 #endif
 
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <utility>
 
@@ -129,16 +131,20 @@ extern "C" {
     inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::size_t a,
                                                                  std::size_t n)
     {
+        // memalign and aligned_alloc are both routed here; alignment checks are
+        // left to libc memalign, which accepts values aligned_alloc rejects.
         auto r = __hipstdpar_hidden_memalign(a, n);
 
-        if (!hipstd::__initialised) return r;
-        if (n == 0) return r; // hipMemAdvise rejects zero-length ranges; nothing to advise.
+        // hipMemAdvise rejects zero-length ranges; nothing to advise.
+        if (!r || !hipstd::__initialised || n == 0) return r;
 
         hipDevice_t d{};
-        hipGetDevice(&d);
-
-        if (hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess)
+        if (hipGetDevice(&d) != hipSuccess ||
+            hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess) {
+            __hipstdpar_hidden_free(r);
+            errno = ENOMEM;
             return nullptr;
+        }
 
         return r;
     }
@@ -151,27 +157,51 @@ extern "C" {
     inline __attribute__((used)) void* __hipstdpar_calloc(std::size_t n,
                                                           std::size_t sz)
     {
-        return ::std::memset(__hipstdpar_malloc(n * sz), 0, n * sz);
+        std::size_t bytes{};
+        if (__builtin_mul_overflow(n, sz, &bytes)) {
+            errno = ENOMEM;
+            return nullptr;
+        }
+
+        auto p = __hipstdpar_malloc(bytes);
+        if (!p) {
+            // A zero-sized request may return nullptr; nullptr alone does not
+            // imply ENOMEM.
+            if (bytes != 0) errno = ENOMEM;
+            return nullptr;
+        }
+
+        return ::std::memset(p, 0, bytes);
     }
 
     inline __attribute__((used))
     int __hipstdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
-    {   // TODO: check invariants on alignment
-        if (!p || n == 0) return 0;
+    {
+        if (!p || a < sizeof(void*) || (a & (a - 1)) != 0) return EINVAL;
 
-        *p = __hipstdpar_aligned_alloc(a, n);
+        if (n == 0) {
+            *p = nullptr;
+            return 0;
+        }
 
-        return 1;
+        const auto saved_errno = errno;
+        auto allocation = __hipstdpar_aligned_alloc(a, n);
+        errno = saved_errno;
+        if (!allocation) return ENOMEM;
+
+        *p = allocation;
+        return 0;
     }
 
     inline __attribute__((used)) void __hipstdpar_free(void* p)
     {
+        if (!p) return;
+
         if (hipstd::__initialised) {
             hipDevice_t d{};
-            hipGetDevice(&d);
-
-            // Even if this fails there isn't much to do.
-            hipMemAdvise(p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d);
+            if (hipGetDevice(&d) == hipSuccess)
+                static_cast<void>(
+                    hipMemAdvise(p, UINT64_MAX, hipMemAdviseUnsetAccessedBy, d));
         }
         return __hipstdpar_hidden_free(p);
     }
@@ -201,20 +231,33 @@ extern "C" {
 
     inline __attribute__((used))
     void* __hipstdpar_realloc_array(void* p, std::size_t n, std::size_t sz)
-    {   // TODO: handle overflow in n * sz gracefully, as per spec.
-        return __hipstdpar_realloc(p, n * sz);
+    {
+        // Checked before reallocating: a wrapped product of zero would be
+        // taken as a request to free p, leaving the caller with a dangling
+        // pointer.
+        std::size_t bytes{};
+        if (__builtin_mul_overflow(n, sz, &bytes)) {
+            errno = ENOMEM;
+            return nullptr;
+        }
+
+        return __hipstdpar_realloc(p, bytes);
     }
 
     inline __attribute__((used))
     void* __hipstdpar_operator_new_aligned(std::size_t n, std::size_t a)
     {
-        if (auto p = __hipstdpar_aligned_alloc(a, n)) return p;
+        const auto allocation_size = n == 0 ? 1 : n;
+        while (true) {
+            if (auto p = __hipstdpar_aligned_alloc(a, allocation_size)) return p;
 
-        throw std::runtime_error{"Failed __hipstdpar_operator_new_aligned"};
+            if (auto handler = std::get_new_handler()) handler();
+            else throw std::bad_alloc{};
+        }
     }
 
     inline __attribute__((used)) void* __hipstdpar_operator_new(std::size_t n)
-    {   // TODO: consider adding the special handling for operator new
+    {
         return __hipstdpar_operator_new_aligned(n, alignof(std::max_align_t));
     }
 
@@ -225,18 +268,18 @@ extern "C" {
             return __hipstdpar_operator_new(n);
         }
         catch (...) {
-            // TODO: handle the potential exception
+            return nullptr;
         }
     }
 
     inline __attribute__((used)) void* __hipstdpar_operator_new_aligned_nothrow(
         std::size_t n, std::size_t a, std::nothrow_t) noexcept
-    {   // TODO: consider adding the special handling for operator new
+    {
         try {
             return __hipstdpar_operator_new_aligned(n, a);
         }
         catch (...) {
-            // TODO: handle the potential exception.
+            return nullptr;
         }
     }
 
@@ -270,18 +313,20 @@ extern "C" {
         void* __hipstdpar_mmap(void* p, std::size_t n, int prot, int f, int fd,
                                off_t dx) noexcept
         {
-            if (auto r = __hipstdpar_hidden_mmap(p, n, prot, f, fd, dx)) {
-                if (!hipstd::__initialised) return r;
+            auto r = __hipstdpar_hidden_mmap(p, n, prot, f, fd, dx);
+            if (r == MAP_FAILED || !hipstd::__initialised) return r;
 
-                hipDevice_t d{};
-                hipGetDevice(&d);
-
-                if (hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess)
-                    return nullptr;
-
-                return r;
+            hipDevice_t d{};
+            if (hipGetDevice(&d) != hipSuccess ||
+                hipMemAdvise(r, n, hipMemAdviseSetAccessedBy, d) != hipSuccess) {
+                // MAP_FIXED has already replaced whatever was mapped there;
+                // unmapping would leave a hole inside a range the caller owns.
+                if (!(f & MAP_FIXED)) __hipstdpar_hidden_munmap(r, n);
+                errno = ENOMEM;
+                return MAP_FAILED;
             }
-            return nullptr;
+
+            return r;
         }
 
         inline __attribute__((used))
@@ -289,10 +334,9 @@ extern "C" {
         {
             if (hipstd::__initialised) {
                 hipDevice_t d{};
-                hipGetDevice(&d);
-
-                if (hipMemAdvise(p, n, hipMemAdviseUnsetAccessedBy, d) != hipSuccess)
-                    return -1;
+                if (hipGetDevice(&d) == hipSuccess)
+                    static_cast<void>(
+                        hipMemAdvise(p, n, hipMemAdviseUnsetAccessedBy, d));
             }
             return __hipstdpar_hidden_munmap(p, n);
         }
