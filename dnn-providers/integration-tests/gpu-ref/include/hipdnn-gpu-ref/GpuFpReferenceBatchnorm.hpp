@@ -40,6 +40,26 @@ inline std::vector<std::string> buildBatchnormFwdDefines()
     return defines;
 }
 
+template <typename DyDataType,
+          typename XDataType,
+          typename ScaleBiasDataType,
+          typename MeanVarianceDataType,
+          typename DxDataType,
+          typename ComputeDataType>
+inline std::vector<std::string> buildBatchnormBwdDefines()
+{
+    std::vector<std::string> defines;
+    defines.emplace_back(std::string("-DGRAD_OUTPUT_TYPE=") + HipRtcTypeName<DyDataType>::VALUE);
+    defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<XDataType>::VALUE);
+    defines.emplace_back(std::string("-DSCALE_BIAS_TYPE=")
+                         + HipRtcTypeName<ScaleBiasDataType>::VALUE);
+    defines.emplace_back(std::string("-DMEAN_VAR_TYPE=")
+                         + HipRtcTypeName<MeanVarianceDataType>::VALUE);
+    defines.emplace_back(std::string("-DGRAD_INPUT_TYPE=") + HipRtcTypeName<DxDataType>::VALUE);
+    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + HipRtcTypeName<ComputeDataType>::VALUE);
+    return defines;
+}
+
 } // namespace detail
 
 class GpuFpReferenceBatchnorm
@@ -205,6 +225,55 @@ public:
         {
             nextRunningVariance->memory().markDeviceModified();
         }
+    }
+
+    template <class DyDataType,
+              class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType = ScaleBiasDataType,
+              class DxDataType = XDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void backward(hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+                         hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                         hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+                         hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
+                         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean
+                         = nullptr,
+                         hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance
+                         = nullptr,
+                         double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)
+    {
+        validateBwdInput<DyDataType,
+                         XDataType,
+                         ScaleBiasDataType,
+                         MeanVarianceDataType,
+                         DxDataType,
+                         ComputeDataType>(dy, x, scale, dx, dscale, dbias, mean, invVariance);
+
+        auto defines = detail::buildBatchnormBwdDefines<DyDataType,
+                                                        XDataType,
+                                                        ScaleBiasDataType,
+                                                        MeanVarianceDataType,
+                                                        DxDataType,
+                                                        ComputeDataType>();
+        launchBackward(dy.memory().deviceData(),
+                       x.memory().deviceData(),
+                       x.dims(),
+                       x.strides(),
+                       scale.memory().deviceData(),
+                       dx.memory().deviceData(),
+                       dscale.memory().deviceData(),
+                       dbias.memory().deviceData(),
+                       mean ? mean->memory().deviceData() : nullptr,
+                       invVariance ? invVariance->memory().deviceData() : nullptr,
+                       epsilon,
+                       defines);
+
+        dx.memory().markDeviceModified();
+        dscale.memory().markDeviceModified();
+        dbias.memory().markDeviceModified();
     }
 
 private:
@@ -486,6 +555,72 @@ private:
                       "compute data types.");
     }
 
+    template <typename DyDataType,
+              typename XDataType,
+              typename ScaleBiasDataType,
+              typename MeanVarianceDataType,
+              typename DxDataType,
+              typename ComputeDataType>
+    static void validateBwdInput(
+        const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
+        const hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        const hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance)
+    {
+        if((mean == nullptr) != (invVariance == nullptr))
+        {
+            throw std::invalid_argument(
+                "Batchnorm backward requires mean and invVariance to be provided together.");
+        }
+
+        const TensorProps inputTensorProps("input", x.dims(), x.strides());
+        TensorProps outputTensorProps("dx", dx.dims(), dx.strides());
+        std::vector<TensorProps> affineTensorProps;
+        affineTensorProps.emplace_back("scale", scale.dims(), scale.strides());
+        affineTensorProps.emplace_back("dscale", dscale.dims(), dscale.strides());
+        affineTensorProps.emplace_back("dbias", dbias.dims(), dbias.strides());
+        if(mean != nullptr)
+        {
+            affineTensorProps.emplace_back("mean", mean->dims(), mean->strides());
+            affineTensorProps.emplace_back(
+                "invVariance", invVariance->dims(), invVariance->strides());
+        }
+
+        validateConsistentDimensions(inputTensorProps, outputTensorProps, affineTensorProps);
+        if(dy.dims() != x.dims())
+        {
+            throw std::invalid_argument(
+                "Batchnorm backward requires dy and input tensors to have the same shape.");
+        }
+
+        affineTensorProps.emplace_back("dy", dy.dims(), dy.strides());
+        affineTensorProps.push_back(std::move(outputTensorProps));
+        validateConsistentLayouts(inputTensorProps, affineTensorProps);
+
+        static_assert(IS_SUPPORTED_DATA_TYPE<DyDataType>,
+                      "Batchnorm backward supports only double, float, half, and bfloat16 dy data "
+                      "types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<XDataType>,
+                      "Batchnorm backward supports only double, float, half, and bfloat16 input "
+                      "data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<ScaleBiasDataType>,
+                      "Batchnorm backward supports only double, float, half, and bfloat16 "
+                      "scale/bias data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<MeanVarianceDataType>,
+                      "Batchnorm backward supports only double, float, half, and bfloat16 "
+                      "mean/invVariance data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<DxDataType>,
+                      "Batchnorm backward supports only double, float, half, and bfloat16 dx data "
+                      "types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
+                      "Batchnorm backward supports only double, float, half, and bfloat16 compute "
+                      "data types.");
+    }
+
     // --- Kernel launchers (defined in GpuFpReferenceBatchnorm.cpp) ---
     static void launchFwdInf(const void* inputPtr,
                              const std::vector<int64_t>& inputDims,
@@ -522,6 +657,19 @@ private:
                                const void* prevRunningVariancePtr,
                                void* nextRunningMeanPtr,
                                void* nextRunningVariancePtr,
+                               std::vector<std::string>& defines);
+
+    static void launchBackward(const void* dyPtr,
+                               const void* inputPtr,
+                               const std::vector<int64_t>& inputDims,
+                               const std::vector<int64_t>& inputStrides,
+                               const void* scalePtr,
+                               void* dxPtr,
+                               void* dscalePtr,
+                               void* dbiasPtr,
+                               const void* meanPtr,
+                               const void* invVariancePtr,
+                               double epsilon,
                                std::vector<std::string>& defines);
 };
 
