@@ -5,8 +5,8 @@
 # R7 ShiftVectorComponents full-sweep characterization config for gfx942.
 #
 # Target: Tensile/Components/ShiftVectorComponents.py
-# Primary target ranges: 47-200 (VALU edge shift), 552-784 (MFMA AllThread).
-# Secondary coverage: 208-546 (MFMA dispatch + PartialThread).
+# Primary target: VALU edge shift.
+# Secondary coverage: MFMA dispatch + PartialThread.
 #
 # Strategy (MFMA PartialThread path):
 #   Two validated gfx942 fp32 MFMA shapes with AssertFree0ElementMultiple=1.
@@ -27,13 +27,7 @@
 #     SourceSwap=1: conThInProcDim=True for A, False for B
 #   Covering both orientations of the numThreadInCoal/numContOutCoal computation.
 #
-# Dead-code evidence (P5-ceiling, not targetable):
-#   Lines 552-784 (ShiftVectorComponentsMFMAAllThread): dispatch at line 237
-#     requires glvw > allContOutCoal * numThreadInCoal.
-#     For shape 1, SourceSwap=0, isA=True: conThInProcDim=False,
-#       numThreadInCoal = WS//matN = 64//16 = 4, numContOutCoal = MIOutputVW*VWA = 4*2 = 8
-#       threshold = 32. glvwAlimit = 16. glvw=4 <= 16 < 32. AllThread never fires.
-#   Line 122 (VALU path): see R4 dead-code analysis.
+# Line 122 of the original VALU path was not targetable; see the R4 analysis.
 #
 # Permutations: (shape1 x SourceSwap=[0,1]) + (shape2 x SourceSwap=0) = 3 kernels.
 # With limit=8, all 3 emit.

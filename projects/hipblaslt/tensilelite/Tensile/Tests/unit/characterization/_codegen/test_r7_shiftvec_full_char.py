@@ -6,8 +6,7 @@
 
 Targets: Tensile/Components/ShiftVectorComponents.py
   Primary ranges:   47-200  (ShiftVectorComponentsVALU.__call__)
-                    552-784 (ShiftVectorComponentsMFMAAllThread)
-  Secondary ranges: 208-546 (ShiftVectorComponentsMFMA dispatch + PartialThread)
+  Secondary ranges: ShiftVectorComponentsMFMA.__call__ + PartialThread
 
 Strategy
 --------
@@ -25,16 +24,6 @@ Two config sweeps are combined in one isolated test run:
      ShiftVectorComponentsMFMAPartialThread.  SourceSwap=[0,1] varies the
      thread-coal orientation to cover both conThInProcDim branches at lines
      290-297.
-
-Dead-code documentation (P5-ceiling evidence)
----------------------------------------------
-Lines 552-784 (ShiftVectorComponentsMFMAAllThread):
-  Dispatch condition at line 237: ``glvw > allContOutCoal * numThreadInCoal``.
-  Solution.py clips GlobalReadVectorWidthA down to glvwAlimit, which is
-  computed as ``MIOutputVectorWidth * (WavefrontSize // matrixInstN)`` for
-  SourceSwap=0 / isA=True -- exactly equal to the AllThread threshold.
-  Because the clip sets glvw == threshold, ``glvw > threshold`` is never True.
-  P5-ceiling: dead code at ShiftVectorComponents.py:237-238 + 552-784.
 
 Line 122 (ShiftVectorComponentsVALU, glvw < vectorWidth branch):
   Requires GlobalReadVectorWidthA < VectorWidthA.  Solution.py (lines
@@ -112,9 +101,6 @@ def test_r7_shiftvec_full_mfma_emits():
     At least one kernel must emit successfully; all valid permutations must be
     err==0.
 
-    Lines 552-784 (AllThread) are documented dead code: glvwAlimit in
-    Solution.py equals the AllThread threshold, so the dispatch at line 237
-    never fires. P5-ceiling evidence at ShiftVectorComponents.py:237-238.
     """
     results = emit_kernels_from_config(_CFG_MFMA, limit=8, arch=_ARCH)
     assert len(results) >= 1, (

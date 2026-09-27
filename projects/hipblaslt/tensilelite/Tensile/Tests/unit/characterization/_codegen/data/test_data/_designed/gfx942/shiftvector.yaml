@@ -5,8 +5,8 @@
 # P4-widen ShiftVectorComponents characterization seed for gfx942.
 #
 # Target: Tensile/Components/ShiftVectorComponents.py
-# Missing ranges (methodology-A): 47-200 (ShiftVectorComponentsVALU.__call__),
-# 238 (AllThread dispatch), 438-439 (large-mb branch), 552-784 (AllThread body).
+# Missing ranges (methodology-A): ShiftVectorComponentsVALU.__call__ and the
+# PartialThread large-mb branch.
 #
 # Strategy: sweep VectorWidthA=[1,2,4] with a VALU kernel
 # (WorkGroup + ThreadTile instead of MatrixInstruction) so
