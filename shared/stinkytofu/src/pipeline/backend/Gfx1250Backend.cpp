@@ -90,6 +90,10 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     // Verify IR integrity before running any passes
     // This catches IR corruption early before it propagates through optimization
     pm.addPass(createStinkyIRVerifierPass());
+    pm.addPass(createStinkyBuildImplicitDependencyPass());
+
+    // If the scheduler is enabled, we need to enable waitcnt insertion
+    enableWaitCnt = runScheduler || enableWaitCnt;
 
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
@@ -101,13 +105,30 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
         pm.addPass(createStinkyRemoveNopPass());
     }
 
-    // addPeepholeOptPasses(pm, optLevel);
-
     // Instruction scheduling
-    pm.addPass(createStinkyBuildImplicitDependencyPass());
     if (runScheduler) {
         pm.addPass(createStinkyDAGSchedulerPass());
         pm.addPass(createStinkyMergeBarrierPass());
+    }
+
+    if (enableWaitCnt) {
+        WaitCntInsertionOptions waitCntOptions;
+        waitCntOptions.enableLoopCarriedTokenDeps =
+            module.getModuleOptions().EnableLoopCarriedTokenDeps;
+        pm.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
+    }
+
+    if (runScheduler) {
+        pm.addPass(createRemoveDscntPass());
+    }
+
+    // The wait insertion above leaves each final wait immediately before the
+    // WMMA that consumes its loads, so that WMMA has nothing to issue behind
+    // it. Repair moves this many non-WMMA instructions past each anchor to
+    // refill those slots, without changing any wait immediate.
+    const int waitRepairSlotsAfterAnchor = 1;
+    if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
+        pm.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
     }
 }
 
@@ -202,22 +223,6 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                    runScheduler);
             PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
-            if (moduleOptions.EnableWaitCntInsertion) {
-                WaitCntInsertionOptions waitCntOptions;
-                waitCntOptions.enableLoopCarriedTokenDeps =
-                    moduleOptions.EnableLoopCarriedTokenDeps;
-                innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
-                if (runScheduler) innerPM.addPass(createRemoveDscntPass());
-            }
-
-            // The wait insertion above leaves each final wait immediately before the
-            // WMMA that consumes its loads, so that WMMA has nothing to issue behind
-            // it. Repair moves this many non-WMMA instructions past each anchor to
-            // refill those slots, without changing any wait immediate.
-            const int waitRepairSlotsAfterAnchor = 1;
-            if (runScheduler && waitRepairSlotsAfterAnchor > 0) {
-                innerPM.addPass(createWaitAwareScheduleRepairPass(waitRepairSlotsAfterAnchor));
-            }
 
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
@@ -264,6 +269,18 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         }
 
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
+
+        // Full-kernel waitcnt insertion, last so the dataflow runs on the final CFG.
+        // TODO: remove runScheduler check once waitcnt insertion could keep region-scoped waitcnts.
+        if (moduleOptions.EnableWaitCntInsertion && !runScheduler) {
+            WaitCntInsertionOptions waitCntOptions;
+            waitCntOptions.enableLoopCarriedTokenDeps = moduleOptions.EnableLoopCarriedTokenDeps;
+
+            pm.addPass(createStinkyBuildImplicitDependencyPass());
+            pm.addPass(createStinkyRemoveWaitCntPass());
+            pm.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
+        }
+
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 
