@@ -300,8 +300,7 @@ private:
     std::optional<VerificationOutcome> fillBundleInputs();
 
     OutputTensors allocateSentinelOutputs() const;
-    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
-                                                        bool useDevice) const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs, bool useDevice);
     EngineRunResult runEngine(GraphSession& session);
     VerificationOutcome engineDidNotRun(const EngineRunResult& run) const;
 
@@ -341,6 +340,7 @@ private:
     SupportClaimLocator _claimLocator;
     std::shared_ptr<IntegrationTestBundle> _bundle;
     InputFillRecipes _inputFillRecipes;
+    TensorMap _packedInputs;
 };
 
 } // namespace hipdnn_integration_tests::bundle
