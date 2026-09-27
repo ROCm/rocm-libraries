@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <type_traits>
+
 #include "hip_tensor_executors.hpp"
 
 __device__ void contrast_hip_compute(uchar* srcPtr, d_float8* pix_f8, d_float8* contrastParams_f8) {
@@ -91,7 +93,10 @@ __global__ void contrast_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr
 
     rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &pix_f8);
     contrast_hip_compute(srcPtr, &pix_f8, &contrastParams_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &pix_f8);
+    else
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
 }
 
 template <typename T>
@@ -118,7 +123,10 @@ __global__ void contrast_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPt
 
     rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &pix_f8);
     contrast_hip_compute(srcPtr, &pix_f8, &contrastParams_f8);
-    rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &pix_f8);
+    else
+        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
 
     if (channelsDst == 3) {
         srcIdx += srcStridesNCH.y;
@@ -126,14 +134,20 @@ __global__ void contrast_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPt
 
         rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &pix_f8);
         contrast_hip_compute(srcPtr, &pix_f8, &contrastParams_f8);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
+        if constexpr (std::is_same<T, Rpp8s>::value)
+            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &pix_f8);
+        else
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
 
         srcIdx += srcStridesNCH.y;
         dstIdx += dstStridesNCH.y;
 
         rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &pix_f8);
         contrast_hip_compute(srcPtr, &pix_f8, &contrastParams_f8);
-        rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
+        if constexpr (std::is_same<T, Rpp8s>::value)
+            rpp_hip_pack_float8_and_store8<RoundToNearest>(dstPtr + dstIdx, &pix_f8);
+        else
+            rpp_hip_pack_float8_and_store8(dstPtr + dstIdx, &pix_f8);
     }
 }
 
@@ -164,7 +178,11 @@ __global__ void contrast_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* 
     contrast_hip_compute(srcPtr, &pix_f24.f8[0], &contrastParams_f8);
     contrast_hip_compute(srcPtr, &pix_f24.f8[1], &contrastParams_f8);
     contrast_hip_compute(srcPtr, &pix_f24.f8[2], &contrastParams_f8);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &pix_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &pix_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &pix_f24);
 }
 
 template <typename T>
@@ -194,7 +212,10 @@ __global__ void contrast_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T*
     contrast_hip_compute(srcPtr, &pix_f24.f8[0], &contrastParams_f8);
     contrast_hip_compute(srcPtr, &pix_f24.f8[1], &contrastParams_f8);
     contrast_hip_compute(srcPtr, &pix_f24.f8[2], &contrastParams_f8);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &pix_f24);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &pix_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &pix_f24);
 }
 
 template <typename T>
