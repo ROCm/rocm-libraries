@@ -57,6 +57,7 @@ namespace rocsparse
                                                             int64_t              batch_stride_C,
                                                             rocsparse_order      order_C,
                                                             rocsparse_index_base idx_base,
+                                                            I                    colB_panel,
                                                             int64_t              batch)
     {
         const int tid = hipThreadIdx_x;
@@ -68,7 +69,7 @@ namespace rocsparse
         __shared__ T shared_val_prev[WF_SIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
 
-        const I       colB   = WF_SIZE * hipBlockIdx_y;
+        const I       colB   = colB_panel;
         const int64_t offset = bid * LOOPS * BLOCKSIZE;
 
         I row_ind;

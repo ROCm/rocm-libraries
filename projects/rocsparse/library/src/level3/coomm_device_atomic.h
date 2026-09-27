@@ -374,22 +374,23 @@ namespace rocsparse
         const I col = coo_col_ind[gid] - idx_base;
         const T val = rocsparse::conj_val(coo_val[gid], conj_A);
 
-        const T bval = (TRANSB) ? rocsparse::conj_val(dense_B[ldb * row + hipBlockIdx_y], conj_B)
-                                : rocsparse::conj_val(dense_B[hipBlockIdx_y * ldb + row], conj_B);
+        // grid.y carries the dense column index and is capped at 65535, so stride
+        // over the columns to cover panels beyond the cap.
+        for(I l = hipBlockIdx_y; l < n; l += hipGridDim_y)
+        {
+            const T bval = (TRANSB) ? rocsparse::conj_val(dense_B[ldb * row + l], conj_B)
+                                    : rocsparse::conj_val(dense_B[l * ldb + row], conj_B);
 
-        if(order_C == rocsparse_order_column)
-        {
-            rocsparse::atomic_add(dense_C,
-                                  hipBlockIdx_y * ldc + col,
-                                  dense_C_size,
-                                  static_cast<C>(alpha * (val * bval)));
-        }
-        else
-        {
-            rocsparse::atomic_add(dense_C,
-                                  col * ldc + hipBlockIdx_y,
-                                  dense_C_size,
-                                  static_cast<C>(alpha * (val * bval)));
+            if(order_C == rocsparse_order_column)
+            {
+                rocsparse::atomic_add(
+                    dense_C, l * ldc + col, dense_C_size, static_cast<C>(alpha * (val * bval)));
+            }
+            else
+            {
+                rocsparse::atomic_add(
+                    dense_C, col * ldc + l, dense_C_size, static_cast<C>(alpha * (val * bval)));
+            }
         }
     }
 }

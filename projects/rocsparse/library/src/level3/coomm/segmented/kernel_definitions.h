@@ -65,31 +65,40 @@ namespace rocsparse
 
         if(alpha != static_cast<T>(0))
         {
-            for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+            // grid.y carries the dense column panel index (WF_SIZE columns each)
+            // and is capped at 65535, so stride over the WF_SIZE-wide panels to
+            // cover the "main" columns [0, N - N % WF_SIZE) when the panel count
+            // exceeds the cap. The remainder columns are handled separately.
+            for(I colB_panel = WF_SIZE * hipBlockIdx_y; colB_panel + WF_SIZE <= N;
+                colB_panel += WF_SIZE * hipGridDim_y)
             {
-                rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
-                    conj_A,
-                    conj_B,
-                    M,
-                    N,
-                    K,
-                    nnz,
-                    batch_stride_A,
-                    alpha,
-                    row_block_red,
-                    val_block_red,
-                    coo_row_ind,
-                    coo_col_ind,
-                    coo_val,
-                    dense_B,
-                    ldb,
-                    batch_stride_B,
-                    dense_C,
-                    ldc,
-                    batch_stride_C,
-                    order_C,
-                    idx_base,
-                    batch);
+                for(int64_t batch = hipBlockIdx_z; batch < batch_count; batch += hipGridDim_z)
+                {
+                    rocsparse::coommnn_segmented_main_device<BLOCKSIZE, WF_SIZE, LOOPS, TRANSB>(
+                        conj_A,
+                        conj_B,
+                        M,
+                        N,
+                        K,
+                        nnz,
+                        batch_stride_A,
+                        alpha,
+                        row_block_red,
+                        val_block_red,
+                        coo_row_ind,
+                        coo_col_ind,
+                        coo_val,
+                        dense_B,
+                        ldb,
+                        batch_stride_B,
+                        dense_C,
+                        ldc,
+                        batch_stride_C,
+                        order_C,
+                        idx_base,
+                        colB_panel,
+                        batch);
+                }
             }
         }
     }

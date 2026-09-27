@@ -62,7 +62,9 @@ namespace rocsparse
 #define LAUNCH_COOMMNN_SEGMENTED_MAIN_KERNEL(COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB)        \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
         (rocsparse::coommnn_segmented_main_kernel<COOMMNN_DIM, WF_SIZE, LOOPS, TRANSB>), \
-        dim3(nblocks, (main - 1) / WF_SIZE + 1, get_batch_grid_size<I>(batch_count_C)),  \
+        dim3(nblocks,                                                                    \
+             get_grid_size<I>((main - 1) / WF_SIZE + 1, max_batch_grid_size),            \
+             get_batch_grid_size<I>(batch_count_C)),                                     \
         dim3(COOMMNN_DIM),                                                               \
         0,                                                                               \
         stream,                                                                          \
