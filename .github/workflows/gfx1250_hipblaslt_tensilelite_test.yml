@@ -165,6 +165,8 @@ jobs:
         if: ${{ steps.fetch.outputs.artifact_ready == 'true' && inputs.run_hipblaslt }}
         env:
           GTEST_FILTER_ARG: ${{ inputs.hipblaslt_gtest_filter }}
+          # StreamKMultiStream.ConcurrentStreamsDoNotDeadlock fails without it.
+          HSA_HOTSWAP_DISABLE: "1"
         run: |
           set -o pipefail  # a failing test must propagate through `| tee`, not be masked
           mkdir -p test_results
@@ -173,12 +175,14 @@ jobs:
             echo "::error::hipblaslt-test not found in the fetched artifact"; exit 1
           fi
           echo "Using: $HIPBLASLT_TEST"
+          export HIPBLASLT_TEST_TIMEOUT=3600
+          export HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250"
           FILTER=()
           [ -n "$GTEST_FILTER_ARG" ] && FILTER+=(--gtest_filter="$GTEST_FILTER_ARG")
-          HIPBLASLT_TEST_TIMEOUT=3600 \
-          HIPBLASLT_TENSILE_LIBPATH="$ROCM/lib/hipblaslt/library/gfx1250" \
-          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 \
-            | tee test_results/hipblaslt_test.log
+          # Cleanup CI logs.
+          scrub() { sed -u -E '/Query[[:space:]]+device/d; /Device[[:space:]]+ID[[:space:]]+[0-9]/d; /PCI[[:space:]]+Chip[[:space:]]+ID/d; /GB[[:space:]]+memory/d; /SCLK|MCLK/d; /compute[[:space:]]+capability/d; /maxGridDimX/d; /sharedMemPerBlock/d; /maxThreadsPerBlock/d; /warpSize/d'; }
+          # Full suite in one pass.
+          "$HIPBLASLT_TEST" "${FILTER[@]}" 2>&1 | scrub | tee test_results/hipblaslt_test.log
 
       - name: Run TensileLite common tests
         timeout-minutes: 240
