@@ -55,15 +55,12 @@ ROCSOLVER_KERNEL void ger_kernel(I const m,
                                  rocblas_stride const strideA,
                                  I const batch_count)
 {
-    // indices
-    I bid = hipBlockIdx_z;
-    I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
-    I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + hipThreadIdx_y;
-
     I const bid_start = hipBlockIdx_z;
     I const bid_inc = hipGridDim_z;
+
     I const i_start = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
     I const i_inc = hipBlockDim_x * hipGridDim_x;
+
     I const j_start = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + hipThreadIdx_y;
     I const j_inc = hipBlockDim_y * hipGridDim_y;
 
@@ -72,8 +69,8 @@ ROCSOLVER_KERNEL void ger_kernel(I const m,
         // batch instance
         T const a = load_scalar(alpha, bid, stridea);
         T* const A = load_ptr_batch(AA, bid, shiftA, strideA);
-        T* const x = load_ptr_batch(xx, bid, shiftX, strideX);
-        T* const y = load_ptr_batch(yy, bid, shiftY, strideY);
+        T const* const x = load_ptr_batch(xx, bid, shiftX, strideX);
+        T const* const y = load_ptr_batch(yy, bid, shiftY, strideY);
 
         for(I j = j_start; j < n; j += j_inc)
         {
@@ -92,25 +89,25 @@ ROCSOLVER_KERNEL void ger_kernel(I const m,
 
 template <bool CONJ, typename T, typename I, typename U>
 rocblas_status rocsolver_ger(rocblas_handle handle,
-                             I m,
-                             I n,
+                             I const m,
+                             I const n,
                              const T* alpha,
                              rocblas_stride stridea,
                              U x,
-                             rocblas_stride shiftX,
-                             I incx,
-                             rocblas_stride strideX,
+                             rocblas_stride const shiftX,
+                             I const incx,
+                             rocblas_stride const strideX,
                              U y,
-                             rocblas_stride shiftY,
-                             I incy,
-                             rocblas_stride strideY,
+                             rocblas_stride const shiftY,
+                             I const incy,
+                             rocblas_stride const strideY,
                              U A,
-                             rocblas_stride shiftA,
-                             I inca,
-                             I lda,
-                             rocblas_stride strideA,
-                             I batch_count,
-                             T** work)
+                             rocblas_stride const shiftA,
+                             I const inca,
+                             I const lda,
+                             rocblas_stride const strideA,
+                             I const batch_count,
+                             T** const work)
 {
     ROCSOLVER_ENTER("ger", "m:", m, "n:", n, "shiftX:", shiftX, "incx:", incx, "shiftY:", shiftY,
                     "incy:", incy, "shiftA:", shiftA, "inca:", inca, "lda:", lda, "bc:", batch_count);
