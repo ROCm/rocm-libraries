@@ -132,13 +132,8 @@ _rocblas_handle::_rocblas_handle()
 // hipMallocAsync and hipFreeAsync are defined in hip version 5.2.0
 // Support for default stream added in hip version 5.3.0
 #if HIP_VERSION >= 50300000
-        // The following allocation & free of device memory using hipMallocAsync/hipFreeAsync will allocate memory from
-        // the OS and release it to default memory pool. Further allocation of memory using hipMallocAsync
-        // will be from the memory pool and it will be faster.
-        THROW_IF_HIP_ERROR((hipMallocAsync)(&device_memory, device_memory_size, stream));
-
-        THROW_IF_HIP_ERROR((hipFreeAsync)(device_memory, stream));
-
+        // Stream-order pool warmup is deferred to set_stream() so hipMallocAsync
+        // runs on the user stream rather than the default stream at handle creation.
         device_memory = nullptr;
 #else
         rocblas_cerr
@@ -356,6 +351,26 @@ rocblas_status _rocblas_handle::set_stream(hipStream_t new_stream)
     }*/
 
     stream = new_stream;
+
+    // Prime the default memory pool on the user stream. Doing this in the constructor
+    // used the default stream and can hang on APU platforms (e.g. MI300A) in hipMallocAsync.
+    if(stream_order_alloc && !stream_order_pool_primed && device_memory_size
+       && stream_status == hipStreamCaptureStatusNone)
+    {
+#if HIP_VERSION >= 50300000
+        hipError_t hipStatus = (hipMallocAsync)(&device_memory, device_memory_size, stream);
+        if(hipStatus != hipSuccess)
+            return rocblas_internal_convert_hip_to_rocblas_status(hipStatus);
+
+        hipStatus     = (hipFreeAsync)(device_memory, stream);
+        device_memory = nullptr;
+        if(hipStatus != hipSuccess)
+            return rocblas_internal_convert_hip_to_rocblas_status(hipStatus);
+
+        stream_order_pool_primed = true;
+#endif
+    }
+
     return rocblas_status_success;
 }
 

@@ -599,7 +599,8 @@ private:
     rocblas_device_memory_ownership device_memory_owner;
     size_t                          device_memory_query_size;
 
-    bool stream_order_alloc = false;
+    bool stream_order_alloc       = false;
+    bool stream_order_pool_primed = false;
 
     // Solution fitness query (used for internal testing)
     double* solution_fitness_query = nullptr;
