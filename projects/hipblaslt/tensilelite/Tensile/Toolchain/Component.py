@@ -22,16 +22,18 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-from os import name as os_name
+import shutil
 from os import environ
+from os import name as os_name
 from pathlib import Path
-from re import search, sub, IGNORECASE
+from re import IGNORECASE, MULTILINE, match, search, sub
 from shlex import split
-from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
-from typing import List
+from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
+from typing import List, Optional
 
 from Tensile.Common import SemanticVersion, print2
-from .Validators import ToolchainDefaults, validateToolchain
+
+from .Validators import validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
   """Invokes a command with the provided arguments in a subprocess.
@@ -79,15 +81,96 @@ def _getVersion(executable: str, versionFlag: str, regex: str) -> str:
         raise RuntimeError(f"Failed to get version when calling {args}: {e}")
 
 
-def get_rocm_version() -> str:
-    """Compute the ROCm version string using hipconfig.
+_DEFAULT_ROCM_ROOT = Path("/opt/rocm")
+_HIP_VERSION_PARTS = ("MAJOR", "MINOR", "PATCH")
+
+
+def _parse_hip_version(version_str: str) -> SemanticVersion:
+    version_match = match(r"^\s*(\d+)\.(\d+)\.(\d+)", version_str)
+    if not version_match:
+        raise RuntimeError(f"Invalid HIP version: {version_str!r}")
+    return SemanticVersion(*(int(part) for part in version_match.groups()))
+
+
+def _read_hip_build_version(path: Path) -> Optional[str]:
+    """Read HIP_VERSION_MAJOR/MINOR/PATCH from a HIP metadata file."""
+    try:
+        contents = path.read_text()
+    except OSError:
+        return None
+
+    values = []
+    for part in _HIP_VERSION_PARTS:
+        value = search(
+            rf"^\s*(?:#define\s+)?HIP_VERSION_{part}(?:\s*=\s*|\s+)(\d+)",
+            contents,
+            MULTILINE,
+        )
+        if not value:
+            raise RuntimeError(f"Invalid HIP version file: {path}")
+        values.append(value.group(1))
+    return ".".join(values)
+
+
+def _read_version_from_root(root: Path) -> Optional[str]:
+    """Read the HIP build version from HIP metadata files only.
+
+    Reads share/hip/version and include/hip/hip_version.h, which contain the
+    HIP build version including the patch/build number used for feature gating.
+    The ROCm release file (.info/version) is intentionally excluded — it contains
+    only the release version and silently drops the build number, which can cause
+    incorrect feature detection when patch-level thresholds are checked.
+    """
+    for relative_path in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
+        version_str = _read_hip_build_version(root / relative_path)
+        if version_str:
+            return version_str
+    return None
+
+
+def get_rocm_version() -> SemanticVersion:
+    """Compute the HIP build version used by the selected ROCm toolchain.
+
+    Reads ROCM_VERSION (set by CMake from hip_VERSION) first. Standalone
+    discovery prefers HIP's build-version metadata over the ROCm release file.
+
+    Note: Python ROCm SDK (pip) version detection is intentionally omitted here;
+    it will be handled by PR #11023 with proper feature-gating once the
+    infrastructure is in place.
 
     Raises:
-        RuntimeError: If hipconfig fails to execute.
+        RuntimeError: If the version cannot be determined or parsed.
     Return:
-        ROCm version string
+        HIP build SemanticVersion
     """
-    return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
+    version_str = environ.get("ROCM_VERSION")
+    if version_str:
+        return _parse_hip_version(version_str)
+
+    for root in (environ.get("ROCM_PATH"), environ.get("HIP_PATH"), _DEFAULT_ROCM_ROOT):
+        if root:
+            version_str = _read_version_from_root(Path(root))
+            if version_str:
+                return _parse_hip_version(version_str)
+
+    for exe in ("amdclang++", "rocm-smi", "amd-smi"):
+        exe_path = shutil.which(exe)
+        if not exe_path:
+            continue
+        candidate = Path(exe_path).resolve().parent
+        for _ in range(5):
+            version_str = _read_version_from_root(candidate)
+            if version_str:
+                return _parse_hip_version(version_str)
+            parent = candidate.parent
+            if parent == candidate:
+                break
+            candidate = parent
+
+    raise RuntimeError(
+        "Failed to get ROCm version from ROCM_VERSION, ROCM_PATH, HIP_PATH, "
+        "/opt/rocm, or a PATH-derived ROCm root"
+    )
 
 
 class Component:

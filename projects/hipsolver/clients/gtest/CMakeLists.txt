@@ -112,12 +112,11 @@ target_compile_definitions(hipsolver-test PRIVATE GOOGLE_TEST)
 target_include_directories(hipsolver-test
   SYSTEM PRIVATE
     $<BUILD_INTERFACE:${CBLAS_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
 )
 
 # TODO: This LAPACK dependency is only required to support geev
 # It should be removed once geev is implemented in rocSOLVER
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia" AND TARGET lapack_libraries)
+if(NOT USE_CUDA AND TARGET lapack_libraries)
   target_link_libraries(hipsolver-test PRIVATE
     lapack_libraries
   )
@@ -147,7 +146,7 @@ if(BUILD_FORTRAN_BINDINGS)
   target_sources(hipsolver-test PRIVATE ${hipsolver_f90_source})
 endif()
 
-if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+if(NOT USE_CUDA)
   target_link_libraries(hipsolver-test PRIVATE hip::host)
 
   if(CUSTOM_TARGET)
@@ -160,12 +159,11 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   endif()
 else()
   target_compile_definitions(hipsolver-test PRIVATE __HIP_PLATFORM_NVIDIA__)
-
+  target_link_libraries(hipsolver-test PRIVATE hip::host)
   target_include_directories(hipsolver-test
     PRIVATE
       $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
   )
-
   target_link_libraries(hipsolver-test PRIVATE ${CUDA_LIBRARIES} Threads::Threads)
 endif()
 

@@ -110,22 +110,49 @@ if(BUILD_ADDRESS_SANITIZER)
   add_compile_definitions(ADDRESS_SANITIZER)
 endif()
 
-# Set internal BUILD_WITH_COMPILER.
-if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-  set( BUILD_WITH_COMPILER "HOST-default" )
+# BUILD_WITH_LIB remains accepted as a compatibility input (ROCM or CUDA).
+# USE_CUDA is the canonical option going forward. Normalize both into a single
+# authoritative value before compiler detection so every downstream consumer
+# (compiler flags, dependency selection, packaging) sees them agree.
+string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
+set( _HIPFFT_USE_CUDA_DEFAULT OFF )
+if( BUILD_WITH_LIB STREQUAL "CUDA" )
+  set( _HIPFFT_USE_CUDA_DEFAULT ON )
+elseif( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
+  message( FATAL_ERROR "BUILD_WITH_LIB must be ROCM or CUDA, got: ${BUILD_WITH_LIB}" )
+endif()
+option( USE_CUDA "Build hipFFT for the CUDA backend using nvcc directly (no hipcc)" ${_HIPFFT_USE_CUDA_DEFAULT} )
+unset( _HIPFFT_USE_CUDA_DEFAULT )
+
+if( USE_CUDA )
+  set( BUILD_WITH_LIB "CUDA" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE )
 else()
-  if( $ENV{HIP_PLATFORM} MATCHES "nvidia" )
+  set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" FORCE )
+endif()
+
+# Load hip headers now that the backend is decided. Using hip CONFIG avoids
+# any hipconfig/hipcc subprocess; hip::host is needed for public HIP headers
+# on both backends.
+find_package( hip CONFIG REQUIRED PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm )
+
+# Set internal BUILD_WITH_COMPILER.
+# Only use HIP-nvcc mode (which wraps flags with -Xcompiler=/-Xlinker=) when
+# the CXX compiler is nvcc or hipcc (which wraps nvcc when HIP_PLATFORM=nvidia).
+# Other compilers (g++, clang++) that target the CUDA backend link against
+# cufft directly and do not need nvcc flag wrapping.
+if( BUILD_WITH_LIB STREQUAL "CUDA" )
+  if( CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR CMAKE_CXX_COMPILER MATCHES ".*hipcc$" )
     set( BUILD_WITH_COMPILER "HIP-nvcc" )
   else()
-    set( BUILD_WITH_COMPILER "HIP-clang" )
-    if( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
-      message( FATAL_ERROR "Detected HIP_COMPILER=clang, but BUILD_WITH_LIB is not ROCM!" )
-    endif()
+    set( BUILD_WITH_COMPILER "HOST-default" )
   endif()
+elseif( CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+" )
+  set( BUILD_WITH_COMPILER "HIP-clang" )
+else()
+  set( BUILD_WITH_COMPILER "HOST-default" )
 endif()
 
 string( TOUPPER "${BUILD_WITH_COMPILER}" BUILD_WITH_COMPILER )
-string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
@@ -139,9 +166,6 @@ endif()
 include(cmake/dependencies.cmake)
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
-  set (BUILD_WITH_LIB "CUDA")
-  set( HIP_PLATFORM "nvidia" )
-
   set( CMAKE_CXX_EXTENSIONS OFF )
 
   set( CMAKE_CXX_COMPILE_OPTIONS_PIC "-Xcompiler=${CMAKE_CXX_COMPILE_OPTIONS_PIC}" )
@@ -172,7 +196,6 @@ else()
   # Check support for the GPU target(s)
   rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   if( BUILD_WITH_COMPILER STREQUAL "HIP-CLANG" )
-    set( HIP_PLATFORM "amd" )
     set( HIP_COMPILER "clang" )
   endif()
 endif()
