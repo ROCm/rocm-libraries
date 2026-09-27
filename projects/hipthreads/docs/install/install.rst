@@ -4,9 +4,9 @@
 
 .. _installation:
 
-******************
+*******************
 Install hipThreads
-******************
+*******************
 
 Before you begin, verify that your system is supported.
 For more information, see :ref:`ROCm Core SDK components <rocm:release-components>`.
@@ -31,6 +31,8 @@ Install hipThreads as a standalone package on Linux
 
 Alternatively, if you want to install hipThreads without the full set of ROCm libraries and tools, install the ``amdrocm-threads`` package.
 This is a granular subset of the ROCm Core SDK ``amdrocm-core-sdk`` that provides hipThreads on its own.
+
+The ``amdrocm-threads`` standalone packages are available on Linux only. On Windows, install hipThreads with the ROCm Core SDK or the `HIP SDK for Windows <https://rocm.docs.amd.com/projects/install-on-windows/en/latest/>`_.
 
 #. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to install dependencies and configure GPU access permissions.
 

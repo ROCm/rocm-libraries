@@ -8,9 +8,9 @@
 hipThreads documentation
 ******************************************
 
-hipThreads is a C++-style concurrency library for AMD GPUs. It implements ``std::thread``-like primitives that run inside GPU kernels, so that existing ``std::thread`` CPU code can be ported to the GPU with minimal changes. hipThreads is built on `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and `libhipcxx <https://github.com/ROCm/libhipcxx>`_.
+hipThreads is a C++-style concurrency library for AMD GPUs. It implements ``std::thread``-like primitives that run inside GPU kernels. Existing ``std::thread`` CPU code can be ported to the GPU with few source changes. hipThreads is built on `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and `libhipcxx <https://github.com/ROCm/libhipcxx>`_.
 
-The hipThreads project is located at https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipthreads.
+The hipThreads project is located in `ROCm/rocm-libraries <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipthreads>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -20,6 +20,9 @@ The hipThreads project is located at https://github.com/ROCm/rocm-libraries/tree
     * :doc:`Install hipThreads <install/install>`
     * :doc:`Build from source <install/source-build>`
 
+.. grid:: 2
+  :gutter: 3
+
   .. grid-item-card:: Conceptual
 
     * :ref:`hipThreads execution model <execution-model>`
@@ -28,6 +31,10 @@ The hipThreads project is located at https://github.com/ROCm/rocm-libraries/tree
 
     * :doc:`Add hipThreads to a CMake project <./how-to/hipThreads-in-a-project>`
     * :doc:`Tune scheduler concurrency <./how-to/hipThreads-tune-scheduler-concurrency>`
+
+  .. grid-item-card:: Examples
+
+    * `Examples <https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/hipThreads>`_
 
   .. grid-item-card:: Reference
 
