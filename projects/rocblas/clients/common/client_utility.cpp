@@ -452,15 +452,6 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
         setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
     }
 
-    if(arg.graph_test)
-    {
-        auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
-        if(stream_order_env)
-            m_stream_order_saved_status = std::string(stream_order_env);
-        m_stream_order_env_set = true;
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
-    }
-
     auto status = rocblas_create_handle(&m_handle);
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
@@ -535,11 +526,6 @@ rocblas_local_handle::~rocblas_local_handle()
     }
 
     rocblas_destroy_handle(m_handle);
-
-    if(m_stream_order_env_set)
-    {
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
-    }
 }
 
 void rocblas_local_handle::rocblas_stream_begin_capture()
