@@ -263,6 +263,37 @@ void CheckShape(Shape shape)
             if(reference.partial_magnitudes[i] <= 0)
                 EXPECT_EQ(got, 0) << "empty partial=" << i;
         }
+        const auto first_weights  = actual;
+        const auto first_partials = observed_partials;
+        dw_device.ToDevice(poison_dw.data());
+        workspace.ToDevice(poison_workspace.data());
+        invoker->Run(arg.get(), StreamConfig{nullptr, false});
+        dw_device.FromDevice(actual.data());
+        workspace.FromDevice(observed_partials.data());
+        for(std::size_t i = 0; i < filter_count; ++i)
+            EXPECT_EQ(ck::type_convert<float>(actual[i]), ck::type_convert<float>(first_weights[i]))
+                << "weight=" << i;
+        for(std::size_t i = 0; i < reference.partials.size(); ++i)
+            EXPECT_EQ(observed_partials[i], first_partials[i]) << "partial=" << i;
+        if(repetition == 0)
+        {
+            auto* typed_arg = dynamic_cast<RowStripOp::Argument*>(arg.get());
+            ASSERT_NE(typed_arg, nullptr);
+            ASSERT_TRUE(typed_arg->narrow_device_indices);
+            typed_arg->narrow_device_indices = false;
+            dw_device.ToDevice(poison_dw.data());
+            workspace.ToDevice(poison_workspace.data());
+            invoker->Run(arg.get(), StreamConfig{nullptr, false});
+            dw_device.FromDevice(actual.data());
+            workspace.FromDevice(observed_partials.data());
+            for(std::size_t i = 0; i < filter_count; ++i)
+                EXPECT_EQ(ck::type_convert<float>(actual[i]),
+                          ck::type_convert<float>(first_weights[i]))
+                    << "wide weight=" << i;
+            for(std::size_t i = 0; i < reference.partials.size(); ++i)
+                EXPECT_EQ(observed_partials[i], first_partials[i]) << "wide partial=" << i;
+            typed_arg->narrow_device_indices = true;
+        }
     }
 }
 
@@ -290,6 +321,18 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
         EXPECT_EQ(op.GetWorkSpaceSize(long_dry.get()), WorkspaceBytes(shape));
         op.SetWorkSpacePointer(long_dry.get(), dry_workspace.data());
     }
+    auto small_dry            = long_problem.MakeArgument(op, nullptr, nullptr, nullptr, 1);
+    const auto* small_indices = dynamic_cast<const RowStripOp::Argument*>(small_dry.get());
+    ASSERT_NE(small_indices, nullptr);
+    EXPECT_TRUE(small_indices->narrow_device_indices);
+    // Query near INT_MAX without allocating a huge input; wide indexing remains legal.
+    const Problem<ck::long_index_t> wide_problem(Shape{1, 3, 1, 715827881});
+    auto wide_dry = wide_problem.MakeArgument(op, nullptr, nullptr, nullptr, 1);
+    ASSERT_TRUE(op.IsSupportedArgument(wide_dry.get()));
+    const auto* wide_indices = dynamic_cast<const RowStripOp::Argument*>(wide_dry.get());
+    ASSERT_NE(wide_indices, nullptr);
+    EXPECT_FALSE(wide_indices->narrow_device_indices);
+    EXPECT_EQ(op.GetWorkSpaceSize(wide_dry.get()), WorkspaceBytes({1, 3, 1, 715827881}));
     for(const ck::index_t split : {-2, 2, 3})
     {
         auto dry = problem.MakeArgument(op, nullptr, nullptr, nullptr, split);
@@ -320,9 +363,13 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
     wrong_dilation.filter_dilations[1] = 2;
     EXPECT_FALSE(op.IsSupportedArgument(
         wrong_dilation.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
-    const Problem<ck::index_t> non_target_groups(Shape{2, 2, 13, 131});
-    EXPECT_FALSE(op.IsSupportedArgument(
-        non_target_groups.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    // G1/2/4/7 are algebraically valid but remain outside the measured reuse domain.
+    for(const int groups : {1, 2, 4, 7})
+    {
+        const Problem<ck::index_t> unmeasured(Shape{2, groups, 13, 131});
+        EXPECT_FALSE(op.IsSupportedArgument(
+            unmeasured.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    }
     auto huge           = long_problem;
     huge.out_lengths[3] = std::numeric_limits<ck::long_index_t>::max();
     EXPECT_FALSE(op.IsSupportedArgument(huge.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));

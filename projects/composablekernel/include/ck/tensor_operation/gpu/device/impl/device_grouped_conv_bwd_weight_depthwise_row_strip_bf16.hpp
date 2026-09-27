@@ -25,74 +25,80 @@ namespace tensor_operation {
 namespace device {
 
 // P[s, g, f], where s = n * ceil(Ho / 12) + strip and f = fy * 11 + fx.
+template <typename DeviceIndex>
 struct DepthwiseRowStripBf16Params
 {
+    using Index = DeviceIndex;
     const bhalf_t* in;
     bhalf_t* wei;
     const bhalf_t* out;
     float* partial;
-    long_index_t groups;
-    long_index_t in_h;
-    long_index_t in_w;
-    long_index_t out_h;
-    long_index_t out_w;
-    long_index_t strips_per_image;
-    long_index_t partial_splits;
+    DeviceIndex groups;
+    DeviceIndex in_h;
+    DeviceIndex in_w;
+    DeviceIndex out_h;
+    DeviceIndex out_w;
+    DeviceIndex strips_per_image;
+    DeviceIndex partial_splits;
 };
 
-struct DepthwiseRowStripBf16Argument : BaseArgument, ArgumentSplitK, DepthwiseRowStripBf16Params
+struct DepthwiseRowStripBf16Argument : BaseArgument,
+                                       ArgumentSplitK,
+                                       DepthwiseRowStripBf16Params<long_index_t>
 {
-    bool valid             = false;
-    size_t workspace_bytes = 0;
+    bool valid                 = false;
+    size_t workspace_bytes     = 0;
+    bool narrow_device_indices = false;
 };
 
-__global__ void
-kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16(DepthwiseRowStripBf16Params a)
+template <typename Params>
+__global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16(Params a)
 {
+    using DeviceIndex                    = typename Params::Index;
     constexpr index_t FilterWidth        = 11;
     constexpr index_t FilterRows         = 2;
     constexpr index_t BlockSize          = 256;
     const index_t tid                    = threadIdx.x;
     const index_t row_lane               = tid / 128;
     const index_t col_lane               = tid % 128;
-    const long_index_t s                 = blockIdx.x;
-    const long_index_t n                 = s / a.strips_per_image;
-    const long_index_t strip             = s % a.strips_per_image;
-    const long_index_t g                 = blockIdx.y;
-    const long_index_t fy                = static_cast<long_index_t>(blockIdx.z) * FilterRows;
+    const DeviceIndex s                  = blockIdx.x;
+    const DeviceIndex n                  = s / a.strips_per_image;
+    const DeviceIndex strip              = s % a.strips_per_image;
+    const DeviceIndex g                  = blockIdx.y;
+    const DeviceIndex fy                 = static_cast<DeviceIndex>(blockIdx.z) * FilterRows;
     const bool second_row                = fy + 1 < FilterWidth;
     float accum[FilterRows][FilterWidth] = {};
 
     for(index_t j = 0; j < 6; ++j)
     {
-        const long_index_t ho = strip * 12 + row_lane + 2 * j;
+        const DeviceIndex ho = strip * 12 + row_lane + 2 * j;
         if(ho >= a.out_h)
             continue;
-        const long_index_t hi   = ho + fy - 5;
+        const DeviceIndex hi    = ho + fy - 5;
         const bool valid_first  = hi >= 0 && hi < a.in_h;
         const bool valid_second = second_row && hi + 1 >= 0 && hi + 1 < a.in_h;
         if(!valid_first && !valid_second)
             continue;
 
-        for(long_index_t wo = col_lane; wo < a.out_w; wo += 128)
+        for(DeviceIndex wo = col_lane; wo < a.out_w; wo += 128)
         {
-            const long_index_t out_offset = ((n * a.out_h + ho) * a.out_w + wo) * a.groups + g;
-            const float dy                = type_convert<float>(a.out[out_offset]);
+            const DeviceIndex out_offset = ((n * a.out_h + ho) * a.out_w + wo) * a.groups + g;
+            const float dy               = type_convert<float>(a.out[out_offset]);
 #pragma unroll
             for(index_t fx = 0; fx < FilterWidth; ++fx)
             {
-                const long_index_t wi = wo + fx - 5;
+                const DeviceIndex wi = wo + fx - 5;
                 if(wi >= 0 && wi < a.in_w)
                 {
                     if(valid_first)
                     {
-                        const long_index_t in_offset =
+                        const DeviceIndex in_offset =
                             ((n * a.in_h + hi) * a.in_w + wi) * a.groups + g;
                         accum[0][fx] += type_convert<float>(a.in[in_offset]) * dy;
                     }
                     if(valid_second)
                     {
-                        const long_index_t in_offset =
+                        const DeviceIndex in_offset =
                             ((n * a.in_h + hi + 1) * a.in_w + wi) * a.groups + g;
                         accum[1][fx] += type_convert<float>(a.in[in_offset]) * dy;
                     }
@@ -101,66 +107,106 @@ kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16(DepthwiseRowStripBf16P
         }
     }
 
-    // Both filter rows use the same CTA reduction; inactive lanes still join every barrier.
-    __shared__ float reduction[FilterRows][FilterWidth][BlockSize];
+    // Reduce within each wave before publishing one partial per wave and tap.
+    // Every source lane is active even for empty rows/columns.
+    constexpr index_t Waves = BlockSize / 32;
+    const index_t lane      = tid % 32;
+    const index_t wave      = tid / 32;
 #pragma unroll
-    for(index_t row = 0; row < FilterRows; ++row)
-#pragma unroll
-        for(index_t fx = 0; fx < FilterWidth; ++fx)
-            reduction[row][fx][tid] = accum[row][fx];
-    __syncthreads();
-    for(index_t step = BlockSize / 2; step > 0; step /= 2)
+    for(index_t step = 16; step > 0; step /= 2)
     {
-        if(tid < step)
-        {
 #pragma unroll
-            for(index_t row = 0; row < FilterRows; ++row)
+        for(index_t row = 0; row < FilterRows; ++row)
 #pragma unroll
-                for(index_t fx = 0; fx < FilterWidth; ++fx)
-                    reduction[row][fx][tid] += reduction[row][fx][tid + step];
-        }
-        __syncthreads();
+            for(index_t fx = 0; fx < FilterWidth; ++fx)
+            {
+                const float other = __builtin_bit_cast(
+                    float,
+                    __builtin_amdgcn_ds_bpermute(((lane ^ step) << 2),
+                                                 __builtin_bit_cast(int, accum[row][fx])));
+                if(lane < step)
+                    accum[row][fx] += other;
+            }
     }
+    __shared__ float reduction[FilterRows][FilterWidth][Waves];
+    if(lane == 0)
+    {
+#pragma unroll
+        for(index_t row = 0; row < FilterRows; ++row)
+#pragma unroll
+            for(index_t fx = 0; fx < FilterWidth; ++fx)
+                reduction[row][fx][wave] = accum[row][fx];
+    }
+    __syncthreads();
     if(tid < FilterWidth)
     {
-        const long_index_t offset =
+        float first[Waves];
+        float second[Waves];
+#pragma unroll
+        for(index_t w = 0; w < Waves; ++w)
+        {
+            first[w]  = reduction[0][tid][w];
+            second[w] = reduction[1][tid][w];
+        }
+#pragma unroll
+        for(index_t step = Waves / 2; step > 0; step /= 2)
+#pragma unroll
+            for(index_t w = 0; w < step; ++w)
+            {
+                first[w] += first[w + step];
+                second[w] += second[w + step];
+            }
+        const DeviceIndex offset =
             (s * a.groups + g) * (FilterWidth * FilterWidth) + fy * FilterWidth + tid;
-        a.partial[offset] = reduction[0][tid][0];
+        a.partial[offset] = first[0];
         if(second_row)
-            a.partial[offset + FilterWidth] = reduction[1][tid][0];
+            a.partial[offset + FilterWidth] = second[0];
     }
 }
 
 // Neighboring lanes read neighboring filter elements in each s plane. Sixteen
-// independent s lanes sum disjoint splits before the final fixed block tree.
-__global__ void
-kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_finalize_bf16(DepthwiseRowStripBf16Params a)
+// independent s lanes sum disjoint splits before wave-local and inter-wave reduction.
+template <typename Params>
+__global__ void kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_finalize_bf16(Params a)
 {
-    constexpr index_t FilterTile    = 16;
-    constexpr index_t SplitLanes    = 16;
-    const index_t tid               = threadIdx.x;
-    const index_t f_lane            = tid % FilterTile;
-    const index_t s_lane            = tid / FilterTile;
-    const long_index_t f            = static_cast<long_index_t>(blockIdx.x) * FilterTile + f_lane;
-    const long_index_t weight_count = a.groups * 121;
-    float sum                       = 0;
+    using DeviceIndex              = typename Params::Index;
+    constexpr index_t FilterTile   = 16;
+    constexpr index_t SplitLanes   = 16;
+    const index_t tid              = threadIdx.x;
+    const index_t f_lane           = tid % FilterTile;
+    const index_t s_lane           = tid / FilterTile;
+    const DeviceIndex f            = static_cast<DeviceIndex>(blockIdx.x) * FilterTile + f_lane;
+    const DeviceIndex weight_count = a.groups * 121;
+    float sum                      = 0;
     if(f < weight_count)
     {
-        for(long_index_t s = s_lane; s < a.partial_splits; s += SplitLanes)
+        for(DeviceIndex s = s_lane; s < a.partial_splits; s += SplitLanes)
             sum += a.partial[s * weight_count + f];
     }
 
-    __shared__ float reduction[SplitLanes][FilterTile];
-    reduction[s_lane][f_lane] = sum;
+    // Two split lanes per wave share each weight. Publish eight wave partials.
+    constexpr index_t Waves = 8;
+    const float other       = __builtin_bit_cast(
+        float, __builtin_amdgcn_ds_bpermute(((tid % 32 ^ 16) << 2), __builtin_bit_cast(int, sum)));
+    if(s_lane % 2 == 0)
+        sum += other;
+    __shared__ float reduction[Waves][FilterTile];
+    if(s_lane % 2 == 0)
+        reduction[s_lane / 2][f_lane] = sum;
     __syncthreads();
-    for(index_t step = SplitLanes / 2; step > 0; step /= 2)
-    {
-        if(s_lane < step)
-            reduction[s_lane][f_lane] += reduction[s_lane + step][f_lane];
-        __syncthreads();
-    }
     if(s_lane == 0 && f < weight_count)
-        a.wei[f] = type_convert<bhalf_t>(reduction[0][f_lane]);
+    {
+        float wave_sums[Waves];
+#pragma unroll
+        for(index_t w = 0; w < Waves; ++w)
+            wave_sums[w] = reduction[w][f_lane];
+#pragma unroll
+        for(index_t step = Waves / 2; step > 0; step /= 2)
+#pragma unroll
+            for(index_t w = 0; w < step; ++w)
+                wave_sums[w] += wave_sums[w + step];
+        a.wei[f] = type_convert<bhalf_t>(wave_sums[0]);
+    }
 }
 
 struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
@@ -184,6 +230,26 @@ struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
             return false;
         result = x * y;
         return true;
+    }
+
+    // Checked byte spans also bound every valid x/dY/P offset. For masked
+    // lanes: maximum ho is 12*strips-1, maximum hi+1 is 12*strips+5;
+    // terminal wo+=128 is at most out_w+127. The finalizer can advance
+    // s to S+15 and form f up to weights+15 before testing the mask.
+    static bool NarrowIndicesSafe(long_index_t in_count,
+                                  long_index_t out_count,
+                                  long_index_t partials,
+                                  long_index_t strips,
+                                  long_index_t out_w,
+                                  long_index_t splits,
+                                  long_index_t weights)
+    {
+        constexpr long_index_t MaxIndex = std::numeric_limits<index_t>::max();
+        if(in_count > MaxIndex / 8 || out_count > MaxIndex / 8 || partials > MaxIndex / 8 ||
+           strips > (MaxIndex - 5) / 12 || out_w > MaxIndex - 128)
+            return false;
+        long_index_t terminal;
+        return CheckedMultiply(splits + 16, weights + 16, MaxIndex, terminal);
     }
 
     template <typename Index>
@@ -214,6 +280,8 @@ struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
                 return false;
         }
         // Exact packed NHWGC, NHWGK and GKYXC (C=K=1) only.
+        // The arithmetic supports other G, but channels-last reuse/selection
+        // outside the measured G3 family has not been established.
         const long_index_t g = il[0];
         if(g != 3 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 || wl[1] != 1 ||
            wl[2] != 1 || ol[2] != 1 || wl[3] != 11 || wl[4] != 11 || il[3] != ol[3] ||
@@ -245,6 +313,8 @@ struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
         const auto logical_bytes = static_cast<size_t>(partials) * sizeof(float);
         if(logical_bytes > static_cast<size_t>(MaxBytes - 255))
             return false;
+        a.narrow_device_indices =
+            NarrowIndicesSafe(in_count, out_count, partials, strips, ol[4], s, weights);
         a.groups           = g;
         a.in_h             = il[3];
         a.in_w             = il[4];
@@ -334,23 +404,46 @@ struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
                 throw std::runtime_error(
                     "Unsupported BF16 depthwise row-strip WRW argument or scratch");
 
-            auto params          = static_cast<const DepthwiseRowStripBf16Params&>(*a);
-            params.partial       = static_cast<float*>(a->p_workspace_);
-            const auto stage1_ms = launch_and_time_kernel(
-                stream,
-                kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16,
-                dim3(static_cast<uint32_t>(a->partial_splits), static_cast<uint32_t>(a->groups), 6),
-                dim3(256),
-                0,
-                params);
-            const auto stage2_ms = launch_and_time_kernel(
-                stream,
-                kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_finalize_bf16,
-                dim3(static_cast<uint32_t>((a->groups * 121 - 1) / 16 + 1)),
-                dim3(256),
-                0,
-                params);
-            return stage1_ms + stage2_ms;
+            const auto wide = static_cast<const DepthwiseRowStripBf16Params<long_index_t>&>(*a);
+            const dim3 stage1_grid(
+                static_cast<uint32_t>(a->partial_splits), static_cast<uint32_t>(a->groups), 6);
+            const dim3 stage2_grid(static_cast<uint32_t>((a->groups * 121 - 1) / 16 + 1));
+            const auto run_pair = [&](auto params) {
+                using Params         = decltype(params);
+                params.partial       = static_cast<float*>(a->p_workspace_);
+                const auto stage1_ms = launch_and_time_kernel(
+                    stream,
+                    kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_bf16<Params>,
+                    stage1_grid,
+                    dim3(256),
+                    0,
+                    params);
+                const auto stage2_ms = launch_and_time_kernel(
+                    stream,
+                    kernel_grouped_conv2d_bwd_weight_depthwise_row_strip_finalize_bf16<Params>,
+                    stage2_grid,
+                    dim3(256),
+                    0,
+                    params);
+                return stage1_ms + stage2_ms;
+            };
+            if(a->narrow_device_indices)
+            {
+                DepthwiseRowStripBf16Params<index_t> narrow{
+                    wide.in,
+                    wide.wei,
+                    wide.out,
+                    nullptr,
+                    static_cast<index_t>(wide.groups),
+                    static_cast<index_t>(wide.in_h),
+                    static_cast<index_t>(wide.in_w),
+                    static_cast<index_t>(wide.out_h),
+                    static_cast<index_t>(wide.out_w),
+                    static_cast<index_t>(wide.strips_per_image),
+                    static_cast<index_t>(wide.partial_splits)};
+                return run_pair(narrow);
+            }
+            return run_pair(wide);
         }
     };
 
