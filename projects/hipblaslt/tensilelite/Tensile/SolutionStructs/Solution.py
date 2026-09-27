@@ -2786,7 +2786,7 @@ class Solution(collections.abc.Mapping):
         or (numBytesB == 2 and isaInfoMap[isa].asmCaps["HasGLTr16B128"]) \
       )
 	  
-    if state["enableLDSTrA"] or state["enableGLTrA"]:
+    if (state["enableLDSTrA"] or state["enableGLTrA"]) and (not state["SourceSwap"]):
       state["VectorWidthA"] = 1
 
     if state["enableLDSTrB"] or state["enableGLTrB"]:
@@ -2902,6 +2902,13 @@ class Solution(collections.abc.Mapping):
         state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
       # ON/OFF the sourceswap according to the sparse type automatically
       state["SourceSwap"] = False if state["ProblemType"]["Sparse"] == 1 else True
+
+    # SourceSwap: keep A on the original (MI300/MI350-style) local-read path -
+    # column-major ds_read followed by a lane permute - instead of LDS-transpose
+    # (ds_load_tr16/tr8/etc). Only A is downgraded here; B (and Metadata) keep
+    # whatever asmCaps allow.
+    if state["SourceSwap"]:
+      state["enableLDSTrA"] = False
 
     # The real value of "1LDSBuffer" will be determined later (when it is -1), not here
 
@@ -3047,7 +3054,8 @@ class Solution(collections.abc.Mapping):
 
     for tc, numBytes in (("A", numBytesA), ("B", numBytesB)):
       if state["enableTDM%s"%tc] and numBytes in _LDS_TR_READ_BYTES \
-         and not state["UnrollMajorLDS%s"%tc] and not state["enableLDSTr%s"%tc]:
+         and not state["UnrollMajorLDS%s"%tc] and not state["enableLDSTr%s"%tc] \
+         and (not state["SourceSwap"]):
         reject(state, printRejectionReason,
                "TileMajor%s with TDM requires LDSTrInst=True"%tc)
         return
