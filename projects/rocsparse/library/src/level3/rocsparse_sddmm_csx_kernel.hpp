@@ -30,6 +30,10 @@
 
 namespace rocsparse
 {
+    // rowcol_offset is the first row (CSR) or column (CSC) of the wavefront panel
+    // this thread block handles. The kernel wrapper supplies it from a grid-stride
+    // loop, so a grid.x clamped against the device limit still covers every
+    // row/column.
     template <uint32_t            BLOCKSIZE,
               uint32_t            WFSIZE,
               uint32_t            NTHREADS_PER_DOTPRODUCT,
@@ -40,7 +44,8 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void sddmm_csx_device_wavefront_per_rowcol(rocsparse_operation transA,
+    ROCSPARSE_DEVICE_ILF void sddmm_csx_device_wavefront_per_rowcol(J rowcol_offset,
+                                                                    rocsparse_operation transA,
                                                                     rocsparse_operation transB,
                                                                     rocsparse_order     orderA,
                                                                     rocsparse_order     orderB,
@@ -72,14 +77,15 @@ namespace rocsparse
                       "WFSIZE must be a multiple of NTHREADS_PER_DOTPRODUCT.");
 
         static constexpr uint32_t NUM_SEQS = (WFSIZE / NTHREADS_PER_DOTPRODUCT);
-        const uint32_t            bid      = hipBlockIdx_x;
         const uint32_t            tid      = hipThreadIdx_x;
         const uint32_t            wid      = tid / WFSIZE;
         const uint32_t            lid      = tid % WFSIZE;
         const uint32_t            swid     = lid / NTHREADS_PER_DOTPRODUCT;
         const uint32_t            slid     = lid % NTHREADS_PER_DOTPRODUCT;
 
-        const uint32_t rowcol = (BLOCKSIZE / WFSIZE) * bid + wid;
+        // Formed in J rather than in 32-bit unsigned: with a clamped grid.x the
+        // panel base can legitimately exceed 2^32 for an int64_t index type.
+        const J rowcol = rowcol_offset + static_cast<J>(wid);
 
         static constexpr bool ROW_ORIENTED = (DIRECTION == rocsparse_direction_row);
 
@@ -218,30 +224,52 @@ namespace rocsparse
         // buffers. The caller is therefore required to lay out those buffers with
         // the matching strides, and to broadcast A or B across batches the caller
         // passes batch_stride_A == 0 or batch_stride_B == 0.
+        //
+        // grid.x is clamped against the device limit (rocsparse::sddmm_grid_size_x),
+        // so one sweep of the grid covers hipGridDim_x * ROWCOLS_PER_BLOCK rows
+        // (CSR) or columns (CSC). Advance the block's panel base by that stride
+        // until the whole row/column range is covered. Both the base and the stride
+        // involve only hipBlockIdx_x, hipGridDim_x, the M/N arguments and compile
+        // time constants, so the trip count is block uniform.
+        //
+        // The offsets are walked in 64 bits so that neither the stride nor the base
+        // can overflow the index type at the top of its range.
+        static constexpr int64_t ROWCOLS_PER_BLOCK = static_cast<int64_t>(BLOCKSIZE / WFSIZE);
+
+        const int64_t rowcol_bound
+            = static_cast<int64_t>((DIRECTION == rocsparse_direction_row) ? M : N);
+        const int64_t rowcol_stride  = static_cast<int64_t>(hipGridDim_x) * ROWCOLS_PER_BLOCK;
+        const int64_t rowcol_initial = static_cast<int64_t>(hipBlockIdx_x) * ROWCOLS_PER_BLOCK;
+
         for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
         {
-            rocsparse::sddmm_csx_device_wavefront_per_rowcol<BLOCKSIZE,
-                                                             WFSIZE,
-                                                             NTHREADS_PER_DOTPRODUCT,
-                                                             DIRECTION>(
-                transA,
-                transB,
-                orderA,
-                orderB,
-                M,
-                N,
-                K,
-                nnz,
-                alpha,
-                load_pointer(dense_A, batch, batch_stride_A),
-                lda,
-                load_pointer(dense_B, batch, batch_stride_B),
-                ldb,
-                beta,
-                load_pointer(csx_val, batch, values_batch_stride_C),
-                load_pointer(csx_ptr, batch, offsets_batch_stride_C),
-                load_pointer(csx_ind, batch, indices_batch_stride_C),
-                csx_base);
+            for(int64_t rowcol_offset = rowcol_initial; rowcol_offset < rowcol_bound;
+                rowcol_offset += rowcol_stride)
+            {
+                rocsparse::sddmm_csx_device_wavefront_per_rowcol<BLOCKSIZE,
+                                                                 WFSIZE,
+                                                                 NTHREADS_PER_DOTPRODUCT,
+                                                                 DIRECTION>(
+                    static_cast<J>(rowcol_offset),
+                    transA,
+                    transB,
+                    orderA,
+                    orderB,
+                    M,
+                    N,
+                    K,
+                    nnz,
+                    alpha,
+                    load_pointer(dense_A, batch, batch_stride_A),
+                    lda,
+                    load_pointer(dense_B, batch, batch_stride_B),
+                    ldb,
+                    beta,
+                    load_pointer(csx_val, batch, values_batch_stride_C),
+                    load_pointer(csx_ptr, batch, offsets_batch_stride_C),
+                    load_pointer(csx_ind, batch, indices_batch_stride_C),
+                    csx_base);
+            }
         }
     }
 
@@ -270,31 +298,45 @@ namespace rocsparse
         static_assert(BLOCKSIZE % NTHREADS_PER_GROUP == 0,
                       "BLOCKSIZE must be a multiple of NTHREADS_PER_GROUP.");
 
-        static constexpr auto GROUPS_PER_BLOCK = BLOCKSIZE / NTHREADS_PER_GROUP;
+        static constexpr int64_t GROUPS_PER_BLOCK
+            = static_cast<int64_t>(BLOCKSIZE / NTHREADS_PER_GROUP);
 
-        const auto lid  = hipThreadIdx_x & (NTHREADS_PER_GROUP - 1);
-        const auto wid  = hipThreadIdx_x / NTHREADS_PER_GROUP;
-        const auto gwid = wid + hipBlockIdx_x * GROUPS_PER_BLOCK;
+        const auto lid = hipThreadIdx_x & (NTHREADS_PER_GROUP - 1);
+        const auto wid = hipThreadIdx_x / NTHREADS_PER_GROUP;
 
         static constexpr bool row_oriented = (DIRECTION == rocsparse_direction_row);
 
-#define BOUND ((row_oriented) ? M : N)
-        if(gwid >= BOUND)
+        // Same clamp/stride contract as the main kernel above: grid.x is sized by
+        // rocsparse::sddmm_grid_size_x and therefore capped at the device limit, so
+        // the block walks its group base forward by hipGridDim_x * GROUPS_PER_BLOCK
+        // until every row (CSR) or column (CSC) is sampled. The base and the stride
+        // involve only hipBlockIdx_x, hipGridDim_x, the M/N arguments and compile
+        // time constants, so the trip count is block uniform; the per-thread group
+        // index is added inside the body.
+        const int64_t bound   = static_cast<int64_t>((row_oriented) ? M : N);
+        const int64_t stride  = static_cast<int64_t>(hipGridDim_x) * GROUPS_PER_BLOCK;
+        const int64_t initial = static_cast<int64_t>(hipBlockIdx_x) * GROUPS_PER_BLOCK;
+
+        for(int64_t base = initial; base < bound; base += stride)
         {
-            return;
-        }
+            const J gwid = static_cast<J>(base + static_cast<int64_t>(wid));
+            if(static_cast<int64_t>(gwid) >= bound)
+            {
+                continue;
+            }
 
-        const I start = csx_ptr[gwid] - csx_base;
-        const I end   = csx_ptr[gwid + 1] - csx_base;
+            const I start = csx_ptr[gwid] - csx_base;
+            const I end   = csx_ptr[gwid + 1] - csx_base;
 
-        for(I at = start + lid; at < end; at += NTHREADS_PER_GROUP)
-        {
-            const I ind = csx_ind[at] - csx_base;
+            for(I at = start + lid; at < end; at += NTHREADS_PER_GROUP)
+            {
+                const I ind = csx_ind[at] - csx_base;
 
-            const J row = (row_oriented) ? gwid : ind;
-            const J col = (row_oriented) ? ind : gwid;
+                const J row = (row_oriented) ? gwid : ind;
+                const J col = (row_oriented) ? ind : gwid;
 
-            csx_val[at] = dense_C[col * lda + row];
+                csx_val[at] = dense_C[col * lda + row];
+            }
         }
     }
 }

@@ -23,6 +23,7 @@
 
 #include "../conversion/rocsparse_coo2dense.hpp"
 #include "rocsparse_sddmm_coox_kernel.hpp"
+#include "rocsparse_sddmm_grid.hpp"
 
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
@@ -220,8 +221,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
             // Sample dense C
             static constexpr int NB = 512;
 
-            const int64_t num_blocks_x = rocsparse::min(
-                ((nnz - 1) / NB + 1), static_cast<I>(handle->properties.maxGridSize[0]));
+            const int64_t num_blocks_x
+                = rocsparse::sddmm_grid_size_x(nnz, NB, handle->properties.maxGridSize[0]);
             const dim3 blocks(num_blocks_x);
             const dim3 threads(NB);
 
@@ -248,9 +249,10 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
             static constexpr int NB = 512;
 
 #define LAUNCH(K_)                                                                       \
-    int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
-    dim3    blocks(num_blocks_x, get_batch_grid_size(batch_count));                      \
-    dim3    threads(NB);                                                                 \
+    int64_t num_blocks_x                                                                 \
+        = rocsparse::sddmm_grid_size_x(nnz, NB / K_, handle->properties.maxGridSize[0]); \
+    dim3 blocks(num_blocks_x, get_batch_grid_size(batch_count));                         \
+    dim3 threads(NB);                                                                    \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_kernel<NB, K_, false, T>), \
                                        blocks,                                           \
                                        threads,                                          \

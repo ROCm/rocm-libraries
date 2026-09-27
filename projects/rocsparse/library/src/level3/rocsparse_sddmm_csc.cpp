@@ -23,6 +23,7 @@
 
 #include "../conversion/rocsparse_csx2dense_impl.hpp"
 #include "rocsparse_sddmm_csx_kernel.hpp"
+#include "rocsparse_sddmm_grid.hpp"
 
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
@@ -222,24 +223,25 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
             // Sample dense C
             static constexpr int NB = 512;
 
-#define SMPL_LAUNCH(NT_)                                                              \
-    const int64_t num_blocks_x = (n - 1) / (NB / NT_) + 1;                            \
-    const dim3    blocks(num_blocks_x);                                               \
-    const dim3    threads(NB);                                                        \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                               \
-        (rocsparse::sddmm_csx_sample_kernel<NB, NT_, rocsparse_direction_column, T>), \
-        blocks,                                                                       \
-        threads,                                                                      \
-        0,                                                                            \
-        handle->stream,                                                               \
-        m,                                                                            \
-        n,                                                                            \
-        nnz,                                                                          \
-        dense,                                                                        \
-        m,                                                                            \
-        C_val_data,                                                                   \
-        C_ptr_data,                                                                   \
-        C_ind_data,                                                                   \
+#define SMPL_LAUNCH(NT_)                                                                \
+    const int64_t num_blocks_x                                                          \
+        = rocsparse::sddmm_grid_size_x(n, NB / NT_, handle->properties.maxGridSize[0]); \
+    const dim3 blocks(num_blocks_x);                                                    \
+    const dim3 threads(NB);                                                             \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                 \
+        (rocsparse::sddmm_csx_sample_kernel<NB, NT_, rocsparse_direction_column, T>),   \
+        blocks,                                                                         \
+        threads,                                                                        \
+        0,                                                                              \
+        handle->stream,                                                                 \
+        m,                                                                              \
+        n,                                                                              \
+        nnz,                                                                            \
+        dense,                                                                          \
+        m,                                                                              \
+        C_val_data,                                                                     \
+        C_ptr_data,                                                                     \
+        C_ind_data,                                                                     \
         C_base)
 
             const I avg_nnz = rocsparse::max(static_cast<I>(1), nnz / n);
@@ -279,7 +281,9 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
         case rocsparse_sddmm_alg_default:
         {
 #define LAUNCH_WAVEFRONT_PER_ROWCOL(BLOCKSIZE, WFSIZE, NTHREADS_PER_DOTPRODUCT)                 \
-    dim3 blocks((n - 1) / (BLOCKSIZE / WFSIZE) + 1, get_batch_grid_size(batch_count));          \
+    dim3 blocks(                                                                                \
+        rocsparse::sddmm_grid_size_x(n, BLOCKSIZE / WFSIZE, handle->properties.maxGridSize[0]), \
+        get_batch_grid_size(batch_count));                                                      \
     dim3 threads(BLOCKSIZE);                                                                    \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_csx_kernel<BLOCKSIZE,                  \
                                                                     WFSIZE,                     \

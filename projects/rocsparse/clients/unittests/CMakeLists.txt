@@ -194,6 +194,13 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- sddmm grid clamp / grid stride [AISPARSE-673] ------------------------
+  # Distinct anchor at the very end of the list so this leaf does not conflict
+  # with the sibling large-grid branches that append after their own groups.
+  # Drives rocsparse_sddmm through roc::rocsparse with a shrunken
+  # handle->properties.maxGridSize[0], plus a direct launch of the CSR/CSC
+  # dense-sample kernel; no compile-in library TUs.
+  unit_test_internal_level3_sddmm_grid_clamp.cpp
 )
 
 # Host building-block library translation units under test by the
