@@ -39,6 +39,7 @@
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBlockScaleQuantize.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmul.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmulBwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleBwd.hpp>
@@ -654,6 +655,63 @@ public:
     }
 #endif
 
+    template <typename InputType,
+              typename OutputType,
+              typename ScaleType,
+              typename ComputeType = float>
+    static void runBlockScaleQuantizeTest()
+    {
+        const std::vector<int64_t> ioDims = {2, 32, 32, 64};
+        const std::vector<int64_t> ioStrides = {65536, 2048, 64, 1};
+        const std::vector<int64_t> scaleDims = {2, 32, 32, 2};
+        const std::vector<int64_t> scaleStrides = {2048, 64, 2, 1};
+        const int32_t blockSize = 32;
+        const int64_t axis = 3;
+
+        const auto inputDataType = nativeTypeToDataType<InputType>();
+        const auto outputDataType = nativeTypeToDataType<OutputType>();
+        const auto scaleDataType = nativeTypeToDataType<ScaleType>();
+        const auto computeDataType = nativeTypeToDataType<ComputeType>();
+
+        auto builder
+            = hipdnn_test_sdk::utilities::createValidBlockScaleQuantizeGraph(ioDims,
+                                                                             ioStrides,
+                                                                             scaleDims,
+                                                                             scaleStrides,
+                                                                             blockSize,
+                                                                             inputDataType,
+                                                                             outputDataType,
+                                                                             scaleDataType,
+                                                                             computeDataType,
+                                                                             axis);
+        const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
+
+        Tensor<InputType> inputTensor(ioDims, ioStrides);
+        Tensor<OutputType> outputTensor(ioDims, ioStrides);
+        Tensor<ScaleType> scaleTensor(scaleDims, scaleStrides);
+        Tensor<OutputType> directOutputTensor(ioDims, ioStrides);
+        Tensor<ScaleType> directScaleTensor(scaleDims, scaleStrides);
+
+        const unsigned int seed = getGlobalTestSeed();
+        inputTensor.fillWithRandomValues(
+            static_cast<InputType>(0.0f), static_cast<InputType>(1.0f), seed);
+
+        auto variantPack = std::unordered_map<int64_t, void*>{{1, inputTensor.memory().hostData()},
+                                                              {2, outputTensor.memory().hostData()},
+                                                              {3, scaleTensor.memory().hostData()}};
+
+        CpuReferenceGraphExecutor().execute(
+            builder.GetBufferPointer(), builder.GetSize(), variantPack);
+
+        CpuFpReferenceBlockScaleQuantize::quantize(
+            inputTensor, directOutputTensor, directScaleTensor, blockSize, axis);
+
+        const CpuFpReferenceValidation<OutputType> outputValidator(0.0F, 0.0F);
+        EXPECT_TRUE(outputValidator.allClose(directOutputTensor, outputTensor));
+        const CpuFpReferenceValidation<ScaleType> scaleValidator(0.0F, 0.0F);
+        EXPECT_TRUE(scaleValidator.allClose(directScaleTensor, scaleTensor));
+    }
+
     template <typename XType, typename ScaleType>
     static void
         runBlockScaleDequantizeTest(hipdnn_flatbuffers_sdk::data_objects::DataType xDataType,
@@ -1032,6 +1090,21 @@ TEST(TestCpuReferenceGraphExecutor, BlockScaleDequantizeBFloat16InputFloatScale)
 {
     TestCpuReferenceGraphExecutor::runBlockScaleDequantizeTest<bfloat16, float>(
         DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, BlockScaleQuantizeFloatInputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runBlockScaleQuantizeTest<float, float, float>();
+}
+
+TEST(TestCpuReferenceGraphExecutor, BlockScaleQuantizeFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runBlockScaleQuantizeTest<float, half, float>();
+}
+
+TEST(TestCpuReferenceGraphExecutor, BlockScaleQuantizeFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runBlockScaleQuantizeTest<float, bfloat16, float>();
 }
 
 TEST(TestCpuReferenceGraphExecutor, LayernormAllFloats)
