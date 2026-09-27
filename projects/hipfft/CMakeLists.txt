@@ -193,6 +193,29 @@ if( ROCmCMakeBuildTools_FOUND )
 endif()
 
 add_subdirectory( library )
+# Fortran bindings for hipFFT and hipFFTW. Self-contained: they declare bind(C)
+# interfaces only, so they compile against neither the hipFFT headers nor
+# libhipfft, and this is safe to add unconditionally. The directory does its own
+# guarding and returns quietly when BUILD_FORTRAN_BINDINGS is off or no Fortran
+# compiler was found. It reports back through HIPFFT_HAVE_FORTRAN_BINDINGS and
+# HIPFFTW_HAVE_FORTRAN_BINDINGS, FALSE in both those cases and TRUE only when the
+# corresponding target was really created.
+#
+# One directory, two bindings, because hipFFTW is built by this project rather
+# than one of its own. They are separate Fortran modules and separate targets,
+# but a single fortran/ directory keeps them next to the headers they bind.
+#
+# After library/ on purpose. The directory falls back to find_package( hipfft )
+# when hip::hipfft is absent, because otherwise it records no link interface and
+# every consumer hits undefined references despite linking hip::hipfft_fortran
+# exactly as documented. Hooked in BEFORE library/, that fallback would silently
+# resolve against whatever hipFFT is INSTALLED on the build machine, and the
+# in-tree build would ship bindings pointing at the wrong libhipfft with no
+# diagnostic at all.
+#
+# Outside if( BUILD_CLIENTS ) and if( BUILD_CLIENTS_TESTS ): the bindings are not
+# clients, and they must build for a site that asks for no clients at all.
+add_subdirectory( fortran )
 
 # Build clients of the library
 if( BUILD_CLIENTS )
