@@ -26,6 +26,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_coosort.hpp"
+#include "rocsparse_cscsort.hpp"
 #include "rocsparse_csrsort.hpp"
 #include "rocsparse_spsort.hpp"
 
@@ -52,11 +53,11 @@ namespace rocsparse
             {
             case rocsparse_format_coo:
             case rocsparse_format_csr:
+            case rocsparse_format_csc:
             {
                 *buffer_size_in_bytes = 0;
                 return rocsparse_status_success;
             }
-            case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
@@ -89,6 +90,11 @@ namespace rocsparse
                 return rocsparse_status_success;
             }
             case rocsparse_format_csc:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsort_buffer_size(
+                    handle, rocsparse_cscsort_alg_default, source, target, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
             case rocsparse_format_ell:
