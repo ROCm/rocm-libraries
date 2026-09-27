@@ -30,24 +30,95 @@
 
 #include "rocsparse_primitives.hpp"
 
-#define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                              \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_csr_device<block_size, wf_size>), \
-                                       dim3((wf_size * m - 1) / block_size + 1),                  \
-                                       dim3(block_size),                                          \
-                                       0,                                                         \
-                                       handle->stream,                                            \
-                                       m,                                                         \
-                                       n,                                                         \
-                                       nnz,                                                       \
-                                       csr_val,                                                   \
-                                       csr_row_ptr,                                               \
-                                       csr_col_ind,                                               \
-                                       csr_col_ind_sorted,                                        \
-                                       idx_base,                                                  \
-                                       matrix_type,                                               \
-                                       uplo,                                                      \
-                                       storage,                                                   \
-                                       d_data_status);
+// The kernel assigns one wavefront-sized lane group per row, so it needs
+// (wf_size * m) threads. Two things must hold for the grid to be correct:
+//
+//   1. The product is computed in int64_t. With J = int32_t (the default build)
+//      `wf_size * m` is a 32-bit product that wraps at m = 2^32 / wf_size --
+//      16,777,216 rows at wf_size 256, 33,554,432 at 128, and so on. The wrapped
+//      value is small, the grid collapses to a single block, and the validator
+//      inspects only the first BLOCKSIZE/wf_size rows before returning
+//      rocsparse_status_success on a matrix it never looked at (AISPARSE-698).
+//   2. The block count is clamped so that the launch is actually accepted. Two
+//      independent device limits apply, and for a 256-thread block it is the
+//      second that binds:
+//        * grid.x <= handle->properties.maxGridSize[0], which is 2^31 - 1 here;
+//        * grid.x * block_size <= 2^32 - 1, because the HSA dispatch packet
+//          encodes the grid size in WORK ITEMS in a 32-bit field. That permits
+//          only 16,777,215 blocks of 256 threads, and asking for 16,777,216
+//          rejects the launch with hipErrorInvalidConfiguration.
+//      Clamping to maxGridSize[0] alone is therefore NOT sufficient: at m = 2^30
+//      with wf_size 4 the ceil-divide lands on exactly 16,777,216 blocks, so the
+//      kernel never runs. Because RETURN_IF_HIPLAUNCHKERNELGGL_ERROR only
+//      inspects hipGetLastError() when the kernel-launch debug variable is set,
+//      the rejected launch does not become a failed status either, and the
+//      validator would once again return success on a matrix it never examined
+//      -- the original AISPARSE-698 symptom, reintroduced by an oversized grid.
+//      The kernel grid-strides over the rows, so a clamped grid still covers
+//      every row. Without the stride the clamp would trade one silent
+//      under-inspection for another: at m = 2^30 and wf_size 4 the clamped grid
+//      is 64 rows short of m.
+//
+//      The clamp also covers the J = int64_t instantiations, where the product
+//      never wrapped but the ceil-divide could exceed the 32-bit dim3 field and
+//      be truncated on the way into the launch.
+//
+// Once PR #11512 lands, the rocsparse::min(...) expression below is a one-line
+// substitution for
+//     rocsparse::get_grid_size(static_cast<int64_t>(wf_size) * m, block_size)
+// which performs the same overflow-safe ceil-divide and grid clamp.
+#define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                               \
+    do                                                                                             \
+    {                                                                                              \
+        static constexpr int64_t max_work_items = 0xffffffffLL;                                    \
+        const int64_t            max_blocks_x                                                      \
+            = rocsparse::min(static_cast<int64_t>(handle->properties.maxGridSize[0]),              \
+                             max_work_items / (block_size));                                       \
+        const int64_t natural_blocks_x = (static_cast<int64_t>(wf_size) * m - 1) / block_size + 1; \
+        const int64_t num_blocks_x     = rocsparse::min(natural_blocks_x, max_blocks_x);           \
+        if(num_blocks_x < natural_blocks_x)                                                        \
+        {                                                                                          \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
+                (rocsparse::check_matrix_csr_device<block_size, wf_size, true>),                   \
+                dim3(num_blocks_x),                                                                \
+                dim3(block_size),                                                                  \
+                0,                                                                                 \
+                handle->stream,                                                                    \
+                m,                                                                                 \
+                n,                                                                                 \
+                nnz,                                                                               \
+                csr_val,                                                                           \
+                csr_row_ptr,                                                                       \
+                csr_col_ind,                                                                       \
+                csr_col_ind_sorted,                                                                \
+                idx_base,                                                                          \
+                matrix_type,                                                                       \
+                uplo,                                                                              \
+                storage,                                                                           \
+                d_data_status);                                                                    \
+        }                                                                                          \
+        else                                                                                       \
+        {                                                                                          \
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                    \
+                (rocsparse::check_matrix_csr_device<block_size, wf_size, false>),                  \
+                dim3(num_blocks_x),                                                                \
+                dim3(block_size),                                                                  \
+                0,                                                                                 \
+                handle->stream,                                                                    \
+                m,                                                                                 \
+                n,                                                                                 \
+                nnz,                                                                               \
+                csr_val,                                                                           \
+                csr_row_ptr,                                                                       \
+                csr_col_ind,                                                                       \
+                csr_col_ind_sorted,                                                                \
+                idx_base,                                                                          \
+                matrix_type,                                                                       \
+                uplo,                                                                              \
+                storage,                                                                           \
+                d_data_status);                                                                    \
+        }                                                                                          \
+    } while(0)
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
