@@ -79,8 +79,9 @@ __host__ __device__ inline I get_splits_size(const I n)
     // 10    I map[n];              // original indices of a sorted values
     // 11    I cand[n];             // deflation candidate flags
     // 12    I dbg[n];              //
+    // 13    I nexp[n];             // exponent of the normalization factor (only [0] is used)
     // };
-    return 13 * n;
+    return 14 * n;
 }
 
 template <typename S, typename I>
@@ -147,6 +148,11 @@ template <typename S, typename I>
 __host__ __device__ inline S* ptr_dbg(I n, S* splits)
 {
     return splits + 12 * n;
+}
+template <typename S, typename I>
+__host__ __device__ inline S* ptr_nexp(I n, S* splits)
+{
+    return splits + 13 * n;
 }
 
 template <typename I>
@@ -245,6 +251,116 @@ __host__ __device__ inline S* ptr_etmpd(I n, S* tempgemm)
 
 /*************** Main kernels *********************************************************/
 /**************************************************************************************/
+
+//--------------------------------------------------------------------------------------//
+/** STEDC_SCALE_POW2 multiplies count elements of v by 2^e, with the block splitting the
+    work. The factor is precomputed so the loop is a plain multiply, which unlike ldexp has
+    a packed form. 2^e is not representable as a normal number at the ends of the exponent
+    range, so fall back to ldexp there rather than scale by a subnormal or an infinity. **/
+template <typename S, typename I>
+__device__ inline void stedc_scale_pow2(S* v, const I count, const int e, const I tid, const I inc)
+{
+    const S scl = std::ldexp(S(1), e);
+
+    if(std::isnormal(scl))
+    {
+        for(I i = tid; i < count; i += inc)
+            v[i] *= scl;
+    }
+    else
+    {
+        for(I i = tid; i < count; i += inc)
+            v[i] = std::ldexp(v[i], e);
+    }
+}
+
+//--------------------------------------------------------------------------------------//
+/** STEDC_NORMALIZE_KERNEL scales D and E so that the largest element lies in [1/2, 1),
+    recording the exponent for STEDC_RESCALE_KERNEL. The deflation tolerance used by the
+    merge is only meaningful on a matrix of norm about one; this is the equivalent of the
+    DLANST/DLASCL that LAPACK's STEDC applies before entering DLAED0. The factor is a
+    power of two so that it and its inverse are exact.
+        - Call this kernel with batch_count groups in y. Groups are size STEDC_BDIM **/
+template <typename S, typename I>
+ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
+    stedc_normalize_kernel(const I n,
+                           S* DD,
+                           const rocblas_stride strideD,
+                           S* EE,
+                           const rocblas_stride strideE,
+                           I* splitsA)
+{
+    I bid = hipBlockIdx_y;
+    I tid = hipThreadIdx_x;
+
+    S* D = DD + bid * strideD;
+    S* E = EE + bid * strideE;
+    I* nexp = ptr_nexp(n, splitsA + bid * get_splits_size(n));
+
+    __shared__ S sval[STEDC_BDIM / WarpSize];
+    __shared__ int sexp;
+
+    S amax = 0;
+    for(I i = tid; i < n; i += STEDC_BDIM)
+        amax = rocblas_max_nan(amax, rocblas_abs(D[i]));
+    for(I i = tid; i < n - 1; i += STEDC_BDIM)
+        amax = rocblas_max_nan(amax, rocblas_abs(E[i]));
+
+    reduce_wave_max_nan(amax);
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = amax;
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < STEDC_BDIM / warpSize; k++)
+            amax = rocblas_max_nan(amax, sval[k]);
+
+        // a zero or non-finite norm has nothing to normalize
+        int expo = 0;
+        if(amax > 0 && std::isfinite(amax))
+            std::frexp(amax, &expo);
+
+        nexp[0] = I(expo);
+        sexp = expo;
+    }
+    __syncthreads();
+
+    const int expo = sexp;
+    if(expo != 0)
+    {
+        stedc_scale_pow2(D, n, -expo, tid, I(STEDC_BDIM));
+        stedc_scale_pow2(E, I(n - 1), -expo, tid, I(STEDC_BDIM));
+    }
+}
+
+//--------------------------------------------------------------------------------------//
+/** STEDC_RESCALE_KERNEL undoes STEDC_NORMALIZE_KERNEL. Only the eigenvalues need it; the
+    eigenvectors are unchanged by a scaling of the matrix, as in LAPACK.
+        - Call this kernel with batch_count groups in y. Groups are size STEDC_BDIM **/
+template <typename S, typename I>
+ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
+    stedc_rescale_kernel(const I n, S* DD, const rocblas_stride strideD, I* splitsA)
+{
+    I bid = hipBlockIdx_y;
+
+    S* D = DD + bid * strideD;
+    const int expo = (int)ptr_nexp(n, splitsA + bid * get_splits_size(n))[0];
+
+    if(expo != 0)
+        stedc_scale_pow2(D, n, expo, I(hipThreadIdx_x), I(hipBlockDim_x));
+}
+
+//--------------------------------------------------------------------------------------//
+/** STEDC_NORMALIZE_ENABLED returns false when the environment variable
+    ROCSOLVER_STEDC_NOSCALE is set to a non-zero integer, in which case STEDC_NORMALIZE_KERNEL
+    and STEDC_RESCALE_KERNEL are both skipped. It is read on every call so that it can be
+    toggled at runtime. **/
+inline bool stedc_normalize_enabled()
+{
+    const char* str = std::getenv("ROCSOLVER_STEDC_NOSCALE");
+    return str == nullptr || std::strtol(str, nullptr, 0) == 0;
+}
 
 //--------------------------------------------------------------------------------------//
 /** STEDC_DIVIDE_KERNEL implements the divide phase of the DC algorithm. It
@@ -2005,6 +2121,14 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(init_ident<S>, dim3(groupsn, groupsn, batch_count), dim3(BS2, BS2),
                                 0, stream, n, n, V, 0, ldv, strideV);
 
+        // 0. normalize phase
+        //-----------------------------
+        const bool normalize = stedc_normalize_enabled();
+        if(normalize)
+            ROCSOLVER_LAUNCH_KERNEL((stedc_normalize_kernel<S>), dim3(1, batch_count),
+                                    dim3(STEDC_BDIM), (I)0, stream, n, D + shiftD, strideD,
+                                    E + shiftE, strideE, splits);
+
         // 1. divide phase
         //-----------------------------
         I groups = (batch_count - 1) / STEDC_BDIM + 1;
@@ -2156,7 +2280,13 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                     ldv, strideV, tmpz, tempgemm, splits);
         }
 
-        // 4. update and sort
+        // 4. undo the normalization
+        //----------------------
+        if(normalize)
+            ROCSOLVER_LAUNCH_KERNEL((stedc_rescale_kernel<S>), dim3(1, batch_count),
+                                    dim3(STEDC_BDIM), (I)0, stream, n, D + shiftD, strideD, splits);
+
+        // 5. update and sort
         //----------------------
         if(evect != rocblas_evect_tridiagonal)
         {
