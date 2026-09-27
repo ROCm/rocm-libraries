@@ -40,8 +40,18 @@ rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle         
 
     ROCSPARSE_ROUTINE_TRACE;
 
+    //
+    // To avoid runtime allocation of the descriptor.
+    //
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    //
+    // A points now to the local A_csr.
+    //
+    A = &A_csr;
+#endif
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_buffer_size(
         handle,
@@ -52,7 +62,11 @@ rocsparse_status rocsparse::cscsm_analysis_buffer_size(rocsparse_handle         
 
         op_B,
         alpha,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+        A,
+#else
         &A_csr,
+#endif
         X,
         p_buffer_size_in_bytes,
         p_error));
@@ -73,8 +87,18 @@ rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle            
 
     ROCSPARSE_ROUTINE_TRACE;
 
+    //
+    // To avoid runtime allocation of the descriptor.
+    //
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
+
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+    //
+    // A points now to the local A_csr.
+    //
+    A = &A_csr;
+#endif
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_buffer_size(handle,
                                                                  nrhs,
@@ -85,7 +109,11 @@ rocsparse_status rocsparse::cscsm_solve_buffer_size(rocsparse_handle            
 
                                                                  op_B,
                                                                  alpha,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                                                 A,
+#else
                                                                  &A_csr,
+#endif
                                                                  X,
                                                                  p_buffer_size_in_bytes,
                                                                  p_error));
@@ -107,7 +135,7 @@ rocsparse_status rocsparse::cscsm_buffer_size(rocsparse_handle            handle
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis_buffer_size(
         handle, nrhs, op_A, op_B, alpha, A, X, p_buffer_size_in_bytes, p_error));
 
-    size_t buffer_size_in_bytes;
+    size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_solve_buffer_size(
         handle, nrhs, op_A, op_B, alpha, A, X, &buffer_size_in_bytes, p_error));
 
