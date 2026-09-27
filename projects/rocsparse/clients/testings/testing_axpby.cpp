@@ -177,10 +177,9 @@ void testing_axpby_extra(const Arguments& arg)
     //
     // This drives the 64-bit-index path of rocsparse_axpby (which dispatches to
     // axpyi_template) with nnz just past the 2^32 boundary and checks that an
-    // element beyond that boundary is actually accumulated into y. To stay
-    // within a single device allocation (host mirrors of the full arrays would
-    // need tens of GB) everything is initialized on the device and a single
-    // element is probed.
+    // element beyond that boundary is actually accumulated into y. Everything
+    // is initialized on the device and a single element is probed, so no host
+    // buffer of this size is needed.
     using I = int64_t;
     using T = float;
 
@@ -188,8 +187,10 @@ void testing_axpby_extra(const Arguments& arg)
 
     // nnz just beyond 2^32 so at least one block has a block index whose
     // (blockIdx * BLOCKSIZE) product overflows 32-bit arithmetic.
-    const I nnz  = two_pow_32 + 512;
-    const I size = 2;
+    const I nnz = two_pow_32 + 512;
+
+    // A sparse-vector descriptor requires nnz <= size.
+    const I size = nnz;
 
     const rocsparse_index_base base = rocsparse_index_base_zero;
 

@@ -7,8 +7,9 @@ Documentation for rocSPARSE is available at
 
 ### Resolved issues
 * Fixed an overflow issue in `rocsparse_roti` and the generic `rocsparse_rot` routine. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-index calculation could overflow, leaving some elements unrotated and causing low-index elements to be processed with incorrect data. The kernel now computes element indices in 64-bit arithmetic and uses a grid-stride loop with the launch grid clamped to the device limit.
-* Fixed an overflow issue in `rocsparse_Xsctr` and the generic `rocsparse_scatter` routine. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-index calculation could overflow and prevent some elements from being scattered. The kernel now computes element indices in 64-bit arithmetic and uses a grid-stride loop with the launch grid clamped to the device limit.
+* Fixed an overflow issue in `rocsparse_Xsctr` and the generic `rocsparse_scatter` routine. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-index calculation could overflow and prevent some elements from being scattered. The kernel now computes element indices in 64-bit arithmetic and uses a grid-stride loop with the launch grid clamped to the 32-bit work-item dispatch limit.
 * Fixed an integer overflow in the ELL SpMV kernels used by `rocsparse_spmv` (ELL format) and the legacy `rocsparse_Xellmv` routines when operating on matrices with more than `2^32` rows and 64-bit index types. The overflow caused rows beyond the `2^32` boundary to be mapped to incorrect row indices, leaving some output values uncomputed. Row indices are now always computed using the matrix index type.
+* Fixed kernel launches whose `grid.x * blockDim.x` exceeded the 32-bit work-item dispatch limit. CDNA rejects those launches (`hipErrorInvalidConfiguration` / `rocsparse_status_internal_error`). `rocsparse_axpby` / `rocsparse_axpyi`, `rocsparse_scatter`, ELL SpMV, and COO AoS atomic SpMV now clamp `grid.x` to `(2^32 - 1) / blockDim.x` and cover the remainder with a grid-stride loop or an extra inner loop.
 
 ## (Unreleased) rocSPARSE 5.1.0
 
