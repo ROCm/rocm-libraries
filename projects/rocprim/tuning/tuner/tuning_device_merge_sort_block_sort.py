@@ -21,24 +21,26 @@
 # THE SOFTWARE.
 
 from typing import Optional, OrderedDict, Callable
+from math import log2
 import sys
 import os
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS
-from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES
+from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
 
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
-BLOCK_SIZES = [32, 64, 128, 256, 512, 1024]
-IPT = [1, 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+BLOCK_SIZES = [256, 512, 1024]
+IPT = [2 ** i for i in range(17)]
+
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_adjacent_difference')
+        return TunerArgs(algo_full_name='device_merge_sort_block_sort')
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
@@ -48,35 +50,37 @@ class Tuner(BaseTuner):
         params['block_size_x'] = BLOCK_SIZES
         params['ipt'] = IPT
         return params
-    
-    def _get_key_type_name(self) -> str:
-        return "value_type"
-
-    def _get_value_type_name(self):
-        return ""
 
     def _get_restrictions(
-        self, value_type: str, _: Optional[str] = None
+        self, key_type: str, val_type: Optional[str] = None
     ) -> Callable[[dict], bool]:
-        element_size = TYPE_CONFIGS[value_type].size
+        key_size = TYPE_CONFIGS[key_type].size
+        val_size = TYPE_CONFIGS[val_type].size
 
-        # based on legacy tuning 
-        MAX_SHARED_MEM = 65536
-
+        max_shared_memory = 65536
+        # legacy tuner: std::max(sizeof(Key) + sizeof(unsigned int), sizeof(Value))
+        max_size_per_element = max(key_size + 4, val_size)
         def validate(params):
             block_size = params['block_size_x']
             ipt = params['ipt']
+            max_ipt = max_shared_memory // (block_size * max_size_per_element)
 
-            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2 )) + element_size
+            max_ipt_exponent = log2(max_ipt) - 1
+            min_ipt_exponent = log2(1024 // block_size)
 
-            return ipt < max_ipt
+            return (2 ** min_ipt_exponent) <= ipt <= (2 ** max_ipt_exponent)
+
 
         return validate
 
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
-        for val_type in COMMON_KEY_TYPES:
-            self.tune_type(val_type)
+
+        VALUE_TYPES = COMMON_VALUE_TYPES + ["rocprim::empty_type"]
+
+        for key_type in COMMON_KEY_TYPES:
+            for value_type in VALUE_TYPES:
+                self.tune_type(key_type, value_type)
 
 
 if __name__ == "__main__":

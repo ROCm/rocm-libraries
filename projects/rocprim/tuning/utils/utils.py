@@ -100,7 +100,6 @@ class TypeInfo:
     size: int
     numpy_type: type | np.dtype
 
-
 TYPE_CONFIGS = {
     "int64_t": TypeInfo("int64_t", 8, np.int64),
     "int": TypeInfo("int", 4, np.int32),
@@ -115,4 +114,7 @@ TYPE_CONFIGS = {
     "rocprim::uint128_t": TypeInfo(
         "rocprim::uint128_t", 16, np.dtype([("low", np.uint64), ("high", np.uint64)])
     ),
+    # Keys-only placeholder: sizeof(rocprim::empty_type) == 1; no real value data,
+    # so numpy_type is a 1-byte stand-in.
+    "rocprim::empty_type": TypeInfo("rocprim::empty_type", 1, np.int8),
 }
