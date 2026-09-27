@@ -40,12 +40,17 @@ def _init_rocisa(isa):
     return ri
 
 
-def _make_writer(ri):
-    """Minimal KernelWriterAssembly stub with rocisa caps wired into states."""
+def _make_writer(ri, isa):
+    """Minimal KernelWriterAssembly stub with rocisa caps wired into states.
+
+    isa must match the ISA *ri* was initialized with: getOccupancy reads
+    states.version to pick the RDNA WGP LDS pool.
+    """
     kw = object.__new__(KernelWriterAssembly)
     kw.states = SimpleNamespace(
         archCaps=ri.getArchCaps(),
         regCaps=ri.getRegCaps(),
+        version=tuple(isa),
     )
     return kw
 
@@ -97,9 +102,52 @@ def test_get_vgpr_occupancy_uses_max_waves_per_simd(isa, expected_occupancy):
     With very few VGPRs the VGPR pool imposes no constraint and the result
     must equal MaxWavesPerSimd // multiplier.  On gfx950 this is 8, not 10.
     """
-    kw = _make_writer(_init_rocisa(isa))
+    kw = _make_writer(_init_rocisa(isa), isa)
     occupancy = kw.getVgprOccupancy(numThreads=256, vgprs=1, doubleVgpr=False)
     assert occupancy == expected_occupancy
+
+
+# ---------------------------------------------------------------------------
+# gfx11 (RDNA3) LDS-limited occupancy uses the 128 KB WGP pool
+# ---------------------------------------------------------------------------
+
+# An RDNA workgroup processor owns 128 KB of LDS -- 2x the 64 KB that archCaps
+# reports as DeviceLDS (the per-workgroup allocation cap) -- and co-resident
+# workgroups carve their allocations out of that single pool.
+#
+# Expected values below are measured on gfx1151 hardware, by counting live
+# workgroups on the device (atomicMax over a live-block counter) rather than by
+# asking hipModuleOccupancyMaxActiveBlocksPerMultiprocessor, which models a
+# 64 KB pool per WGP and under-reports every one of these points.
+#
+# Only LDS-bound sizes are listed: below 16 KB the wave-slot term binds first,
+# and that term has its own (separate) correction pending.
+_GFX11_WGP_LDS_OCCUPANCY = [
+    (16384, 8),
+    (20480, 6),
+    (32768, 4),
+    (40960, 3),   # 128 KB pool fits 3; the 64 KB value fit only 1
+    (49152, 2),
+    (65536, 2),
+]
+
+
+@pytest.mark.parametrize(
+    "lds_bytes,expected_occ",
+    _GFX11_WGP_LDS_OCCUPANCY,
+    ids=[f"{b // 1024}KB" for b, _ in _GFX11_WGP_LDS_OCCUPANCY],
+)
+def test_gfx11_lds_limited_occupancy_uses_wgp_pool(lds_bytes, expected_occ):
+    """gfx11 LDS-limited occupancy divides the 128 KB WGP pool, not 64 KB.
+
+    8 VGPRs and 66 SGPRs keep every other limiter slack, so getOccupancy
+    returns the LDS term.
+    """
+    kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
+    assert kw.states.archCaps["DeviceLDS"] == 65536  # per-workgroup cap, not the pool
+    occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
+               sgprs=66, ldsBytes=lds_bytes, doubleVgpr=False)
+    assert occ == expected_occ
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +280,7 @@ def test_gfx11_low_vgpr_kernel_reaches_wave_cap():
     should bind.  With the old PhysicalMaxSgpr=800 the 66-SGPR kernel was
     reported as 800 // 66 = 12 waves instead.
     """
-    kw = _make_writer(_init_rocisa((11, 5, 1)))
+    kw = _make_writer(_init_rocisa((11, 5, 1)), (11, 5, 1))
     assert kw.states.archCaps["MaxWavesPerSimd"] == 16
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
                sgprs=66, ldsBytes=0, doubleVgpr=False)
@@ -242,7 +290,7 @@ def test_gfx11_low_vgpr_kernel_reaches_wave_cap():
 def test_gfx11_max_sgpr_kernel_still_reaches_wave_cap():
     """Even a kernel using every allocatable SGPR is not SGPR-limited."""
     ri = _init_rocisa((11, 5, 1))
-    kw = _make_writer(ri)
+    kw = _make_writer(ri, (11, 5, 1))
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
                sgprs=ri.getRegCaps()["MaxSgpr"], ldsBytes=0, doubleVgpr=False)
     assert occ == kw.states.archCaps["MaxWavesPerSimd"]
@@ -331,7 +379,7 @@ class TestGetOccupancyGfx950:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        self.kw = _make_writer(_init_rocisa((9, 5, 0)))
+        self.kw = _make_writer(_init_rocisa((9, 5, 0)), (9, 5, 0))
 
     def test_vgpr_limited_two_waves(self):
         """256 combined VGPRs → occ=2 per SIMD (512 pool / 256 = 2)."""
@@ -466,7 +514,7 @@ def test_lds_limited_occupancy_matches_hip_oracle(desc, numRegs, staticLDS,
 def test_getoccupancy_with_compiled_register_counts(desc, numRegs, staticLDS,
                                                      numThreads, hip_occ):
     """getOccupancy with compiled numRegs (from hipFuncGetAttribute) must match HIP oracle."""
-    kw = _make_writer(_init_rocisa((9, 5, 0)))
+    kw = _make_writer(_init_rocisa((9, 5, 0)), (9, 5, 0))
 
     # All VGPR seen as pure accvgprs in the combined pool, 0 regular vgprs.
     # This isolates the VGPR-pool limit: ceil(0/8)*8 + numRegs = numRegs.
@@ -499,7 +547,7 @@ def test_max_waves_limits_low_vgpr_kernels(isa, max_waves):
     that would otherwise be unconstrained by VGPR or LDS are now capped at
     the correct hardware limit (8 for unified-register ISAs).
     """
-    kw = _make_writer(_init_rocisa(isa))
+    kw = _make_writer(_init_rocisa(isa), isa)
     # 1 VGPR: no register pressure, occupancy determined entirely by MaxWavesPerSimd.
     # doubleVgpr=False mimics pre-MFMA kernels where accvgprs=0.
     occ = kw.getOccupancy(256, 1, 64, 1, 0, doubleVgpr=False)
@@ -522,7 +570,7 @@ def test_max_waves_per_simd_prevents_overclaim_on_gfx950(isa, should_be_capped):
     cap is 8.  Kernels with very few VGPRs (< 512/9 ≈ 56 total) would have
     reported occupancy 9 or 10 before the fix but now correctly report ≤ 8.
     """
-    kw = _make_writer(_init_rocisa(isa))
+    kw = _make_writer(_init_rocisa(isa), isa)
     archCaps = kw.states.archCaps
     # Use doubleVgpr only for ArchAccUnifiedRegs (as Tensile's code-gen does).
     double = bool(archCaps["ArchAccUnifiedRegs"])
@@ -581,7 +629,7 @@ class TestUpdateOccupancyFromMaxVgpr:
     @pytest.fixture(autouse=True)
     def setup(self):
         self.ri = _init_rocisa((9, 5, 0))
-        self.kw = _make_writer(self.ri)
+        self.kw = _make_writer(self.ri, (9, 5, 0))
         # Wire in pool sizes to simulate checkResources post-state.
         # pool.size()=21 vgprs, pool.size()=240 agprs (MT320x192x64 subtile estimate)
         import types
@@ -624,7 +672,7 @@ class TestUpdateOccupancyFromMaxVgpr:
     def test_no_update_for_non_arch_acc_unified(self):
         """Non-ArchAccUnifiedRegs ISA: max-VGPR update is skipped entirely."""
         ri_gfx908 = _init_rocisa((9, 0, 8))  # gfx908: not ArchAccUnifiedRegs
-        kw_908 = _make_writer(ri_gfx908)
+        kw_908 = _make_writer(ri_gfx908, (9, 0, 8))
         import types
         kw_908.vgprPool = types.SimpleNamespace(size=lambda: 21)
         kw_908.agprPool = types.SimpleNamespace(size=lambda: 240)

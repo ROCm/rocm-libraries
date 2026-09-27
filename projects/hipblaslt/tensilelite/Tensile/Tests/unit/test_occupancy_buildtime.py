@@ -448,6 +448,9 @@ def _make_max_vgpr_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, s
         },
         regCaps={"MaxVgpr": 256, "PhysicalMaxSgpr": 800},
         doubleVgpr=arch_acc_unified,
+        # getOccupancy reads version to select the RDNA WGP LDS pool; the
+        # non-unified case above stands in for gfx11.
+        version=(9, 4, 2) if arch_acc_unified else (11, 0, 0),
     )
     kw.vgprPool = _MockPool(vgpr_size)
     kw.agprPool = _MockPool(agpr_size)
