@@ -8,6 +8,18 @@
 
 namespace hipblaslt_bench_options
 {
+    int32_t& cotenant_cus()
+    {
+        static int32_t v = 0;
+        return v;
+    }
+
+    int32_t& cotenant_max_occupancy()
+    {
+        static int32_t v = 1;
+        return v;
+    }
+
     int32_t& sm_count_target()
     {
         static int32_t v = 0;
