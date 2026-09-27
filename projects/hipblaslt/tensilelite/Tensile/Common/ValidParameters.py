@@ -349,10 +349,10 @@ validParameters = { # we need to make sure this matches develop
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
-    # PrefetchGlobalReadA/B = -1: auto max-LDS pair. Both keys must be set or
-    # both omitted; Components/DecouplePGR.py holds the accepted combinations.
-    "PrefetchGlobalReadA": [-1] + list(range(16 + 1)),
-    "PrefetchGlobalReadB": [-1] + list(range(16 + 1)),
+    # Per-tensor PrefetchGlobalRead. Both keys must be set or both omitted; omitted
+    # is auto. Components/DecouplePGR.py holds the accepted combinations.
+    "PrefetchGlobalReadA": list(range(16 + 1)),
+    "PrefetchGlobalReadB": list(range(16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).

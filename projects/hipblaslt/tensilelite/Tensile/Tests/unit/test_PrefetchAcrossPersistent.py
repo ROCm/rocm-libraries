@@ -1349,8 +1349,6 @@ def _ks(fuse=1, **ov):
         "NumWaves": 4,
         "UseSubtileImpl": False,
         "PrefetchGlobalRead": 2,
-        "PrefetchGlobalReadA": -1,
-        "PrefetchGlobalReadB": -1,
         "ProblemType": {"MXBlockA": 32, "MXBlockB": 32},
     }
     ks.update(ov)

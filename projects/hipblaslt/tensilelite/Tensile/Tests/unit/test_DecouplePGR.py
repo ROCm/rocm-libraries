@@ -34,12 +34,13 @@ from Tensile.Components.DecouplePGR import (
     equalPairDegeneratesToScalar,
     ldsBlocksForPgrLevel,
     macroTileFromMatrixInstruction,
-    PGR_SPECIAL_AUTO,
+    pgrAutoDivergentRanking,
+    pgrAutoIneligibleReason,
     pgrAutoPairCandidates,
     pgrAutoPairRanking,
     pgrAutoPairRequested,
-    pgrSpecialValueRejectReason,
-    resolvePrefetchGlobalReadSpecialValues,
+    pgrPairKeysRejectReason,
+    resolvePrefetchGlobalReadAuto,
     tdmWaveIssueOrder,
 )
 from Tensile.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
@@ -47,9 +48,9 @@ from Tensile.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGroupin
 pytestmark = pytest.mark.unit
 
 
-def pgrAutoPairSelectMaxLds(pgr, state, problemType=None, fixedA=None, fixedB=None):
+def pgrAutoPairSelectMaxLds(pgr, state, problemType=None):
     """Head of the ranking. Production reads the whole ranking; only tests want one."""
-    ranking = pgrAutoPairRanking(pgr, state, problemType, fixedA=fixedA, fixedB=fixedB)
+    ranking = pgrAutoPairRanking(pgr, state, problemType)
     return ranking[0] if ranking else None
 
 
@@ -193,24 +194,17 @@ def test_pgr_auto_pair_candidates(pgr, expected):
     assert (1, 0) not in expected
 
 
-@pytest.mark.parametrize("pgrA, pgrB, clause", [
-    (-1, None, "both be set or both omitted"),
-    (0, None, "both be set or both omitted"),
-    (1, None, "both be set or both omitted"),
-    (2, None, "both be set or both omitted"),
-    (None, 2, "both be set or both omitted"),
-    (None, -1, "both be set or both omitted"),
-])
-def test_pgr_special_value_reject_reason(pgrA, pgrB, clause):
-    reason = pgrSpecialValueRejectReason(pgrA, pgrB)
-    assert reason is not None and clause in reason
+@pytest.mark.parametrize("pgrA, pgrB", [(0, None), (1, None), (2, None), (None, 0), (None, 2)])
+def test_pgr_pair_keys_reject_a_single_key(pgrA, pgrB):
+    reason = pgrPairKeysRejectReason(pgrA, pgrB)
+    assert reason is not None and "both be set or both omitted" in reason
 
 
 @pytest.mark.parametrize("pgrA, pgrB", [
-    (None, None), (0, 0), (1, 1), (-1, -1), (1, 2), (2, 1), (0, 2), (2, 0), (2, 2),
+    (None, None), (0, 0), (1, 1), (1, 2), (2, 1), (0, 2), (2, 0), (2, 2),
 ])
-def test_pgr_special_value_accepts_equal_sentinels_and_real_pairs(pgrA, pgrB):
-    assert pgrSpecialValueRejectReason(pgrA, pgrB) is None
+def test_pgr_pair_keys_accept_absent_and_real_pairs(pgrA, pgrB):
+    assert pgrPairKeysRejectReason(pgrA, pgrB) is None
 
 
 _F8F4_PROBLEM_TYPE = {
@@ -275,122 +269,69 @@ def test_pgr_auto_select_max_lds_picks_higher_usage_divergent_pair():
     assert selected == (1, 2)
 
 
-def test_resolve_auto_picks_max_lds_pair():
-    state = _autoSelectState(PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1)
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == (2, 2)
+def _eligibleState(**overrides):
+    """_autoSelectState plus the path develop can emit a divergent pair on."""
+    return _autoSelectState(**{"ISA": [12, 5, 0], "TDMInst": 3, "ScheduleIterAlg": 4,
+                               **overrides})
 
 
-@pytest.mark.parametrize("pgr", [0, 1])
-def test_resolve_auto_below_two_drops_per_tensor_keys(pgr):
-    state = {"PrefetchGlobalRead": pgr, "PrefetchGlobalReadA": -1, "PrefetchGlobalReadB": -1}
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert "PrefetchGlobalReadA" not in state
-    assert "PrefetchGlobalReadB" not in state
-    assert state["PrefetchGlobalRead"] == pgr
+@pytest.mark.parametrize("scheduleIterAlg", [0, 4])
+def test_auto_is_eligible_on_gfx1250_tdm_sia0_and_sia4(scheduleIterAlg):
+    state = _eligibleState(ScheduleIterAlg=scheduleIterAlg)
+    assert pgrAutoIneligibleReason(state) is None
+    assert pgrAutoPairRequested(state) is True
 
 
-@pytest.mark.parametrize("pgrA, pgrB", [(-1, -1), (-1, 2), (2, -1)])
-def test_resolve_auto_rejects_auto_depthu(pgrA, pgrB):
-    state = _autoSelectState(DepthU=-1, PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    reason = resolvePrefetchGlobalReadSpecialValues(state)
-    assert reason is not None and "needs a concrete DepthU" in reason
-    # Left unresolved, so no later rule reads a level the LDS search never ranked.
-    assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == (pgrA, pgrB)
-
-
-@pytest.mark.parametrize("pgr", [0, 1])
-def test_resolve_auto_below_two_degenerates_under_auto_depthu(pgr):
-    state = _autoSelectState(DepthU=-1, PrefetchGlobalRead=pgr,
-                             PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1)
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert "PrefetchGlobalReadA" not in state
-    assert "PrefetchGlobalReadB" not in state
-    assert state["PrefetchGlobalRead"] == pgr
-
-
-@pytest.mark.parametrize("pgrA, pgrB", [(0, 0), (1, 1)])
-def test_resolve_leaves_equal_pair_for_scalar_degeneration(pgrA, pgrB):
-    state = {"PrefetchGlobalRead": 2, "PrefetchGlobalReadA": pgrA, "PrefetchGlobalReadB": pgrB}
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == (pgrA, pgrB)
-
-
-def test_resolve_bare_scalar_auto_is_not_a_pair_request():
-    state = _autoSelectState(PrefetchGlobalRead=-1)
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert "PrefetchGlobalReadA" not in state
-    assert "PrefetchGlobalReadB" not in state
-    assert decouplePGRBlocks(state) == (False, 1, 1)
-
-
-def test_scalar_prefetch_global_read_does_not_accept_auto():
-    assert PGR_SPECIAL_AUTO not in validParameters["PrefetchGlobalRead"]
-    assert PGR_SPECIAL_AUTO in validParameters["PrefetchGlobalReadA"]
-    assert PGR_SPECIAL_AUTO in validParameters["PrefetchGlobalReadB"]
-
-
-# ---------------------------------------------------------------------------
-# One-sided auto: -1 vs a pinned depth.
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize("fixedA, fixedB, expected", [
-    (None, 1, (2, 1)),
-    (None, 2, (2, 2)),
-    (1, None, (1, 2)),
-    (2, None, (2, 2)),
+@pytest.mark.parametrize("overrides, clause", [
+    ({"ISA": [9, 5, 0]}, "gfx1250 only"),
+    ({"ISA": [9, 4, 2]}, "gfx1250 only"),
+    ({"ISA": [9, 0, 10]}, "gfx1250 only"),
+    ({"TDMInst": 0}, "TDMInst=3"),
+    ({"TDMInst": 1}, "TDMInst=3"),
+    ({"TDMInst": 2}, "TDMInst=3"),
+    ({"ScheduleIterAlg": 1}, "ScheduleIterAlg 0 or 4"),
+    ({"ScheduleIterAlg": 2}, "ScheduleIterAlg 0 or 4"),
+    ({"ScheduleIterAlg": 3}, "ScheduleIterAlg 0 or 4"),
+    ({"PrefetchGlobalRead": 0}, "below 2"),
+    ({"PrefetchGlobalRead": 1}, "below 2"),
+    ({"DepthU": -1}, "concrete DepthU"),
+    ({"PrefetchGlobalReadA": 2, "PrefetchGlobalReadB": 1}, "are set"),
+    ({"PrefetchGlobalReadA": 2}, "are set"),
 ])
-def test_pgr_auto_select_honours_a_pinned_side(fixedA, fixedB, expected):
-    selected = pgrAutoPairSelectMaxLds(2, _autoSelectState(), _F8F4_PROBLEM_TYPE,
-                                       fixedA=fixedA, fixedB=fixedB)
-    assert selected == expected
+def test_auto_is_empty_off_the_supported_path(overrides, clause):
+    state = _eligibleState(**overrides)
+    reason = pgrAutoIneligibleReason(state)
+    assert reason is not None and clause in reason
+    assert pgrAutoPairRequested(state) is False
 
 
-def test_pgr_auto_select_pinned_side_still_ranks_by_lds():
-    assert pgrAutoPairSelectMaxLds(2, _autoSelectState(), _F8F4_PROBLEM_TYPE,
-                                   fixedB=2) == (2, 2)
-    assert pgrAutoPairSelectMaxLds(2, _autoSelectState(MaxLDS=90000), _F8F4_PROBLEM_TYPE,
-                                   fixedB=2) == (1, 2)
+def test_auto_divergent_ranking_never_offers_the_equal_pair():
+    ranking = pgrAutoDivergentRanking(_eligibleState(), _F8F4_PROBLEM_TYPE)
+    assert sorted(ranking) == [(1, 2), (2, 1)]
+    assert pgrAutoDivergentRanking(_eligibleState(PrefetchGlobalRead=3),
+                                   _F8F4_PROBLEM_TYPE) == ranking
 
 
-def test_pgr_auto_select_pinned_side_with_no_candidate_is_none():
-    assert pgrAutoPairSelectMaxLds(2, _autoSelectState(), _F8F4_PROBLEM_TYPE,
-                                   fixedB=0) is None
+def test_auto_divergent_ranking_keeps_the_max_lds_order():
+    assert pgrAutoDivergentRanking(_eligibleState(MaxLDS=90000), _F8F4_PROBLEM_TYPE)[0] == (1, 2)
 
 
-@pytest.mark.parametrize("pgrA, pgrB, expected", [
-    (-1, 1, (2, 1)),
-    (1, -1, (1, 2)),
-    (-1, 2, (2, 2)),
-    (2, -1, (2, 2)),
-])
-def test_resolve_one_sided_auto_searches_the_minus_one_side(pgrA, pgrB, expected):
-    state = _autoSelectState(PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == expected
+def test_resolve_auto_pins_the_ranking_in_order_and_then_runs_out():
+    ranking = pgrAutoDivergentRanking(_eligibleState())
+    for attempt, pair in enumerate(ranking):
+        state = _eligibleState()
+        assert resolvePrefetchGlobalReadAuto(state, attempt) is True
+        assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == pair
+    state = _eligibleState()
+    assert resolvePrefetchGlobalReadAuto(state, len(ranking)) is False
+    assert "PrefetchGlobalReadA" not in state and "PrefetchGlobalReadB" not in state
 
 
-def test_resolve_one_sided_auto_raises_the_ceiling_to_the_pinned_depth():
-    state = _autoSelectState(PrefetchGlobalRead=0, PrefetchGlobalReadA=-1,
-                             PrefetchGlobalReadB=2)
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == (2, 2)
-
-
-@pytest.mark.parametrize("pgrA, pgrB, heldTc", [(-1, 1, "B"), (1, -1, "A")])
-def test_resolve_one_sided_auto_rejects_when_nothing_fits(pgrA, pgrB, heldTc):
-    state = _autoSelectState(MaxLDS=1024, PrefetchGlobalReadA=pgrA,
-                             PrefetchGlobalReadB=pgrB)
-    reason = resolvePrefetchGlobalReadSpecialValues(state)
-    assert reason is not None
-    assert "no LDS-feasible pair" in reason
-    assert "PrefetchGlobalRead%s held at" % heldTc in reason
-
-
-@pytest.mark.parametrize("pgrA, pgrB, expected", [(-1, 1, (True, 2, 1)), (1, -1, (True, 1, 2))])
-def test_one_sided_auto_reaches_decouple_pgr_blocks(pgrA, pgrB, expected):
-    state = _autoSelectState(PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    assert resolvePrefetchGlobalReadSpecialValues(state) is None
-    assert decouplePGRBlocks(state) == expected
+@pytest.mark.parametrize("key", ["PrefetchGlobalRead", "PrefetchGlobalReadA",
+                                 "PrefetchGlobalReadB"])
+def test_minus_one_is_not_a_prefetch_global_read_value(key):
+    assert -1 not in validParameters[key]
+    assert 0 in validParameters[key] and 2 in validParameters[key]
 
 
 def _problemType(macA, macB, mxA=0, mxB=0):
@@ -675,6 +616,10 @@ def _derive(gfx1250_iim, assembler, capsys, **overrides):
         "WorkGroupMapping": 1,
     }
     params.update(overrides)
+    # None means "omit the key": both omitted is auto.
+    for key in ("PrefetchGlobalReadA", "PrefetchGlobalReadB"):
+        if params.get(key) is None:
+            params.pop(key, None)
     params.update(matrixInstructionToMIParameters(
         mi, isa, params["WavefrontSize"], problemType, workGroup, gfx1250_iim))
     sol = Solution(params, False, True, False, assembler, gfx1250_iim)
@@ -720,9 +665,9 @@ def test_solution_accepts_divergent_pairs(_gp_gfx1250, gfx1250_iim, assembler, c
     assert sol.get("Valid") is True, out
 
 
-# Auto plus every real depth up to DCP_MAX_LDS_BLOCKS_DIVERGENT.
+# Omitted (None, i.e. auto) plus every real depth up to DCP_MAX_LDS_BLOCKS_DIVERGENT.
 _PGR_PAIR_SPACE = list(itertools.product(
-    [PGR_SPECIAL_AUTO] + list(range(DCP_MAX_LDS_BLOCKS_DIVERGENT + 1)), repeat=2))
+    [None] + list(range(DCP_MAX_LDS_BLOCKS_DIVERGENT + 1)), repeat=2))
 
 
 @pytest.mark.parametrize("pgrA, pgrB", _PGR_PAIR_SPACE)
@@ -884,13 +829,14 @@ def test_solution_equal_one_degenerates_to_scalar(_gp_gfx1250, gfx1250_iim, asse
     assert "may overwrite LDS data still being read" in out
 
 
-def test_solution_auto_equal_pair_degenerates_to_scalar(_gp_gfx1250, gfx1250_iim, assembler, capsys):
+def test_solution_auto_keeps_the_legacy_kernel_when_it_fits(_gp_gfx1250, gfx1250_iim, assembler, capsys):
     sol, out = _derive(gfx1250_iim, assembler, capsys,
-                       PrefetchGlobalRead=2, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1)
+                       PrefetchGlobalRead=2, PrefetchGlobalReadA=None, PrefetchGlobalReadB=None)
     assert sol.get("Valid") is True, out
     assert sol.get("PrefetchGlobalRead") == 2
     assert sol.get("PrefetchGlobalReadA") is None
     assert sol.get("PrefetchGlobalReadB") is None
+    assert "PrefetchGlobalReadA/B" not in out, out
 
 
 def test_solution_degenerate_zero_falls_back_to_scalar(_gp_gfx1250, gfx1250_iim, assembler, capsys):
@@ -906,32 +852,12 @@ def test_solution_degenerate_zero_falls_back_to_scalar(_gp_gfx1250, gfx1250_iim,
 # ---------------------------------------------------------------------------
 # Scalar vs PGRA/PGRB through assignDerivedParameters.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("pgrA, pgrB, expected", [(-1, 1, (2, 1)), (1, -1, (1, 2))])
-def test_solution_one_sided_auto_searches_the_constrained_pair(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB, expected):
+@pytest.mark.parametrize("pgrA, pgrB", [(1, None), (None, 1), (2, None), (None, 0)])
+def test_solution_rejects_a_single_key(_gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB):
     sol, out = _derive(gfx1250_iim, assembler, capsys,
                        PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    assert sol.get("Valid") is True, out
-    assert (sol.get("PrefetchGlobalReadA"), sol.get("PrefetchGlobalReadB")) == expected
-
-
-@pytest.mark.parametrize("pgrA, pgrB", [(-1, 2), (2, -1)])
-def test_solution_one_sided_auto_can_pick_the_equal_pair_and_degenerate(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys, pgrA, pgrB):
-    sol, out = _derive(gfx1250_iim, assembler, capsys,
-                       PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    assert sol.get("Valid") is True, out
-    assert sol.get("PrefetchGlobalRead") == 2
-    assert sol.get("PrefetchGlobalReadA") is None
-    assert sol.get("PrefetchGlobalReadB") is None
-
-
-def test_solution_both_auto_picks_max_lds_pair(_gp_gfx1250, gfx1250_iim, assembler, capsys):
-    sol, out = _derive(gfx1250_iim, assembler, capsys,
-                       PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1)
-    assert sol.get("Valid") is True, out
-    assert sol.get("PrefetchGlobalRead") == 2
-    assert (sol.get("PrefetchGlobalReadA"), sol.get("PrefetchGlobalReadB")) == (None, None)
+    assert sol.get("Valid") is False, out
+    assert "both be set or both omitted" in out, out
 
 
 @pytest.mark.parametrize("pgrA, pgrB, expected", [(1, 2, (1, 2)), (2, 1, (2, 1))])
@@ -1276,16 +1202,6 @@ def test_divergent_level_zero_is_rejected(pgrA, pgrB):
     reason = divergentPairUnsupportedReason(ks)
     assert reason is not None
     assert "level 0" in reason
-
-
-@pytest.mark.parametrize("pgrA, pgrB, heldTc", [(-1, 0, "B"), (0, -1, "A")])
-def test_one_sided_auto_against_a_pinned_zero_names_the_real_reason(pgrA, pgrB, heldTc):
-    state = _postConversionState(PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
-    reason = resolvePrefetchGlobalReadSpecialValues(state)
-    assert reason is not None
-    assert "PrefetchGlobalRead%s=0" % heldTc in reason
-    assert "level 0" in reason
-    assert "no LDS-feasible pair" not in reason
 
 
 # ---------------------------------------------------------------------------
@@ -1838,45 +1754,6 @@ def test_auto_pair_ranking_drops_the_candidates_a_cap_excludes():
     assert pgrAutoPairRanking(2, _postConversionState(MaxLDS=1024), _F8F4) == []
 
 
-def test_resolve_auto_skip_walks_the_ranking_in_order():
-    ranking = pgrAutoPairRanking(2, _postConversionState(), _F8F4)
-    assert len(ranking) > 1, "expected ranking longer than 1"
-    for skip, expected in enumerate(ranking):
-        state = _postConversionState(PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1)
-        assert resolvePrefetchGlobalReadSpecialValues(state, skip) is None
-        assert (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"]) == expected
-
-
-def test_resolve_auto_skip_past_the_ranking_reports_the_same_no_fit():
-    ranking = pgrAutoPairRanking(2, _postConversionState(), _F8F4)
-    exhausted = _postConversionState(PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1)
-    nothingFits = _postConversionState(PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1,
-                                       MaxLDS=1024)
-    reason = resolvePrefetchGlobalReadSpecialValues(exhausted, len(ranking))
-    assert reason == resolvePrefetchGlobalReadSpecialValues(nothingFits, 0)
-    assert "no LDS-feasible pair" in reason
-    assert exhausted["PrefetchGlobalReadA"] == -1
-
-
-@pytest.mark.parametrize("state, requested", [
-    (dict(PrefetchGlobalRead=2, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1), True),
-    (dict(PrefetchGlobalRead=2, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=2), True),
-    (dict(PrefetchGlobalRead=2, PrefetchGlobalReadA=2, PrefetchGlobalReadB=-1), True),
-    # The bare scalar asks for nothing, so there is no ranking to step.
-    (dict(PrefetchGlobalRead=-1), False),
-    (dict(PrefetchGlobalRead=2, PrefetchGlobalReadA=2, PrefetchGlobalReadB=1), False),
-    (dict(PrefetchGlobalRead=2), False),
-    # Below two the keys are dropped rather than searched, so there is no
-    # ranking to step through.
-    (dict(PrefetchGlobalRead=1, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1), False),
-    (dict(PrefetchGlobalRead=0, PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1), False),
-    # One-sided keys are rejected, never searched.
-    (dict(PrefetchGlobalRead=2, PrefetchGlobalReadA=-1), False),
-])
-def test_pgr_auto_pair_requested(state, requested):
-    assert pgrAutoPairRequested(state) is requested
-
-
 # Estimate 327680 vs derived 332800 at this BBS tile.
 _LDS_WITNESSES = [
     ([16, 16, 32, 1, 1, 8, 4, 2, 2], 256, (1, 2)),
@@ -1906,12 +1783,22 @@ def test_solution_auto_steps_past_a_pair_the_lds_check_refuses(
     assert refused.get("Valid") is False, refusedOut
     assert "bytes of LDS" in refusedOut, refusedOut
 
+    legacy, legacyOut = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
+        MatrixInstruction=mi, DepthU=depthU,
+        PrefetchGlobalReadA=None, PrefetchGlobalReadB=None,
+        ScheduleIterAlg=3))
+    assert legacy.get("Valid") is False, legacyOut
+    assert "bytes of LDS" in legacyOut, legacyOut
+
     auto, autoOut = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
         MatrixInstruction=mi, DepthU=depthU,
-        PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+        PrefetchGlobalReadA=None, PrefetchGlobalReadB=None))
     assert auto.get("Valid") is True, autoOut
     assert (auto["PrefetchGlobalReadA"], auto["PrefetchGlobalReadB"]) == expected
     assert auto["LdsNumBytes"] <= auto["MaxLDS"]
+    # A try that is not the verdict stays quiet, pin warning included.
+    assert "bytes of LDS" not in autoOut, autoOut
+    assert "pins scalar" not in autoOut, autoOut
 
 
 @pytest.mark.parametrize("mi, depthU, expected", _LDS_WITNESSES)
@@ -1919,7 +1806,7 @@ def test_solution_auto_matches_the_same_pair_written_out(
         _gp_gfx1250, gfx1250_iim, assembler, capsys, mi, depthU, expected):
     auto, autoOut = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
         MatrixInstruction=mi, DepthU=depthU,
-        PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+        PrefetchGlobalReadA=None, PrefetchGlobalReadB=None))
     assert auto.get("Valid") is True, autoOut
     explicit, _ = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
         MatrixInstruction=mi, DepthU=depthU,
@@ -1928,32 +1815,77 @@ def test_solution_auto_matches_the_same_pair_written_out(
     assert dict(auto) == dict(explicit)
 
 
-def test_solution_auto_exhausting_the_ranking_still_rejects(
+def test_solution_auto_exhausting_the_ranking_keeps_the_legacy_verdict(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
     sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
         MatrixInstruction=[16, 16, 32, 1, 1, 8, 4, 2, 2], MaxLDS=40960,
-        PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+        PrefetchGlobalReadA=None, PrefetchGlobalReadB=None))
     assert sol.get("Valid") is False, out
+    assert "bytes of LDS" in out, out
+    assert "PrefetchGlobalReadA/B" not in out, out
+    assert sol.get("PrefetchGlobalReadA") is None and sol.get("PrefetchGlobalReadB") is None
 
 
-def test_solution_auto_does_not_retry_an_unrelated_rejection(
+def test_solution_auto_reports_the_legacy_verdict_not_a_divergent_try(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    # ClusterDim refuses both divergent tries; the verdict stays the legacy LDS one.
     sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
         MatrixInstruction=[16, 16, 32, 1, 1, 8, 4, 2, 2], ClusterDim=[2, 1],
-        PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+        PrefetchGlobalReadA=None, PrefetchGlobalReadB=None))
     assert sol.get("Valid") is False, out
-    assert "ClusterDim != [1, 1] is incompatible with" in out, out
+    assert "bytes of LDS" in out, out
+    assert "ClusterDim != [1, 1] is incompatible with" not in out, out
 
 
-def test_solution_derivation_leaves_no_capacity_marker_behind(
+@pytest.mark.parametrize("overrides", [
+    dict(ScheduleIterAlg=3),
+    dict(PrefetchGlobalRead=1),
+    dict(TDMInst=0),
+])
+def test_solution_auto_off_the_supported_path_is_the_original_route(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, overrides):
+    solutionModule = _dcpSolutionModule()
+
+    def _neverCalled(*_args, **_kwargs):
+        raise AssertionError("auto tried a divergent pair off the supported path")
+
+    monkeypatch.setattr(solutionModule, "resolvePrefetchGlobalReadAuto", _neverCalled)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
+        MatrixInstruction=[16, 16, 32, 1, 1, 8, 4, 2, 2],
+        PrefetchGlobalReadA=None, PrefetchGlobalReadB=None, **overrides))
+    assert sol.get("PrefetchGlobalReadA") is None and sol.get("PrefetchGlobalReadB") is None
+    assert "PrefetchGlobalReadA/B" not in out, out
+
+
+@pytest.mark.parametrize("overrides", [
+    dict(),
+    dict(ScheduleIterAlg=0),
+    dict(MatrixInstruction=[16, 16, 32, 1, 1, 4, 4, 2, 2]),
+])
+def test_solution_auto_is_the_legacy_derivation_when_it_fits(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch, overrides):
+    solutionModule = _dcpSolutionModule()
+
+    params = _bbsWitness(DepthU=128, PrefetchGlobalReadA=None, PrefetchGlobalReadB=None)
+    params.setdefault("MatrixInstruction", [16, 16, 32, 1, 1, 8, 4, 2, 2])
+    params.update(overrides)
+    auto, autoOut = _derive(gfx1250_iim, assembler, capsys, **copy.deepcopy(params))
+    assert auto.get("Valid") is True, autoOut
+    monkeypatch.setattr(solutionModule, "pgrAutoPairRequested", lambda _state: False)
+    legacy, _ = _derive(gfx1250_iim, assembler, capsys, **copy.deepcopy(params))
+    assert dict(auto) == dict(legacy)
+
+
+def test_solution_derivation_leaves_no_auto_marker_behind(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
     from Tensile.SolutionStructs.Solution import Solution
 
     for maxLds in (327680, 40960):
         sol, _ = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
             MatrixInstruction=[16, 16, 32, 1, 1, 8, 4, 2, 2], MaxLDS=maxLds,
-            PrefetchGlobalReadA=-1, PrefetchGlobalReadB=-1))
+            PrefetchGlobalReadA=None, PrefetchGlobalReadB=None))
         assert Solution.DCP_LDS_CAPACITY_REFUSED not in sol
+        assert Solution.DCP_AUTO_EXHAUSTED not in sol
 
 
 # ---------------------------------------------------------------------------

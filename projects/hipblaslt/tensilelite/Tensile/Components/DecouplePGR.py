@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: MIT
 """Per-tensor PrefetchGlobalReadA/B (DecouplePGR).
 
-Both keys must be set or both omitted.
-Auto (-1) is resolved before the DepthU candidates, so it needs a concrete DepthU.
+Both keys must be set or both omitted. Omitting both is auto.
 
-  omitted, omitted              legacy scalar PrefetchGlobalRead
-  (-1, -1) and PGR >= 2         auto: max-LDS pair, start at PrefetchGlobalRead
-  (-1, -1) and PGR is 0 or 1    drop A/B, keep that scalar (no auto pair)
+  omitted, omitted              auto: the legacy scalar PrefetchGlobalRead kernel first;
+                                a divergent pair only if that kernel exceeds LDS and
+                                pgrAutoIneligibleReason is None (gfx1250, TDMInst=3,
+                                ScheduleIterAlg 0 or 4, PGR >= 2, concrete DepthU)
   (k, k) for k >= 0             PrefetchGlobalRead=k  (includes (0,0) and (1,1))
-  (-1, k) / (k, -1) for k >= 1  auto over the -1 tensor with the other held at k
-  (-1, 0) / (0, -1)             reject (a divergent pair at level 0 has no cadence)
+  (0, k) / (k, 0) for k >= 1    reject (a divergent pair at level 0 has no cadence)
   (0, 1) / (1, 0)               reject (both single-buffered)
   one key only                  reject
 """
@@ -21,10 +20,8 @@ from typing import NamedTuple
 
 from ..Common.DataType import DataType
 from ..Common.Utilities import effectiveMatrixInstMN
-from .TDMFuse import liveGroups, tdmGroupingSeparatesAB, tdmSeparateABDescriptors
-
-PGR_SPECIAL_AUTO = -1
-PGR_AUTO_DEFAULT_LEVEL = 2
+from .TDMFuse import liveGroups, tdmBothTensors, tdmGroupingSeparatesAB, \
+                     tdmSeparateABDescriptors
 
 
 def pgrAutoPairCandidates(pgr):
@@ -258,14 +255,10 @@ def _thickSideRank(pair, state):
     return placed, thickIsA
 
 
-def pgrAutoPairRanking(pgr, state, problemType=None, fixedA=None, fixedB=None):
+def pgrAutoPairRanking(pgr, state, problemType=None):
     """Rank legal LDS-feasible pairs; retain successors for post-padding retries."""
     candidates = [pair for pair in pgrAutoPairCandidates(pgr)
                   if autoPairCandidateIsLegal(*pair)]
-    if fixedA is not None:
-        candidates = [pair for pair in candidates if pair[0] == fixedA]
-    if fixedB is not None:
-        candidates = [pair for pair in candidates if pair[1] == fixedB]
     if not candidates:
         return []
     macroTile = _macroTileFromState(state)
@@ -291,7 +284,7 @@ def pgrAutoPairRanking(pgr, state, problemType=None, fixedA=None, fixedB=None):
     return [pair for _, pair in ranked]
 
 
-def pgrSpecialValueRejectReason(pgrA, pgrB):
+def pgrPairKeysRejectReason(pgrA, pgrB):
     """Reject one-sided keys. Every both-set combination passes here."""
     if pgrA is None and pgrB is None:
         return None
@@ -301,68 +294,49 @@ def pgrSpecialValueRejectReason(pgrA, pgrB):
     return None
 
 
-def pgrAutoPairRequested(state):
-    """Return whether the per-tensor keys request an auto ranking."""
-    pgrA = state.get("PrefetchGlobalReadA")
-    pgrB = state.get("PrefetchGlobalReadB")
-    pgr = state.get("PrefetchGlobalRead", 0)
-    if pgrSpecialValueRejectReason(pgrA, pgrB):
-        return False
-    autoA = pgrA == PGR_SPECIAL_AUTO
-    autoB = pgrB == PGR_SPECIAL_AUTO
-    if autoA and autoB:
-        return pgr not in (0, 1)
-    return autoA != autoB
+def pgrAutoIneligibleReason(state):
+    """Why auto has no divergent candidate for this input state, or None.
 
-
-def resolvePrefetchGlobalReadSpecialValues(state, skip=0):
-    """Resolve auto (-1); `skip` advances the ranking after an LDS refusal."""
-    pgrA = state.get("PrefetchGlobalReadA")
-    pgrB = state.get("PrefetchGlobalReadB")
+    Only states develop can emit a divergent pair for qualify; anything else
+    keeps the legacy scalar kernel and never enters the retry.
+    """
+    if state.get("PrefetchGlobalReadA") is not None \
+            or state.get("PrefetchGlobalReadB") is not None:
+        return "PrefetchGlobalReadA/B are set, so auto does not apply"
+    if tuple(state.get("ISA", ()))[:2] != (12, 5):
+        return "divergent pairs are gfx1250 only"
+    if not tdmBothTensors(state):
+        return "divergent pairs need TDMInst=3"
+    if state.get("ScheduleIterAlg") not in (0, 4):
+        return "divergent pairs need ScheduleIterAlg 0 or 4"
     pgr = state.get("PrefetchGlobalRead", 0)
-    reason = pgrSpecialValueRejectReason(pgrA, pgrB)
-    if reason:
-        return reason
-    autoA = pgrA == PGR_SPECIAL_AUTO
-    autoB = pgrB == PGR_SPECIAL_AUTO
-    pairAuto = autoA and autoB
-    oneSided = autoA != autoB
-    if not (pairAuto or oneSided):
-        return None
-    if pairAuto and pgr in (0, 1):
-        state.pop("PrefetchGlobalReadA", None)
-        state.pop("PrefetchGlobalReadB", None)
-        return None
-    fixedA = fixedB = held = heldTc = None
-    start = pgr
-    if oneSided:
-        if autoA:
-            fixedB = held = pgrB
-            heldTc = "B"
-        else:
-            fixedA = held = pgrA
-            heldTc = "A"
-        if held == 0:
-            return ("PrefetchGlobalReadA/B: PrefetchGlobalRead%s=0 cannot be held while "
-                    "the other tensor is auto; a divergent pair has no level 0. Use 1 "
-                    "or more." % heldTc)
-        # A divergent pair needs a side at 2, whatever the scalar says.
-        start = max(start, held, PGR_AUTO_DEFAULT_LEVEL)
+    if not isinstance(pgr, int) or pgr < 2:
+        return "PrefetchGlobalRead below 2 has no divergent pair"
     depthU = state.get("DepthU")
     if not isinstance(depthU, int) or depthU <= 0:
-        return ("PrefetchGlobalReadA/B: auto needs a concrete DepthU; DepthU=-1 picks its "
-                "own candidates later. Name a DepthU, or drop the per-tensor keys.")
-    ranking = pgrAutoPairRanking(start, state, state.get("ProblemType"),
-                                 fixedA=fixedA, fixedB=fixedB)
-    if skip >= len(ranking):
-        if oneSided:
-            return ("PrefetchGlobalReadA/B: auto found no LDS-feasible pair with "
-                    "PrefetchGlobalRead%s held at %d, starting from %d; lower DepthU "
-                    "or the macro tile" % (heldTc, held, start))
-        return ("PrefetchGlobalReadA/B: auto found no LDS-feasible pair starting from "
-                "PrefetchGlobalRead=%s; lower DepthU or the macro tile" % pgr)
-    state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"] = ranking[skip]
+        return "auto needs a concrete DepthU"
     return None
+
+
+def pgrAutoPairRequested(state):
+    """Return whether auto may retry a divergent pair after an LDS refusal."""
+    return pgrAutoIneligibleReason(state) is None
+
+
+def pgrAutoDivergentRanking(state, problemType=None):
+    """Divergent auto candidates, best first; the equal pair is the legacy kernel."""
+    pt = problemType if problemType is not None else state.get("ProblemType")
+    return [pair for pair in pgrAutoPairRanking(state.get("PrefetchGlobalRead", 0), state, pt)
+            if pair[0] != pair[1]]
+
+
+def resolvePrefetchGlobalReadAuto(state, attempt):
+    """Pin the `attempt`-th divergent pair; False once the ranking is exhausted."""
+    ranking = pgrAutoDivergentRanking(state)
+    if attempt >= len(ranking):
+        return False
+    state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"] = ranking[attempt]
+    return True
 
 
 def pgrLevelsForTensors(ks):
@@ -402,7 +376,7 @@ def decouplePGRBlocks(ks):
 def equalPairDegeneratesToScalar(ks):
     """True when both per-tensor levels are the same real depth (including 0 and 1)."""
     decoupled, pgrA, pgrB = pgrLevelsForTensors(ks)
-    return bool(decoupled and pgrA == pgrB and pgrA != PGR_SPECIAL_AUTO)
+    return bool(decoupled and pgrA == pgrB)
 
 
 def divergentPairUnsupportedReason(ks):

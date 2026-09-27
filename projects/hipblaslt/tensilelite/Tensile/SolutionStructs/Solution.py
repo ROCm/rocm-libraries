@@ -51,7 +51,8 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
                                        decoupledThickGateRelaxation, \
                                        DCP_THICK_GATE_TEXT, \
                                        pgrAutoPairRequested, \
-                                       resolvePrefetchGlobalReadSpecialValues
+                                       pgrPairKeysRejectReason, \
+                                       resolvePrefetchGlobalReadAuto
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
@@ -663,6 +664,8 @@ class Solution(collections.abc.Mapping):
   # attempt, and popped before the state is handed back, so no other rejection
   # can be read as that one and it never reaches a serialized solution.
   DCP_LDS_CAPACITY_REFUSED: str = "_DcpLdsCapacityRefused"
+  # Written only when auto's divergent ranking runs out; popped by the same entry.
+  DCP_AUTO_EXHAUSTED: str = "_DcpAutoExhausted"
 
   ########################################   # need to be sure PSRR is passing to all fxns
   def __init__(
@@ -1877,9 +1880,13 @@ class Solution(collections.abc.Mapping):
     printIndexAssignmentInfo: bool,
     isaInfoMap,
     rocmVersion: SemanticVersion,
-    dcpAutoSkip=None
+    dcpAutoAttempt=None
   ):
-    """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    """Derive; auto tries divergent pairs only after the legacy kernel's LDS refusal.
+
+    dcpAutoAttempt: None for the caller's entry, -1 for the legacy kernel (both
+    keys absent), k >= 0 for auto's k-th divergent pair.
+    """
     if state.get("StreamK", 0) and state["ProblemType"].get("OutputAmaxD", False):
       reject(state, printRejectionReason,
              "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
@@ -1893,28 +1900,40 @@ class Solution(collections.abc.Mapping):
       # The amax workspace/counter indexes dense output tiles within one batch.
       # Publish the corresponding runtime predicate, including for explicit YAML.
       state["BatchSizeEqual"] = 1
-    if dcpAutoSkip is None:
-      # Re-derive pair-dependent scalar state from pristine input on each retry.
+    if dcpAutoAttempt is None:
+      # Legacy first: with the keys absent this is today's kernel, byte for byte.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
-      attempt = 0
-      while True:
-        # A retried attempt stays quiet: its LDS refusal is not the verdict.
-        Solution.assignDerivedParameters(
-          state, splitGSU, printRejectionReason and pristine is None,
-          printIndexAssignmentInfo, isaInfoMap, rocmVersion, dcpAutoSkip=attempt)
-        refused = state.pop(Solution.DCP_LDS_CAPACITY_REFUSED, None)
-        if refused is None or pristine is None:
-          break
-        attempt += 1
-        state.clear()
-        state.update(copy.deepcopy(pristine))
-      if pristine is not None and printRejectionReason and state.get("Valid") is False:
-        state.clear()
-        state.update(copy.deepcopy(pristine))
-        Solution.assignDerivedParameters(
-          state, splitGSU, True, printIndexAssignmentInfo, isaInfoMap,
-          rocmVersion, dcpAutoSkip=attempt)
-        state.pop(Solution.DCP_LDS_CAPACITY_REFUSED, None)
+      Solution.assignDerivedParameters(
+        state, splitGSU, printRejectionReason and pristine is None,
+        printIndexAssignmentInfo, isaInfoMap, rocmVersion, dcpAutoAttempt=-1)
+      refused = state.pop(Solution.DCP_LDS_CAPACITY_REFUSED, None)
+      if pristine is None or state.get("Valid") is not False:
+        return
+      if refused is not None:
+        # Re-derive pair-dependent scalar state from pristine input on each try;
+        # a try stays quiet, since its refusal is not the verdict.
+        attempt = 0
+        while True:
+          state.clear()
+          state.update(copy.deepcopy(pristine))
+          Solution.assignDerivedParameters(
+            state, splitGSU, False, printIndexAssignmentInfo, isaInfoMap,
+            rocmVersion, dcpAutoAttempt=attempt)
+          state.pop(Solution.DCP_LDS_CAPACITY_REFUSED, None)
+          if state.pop(Solution.DCP_AUTO_EXHAUSTED, False):
+            break
+          if state.get("Valid") is not False:
+            return
+          attempt += 1
+      elif not printRejectionReason:
+        return
+      # No divergent pair derived: the verdict is the legacy kernel's.
+      state.clear()
+      state.update(copy.deepcopy(pristine))
+      Solution.assignDerivedParameters(
+        state, splitGSU, printRejectionReason, printIndexAssignmentInfo, isaInfoMap,
+        rocmVersion, dcpAutoAttempt=-1)
+      state.pop(Solution.DCP_LDS_CAPACITY_REFUSED, None)
       return
 
     isa = tuple(state["ISA"])
@@ -1945,10 +1964,19 @@ class Solution(collections.abc.Mapping):
     state["MathClocksUnrolledLoop"] = 0
 
     # Pin PrefetchGlobalReadA/B before later rules read the scalar loop depth.
-    dcpSpecialReject = resolvePrefetchGlobalReadSpecialValues(state, dcpAutoSkip)
-    if dcpSpecialReject:
-      reject(state, printRejectionReason, dcpSpecialReject)
-      return
+    dcpAuto = dcpAutoAttempt is not None and dcpAutoAttempt >= 0
+    if dcpAuto:
+      if not resolvePrefetchGlobalReadAuto(state, dcpAutoAttempt):
+        state[Solution.DCP_AUTO_EXHAUSTED] = True
+        reject(state, printRejectionReason,
+               "PrefetchGlobalReadA/B: auto has no further divergent pair")
+        return
+    else:
+      dcpKeysReject = pgrPairKeysRejectReason(state.get("PrefetchGlobalReadA"),
+                                              state.get("PrefetchGlobalReadB"))
+      if dcpKeysReject:
+        reject(state, printRejectionReason, dcpKeysReject)
+        return
     dcpSetPerTensor, dcpPgrA, dcpPgrB = pgrLevelsForTensors(state)
     # Equal (k,k) degenerates to scalar PrefetchGlobalRead=k.
     if equalPairDegeneratesToScalar(state):
@@ -1971,7 +1999,7 @@ class Solution(collections.abc.Mapping):
     if dcpSetPerTensor:
       dcpPinned = min(max(dcpPgrA, dcpPgrB),
                       min(ldsBlocksForPgrLevel(dcpPgrA), ldsBlocksForPgrLevel(dcpPgrB)))
-      if state["PrefetchGlobalRead"] != dcpPinned:
+      if state["PrefetchGlobalRead"] != dcpPinned and not dcpAuto:
         printWarning(
           "PrefetchGlobalReadA/B: ignoring PrefetchGlobalRead=%u; pair (%u, %u) pins scalar %u."
           % (state["PrefetchGlobalRead"], dcpPgrA, dcpPgrB, dcpPinned))

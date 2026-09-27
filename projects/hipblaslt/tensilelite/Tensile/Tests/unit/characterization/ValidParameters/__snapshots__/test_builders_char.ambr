@@ -2444,20 +2444,20 @@
     }),
     'PrefetchGlobalReadA': dict({
       'head': list([
-        -1,
         0,
         1,
+        2,
       ]),
-      'len': 18,
+      'len': 17,
       'type': 'list',
     }),
     'PrefetchGlobalReadB': dict({
       'head': list([
-        -1,
         0,
         1,
+        2,
       ]),
-      'len': 18,
+      'len': 17,
       'type': 'list',
     }),
     'PrefetchLocalRead': dict({
