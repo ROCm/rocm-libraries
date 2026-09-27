@@ -1,6 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-# generate kernel instances to speed up compilation
 
 import argparse
 import sys
@@ -30,7 +29,7 @@ def _load_ops_module(importer, module_name: str):
     return module
 
 
-# inspect all modules under 'codegen.ops' and register API handlers
+# Load all modules under codegen.ops and register their API handlers.
 ops = []
 for importer, module_name, _ in pkgutil.iter_modules(codegen.ops.__path__):
     full_module_name = "%s.%s" % (codegen.ops.__name__, module_name)
@@ -70,7 +69,6 @@ def write_blobs(
         handler(output_dir, kernel_filter, receipt, optdim_list, mask_impl)
 
 
-# list all the files that will be generated
 def list_blobs(
     output_file: Optional[str],
     api_list: List[str],
@@ -82,7 +80,6 @@ def list_blobs(
     assert output_file is not None
     file_path = Path(output_file)
 
-    # create an empty file / drop its contents if it exists
     open(file_path, "w").close()
 
     for api, kernel_filter in zip(api_list, filters_list):
@@ -96,13 +93,12 @@ if __name__ == "__main__":
         description="gen API for CK fmha kernel",
     )
     parser.add_argument(
-        "-d",
-        "--direction",  # we keep 'direction' option for backward compatibility
         "-a",
         "--api",
         default="fwd_jenga",
         required=False,
-        help="supply API(s) to generate (default: fwd). separated by comma.",
+        help="supply API(s) to generate (default: fwd_jenga). separated by comma.\n"
+        "  fwd_jenga / fwd_vsa / fwd_sparge",
     )
     parser.add_argument(
         "-o",
@@ -113,7 +109,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "-l", "--list_blobs", required=False, help="list all the kernels to a file"
     )
-    # TODO: if using filter, must apply same value to output_dir and list_blobs
     parser.add_argument(
         "-f",
         "--filter",
@@ -135,15 +130,13 @@ if __name__ == "__main__":
         "--receipt",
         default=0,
         required=False,
-        help="codegen receipt. 0: generate only 8xhdim coverage\n"
-        + "  1: generate more instance to cover all hdim\n"
-        + "  2: Only generate instance for Flash attention integration\n"
-        + "  4: Only generate instance for PyTorch integration\n"
-        + "  100-199: Only generate instance for Aiter(mha_fwd) integration\n"
-        + "  200-299: Only generate instance for Aiter(mha_varlen_fwd) integration\n"
-        + "  300-399: Only generate instance for Aiter(mha_bwd) integration\n"
-        + "  400-499: Only generate instance for Aiter(mha_varlen_bwd) integration\n"
-        + "  600-699: Only generate instance for aiter::mha_fwd && aiter::mha_fwd_splitkv && aiter::mha_bwd C++ api integration",
+        help="codegen receipt (sparse_attn build uses 600). Recognized values:\n"
+        "  0   : default coverage\n"
+        "  2/3 : Flash attention integration subset\n"
+        "  4   : PyTorch integration subset (jenga / vsa only)\n"
+        "  100 : Aiter mha_fwd subset (jenga / vsa only)\n"
+        "  200 : Aiter mha_varlen_fwd subset (group mode for all 3 APIs)\n"
+        "  600 : Aiter C++ API integration subset (used by CMake)",
     )
 
     parser.add_argument(
@@ -155,7 +148,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    api_list = args.direction.split(",")
+    api_list = args.api.split(",")
     filter_list = args.filter.split(",")
     filter_list.extend([""] * (len(api_list) - len(filter_list)))
     optdim_list = [int(hdim) for hdim in args.optdim.split(",")]
