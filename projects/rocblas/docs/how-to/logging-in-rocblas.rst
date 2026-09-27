@@ -41,6 +41,26 @@ of the function.
 Internal API logging outputs information like the GEMM backend used for a particular GEMM call.
 Not all internal APIs are logged. The log output goes to the same stream as trace logging.
 
+Kernel-selection logging (``ROCBLAS_LAYER=0x10``) emits one ``rocblas-bench``-replayable line per
+internal GEMM sub-problem dispatched, including those produced by decomposed BLAS3 ops such as
+``trsm``, ``trmm``, ``syrk``, and friends. Each line ends in a ``#`` comment that names the source
+backend (``hipblaslt`` or ``tensile``), the selected kernel name (Tensile backend only), whether
+the call fell back from another backend, and the user-facing API that triggered it. The line
+itself is copy-pasteable into ``rocblas-bench`` to reproduce that single sub-problem in isolation.
+Output goes to the same stream as trace logging. Example:
+
+.. code-block:: text
+
+   ./rocblas-bench -f gemm_strided_batched_ex --transposeA N --transposeB N -m 4096 -n 4096 -k 4096 \
+     --alpha 1 --a_type f32_r --lda 4096 --stride_a 0 --b_type f32_r --ldb 4096 --stride_b 0 \
+     --beta 0 --c_type f32_r --ldc 4096 --stride_c 0 --d_type f32_r --ldd 4096 --stride_d 0 \
+     --batch_count 1 --compute_type f32_r --algo 0 --solution_index 0 --flags 0 \
+     # source=tensile kernel=Cijk_Ailk_Bljk_SB_MT128x128x8 \
+     fallback_from=hipblaslt parent_api=rocblas_strsm
+
+Bits can be combined: ``ROCBLAS_LAYER=0x19`` enables trace (``0x1``), internal (``0x8``), and
+kernel-selection (``0x10``) simultaneously.
+
 The default stream for logging output is standard error. :ref:`Four
 environment variables <rocblas_logging_env>` can set the full path name for a
 log file.

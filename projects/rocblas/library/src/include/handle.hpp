@@ -441,7 +441,12 @@ public:
     std::unique_ptr<rocblas_internal_ostream> log_bench_os;
     std::unique_ptr<rocblas_internal_ostream> log_profile_os;
     void                                      init_logging();
-    void                                      init_check_numerics();
+
+    // Name of the user-facing C API call currently executing on this handle. Set by an RAII helper
+    // at the top of each *_impl and cleared on scope exit. Used by rocblas_layer_mode_log_kernel_select
+    // (0x10) to annotate internal-GEMM trace lines with their parent API. Null when no API is active.
+    const char* current_api_name = nullptr;
+    void        init_check_numerics();
 
     // data pointer for rocSOLVER
     std::shared_ptr<void> data_ptr;
@@ -944,6 +949,35 @@ public:
 
         return _gsu_malloc_by_size(this, requested_Workspace_Size);
     };
+};
+
+// RAII helper that stamps the user-facing C API name onto the handle for the duration of a call.
+// Used by rocblas_layer_mode_log_kernel_select (0x10) to attribute each internal-GEMM trace line
+// to its parent API. Construct one line at the top of each *_impl after the handle null-check.
+// When kernel-select logging is off (the common case) this is a no-op: the constructor only tests
+// the layer bit and touches the handle when the bit is set, so it costs nothing on the hot path.
+// Save/restore protects against re-entry: if an internal path calls another rocBLAS API, the
+// outer name is restored on scope exit. Single-threaded per handle, matching the rest of rocBLAS.
+struct rocblas_internal_api_scope
+{
+    rocblas_internal_api_scope(rocblas_handle h, const char* name)
+        : m_handle((h && (h->layer_mode & rocblas_layer_mode_log_kernel_select)) ? h : nullptr)
+        , m_prev(m_handle ? m_handle->current_api_name : nullptr)
+    {
+        if(m_handle)
+            m_handle->current_api_name = name;
+    }
+    ~rocblas_internal_api_scope()
+    {
+        if(m_handle)
+            m_handle->current_api_name = m_prev;
+    }
+    rocblas_internal_api_scope(const rocblas_internal_api_scope&) = delete;
+    rocblas_internal_api_scope& operator=(const rocblas_internal_api_scope&) = delete;
+
+private:
+    rocblas_handle m_handle;
+    const char*    m_prev;
 };
 
 // For functions which don't use temporary device memory, and won't be likely
