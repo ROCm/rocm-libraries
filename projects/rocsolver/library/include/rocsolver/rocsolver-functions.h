@@ -19522,7 +19522,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak(rocblas_handle handle,
                 V contains left eigenvectors.
     @param[in]
     n           rocblas_int. n >= 0.
-                The number of rows of the matrix Vces V_l.
+                The number of rows of the matrices V_l.
     @param[in]
     ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
                 The values of ilo returned by GEBAL_BATCHED.
@@ -19632,7 +19632,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_batched(rocblas_handle handle,
                 V contains left eigenvectors.
     @param[in]
     n           rocblas_int. n >= 0.
-                The number of rows of the matrix Vces V_l.
+                The number of rows of the matrices V_l.
     @param[in]
     ilo         pointer to rocblas_int. Array of batch_count integers on the GPU.
                 The values of ilo returned by GEBAL_STRIDED_BATCHED.
@@ -19763,7 +19763,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgebak_strided_batched(rocblas_handle 
     @param[in]
     job         #rocsolver_schur_job.
                 If rocsolver_schur_eigenvalues, only the eigenvalues are computed. If
-                rocsolver_schur_form, the Schur formFalse T is also computed.
+                rocsolver_schur_form, the Schur form T is also computed.
     @param[in]
     compz       #rocsolver_schur_vectors.
                 If rocsolver_schur_vectors_none, Z is not referenced. If
@@ -19872,7 +19872,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr(rocblas_handle handle,
     @param[in]
     job         #rocsolver_schur_job.
                 If rocsolver_schur_eigenvalues, only the eigenvalues are computed. If
-                rocsolver_schur_form, the Schur formTrue T_l are also computed.
+                rocsolver_schur_form, the Schur forms T_l are also computed.
     @param[in]
     compz       #rocsolver_schur_vectors.
                 If rocsolver_schur_vectors_none, Z is not referenced. If
@@ -19989,7 +19989,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhseqr_batched(rocblas_handle handle,
     @param[in]
     job         #rocsolver_schur_job.
                 If rocsolver_schur_eigenvalues, only the eigenvalues are computed. If
-                rocsolver_schur_form, the Schur formTrue T_l are also computed.
+                rocsolver_schur_form, the Schur forms T_l are also computed.
     @param[in]
     compz       #rocsolver_schur_vectors.
                 If rocsolver_schur_vectors_none, Z is not referenced. If

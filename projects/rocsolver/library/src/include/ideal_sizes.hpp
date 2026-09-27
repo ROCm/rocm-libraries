@@ -339,7 +339,8 @@
 /*! \brief Maximum number of thread-blocks that chase the bulges of a chunk of the
     multishift QR sweeps of HSEQR (when the reflections are accumulated). The
     multiplications by the reflections are distributed among them, with two grid
-    barriers per step of the chase. At most a quarter of the compute units are used. */
+    barriers per step of the chase. At most a quarter of the compute units, and one
+    thread-block per 4 bulges, are used. */
 #ifndef HSEQR_CHASE_GROUPS
 #define HSEQR_CHASE_GROUPS 16
 #endif
@@ -349,12 +350,13 @@
     by LAPACK IPARMQ.
 
     \details The Schur form of the window is computed by a single thread-block, so
-    that large windows are expensive on the GPU. The default was measured on MI300X
-    (n = 2000: 5.0 s with the IPARMQ window of 96, 3.5 s with 64); it deviates from
-    LAPACK, which uses windows of NS or 3*NS/2 entries (NS = number of shifts). For
-    large matrices the cap is raised (see hseqr_aed_window_cap).
-    (The window may still grow beyond this value after several iterations without
-    deflations, as in LAPACK.)*/
+    that large windows are expensive on the GPU; windows of at most 64 entries fit in
+    shared memory (lahqr_lds_block), which is much faster. This deviates from LAPACK,
+    which uses windows of NS or 3*NS/2 entries (NS = number of shifts), and the number
+    of shifts is capped likewise. The cap includes the extra entry that the window
+    selection of ZLAQR0 may add. For large matrices the cap is raised (see
+    hseqr_aed_window_cap). (The window may still grow beyond this value after several
+    iterations without deflations, as in LAPACK.)*/
 #ifndef HSEQR_AED_WINDOW_MAX
 #define HSEQR_AED_WINDOW_MAX 64
 #endif

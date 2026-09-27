@@ -823,6 +823,7 @@ void hseqr_getError(const rocblas_handle handle,
             cpu_hseqr(rocsolver_schur_eigenvalues, rocsolver_schur_vectors_none, n, ilo, ihi,
                       Hc.data(), n, Wc.data(), Zc.data(), 1, work.data(), (rocblas_int)work.size(),
                       &info);
+            EXPECT_EQ(info, 0) << "(host LAPACK) where b = " << b;
 
             // match each host eigenvalue with the closest unmatched device eigenvalue;
             // error is max |lambda - lambda_ref| / ||H0||
@@ -846,6 +847,11 @@ void hseqr_getError(const rocblas_handle handle,
                         best = d;
                         kbest = k;
                     }
+                }
+                if(kbest < 0)
+                {
+                    *max_err_eig = std::max(*max_err_eig, 1.0);
+                    continue;
                 }
                 used[kbest] = true;
                 *max_err_eig = std::max(*max_err_eig, best / hnorm);

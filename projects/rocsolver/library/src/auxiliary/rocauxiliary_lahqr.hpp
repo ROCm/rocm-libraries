@@ -443,6 +443,7 @@ __host__ __device__ inline void hqr_rot(T& x, T& y, const S c, const T s)
 template <int BS, typename I>
 __host__ __device__ I hqr_block_max(I v, I (*s_red)[HQR_RED(BS)], int& buf)
 {
+    static_assert(BS == 1 || BS % 64 == 0, "BS must be 1 or a multiple of 64");
 #if defined(__HIP_DEVICE_COMPILE__)
     const int lane = hqr_tid() % warpSize;
     const int wave = hqr_tid() / warpSize;
@@ -908,7 +909,9 @@ __host__ __device__ I lahqr_block(const bool wantt,
 // packed matrix (2205 entries for n = 64), 2*HQR_LDS_NMAX transformations, and
 // HQR_LDS_NMAX + 2 integers (column offsets and a reduction variable; 40 entries of at
 // least 8 bytes)
-#define HQR_LDS_WS_SIZE (2208 + 2 * HQR_LDS_NMAX + 40)
+// (the packed matrix of order HQR_LDS_NMAX has 2205 entries, rounded up to 2208)
+#define HQR_LDS_PACKED_SIZE 2208
+#define HQR_LDS_WS_SIZE (HQR_LDS_PACKED_SIZE + 2 * HQR_LDS_NMAX + 40)
 
 /** HQR_LARFG2_FAST computes a 2-element reflection like hqr_larfg<2>, directly when
     alpha and x are in a range where no scaling is needed. **/
@@ -947,7 +950,7 @@ __device__ I lahqr_lds_block(const I n, T* Hg, const I ldh, T* Wg, T* Zg, const 
     const I tid = hipThreadIdx_x;
 
     T* Hs = ws;
-    T* rt1 = ws + 2208;
+    T* rt1 = ws + HQR_LDS_PACKED_SIZE;
     T* rv2 = rt1 + HQR_LDS_NMAX;
     int* offs = reinterpret_cast<int*>(rv2 + HQR_LDS_NMAX);
     int* s_int = offs + HQR_LDS_NMAX + 1;

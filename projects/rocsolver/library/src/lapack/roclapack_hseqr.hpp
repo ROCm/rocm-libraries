@@ -412,14 +412,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr5_chunk_kernel(const bool wantt,
                                                                const I ihiz,
                                                                T* Z,
                                                                const I ldz,
-                                                               T* U,
-                                                               const I ldu,
                                                                T* Vbuf,
                                                                unsigned* bar)
 {
     __shared__ T sV[HSEQR_MAX_SHIFTS / 2 + 2][3];
     laqr5_chunk_block<BS>(wantt, wantz, accum, n, ktop, kbot, nbmps, incol, sh, H, ldh, iloz, ihiz,
-                          Z, ldz, U, ldu, Vbuf, sV, I(hipGridDim_x), I(hipBlockIdx_x), bar);
+                          Z, ldz, Vbuf, sV, I(hipGridDim_x), I(hipBlockIdx_x), bar);
 }
 
 /** LAQR5_BUILD_U_KERNEL forms U from the stored reflections (laqr5_build_u_block), each
@@ -497,27 +495,29 @@ struct hseqr_side_stream
     }
 };
 
-/** HSEQR_IPARMQ returns the number of shifts (ISPEC = 15) and the deflation window
-    size (ISPEC = 13) recommended by LAPACK IPARMQ for an active block of order nh. **/
-template <typename I>
-void hseqr_iparmq(const I nh, I& ns, I& nw)
+/** HSEQR_WORKT_LAYOUT is the layout of the scalar workspace workT of HSEQR (in entries
+    of type T) for matrices of order n: the status scalars, the reflections of two chunks
+    of the sweep with the largest number of shifts (see hseqr_multishift), and the
+    compact copy of the band of a chunk, with leading dimension ldw. **/
+struct hseqr_workT_layout
 {
-    ns = 2;
-    if(nh >= 30)
-        ns = 4;
-    if(nh >= 60)
-        ns = 10;
-    if(nh >= 150)
-        ns = std::max(I(10), I(nh / I(std::lround(std::log(double(nh)) / std::log(2.0)))));
-    if(nh >= 590)
-        ns = 64;
-    if(nh >= 3000)
-        ns = 128;
-    if(nh >= 6000)
-        ns = 256;
-    ns = std::max(I(2), ns - ns % 2);
-    nw = (nh <= 500) ? ns : 3 * ns / 2;
-}
+    size_t vbuf; // offset of the two slots of reflections
+    size_t win; // offset of the compact copy of the band of a chunk
+    size_t ldw; // its leading dimension (at least kdu + 8 for every sweep)
+    size_t size; // total number of entries
+
+    template <typename I>
+    explicit hseqr_workT_layout(const I n)
+    {
+        I nsmax = std::min((n + 6) / 9, I(HSEQR_MAX_SHIFTS));
+        nsmax = std::max(I(2), nsmax - nsmax % 2);
+        const size_t nbmps = nsmax / 2;
+        vbuf = LAQR0_STATUS_SCALAR_SIZE;
+        win = vbuf + 2 * (3 * nbmps) * 3 * (nbmps + 1);
+        ldw = 6 * nbmps + 5;
+        size = win + ldw * ldw;
+    }
+};
 
 /** HSEQR_AED_WINDOW_CAP returns the cap of the (initial) deflation window for an active
     block of order nh: HSEQR_AED_WINDOW_MAX (0: no cap), raised for large blocks. The
@@ -550,35 +550,41 @@ I hseqr_aed_window_cap(const I nh, const bool hybrid)
 
 /** HSEQR_MULTISHIFT computes the Schur form of one Hessenberg matrix with the
     multishift QR algorithm with aggressive early deflation of LAPACK ZLAQR0. The
-    control flow runs on the host; each iteration launches one kernel (active block,
-    deflation window, AED and shifts), reads back a small status array, and then
-    launches the off-window updates of the AED and the chunks of the sweep, with
-    their matrix-matrix products. As in LAPACK, the workspace of these steps is the
-    part of H below its first subdiagonal. Returns info (0 or kbot > 0 in case of
-    failure, as in LAPACK).
+    control flow runs on the host; each iteration launches the iteration kernel (active
+    block, deflation window, AED and shifts; with a deflation window larger than
+    LAQR4_NMIN, the AED core and the shift selection are completed by
+    laqr0_core4_kernel), reads back a small status array, and then launches the
+    off-window updates of the AED, the computation of extra shifts if the AED provides
+    too few (laqr0_toofew_kernel), and the chunks of the sweep, with their
+    matrix-matrix products. As in LAPACK, the workspace of these steps is the part of
+    H below its first subdiagonal. On success, info is 0, or kbot > 0 if the iterations
+    did not converge (as in LAPACK); HIP and rocBLAS errors are returned as the status.
 
     In hybrid mode, the core of the aggressive early deflation (the Schur form of the
     deflation window, the deflation tests and the return to Hessenberg form) runs on
-    the host, with the same code as on the device: the window is copied to the host
-    and back in each iteration. **/
+    the host, with the same code as on the device (except that the Schur form of the
+    window always uses ZLAHQR, and in a different order of operations, so that the
+    results are equally valid but not bitwise identical): the window is copied to the
+    host and back in each iteration. **/
 template <typename T, typename I>
-I hseqr_multishift(rocblas_handle handle,
-                   const bool wantt,
-                   const bool wantz,
-                   const I n,
-                   const I ilo,
-                   const I ihi,
-                   T* H,
-                   const I ldh,
-                   T* W,
-                   const I iloz,
-                   const I ihiz,
-                   T* Z,
-                   const I ldz,
-                   I* dstatus,
-                   T* dstatusT,
-                   unsigned* dbar,
-                   const bool hybrid)
+rocblas_status hseqr_multishift(rocblas_handle handle,
+                                const bool wantt,
+                                const bool wantz,
+                                const I n,
+                                const I ilo,
+                                const I ihi,
+                                T* H,
+                                const I ldh,
+                                T* W,
+                                const I iloz,
+                                const I ihiz,
+                                T* Z,
+                                const I ldz,
+                                I* dstatus,
+                                T* dstatusT,
+                                unsigned* dbar,
+                                const bool hybrid,
+                                I& info)
 {
     using S = decltype(std::real(T{}));
     hipStream_t stream;
@@ -594,25 +600,34 @@ I hseqr_multishift(rocblas_handle handle,
     auto gemm_copy = [&](rocblas_operation transA, const I m, const I nn, const I k, T* A,
                          const I lda, T* B, const I ldb, T* C, const I ldc, T* Ws, const I ldw) {
         if(m <= 0 || nn <= 0)
-            return;
-        rocblasCall_gemm(handle, transA, rocblas_operation_none, m, nn, k, &one, A, 0, lda, 0, B, 0,
-                         ldb, 0, &zero, Ws, 0, ldw, 0, I(1), (T**)nullptr);
+            return rocblas_status_success;
+        ROCBLAS_CHECK(rocblasCall_gemm(handle, transA, rocblas_operation_none, m, nn, k, &one, A, 0,
+                                       lda, 0, B, 0, ldb, 0, &zero, Ws, 0, ldw, 0, I(1),
+                                       (T**)nullptr));
         const I blocksx = (m - 1) / BS2 + 1;
         const I blocksy = (nn - 1) / BS2 + 1;
         ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, T*, T*>), dim3(blocksx, blocksy, 1), dim3(BS2, BS2), 0,
                                 gstream, m, nn, Ws, 0, ldw, 0, C, 0, ldc, 0);
+        return rocblas_status_success;
     };
     auto h = [&](const I i, const I j) -> T* { return H + idx2D(i - 1, j - 1, ldh); };
     auto z = [&](const I i, const I j) -> T* { return Z + idx2D(i - 1, j - 1, ldz); };
     hseqr_side_stream side;
     side.s0 = stream;
 
-    // number of thread-blocks that chase the bulges of a chunk (with accum; they must all
-    // be resident at once, so at most a quarter of the compute units are used)
-    int device, ncu;
+    // number of thread-blocks that chase the bulges of a chunk (with accum). They
+    // synchronize with grid barriers (laqr5_grid_barrier), so they must all become
+    // resident: at most a quarter of the compute units are requested, each of which can
+    // hold one of them (checked with the occupancy of the kernel; otherwise a single
+    // thread-block is used). Kernels running concurrently on the side stream may delay
+    // some of them, but not indefinitely, as those kernels do not wait for the chase.
+    int device, ncu, occupancy = 0;
     HIP_CHECK(hipGetDevice(&device));
     HIP_CHECK(hipDeviceGetAttribute(&ncu, hipDeviceAttributeMultiprocessorCount, device));
-    const I maxgroups = std::max(1, std::min(int(HSEQR_CHASE_GROUPS), ncu / 4));
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &occupancy, laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T, I>, HSEQR_CHASE_BLOCKSIZE, 0));
+    const I maxgroups
+        = (occupancy >= 1) ? std::max(1, std::min(int(HSEQR_CHASE_GROUPS), ncu / 4)) : 1;
 
     // tuning parameters (LAPACK IPARMQ and ZLAQR0 3.9.0, with an unlimited LWORK)
     const I nhfull = ihi - ilo + 1;
@@ -640,7 +655,7 @@ I hseqr_multishift(rocblas_handle handle,
     {
         // (the window size selection of ZLAQR0 may add 1 to nwr, so that the window, of at
         // most wcap entries, still fits the shared memory kernels when wcap is HQR_LDS_NMAX)
-        nwr_t = std::min(nwr_t, wcap - 1);
+        nwr_t = std::min(nwr_t, std::max(I(2), wcap - 1));
         nsr_t = std::min(nsr_t, wcap);
         nsr_t = std::max(I(2), nsr_t - nsr_t % 2);
     }
@@ -672,15 +687,21 @@ I hseqr_multishift(rocblas_handle handle,
     //     hybrid mode; after step 3, which updates the rows of the trailing submatrix
     //     above the window; V is dead): H(n-ns+1:n, 1:ns), as in LAPACK.
     //  5. sweep chunks (after steps 3 and 4):
-    //     U  = H(n-kdu+1:n, 1:kdu), kdu = 3ns-3 (written by each chunk kernel and read by
-    //     the GEMMs that follow it), WH = H(n-kdu+1:n, kdu+1:kdu+nho') and
-    //     WV = H(kdu+4:n-kdu, 1:kdu), both disjoint from U.
+    //     U  = H(n-kdu+1:n, 1:kdu), kdu = 3ns-3 (with accum: formed by laqr5_build_u_kernel
+    //     on the side stream from the reflections of the chunk, and read by the GEMMs that
+    //     follow it), WH = H(n-kdu+1:n, kdu+1:kdu+nho') and WV = H(kdu+4:n-kdu, 1:kdu),
+    //     both disjoint from U; all of them lie at least 4 rows below the diagonal, outside
+    //     the band that the chunk kernels use. The reflections of the chunks (Vbuf) and the
+    //     compact copy of the band of a chunk (see below) are in workT.
     // The shifts and eigenvalues are in W (not in H); the status arrays are separate.
     for(I it = 1; it <= itmax; it++)
     {
         // done when kbot falls below ilo
         if(kbot < ilo)
-            return 0;
+        {
+            info = 0;
+            return rocblas_status_success;
+        }
 
         // active block, deflation window, AED and shifts
         if(!hybrid)
@@ -787,16 +808,17 @@ I hseqr_multishift(rocblas_handle handle,
             for(I krow = ltop; krow <= kwtop - 1; krow += nve)
             {
                 const I kln = std::min(nve, kwtop - krow);
-                gemm_copy(rocblas_operation_none, kln, jw, jw, h(krow, kwtop), ldh, V, ldh,
-                          h(krow, kwtop), ldh, h(kwv, 1), ldh);
+                ROCBLAS_CHECK(gemm_copy(rocblas_operation_none, kln, jw, jw, h(krow, kwtop), ldh, V,
+                                        ldh, h(krow, kwtop), ldh, h(kwv, 1), ldh));
             }
             if(wantt)
             {
                 for(I kcol = kbot + 1; kcol <= n; kcol += nho)
                 {
                     const I kln = std::min(nho, n - kcol + 1);
-                    gemm_copy(rocblas_operation_conjugate_transpose, jw, kln, jw, V, ldh,
-                              h(kwtop, kcol), ldh, h(kwtop, kcol), ldh, h(kv, kt), ldh);
+                    ROCBLAS_CHECK(gemm_copy(rocblas_operation_conjugate_transpose, jw, kln, jw, V,
+                                            ldh, h(kwtop, kcol), ldh, h(kwtop, kcol), ldh,
+                                            h(kv, kt), ldh));
                 }
             }
             if(wantz)
@@ -804,8 +826,8 @@ I hseqr_multishift(rocblas_handle handle,
                 for(I krow = iloz; krow <= ihiz; krow += nve)
                 {
                     const I kln = std::min(nve, ihiz - krow + 1);
-                    gemm_copy(rocblas_operation_none, kln, jw, jw, z(krow, kwtop), ldz, V, ldh,
-                              z(krow, kwtop), ldz, h(kwv, 1), ldh);
+                    ROCBLAS_CHECK(gemm_copy(rocblas_operation_none, kln, jw, jw, z(krow, kwtop),
+                                            ldz, V, ldh, z(krow, kwtop), ldz, h(kwv, 1), ldh));
                 }
             }
         }
@@ -871,11 +893,9 @@ I hseqr_multishift(rocblas_handle handle,
             const I kwv = kdu + 4;
             const I nve = n - kdu - kwv + 1;
             T* U = h(ku, 1);
-            T* Vbuf = dstatusT + LAQR0_STATUS_SCALAR_SIZE;
-            // (the compact copy of the window of a chunk, after the two slots of Vbuf of the
-            // largest sweep, as in rocsolver_hseqr_getMemorySize)
-            const size_t nbmax = nsmax / 2;
-            T* Wwin = Vbuf + 2 * size_t(3 * nbmax) * 3 * (nbmax + 1);
+            const hseqr_workT_layout layout(n);
+            T* Vbuf = dstatusT + layout.vbuf;
+            T* Wwin = dstatusT + layout.win;
 
             // clear trash
             if(ktop + 2 <= kbot)
@@ -906,17 +926,19 @@ I hseqr_multishift(rocblas_handle handle,
                 // the side stream must be done with this slot of Vbuf (chunk-2)
                 if(accum && chunk >= 2)
                     HIP_CHECK(hipStreamWaitEvent(stream, side.ubuilt[slot], 0));
+                // (without accum, a single thread-block chases the chunk: the multi-block chase
+                // passes the reflections through Vbuf, which is only used with accum)
                 if(!accum)
                 {
                     ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>), dim3(1),
                                             dim3(HSEQR_CHASE_BLOCKSIZE), 0, stream, wantt, wantz,
                                             accum, n, ktop, kbot, nbmps, incol, W + (ks - 1), H,
-                                            ldh, iloz, ihiz, Z, ldz, U, ldh, Vb, dbar);
+                                            ldh, iloz, ihiz, Z, ldz, Vb, dbar);
                     continue;
                 }
 
                 // With accum, the chunk kernel works on a compact copy of the part of H that
-                // it reads, H(r0:r1, r0:r1) (with ldw = kdu+8): with the leading dimension of
+                // it reads, H(r0:r1, r0:r1) (with leading dimension layout.ldw): with the leading dimension of
                 // a large H, the columns of the window span so much memory that most of its
                 // accesses miss the address translation caches (on MI300X, the time per step
                 // doubles when they span more than about 64 MB). It only reads and writes
@@ -928,7 +950,7 @@ I hseqr_multishift(rocblas_handle handle,
                 const I lo = std::max(ktop, incol);
                 const I r0 = std::max(I(1), lo - 3);
                 const I r1 = std::min(n, incol + kdu + 1);
-                const I ldw = kdu + 8;
+                const I ldw = I(layout.ldw);
                 {
                     const I mw = r1 - r0 + 1;
                     ROCSOLVER_LAUNCH_KERNEL(
@@ -939,7 +961,7 @@ I hseqr_multishift(rocblas_handle handle,
                 ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>),
                                         dim3(ngroups > 1 ? ngroups : 1), dim3(HSEQR_CHASE_BLOCKSIZE),
                                         0, stream, wantt, wantz, accum, n, ktop, kbot, nbmps, incol,
-                                        W + (ks - 1), Hc, ldw, iloz, ihiz, Z, ldz, U, ldh, Vb, dbar);
+                                        W + (ks - 1), Hc, ldw, iloz, ihiz, Z, ldz, Vb, dbar);
                 {
                     const I mw = r1 - lo + 1;
                     ROCSOLVER_LAUNCH_KERNEL(
@@ -977,10 +999,12 @@ I hseqr_multishift(rocblas_handle handle,
                             gs = s0;
                         }
                     } restore{handle, stream, gstream};
-                    rocblas_set_stream(handle, side.s1);
+                    ROCBLAS_CHECK(rocblas_set_stream(handle, side.s1));
                     gstream = side.s1;
 
-                    const I nr = std::max(I(1), std::min(kdu, I(49152 / (sizeof(T) * kdu))));
+                    // (rows of U per thread-block, with at most 48 KB of shared memory)
+                    constexpr size_t lds_bytes = 49152;
+                    const I nr = std::max(I(1), std::min(kdu, I(lds_bytes / (sizeof(T) * kdu))));
                     const I nblk = (kdu - 1) / nr + 1;
                     ROCSOLVER_LAUNCH_KERNEL((laqr5_build_u_kernel<256, T>), dim3(nblk), dim3(256),
                                             sizeof(T) * nr * kdu, side.s1, ktop, kbot, nbmps, incol,
@@ -995,24 +1019,26 @@ I hseqr_multishift(rocblas_handle handle,
                     for(I jcol = std::max(jl0, jl1 + 1); jcol <= jbot; jcol += nho)
                     {
                         const I jlen = std::min(nho, jbot - jcol + 1);
-                        gemm_copy(rocblas_operation_conjugate_transpose, nu, jlen, nu, Uk, ldh,
-                                  h(incol + k1, jcol), ldh, h(incol + k1, jcol), ldh, h(ku, kwh),
-                                  ldh);
+                        ROCBLAS_CHECK(gemm_copy(rocblas_operation_conjugate_transpose, nu, jlen, nu,
+                                                Uk, ldh, h(incol + k1, jcol), ldh,
+                                                h(incol + k1, jcol), ldh, h(ku, kwh), ldh));
                     }
                     HIP_CHECK(hipEventRecord(side.far[slot], side.s1));
                     for(I jrow = jtop; jrow <= std::max(ktop, incol) - 1; jrow += nve)
                     {
                         const I jlen = std::min(nve, std::max(ktop, incol) - jrow);
-                        gemm_copy(rocblas_operation_none, jlen, nu, nu, h(jrow, incol + k1), ldh,
-                                  Uk, ldh, h(jrow, incol + k1), ldh, h(kwv, 1), ldh);
+                        ROCBLAS_CHECK(gemm_copy(rocblas_operation_none, jlen, nu, nu,
+                                                h(jrow, incol + k1), ldh, Uk, ldh,
+                                                h(jrow, incol + k1), ldh, h(kwv, 1), ldh));
                     }
                     if(wantz)
                     {
                         for(I jrow = iloz; jrow <= ihiz; jrow += nve)
                         {
                             const I jlen = std::min(nve, ihiz - jrow + 1);
-                            gemm_copy(rocblas_operation_none, jlen, nu, nu, z(jrow, incol + k1),
-                                      ldz, Uk, ldh, z(jrow, incol + k1), ldz, h(kwv, 1), ldh);
+                            ROCBLAS_CHECK(gemm_copy(rocblas_operation_none, jlen, nu, nu,
+                                                    z(jrow, incol + k1), ldz, Uk, ldh,
+                                                    z(jrow, incol + k1), ldz, h(kwv, 1), ldh));
                         }
                     }
                 }
@@ -1030,7 +1056,8 @@ I hseqr_multishift(rocblas_handle handle,
     }
 
     // iteration limit exceeded
-    return kbot;
+    info = kbot;
+    return rocblas_status_success;
 }
 
 template <typename T, typename I>
@@ -1047,14 +1074,9 @@ void rocsolver_hseqr_getMemorySize(const I n, const I batch_count, size_t* size_
         // (and the flags of the matrices with NaN or infinite entries, and the counters of
         // the grid barriers of the sweep)
         *size_work = sizeof(I) * (LAQR0_STATUS_SIZE + batch_count + 4);
-        // (and the reflections of two chunks of the sweep, see hseqr_multishift)
-        I nsmax = std::min((n + 6) / 9, I(HSEQR_MAX_SHIFTS));
-        nsmax = std::max(I(2), nsmax - nsmax % 2);
-        const I nbmps = nsmax / 2;
-        // (and the compact copy of the window of a chunk, see hseqr_multishift)
-        const size_t ldw = 6 * nbmps + 5;
-        *size_workT = sizeof(T)
-            * (LAQR0_STATUS_SCALAR_SIZE + 2 * size_t(3 * nbmps) * 3 * (nbmps + 1) + ldw * ldw);
+        // (and the reflections of two chunks of the sweep and the compact copy of the band
+        // of a chunk, see hseqr_multishift)
+        *size_workT = sizeof(T) * hseqr_workT_layout(n).size;
     }
 }
 
@@ -1212,8 +1234,8 @@ rocblas_status rocsolver_hseqr_template(rocblas_handle handle,
         const I ilo1 = ibad > 0 ? ibad + 1 : ilob;
         I infob = 0;
         if(ilo1 < ihib)
-            infob = hseqr_multishift<T>(handle, wantt, wantz, n, ilo1, ihib, Hb, ldh, Wb, ilob,
-                                        ihib, Zb, ldz, work, workT, dbar, hybrid);
+            ROCBLAS_CHECK(hseqr_multishift<T>(handle, wantt, wantz, n, ilo1, ihib, Hb, ldh, Wb, ilob,
+                                              ihib, Zb, ldz, work, workT, dbar, hybrid, infob));
         if(infob == 0)
             infob = ibad;
 

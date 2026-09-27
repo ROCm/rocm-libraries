@@ -57,10 +57,9 @@ ROCSOLVER_BEGIN_NAMESPACE
  *    factorization (HSEQR), eigenvectors of the Schur form back-transformed with
  *    the Schur vectors (TREVC3), back-transformation of the balancing (GEBAK),
  *    normalization, and unscaling of the eigenvalues. All the matrices of a
- *    batch go through each stage together; the decisions that depend on the
- *    data (scaling, the balancing range ilo:ihi) are taken on the device.
- *    GEHRD and UNGHR take their range ilo:ihi as a host argument: it is read back
- *    after GEBAL. When all the matrices of a batch have the same range, they are
+ *    batch go through each stage together; the scaling decisions are taken on the
+ *    device, but GEHRD and UNGHR take their range ilo:ihi as a host argument, so
+ *    the ranges computed by GEBAL are read back to the host (a synchronization). When all the matrices of a batch have the same range, they are
  *    reduced together; otherwise they are reduced in groups with the same range
  *    (through arrays of pointers), each group with exactly its own range. A common
  *    larger range would be exact in exact arithmetic (the reflectors outside a
@@ -264,7 +263,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) geev_normalize_kernel(const I n,
             sval[tid] += sval[tid + s];
         __syncthreads();
     }
-    const S scl = S(1) / (amax * std::sqrt(sval[0]));
+    // (the scaling is v / amax / sqrt(ssq), in two steps: amax * sqrt(ssq) may overflow)
+    const S scl = S(1) / std::sqrt(sval[0]);
     __syncthreads();
 
     // scale, and find the first entry of largest |Re|^2 + |Im|^2
@@ -272,7 +272,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) geev_normalize_kernel(const I n,
     I imax = n;
     for(I i = tid; i < n; i += BS)
     {
-        const T x = v[i] * scl;
+        const T x = T(v[i].real() / amax, v[i].imag() / amax) * scl;
         v[i] = x;
         const S r = x.real() * x.real() + x.imag() * x.imag();
         if(r > rmax)
@@ -354,7 +354,7 @@ rocblas_status rocsolver_geev_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-/** Workspace of GEEV: the buffers work1 to work7 are shared by the stages (each has
+/** Workspace of GEEV: the buffers work1 to work6 are shared by the stages (each has
     the largest size that any stage needs), and tau, scale, iloihi and anrm persist
     across the stages. **/
 template <bool BATCHED, typename T, typename I>
@@ -548,15 +548,15 @@ rocblas_status rocsolver_geev_template(rocblas_handle handle,
     const dim3 threads2(BS2, BS2, 1);
 
     // scale A if its largest entry is outside [smlnum, bignum]
-    rocsolver_lange_template<T>(handle, rocsolver_norm_type_max, n, n, A, shiftA, lda, strideA,
-                                batch_count, anrmS, (S*)work1);
+    ROCBLAS_CHECK(rocsolver_lange_template<T>(handle, rocsolver_norm_type_max, n, n, A, shiftA, lda,
+                                              strideA, batch_count, anrmS, (S*)work1));
     ROCSOLVER_LAUNCH_KERNEL((geev_scale_kernel<T>), grid2, threads2, 0, stream, n, A, shiftA, lda,
                             strideA, (const S*)anrmS);
 
     // balance
-    rocsolver_gebal_template<BATCHED, STRIDED, T>(handle, rocsolver_balance_both, n, A, shiftA, lda,
-                                                  strideA, ilo, ihi, scaleS, strideS, batch_count,
-                                                  (I*)work1);
+    ROCBLAS_CHECK(rocsolver_gebal_template<BATCHED, STRIDED, T>(
+        handle, rocsolver_balance_both, n, A, shiftA, lda, strideA, ilo, ihi, scaleS, strideS,
+        batch_count, (I*)work1));
 
     // range of the Hessenberg reduction: the active block ilo:ihi of each matrix (read back,
     // as GEHRD and UNGHR take it as a host argument)
@@ -585,17 +585,17 @@ rocblas_status rocsolver_geev_template(rocblas_handle handle,
     if(uniform)
     {
         // reduce to upper Hessenberg form
-        rocsolver_gehrd_template<BATCHED, STRIDED, T>(
+        ROCBLAS_CHECK(rocsolver_gehrd_template<BATCHED, STRIDED, T>(
             handle, n, hilo[0], hihi[0], A, shiftA, lda, strideA, tau, strideP, batch_count,
-            scalars, work1, (T*)work2, work3, (T*)work4, (T*)work5, (T*)work6);
+            scalars, work1, (T*)work2, work3, (T*)work4, (T*)work5, (T*)work6));
 
         // Q (the reflectors are then cleared from A)
         ROCSOLVER_LAUNCH_KERNEL((geev_copy_kernel<T>), grid2, threads2, 0, stream, n, A, shiftA,
                                 lda, strideA, Q, shiftQ, ldq, strideQ, wantv, true);
         if(wantv)
-            rocsolver_orghr_unghr_template<BATCHED, STRIDED, T>(
+            ROCBLAS_CHECK(rocsolver_orghr_unghr_template<BATCHED, STRIDED, T>(
                 handle, n, hilo[0], hihi[0], Q, shiftQ, ldq, strideQ, tau, strideP, batch_count,
-                scalars, (T*)work1, (T*)work2, (T*)work3, (T**)work4);
+                scalars, (T*)work1, (T*)work2, (T*)work3, (T**)work4));
     }
     else
     {
@@ -643,45 +643,48 @@ rocblas_status rocsolver_geev_template(rocblas_handle handle,
         T* const* gA = ptrs;
         T* const* gQ = ptrs + batch_count;
 
-        // calls fn for each group [g0, g1) of the sorted order, with its range
-        auto for_each_group = [&](auto&& fn) {
+        // calls fn (which returns a rocblas_status) for each group [g0, g1) of the sorted
+        // order, with its range
+        auto for_each_group = [&](auto&& fn) -> rocblas_status {
             for(I g0 = 0; g0 < batch_count;)
             {
                 I g1 = g0 + 1;
                 while(g1 < batch_count && hilo[order[g1]] == hilo[order[g0]]
                       && hihi[order[g1]] == hihi[order[g0]])
                     g1++;
-                fn(g0, g1, hilo[order[g0]], hihi[order[g0]]);
+                ROCBLAS_CHECK(fn(g0, g1, hilo[order[g0]], hihi[order[g0]]));
                 g0 = g1;
             }
+            return rocblas_status_success;
         };
 
         // reduce to upper Hessenberg form
-        for_each_group([&](const I g0, const I g1, const I ilog, const I ihig) {
-            rocsolver_gehrd_template<true, false, T>(handle, n, ilog, ihig, gA + g0, shiftA, lda,
-                                                     rocblas_stride(0), tau + g0 * strideP, strideP,
-                                                     g1 - g0, scalars, work1, (T*)work2, work3,
-                                                     (T*)work4, (T*)work5, (T*)work6);
-        });
+        ROCBLAS_CHECK(for_each_group([&](const I g0, const I g1, const I ilog,
+                                         const I ihig) -> rocblas_status {
+            return rocsolver_gehrd_template<true, false, T>(
+                handle, n, ilog, ihig, gA + g0, shiftA, lda, rocblas_stride(0), tau + g0 * strideP,
+                strideP, g1 - g0, scalars, work1, (T*)work2, work3, (T*)work4, (T*)work5, (T*)work6);
+        }));
 
         // Q (the reflectors are then cleared from A)
         ROCSOLVER_LAUNCH_KERNEL((geev_copy_kernel<T>), grid2, threads2, 0, stream, n, A, shiftA,
                                 lda, strideA, Q, shiftQ, ldq, strideQ, wantv, true);
         if(wantv)
-            for_each_group([&](const I g0, const I g1, const I ilog, const I ihig) {
-                rocsolver_orghr_unghr_template<true, false, T>(
-                    handle, n, ilog, ihig, gQ + g0, shiftQ, ldq, rocblas_stride(0),
-                    tau + g0 * strideP, strideP, g1 - g0, scalars, (T*)work1, (T*)work2, (T*)work3,
-                    (T**)work4);
-            });
+            ROCBLAS_CHECK(for_each_group(
+                [&](const I g0, const I g1, const I ilog, const I ihig) -> rocblas_status {
+                    return rocsolver_orghr_unghr_template<true, false, T>(
+                        handle, n, ilog, ihig, gQ + g0, shiftQ, ldq, rocblas_stride(0),
+                        tau + g0 * strideP, strideP, g1 - g0, scalars, (T*)work1, (T*)work2,
+                        (T*)work3, (T**)work4);
+                }));
     }
 
     // Schur factorization (and Schur vectors Q*Z)
-    rocsolver_hseqr_template<BATCHED, STRIDED, T>(
+    ROCBLAS_CHECK(rocsolver_hseqr_template<BATCHED, STRIDED, T>(
         handle, wantv ? rocsolver_schur_form : rocsolver_schur_eigenvalues,
         wantv ? rocsolver_schur_vectors_update : rocsolver_schur_vectors_none, n, (const I*)ilo,
         (const I*)ihi, A, shiftA, lda, strideA, W, strideW, Q, shiftQ, ldq, strideQ, info,
-        batch_count, (I*)work1, (T*)work2);
+        batch_count, (I*)work1, (T*)work2));
 
     if(wantv)
     {
@@ -694,25 +697,25 @@ rocblas_status rocsolver_geev_template(rocblas_handle handle,
         const rocblas_side side = leftv && rightv ? rocblas_side_both
             : leftv                               ? rocblas_side_left
                                                   : rocblas_side_right;
-        rocsolver_trevc3_template<BATCHED, STRIDED, T>(
+        ROCBLAS_CHECK(rocsolver_trevc3_template<BATCHED, STRIDED, T>(
             handle, side, rocsolver_eigenvectors_backtransform, n, A, shiftA, lda, strideA, VL,
             shiftVL, ldvl, strideVL, VR, shiftVR, ldvr, strideVR, batch_count, (T*)work1, (T*)work2,
-            (T*)work3, work4, (T**)work5);
+            (T*)work3, work4, (T**)work5));
 
         // undo the balancing, and normalize
         if(leftv)
         {
-            rocsolver_gebak_template<BATCHED, STRIDED, T>(
+            ROCBLAS_CHECK(rocsolver_gebak_template<BATCHED, STRIDED, T>(
                 handle, rocsolver_balance_both, rocblas_side_left, n, (const I*)ilo, (const I*)ihi,
-                (const S*)scaleS, strideS, n, VL, shiftVL, ldvl, strideVL, batch_count);
+                (const S*)scaleS, strideS, n, VL, shiftVL, ldvl, strideVL, batch_count));
             ROCSOLVER_LAUNCH_KERNEL((geev_normalize_kernel<BS1, T>), dim3(n, batch_count),
                                     dim3(BS1), 0, stream, n, VL, shiftVL, ldvl, strideVL);
         }
         if(rightv)
         {
-            rocsolver_gebak_template<BATCHED, STRIDED, T>(
+            ROCBLAS_CHECK(rocsolver_gebak_template<BATCHED, STRIDED, T>(
                 handle, rocsolver_balance_both, rocblas_side_right, n, (const I*)ilo, (const I*)ihi,
-                (const S*)scaleS, strideS, n, VR, shiftVR, ldvr, strideVR, batch_count);
+                (const S*)scaleS, strideS, n, VR, shiftVR, ldvr, strideVR, batch_count));
             ROCSOLVER_LAUNCH_KERNEL((geev_normalize_kernel<BS1, T>), dim3(n, batch_count),
                                     dim3(BS1), 0, stream, n, VR, shiftVR, ldvr, strideVR);
         }

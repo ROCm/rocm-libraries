@@ -53,6 +53,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <int BS, typename S>
 __host__ __device__ S hqr_block_sum(S v, S (*s_red)[HQR_RED(BS)], int& buf)
 {
+    static_assert(BS == 1 || BS % 64 == 0, "BS must be 1 or a multiple of 64");
 #if defined(__HIP_DEVICE_COMPILE__)
     const int lane = hqr_tid() % warpSize;
     const int wave = hqr_tid() / warpSize;
@@ -73,24 +74,33 @@ __host__ __device__ S hqr_block_sum(S v, S (*s_red)[HQR_RED(BS)], int& buf)
 #endif
 }
 
-/** HQR_BLOCK_MAXS returns the maximum of v (a non-negative real value) over the
-    thread-block to all the threads, with the same buffering scheme as hqr_block_sum. **/
+/** HQR_NANMAX returns the maximum of a and b, or NaN if either of them is NaN. **/
+template <typename S>
+__host__ __device__ inline S hqr_nanmax(const S a, const S b)
+{
+    return (a != a) ? a : ((b != b) ? b : std::max(a, b));
+}
+
+/** HQR_BLOCK_MAXS returns the maximum of v (a non-negative real value, or NaN) over the
+    thread-block to all the threads (NaN if any of the values is NaN), with the same
+    buffering scheme as hqr_block_sum. **/
 template <int BS, typename S>
 __host__ __device__ S hqr_block_maxs(S v, S (*s_red)[HQR_RED(BS)], int& buf)
 {
+    static_assert(BS == 1 || BS % 64 == 0, "BS must be 1 or a multiple of 64");
 #if defined(__HIP_DEVICE_COMPILE__)
     const int lane = hqr_tid() % warpSize;
     const int wave = hqr_tid() / warpSize;
     const int nwaves = BS / warpSize;
 
     for(int offset = warpSize / 2; offset > 0; offset /= 2)
-        v = std::max(v, S(__shfl_xor(v, offset)));
+        v = hqr_nanmax(v, S(__shfl_xor(v, offset)));
     if(lane == 0)
         s_red[buf][wave] = v;
     hqr_sync();
     v = s_red[buf][0];
     for(int w = 1; w < nwaves; w++)
-        v = std::max(v, s_red[buf][w]);
+        v = hqr_nanmax(v, s_red[buf][w]);
     buf = 1 - buf;
     return v;
 #else
@@ -105,9 +115,10 @@ template <int BS, typename T, typename I, typename S>
 __host__ __device__ S hqr_block_nrm2(const I m, const T* x, S (*s_red)[HQR_RED(BS)], int& buf)
 {
     const I tid = hqr_tid();
+    // (a NaN entry makes the norm NaN, as in LAPACK DZNRM2)
     S amax = 0;
     for(I j = tid; j < m; j += BS)
-        amax = std::max(amax, std::max(std::abs(x[j].real()), std::abs(x[j].imag())));
+        amax = hqr_nanmax(amax, hqr_nanmax(std::abs(x[j].real()), std::abs(x[j].imag())));
     amax = hqr_block_maxs<BS>(amax, s_red, buf);
     if(amax == 0 || !std::isfinite(amax))
         return amax;
@@ -328,6 +339,28 @@ __device__ bool aed_setup_block(const I n,
     return true;
 }
 
+/** HSEQR_IPARMQ returns the number of shifts (ISPEC = 15) and the deflation window
+    size (ISPEC = 13) recommended by LAPACK IPARMQ for an active block of order nh. **/
+template <typename I>
+__host__ __device__ void hseqr_iparmq(const I nh, I& ns, I& nw)
+{
+    ns = 2;
+    if(nh >= 30)
+        ns = 4;
+    if(nh >= 60)
+        ns = 10;
+    if(nh >= 150)
+        ns = std::max(I(10), I(nh / I(::lround(::log(double(nh)) / ::log(2.0)))));
+    if(nh >= 590)
+        ns = 64;
+    if(nh >= 3000)
+        ns = 128;
+    if(nh >= 6000)
+        ns = 256;
+    ns = std::max(I(2), ns - ns % 2);
+    nw = (nh <= 500) ? ns : 3 * ns / 2;
+}
+
 /** Maximum number of shifts of the sweeps of laqr4_block, and the size of the window
     above which aed_core_block uses laqr4_block for its Schur form (on the device). **/
 #define LAQR4_MAX_SHIFTS 32
@@ -361,7 +394,9 @@ __device__ I laqr4_block(const I n,
     - update: whether H must be updated with T and V,
     - spike: the new value of H(kwtop, kwtop-1).
     On the device it is executed by all the threads of a thread-block of BS threads;
-    on the host, with BS = 1. With MULTISHIFT (on the device, with st4, stT4 and sV4, the
+    on the host, with BS = 1. On the device, lds_ws (shared memory of HQR_LDS_WS_SIZE
+    entries, if given, with BS >= HQR_LDS_NMAX) is used for the Schur form of windows of
+    at most HQR_LDS_NMAX entries (lahqr_lds_block). With MULTISHIFT (on the device, with st4, stT4 and sV4, the
     status arrays and the reflections of laqr4_block in shared memory), windows with
     jw > LAQR4_NMIN are reduced to Schur form by laqr4_block (the multishift QR
     algorithm, as LAPACK ZLAQR3 calls ZLAQR4), whose own deflation windows use this
@@ -400,7 +435,7 @@ __host__ __device__ void aed_core_block(const I n,
     const S ulp = hqr_ulp<S>();
     const S smlnum = safmin * (S(n) / ulp);
 
-    I infqr;
+    I infqr = 0;
 #if defined(__HIP_DEVICE_COMPILE__)
     bool multishift = false;
     if constexpr(MULTISHIFT)
@@ -600,9 +635,17 @@ __device__ void hqr_laqr1(const int nn, const T* H, const I ldh, const T s1, con
         {
             T h21s = h(2, 1) / s;
             T h31s = h(3, 1) / s;
-            v[0] = (h(1, 1) - s1) * ((h(1, 1) - s2) / s) + h(1, 2) * h21s + h(1, 3) * h31s;
-            v[1] = h21s * (h(1, 1) + h(2, 2) - s1 - s2) + h(2, 3) * h31s;
+            v[0] = (h(1, 1) - s1) * ((h(1, 1) - s2) / s) + h(1, 2) * h21s;
+            v[1] = h21s * (h(1, 1) + h(2, 2) - s1 - s2);
             v[2] = h31s * (h(1, 1) + h(3, 3) - s1 - s2) + h21s * h(3, 2);
+            // (h(3,1) is zero when a bulge is introduced at the top of the active block; then
+            // h(1,3) and h(2,3) are not read, as the other thread-blocks of the chase may be
+            // updating them, see laqr5_chunk_block)
+            if(h31s != T(0))
+            {
+                v[0] += h(1, 3) * h31s;
+                v[1] += h(2, 3) * h31s;
+            }
         }
     }
 }
@@ -647,14 +690,19 @@ __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G, const
  *    spaced 3 rows apart (LAPACK 3.10 and later pack them 2 rows apart). With
  *    this spacing, the reflections of different bulges act on disjoint rows and
  *    columns, so that each step of the chase can be applied in parallel across
- *    bulges (5 barriers per step, independently of the number of shifts), whereas
- *    the tightly packed version requires the bulges to be processed one after the
- *    other. The deflation checks and the handling of collapsed bulges are those of
- *    LAPACK 3.9.0. Reflections are accumulated in U when accum is true (KACC22 = 1;
- *    the 2-by-2 block structured update of KACC22 = 2 is not used), and the
- *    far-from-diagonal updates are then left to the caller.
+ *    bulges (a fixed number of barriers per step, independently of the number of
+ *    shifts), whereas the tightly packed version requires the bulges to be processed
+ *    one after the other. The deflation checks and the handling of collapsed bulges
+ *    are those of LAPACK 3.9.0.
  *
- *    s contains the shifts (s[0:2*nbmps-1]), and sV is shared workspace for
+ *    Without accum, the reflections are applied to the full rows and columns of H and,
+ *    if wantz, to Z. With accum (KACC22 = 1; the 2-by-2 block structured update of
+ *    KACC22 = 2 is not used), only the window of the chunk is updated, and the
+ *    reflections of each step krcol are stored in Vbuf (3*(nbmps+1) entries per step:
+ *    the 3 entries of the reflection of each bulge), from which the caller forms U
+ *    (laqr5_build_u_block) for the far-from-diagonal updates.
+ *
+ *    sh contains the shifts (sh[0:2*nbmps-1]), and sV is shared workspace for
  *    nbmps+1 reflections.
  *
  *    With accum, the chunk may be chased by G > 1 thread-blocks (w = 0:G-1; bar
@@ -686,8 +734,6 @@ __device__ void laqr5_chunk_block(const bool wantt,
                                   const I ihiz,
                                   T* Z,
                                   const I ldz,
-                                  T* U,
-                                  const I ldu,
                                   T* Vbuf,
                                   T (*sV)[3],
                                   const I G = 1,
@@ -699,7 +745,6 @@ __device__ void laqr5_chunk_block(const bool wantt,
     const I tid = hipThreadIdx_x;
     auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
     auto z = [&](const I i, const I j) -> T& { return Z[idx2D(i - 1, j - 1, ldz)]; };
-    auto u = [&](const I i, const I j) -> T& { return U[idx2D(i - 1, j - 1, ldu)]; };
     auto vv = [&](const I r, const I m) -> T& { return sV[m][r - 1]; }; // V(r, m), 1-based
     auto s = [&](const I i) -> T { return sh[i - 1]; }; // S(i), 1-based
 
@@ -870,7 +915,8 @@ __device__ void laqr5_chunk_block(const bool wantt,
         // is updated with a matrix-matrix multiply, and the other thread-blocks read them)
         const I mlast = mbot + (bmp22 ? 1 : 0);
         const I nb = mlast - mtop + 1;
-        T* vb = Vbuf + (krcol - incol) * ldvb;
+        // (Vbuf is only given with accum, which G > 1 requires)
+        T* vb = accum ? Vbuf + (krcol - incol) * ldvb : nullptr;
         if(accum && lead)
         {
             for(I idx = tid; idx < 3 * nb; idx += BS)
@@ -961,8 +1007,8 @@ __device__ void laqr5_chunk_block(const bool wantt,
         else
             __syncthreads();
 
-        // 3. multiply H by reflections from the right, and accumulate them in U (or apply
-        //    them to Z). Delay filling in the last row until the vigilant deflation check
+        // 3. multiply H by reflections from the right (and, without accum, Z; with accum
+        //    they were stored in Vbuf). Delay filling in the last row until the vigilant deflation check
         //    is complete. The bulges act on disjoint columns, so all the (bulge, row) pairs
         //    are independent and are distributed among the threads.
         const I jtop = accum ? std::max(ktop, incol) : (wantt ? I(1) : ktop);
@@ -1376,10 +1422,14 @@ __host__ __device__ void laqr0_shifts_tail(const bool sort,
  *    workspace bounds, e.g. NSMAX = (n+6)/9, match the sweep of laqr5_chunk_block;
  *    3.12 uses NSMAX = (n-3)/6), except for the off-window updates of the AED, the
  *    extra shifts when the AED provides too few (laqr0_toofew_block) and the sweep
- *    itself, which are left to the caller. Unlike LAPACK, the Schur forms of the
- *    deflation window and of the too-few-shifts submatrix always use ZLAHQR, where
- *    LAPACK calls ZLAQR4 for sizes above NMIN = 75 (the window is capped by
- *    HSEQR_AED_WINDOW_MAX, but can still grow to (n-1)/3 when the iterations stall).
+ *    itself, which are left to the caller. LAPACK computes the Schur forms of the
+ *    deflation window and of the too-few-shifts submatrix with ZLAQR4 for sizes above
+ *    NMIN = 75, and with ZLAHQR otherwise. Here, on the device, windows larger than
+ *    LAQR4_NMIN (64, the largest size of the shared memory kernel lahqr_lds_block) use
+ *    laqr4_block, deferred to laqr0_core4_block, and the other windows, the
+ *    too-few-shifts submatrix and all the windows of the hybrid mode use ZLAHQR (the
+ *    window is capped by hseqr_aed_window_cap, but can still grow to (n-1)/3 when the
+ *    iterations stall).
  *    It is split in two parts around the core of the aggressive early deflation
  *    (aed_core_block), which runs on the device (laqr0_iteration_block) or on the
  *    host (hybrid mode):
@@ -1505,7 +1555,7 @@ __device__ void laqr0_part2_block(const I n,
     auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
 
     constexpr I kexsh = 6;
-    constexpr I nmin = 75;
+    constexpr I nmin = 75; // LAPACK NMIN (IPARMQ, ISPEC = 12)
     constexpr I nibble = 14;
     const S wilk1 = S(0.75);
 
@@ -1599,11 +1649,9 @@ __device__ void laqr0_part2_block(const I n,
     eigenvalues of the trailing submatrix H(ks:kbot2, ks:kbot2) (ns-by-ns), computed
     with ZLAHQR in the workspace H(n-ns+1:n, 1:ns) below the subdiagonal. It must run
     after the off-window updates of the AED.
-    Test coverage: with the default settings (ns capped at the deflation window),
-    this path is only reached when the window has shrunk after several iterations
-    without deflations, or when the ZLAHQR of the window fails, and no test matrix is
-    known to reach it reliably (a large deflation skips the sweep instead). It was
-    verified with the cap disabled at n = 3000, where it runs in nearly every sweep. **/
+    With the default settings (ns capped by the deflation window), this path is only
+    reached when the window has shrunk after several iterations without deflations, or
+    when the Schur form of the window fails. **/
 template <int BS, typename T, typename I>
 __device__ void
     laqr0_toofew_block(const I n, T* H, const I ldh, T* W, I* status, I (*s_ired)[HQR_RED(BS)], int& ibuf)
@@ -1714,17 +1762,8 @@ __device__ I laqr4_block(const I n,
     auto h = [&](const I i, const I j) -> T& { return H[idx2D(i - 1, j - 1, ldh)]; };
 
     // tuning parameters (LAPACK IPARMQ for the order n, and ZLAQR4 with an unlimited LWORK)
-    I ns_ip = 2;
-    if(n >= 30)
-        ns_ip = 4;
-    if(n >= 60)
-        ns_ip = 10;
-    if(n >= 150)
-        ns_ip = std::max(I(10), I(n / I(::lround(::log2(double(n))))));
-    if(n >= 590)
-        ns_ip = 64;
-    ns_ip = std::max(I(2), ns_ip - ns_ip % 2);
-    const I nw_ip = (n <= 500) ? ns_ip : 3 * ns_ip / 2;
+    I ns_ip, nw_ip;
+    hseqr_iparmq(n, ns_ip, nw_ip);
     const I nwr = std::min(n, std::min((n - 1) / 3, std::max(I(2), nw_ip)));
     I nsr = std::min(ns_ip, std::min((n + 6) / 9, n - 1));
     nsr = std::min(nsr, I(LAQR4_MAX_SHIFTS));
@@ -1834,7 +1873,7 @@ __device__ I laqr4_block(const I n,
             hqr_sync();
             for(I incol = 3 * (1 - nbmps) + ktop - 1; incol <= kbot - 2; incol += 3 * nbmps - 2)
                 laqr5_chunk_block<BS>(true, true, false, n, ktop, kbot, nbmps, incol, W + (ks - 1),
-                                      H, ldh, I(1), n, Z, ldz, (T*)nullptr, I(1), (T*)nullptr, sV);
+                                      H, ldh, I(1), n, Z, ldz, (T*)nullptr, sV);
         }
 
         // note progress (or the lack of it)
