@@ -1,0 +1,58 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Gap Coverage: F32 GEMM on gfx1250
+# Note: F32XdlMathOp requires specific setup, testing basic F32 GEMM
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  KernelTime: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # F32 baseline GEMM
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [32, 32, 1, 32]     # Small
+          - Exact: [64, 64, 1, 64]     # Medium
+          - Exact: [128, 128, 1, 128]  # Larger
+          - Exact: [256, 256, 1, 256]  # Large
+          - Exact: [512, 512, 1, 512]  # Very large
+          - Exact: [63, 65, 1, 67]     # Odd
+          - Exact: [97, 97, 1, 97]     # Prime
+          - Exact: [64, 256, 1, 128]   # Non-square
+          - Exact: [256, 64, 1, 128]   # Wide
+          - Exact: [64, 64, 5, 64]     # Batched
+          # === RANGE SIZES ===
+          - Range: [ [64, 64, 256], [64, 64, 256], [1], [128] ]
+          - Range: [ [63, 1, 65], [63, 1, 65], [1], [64] ]

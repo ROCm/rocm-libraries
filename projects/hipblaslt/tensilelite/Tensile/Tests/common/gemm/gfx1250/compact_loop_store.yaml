@@ -1,0 +1,71 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# A0-compatible test: CompactLoopStore feature validation
+# Tests consolidation of global write batches into single loop
+# Good for E2E cases, reduces shader code size
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # Test CompactLoopStore: True vs False with small problem sizes
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32, 64]
+        - WavefrontSize: [32]
+        - CompactLoopStore: [True, False]  # Explicit test
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - WorkGroupMapping: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # === EXACT SIZES ===
+          - Exact: [16, 16, 1, 16]     # Minimal
+          - Exact: [32, 32, 1, 32]     # Small
+          - Exact: [64, 64, 1, 64]     # Medium square
+          - Exact: [128, 128, 1, 128]  # Larger square
+          - Exact: [256, 256, 1, 256]  # Large
+          - Exact: [63, 65, 1, 67]     # Odd sizes
+          - Exact: [97, 97, 1, 97]     # Prime
+          - Exact: [64, 256, 1, 128]   # Non-square tall
+          - Exact: [256, 64, 1, 128]   # Non-square wide
+          - Exact: [64, 64, 7, 64]     # Batched prime
+          # === RANGE SIZES ===
+          - Range: [ [64, 64, 256], [64, 64, 256], [1], [64] ]
+          - Range: [ [63, 1, 65], [63, 1, 65], [1], [64] ]
