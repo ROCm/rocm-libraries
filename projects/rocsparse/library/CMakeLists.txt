@@ -121,8 +121,8 @@ message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
 
 # Target include directories
 target_include_directories(rocsparse
-                           PRIVATE ${ROCPRIM_INCLUDE_DIRS}
-                                   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
+                           SYSTEM PRIVATE ${ROCPRIM_INCLUDE_DIRS}
+                           PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
                                    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/library/include>
                            PUBLIC  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/rocsparse>
                                    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
