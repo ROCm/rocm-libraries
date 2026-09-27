@@ -29,7 +29,7 @@
 function hipblasSgetrfFortran(handle, n, A, lda, ipiv, info) &
     bind(c, name='hipblasSgetrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetrfFortran
     type(c_ptr), value :: handle
@@ -45,7 +45,7 @@ end function hipblasSgetrfFortran
 function hipblasDgetrfFortran(handle, n, A, lda, ipiv, info) &
     bind(c, name='hipblasDgetrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetrfFortran
     type(c_ptr), value :: handle
@@ -61,7 +61,7 @@ end function hipblasDgetrfFortran
 function hipblasCgetrfFortran(handle, n, A, lda, ipiv, info) &
     bind(c, name='hipblasCgetrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetrfFortran
     type(c_ptr), value :: handle
@@ -77,7 +77,7 @@ end function hipblasCgetrfFortran
 function hipblasZgetrfFortran(handle, n, A, lda, ipiv, info) &
     bind(c, name='hipblasZgetrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetrfFortran
     type(c_ptr), value :: handle
@@ -94,7 +94,7 @@ end function hipblasZgetrfFortran
 function hipblasSgetrfBatchedFortran(handle, n, A, lda, ipiv, info, batch_count) &
     bind(c, name='hipblasSgetrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetrfBatchedFortran
     type(c_ptr), value :: handle
@@ -111,7 +111,7 @@ end function hipblasSgetrfBatchedFortran
 function hipblasDgetrfBatchedFortran(handle, n, A, lda, ipiv, info, batch_count) &
     bind(c, name='hipblasDgetrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetrfBatchedFortran
     type(c_ptr), value :: handle
@@ -128,7 +128,7 @@ end function hipblasDgetrfBatchedFortran
 function hipblasCgetrfBatchedFortran(handle, n, A, lda, ipiv, info, batch_count) &
     bind(c, name='hipblasCgetrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetrfBatchedFortran
     type(c_ptr), value :: handle
@@ -145,7 +145,7 @@ end function hipblasCgetrfBatchedFortran
 function hipblasZgetrfBatchedFortran(handle, n, A, lda, ipiv, info, batch_count) &
     bind(c, name='hipblasZgetrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetrfBatchedFortran
     type(c_ptr), value :: handle
@@ -164,7 +164,7 @@ function hipblasSgetrfStridedBatchedFortran(handle, n, A, lda, stride_A, &
                                             ipiv, stride_P, info, batch_count) &
     bind(c, name='hipblasSgetrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -185,7 +185,7 @@ function hipblasDgetrfStridedBatchedFortran(handle, n, A, lda, stride_A, &
                                             ipiv, stride_P, info, batch_count) &
     bind(c, name='hipblasDgetrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -206,7 +206,7 @@ function hipblasCgetrfStridedBatchedFortran(handle, n, A, lda, stride_A, &
                                             ipiv, stride_P, info, batch_count) &
     bind(c, name='hipblasCgetrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -227,7 +227,7 @@ function hipblasZgetrfStridedBatchedFortran(handle, n, A, lda, stride_A, &
                                             ipiv, stride_P, info, batch_count) &
     bind(c, name='hipblasZgetrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -249,7 +249,7 @@ function hipblasSgetrsFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                 B, ldb, info) &
     bind(c, name='hipblasSgetrsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetrsFortran
     type(c_ptr), value :: handle
@@ -271,7 +271,7 @@ function hipblasDgetrsFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                 B, ldb, info) &
     bind(c, name='hipblasDgetrsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetrsFortran
     type(c_ptr), value :: handle
@@ -293,7 +293,7 @@ function hipblasCgetrsFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                 B, ldb, info) &
     bind(c, name='hipblasCgetrsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetrsFortran
     type(c_ptr), value :: handle
@@ -315,7 +315,7 @@ function hipblasZgetrsFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                 B, ldb, info) &
     bind(c, name='hipblasZgetrsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetrsFortran
     type(c_ptr), value :: handle
@@ -338,7 +338,7 @@ function hipblasSgetrsBatchedFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                         B, ldb, info, batch_count) &
     bind(c, name='hipblasSgetrsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetrsBatchedFortran
     type(c_ptr), value :: handle
@@ -361,7 +361,7 @@ function hipblasDgetrsBatchedFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                         B, ldb, info, batch_count) &
     bind(c, name='hipblasDgetrsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetrsBatchedFortran
     type(c_ptr), value :: handle
@@ -384,7 +384,7 @@ function hipblasCgetrsBatchedFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                         B, ldb, info, batch_count) &
     bind(c, name='hipblasCgetrsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetrsBatchedFortran
     type(c_ptr), value :: handle
@@ -407,7 +407,7 @@ function hipblasZgetrsBatchedFortran(handle, trans, n, nrhs, A, lda, ipiv, &
                                         B, ldb, info, batch_count) &
     bind(c, name='hipblasZgetrsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetrsBatchedFortran
     type(c_ptr), value :: handle
@@ -431,7 +431,7 @@ function hipblasSgetrsStridedBatchedFortran(handle, trans, n, nrhs, A, lda, stri
                                             stride_P, B, ldb, stride_B, info, batch_count) &
     bind(c, name='hipblasSgetrsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetrsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -457,7 +457,7 @@ function hipblasDgetrsStridedBatchedFortran(handle, trans, n, nrhs, A, lda, stri
                                             stride_P, B, ldb, stride_B, info, batch_count) &
     bind(c, name='hipblasDgetrsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetrsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -483,7 +483,7 @@ function hipblasCgetrsStridedBatchedFortran(handle, trans, n, nrhs, A, lda, stri
                                             stride_P, B, ldb, stride_B, info, batch_count) &
     bind(c, name='hipblasCgetrsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetrsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -509,7 +509,7 @@ function hipblasZgetrsStridedBatchedFortran(handle, trans, n, nrhs, A, lda, stri
                                             stride_P, B, ldb, stride_B, info, batch_count) &
     bind(c, name='hipblasZgetrsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetrsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -535,7 +535,7 @@ end function hipblasZgetrsStridedBatchedFortran
 function hipblasSgetriBatchedFortran(handle, n, A, lda, ipiv, C, ldc, info, batch_count) &
     bind(c, name='hipblasSgetriBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgetriBatchedFortran
     type(c_ptr), value :: handle
@@ -554,7 +554,7 @@ end function hipblasSgetriBatchedFortran
 function hipblasDgetriBatchedFortran(handle, n, A, lda, ipiv, C, ldc, info, batch_count) &
     bind(c, name='hipblasDgetriBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgetriBatchedFortran
     type(c_ptr), value :: handle
@@ -573,7 +573,7 @@ end function hipblasDgetriBatchedFortran
 function hipblasCgetriBatchedFortran(handle, n, A, lda, ipiv, C, ldc, info, batch_count) &
     bind(c, name='hipblasCgetriBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgetriBatchedFortran
     type(c_ptr), value :: handle
@@ -592,7 +592,7 @@ end function hipblasCgetriBatchedFortran
 function hipblasZgetriBatchedFortran(handle, n, A, lda, ipiv, C, ldc, info, batch_count) &
     bind(c, name='hipblasZgetriBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgetriBatchedFortran
     type(c_ptr), value :: handle
@@ -612,7 +612,7 @@ end function hipblasZgetriBatchedFortran
 function hipblasSgeqrfFortran(handle, m, n, A, lda, tau, info) &
     bind(c, name='hipblasSgeqrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgeqrfFortran
     type(c_ptr), value :: handle
@@ -629,7 +629,7 @@ end function hipblasSgeqrfFortran
 function hipblasDgeqrfFortran(handle, m, n, A, lda, tau, info) &
     bind(c, name='hipblasDgeqrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgeqrfFortran
     type(c_ptr), value :: handle
@@ -646,7 +646,7 @@ end function hipblasDgeqrfFortran
 function hipblasCgeqrfFortran(handle, m, n, A, lda, tau, info) &
     bind(c, name='hipblasCgeqrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgeqrfFortran
     type(c_ptr), value :: handle
@@ -663,7 +663,7 @@ end function hipblasCgeqrfFortran
 function hipblasZgeqrfFortran(handle, m, n, A, lda, tau, info) &
     bind(c, name='hipblasZgeqrfFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgeqrfFortran
     type(c_ptr), value :: handle
@@ -681,7 +681,7 @@ end function hipblasZgeqrfFortran
 function hipblasSgeqrfBatchedFortran(handle, m, n, A, lda, tau, info, batch_count) &
     bind(c, name='hipblasSgeqrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgeqrfBatchedFortran
     type(c_ptr), value :: handle
@@ -699,7 +699,7 @@ end function hipblasSgeqrfBatchedFortran
 function hipblasDgeqrfBatchedFortran(handle, m, n, A, lda, tau, info, batch_count) &
     bind(c, name='hipblasDgeqrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgeqrfBatchedFortran
     type(c_ptr), value :: handle
@@ -717,7 +717,7 @@ end function hipblasDgeqrfBatchedFortran
 function hipblasCgeqrfBatchedFortran(handle, m, n, A, lda, tau, info, batch_count) &
     bind(c, name='hipblasCgeqrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgeqrfBatchedFortran
     type(c_ptr), value :: handle
@@ -735,7 +735,7 @@ end function hipblasCgeqrfBatchedFortran
 function hipblasZgeqrfBatchedFortran(handle, m, n, A, lda, tau, info, batch_count) &
     bind(c, name='hipblasZgeqrfBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgeqrfBatchedFortran
     type(c_ptr), value :: handle
@@ -755,7 +755,7 @@ function hipblasSgeqrfStridedBatchedFortran(handle, m, n, A, lda, stride_A, &
                                             tau, stride_T, info, batch_count) &
     bind(c, name='hipblasSgeqrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgeqrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -777,7 +777,7 @@ function hipblasDgeqrfStridedBatchedFortran(handle, m, n, A, lda, stride_A, &
                                             tau, stride_T, info, batch_count) &
     bind(c, name='hipblasDgeqrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgeqrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -799,7 +799,7 @@ function hipblasCgeqrfStridedBatchedFortran(handle, m, n, A, lda, stride_A, &
                                             tau, stride_T, info, batch_count) &
     bind(c, name='hipblasCgeqrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgeqrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -821,7 +821,7 @@ function hipblasZgeqrfStridedBatchedFortran(handle, m, n, A, lda, stride_A, &
                                             tau, stride_T, info, batch_count) &
     bind(c, name='hipblasZgeqrfStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgeqrfStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -843,7 +843,7 @@ end function hipblasZgeqrfStridedBatchedFortran
 function hipblasSgelsFortran(handle, trans, m, n, nrhs, A, lda, B, ldb, info, deviceInfo) &
     bind(c, name='hipblasSgelsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgelsFortran
     type(c_ptr), value :: handle
@@ -864,7 +864,7 @@ end function hipblasSgelsFortran
 function hipblasDgelsFortran(handle, trans, m, n, nrhs, A, lda, B, ldb, info, deviceInfo) &
     bind(c, name='hipblasDgelsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgelsFortran
     type(c_ptr), value :: handle
@@ -885,7 +885,7 @@ end function hipblasDgelsFortran
 function hipblasCgelsFortran(handle, trans, m, n, nrhs, A, lda, B, ldb, info, deviceInfo) &
     bind(c, name='hipblasCgelsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgelsFortran
     type(c_ptr), value :: handle
@@ -906,7 +906,7 @@ end function hipblasCgelsFortran
 function hipblasZgelsFortran(handle, trans, m, n, nrhs, A, lda, B, ldb, info, deviceInfo) &
     bind(c, name='hipblasZgelsFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgelsFortran
     type(c_ptr), value :: handle
@@ -929,7 +929,7 @@ function hipblasSgelsBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, B, ldb, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasSgelsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgelsBatchedFortran
     type(c_ptr), value :: handle
@@ -952,7 +952,7 @@ function hipblasDgelsBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, B, ldb, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasDgelsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgelsBatchedFortran
     type(c_ptr), value :: handle
@@ -975,7 +975,7 @@ function hipblasCgelsBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, B, ldb, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasCgelsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgelsBatchedFortran
     type(c_ptr), value :: handle
@@ -998,7 +998,7 @@ function hipblasZgelsBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, B, ldb, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasZgelsBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgelsBatchedFortran
     type(c_ptr), value :: handle
@@ -1022,7 +1022,7 @@ function hipblasSgelsStridedBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, strideA, B, ldb, strideB, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasSgelsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSgelsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -1048,7 +1048,7 @@ function hipblasDgelsStridedBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, strideA, B, ldb, strideB, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasDgelsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasDgelsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -1074,7 +1074,7 @@ function hipblasCgelsStridedBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, strideA, B, ldb, strideB, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasCgelsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasCgelsStridedBatchedFortran
     type(c_ptr), value :: handle
@@ -1100,7 +1100,7 @@ function hipblasZgelsStridedBatchedFortran(handle, trans, m, n, nrhs, A, &
     lda, strideA, B, ldb, strideB, info, deviceInfo, batchCount) &
         bind(c, name = 'hipblasZgelsStridedBatchedFortran')
     use iso_c_binding
-    use hipblas_enums
+    use hipblas
     implicit none
     integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasZgelsStridedBatchedFortran
     type(c_ptr), value :: handle

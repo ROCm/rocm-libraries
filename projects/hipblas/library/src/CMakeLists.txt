@@ -196,6 +196,7 @@ else( )
   )
 endif( )
 
-# Force installation of .f90 module files
-rocm_install(FILES "hipblas_module.f90"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblas")
+# The Fortran binding is generated from the headers and lives in ../../fortran,
+# which installs its own archive and .mod set. Nothing to install here any more:
+# the hand-written hipblas_module.f90 that used to be shipped as a source file
+# has been superseded and removed.

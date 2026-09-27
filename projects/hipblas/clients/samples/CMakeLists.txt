@@ -40,6 +40,13 @@ if(NOT WIN32)
   add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
 
   set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
+
+  # Absorbing the shims' objects is not enough any more: the hipblas module they
+  # and these samples `use` is built by ../../fortran, and only a link brings in
+  # both its .mod directory and its archive.
+  foreach( exe ${sample_list_fortran} )
+    target_link_libraries( ${exe} PRIVATE hipblas_fortran_client )
+  endforeach()
 endif()
 
 if(HIP_PLATFORM STREQUAL amd)
