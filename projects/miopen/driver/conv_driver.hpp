@@ -25,6 +25,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/conv/solvers.hpp>
+#include <miopen/gpu_conv_reference.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 
@@ -113,30 +114,6 @@ private:
     bool debug_logging_quiet_prev;
     bool debug_find_enforce_disable_prev;
     bool debug_is_warmup_ongoing_prev;
-};
-
-struct AutoPrepareForGpuReference
-{
-    AutoPrepareForGpuReference()
-    {
-        quiet_prev                                 = miopen::debug::LoggingQuiet;
-        naive_prev                                 = miopen::debug::AlwaysEnableConvDirectNaive;
-        miopen::debug::AlwaysEnableConvDirectNaive = true;
-        miopen::debug::LoggingQuiet                = true;
-    }
-    AutoPrepareForGpuReference(const AutoPrepareForGpuReference&)            = delete;
-    AutoPrepareForGpuReference(AutoPrepareForGpuReference&&)                 = delete;
-    AutoPrepareForGpuReference& operator=(const AutoPrepareForGpuReference&) = delete;
-    AutoPrepareForGpuReference& operator=(AutoPrepareForGpuReference&&)      = delete;
-    ~AutoPrepareForGpuReference()
-    {
-        miopen::debug::LoggingQuiet                = quiet_prev;
-        miopen::debug::AlwaysEnableConvDirectNaive = naive_prev;
-    }
-
-private:
-    bool naive_prev;
-    bool quiet_prev;
 };
 
 static inline void AdjustWorkspacesizeVariableFromEnv(std::size_t& sz)
@@ -566,6 +543,13 @@ private:
 
     double GetDefaultTolerance() const
     {
+        constexpr bool is_fp8  = std::is_same<Tgpu, float8_fnuz>::value;
+        constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
+
+        // hip_f8 is one byte, so fp8/bf8 would otherwise take the int8 constant below.
+        if(is_fp8 || is_bfp8)
+            return is_bfp8 ? 2.0e-3 : 1.0e-3;
+
         // Computation error of fp16 is ~2^13 (=8192) bigger than
         // the one of fp32 because mantissa is shorter by 13 bits.
         auto tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 1) ? 1.5e-6 : 8.2e-3;
@@ -573,9 +557,7 @@ private:
         // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
         if(std::is_same<Tgpu, bfloat16>::value)
             tolerance *= 8.0;
-        constexpr bool is_fp8  = std::is_same<Tgpu, float8_fnuz>::value;
-        constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
-        if(is_bfp8 || is_fp8 || TensorsCasted())
+        if(TensorsCasted())
             tolerance *= 37.0;
 
         { // tf32 has same mantissa length as fp16
@@ -585,6 +567,17 @@ private:
                 tolerance = 8.2e-3;
         }
         return tolerance;
+    }
+
+    // The GPU stores its result as fp8/bf8 but the CPU reference keeps it in float, so round the
+    // reference the same way before comparing. Otherwise the GPU's rounding looks like an error.
+    void RoundRefToGpuStorage(std::vector<Tref>& v) const
+    {
+        if constexpr(std::is_same_v<Tgpu, float8_fnuz> || std::is_same_v<Tgpu, bfloat8_fnuz>)
+        {
+            for(auto& x : v)
+                x = static_cast<Tgpu>(x);
+        }
     }
 
     enum class Direction
@@ -956,7 +949,10 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
     {
         out_len[0] *= miopen::deref(inputTensor).GetVectorLength();
     }
-    SetTensorNd(outputTensor, out_len, inflags.GetValueStr("out_layout"), data_type);
+    // Int8 convolution produces an int32 output.
+    const auto out_data_type =
+        (data_type == miopenInt8 || data_type == miopenInt8x4) ? miopenInt32 : data_type;
+    SetTensorNd(outputTensor, out_len, inflags.GetValueStr("out_layout"), out_data_type);
     if(inflags.GetValueStr("out_cast_type") != "-1")
     {
         const auto out_cast_type = DataTypeFromShortString(inflags.GetValueStr("out_cast_type"));
@@ -1778,10 +1774,10 @@ bool ConvDriver<Tgpu, Tref>::UseGPUReference()
 {
     if(!env::disabled(MIOPEN_DRIVER_USE_GPU_REFERENCE))
     {
+        // GpuConvReference does not support fp8/bf8, so those types use the CPU reference.
         if((miopen_type<Tref>{} == miopenFloat &&
             (miopen_type<Tgpu>{} == miopenFloat || miopen_type<Tgpu>{} == miopenHalf ||
-             miopen_type<Tgpu>{} == miopenBFloat16 || miopen_type<Tgpu>{} == miopenFloat8_fnuz ||
-             miopen_type<Tgpu>{} == miopenBFloat8_fnuz)) ||
+             miopen_type<Tgpu>{} == miopenBFloat16)) ||
            (miopen_type<Tref>{} == miopenInt32 && miopen_type<Tgpu>{} == miopenInt8))
             return true;
         else
@@ -2645,6 +2641,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
 
         if(inflags.GetValueInt("bias") != 0)
         {
+            RoundRefToGpuStorage(outhost.data);
             cpu_bias_forward(outhost, b.GetTensor());
         }
     }
@@ -2661,6 +2658,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
 
         if(inflags.GetValueInt("bias") != 0)
         {
+            RoundRefToGpuStorage(outhost.data);
             outhost.par_for_each([&](auto out_n_id, auto out_k_id, auto... out_spatial_id_pack) {
                 outhost(out_n_id, out_k_id, out_spatial_id_pack...) =
                     double(outhost(out_n_id, out_k_id, out_spatial_id_pack...)) +
@@ -2668,6 +2666,11 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
             });
         }
     }
+
+    // The GPU applies bias as a separate kernel, so it rounds twice: once when the conv kernel
+    // stores its output and once when the bias kernel stores its own. The rounds above match
+    // the first; this one matches the second, and is a no-op when bias is off.
+    RoundRefToGpuStorage(outhost.data);
 
     if(inflags.GetValueInt("dump_output"))
     {
@@ -2681,8 +2684,6 @@ int ConvDriver<Tgpu, Tref>::RunForwardCPU()
 template <typename Tgpu, typename Tref>
 int ConvDriver<Tgpu, Tref>::RunForwardGPUReference()
 {
-    AutoPrepareForGpuReference naive_conv_enable;
-
     if(inflags.GetValueInt("bias") != 0)
     {
         std::cout << "gpu reference convolution does not support bias yet" << std::endl;
@@ -2693,25 +2694,30 @@ int ConvDriver<Tgpu, Tref>::RunForwardGPUReference()
         out.FillGpuBufferWithNans(handle, outputTensor);
     }
 
-    auto ref_solution_id = mode == miopenTranspose //
-                               ? miopen::solver::Id("ConvDirectNaiveConvBwd").Value()
-                               : miopen::solver::Id("ConvDirectNaiveConvFwd").Value();
-    auto rc              = miopenConvolutionForwardImmediate(handle,
-                                                weightTensor,
-                                                wei.GetDevicePtr(),
-                                                inputTensor,
-                                                in.GetDevicePtr(),
-                                                convDesc,
-                                                outputTensor,
-                                                out.GetDevicePtr(),
-                                                nullptr,
-                                                0,
-                                                ref_solution_id);
-    if(rc != miopenStatusSuccess)
+    auto& miopen_handle = miopen::deref(handle);
+    const auto& conv    = miopen::deref(convDesc);
+    if(mode == miopenTranspose)
     {
-        std::cout << "reference kernel fail to run "
-                  << miopen::solver::Id(ref_solution_id).ToString() << std::endl;
-        return rc;
+        // Transpose FWD is semantically a backward data pass
+        miopen::GpuConvReference::RunBwd(miopen_handle,
+                                         miopen::deref(inputTensor),
+                                         in.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         wei.GetDevicePtr(),
+                                         miopen::deref(outputTensor),
+                                         out.GetDevicePtr(),
+                                         conv);
+    }
+    else
+    {
+        miopen::GpuConvReference::RunFwd(miopen_handle,
+                                         miopen::deref(inputTensor),
+                                         in.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         wei.GetDevicePtr(),
+                                         miopen::deref(outputTensor),
+                                         out.GetDevicePtr(),
+                                         conv);
     }
 
     if(miopen_type<Tgpu>{} == miopen_type<Tref>{} || miopen_type<Tgpu>{} == miopenInt8 ||
@@ -3957,6 +3963,8 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWeightsCPU()
                                         miopen::deref(convDesc).GetGroupCount());
     }
 
+    RoundRefToGpuStorage(dwei_host.data);
+
     if(inflags.GetValueInt("dump_output"))
     {
         dumpBufferToFile<Tref>(
@@ -3993,6 +4001,11 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataCPU()
                                       miopen::deref(convDesc).GetGroupCount());
     }
 
+    // Needed for the transpose branch above, which stores through tensor<Tref>. The non-
+    // transpose branch already quantizes, since cpu_convolution_backward_data deduces its
+    // store type from dout (tensor<Tgpu>); rounding is idempotent, so this covers both.
+    RoundRefToGpuStorage(din_host.data);
+
     if(inflags.GetValueInt("dump_output"))
     {
         dumpBufferToFile<Tref>("dump_bwd_din_cpu.bin", din_host.data.data(), din_host.data.size());
@@ -4007,6 +4020,8 @@ int ConvDriver<Tgpu, Tref>::RunBackwardBiasCPU()
 {
     cpu_bias_backward_data(dout.GetTensor(), db_host);
 
+    RoundRefToGpuStorage(db_host.data);
+
     if(inflags.GetValueInt("dump_output"))
     {
         dumpBufferToFile<Tref>("dump_bwd_db_cpu.bin", db_host.data.data(), db_host.data.size());
@@ -4019,30 +4034,37 @@ int ConvDriver<Tgpu, Tref>::RunBackwardBiasCPU()
 template <typename Tgpu, typename Tref>
 int ConvDriver<Tgpu, Tref>::RunBackwardWeightsGPUReference()
 {
-    AutoPrepareForGpuReference naive_conv_enable;
-
     if(init_output_nan)
     {
         dwei.FillGpuBufferWithNans(handle, weightTensor);
     }
 
-    auto ref_solution_id = miopen::solver::Id("ConvDirectNaiveConvWrw").Value();
-    auto rc              = miopenConvolutionBackwardWeightsImmediate(handle,
-                                                        outputTensor,
-                                                        dout.GetDevicePtr(),
-                                                        inputTensor,
-                                                        in.GetDevicePtr(),
-                                                        convDesc,
-                                                        weightTensor,
-                                                        dwei.GetDevicePtr(),
-                                                        nullptr,
-                                                        0,
-                                                        ref_solution_id);
-    if(rc != miopenStatusSuccess)
+    auto& miopen_handle = miopen::deref(handle);
+    const auto& conv    = miopen::deref(convDesc);
+    if(mode == miopenTranspose)
     {
-        std::cout << "reference kernel fail to run "
-                  << miopen::solver::Id(ref_solution_id).ToString() << std::endl;
-        return rc;
+        // Transpose WrW: roles of "input" and "output" are swapped relative to a
+        // regular convolution (mirrors RunBackwardWeightsCPU's transpose branch,
+        // which calls cpu_convolution_backward_weight(dout, dwei, in, ...)).
+        miopen::GpuConvReference::RunWrw(miopen_handle,
+                                         miopen::deref(inputTensor),
+                                         in.GetDevicePtr(),
+                                         miopen::deref(outputTensor),
+                                         dout.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         dwei.GetDevicePtr(),
+                                         conv);
+    }
+    else
+    {
+        miopen::GpuConvReference::RunWrw(miopen_handle,
+                                         miopen::deref(outputTensor),
+                                         dout.GetDevicePtr(),
+                                         miopen::deref(inputTensor),
+                                         in.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         dwei.GetDevicePtr(),
+                                         conv);
     }
 
     if(miopen_type<Tgpu>{} == miopen_type<Tref>{})
@@ -4073,32 +4095,35 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWeightsGPUReference()
 template <typename Tgpu, typename Tref>
 int ConvDriver<Tgpu, Tref>::RunBackwardDataGPUReference()
 {
-    AutoPrepareForGpuReference naive_conv_enable;
-
     if(init_output_nan)
     {
         din.FillGpuBufferWithNans(handle, inputTensor);
     }
 
-    auto ref_solution_id = mode == miopenTranspose //
-                               ? miopen::solver::Id("ConvDirectNaiveConvFwd").Value()
-                               : miopen::solver::Id("ConvDirectNaiveConvBwd").Value();
-    auto rc              = miopenConvolutionBackwardDataImmediate(handle,
-                                                     outputTensor,
-                                                     dout.GetDevicePtr(),
-                                                     weightTensor,
-                                                     wei.GetDevicePtr(),
-                                                     convDesc,
-                                                     inputTensor,
-                                                     din.GetDevicePtr(),
-                                                     nullptr,
-                                                     0,
-                                                     ref_solution_id);
-    if(rc != miopenStatusSuccess)
+    auto& miopen_handle = miopen::deref(handle);
+    const auto& conv    = miopen::deref(convDesc);
+    if(mode == miopenTranspose)
     {
-        std::cout << "reference kernel fail to run "
-                  << miopen::solver::Id(ref_solution_id).ToString() << std::endl;
-        return rc;
+        // Transpose BWD is semantically a forward pass: din = Fwd(x=dout, w)
+        miopen::GpuConvReference::RunFwd(miopen_handle,
+                                         miopen::deref(outputTensor),
+                                         dout.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         wei.GetDevicePtr(),
+                                         miopen::deref(inputTensor),
+                                         din.GetDevicePtr(),
+                                         conv);
+    }
+    else
+    {
+        miopen::GpuConvReference::RunBwd(miopen_handle,
+                                         miopen::deref(outputTensor),
+                                         dout.GetDevicePtr(),
+                                         miopen::deref(weightTensor),
+                                         wei.GetDevicePtr(),
+                                         miopen::deref(inputTensor),
+                                         din.GetDevicePtr(),
+                                         conv);
     }
 
     if(miopen_type<Tgpu>{} == miopen_type<Tref>{})

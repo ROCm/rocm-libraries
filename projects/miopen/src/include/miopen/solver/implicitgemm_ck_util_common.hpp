@@ -519,30 +519,6 @@ inline size_t GetWorkspaceSizeLayoutTransformConv(const miopen::conv::ProblemDes
     return wt.GetSize();
 }
 
-inline void
-ZeroOutTensor(const Handle& handle, const TensorDescriptor& tensorDesc, Data_t tensorData)
-{
-#if MIOPEN_BACKEND_HIP
-    // SetTensor is required for non-packed tensors, but is also slower.
-    // Use faster clear if possible.
-    if(tensorDesc.IsPacked())
-    {
-        HipEventProfiler pfr(handle);
-
-        auto status = hipMemsetAsync(tensorData, 0, tensorDesc.GetNumBytes(), handle.GetStream());
-        if(status != hipSuccess)
-        {
-            MIOPEN_THROW_HIP_STATUS(status, "hipMemsetAsync() failed");
-        }
-    }
-    else
-#endif
-    {
-        auto zero = 0.0f;
-        SetTensor(handle, tensorDesc, tensorData, &zero);
-    }
-}
-
 template <typename CastType>
 Data_t GetWorkspacePointer(const CastType& data_ctx)
 {

@@ -32,11 +32,23 @@ auto GetConvTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
-    return std::vector{
+    auto cases = std::vector{
         // clang-format off
         TestCase{{1, 16, 14, 14}, {48, 16, 5, 5}, {2, 2}, {1, 1}, {1, 1}, datatype},
         // clang-format on
     };
+
+    // Cross-block tiling needs an fp32 output and spatial > WRW_SPATIAL_TILING_THRESHOLD, so only
+    // the fp32 suite can reach it. n=8, 200x200, 3x3 pad=1 s=1 -> ho=wo=200, spatial = 320000.
+    if(datatype == miopenFloat)
+    {
+        cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}},
+                                    {datatype, miopenTensorNCHW, {4, 3, 3, 3}},
+                                    datatype,
+                                    {{1, 1}, {1, 1}, {1, 1}}});
+    }
+
+    return cases;
 }
 
 auto GetConvTestCasesFull(miopenDataType_t datatype)
@@ -133,6 +145,38 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 4, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}, 4}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {8, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
     cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {64, 16, 32, 32}}, {datatype, miopenTensorNHWC, {64, 16, 3, 3}}, datatype, {{0, 0}, {1, 1}, {1, 1}}});
+
+    // Large spatial shapes to exercise WRW cross-block tiling with atomicAdd
+    // (spatial = n * ho * wo > WRW_SPATIAL_TILING_THRESHOLD = 262144)
+    // n=1, 600x600, 3x3 pad=1 s=1 → ho=wo=600, spatial=360000
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {1, 3, 600, 600}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {1, 3, 600, 600}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    // n=8, 200x200, 3x3 pad=1 s=1 → ho=wo=200, spatial=320000
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCHW, {8, 3, 200, 200}}, {datatype, miopenTensorNCHW, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNHWC, {8, 3, 200, 200}}, {datatype, miopenTensorNHWC, {4, 3, 3, 3}}, datatype, {{1, 1}, {1, 1}, {1, 1}}});
+
+    // 3D coverage (NCDHW/NDHWC)
+    // Plain 3x3x3
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    // Padding on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    // Stride 2 on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{1, 1, 1}, {2, 2, 2}, {1, 1, 1}}});
+    // Dilation 2 on all axes
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {4, 4, 3, 3, 3}}, datatype, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 4, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {4, 4, 3, 3, 3}}, datatype, {{2, 2, 2}, {1, 1, 1}, {2, 2, 2}}});
+    // Grouped, g=4
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 8, 8, 16, 16}}, {datatype, miopenTensorNCDHW, {8, 2, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 4}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 8, 8, 16, 16}}, {datatype, miopenTensorNDHWC, {8, 2, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 4}});
+    // Batch-dominant
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {8, 4, 4, 8, 8}}, {datatype, miopenTensorNCDHW, {8, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {8, 4, 4, 8, 8}}, {datatype, miopenTensorNDHWC, {8, 4, 3, 3, 3}}, datatype, {{0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+    // Large spatial extent, above the WRW cross-block tiling threshold
+    cases.emplace_back(TestCase{{datatype, miopenTensorNCDHW, {2, 1, 34, 66, 66}}, {datatype, miopenTensorNCDHW, {1, 1, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
+    cases.emplace_back(TestCase{{datatype, miopenTensorNDHWC, {2, 1, 34, 66, 66}}, {datatype, miopenTensorNDHWC, {1, 1, 3, 3, 3}}, datatype, {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}});
     // clang-format on
 
     return cases;
@@ -143,6 +187,12 @@ const auto& GetTestParams()
     static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         p.UseCpuRef(); // CPU verification
+        // Float accumulators (solver mode) introduce more rounding error than the
+        // previous double accumulators, especially for WRW which reduces over
+        // n * ho * wo spatial positions. Relax tolerance from 1x to 20x epsilon.
+        p.SetTolerance(Gpu::All, miopenFloat, 20.0f);
+        p.SetTolerance(Gpu::All, miopenHalf, 20.0f);
+        p.SetTolerance(Gpu::All, miopenBFloat16, 20.0f);
         return p;
     }();
     return params;
