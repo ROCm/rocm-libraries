@@ -595,14 +595,13 @@ def update_comment_if_exists(
 def build_policy_table_comment(
     results: List[CheckResult],
     marker: str,
-    ready: bool = False,
     note: Optional[str] = None,
 ) -> str:
     """Render the results as a single Markdown comment with a status table.
 
     Rows are sorted into `TABLE_ORDER`, each showing ✅/❌/⏳/🚧/🔜 status and
     full details. The footer summarises failures (or success) and a FAQ link is
-    appended. `ready` switches the heading to "Ready for Review"; `note` adds an
+    appended. The rendered claim stays scoped to policy checks. `note` adds an
     optional banner (used for the bump-PR special case).
     """
     # Render rows in a fixed, human-friendly order regardless of the order in
@@ -611,12 +610,10 @@ def build_policy_table_comment(
     results = sorted(results, key=lambda r: order_index.get(r.name, len(TABLE_ORDER)))
 
     all_passed = all(r.passed for r in results)
-    if all_passed and ready:
-        heading = "### ✅ All Checks Passed — Ready for Review"
-    elif all_passed:
-        heading = "### ✅ All Policy Checks Passed"
+    if all_passed:
+        heading = "### ✅ Policy Checks Passed"
     else:
-        heading = "### ❌ PR Check — Action Required"
+        heading = "### ❌ Policy Action Required"
     rows = []
     for r in results:
         if r.warn:
@@ -674,16 +671,14 @@ def build_policy_table_comment(
         failing_list = "\n".join(f"> - ❌ {n}" for n in failing_names)
         footer = (
             f"\n\n> ⚠️ **{failing_count} policy check(s) failed.** "
-            "Please address the issues above before this PR can be Reviewed.\n>\n"
-            "> 🚫 **Please fix the failed policies**\n"
+            "Please address the policy issues above.\n>\n"
+            "> 🚫 **Policy action required**\n"
             f"{failing_list}\n>\n"
             f"> The **`{NOT_READY_LABEL}`** label was added to this PR. Once all "
             "policies pass, the label is removed automatically."
         )
-    elif ready:
-        footer = "\n\n> 🎉 All checks passed! This PR is ready for review."
     else:
-        footer = "\n\n> 🎉 All policy checks passed!"
+        footer = "\n\n> 🎉 Policy checks passed."
 
     faq_url = "https://github.com/ROCm/rocm-libraries/blob/develop/docs/LIBRARIES_PR_BOT_FAQ.md"
 
@@ -999,7 +994,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "<!-- therock-pr-bot-fix-policies -->\n"
             "✅ Auto-approved — this is an automated dependency bump PR.",
         )
-        print(f"��� Bump PR by @{author} — all checks auto-passed.")
+        print(f"��� Bump PR by @{author} — policy checks auto-approved.")
         return 0
 
     pr_files = list(iter_pr_files(owner, repo, pr_number, token))  # type: ignore[arg-type]
@@ -1112,7 +1107,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         fix_marker = "<!-- therock-pr-bot-fix-policies -->"
         fix_body = (
             f"{fix_marker}\n"
-            "🚫 **Please fix the failed policies before requesting reviews.**\n\n"
+            "🚫 **Policy action required.**\n\n"
             "The following policy checks failed:\n"
             + "\n".join(f"- ❌ {n}" for n in failing_names)
             + "\n\n"
@@ -1227,7 +1222,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 pr_number,
                 token,
                 marker,
-                build_policy_table_comment(final_results, marker, ready=True),
+                build_policy_table_comment(final_results, marker),
             )
 
             # Update the "fix policies" comment to reflect success.
@@ -1238,7 +1233,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 pr_number,
                 token,  # type: ignore[arg-type]
                 fix_marker,
-                f"{fix_marker}\n🎉 All checks passed! This PR is ready for review.",
+                f"{fix_marker}\n🎉 Policy checks passed.",
             )
 
             # Mark any stale "blocked reviewer/assignee" gate comment as
@@ -1249,13 +1244,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 pr_number,
                 token,  # type: ignore[arg-type]
                 "<!-- therock-pr-bot-review-gate -->",
-                "<!-- therock-pr-bot-review-gate -->\n"
-                "✅ All policy checks passed — this PR is ready for review.",
+                "<!-- therock-pr-bot-review-gate -->\n✅ Policy checks passed.",
             )
 
             # All clean — remove the "Not ready to Review" label.
             remove_label(owner, repo, pr_number, token, NOT_READY_LABEL)  # type: ignore[arg-type]
-            print("✅ All required checks passed.")
+            print("✅ Policy checks passed.")
             return 0
 
         if time.time() - start > args.timeout_seconds:

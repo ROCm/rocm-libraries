@@ -222,6 +222,42 @@ Some visible text between the comments.
         self.assertTrue(any("Checklist" in x or "checklist" in x for x in e))
 
 
+# ----------------------------- policy comment -------------------------------
+
+
+class PolicyCommentWordingTests(unittest.TestCase):
+    def test_success_is_scoped_to_policy_checks(self) -> None:
+        marker = "<!-- test-policy-marker -->"
+        result = pc.CheckResult("PR Description", "📝", True, [])
+
+        body = pc.build_policy_table_comment([result], marker)
+
+        self.assertTrue(body.startswith(marker))
+        self.assertIn("### ✅ Policy Checks Passed", body)
+        self.assertIn("🎉 Policy checks passed.", body)
+        self.assertNotIn("All Checks Passed", body)
+        self.assertNotIn("ready for review", body.lower())
+        self.assertNotIn("ready to merge", body.lower())
+        self.assertIn("[Policy FAQ]", body)
+        self.assertIn("[Wish to Override Policy?]", body)
+
+    def test_failure_requests_policy_action_without_claiming_pr_readiness(self) -> None:
+        marker = "<!-- test-policy-marker -->"
+        result = pc.CheckResult(
+            "PR Description", "📝", False, ["Issue reference is missing"]
+        )
+
+        body = pc.build_policy_table_comment([result], marker)
+
+        self.assertTrue(body.startswith(marker))
+        self.assertIn("### ❌ Policy Action Required", body)
+        self.assertIn("🚫 **Policy action required**", body)
+        self.assertNotIn("ready for review", body.lower())
+        self.assertNotIn("ready to merge", body.lower())
+        self.assertIn("[Policy FAQ]", body)
+        self.assertIn("[Wish to Override Policy?]", body)
+
+
 # ----------------------------- forbidden files -------------------------------
 
 
@@ -257,7 +293,7 @@ class ForbiddenFileTests(unittest.TestCase):
             warn=True,
         )
         marker = "<!-- test -->"
-        body = pc.build_policy_table_comment([result], marker, ready=True)
+        body = pc.build_policy_table_comment([result], marker)
         self.assertIn("⚠️ Warning", body)
         self.assertIn("secret.pem", body)
         # Forbidden Files must NOT be in the label-triggering set.
@@ -372,7 +408,7 @@ class UnitTestRuleTests(unittest.TestCase):
             "Unit Test", "🧪", passed=True, details=["missing test"], warn=True
         )
         marker = "<!-- test -->"
-        body = pc.build_policy_table_comment([result], marker, ready=True)
+        body = pc.build_policy_table_comment([result], marker)
         self.assertIn("⚠️ Warning", body)
         self.assertIn("missing test", body)
         # Unit Test must NOT be in the label-triggering set anymore.
