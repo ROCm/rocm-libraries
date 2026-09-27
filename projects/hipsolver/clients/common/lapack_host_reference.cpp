@@ -1327,6 +1327,11 @@ void zsytrs_(char*                   uplo,
              int*                    ldb,
              int*                    info);
 
+void strtri_(char* uplo, char* diag, int* n, float* A, int* lda, int* info);
+void dtrtri_(char* uplo, char* diag, int* n, double* A, int* lda, int* info);
+void ctrtri_(char* uplo, char* diag, int* n, hipsolverComplex* A, int* lda, int* info);
+void ztrtri_(char* uplo, char* diag, int* n, hipsolverDoubleComplex* A, int* lda, int* info);
+
 #ifdef __cplusplus
 }
 #endif
@@ -3896,4 +3901,49 @@ void cpu_sytrs<hipsolverDoubleComplex>(hipsolverFillMode_t     uplo,
 {
     char uploC = hipsolver2char_fill(uplo);
     zsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+// trtri
+template <>
+void cpu_trtri(
+    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, float* A, int lda, int* info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    strtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(
+    hipsolverFillMode_t uplo, hipsolverDiagType_t diag, int n, double* A, int lda, int* info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    dtrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(hipsolverFillMode_t uplo,
+               hipsolverDiagType_t diag,
+               int                 n,
+               hipsolverComplex*   A,
+               int                 lda,
+               int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    ctrtri_(&uploC, &diagC, &n, A, &lda, info);
+}
+
+template <>
+void cpu_trtri(hipsolverFillMode_t     uplo,
+               hipsolverDiagType_t     diag,
+               int                     n,
+               hipsolverDoubleComplex* A,
+               int                     lda,
+               int*                    info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    char diagC = hipsolver2char_diag(diag);
+    ztrtri_(&uploC, &diagC, &n, A, &lda, info);
 }

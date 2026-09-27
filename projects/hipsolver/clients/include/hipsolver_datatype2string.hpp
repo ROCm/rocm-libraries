@@ -82,6 +82,8 @@ char hipsolver2char_operation(hipsolverOperation_t value);
 
 char hipsolver2char_fill(hipsolverFillMode_t value);
 
+char hipsolver2char_diag(hipsolverDiagType_t value);
+
 char hipsolver2char_side(hipsolverSideMode_t value);
 
 char hipsolver2char_evect(hipsolverEigMode_t value);
@@ -102,6 +104,8 @@ hipsolverStatus_t string2hipsolver_status(const std::string& value);
 hipsolverOperation_t char2hipsolver_operation(char value);
 
 hipsolverFillMode_t char2hipsolver_fill(char value);
+
+hipsolverDiagType_t char2hipsolver_diag(char value);
 
 hipsolverSideMode_t char2hipsolver_side(char value);
 

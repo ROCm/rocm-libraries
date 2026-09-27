@@ -59,6 +59,7 @@ set(hipsolverDn_test_source
   potrf_gtest.cpp
   potri_gtest.cpp
   potrs_gtest.cpp
+  trtri_gtest.cpp
   syevd_heevd_gtest.cpp
   syevj_heevj_gtest.cpp
   sygvd_hegvd_gtest.cpp

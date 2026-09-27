@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,6 +156,17 @@ public:
 
         char uplo = val->second.as<char>();
         if(uplo != 'U' && uplo != 'L' && uplo != 'F')
+            throw std::invalid_argument("Invalid value for " + name);
+    }
+
+    void validate_diag(const std::string name) const
+    {
+        auto val = find(name);
+        if(val == end())
+            return;
+
+        char diag = val->second.as<char>();
+        if(diag != 'N' && diag != 'U')
             throw std::invalid_argument("Invalid value for " + name);
     }
 

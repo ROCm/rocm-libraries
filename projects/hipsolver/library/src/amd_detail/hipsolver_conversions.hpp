@@ -38,6 +38,10 @@ rocblas_fill_ hip2rocblas_fill(hipsolverFillMode_t fill);
 
 hipsolverFillMode_t rocblas2hip_fill(rocblas_fill_ fill);
 
+rocblas_diagonal_ hip2rocblas_diag(hipsolverDiagType_t diag);
+
+hipsolverDiagType_t rocblas2hip_diag(rocblas_diagonal_ diag);
+
 rocblas_side_ hip2rocblas_side(hipsolverSideMode_t side);
 
 hipsolverSideMode_t rocblas2hip_side(rocblas_side_ side);
