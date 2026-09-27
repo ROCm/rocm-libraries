@@ -14,6 +14,8 @@ solution_module = importlib.import_module("Tensile.SolutionStructs.Solution")
 
 
 def apply_overrides(state, overrides):
+    if {"TileProcessingStrategy", "WorkAssignment"}.intersection(overrides):
+        state.pop("_PersistentLoop", None)
     for key, value in overrides.items():
         if "." in key:
             top, subkey = key.split(".", 1)

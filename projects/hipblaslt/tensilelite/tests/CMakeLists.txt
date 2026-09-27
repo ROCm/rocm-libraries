@@ -36,6 +36,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PersistentArgumentLayout_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PersistentExecutionPolicySerialization_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
@@ -60,6 +62,11 @@ if(NOT HIPBLASLT_ENABLE_YAML)
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
     )
+endif()
+
+if(HIPBLASLT_ENABLE_YAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
 endif()
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

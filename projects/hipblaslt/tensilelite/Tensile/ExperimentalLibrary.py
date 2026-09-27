@@ -22,7 +22,7 @@ silently half-built):
 
   list-solutions
              Filter the solutions in one or more shipped ``3_LibraryLogic``
-             yaml file(s)/dir(s) by parameter (e.g. ``--where StreamK=5``) to
+             yaml file(s)/dir(s) by parameter (e.g. ``--where TileProcessingStrategy=StreamK --where WorkAssignment=Hybrid``) to
              discover which indices to extract.
   extract    Reverse a shipped ``3_LibraryLogic`` yaml into a benchmark config
              (wraps ``Tensile.TensileLibLogicToYaml``).
@@ -67,7 +67,7 @@ subcommand:
       --logic <shipped>/gfx950/.../<liblogic>.yaml --indices 0 --out base.yaml
   python -m Tensile.ExperimentalLibrary pipeline \\
       --config base.yaml --set StreamKFixupTreeReduction=1 \\
-      --set StreamK=3 --feature-name streamk_treereduce \\
+      --set TileProcessingStrategy=StreamK --set WorkAssignment=StaticGrid --feature-name streamk_treereduce \\
       --arch gfx950 --cu 256 --out work/
 
 A/B family example -- rebuild every StreamK==5 solution from a shipped logic
@@ -76,7 +76,7 @@ be contrasted by solution index (StreamKWorkStealing is illustrative; use any
 real parameter, and --skip-validation for a parameter not yet in the registry):
 
   IDX=$(python -m Tensile.ExperimentalLibrary list-solutions \\
-      --logic-src <shipped>/.../<liblogic>.yaml --where StreamK=5 --indices-only)
+      --logic-src <shipped>/.../<liblogic>.yaml --where TileProcessingStrategy=StreamK --where WorkAssignment=Hybrid --indices-only)
   python -m Tensile.ExperimentalLibrary extract \\
       --logic <shipped>/.../<liblogic>.yaml --indices "$IDX" --out sk5/base.yaml
   python -m Tensile.ExperimentalLibrary merge \\
@@ -84,7 +84,7 @@ real parameter, and --skip-validation for a parameter not yet in the registry):
       # (``base*.yaml`` matches both ``base.yaml`` for a single index and
       #  ``base_<idx>.yaml`` for two or more.)
   python -m Tensile.ExperimentalLibrary pipeline \\
-      --config sk5/merged.yaml --set StreamKWorkStealing=0,1 \\
+      --config sk5/merged.yaml --set WorkQueueStealing=0,1 \\
       --feature-name sk5_ws --arch gfx950 --cu 256 --out work/ --skip-validation
 
 Omit the ``--set`` / use ``gen-logic`` + ``build-lib`` directly to just rebuild
@@ -97,7 +97,7 @@ two libraries that differ only in that parameter, with no re-benchmark:
   python -m Tensile.ExperimentalLibrary patch-logic \\
       --logic-src <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bjlk_*.yaml \\
                   <shipped>/gfx950/.../gfx950_Cijk_Ailk_Bljk_*.yaml \\
-      --where StreamK=5 --set PrefetchAcrossPersistent=1 \\
+      --where TileProcessingStrategy=StreamK --where WorkAssignment=Hybrid --set PrefetchAcrossPersistent=1 \\
       --matched-pair --skip-unbuildable \\
       --arch gfx950 --out work/pap --feature-name sk5_pap1
       # prints both HIPBLASLT_TENSILE_LIBPATH exports and writes
@@ -246,13 +246,24 @@ def parse_set_arg(arg: str) -> Tuple[str, List[Any]]:
         raise ExperimentalLibraryError(
             f"Malformed --set '{arg}': no value(s) provided for '{name}'"
         )
+    from .ExecutionPolicy import TileProcessingStrategy, WorkAssignment
+
+    string_enum = {"TileProcessingStrategy": TileProcessingStrategy,
+                   "WorkAssignment": WorkAssignment}.get(name)
+    enum_values = {member.value for member in string_enum} if string_enum else set()
+
+    def parse_value(raw):
+        # In particular, the public strategy "None" is a string, while None
+        # remains a Python null for parameters that already accept that value.
+        return raw.strip() if raw.strip() in enum_values else coerce_value(raw)
+
     # A leading "[" means a single bracketed list value (e.g.
     # ``MatrixInstruction=[16,16,16,1]``); treat the whole thing as one token so
     # the embedded commas are not split into separate values.
     if values_str_stripped.startswith("["):
-        values = [coerce_value(values_str_stripped)]
+        values = [parse_value(values_str_stripped)]
     else:
-        values = [coerce_value(v) for v in values_str.split(",")]
+        values = [parse_value(v) for v in values_str.split(",")]
     return name, values
 
 
@@ -319,6 +330,82 @@ def _set_fork_parameter(fork_params: List[Dict[str, Any]], name: str, values: Li
     fork_params.append(new_entry)
 
 
+def _augment_execution_policy(size_group, overrides):
+    """Resolve policy overrides without expanding unrelated tuning-value axes."""
+    import itertools
+
+    from .ExecutionPolicy import (
+        ALIASES, SELECTORS, UnsupportedExecutionPolicy,
+        normalize_execution_policy_with_defaults,
+    )
+
+    selector_keys = SELECTORS | set(ALIASES) | set(ALIASES.values())
+    if not selector_keys.intersection(overrides):
+        return set()
+    policy_keys = selector_keys | {
+        "StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK",
+        "PrefetchAcrossPersistent", "ReuseAcrossPersistent",
+        "DebugPersistentKernelLoopForever",
+    }
+    policy_overrides = {key: values for key, values in overrides.items() if key in policy_keys}
+    common = size_group.get("BenchmarkCommonParameters") or []
+    fork = size_group.get("ForkParameters") or []
+    source_axes = {key: values for entry in common + fork for key, values in entry.items()
+                   if key in policy_keys}
+    groups = next((entry["Groups"] for entry in reversed(fork) if "Groups" in entry), [])
+
+    # A policy-bearing group can correlate a selector with any tuning field.
+    # Combine its entries with other policy-bearing groups in their original
+    # order, including intervening groups so later field overrides still win.
+    # Independent factors before/after that span remain unexpanded.
+    policy_groups = [i for i, factor in enumerate(groups)
+                     if any(policy_keys.intersection(entry) for entry in factor)]
+    start, end = (policy_groups[0], policy_groups[-1] + 1) if policy_groups else (len(groups), len(groups))
+    entries = []
+    unsupported = None
+    for combination in itertools.product(*groups[start:end]):
+        grouped = {key: value for entry in combination for key, value in entry.items()}
+        axes = dict(source_axes)
+        axes.update({key: value if isinstance(value, list) else [value]
+                     for key, value in grouped.items() if key in policy_keys})
+        tuning = {key: value for key, value in grouped.items() if key not in policy_keys}
+        for values in itertools.product(*axes.values()):
+            source = dict(zip(axes, values))
+            for requested_values in itertools.product(*policy_overrides.values()):
+                requested = dict(zip(policy_overrides, requested_values))
+                try:
+                    normalized = normalize_execution_policy_with_defaults(requested, source)
+                except UnsupportedExecutionPolicy as error:
+                    # Solution generation also filters unsupported candidates
+                    # from a sweep. Invalid names, aliases and layouts are errors.
+                    unsupported = error
+                    continue
+                except ValueError as error:
+                    raise ExperimentalLibraryError(str(error)) from error
+                entries.append(dict(tuning, **{key: value for key, value in normalized.items()
+                                                if key in policy_keys}))
+    if not entries:
+        raise ExperimentalLibraryError(
+            f"No supported execution-policy combinations remain after --set: {unsupported}"
+        )
+
+    # Keep final benchmark settings and every non-policy tuning axis intact.
+    for section in ("BenchmarkCommonParameters", "ForkParameters"):
+        if isinstance(size_group.get(section), list):
+            size_group[section] = [remaining for entry in size_group[section]
+                                  if (remaining := {key: value for key, value in entry.items()
+                                                    if key not in policy_keys and key != "Groups"})]
+    if not isinstance(size_group.get("ForkParameters"), list):
+        size_group["ForkParameters"] = []
+    fork = size_group["ForkParameters"]
+    if not groups and len(entries) == 1:
+        for key, value in entries[0].items():
+            _set_fork_parameter(fork, key, [value])
+    else:
+        _set_fork_parameter(fork, "Groups", groups[:start] + [entries] + groups[end:])
+    return set(policy_overrides)
+
+
 def augment_config(
     config: Dict[str, Any], sets: Sequence[Tuple[str, List[Any]]]
 ) -> Dict[str, Any]:
@@ -338,14 +425,18 @@ def augment_config(
     for group in problems:
         if not (isinstance(group, list) and len(group) >= 2 and isinstance(group[1], dict)):
             continue
-        size_group = group[1]
-        fork_params = size_group.get("ForkParameters")
-        if not isinstance(fork_params, list):
-            fork_params = []
-            size_group["ForkParameters"] = fork_params
-        for name, values in sets:
-            _set_fork_parameter(fork_params, name, values)
-        touched += 1
+        for size_group in group[1:]:
+            if not isinstance(size_group, dict):
+                continue
+            handled = _augment_execution_policy(size_group, dict(sets))
+            fork_params = size_group.get("ForkParameters")
+            if not isinstance(fork_params, list):
+                fork_params = []
+                size_group["ForkParameters"] = fork_params
+            for name, values in sets:
+                if name not in handled:
+                    _set_fork_parameter(fork_params, name, values)
+            touched += 1
 
     if touched == 0:
         raise ExperimentalLibraryError(
@@ -517,7 +608,8 @@ def _count_solutions_structural(logic_yaml_path: str) -> int:
 
 
 _SUMMARY_KEYS = (
-    "StreamK",
+    "TileProcessingStrategy",
+    "WorkAssignment",
     "MatrixInstruction",
     "MIWaveTile",
     "DepthU",
@@ -547,9 +639,13 @@ def solution_matches(
     """True when ``state`` satisfies every ``(name, values)`` predicate.
 
     AND across predicates, OR within each predicate's values. A solution that
-    lacks a queried key does not match (so ``--where StreamK=5`` never matches a
+    lacks a queried key does not match (so ``--where TileProcessingStrategy=StreamK --where WorkAssignment=Hybrid`` never matches a
     solution with no StreamK key).
     """
+    from .ExecutionPolicy import normalize_execution_policy
+    if any(name in {"TileProcessingStrategy", "WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"}
+           for name, _ in wheres):
+        state = dict(state, **normalize_execution_policy(state, regenerate=False))
     for name, values in wheres:
         if name not in state or not any(_value_eq(state[name], v) for v in values):
             return False
@@ -585,6 +681,9 @@ def summarize_solution(state: Dict[str, Any], extra_keys: Sequence[str] = ()) ->
     ``extra_keys`` (e.g. the active ``--where`` names) are shown first, followed
     by ``_SUMMARY_KEYS``, de-duplicated; only keys present in ``state`` appear.
     """
+    from .ExecutionPolicy import SELECTORS, normalize_execution_policy
+    if SELECTORS.intersection(state):
+        state = dict(state, **normalize_execution_policy(state, regenerate=False))
     keys = _dedup_keys(extra_keys, _SUMMARY_KEYS)
     parts = [f"{k}={state[k]}" for k in keys if k in state]
     return " ".join(parts) if parts else "(no summary keys)"
@@ -1296,7 +1395,8 @@ def cmd_pipeline(args: argparse.Namespace) -> int:
 # Diagnostic-context columns for patch_manifest.csv, appended after whatever
 # --set/--where names the run actually queried (see cmd_patch_logic).
 _PATCH_MANIFEST_PARAMS = (
-    "StreamK",
+    "TileProcessingStrategy",
+    "WorkAssignment",
     "MacroTile0",
     "MacroTile1",
     "DepthU",
@@ -1319,8 +1419,36 @@ def _apply_overrides(state: Dict[str, Any], sets: Sequence[Tuple[str, List[Any]]
     scalar is written straight onto the state; rebuilding re-derives the kernel
     because ``solutionStateToSolution`` clears the derived-parameter flags.
     """
-    for name, values in sets:
-        state[name] = values[0]
+    from .ExecutionPolicy import ALIASES, SELECTORS, normalize_execution_policy
+    overrides = {name: values[0] for name, values in sets}
+    if not (SELECTORS | set(ALIASES) | set(ALIASES.values())).intersection(set(state) | set(overrides)):
+        state.update(overrides)
+        return
+    normalized = normalize_execution_policy(state, regenerate=False)
+    normalized.pop("_PersistentLoop", None)
+    if "StreamK" in overrides or "StreamKForceDPOnly" in overrides:
+        # A legacy --set can replace only one selector. Recover its companion
+        # from the source policy before applying the explicit override, just as
+        # editing that field in an old logic file would preserve the other one.
+        # This translation stays at the input boundary; generated state retains
+        # only the canonical selectors.
+        normalized["StreamK"] = (
+            0 if normalized["TileProcessingStrategy"] == "None" else
+            {"StaticGrid": 3, "DynamicWorkQueue": 4, "Hybrid": 5}[
+                normalized["WorkAssignment"]]
+        )
+        normalized["StreamKForceDPOnly"] = int(
+            normalized["TileProcessingStrategy"] == "DataParallel"
+        )
+    normalized.update(overrides)
+    # Inherited canonical values are not explicit requests. This allows an old
+    # alias to replace a source value while still rejecting contradictory old
+    # and new spellings supplied together in this override list.
+    normalized = normalize_execution_policy(normalized, explicit_keys=set(overrides))
+    normalized["AssignedDerivedParameters"] = False
+    normalized["AssignedProblemIndependentDerivedParameters"] = False
+    state.clear()
+    state.update(normalized)
 
 
 def _unique_staged_name(base: str, assigned: set) -> str:
@@ -1762,7 +1890,7 @@ def build_parser() -> argparse.ArgumentParser:
     ppl.add_argument(
         "--where", action="append", default=[], metavar="NAME=v1[,v2]",
         help="Select solutions to patch (repeatable; AND across keys, OR within "
-        "values), e.g. --where StreamK=5. Omit to select every solution in "
+        "values), e.g. --where TileProcessingStrategy=StreamK --where WorkAssignment=Hybrid. Omit to select every solution in "
         "--logic-src.",
     )
     ppl.add_argument(
