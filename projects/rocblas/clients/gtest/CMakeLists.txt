@@ -55,6 +55,7 @@ set(rocblas_no_tensile_test_source
     blas1/axpy_gtest.cpp
     blas1/copy_gtest.cpp
     blas1/dot_gtest.cpp
+    blas1/dot_ilp64_chunk_gtest.cpp
     blas1/iamaxmin_gtest.cpp
     blas1/nrm2_gtest.cpp
     blas1/rot_gtest.cpp

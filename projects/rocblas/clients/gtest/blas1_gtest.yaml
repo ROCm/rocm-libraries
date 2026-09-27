@@ -3,6 +3,7 @@ include: asum_gtest.yaml
 include: axpy_gtest.yaml
 include: copy_gtest.yaml
 include: dot_gtest.yaml
+include: dot_ilp64_chunk_gtest.yaml
 include: iamax_iamin_gtest.yaml
 include: nrm2_gtest.yaml
 include: rot_gtest.yaml

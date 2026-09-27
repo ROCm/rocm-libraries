@@ -1,0 +1,56 @@
+---
+include: rocblas_common.yaml
+
+# Regression for the dot_64 single-block negative-increment shift. The launcher
+# already walks a negative increment from the end of the data; the src64
+# single-block path computed the same shift again and passed the result in, so
+# it was applied twice, and its second line scaled by incx_64 where it should
+# have used incy_64.
+#
+# Only the increment *signs* are data here. The magnitudes are fixed in the C++:
+# incx is 1 so x costs two elements, and incy carries 2147483648, the smallest
+# magnitude above c_ILP64_i32_max and therefore the smallest that selects the
+# 64-bit-increment branch. Putting the real magnitude in the yaml would invite
+# someone to reduce it to a value that silently stops reaching the branch.
+#
+# n is 2 in the C++: the shift scales with (n-1), so 2 is the smallest n that
+# shifts at all, and every extra element multiplies an allocation already fixed
+# near 2^31 by the increment. That is about 8.6 GB at single precision and is
+# why these rows are nightly. The test skips rather than fails where the device
+# cannot supply it.
+
+Tests:
+# Detector. shiftx is doubled and shifty is shifted when it should not be,
+# reading y one element past the end.
+- name: dot_ilp64_single_block_neg_incx
+  category: nightly
+  arguments:
+    - { incx: -1, incy: 1 }
+  function:
+    - dot_ilp64_single_block_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+# Control, and the reason it exists. With incx positive both caller lines
+# collapse to the plain offsets, so this case is already correct before the fix
+# and must remain correct after it.
+#
+# Fixing only the incx_64/incy_64 typo, while leaving the double shift in place,
+# would give shifty twice its intended offset and break exactly this case. That
+# was a seriously considered fix. Without this row it would have looked clean.
+- name: dot_ilp64_single_block_neg_incy_control
+  category: nightly
+  arguments:
+    - { incx: 1, incy: -1 }
+  function:
+    - dot_ilp64_single_block_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+# Both lines wrong at once.
+- name: dot_ilp64_single_block_neg_both
+  category: nightly
+  arguments:
+    - { incx: -1, incy: -1 }
+  function:
+    - dot_ilp64_single_block_chunk: *single_precision
+  os_flags: [ LINUX ]
+...

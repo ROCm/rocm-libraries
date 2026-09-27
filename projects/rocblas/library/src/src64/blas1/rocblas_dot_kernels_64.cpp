@@ -261,9 +261,11 @@ rocblas_status rocblas_internal_dot_launcher_64(rocblas_handle __restrict__ hand
             // we only reduce the block count to 1 so safe to ignore extra workspace allocated in caller
             int32_t n = n_64;
 
-            // in case of negative inc shift pointer to end of data for negative indexing tid*inc
-            int64_t shiftx = incx_64 < 0 ? offsetx - (incx_64) * (n - 1) : offsetx;
-            int64_t shifty = incx_64 < 0 ? offsety - (incx_64) * (n - 1) : offsety;
+            // Single block, so this is the only chunk and its base offset is zero. The
+            // launcher applies the negative-increment shift to the end of the data itself;
+            // repeating it here would shift twice.
+            int64_t shiftx = offsetx;
+            int64_t shifty = offsety;
 
             static constexpr int NB_OB  = 1024;
             static constexpr int WIN_OB = 32; // 32K max n threshold, assert guard below
