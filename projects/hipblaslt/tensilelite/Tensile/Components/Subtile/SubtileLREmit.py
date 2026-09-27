@@ -5,7 +5,7 @@
 # LR (local read) emit and alloc dispatch.
 #
 # singledispatch over LR tag sentinels (LRTag_1x2, LRTag_TLU1, etc.).
-# ABLRTile calls these via self.config.tag as the dispatch key.
+# ABLRTile.py is the tile entry point; dispatch uses self.config.tag as the key.
 #
 # Structure:
 #   1. Dispatch bases       — @singledispatch declarations
