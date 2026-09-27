@@ -2687,11 +2687,10 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_16BF)} == "bf16_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8I)} == "i8_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_32I)} == "i32_r");
-    ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E4M3_FNUZ)} == "f8_r");
-    ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2_FNUZ)} == "bf8_r");
+    ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E4M3_FNUZ)} == "f8_fnuz_r");
+    ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2_FNUZ)} == "bf8_fnuz_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E4M3)} == "f8_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2)} == "bf8_r");
-    ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2_FNUZ)} == "bf8_r");
     ASSERT_TRUE(
         std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_6F_E2M3))}
         == "f6_r");
