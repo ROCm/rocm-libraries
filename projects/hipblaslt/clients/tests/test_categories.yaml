@@ -109,4 +109,4 @@ execution_settings:
     standard: 3600      # 1 h
     comprehensive: 7200 # 2 h
     full: 86400         # 24 h
-    multi_gpu: 600      # registration only; no GEMM runs here yet
+    multi_gpu: 600      # 10 min

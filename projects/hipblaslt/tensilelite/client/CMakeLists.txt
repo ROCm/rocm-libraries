@@ -29,22 +29,10 @@ endif()
 option(TENSILELITE_ENABLE_SDMA "Build the GPU-initiated SDMA transport path" OFF)
 
 if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
-    if(NOT DEFINED ROCM_PATH)
-        if(DEFINED ENV{ROCM_PATH})
-            set(ROCM_PATH "$ENV{ROCM_PATH}")
-        else()
-            set(ROCM_PATH "/opt/rocm")
-        endif()
-    endif()
-
     # hsakmt::hsakmt's exported link interface names numa::numa, so libnuma has
-    # to be found as an imported target before that export is loaded.
-    # cmake/FindNUMA.cmake does that, and it has to stay on CMAKE_MODULE_PATH
-    # across the find_package(hsakmt) below: ROCm 7.x's own hsakmt-config.cmake
-    # calls find_dependency(NUMA), and nothing -- not CMake, not libnuma-dev,
-    # not hsakmt itself -- installs a NUMA package config for it to find. See
-    # cmake/FindNUMA.cmake for the full story and for when this can be dropped.
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../cmake")
+    # to be found as an imported target before that export is loaded. The
+    # project's cmake/FindNUMA.cmake does that and documents when it can be
+    # dropped.
     find_package(NUMA REQUIRED)
 
     find_package(hsa-runtime64 REQUIRED)
@@ -54,16 +42,8 @@ if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
     # hsakmt::hsakmt's INTERFACE_LINK_LIBRARIES that do not exist on a fresh
     # container, so every executable linking hsakmt fails. The repair lives in
     # cmake/HsakmtLinkInterface.cmake, which documents the two broken forms.
-    if(TARGET hsakmt::hsakmt)
-        include("${CMAKE_CURRENT_LIST_DIR}/../cmake/HsakmtLinkInterface.cmake")
-        get_target_property(_hsakmt_ill hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
-        if(_hsakmt_ill)
-            tensilelite_sanitize_hsakmt_link_interface(_hsakmt_ill_clean
-                "${ROCM_PATH}/lib/rocm_sysdeps/lib" _hsakmt_ill)
-            set_target_properties(hsakmt::hsakmt PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${_hsakmt_ill_clean}")
-        endif()
-    endif()
+    include(HsakmtLinkInterface)
+    hipblaslt_sanitize_hsakmt_link_interface()
 endif()
 
 target_link_libraries(tensilelite-client-common

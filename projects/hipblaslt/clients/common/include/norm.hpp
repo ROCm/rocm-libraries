@@ -448,7 +448,7 @@ double norm_check_general(
     return cumulative_error;
 }
 
-double norm_check_general(
+inline double norm_check_general(
     char norm_type, int64_t M, int64_t N, int64_t lda, void* hCPU, void* hGPU, hipDataType type)
 {
     switch(type)
@@ -523,15 +523,15 @@ double norm_check_general(
     }
 }
 
-double norm_check_general(char        norm_type,
-                          int64_t     M,
-                          int64_t     N,
-                          int64_t     lda,
-                          int64_t     stride_a,
-                          void*       hCPU,
-                          void*       hGPU,
-                          int64_t     batch_count,
-                          hipDataType type)
+inline double norm_check_general(char        norm_type,
+                                 int64_t     M,
+                                 int64_t     N,
+                                 int64_t     lda,
+                                 int64_t     stride_a,
+                                 void*       hCPU,
+                                 void*       hGPU,
+                                 int64_t     batch_count,
+                                 hipDataType type)
 {
     switch(type)
     {
@@ -676,7 +676,7 @@ bool norm_check(double norm_error)
 }
 
 // TODO: tune norm tolerance for MX FP6 and FP8 types
-double norm_tolerance(hipDataType type)
+inline double norm_tolerance(hipDataType type)
 {
     switch(type)
     {
@@ -712,17 +712,17 @@ double norm_tolerance(hipDataType type)
     }
 }
 
-bool norm_check(double norm_error, hipDataType type)
+inline bool norm_check(double norm_error, hipDataType type)
 {
     double tol = norm_tolerance(type);
     return tol > 0.0 && norm_error < tol;
 }
 
-bool norm_check(double                 norm_error,
-                hipDataType            outputType,
-                hipblasComputeType_t   compute_type,
-                hipDataType            inputTypeA = static_cast<hipDataType>(-1),
-                hipDataType            inputTypeB = static_cast<hipDataType>(-1))
+inline bool norm_check(double               norm_error,
+                       hipDataType          outputType,
+                       hipblasComputeType_t compute_type,
+                       hipDataType          inputTypeA = static_cast<hipDataType>(-1),
+                       hipDataType          inputTypeB = static_cast<hipDataType>(-1))
 {
     double tol = norm_tolerance(outputType);
 
