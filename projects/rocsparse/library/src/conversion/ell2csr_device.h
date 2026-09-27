@@ -63,8 +63,8 @@ namespace rocsparse
 
         for(rocsparse_int p = 0; p < ell_width; ++p)
         {
-            const I idx = ELL_IND(ai, p, m, ell_width);
-            const J col = ell_col_ind[idx] - ell_base;
+            const int64_t idx = ELL_IND(ai, p, static_cast<int64_t>(m), ell_width);
+            const J       col = ell_col_ind[idx] - ell_base;
             if(col >= 0 && col < n)
             {
                 ++nnz;
@@ -100,8 +100,8 @@ namespace rocsparse
         I csr_idx = csr_row_ptr[ai] - csr_base;
         for(J p = 0; p < ell_width; ++p)
         {
-            const I ell_idx = ELL_IND(ai, p, m, ell_width);
-            const J ell_col = ell_col_ind[ell_idx] - ell_base;
+            const int64_t ell_idx = ELL_IND(ai, p, static_cast<int64_t>(m), ell_width);
+            const J       ell_col = ell_col_ind[ell_idx] - ell_base;
             if(ell_col >= 0 && ell_col < n)
             {
                 csr_col_ind[csr_idx] = ell_col + csr_base;
