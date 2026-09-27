@@ -1233,8 +1233,10 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
 
 
 ##################################################
-# Subroutine to generate MMA code
-# Initial idea: maybe store asm in modules in a separate obj?
+# Subroutine entry point for preloop
+#
+# We will need to support different PGR values
+# We will need to support different PLR values
 #
 def preLoop(writer, kernel):
   module = Module()

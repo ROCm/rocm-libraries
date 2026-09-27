@@ -8,6 +8,10 @@ Targets: Tensile/Components/ShiftVectorComponents.py
   Primary ranges:   47-200  (ShiftVectorComponentsVALU.__call__)
   Secondary ranges: ShiftVectorComponentsMFMA.__call__ + PartialThread
 
+The gfx1101 int8 case exercises AllThread: four-byte reads exceed the
+two-element partial-thread threshold. It covers NT/TT and int8/int32 outputs,
+matching the Windows edge failures in ROCm/rocm-libraries#12455.
+
 Strategy
 --------
 Two config sweeps are combined in one isolated test run:
@@ -36,10 +40,12 @@ CPU-only; no GPU device required.
 """
 
 import os
+import re
 
 import pytest
+import yaml
 
-from config_harness import emit_kernels_from_config
+from config_harness import derive_states, emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 
@@ -120,3 +126,68 @@ def test_r7_shiftvec_full_mfma_emits():
         assert "ShiftVectorComponents" in src, (
             f"Expected ShiftVectorComponents labels in MFMA asm {base!r}"
         )
+
+
+@pytest.mark.parametrize("transpose_a", [False, True], ids=["NT", "TT"])
+@pytest.mark.parametrize("dest_type", [8, 6], ids=["int8-output", "int32-output"])
+def test_gfx1101_int8_edge_shift(tmp_path, transpose_a, dest_type):
+    """Preserve cross-thread B edge shifts for four-element int8 reads.
+
+    Shapes come from navi32's GridBased Alik_Bjlk_I8II solution 1 (TT)
+    and Ailk_Bjlk_I8II solution 0 (NT).
+    Int8's minimum four-element read width exceeds 1 * (32 / 16) = 2,
+    so partial B edges need the all-thread algorithm. Sizes 131 and 1031
+    expose this in the Windows numerical tests; both have remainder 3.
+    """
+    parameters = {
+        "MatrixInstruction": [[16, 16, 16, 1, 1] + ([6, 1, 1, 4] if transpose_a else [1, 1, 2, 2])],
+        "WavefrontSize": [32],
+        "SourceSwap": [True],
+        "VectorWidthA": [1],
+        "VectorWidthB": [1],
+        "GlobalReadVectorWidthA": [4],
+        "GlobalReadVectorWidthB": [4],
+        "DepthU": [32],
+        "PrefetchGlobalRead": [0],
+        "PrefetchLocalRead": [1],
+        "ScheduleIterAlg": [3],
+        "GlobalSplitU": [1],
+        "AssertFree0ElementMultiple": [1],
+        "AssertFree1ElementMultiple": [1],
+    }
+    config = {
+        "BenchmarkProblems": [[{
+            "OperationType": "GEMM",
+            "DataType": 8,
+            "DestDataType": dest_type,
+            "ComputeDataType": 6,
+            "HighPrecisionAccumulate": True,
+            "TransposeA": transpose_a,
+            "TransposeB": True,
+            "Batched": True,
+        }, {
+            "ForkParameters": [{key: values} for key, values in parameters.items()],
+        }]],
+    }
+    config_path = tmp_path / "int8_edge_shift.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    states = derive_states(config_path, arch="gfx1101")
+    assert len(states) == 1
+    assert states[0]["GlobalReadVectorWidthB"] == 4
+    assert not states[0]["GuaranteeNoPartialB"]
+
+    results = emit_kernels_from_config(config_path, arch="gfx1101", expected_fork_count=1)
+    assert len(results) == 1
+    _base, source, error = results[0]
+    assert error == 0
+    for remainder in (1, 2, 3):
+        block = re.search(
+            rf"^label_ShiftVectorComponents1_shift{remainder}_glvwblk0[^:\n]*:\n"
+            r"(.*?)(?=^label_)",
+            source,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert block is not None, f"missing B edge shift for remainder {remainder}"
+        assert "v_mov_b32" in block[1], "edge shift must move accumulator values"
+        if remainder != 2:
+            assert "ds_bpermute_b32" in block[1], "odd shifts must exchange lanes"
