@@ -1,0 +1,28 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RUN_LENGTH_ENCODE_NON_TRIVIAL_RUNS_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+non_trivial_runs_config_params{
+    { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} },
+    ::rocprim::{{ measurement['cfg']['load_method'] }},
+    ::rocprim::block_scan_algorithm::using_warp_scan}
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class key_type> constexpr auto run_length_encode_non_trivial_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("non_trivial_runs_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return non_trivial_runs_config_params_base<key_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return run_length_encode_non_trivial_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, key_type>();
+{%- endmacro %}

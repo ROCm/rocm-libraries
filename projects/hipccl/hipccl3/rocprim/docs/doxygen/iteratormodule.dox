@@ -1,0 +1,10 @@
+/**
+@brief rocPRIM fancy iterators.
+@author
+@file
+*/
+
+/**
+ * \defgroup iteratormodule Fancy iterators
+ *
+ */

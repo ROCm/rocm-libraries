@@ -1,0 +1,17 @@
+[
+    {
+        "folder":  "rocprim",
+        "rtd_slug": "advanced-micro-devices-rocprim",
+        "rtd_alias": "rocPRIM"
+    },
+    {
+        "folder":  "hipcub",
+        "rtd_slug": "advanced-micro-devices-hipcub",
+        "rtd_alias": "hipCUB"
+    },
+    {
+        "folder":  "rocthrust",
+        "rtd_slug": "advanced-micro-devices-rocthrust",
+        "rtd_alias": "rocThrust"
+    }
+]

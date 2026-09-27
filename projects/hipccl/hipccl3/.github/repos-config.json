@@ -1,0 +1,40 @@
+{
+  "repositories": [
+    {
+      "name": "rocprim",
+      "url": "ROCm/rocPRIM",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "hipcub",
+      "url": "ROCm/hipCUB",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "rocthrust",
+      "url": "ROCm/rocThrust",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "libhipcxx",
+      "url": "ROCm/libhipcxx",
+      "branch": "amd-develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": false
+    }
+  ]
+}
