@@ -40,8 +40,10 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
@@ -63,14 +65,18 @@
 #include "stinkytofu/transforms/asm/StinkyMergeBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyUnreachableBlockElimPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
+#include "stinkytofu/transforms/asm/TieExecMaskedWritesPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
+#include "stinkytofu/transforms/asm/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -109,6 +115,52 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
         pm.addPass(createStinkyDAGSchedulerPass());
         pm.addPass(createStinkyMergeBarrierPass());
     }
+}
+
+/// Register allocation from ModuleOptions::RegisterAllocation: 0 off, 1 shadow,
+/// 2 and above apply, as Mode below describes.
+///
+/// The producer reads 3 as "let an over-budget kernel reach allocation and
+/// re-judge afterwards", a policy that changes nothing about this pipeline.
+/// Clamping, rather than switching on the value, is what keeps it that way.
+void addRegisterAllocationPasses(PassManager& pm, const StinkyAsmModule& module) {
+    enum class Mode : int {
+        Off = 0,     ///< Keep the producer's numbering; add no passes.
+        Shadow = 1,  ///< Colour and report, rewrite nothing. Code is unchanged.
+        Apply = 2,   ///< Write the colouring through to the emitted operands.
+    };
+    const int configured = module.getModuleOptions().RegisterAllocation;
+    Mode mode = Mode::Apply;
+    if (configured <= static_cast<int>(Mode::Off))
+        mode = Mode::Off;
+    else if (configured == static_cast<int>(Mode::Shadow))
+        mode = Mode::Shadow;
+    if (mode == Mode::Off) return;
+
+    // Rebuild the CFG in case a label was left inside a block, where it is a
+    // branch target with no edges. Building only runs on a flat function.
+    pm.addPass(createFlattenCFGPass());
+    pm.addPass(createCFGBuilderPass());
+
+    pm.addPass(createStinkyUnreachableBlockElimPass());
+    pm.addPass(createRemoveDefUseAnalysisPass());
+
+    // Must precede the lift, which binds the operand it adds. Otherwise a write
+    // that only some lanes execute looks like a full definition of its
+    // destination, and the allocator moves it off the value those lanes keep.
+    pm.addPass(createTieExecMaskedWritesPass());
+
+    LiftAsmRegistersToSSAOptions liftOptions;
+    liftOptions.classes = RegClassSet::only(RegType::S);
+    pm.addPass(createLiftAsmRegistersToSSAPass(liftOptions));
+
+    pm.addPass(createRegisterAllocationPass(RegisterAllocationOptions{
+        .allocator = "greedy-compact",
+        .allocate = RegClassSet::only(RegType::S),
+        .applyToOperands = (mode == Mode::Apply),
+        .report = true,
+        .emitSymbolBreadcrumbs = true,
+    }));
 }
 
 /// A fresh entry-scoped PassManager with analyses + standard instrumentation.
@@ -264,6 +316,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         }
 
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
+
+        // Register allocation (lift to SSA, colour, report, rewrite if Apply mode).
+        addRegisterAllocationPasses(pm, module);
+
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
 
@@ -320,36 +376,42 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
         // SwInstructionPrefetchRelStaticPass handles multiple functions directly.
         pm.addPass(createFlattenCalleesPass(module.getFunctions()));
-        // gfx1250 hardware-entrypoint prologue: `s_mov_b64 s[64:65], 0` + `v_nop` +
-        // `global_prefetch_b8 v0, [s64, s65] scope:SCOPE_SE th:TH_LOAD_RT`.
-        // global_prefetch_b8 makes the first VMEM instruction non-clause-bound (it
-        // is a VMEM op that ignores EXEC); s[64:65] is never HW-initialized so
-        // zeroing it is free, and v_nop is a safe first VALU instruction that also
-        // covers the write-to-use delay before the prefetch reads the pair. Runs
-        // after flatten (so the entry's first instruction is the kernel's first)
-        // and before SW-prefetch insertion so the prefetch pass anchors its byte
-        // layout on the final entry (prologue included) and its CP-boundary
-        // coverage stays gap-free.
-        pm.addPass(createInsertInitialUnclausedVmemPass());
+        // Hardware-entrypoint prologue: `s_mov_b64` of an SGPR pair + `v_nop` +
+        // `global_prefetch_b8 v0, [pair] scope:SCOPE_SE th:TH_LOAD_RT`, which
+        // ignores EXEC and so leaves the first VMEM instruction non-clause-bound.
+        // v_nop is a safe first VALU instruction and covers the write-to-use delay
+        // before the prefetch reads the pair.
+        //
+        // Without RA the pair is s[64:65], which the hardware never initializes, so
+        // zeroing it is free. After SGPR compact those indexes may hold values, so
+        // the pass takes the top pair inside the kernel's own range instead — also
+        // free, since nothing has run at entry and no SGPR above the dispatch-filled
+        // line holds a value yet.
+        //
+        // Runs after flatten, so the entry's first instruction really is the
+        // kernel's, and before SW prefetch, so that pass lays out its bytes over the
+        // final entry and its CP-boundary coverage stays gap-free.
+        pm.addPass(createInsertInitialUnclausedVmemPass(moduleOptions.RegisterAllocation >= 2));
 
         // SW instruction prefetch — abs and PC-rel are mutually exclusive.
         // Priority: abs (EnableSwInstructionPrefetchAbs) > PC-rel
         // (EnableSwInstructionPrefetchRelStatic).
         if (moduleOptions.EnableSwInstructionPrefetchAbs) {
-            // One knob enables both abs passes; they are mutually exclusive by
-            // regime:
-            //   - static  : entry-burst grid, emits for (32640, 65536]; no-ops for >
-            //   65536.
-            //   - dynamic : run-time-targeted (post-CP) policy. Runs the read-only
-            //   analysis dump for
-            //     total > P(0)=32640; emits the predicated prefetch ladder (after
-            //     label_MultiGemmEnd) for total > 65536. Dumps to
+            // One knob enables both abs passes, which split by kernel size:
+            //   - static : entry-burst grid, emits for (32640, 65536].
+            //   - dynamic: run-time-targeted (post-CP) policy. Dumps its read-only
+            //     analysis for total > P(0)=32640 and emits the predicated ladder
+            //     (after label_MultiGemmEnd) for total > 65536, to
             //     <outputDir>/<kernel>/sw_prefetch_abs_dynamic_pass.txt.
-            // Both use the module overload (reads SwInstructionPrefetchAbsBaseSgpr +
-            // debug path). Dynamic runs FIRST so its analysis dump reflects the
-            // PRISTINE layout (before the static pass's entry burst shifts offsets).
-            // At any given size exactly one pass emits, so there is no co-mutation or
-            // baseSgpr contention.
+            //
+            // Dynamic runs FIRST so that dump reflects the PRISTINE layout, before
+            // the static pass's entry burst shifts offsets. Only one of the two ever
+            // emits, so they neither co-mutate nor contend for baseSgpr.
+            //
+            // After SGPR compact the Tensile-reserved triple means nothing and each
+            // burst picks its own block: an entry burst reuses one inside the
+            // kernel's range, the mid-kernel ladder takes one above every register
+            // named (see absPrefetchEntrySgprBase).
             pm.addPass(createSwInstructionPrefetchAbsDynamicPass(module));
             pm.addPass(createSwInstructionPrefetchAbsStaticPass(module));
         } else if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {

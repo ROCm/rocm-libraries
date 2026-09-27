@@ -4,7 +4,7 @@ How a colouring policy plugs in, what it may read, and what it must not touch.
 
 - [SSA representation](ssa-representation.md) — values, use-lists, block arguments, `AllocationResult`, `destroyAttachedSSA`
 - [Lift Asm registers to SSA](lift-asm-registers-to-ssa-pass.md) — how physical `RegKey`s become those values
-- [The greedy allocator](register-allocation-GreedyAllocator.md) — `greedy` and `greedy-compact`, including how they honour placement and preference rules
+- [The greedy allocator](register-allocation-GreedyAllocator.md) — the three greedy variants, including how they honour placement and preference rules
 - [Adding an architecture](adding-architecture.md) — a new triple's rules TU lives beside the pipeline, not inside it
 
 ## 1. The contract
@@ -144,6 +144,7 @@ classDiagram
     AllocationConstraints ..> AllocationRules : build() calls addRelations
     RegisterAllocator <|-- GreedyAllocator
     RegisterAllocator <|-- CompactingGreedyAllocator
+    RegisterAllocator <|-- FreedomOrderedGreedyAllocator
     RegisterAllocator <|-- LegacyIdentityAllocator
     RegisterAllocator ..> AllocationContext : reads only
     RegisterAllocator ..> AllocationResult : produces
@@ -180,20 +181,23 @@ Where all of it lives, under both `include/stinkytofu/` and `src/`:
 
 | Option | Meaning |
 |---|---|
-| `allocator=<name>` | `greedy` (default), `greedy-compact`, `legacy` |
+| `allocator=<name>` | `greedy` (default), `greedy-compact`, `greedy-compact-freedom`, `legacy` |
 | `classes=<vs>` | class axis of allocation scope; see section 3 |
 | `regionEnd=<label>` | region axis: only values whose live range ends at or before this block may move (`^` prefix optional). Empty = whole function. See section 3.2 |
+| `pinReg=<range>` | leave these registers exactly as found: each keeps the value lifted into it and takes no other. One as `pinReg=s0`, an inclusive run as `pinReg=s0:19`. Repeat the key for disjoint runs |
+| `unbankable=hold\|allocate` | what to do about an operand whose field cannot select a VGPR bank. `allocate` (default) places it under a ceiling, ahead of the free blocks; `hold` keeps the register the producer chose |
 | `apply` | write the colouring through `destroyAttachedSSA`; without it the pass is a shadow colouring |
-| `report` | emit peak / highest / `regionPeak` as an analysis remark (`--remarks`) |
+| `report` | emit peak / highest / `regionPeak` / rules / preferences as an analysis remark (`--remarks`) |
 | `emitRegisterMap` | with `apply`, insert a producer→allocated map as a TEXTBLOCK at the entry block; see section 11.3 |
 | `emitSymbolBreadcrumbs` | with `apply`, note on each instruction whose operand lost a symbolic name; see section 11.3 |
 | `noVerify` | skip the verifier — a testing hatch, not a production switch |
 | `rules=<name>` | force this architecture rule `Active`, ignoring the chip's capability gate. Repeat the key (`rules=A,rules=B`) or join with `+` (`rules=A+B`) — a comma already separates pass arguments |
 | `rules=all` | force every rule the triple declares |
+| `noRule=<name>` | force this rule `Off`, so a rule the chip ships Active can be measured against without a rebuild. Same list spelling as `rules=` |
 | `ruleAudit` | force every hard rule to `Audit` |
 | `noRules` | empty the table: the pre-framework behaviour |
 
-A misspelled rule name is an error, not a silent no-op. Section 14 covers the table itself.
+A misspelled rule name is an error, not a silent no-op, and naming one rule in both `rules=` and `noRule=` is an error too rather than a coin toss. Section 14 covers the table itself.
 
 Conformance tests are parameterized over `registeredAllocatorNames()`, so registering a policy is what subscribes it to the suite.
 
@@ -516,6 +520,8 @@ When a `clobbersEarly` rule is Active, the allocator and the verifier see the wi
 | `.maxVGPR`, `.maxSGPR`, `.maxAGPR` | indexes an operand can encode → `indexCount(class)` |
 | `.totalVgprPerSimd` | physical register file → `totalPerSimd(class)` |
 | `.vgprAllocGranule` | step occupancy is measured in → `allocationGranule(class)` |
+| `.maxWavesPerSimd` | wave slots per SIMD, the cap `getWavesPerSimd` applies once registers stop binding |
+| `.packedWorkitemId` | whether the dispatch packs the work-item ID dimensions into `v0` → `hasPackedWorkitemId`, which fixes how many VGPRs arrive filled and so which vector live-ins may be pinned |
 
 Nothing is keyed on an architecture, so supporting a target means editing that target's `.def`.
 
@@ -543,8 +549,9 @@ flowchart LR
     Arena["SSAArena::values()"] --> ClassOf["classOf()"]
     Arena --> Hint["hintFor()<br/>from PhysicalBinding"]
     Ops["srcRegs / destRegs<br/>via liftedSSAUnits()"] --> Tuple["tupleRuns()"]
-    Args["block ssaArguments()"] -->|has incoming| Aff["affinitySets()"]
-    Args -->|no incoming| Pin["isPinned()"]
+    Args["block ssaArguments()"] -->|"has incoming, less the undefined ones"| Aff["affinitySets()"]
+    Args -->|"no incoming, dispatch-filled"| Pin["isPinned()"]
+    Args -->|"no incoming, above its class's line"| Undef["undefinedLiveIns()"]
     RMW["read-write dest/src pair"] --> Aff
     Rules["AllocationRules::addRelations"] --> Tuple
     Rules --> Aff
@@ -555,23 +562,40 @@ Everything is stored per value ID, so every query is an array lookup. Only `isAl
 | Constraint | Source | Rule |
 |---|---|---|
 | Consecutive range | operand + `liftedSSAUnits()` | `tupleRuns()`: one operand's slots occupy consecutive units, in operand order |
-| Merge | `SSABlockArgument.incoming` | `affinitySets()`: the argument and every incoming value get one colour |
-| Pinned | block argument with no incoming | `isPinned()`: must keep its original register |
+| Merge | `SSABlockArgument.incoming` | `affinitySets()`: the argument and every incoming value the program defines get one colour |
+| Pinned | block argument with no incoming, in a register the dispatch fills | `isPinned()`: must keep its original register |
 | Hint | `PhysicalBinding` | `hintFor()`: first candidate, not an obligation |
 | Class | `StinkySSAValue::type()` | `classOf()` / `isAllocatable()` |
 | Tied / RMW | overlapping bindings on a src and a dest, or `isReadWrite` | may share a unit; `collectReadWriteTies` adds an `AffinitySet` so they must |
+| Index ceiling | an operand field with no VGPR-bank selector | `maxIndexFor()`: the value cannot sit past the bank that field reaches |
+| Preference | chip, via `addPreferences` | `preferences()`: two values that would rather share a register. A wish, not a requirement |
 | Ignored specials | not lifted | never in the matrix |
 | Alignment | chip, via `forbidsBase` | not a constraint; see section 14.5 |
 
-Three things deliberately yield no constraint, which is as useful to know:
+**An index ceiling is legality, like pinning.** Some operand fields carry eight bits of index and no bank selector, so they can only name a register inside one 256-register window. A value used through such a field has to live there. Ignoring it emits an operand naming a register the instruction cannot reach, which is wrong arithmetic rather than a slower kernel — so `maxIndexFor()` is a hard limit the allocator places under, not a cost. Note that "bank" here means that addressing window, not the `index % 4` read port of the register file; the two are unrelated and this framework models only the first.
+
+Four things deliberately yield no constraint, which is as useful to know:
 
 - a one-unit operand — a run needs two or more units, so single-DWORD operands are free;
 - an affinity set that collapses to one member after sort and dedup, so a merge already agreeing with its incoming value adds nothing;
+- a merge edge whose incoming value is undefined, which is the paragraph on `StinkySSAValue::isUndefined()` below;
 - a reserved hint — `isAllocatable()` is class-level and never consults `hintFor()`, so a value whose original register is reserved stays a candidate that simply cannot keep its hint.
 
 **Read-write operands must share a colour.** `s_cmov_b32 d, s` is `if (SCC) d = s`: on the untaken path `d` keeps what it already held. `HwInstDesc` marks that field `isReadWrite` and `AsmVerifierPass` already requires the register in both `destRegs` and `srcRegs`. The IR models the old value as an extra implicit source that the assembler does not print. Overlapping bindings *permit* sharing; `collectReadWriteTies` adds an `AffinitySet` per pair so the colourer *must* keep them together — the same mechanism as a merge. `tests/filecheck/allocation_read_write_tie.stir` uses an untied input so the colouring has to bring the two together rather than merely preserve them.
 
 **Pinning is legality, not policy.** A block argument with no incoming edges is a function live-in: its value arrives in a specific register that the dispatch filled before any instruction ran, so nothing in the function defines it and relocating it changes what the kernel reads. A policy that ignores `isPinned()` emits wrong code, not a slower kernel. A placement rule that forbids that register has no repair: the kernel comes out uncoloured.
+
+**But only up to where the dispatch stops writing.** "No incoming edge" says nothing defines the value; the pin claims something *else* does, and that holds only inside the ABI prefix — `settledDispatchFilledSgprCount()`: preloaded kernargs plus two for the kernarg segment pointer, then one per enabled workgroup id, so 32 for a kernel with `.amdhsa_user_sgpr_count 29`. A scalar live-in above that line was written by nobody, so any register serves it equally and a pin there preserves contents that do not exist — at `s[100:107]` on a 106-register chip it cannot be honoured at all, which is why an SGPR-heavy kernel came back uncoloured. Those values stay movable and are listed in `undefinedLiveIns()`, which the shadow report names: "nothing defines it" and "it is undefined" differ by whether lifting saw every definition, so a run that moves one should be able to say which.
+
+Every unknown pins. The line arrives as `kSigDispatchFilledSgprsMetaKey` on the Function, the descriptor not being reachable from a pass, and absent or zero reads as the whole file — so a `.stir` file or a test keeps the old behaviour. A kernel with no preloaded kernargs never publishes it at all, the descriptor leaving it unsettled whether the kernarg segment pointer sits in `s[0:1]` ahead of the workgroup ids; understating the line is the one direction that produces wrong code.
+
+**Vectors have a line of their own, and it is `v0`.** The only VGPRs a dispatch fills hold the workitem id, and `.amdhsa_system_vgpr_workitem_id` counts enabled *dimensions*, not registers. Which of the two conventions a target uses is `.packedWorkitemId` in its `DEF_ARCH`, read through `hasPackedWorkitemId()` — packed means x, y and z share `v0`'s bits 0:9, 10:19 and 20:29, so one register arrives filled whatever the field says, and `settledDispatchFilledVgprCount()` answers 1 without consulting the descriptor at all. An unpacked target needs the field, which the allocator cannot reach, so the answer is nothing and every vector live-in stays pinned as before. No metadata key either way: `markUndefinedLiveIns()` has `target.arch()`, which is the whole question.
+
+**Undefined is a property of the value, decided once.** `markUndefinedLiveIns()` runs before `build()` and stamps `StinkySSAValue::setUndefined()` on every entry live-in above its class's line. Three readers need that answer and none can hand it to the others: `build()` uses it for the pin split and for the merge exclusion below, and `SSADestruction::checkPhis` uses it having been given a function and a colouring and nothing else. False is the safe default — a value nobody stamps stays defined and therefore pinned, so a forgotten marker loses an optimisation where the reverse would lose what the dispatch wrote.
+
+**An undefined merge edge asks for nothing.** Unpinning the live-ins is not enough on its own: a live-in that feeds a merge is also an incoming value, and welding it to the merge puts it back under a hard constraint by another route. The merge reads garbage along that edge whichever register it takes, so `build()` leaves the member out; the result stays welded to the edges that genuinely define it, and to any pinned live-in among them, so a filled register still forces agreement. `checkPhis` grants the matching exception, a copy having no contents to move. The two sides have to move together — either alone is a contradiction between the colouring and the check — and the effect is `f8_tn_maf`-scale, 505 merges in one kernel.
+
+This matters more than the scalar line does. A kernel lifted mid-stream can name hundreds of VGPRs nothing in the function defines — an F8 GEMM came back with 506, of which only `v0` had arrived holding anything. Pinning the other 505 left no aligned 16-wide window free anywhere in the file and the kernel would not colour, which is why the shadow report prints a count and a sample rather than the list.
 
 **Alignment is a placement rule, not a constraint.** Neither `AllocationConstraints` nor `destroyAttachedSSA` checks it — both check consecutiveness alone. A row such as `ScalarTupleAlignment` forbids a bad base through `forbidsBase`, and the verifier rechecks it, so a policy that ignores the table is refused rather than assembled. A chip with an empty table still does not enforce alignment. Do not route an arch preference through `hintFor()`: that is the register the producer used, so it would vanish for any value with no hint.
 
@@ -591,11 +615,12 @@ They constrain each other only when they appear together in one operand.
 |---|---|---|
 | `greedy` | `GreedyAllocator` | weighted first-fit with eviction, preferring each value's original register. The default |
 | `greedy-compact` | `CompactingGreedyAllocator` | the same, with hints off, so placement packs from the bottom |
+| `greedy-compact-freedom` | `FreedomOrderedGreedyAllocator` | the same again, but ordering blocks by how few legal bases they have rather than by how hot they are |
 | `legacy` | `LegacyIdentityAllocator` | hands every value straight back the producer's register, via `createLegacyColoring()` |
 
-All three report empty `AllocatorCapabilities`, so none is refused by the gate in section 2.
+All four report empty `AllocatorCapabilities`, so none is refused by the gate in section 2.
 
-[The greedy allocator](register-allocation-GreedyAllocator.md) covers the two greedy policies in full: how tuple runs and affinity sets fold into placeable blocks, how weight is computed, the eviction rule and why it terminates, why hint-following reproduces the input, and how `reachableAt` / `pickBase` honour the rules table.
+[The greedy allocator](register-allocation-GreedyAllocator.md) covers the three greedy policies in full: how tuple runs and affinity sets fold into placeable blocks, how a pairing rule can fold two blocks into one, how weight and freedom order placement, the eviction rule and why it terminates, why hint-following reproduces the input, and how `reachableAt` / `pickBase` honour the rules table.
 
 ## 10. Verifier
 
@@ -869,26 +894,48 @@ That last point is also why `physicalIR()` is useless for testing this. Every na
 
 ### 11.5. Kernel descriptor
 
-Rewriting operands invalidates the declared register count and nothing else. `requiredSgprCount` (`transforms/asm/ra/RegisterBudget.hpp`) computes the replacement and the emit path applies it, lowering `SignatureKernelDescriptor::totalSgprs` — which reaches both `.amdhsa_next_free_sgpr` and the `.sgpr_count` metadata. Without that step compaction is invisible: the shadow report says `highest=93->72` while the kernel still declares 94 and gets exactly the occupancy it started with.
+Rewriting operands invalidates the declared register count and nothing else. `RegisterBudget.hpp` computes the replacement per class — `requiredSgprCount` and `requiredVgprCount` — and the emit path applies it through `refreshSgprCount` and `refreshVgprCount`. Each reaches both places a count appears: `.amdhsa_next_free_sgpr` with the `.sgpr_count` metadata, and `.amdhsa_next_free_vgpr` with `.vgpr_count`. Without that step compaction is invisible: the shadow report says `highest=93->72` while the kernel still declares 94 and gets exactly the occupancy it started with.
 
-The count is **not** `highest used + 1`. It is the maximum of that and what the dispatch fills before the first instruction: `numSgprPreload + 2` for the preloaded kernargs and the kernarg segment pointer, then one per enabled entry of `sgprWorkGroup`. A preloaded argument the kernel never reads appears in no operand at all, so a count taken purely from usage can declare fewer registers than the hardware writes. The count is only ever lowered, so a flow whose registers did not move keeps the producer's number.
+The count is **not** `highest used + 1`. It is the maximum of that and what the dispatch fills before the first instruction — for scalars, `numSgprPreload + 2` for the preloaded kernargs and the kernarg segment pointer, then one per enabled entry of `sgprWorkGroup`. A preloaded argument the kernel never reads appears in no operand at all, so a count taken purely from usage can declare fewer registers than the hardware writes.
 
-Everything else in the descriptor is an ABI statement about what happens before entry and must not be touched: `.amdhsa_user_sgpr_count`, `.amdhsa_user_sgpr_kernarg_preload_length` and `_offset`, `.amdhsa_user_sgpr_kernarg_segment_ptr`, `.amdhsa_system_sgpr_workgroup_id_*`, `.amdhsa_system_vgpr_workitem_id`. Two related traps: `RawAsmParser` round-trips unmodelled `.amdhsa_*` directives as verbatim pass-through text, so a recompute must leave that list alone; and `kSigTotalVgprsMetaKey` stamps `totalVgprs` onto the Function for occupancy-aware passes, so allocating VGPRs will mean updating that key and `accumOffset` too, not just the two VGPR directives.
+**The VGPR count moves in both directions, and this is the part that surprises people.** Allocation works in the architecture's whole addressable file, not the pool the producer happened to stop at, so a colouring may legitimately need *more* registers than were reserved. `setDeclaredVgprs` therefore writes whichever way the count moved:
+
+```mermaid
+flowchart LR
+    Colour["colouring"] --> Req["requiredVgprCount"]
+    Req --> Cmp{"vs declared"}
+    Cmp -->|lower| Down["lower it<br/>occupancy improves"]
+    Cmp -->|higher| Up["raise it<br/>the wave needs the registers"]
+    Cmp -->|"above getMaxVGPR"| Err["error: nothing can encode it"]
+```
+
+Declaring too many costs occupancy on every dispatch. Declaring too few is worse: the wave is handed fewer registers than the code names, and the hardware reads whatever happens to be there. A requirement above what the architecture can address is raised as an error rather than quietly clamped, because no descriptor can express it. `originalTotalVgprs` is deliberately left alone, so `Num VGPR` keeps reporting what the producer reserved and both numbers stay comparable in a dump. Where AGPRs share the register file the count is `accumOffset + totalAgprs` and this is not the place to compute it, so the update declines.
+
+Everything else in the descriptor is an ABI statement about what happens before entry and must not be touched: `.amdhsa_user_sgpr_count`, `.amdhsa_user_sgpr_kernarg_preload_length` and `_offset`, `.amdhsa_user_sgpr_kernarg_segment_ptr`, `.amdhsa_system_sgpr_workgroup_id_*`, `.amdhsa_system_vgpr_workitem_id`. One related trap: `RawAsmParser` round-trips unmodelled `.amdhsa_*` directives as verbatim pass-through text, so a recompute must leave that list alone.
 
 ## 12. Pipeline placement
 
 Scheduling and every pass that creates temporaries or reorders instructions run **before** lift, on physical IR. Allocation is kernel-scope and whole-function: attached SSA does not survive `ScopeAdaptor` splice-back.
 
-```text
-StinkyUnreachableBlockElimPass      every block must be reachable
-  -> RemoveDefUseAnalysisPass       lifting rejects a leftover GFX::PHI
-  -> LiftAsmRegistersToSSAPass      needs final instruction order
-  -> RegisterAllocationPass         shadow mode stops here
-  -> destroyAttachedSSA             via apply
-  -> syncRegisterSymbols            via apply; symbolic names and the .set block
-  -> InsertVgprMsbPass
-  -> waitcnt / delay / hazard / emit
+```mermaid
+flowchart TD
+    Elim["StinkyUnreachableBlockElimPass<br/>every block must be reachable"]
+    Rm["RemoveDefUseAnalysisPass<br/>lifting rejects a leftover GFX::PHI"]
+    Tie["TieExecMaskedWritesPass<br/>adds the read a masked write performs"]
+    Lift["LiftAsmRegistersToSSAPass<br/>needs final instruction order"]
+    RA["RegisterAllocationPass"]
+    Shadow["shadow mode stops here<br/>nothing is rewritten"]
+    Destroy["destroyAttachedSSA"]
+    Sync["syncRegisterSymbols<br/>symbolic names and the .set block"]
+    Msb["InsertVgprMsbPass"]
+    Rest["waitcnt / delay / hazard / emit"]
+
+    Elim --> Rm --> Tie --> Lift --> RA
+    RA -->|"no apply"| Shadow
+    RA -->|apply| Destroy --> Sync --> Msb --> Rest
 ```
+
+`TieExecMaskedWritesPass` must precede the lift, because it adds an operand the lift has to bind; see [Lift Asm registers to SSA](lift-asm-registers-to-ssa-pass.md) section 4.2 for why a write under a narrowed `EXEC` reads its own destination.
 
 It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `InsertWaitAluPass`, `InsertCoexecHazardPass`, `InsertDelayAluPass`, `SetMatrixReusePass`, and the per-arch hazard pass.
 
@@ -897,10 +944,18 @@ It must precede every consumer of physical numbers: `InsertVgprMsbPass`, `Insert
 `RegisterAllocationOptions::report` emits one line per kernel comparing the colouring against the producer's, as a `ShadowReport` analysis remark. `stinkytofu-opt` exposes it as `report` (needs `--remarks`):
 
 ```text
-@kernel: greedy-compact shadow: values=230 v[peak=62 highest=65->65 regionPeak=40 waves=14->14] s[peak=5 highest=69->69] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active]
+@kernel: greedy-compact shadow: values=24159 v[peak=643 highest=679->722 waves=1->1] rule[SmemSelfOverlapUnderXnackReplay=active] rule[ScalarTupleAlignment=active] rule[VectorTupleAlignment=active] rule[WmmaAccumulatorReuse=active] pref[WmmaAccumulatorReuse=active 2416/2560 unmet 51 blocked 93 missed]
 ```
 
-`peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]` so a report is interpretable without knowing the triple or the caps.
+`peak` is the pressure floor from the live intervals, `highest` is the high-water mark before and after, `regionPeak` is pressure over `[0, cut)` when `regionEnd` is set, and `waves` is `getWavesPerSimd()` on the VGPR count each implies. Occupancy moves in granule steps, so a lower index need not buy a wave. A region run cannot lower `highest` unless the function peak is inside the region — the pinned tail still contributes. Each declared rule is listed as `rule[<Name>=<status>]`, and a pairing rule adds `pref[...]` with its satisfaction, so a report is interpretable without knowing the triple or the caps.
+
+Three cautions on reading it, all of which have caught someone out.
+
+The word `shadow` is part of the report string, so an `apply` run prints it too. It says nothing about whether the colouring was written.
+
+`peak` and `highest` answer different questions. `peak` is what the kernel needs; `highest` is where this colouring put things. Only `highest` is what the hardware must provide, and the example above is a case where they disagree sharply — a peak of 643 with a colouring reaching 722.
+
+`highest=a->b` carries no promise that `b <= a`. A compacting run usually lowers it, but a preference can move a block upward to reach its partner, and nothing currently prices that distance (section 14.7). Read `pref[...]` and `highest=` together, and use `noRule=<name>` to see what a rule is actually buying.
 
 The report reads attached SSA, which destruction clears, so it is built before a colouring is applied and returned through an out-parameter.
 
@@ -960,11 +1015,39 @@ Which function follows from what the hardware fact is *about*:
 | `forbidsBase` | which indexes are legal for a value | hard |
 | `clobbersEarly` | an instruction writes before it finishes reading | hard |
 | `addRelations` | two values must sit a fixed distance apart | hard |
+| `pinToProducer` | a value must keep the register the producer assigned | hard |
 | `baseCost` | an index is legal but worse | soft |
+| `addPreferences` | two values would rather share a register | soft |
 
-Reads like a register rule but is really about *when* an instruction reads versus writes? `clobbersEarly`. A fixed displacement between two values? `addRelations`. Otherwise it is about which indexes are acceptable, and the only question left is whether a bad one is illegal (`forbidsBase`) or merely slow (`baseCost`).
+Reads like a register rule but is really about *when* an instruction reads versus writes? `clobbersEarly`. A fixed displacement two values *must* keep? `addRelations`. An operand that must sit on the producer's own register? `pinToProducer`. A sharing the chip would merely *like*? `addPreferences`. Otherwise it is about which indexes are acceptable, and the only question left is whether a bad one is illegal (`forbidsBase`) or merely slow (`baseCost`).
 
-Then hand the table to the registry from a per-arch TU. Nothing else changes: no policy is edited, no allocator learns the rule exists, no header is touched.
+`addPreferences` is the one row that needs a second function. It collects the pairs, and `satisfiedBy` judges them:
+
+```cpp
+AllocationRule reuse;
+reuse.name = "WmmaAccumulatorReuse";
+reuse.description = "a matrix destination should reuse its accumulator's registers";
+reuse.status = RuleStatus::Active;
+reuse.satisfiedBy = [](RegKey d, RegKey c) { return d == c; };
+reuse.addPreferences = pairMatrixAccumulator;   // walks one instruction's operands
+```
+
+One without the other is a table mistake, and the table says so. `addPreferences` sees one instruction at a time, with its register operands already resolved to SSA values by printed operand position — resolved for the rule rather than left to it, because pairing an operand with its values is the step that is easy to get wrong and silently relate the wrong registers. A rule that needs to pair *across* instructions has no hook yet.
+
+`pinToProducer` uses the same resolved operands, and is the hook for an absolute producer index:
+
+```cpp
+AllocationRule pin;
+pin.name = "ProducerPinMatrix";
+pin.description =
+    "VGPR operands of a matrix instruction keep the registers the producer assigned";
+pin.status = RuleStatus::Off;
+pin.pinToProducer = pinMatrixProducerRegisters;
+```
+
+Each preference carries a `benefit`, and that number must never be negative: `pickBase` stops scanning as soon as a base costs nothing, which is only sound while penalties cannot go below zero.
+
+Then hand the table to the registry from a per-arch TU. Nothing else changes for a new *row*: no policy is edited, no allocator learns the rule exists. A new *kind* is the exception — `pinToProducer` is one, and it is the hook that lets a row name an absolute producer index.
 
 ```cpp
 // src/transforms/asm/ra/target/<Arch>AllocationRules.cpp
@@ -1029,7 +1112,9 @@ Each already had exactly one honouring site and one checking site:
 | `forbidsBase` | `Greedy::reachableAt()` | the per-value loop in `verifyAllocation` |
 | `addRelations` | `OffsetUnion` in `Greedy::buildBlocks()` | the `tupleRuns()` / `affinitySets()` loops in `verifyAllocation` |
 | `clobbersEarly` | `PhysRegMatrix::available()`, via widened ranges | the overlap check inside the per-value loop |
+| `pinToProducer` | `AllocationConstraints::build()` → `isPinned()` | the pin check in `verifyAllocation`, and `Greedy::pinReasonOf()` |
 | `baseCost` | `Greedy::pickBase()` | **nothing** — paying a price is legal |
+| `addPreferences` | `Greedy::foldPairs()` and `Greedy::pickBase()` | **nothing** — an unmet wish is legal |
 
 ```mermaid
 flowchart TD
@@ -1040,7 +1125,9 @@ flowchart TD
 
     table -->|"forbidsBase"| place["Greedy::reachableAt"]
     table -->|"baseCost"| pick["Greedy::pickBase"]
+    table -->|"addPreferences"| pref["Greedy::foldPairs"] --> pick
     table -->|"addRelations"| cons["AllocationConstraints::build"] --> offs["OffsetUnion"]
+    table -->|"pinToProducer"| cons
     table -->|"clobbersEarly"| adj["applyEarlyClobber"] --> mat["PhysRegMatrix::available"]
 
     place --> ver{"verifyAllocation"}
@@ -1053,13 +1140,17 @@ flowchart TD
     table -->|"any status"| audit["auditRules<br/>against the producer's colouring"]
 ```
 
-The dotted edge into the verifier is the whole difference between hard and soft: a price reaches the colouring but never the verifier. `auditRules` ignores status — its question is whether the *input* already breaks a rule. Honouring of `forbidsBase` and `baseCost` is documented with greedy, because those two sites are inside that policy; `legacy` still cannot violate them, because the verifier is the enforcement point.
+The dotted edge into the verifier is the whole difference between hard and soft: a price or a wish reaches the colouring but never the verifier. `auditRules` ignores status — its question is whether the *input* already breaks a rule. Honouring of the soft kinds is documented with greedy, because those sites are inside that policy; `legacy` still cannot violate the hard ones, because the verifier is the enforcement point.
+
+**A pairing rule has two chances and needs neither.** `foldPairs` is the strong one: it puts both values in one block so they share by construction. It only applies when the rule would accept a single register for the pair, which the allocator discovers by asking `satisfiedBy(k, k)` — so a rule wanting its pair merely *near*, or *apart*, declines automatically and nothing in the allocator has to know what any rule means. Whatever is not folded is still scored in `pickBase`. And because folding asks placement for one long run where two shorter ones would have fitted, a refusal is retried with folding off: a soft rule may improve a colouring, never prevent one.
 
 **`forbidsBase` sees no instruction, on purpose.** Placement is decided per *block* of tied values, and a value in that block may be used by many instructions. A placement rule therefore over-constrains: an alignment rule applies to every block of that class and width, not only to the operands that motivate it. LLVM takes the same trade, putting SGPR pair alignment on the register class. Passing a `StinkyInstruction` would honour one use and ignore the rest.
 
 `reachableAt()` is the single funnel every candidate base passes through — placement, eviction, and hint-following all reach it — so one call subjects all three to the rule. `checkFeasible()` also consults it, so a block that can never be placed names the rule instead of exhausting every base.
 
 **`addRelations` goes through `build()`.** The architecture contributes through `AllocationConstraints::build()`, which calls every Active rule with its own private vectors just before returning. `tupleRuns()` and `affinitySets()` stay the only vocabulary, and the object stays immutable once built. `addRelations` holds only equalities. A disequality — "these two must differ" — is what `clobbersEarly` is for. `OffsetUnion::relate()` already reports a contradiction, so a rule that conflicts with an operand's own requirement produces a named error.
+
+**`pinToProducer` also goes through `build()`.** It sets `isPinned()` on the values it names, so `hintFor()` is a requirement. Live-ins already used that bit; a rule pin is the same obligation for a defined value. `Greedy::pinReasonOf()` reads the reason (`"a function live-in"` or the rule name) and places those blocks first at their hint, even under `greedy-compact`. The verifier checks the assignment against the hint and names the reason. A value with no recorded register is skipped rather than pinned into a hole.
 
 **`clobbersEarly` widens ranges.** A source dying at instruction `I` ends at `I`'s `d` point and a normal destination starts at the same `d` point, so half-open ranges make them touch without overlapping — which is what lets `v40 = wmma(..., v40)` reuse a register. Starting an early-clobber destination at `I`'s `u` point instead makes them genuinely overlap:
 
@@ -1109,18 +1200,44 @@ Ungated: it is a property of the instruction encoding, true of every module of t
 
 The rule constrains a *block's* base. A block wider than any single operand — overlapping tuple runs — could still place an interior operand oddly. Section 14.7 records that; the common case of one operand per block is exact.
 
+#### `VectorTupleAlignment` — placement, `Active` always
+
+A VGPR tuple must start on an even index at every width above one; a single VGPR sits anywhere. The assembler rejects anything else with `vgpr tuples must be 64 bit aligned`.
+
+This is a *different* requirement from the scalar one, which is why it is a separate row rather than another arm of `ScalarTupleAlignment`. Scalars align to their width, vectors to a flat 64 bits, so `v[2:5]` is legal where `s[2:5]` is not, and `ds_load_b96 v[2:4]` is legal at a width the scalar rule would round up to four. Neither predicate can answer for the other.
+
+Ungated, for the same reason as its scalar sibling: it is a property of the instruction encoding. It also wants no Audit stage — the producer's own VGPR tuples assemble today.
+
+The row was added after enabling VGPR lifting, and its absence is worth remembering as a category of bug rather than a one-off. `Gfx1250Backend` lifted SGPRs alone for as long as this table had only scalar rows, so every allocated multi-DWORD range was covered by the one rule that existed. Widening the lift scope to `RegType::V` moved allocation into a class the table said nothing about, and because the verifier reads the same table as the allocator, both agreed there was nothing to check and a `v[3:10]` WMMA destination reached the assembler. See `st_register_allocation.md`, "Multi-DWORD VGPR ranges were placed at odd bases". `tests/filecheck/allocation_rule_vector_alignment.stir` pins the fixed colouring.
+
+#### `ProducerPinMatrix` — pin, `Active`
+
+VGPR operands of a matrix instruction keep the registers the producer assigned. Compaction otherwise packs dest and sources, which changes the packed `s_set_vgpr_msb` word those instructions need.
+
+**Why `pinToProducer` and not a preference.** "This value sits *here*" is an absolute producer index. `forbidsBase` can only veto some bases, `addRelations` can only relate two values, and a preference can only rank legal ones. The pin goes through `AllocationConstraints::isPinned()`, so a compacting run places the block at its hint first — the same path a function live-in already takes — rather than scoring a wish it may leave unmet.
+
+The family is `isMatrixInstruction`: dest and every VGPR source, including slotless scale fields. A vector add in the same function is free to pack. Pinning dest and C at different indexes fights `WmmaAccumulatorReuse`; the pin is hard, so reuse goes unmet.
+
+It ships `Active`. A hard rule the input already violates would turn those kernels silently uncoloured; the producer's own colouring is tautological for a pin, because that colouring *is* the producer registers. `tests/filecheck/allocation_rule_producer_pin_matrix_test.stir` is the end-to-end check.
+
+This is not `AllocationScope::pinRegisters`. HeldRange withholds a physical register for the whole function; this pins a *value* to its hint, and the register is free again when the value dies.
+
 ### 14.6. Diagnostics
 
 | Surface | What it gains |
 |---|---|
 | uncoloured reasons | `rule <Name>: <description>` |
-| shadow report | `rule[<Name>=<status>]` per rule |
+| shadow report | `rule[<Name>=<status>]` per rule, plus `pref[<Name>=<status> met/offered unmet B blocked M missed]` for a pairing rule |
 | audit remarks | one per producer violation |
 | `AllocationRules::toString()` | per rule: name, kind, status, description |
 
-### 14.7. What the four functions cannot say
+The `pref[...]` breakdown splits the unmet pairings into two kinds, because the bare ratio does not say whether the remaining ones were ever available. **Blocked** means a third value held the register in both directions, so the wish was impossible. **Missed** means a register was free and placement simply did not take it, which is an ordering problem and therefore the part worth working on.
 
-- **Pairwise facts.** A rule relating two *different* instructions' operands — which is what a hazard pass's group rules are — is not one instruction's timing, so `clobbersEarly` cannot express it. Real pairwise exclusion needs two-phase placement, because greedy places blocks in weight order and a partner may be unplaced when the pair needs checking.
-- **Reuse cost, which would be a fifth function.** Giving a dead value's register to an unrelated value creates a false dependency that a wait or delay must cover. The cost depends on who held the register before and when they died, not on the index, so `baseCost` cannot carry it.
-- **Whole-colouring preferences.** VGPR-MSB churn is the example: `s_set_vgpr_msb` is emitted only when the required word *changes* between instructions, so the cost is a function of the whole stream rather than of where one block sits.
+### 14.7. What the six functions cannot say
+
+- **Pairwise facts as a hard rule.** A rule relating two *different* instructions' operands — which is what a hazard pass's group rules are — is not one instruction's timing, so `clobbersEarly` cannot express it. `addPreferences` relates two values but only as a wish, and only within one instruction. Real pairwise *exclusion* needs two-phase placement, because a partner may be unplaced when the pair needs checking.
+- **Pairings across instructions.** `addPreferences` is handed one instruction with its operands resolved, so a wish spanning two of them has no hook.
+- **Reuse cost.** Giving a dead value's register to an unrelated value creates a false dependency that a wait or delay must cover. The cost depends on who held the register before and when they died, not on the index, so `baseCost` cannot carry it.
+- **The cost of moving up.** Neither `baseCost` nor a preference's `benefit` has a term for distance, so a satisfied wish beats a lower base by any margin. On a chip where occupancy moves in granule steps that trade can be a bad one, and nothing currently prices it. `pinToProducer` freezes the producer index instead of pricing the move.
+- **Whole-colouring preferences.** Stream-level VGPR-MSB churn is the example: `s_set_vgpr_msb` is emitted only when the required word *changes* between instructions, so the true cost is a function of the whole stream rather than of where one block sits. `ProducerPinMatrix` freezes the producer's layout on matrix instructions, which can preserve a word the producer already had. The inter-instruction half still has no hook.
 - **Placement below a block.** A rule constrains a block's base, and a block is a union of tied values, so two overlapping tuple runs can form a block wider than either operand — an operand at an odd offset inside an aligned block is still misaligned. The verifier and the audit approximate blocks for the same reason: they reconstruct runs from `tupleRuns()` rather than running `OffsetUnion`. Exact for tuples and singletons, conservative otherwise.

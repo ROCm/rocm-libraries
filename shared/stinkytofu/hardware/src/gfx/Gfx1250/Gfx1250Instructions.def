@@ -1301,10 +1301,26 @@ DEF_BATCH(.format = VOP1,
 DEF_BATCH(.format = VOP3_2SRC,
     VCvtPkBf16F32Inst, "v_cvt_pk_bf16_f32", .logical = "VCvtPkF32toBF16",
     VCvtPkF16F32Inst, "v_cvt_pk_f16_f32", .logical = "VCvtPkF32toF16",
-    VCvtPkBf8F32Inst, "v_cvt_pk_bf8_f32", .logical = "VCvtPkF32toBF8",
-        .operand_fields = { {D0, .size=16} },
-    VCvtPkFp8F32Inst, "v_cvt_pk_fp8_f32", .logical = "VCvtPkF32toFP8",
-        .operand_fields = { {D0, .size=16} },
+)
+
+// Vector Convert (VOP3-only, packs into one half of D0, D0 is read-write)
+// op_sel picks the half written; the other half keeps its old value, which is
+// how a four-value pack builds one register from two of these.
+DEF_T(VCvtPkBf8F32Inst, "v_cvt_pk_bf8_f32", .logical = "VCvtPkF32toBF8",
+    .format = VOP3_2SRC,
+    .operand_fields = {
+        {D0, vdst, vgpr, 16, RW},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
+)
+DEF_T(VCvtPkFp8F32Inst, "v_cvt_pk_fp8_f32", .logical = "VCvtPkF32toFP8",
+    .format = VOP3_2SRC,
+    .operand_fields = {
+        {D0, vdst, vgpr, 16, RW},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+    },
 )
 
 // Vector Convert (VOP3-only, stochastic rounding, D0 is read-write)

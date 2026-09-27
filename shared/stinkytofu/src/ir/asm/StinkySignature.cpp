@@ -573,6 +573,13 @@ void SignatureBase::setGprs(int totalVgprs, int totalAgprs, int totalSgprs) {
     codeMeta.setGprs(totalVgprs, totalSgprs);
 }
 
+void SignatureBase::setDeclaredVgprs(int totalVgprs) {
+    if (kernelDescriptor.accumOffset != -1) return;
+    if (totalVgprs <= 0 || totalVgprs == kernelDescriptor.totalVgprs) return;
+    kernelDescriptor.totalVgprs = totalVgprs;
+    codeMeta.totalVgprs = totalVgprs;
+}
+
 void SignatureBase::addArg(const std::string& name, SignatureValueKind kind,
                            const std::string& type, const std::string& addrSpaceQual) {
     codeMeta.addArg(name, kind, type, addrSpaceQual);

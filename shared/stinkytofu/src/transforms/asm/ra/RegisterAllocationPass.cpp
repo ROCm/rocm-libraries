@@ -1,25 +1,6 @@
-/* ************************************************************************
- * Copyright (C) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include "stinkytofu/transforms/asm/ra/RegisterAllocationPass.hpp"
 
 #include <algorithm>
@@ -28,6 +9,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -120,12 +103,103 @@ std::string wavesOf(GfxArchID arch, uint32_t vgprs) {
     return waves == std::numeric_limits<int>::max() ? "n/a" : std::to_string(waves);
 }
 
+/// How many values carry an index ceiling, and the tightest one.
+///
+/// The Allocate counterpart of the held-range list: same constraint, but it
+/// reaches the allocator as a limit per value rather than as frozen registers,
+/// so there are no ranges to name and the report counts instead.
+struct CappedValues {
+    size_t count = 0;
+    uint32_t ceiling = 0;
+};
+
+CappedValues cappedValuesOf(const Function& function, const AllocationConstraints& constraints) {
+    constexpr uint32_t kNoLimit = std::numeric_limits<uint32_t>::max();
+    CappedValues capped;
+    const size_t valueCount = function.ssaArena().valueCount();
+    for (size_t id = 1; id <= valueCount; ++id) {
+        const uint32_t ceiling = constraints.maxIndexFor(static_cast<SSAValueID>(id));
+        if (ceiling == kNoLimit) continue;
+        if (capped.count == 0 || ceiling < capped.ceiling) capped.ceiling = ceiling;
+        ++capped.count;
+    }
+    return capped;
+}
+
+/// Why a pairing rule did not get what it asked for.
+///
+/// A soft rule stays silent when it loses. A bare count therefore cannot say
+/// whether the register was unavailable, or whether placement simply did not
+/// take it. The two need different fixes -- shorter live ranges for the first,
+/// better placement for the second -- and the final colouring tells them
+/// apart.
+///
+/// The two counts differ in how sure they are. `blocked` is certain: a third
+/// value sits on the register across this value's whole range, so no order of
+/// placement could have paired them. `missed` is an upper bound: the register
+/// was free for this one value, but a value moves together with the block it
+/// is tied to, and this report does not see blocks. Read `missed` as how much
+/// is worth investigating.
+struct UnmetPreferences {
+    size_t blocked = 0;  ///< A third value holds the partner's register.
+    size_t missed = 0;   ///< It was free, and was not used.
+};
+
+/// Which values sit on each register. Built once, so the question above costs
+/// a lookup instead of a scan over every value per preference.
+///
+/// One register per value, which is how the allocator binds them. The lift
+/// makes one SSA value per DWORD, so a tuple is a run of values rather than
+/// one wide value.
+using RegOccupants = RegKeyMap<std::vector<SSAValueID>>;
+
+RegOccupants occupantsOf(const AllocationResult& coloured) {
+    RegOccupants occupants;
+    for (SSAValueID id = 1; id <= coloured.valueCount(); ++id) {
+        if (!coloured.isAssigned(id)) continue;
+        occupants[coloured.assignmentOf(id)].push_back(id);
+    }
+    return occupants;
+}
+
+/// Could \p mover have taken \p reg, given where everything else ended up?
+///
+/// Asks what placement asks, in the same order: first whether the register is
+/// off limits, then whether anything else is on it. \p partner is left out
+/// because sharing with it is the whole point. Counting the partner as a
+/// neighbour would report every pair as impossible.
+bool couldHaveTaken(RegKey reg, SSAValueID mover, SSAValueID partner,
+                    const SSALiveIntervals& intervals, const AllocationConstraints& constraints,
+                    const AllocationScope& scope, const AsmTargetRegisters& target,
+                    const AllocationRules& rules, const RegOccupants& occupants) {
+    if (reg.idx > constraints.maxIndexFor(mover)) return false;
+    if (!target.isAllocatable(reg.type, reg.idx)) return false;
+    // A held register accepts only the value that was lifted from it, which is
+    // the rule reachableAt applies during placement.
+    if (scope.isPinnedRegister(reg.type, reg.idx)) {
+        const std::optional<RegKey> hint = constraints.hintFor(mover);
+        if (!hint.has_value() || *hint != reg) return false;
+    }
+    if (rules.forbidsBase(reg.type, reg.idx, /*width=*/1) != nullptr) return false;
+
+    const auto found = occupants.find(reg);
+    if (found == occupants.end()) return true;
+    const LiveRange& range = intervals.rangeOf(mover);
+    for (const SSAValueID resident : found->second) {
+        if (resident == mover || resident == partner) continue;
+        if (intervals.rangeOf(resident).overlaps(range)) return false;
+    }
+    return true;
+}
+
 /// One line per kernel comparing a colouring against the producer's: what it
 /// would cost, next to the pressure floor it could not go below.
 std::string shadowReport(const Function& function, const AllocationResult& coloured,
                          const SSALiveIntervals& intervals,
                          const AllocationConstraints& constraints, const AllocationScope& scope,
-                         const AllocationRules& rules, const char* allocator) {
+                         const AllocationRules& rules, const AsmTargetRegisters& target,
+                         std::span<const AllocationScope::HeldRange> unbankable,
+                         const char* allocator) {
     const AllocationResult producer = createLegacyColoring(function);
     const std::array<int, 3>& isa = function.getGemmTileConfig().arch;
     const GfxArchID arch =
@@ -155,6 +229,104 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     for (const AllocationRule& rule : rules.all()) {
         text += " rule[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + "]";
     }
+    // How much of what each pairing rule asked for it actually got. A hard
+    // rule announces itself by refusing. A soft rule says nothing, so without
+    // this line a rule that collects nothing reads exactly like a rule that is
+    // satisfied everywhere. Prints nothing when the chip declares no pairing
+    // rule.
+    const RegOccupants occupants =
+        constraints.preferences().empty() ? RegOccupants{} : occupantsOf(coloured);
+    for (size_t index = 0; index < rules.all().size(); ++index) {
+        const AllocationRule& rule = rules.all()[index];
+        if (rule.kind() != RuleKind::Pairing) continue;
+        size_t offered = 0;
+        size_t satisfied = 0;
+        UnmetPreferences unmet;
+        for (const Preference& preference : constraints.preferences()) {
+            if (preference.rule != index) continue;
+            ++offered;
+            if (!coloured.isAssigned(preference.a) || !coloured.isAssigned(preference.b)) continue;
+            const RegKey a = coloured.assignmentOf(preference.a);
+            const RegKey b = coloured.assignmentOf(preference.b);
+            if (rules.satisfiedBy(preference, a, b)) {
+                ++satisfied;
+                continue;
+            }
+            // Moving either end onto the other would have paired them. So both
+            // directions must be blocked by a third value before this pair can
+            // be called impossible.
+            const bool reachable = couldHaveTaken(b, preference.a, preference.b, intervals,
+                                                  constraints, scope, target, rules, occupants) ||
+                                   couldHaveTaken(a, preference.b, preference.a, intervals,
+                                                  constraints, scope, target, rules, occupants);
+            if (reachable)
+                ++unmet.missed;
+            else
+                ++unmet.blocked;
+        }
+        text += " pref[" + std::string(rule.name) + "=" + ruleStatusName(rule.status) + " " +
+                std::to_string(satisfied) + "/" + std::to_string(offered);
+        if (unmet.blocked != 0 || unmet.missed != 0) {
+            text += " unmet " + std::to_string(unmet.blocked) + " blocked " +
+                    std::to_string(unmet.missed) + " missed";
+        }
+        text += "]";
+    }
+    // The live-ins left unpinned. Named because moving them rests on nothing
+    // having defined them, which holds only while lifting saw every definition.
+    // Silent when there are none, like the rules above.
+    //
+    // A count and a bounded sample, not the list. A kernel lifted mid-stream
+    // names hundreds of vector registers it never defines, and a line naming
+    // every one is long enough that nobody reads any of it. The sample is for
+    // spot-checking that the hints look like what the producer used; the count
+    // is the figure worth watching.
+    const std::span<const SSAValueID> undefined = constraints.undefinedLiveIns();
+    if (!undefined.empty()) {
+        constexpr size_t kSampleSize = 8;
+        const size_t sampled = std::min(kSampleSize, undefined.size());
+        text += " undefinedLiveIn[" + std::to_string(undefined.size());
+        for (size_t i = 0; i < sampled; ++i) {
+            text += " %" + std::to_string(undefined[i]);
+            if (const std::optional<RegKey> hint = constraints.hintFor(undefined[i]))
+                text += "=" + regKeyToString(*hint);
+        }
+        if (sampled != undefined.size())
+            text += " +" + std::to_string(undefined.size() - sampled) + " more";
+        text += "]";
+    }
+    // Narrow writes nothing reads, usually a missing RW. Sampled like the line above.
+    const std::span<const SSAValueID> unread = constraints.unreadPartialWrites();
+    if (!unread.empty()) {
+        constexpr size_t kSampleSize = 8;
+        const size_t sampled = std::min(kSampleSize, unread.size());
+        text += " unreadPartialWrite[" + std::to_string(unread.size());
+        for (size_t i = 0; i < sampled; ++i) {
+            text += " %" + std::to_string(unread[i]);
+            if (const std::optional<RegKey> hint = constraints.hintFor(unread[i]))
+                text += "=" + regKeyToString(*hint);
+        }
+        if (sampled != unread.size())
+            text += " +" + std::to_string(unread.size() - sampled) + " more";
+        text += "]";
+    }
+    // What was done about operands that cannot name a bank. Reported in both
+    // modes, because under Hold these registers are why the high-water mark
+    // cannot fall below them, and under Allocate the constraint is still in
+    // force even though nothing is frozen -- a silent report there would read
+    // as no constraint at all.
+    if (!unbankable.empty()) {
+        text += " unbankable[held";
+        for (const AllocationScope::HeldRange& range : unbankable) {
+            text += " " + regTypeToString(range.regClass) + std::to_string(range.start);
+            if (range.end != range.start) text += ":" + std::to_string(range.end);
+        }
+        text += "]";
+    } else if (const CappedValues capped = cappedValuesOf(function, constraints);
+               capped.count > 0) {
+        text += " unbankable[allocated " + std::to_string(capped.count) + " value(s) max " +
+                std::to_string(capped.ceiling) + "]";
+    }
     return text;
 }
 
@@ -182,6 +354,14 @@ Expected<AllocationRules> resolveRules(const Function& function,
         for (const std::string& name : unknown) names += (names.empty() ? "" : ", ") + name;
         return Expected<AllocationRules>::Error("@" + function.getName() +
                                                 ": no such allocation rule: " + names);
+    }
+    if (const std::vector<std::string> both = AllocationRules::contradictoryNames(options.rules);
+        !both.empty()) {
+        std::string names;
+        for (const std::string& name : both) names += (names.empty() ? "" : ", ") + name;
+        return Expected<AllocationRules>::Error(
+            "@" + function.getName() +
+            ": asked to activate and to disable the same allocation rule: " + names);
     }
     rules.force(options.rules);
     return rules;
@@ -225,6 +405,11 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
 
     const SSALiveIntervals intervals = computeSSALiveIntervals(function);
     AsmTargetRegisters target = AsmTargetRegisters::forFunction(function);
+
+    // Before build(), which reads the stamp rather than work it out, and before
+    // destruction, which has no other way to learn it.
+    markUndefinedLiveIns(function, target);
+
     const AllocationConstraints constraints = AllocationConstraints::build(function, target, rules);
     const std::vector<Loop> loops = detectLoops(function);
 
@@ -249,6 +434,17 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
         const SlotIndex cut = ruleIntervals.slots().blockEnd(endBlock);
         scope = AllocationScope::upTo(constraints, ruleIntervals, options.allocate, cut);
     }
+
+    // Before the requested holds, so a register in both reports the constraint
+    // rather than the request.
+    //
+    // Allocate holds nothing. The ceiling is collected under either policy, so
+    // the same constraint reaches the allocator as a limit to place under.
+    const std::vector<AllocationScope::HeldRange> unbankable =
+        options.unbankableOperands == RegisterAllocationOptions::UnbankableOperands::Hold
+            ? AllocationScope::unbankableOperandRegisters(function, target)
+            : std::vector<AllocationScope::HeldRange>{};
+    if (!unbankable.empty()) scope.holdUnbankableOperands(constraints, unbankable);
 
     if (!options.pinRegisters.empty()) {
         // A backwards pair holds nothing, which reads as "holding made no
@@ -281,8 +477,8 @@ Expected<AllocationResult> allocateRegisters(Function& function, RegisterAllocat
 
     // Before destruction, which clears the attached SSA the report reads.
     if (options.report && report != nullptr) {
-        *report = shadowReport(function, *allocated, intervals, constraints, scope, rules,
-                               allocator.name());
+        *report = shadowReport(function, *allocated, intervals, constraints, scope, rules, target,
+                               unbankable, allocator.name());
     }
 
     if (options.applyToOperands) {

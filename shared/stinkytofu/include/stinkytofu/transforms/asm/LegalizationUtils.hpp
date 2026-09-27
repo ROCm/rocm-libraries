@@ -94,7 +94,7 @@ STINKYTOFU_EXPORT Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilde
 //      ds_load_b192 v[0:5], v0 offset:0  →  ds_load_b128 v[0:3], v0 offset:0
 //                                            ds_load_b64 v[4:5], v0 offset:16
 STINKYTOFU_EXPORT Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
-                                               GfxArchID archId, bool hasVgprMsb);
+                                               GfxArchID archId);
 
 // Legalize ds_store_b192 instruction
 // Expands into two ds_store instructions (b128 + b64).
@@ -104,7 +104,7 @@ STINKYTOFU_EXPORT Legalized legalizeDSLoadB192(StinkyInstruction* inst, AsmIRBui
 //      ds_store_b192 v[0:5], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
 //                                            ds_store_b64 v[4:5], v0 offset:16
 STINKYTOFU_EXPORT Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
-                                                GfxArchID archId, bool hasVgprMsb);
+                                                GfxArchID archId);
 
 // Legalize ds_store_b256 instruction
 // Expands into two ds_store_b128 instructions.
@@ -114,7 +114,7 @@ STINKYTOFU_EXPORT Legalized legalizeDSStoreB192(StinkyInstruction* inst, AsmIRBu
 //      ds_store_b256 v[0:7], v0 offset:0  →  ds_store_b128 v[0:3], v0 offset:0
 //                                            ds_store_b128 v[4:7], v0 offset:16
 STINKYTOFU_EXPORT Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder,
-                                                GfxArchID archId, bool hasVgprMsb);
+                                                GfxArchID archId);
 
 // Legalize implicit special registers (SCC, VCC, EXEC) on an instruction.
 //
@@ -127,6 +127,23 @@ STINKYTOFU_EXPORT Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBu
 // sufficient for SCC/VCC/EXEC since they are singletons.
 STINKYTOFU_EXPORT void legalizeImplicitSpecialRegisters(StinkyInstruction* inst,
                                                         uint32_t wavefrontSize);
+
+// Add the hidden source that each read-write destination of `inst` implies.
+//
+// A read-write (RW) destination keeps part of its old value: `s_cmov_b32` keeps
+// all of it when the condition is false, and `v_cvt_pk_fp8_f32` keeps the half
+// that op_sel does not write. That old value is an input, so the register must
+// also be listed as a source, or use-def tracking, the SSA lift and the register
+// allocator will not see the read.
+//
+// The register is added last, where the emitter does not print it, and only if
+// it is not already a source, so calling this twice is safe. Call it when the
+// instruction is built; the verifier and other early passes rely on it.
+//
+// Example (high half of an FP8 pack, which keeps the low half of v10):
+//      v10 = v_cvt_pk_fp8_f32(v1, v2)  →  v10 = v_cvt_pk_fp8_f32(v1, v2, v10)
+//      Both print as: v_cvt_pk_fp8_f32 v10, v1, v2 op_sel:[0,0,1]
+STINKYTOFU_EXPORT void legalizeReadWriteSources(StinkyInstruction* inst);
 
 }  // namespace stinkytofu
 
