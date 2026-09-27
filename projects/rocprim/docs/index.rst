@@ -30,16 +30,14 @@ The rocPRIM project is located in https://github.com/ROCm/rocm-libraries/tree/de
   .. grid-item-card:: How to
 
     * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
-    * :doc:`Use primbench for benchmarking <./how-to/rocPRIM-primbench>`
     * :doc:`Run unit tests on multiple GPUs <./how-to/rocPRIM-run-tests>`
-
    
   .. grid-item-card:: Reference
 
+    * `Benchmarking with Primbench <https://rocm.docs.amd.com/projects/primbench/en/latest>`_
     * :ref:`glossary`
     * :doc:`rocPRIM precision support <./reference/data-type-support>`
     * :ref:`reference`
-
       * :ref:`Iterators <iterators>` 
       * :ref:`Intrinsics <intrinsics>` 
       * :ref:`Utility types <types>`
