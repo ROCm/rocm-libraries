@@ -508,8 +508,8 @@ __global__ void tensor_op_tensor_nd_hip_tensor(T1* srcPtr1, T1* srcPtr2, uint* s
 
 template <typename T1, typename T2, typename Operation>
 __global__ void tensor_op_tensor_non_broadcast_nd_hip_tensor(T1* src1Ptr, T1* src2Ptr,
-                                                             uint* src1Dims, uint numDims,
-                                                             T2* dstPtr, uint* strides,
+                                                             d_uint5_s src1Dims, uint numDims,
+                                                             T2* dstPtr, d_uint5_s strides,
                                                              uint* roiTensor1, uint* roiTensor2,
                                                              Operation op) {
     int id_x = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * 8;
@@ -518,28 +518,28 @@ __global__ void tensor_op_tensor_non_broadcast_nd_hip_tensor(T1* src1Ptr, T1* sr
     using VectorType1 = typename ArithmeticLoadStoreExecute<T1>::VectorType;
     using VectorType2 = typename ArithmeticLoadStoreExecute<T2>::VectorType;
 
-    if (id_x >= strides[0]) return;
+    if (id_x >= strides.data[0]) return;
 
     uint* roi1 = roiTensor1 + id_z * numDims * 2;
     uint* begin1 = roi1;
     uint* roi2 = roiTensor2 + id_z * numDims * 2;
     uint* begin2 = roi2;
     uint* length = &roi2[numDims];
-    uint dstIdx = (id_z * *strides);
-    uint srcIdx1 = (id_z * *strides);
-    uint srcIdx2 = (id_z * *strides);
-    strides++;
+    uint dstIdx = (id_z * strides.data[0]);
+    uint srcIdx1 = (id_z * strides.data[0]);
+    uint srcIdx2 = (id_z * strides.data[0]);
+    const uint* dimStrides = strides.data + 1;
     uint coords[RPPT_MAX_DIMS];
 
     for (int i = 0; i < numDims; i++) {
-        coords[i] = (id_x / strides[i]) % src1Dims[i];
+        coords[i] = (id_x / dimStrides[i]) % src1Dims.data[i];
         if (coords[i] >= length[i]) return;
     }
 
     for (int i = 0; i < numDims; i++) {
-        dstIdx += (coords[i] * strides[i]);
-        srcIdx1 += (begin1[i] + (coords[i] * strides[i]));
-        srcIdx2 += (begin2[i] + (coords[i] * strides[i]));
+        dstIdx += (coords[i] * dimStrides[i]);
+        srcIdx1 += (begin1[i] + coords[i]) * dimStrides[i];
+        srcIdx2 += (begin2[i] + coords[i]) * dimStrides[i];
     }
 
     VectorType1 src1_vec8, src2_vec8;
@@ -834,14 +834,19 @@ RppStatus hip_exec_tensor_non_broadcast_binary_arithmetic_generic_tensor(
         int globalThreads_y = 1;
         int globalThreads_z = dstGenericDescPtr->dims[0];
 
+        // Descriptors are caller-owned and may live in pageable host memory, so dims/strides
+        // are passed to the kernel by value rather than as pointers into the descriptor.
+        d_uint5_s srcDims = {}, dstStrides = {};
+        memcpy(srcDims.data, srcGenericDescPtr1->dims + 1, numDims * sizeof(Rpp32u));
+        memcpy(dstStrides.data, dstGenericDescPtr->strides, (numDims + 1) * sizeof(Rpp32u));
+
         hipLaunchKernelGGL(tensor_op_tensor_non_broadcast_nd_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), srcPtr1, srcPtr2, srcGenericDescPtr1->dims + 1,
-                           srcGenericDescPtr1->numDims - 1, dstPtr, dstGenericDescPtr->strides,
-                           roiTensor1, roiTensor2, op);
+                           handle.GetStream(), srcPtr1, srcPtr2, srcDims, numDims, dstPtr,
+                           dstStrides, roiTensor1, roiTensor2, op);
         HIP_CHECK_LAUNCH_RETURN();
     }
 
