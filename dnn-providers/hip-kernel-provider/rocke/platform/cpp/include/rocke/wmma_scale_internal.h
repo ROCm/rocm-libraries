@@ -14,6 +14,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/error.hpp"
 #include "rocke/ir.h"
+#include "rocke/storage.h"
 
 typedef struct rocke_scale_packing
 {
@@ -22,6 +23,47 @@ typedef struct rocke_scale_packing
     int count;
     int block_k;
 } rocke_scale_packing_t;
+
+static inline int rocke_scale_word_bits(const rocke_scale_packing_t* p)
+{
+    if(p->block_k <= 0)
+        ckc::raise_status(ROCKE_ERR_VALUE, "scale block_k must be positive");
+    if(p->count != 1 && p->count != 2 && p->count != 4 && p->count != 8)
+        ckc::raise_status(ROCKE_ERR_VALUE, "carrier_bits must be 8, 16, 32, or 64");
+    return p->count * 8;
+}
+
+static inline rocke_fragment_packing_t rocke_scale_fragment(const rocke_scale_packing_t* p)
+{
+    const int word_bits = rocke_scale_word_bits(p);
+    rocke_bit_packing_t bits;
+    rocke_fragment_packing_t result;
+    if(!rocke_bit_packing_init(&bits, 8, 0)
+       || !rocke_fragment_packing_init(&result, &bits, p->count, word_bits, 1))
+        ckc::raise_status(ROCKE_ERR_VALUE, "invalid scale packing");
+    return result;
+}
+
+static inline rocke_matrix_fragment_layout_t rocke_scaled_matrix_layout(const char* dtype,
+                                                                        int abi_words)
+{
+    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
+    int chunk = 0;
+    if(info && (strcmp(info->name, "fp8e4m3") == 0 || strcmp(info->name, "bf8e5m2") == 0))
+        chunk = 16;
+    else if(info
+            && (strcmp(info->name, "fp4e2m1") == 0 || strcmp(info->name, "fp6e2m3") == 0
+                || strcmp(info->name, "fp6e3m2") == 0))
+        chunk = 32;
+    rocke_bit_packing_t bits;
+    rocke_fragment_packing_t fragment;
+    rocke_matrix_fragment_layout_t result;
+    if(!chunk || abi_words < 0 || !rocke_bit_packing_init(&bits, info->encoded_bits, 0)
+       || !rocke_fragment_packing_init(&fragment, &bits, 64, 32, abi_words)
+       || !rocke_matrix_fragment_layout_init(&result, &fragment, chunk, 2, 16))
+        ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled matrix layout");
+    return result;
+}
 
 typedef struct rocke_scaled_wmma_op
 {
@@ -43,6 +85,13 @@ static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma(const char* op_id)
     const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx1250");
     const rocke_mma_op_t* atom = rocke_mma_catalog_by_op_id(&target->mma, op_id);
     return atom && strcmp(atom->family, "wmma_scaled") == 0 ? atom : NULL;
+}
+
+static inline rocke_matrix_fragment_layout_t
+    rocke_scaled_wmma_matrix_layout(const rocke_mma_op_t* atom, bool for_b)
+{
+    return rocke_scaled_matrix_layout(for_b ? atom->b_dtype : atom->a_dtype,
+                                      for_b ? atom->b_frag_len : atom->a_frag_len);
 }
 
 static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_op_t* atom)
@@ -100,11 +149,6 @@ static inline const rocke_mma_op_t* rocke_gfx1250_scaled_wmma_from_op(const rock
 {
     const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
     return rocke_gfx1250_scaled_wmma(op_id ? op_id : op->name);
-}
-
-static inline int rocke_scale_word_bits(const rocke_scale_packing_t* packing)
-{
-    return packing->count * 8;
 }
 
 #endif /* ROCKE_WMMA_SCALE_INTERNAL_H */

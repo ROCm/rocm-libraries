@@ -570,7 +570,8 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
             elem_bytes = 8;
         }
     }
-    int64_t align = vec * elem_bytes;
+    /* New 96-bit widths guarantee only element alignment, including FP8. */
+    int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
      * pass from substituting ds_load_tr16_b128 (transposed) for the plain
      * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
