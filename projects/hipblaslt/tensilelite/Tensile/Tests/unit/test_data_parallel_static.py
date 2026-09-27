@@ -39,6 +39,8 @@ import Tensile.KernelWriterAssembly as kwa_module
 from Tensile.Common.DataType import DataType
 from Tensile.Components.StreamK import StreamKTwoTileDPFirst
 from Tensile.Components.TileProcessingStrategy import DataParallel
+from Tensile.Components.PersistentLoop import PersistentLoopOn
+from Tensile.Components.WorkAssignment import StaticGrid
 from Tensile.Components.Subtile.SubtileGREmit import tdmApplyTileKOffsetSubtile
 from Tensile.Contractions import SizeMapping
 
@@ -48,9 +50,10 @@ from Tensile.Contractions import SizeMapping
 from test_PrefetchAcrossPersistent import (
     _StubLabels,
     _StubStreamK,
+    _ClassicPapWrapperWriter,
     _instruction_indices,
     _module_items,
-    _prefetch_across_persistent,
+    _pap_wrapper_kernel,
     _tensor_parameters,
 )
 
@@ -132,11 +135,14 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
 
+
     def tdmFusePaired(self, kernel):
         return kwa_module.KernelWriterAssembly.tdmFusePaired(self, kernel)
+
 
     def _tdmPairedParityOrder(self, kernel, tpa, tpb):
         return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
@@ -162,68 +168,51 @@ def _processing(dp_only=True):
 
 # ---------------------------------------------------------------------------
 # 1. classic PAP: the AddressFlags "parallel reduction: skip PAP" compare is
-#    folded out under DP-only. PersistentIteration >= PersistentIterationEnd lives in the
-#    papHasNextPersistentIteration seam (nested Module), not as a top-level
-#    instruction in prefetchAcrossPersistent.
+#    folded out under DP-only. Assignment owns the pending-work bound check.
 # ---------------------------------------------------------------------------
 def test_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
-    _, dp_items = _prefetch_across_persistent(monkeypatch, TileProcessingStrategy="DataParallel")
-    _, nodp_items = _prefetch_across_persistent(monkeypatch, TileProcessingStrategy="StreamK")
+    dp_items = _pap_items(monkeypatch, dp_only=True)
+    nodp_items = _pap_items(monkeypatch, dp_only=False)
 
     # DP-only: no AddressFlags synchronizer compare ...
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
     # non-DP-only: the AddressFlags compare is present (path unchanged).
     assert _instruction_indices(nodp_items, SCmpEQU64, src_contains="AddressFlags")
 
-    skip_label = Label("SK_SkipNllPAP_unit", "")
-    sk3_items = _module_items(
-        StreamKTwoTileDPFirst().papHasNextPersistentIteration(
-            writer=None, kernel={}, skipLabel=skip_label
-        )
-    )
-    assert _instruction_indices(sk3_items, SCmpGeU32, src_contains="PersistentIteration")
+    assert _instruction_indices(dp_items, SCmpGeU32, src_contains="PersistentIteration")
+    assert _instruction_indices(nodp_items, SCmpGeU32, src_contains="PersistentIteration")
 
 
 # ---------------------------------------------------------------------------
 # 2. Subtile PAP (KernelWriter.prefetchAcrossPersistentSubtile): same fold.
 # ---------------------------------------------------------------------------
-class _SubtilePapWriter:
-    def __init__(self):
-        self.labels = _StubLabels()
-        self.vgprPool = SimpleNamespace(
-            checkOutAligned=lambda *a, **k: 300,
-            checkIn=lambda *a, **k: None,
-        )
-
-    def isPrefetchAcrossPersistentEnabled(self, kernel):
-        return True
-
-    def papTileIdentityNames(self, kernel):
-        return []
-
-    def papCheckpointCurrentTileIdentityVgprs(self, kernel, prevTile):
-        return Module("papCheckpointCurrentTileIdentityVgprs")
-
-    def papRestoreCurrentTileIdentityVgprs(self, kernel, prevTile):
-        return Module("papRestoreCurrentTileIdentityVgprs")
-
+class _SubtilePapWriter(_ClassicPapWrapperWriter):
     def setupPrefetchAcrossPersistentSubtileLoads(self, kernel, tpa, tpb, preloopGrModule=None):
         return Module("setupPrefetchAcrossPersistentSubtileLoads")
 
 
-def _subtile_pap_items(monkeypatch, dp_only):
-    monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _StubStreamK())
-    writer = _SubtilePapWriter()
-    kernel = {"UseSubtileImpl": True, "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",
-        "WorkAssignment": "StaticGrid"}
+def _pap_items(monkeypatch, dp_only, subtile=False):
+    processing = _processing(dp_only)
+    processing.prefetchAcrossPersistentSetupNextTile = _StubStreamK().prefetchAcrossPersistentSetupNextTile
+    monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: processing)
+    monkeypatch.setattr(kw_module.Component.WorkAssignment, "find", lambda writer: StaticGrid())
+    monkeypatch.setattr(kw_module.Component.PersistentLoop, "find", lambda writer: PersistentLoopOn())
+    writer = _SubtilePapWriter() if subtile else _ClassicPapWrapperWriter()
+    kernel = _pap_wrapper_kernel(UseSubtileImpl=subtile,
+                                TileProcessingStrategy="DataParallel" if dp_only else "StreamK")
+    writer.states.kernel = kernel
+    writer.states.currentTileWork = processing.tileWork(kernel)
     tpa, tpb = _tensor_parameters()
-    module = kw_module.KernelWriter.prefetchAcrossPersistentSubtile(writer, kernel, tpa, tpb)
-    return _module_items(module)
+    if subtile:
+        module = kw_module.KernelWriter.prefetchAcrossPersistentSubtile(writer, kernel, tpa, tpb)
+    else:
+        module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(writer, kernel, tpa, tpb)
+    return list(module.flatitems())
 
 
 def test_subtile_pap_addressflags_compare_folded_under_dp_only(monkeypatch):
-    dp_items = _subtile_pap_items(monkeypatch, dp_only=True)
-    nodp_items = _subtile_pap_items(monkeypatch, dp_only=False)
+    dp_items = _pap_items(monkeypatch, dp_only=True, subtile=True)
+    nodp_items = _pap_items(monkeypatch, dp_only=False, subtile=True)
 
     assert not _instruction_indices(dp_items, SCmpEQU64, src_contains="AddressFlags")
     assert _instruction_indices(dp_items, SCmpGeU32, src_contains="PersistentIteration")
@@ -358,7 +347,7 @@ def _tdm_setup_increment_items(dp_only):
     tpa, tpb = _tensor_parameters(with_mx=True)
     # Keys so TDMFuse=2 actually resolves; the increment reads the grouping table.
     kernel = {
-        "StreamKForceDPOnly": 1 if dp_only else 0,
+        "TileProcessingStrategy": "DataParallel" if dp_only else "StreamK",
         "TDMFuse": 2,
         "TDMInst": 3,
         "NumWaves": 4,
@@ -600,11 +589,11 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
 
 
 # ---------------------------------------------------------------------------
-# 10. rapTileBatch: the batch of the tile at PersistentIteration, with none of the
+# 10. peekTileBatch: the batch of the tile at PersistentIteration, with none of the
 #     side effects that would make it unsafe where ReuseAcrossPersistent
 #     needs it.
 # ---------------------------------------------------------------------------
-def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
+def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it(monkeypatch):
     """RAP asks for this before it knows whether it will run the tile here.
 
     The reuse copy can only serve tiles in the batch its resident A was filled
@@ -614,7 +603,7 @@ def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
     this batch cannot: ``skTileIndex`` resets the local-read offsets and
     ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
 
-    So rapTileBatch repeats their arithmetic and writes only its destination. A
+    So peekTileBatch repeats their arithmetic and writes only its destination. A
     later edit that reaches for skIndexToWG instead would leave WorkGroup* set
     for a tile the fill copy then re-derives, which no build failure would catch.
     """
@@ -622,9 +611,10 @@ def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
     kernel = _sk_common_kernel(dp_only=True)
     kernel["WavefrontSize"] = 32
 
-    rendered = str(_processing().rapTileBatch(writer, kernel, "RAPResidentBatch"))
+    monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _processing())
+    rendered = str(StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch"))
 
-    # PersistentIteration still names the pending tile here; graWorkGroup advances it.
+    # PersistentIteration names pending work; activation advances it only when claimed.
     assert "s[sgprPersistentIteration]" in rendered
     # Tiles per batch, the divisor that turns a tile index into a batch.
     assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
@@ -632,6 +622,6 @@ def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it():
 
     for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
         assert claimed not in rendered, (
-            "rapTileBatch claimed %s for a tile it may hand back to the fill copy"
+            "peekTileBatch claimed %s for a tile it may hand back to the fill copy"
             % claimed
         )
