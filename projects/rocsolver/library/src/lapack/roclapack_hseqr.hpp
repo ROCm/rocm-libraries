@@ -626,8 +626,10 @@ I hseqr_multishift(rocblas_handle handle,
     const I wcap = hseqr_aed_window_cap(nhfull, hybrid);
     if(wcap > 0)
     {
-        nwr_t = std::min(nwr_t, wcap);
-        nsr_t = std::min(nsr_t, nwr_t);
+        // (the window size selection of ZLAQR0 may add 1 to nwr, so that the window, of at
+        // most wcap entries, still fits the shared memory kernels when wcap is HQR_LDS_NMAX)
+        nwr_t = std::min(nwr_t, wcap - 1);
+        nsr_t = std::min(nsr_t, wcap);
         nsr_t = std::max(I(2), nsr_t - nsr_t % 2);
     }
 
