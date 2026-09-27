@@ -573,6 +573,10 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_ngchw_gkcyx_ngkhw_bf16_instances(
                         op_ptrs);
+#if defined(CK_USE_WMMA) && defined(CK_GFX1250_SUPPORT)
+                    add_device_grouped_conv2d_bwd_weight_nchw_pointwise_bf16_wmma_instances(
+                        op_ptrs);
+#endif
                 }
 #endif
 #ifdef CK_ENABLE_FP32
