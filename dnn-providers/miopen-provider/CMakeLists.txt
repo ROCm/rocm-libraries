@@ -376,9 +376,10 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         if(HIPDNN_TEST_MIOPEN_CACHE_DIR)
             set(_miopen_cache_fixture hipdnn_clear_miopen_test_cache)
         endif()
-        # The GTest YAML applies to both test binaries; each call appends its category suites
-        # (e.g. miopen_plugin_tests_quick_suite, miopen_plugin_integration_tests_quick_suite)
-        # to the same install-time CTestTestfile.cmake. ENVIRONMENT forwards the CMake-side
+        # The GTest YAML normally applies to both test binaries. HOST_ASAN admits only the
+        # unit executable because the integration binary has no matching CPU-only cases.
+        # Each call appends its category suites to the same install-time CTestTestfile.cmake.
+        # ENVIRONMENT forwards the CMake-side
         # TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE, set by
         # dnn-providers/cmake/Sanitizers.cmake / _build_test_environment_list_internal) to
         # every generated suite; without it those suites run unsanitized/uninstrumented.
@@ -391,15 +392,17 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
             FIXTURES_REQUIRED ${_miopen_cache_fixture}
         )
-        apply_test_category_labels(
-            miopen_plugin_integration_tests
-            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
-            "${PROJECT_BINARY_DIR}/staging"
-            "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
-            ENVIRONMENT ${TEST_ENVIRONMENT}
-            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
-            FIXTURES_REQUIRED ${_miopen_cache_fixture}
-        )
+        if(NOT THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+            apply_test_category_labels(
+                miopen_plugin_integration_tests
+                "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
+                "${PROJECT_BINARY_DIR}/staging"
+                "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+                ENVIRONMENT ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                FIXTURES_REQUIRED ${_miopen_cache_fixture}
+            )
+        endif()
     endif()
 
     set(_external_category_args "")

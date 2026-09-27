@@ -88,6 +88,56 @@ test_categories:
       - "ffm-quick"
       - "ffm-full"
 
+  # CPU-only host-ASAN admission. This is a positive allowlist of the 38 suites
+  # (811 tests) validated under ASAN with leak detection on a machine without
+  # GPU device nodes. Newly added suites, IntegrationGpu suites, and fixtures
+  # that construct HIP or MIOpen device resources are excluded by default.
+  host-asan:
+    description: "GPU-independent provider unit tests for host ASAN"
+    test_patterns:
+      - "*TestBatchnormApplicabilityChecks.*"
+      - "*TestBatchnormBwdParams.*"
+      - "*TestBatchnormFwdTrainingActivParams.*"
+      - "*TestBatchnormFwdTrainingParams.*"
+      - "*TestCheckBatchnormBackwardConfigSupported.*"
+      - "*TestCheckBatchnormBwdActivationModeSupported.*"
+      - "*TestCheckBatchnormFusedBackwardConfigSupported.*"
+      - "*TestCheckBatchnormFwdActivationModeSupported.*"
+      - "*TestCheckBatchnormInferenceConfigSupported.*"
+      - "*TestCheckBatchnormInferenceWithVarianceConfigSupported.*"
+      - "*TestCheckBatchnormInferenceWithVarianceFusedConfigSupported.*"
+      - "*TestCheckBatchnormTrainingConfigSupported.*"
+      - "*TestCheckTensorDataTypesSupported.*"
+      - "*TestCheckTensorLayoutsAndDimsSupported.*"
+      - "*TestCheckTensorShapesSupported.*"
+      - "*TestConvBwdParams.*"
+      - "*TestConvFwdBiasActivParams.*"
+      - "*TestConvFwdParams.*"
+      - "*TestConvWrwParams.*"
+      - "*TestHipdnnMiopenSettings.*"
+      - "*TestMiopenActivationDescriptor.*"
+      - "*TestMiopenBatchnormFwdInferenceParams.*"
+      - "*TestMiopenBatchnormFwdInferenceWithVarianceParams.*"
+      - "*TestMiopenConvDescriptor.*"
+      - "*TestMiopenPluginPublic.*"
+      - "*TestMiopenTensor.*"
+      - "*TestMiopenUtils.*"
+      - "*TestValidateConsistentDataTypes.*"
+      - "*TestValidateConsistentDimensions.*"
+      - "*TestValidateConsistentLayouts.*"
+      - "*TestValidateConsistentShapes.*"
+      - "*TestValidateDataTypeIsSupported.*"
+      - "*TestValidateDimensionCount.*"
+      - "*TestValidateFixedDataType.*"
+      - "*TestValidatePackedTensors.*"
+      - "*TestValidateSpatialDimensions.*"
+      - "*TestValidateSupportedLayout.*"
+      - "*TestWorkaroundsIssue6979.*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "host-asan"
+
 # GPU-arch-specific exclusions. Mirrors the TEST_TO_IGNORE map in the legacy
 # TheRock/build_tools/github_actions/test_executable_scripts/test_miopenprovider.py:
 #
@@ -131,3 +181,4 @@ execution_settings:
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
     ffm-quick: 7200       # 2 hours
+    host-asan: 2700       # 45 minutes
