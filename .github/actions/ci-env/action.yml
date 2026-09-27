@@ -22,7 +22,7 @@ outputs:
     value: "aws-linux-scale-rocm-prod"
   windows-runner:
     description: "GitHub Actions runner label for Windows jobs"
-    value: "azure-windows-scale-rocm"
+    value: "aws-windows-scale-rocm-prod-mix"
 
 runs:
   using: "composite"
