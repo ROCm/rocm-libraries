@@ -194,6 +194,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # sibling branches appending elsewhere. Needs the defining library TU in
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below.
+  unit_test_internal_conversion_csr2ell_batch.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -272,6 +277,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
+  # Added at this leaf for unit_test_internal_conversion_csr2ell_batch.cpp
+  # [AISPARSE-683]: the rocsparse_Xcsr2ell_strided_batched entry points are
+  # declared in no header and librocsparse hides them
+  # (CXX_VISIBILITY_PRESET "hidden"), so the defining TU is compiled into this
+  # binary. Build wiring only -- no library source changes.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_csr2ell_strided_batched.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
