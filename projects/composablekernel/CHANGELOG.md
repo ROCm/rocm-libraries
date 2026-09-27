@@ -11,12 +11,13 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added a profiler mode linking only MIOpen-facing 2D/3D channels-last grouped convolution candidates and explicit backward-weight competitors.
 * Added opt-in raw complete-invocation timing and unique candidate numbering to the grouped-convolution profiler.
 * Added a gfx1250 FP16 factor-4 packed-weight grouped forward candidate for 2D channels-last convolutions.
-* Added a gfx1250 BF16 group-local depthwise backward-weight candidate for packed 2D channels-last 3x3 convolutions with at least 256 groups and short reductions.
+* Added a gfx1250 BF16 group-local depthwise backward-weight candidate for packed 2D channels-last 3x3 convolutions with at least 128 groups and reductions no longer than `min(G, 512)`.
 * Added a gfx1250 BF16 2D channels-last pointwise backward-data WMMA-v3 instance with paired A loads for even output-channel counts and split 1; the scalar instance remains available for odd channels.
 
 ### Optimized
 
 * Omitted redundant output/workspace clears for packed, completely overwritten split-1 grouped convolution backward paths.
+* Extended gfx1250 BF16 depthwise backward-weight row-strip candidates to resource-bounded 3x3 group families and small-group 11x11 convolutions, retaining competing kernels when workgroups are insufficient.
 
 ### Fixed
 
