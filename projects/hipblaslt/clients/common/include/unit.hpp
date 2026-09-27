@@ -546,39 +546,6 @@ inline void unit_check_general(int64_t                     M,
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_DOUBLE_COMPLEX_EQ);
 }
 
-template <typename T>
-constexpr double get_epsilon()
-{
-    return std::numeric_limits<T>::epsilon();
-}
-
-template <typename T>
-inline int64_t unit_check_diff(
-    int64_t M, int64_t N, int64_t lda, int64_t stride, T* hCPU, T* hGPU, int64_t batch_count)
-{
-    using c_type  = std::conditional_t<std::is_same<hipblasLtHalf, T>::value, float, T>;
-    int64_t error = 0;
-    do
-    {
-        for(size_t k = 0; k < batch_count; k++)
-            for(size_t j = 0; j < N; j++)
-                for(size_t i = 0; i < M; i++)
-                    if(hipblaslt_isnan(hCPU[i + j * size_t(lda) + k * stride]))
-                    {
-                        error += hipblaslt_isnan(hGPU[i + j * size_t(lda) + k * stride]) ? 0 : 1;
-                    }
-                    else
-                    {
-                        error += static_cast<c_type>(hCPU[i + j * size_t(lda) + k * stride])
-                                         == static_cast<c_type>(
-                                             hGPU[i + j * size_t(lda) + k * stride])
-                                     ? 0
-                                     : 1;
-                    }
-    } while(0);
-    return error;
-}
-
 inline void unit_check_general(int64_t     M,
                                int64_t     N,
                                int64_t     lda,
