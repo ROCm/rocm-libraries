@@ -1,0 +1,19 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Positive-only CPU admission for hipdnn_gpu_ref_tests. These validation and
+# HIP-error translation suites do not allocate a device. The TheRock runner
+# protects this selector with the exact 14-case name inventory.
+test_categories:
+  host-asan:
+    description: "GPU-reference validation/error paths that stay on the host"
+    test_patterns:
+      - "TestConvolutionValidation.*"
+      - "TestGpuRefHipError.*"
+    labels:
+      - "host-asan"
+
+execution_settings:
+  default_timeout: 600
+  category_timeouts:
+    host-asan: 600

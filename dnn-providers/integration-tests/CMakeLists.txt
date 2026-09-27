@@ -142,13 +142,6 @@ if(Python3_FOUND)
     # Labels are applied via the shared YAML category path below (test_categories_external.yaml)
     # so this pre-registered test gets the tier labels.
     set(HIPDNN_IT_BUNDLE_VERIFIER_TEST hipdnn_bundle_verifier_python_tests)
-
-    add_test(
-        NAME hipdnn_support_claim_verifier_python_tests
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_support_claims.py
-    )
-    set(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST hipdnn_support_claim_verifier_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -171,7 +164,6 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/ProductionPolicy.cpp
     src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
-    src/harness/bundle/SupportClaimWriter.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/VariantPackBuilder.cpp
@@ -273,9 +265,6 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
     endif()
-    if(HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST)
-        _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_CLAIM_VERIFIER_TEST})
-    endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
 endif()
@@ -317,6 +306,42 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
             ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
         )
     endforeach()
+
+    # Host-ASAN is a separate, positive-only admission lane. Keep one category
+    # manifest per executable: applying a shared catch-all category to all three
+    # binaries would silently admit new GPU tests. The CI-side runner audits the
+    # generated commands and requires the exact selected names/counts before it
+    # executes any test.
+    apply_test_category_labels(
+        hipdnn_integration_tests_unit_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_host_asan_unit.yaml"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_TEST_FILE "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+        ENVIRONMENT ${TEST_ENVIRONMENT}
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+    apply_test_category_labels(
+        hipdnn_gpu_ref_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_host_asan_gpu_ref.yaml"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_TEST_FILE "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+        ENVIRONMENT ${TEST_ENVIRONMENT}
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
+    apply_test_category_labels(
+        hipdnn_golden_data_tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_host_asan_golden.yaml"
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+        INSTALL_TEST_FILE "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+        COMMAND_ARGS
+            --reference cpu
+            --gd "${CMAKE_BINARY_DIR}/lib/integration-test-bundles/quick/BatchnormFwdInference"
+        INSTALL_COMMAND_ARGS
+            --reference cpu
+            --gd "../../${CMAKE_INSTALL_LIBDIR}/integration-test-bundles/quick/BatchnormFwdInference"
+        ENVIRONMENT ${TEST_ENVIRONMENT}
+        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+    )
 
     # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
