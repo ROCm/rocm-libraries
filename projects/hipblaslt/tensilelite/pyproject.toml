@@ -118,9 +118,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["Tensile*"]
 
-[tool.setuptools.package-data]
-Tensile = ["cmake/*"]
-
 [tool.uv]
 # Use the user's existing interpreter; never download a uv-managed Python.
 # rocisa is a HIP/nanobind native ext, so the chosen Python must have its dev
