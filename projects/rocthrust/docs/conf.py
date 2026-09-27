@@ -23,11 +23,13 @@ html_theme_options = {
     "use_issues_button": True,
     "use_download_button": True,
 }
+# Generate llms.txt (https://llmstxt.org/)
+rocm_docs_generate_llms = True
 
 # for PDF output on Read the Docs
 project = "rocThrust Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
