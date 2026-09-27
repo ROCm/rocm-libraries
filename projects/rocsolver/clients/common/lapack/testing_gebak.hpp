@@ -175,7 +175,7 @@ void gebak_initData(const rocblas_handle handle,
         for(rocblas_int b = 0; b < bc; ++b)
         {
             for(size_t k = 0; k < A.size(); k++)
-                A[k] = hV[b][k % (size_t(ldv) * m)];
+                A[k] = random_generator<T>();
             gebal_genMatrix(n, A.data(), n, mtype, b);
             cpu_gebal(job, n, A.data(), n, hIlo[b], hIhi[b], hScale[b], &info);
         }

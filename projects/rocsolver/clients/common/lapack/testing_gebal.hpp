@@ -293,9 +293,10 @@ void gebal_getError(const rocblas_handle handle,
         cpu_gebal(job, n, hA[b], lda, hIlo[b], hIhi[b], hScale[b], &info);
 
     // the GPU and CPU results must coincide:
-    // - error is ||hA - hARes|| / ||hA|| and ||hScale - hScaleRes|| / ||hScale||
-    //   (as the scaling factors are powers of two, these errors are zero unless
-    //   the tiny differences in the computed norms change a balancing decision)
+    // - error is ||hA - hARes|| / ||hA|| and max_i |hScale(i) - hScaleRes(i)| / |hScale(i)|
+    //   (as the scaling factors are powers of two, these errors are zero unless the tiny
+    //   differences in the computed norms change a balancing decision; a different
+    //   decision on any factor, however small, gives an error of at least 1/2)
     // - ilo and ihi must be equal
     double err;
     *max_err = 0;
@@ -304,8 +305,12 @@ void gebal_getError(const rocblas_handle handle,
         err = norm_error('F', n, n, lda, hA[b], hARes[b]);
         *max_err = err > *max_err ? err : *max_err;
 
-        err = norm_error('F', 1, n, 1, hScale[b], hScaleRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        for(rocblas_int i = 0; i < n; i++)
+        {
+            const double s = hScale[b][i];
+            err = std::abs(double(hScaleRes[b][i]) - s) / (s != 0 ? std::abs(s) : 1.0);
+            *max_err = err > *max_err ? err : *max_err;
+        }
 
         EXPECT_EQ(hIlo[b][0], hIloRes[b][0]) << "where b = " << b;
         EXPECT_EQ(hIhi[b][0], hIhiRes[b][0]) << "where b = " << b;

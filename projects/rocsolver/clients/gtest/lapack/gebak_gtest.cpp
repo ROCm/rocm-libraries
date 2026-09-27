@@ -43,8 +43,8 @@ typedef std::tuple<vector<int>, vector<char>> gebak_tuple;
 // case when n = 0, job = B and side = R will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-const vector<vector<char>> op_range
-    = {{'N', 'R'}, {'P', 'R'}, {'S', 'R'}, {'B', 'R'}, {'P', 'L'}, {'S', 'L'}, {'B', 'L'}};
+const vector<vector<char>> op_range = {{'N', 'R'}, {'P', 'R'}, {'S', 'R'}, {'B', 'R'},
+                                       {'N', 'L'}, {'P', 'L'}, {'S', 'L'}, {'B', 'L'}};
 
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {

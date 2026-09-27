@@ -768,6 +768,24 @@ void hseqr_getError(const rocblas_handle handle,
             *max_err += nonzeros + mismatches;
         }
 
+        // the sum of the eigenvalues is the trace of H0 (checked for all the classes, also
+        // those whose eigenvalues are too ill-conditioned to be compared one by one):
+        // error |sum(W) - trace(H0)| / (sqrt(n) * ||H0||)
+        {
+            T sumw = 0, trace = 0;
+            double hnorm2 = 0;
+            for(rocblas_int j = 0; j < n; j++)
+            {
+                sumw += hWRes[b][j];
+                trace += hH0[b][j + size_t(j) * ldh];
+                for(rocblas_int i = 0; i < n; i++)
+                    hnorm2 += std::norm(hH0[b][i + size_t(j) * ldh]);
+            }
+            const double err
+                = std::abs(sumw - trace) / std::max(std::sqrt(double(n) * hnorm2), 1e-300);
+            *max_err_eig = std::max(*max_err_eig, err);
+        }
+
         if(wantt && wantz)
         {
             // M = Z0 * H0 * Z0^H (or H0 if Z0 = I)
@@ -810,6 +828,22 @@ void hseqr_getError(const rocblas_handle handle,
             cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, n, n, n, T(-1),
                      Z.data(), n, Z.data(), n, T(1), R.data(), n);
             err = snorm('F', n, n, R.data(), n) / std::sqrt(double(n));
+            *max_err = err > *max_err ? err : *max_err;
+        }
+        else if(wantz)
+        {
+            // without the Schur form, only the orthogonality of Z can be checked:
+            // ||Z^H * Z - I|| / sqrt(n)
+            std::vector<T> Z(size_t(n) * n);
+            for(rocblas_int j = 0; j < n; j++)
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    Z[i + size_t(j) * n] = hZRes[b][i + size_t(j) * ldz];
+                    R[i + size_t(j) * n] = (i == j) ? T(1) : T(0);
+                }
+            cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, n, n, n, T(-1),
+                     Z.data(), n, Z.data(), n, T(1), R.data(), n);
+            const double err = snorm('F', n, n, R.data(), n) / std::sqrt(double(n));
             *max_err = err > *max_err ? err : *max_err;
         }
 

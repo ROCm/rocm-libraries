@@ -640,8 +640,32 @@ void geev_getError(const rocblas_handle handle,
                      1, VRc.data(), 1, &info);
             EXPECT_EQ(info, 0) << "(host LAPACK) where b = " << b;
 
+            // for the badly scaled classes, the eigenvalues are only determined to about
+            // eps * ||B||_F, with B = D^(-1) * A * D balanced by GEBAL, which can be much
+            // smaller than ||A||_F: the errors are relative to ||B||_F
+            double enorm = anorm;
+            if(mt == 2 || mt == 7)
+            {
+                std::vector<T> Bc(size_t(n) * n);
+                std::vector<decltype(std::real(T{}))> scale(n);
+                for(rocblas_int j = 0; j < n; j++)
+                    for(rocblas_int i = 0; i < n; i++)
+                        Bc[i + size_t(j) * n] = entry(i, j);
+                rocblas_int bilo, bihi, binfo;
+                cpu_gebal(rocsolver_balance_both, n, Bc.data(), n, &bilo, &bihi, scale.data(),
+                          &binfo);
+                double bnorm = 0;
+                for(rocblas_int j = 0; j < n; j++)
+                    for(rocblas_int i = 0; i < n; i++)
+                        bnorm += std::norm(Bc[i + size_t(j) * n]);
+                bnorm = std::sqrt(bnorm) / amax;
+                if(binfo == 0 && bnorm > 0)
+                    enorm = std::min(enorm, bnorm);
+            }
+
             // match each host eigenvalue with the closest unmatched device eigenvalue;
-            // error is max |lambda - lambda_ref| / ||A||_F (computed with the scaled values)
+            // error is max |lambda - lambda_ref| / ||A||_F (or ||B||_F, see above; computed
+            // with the scaled values)
             std::vector<bool> used(n, false);
             for(rocblas_int j = 0; j < n; j++)
             {
@@ -666,7 +690,7 @@ void geev_getError(const rocblas_handle handle,
                     continue;
                 }
                 used[kbest] = true;
-                geev_updateError(*max_err_eig, best / anorm);
+                geev_updateError(*max_err_eig, best / enorm);
             }
         }
     }

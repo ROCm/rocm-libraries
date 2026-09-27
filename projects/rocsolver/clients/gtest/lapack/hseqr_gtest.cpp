@@ -62,7 +62,8 @@ typedef std::tuple<vector<int>, vector<char>> hseqr_tuple;
 // case when n = 0, job = S and compz = I will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-const vector<vector<char>> op_range = {{'S', 'I'}, {'S', 'V'}, {'S', 'N'}, {'E', 'N'}};
+const vector<vector<char>> op_range
+    = {{'S', 'I'}, {'S', 'V'}, {'S', 'N'}, {'E', 'N'}, {'E', 'I'}, {'E', 'V'}};
 
 // for checkin_lapack tests
 const vector<vector<int>> matrix_size_range = {
@@ -138,7 +139,7 @@ Arguments hseqr_setup_arguments(hseqr_tuple tup)
     arg.set<char>("schur_job", op[0]);
     arg.set<char>("compz", op[1]);
 
-    // only testing standard use case/defaults for strides
+    // only testing standard use case/defaults for strides (as the other functions)
 
     arg.timing = 0;
 

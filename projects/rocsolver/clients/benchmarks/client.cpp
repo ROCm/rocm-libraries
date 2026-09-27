@@ -146,6 +146,12 @@ try
             "                           the function, in bytes.\n"
             "                           ")
 
+        ("mtype",
+         value<rocblas_int>(),
+            "Class of the test matrices, for the functions whose tests generate several\n"
+            "                           (gebal, gebak, hseqr, trexc, trevc3, geev; see their tests).\n"
+            "                           ")
+
         ("perf",
          value<rocblas_int>(&argus.perf)->default_value(0),
             "Ignore CPU timing results? 0 = No, 1 = Yes.\n"
@@ -282,6 +288,18 @@ try
             "                           Leading dimension of matrices C.\n"
             "                           ")
 
+        ("ldh",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices H.\n"
+            "                           ")
+
+        ("ldq",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices Q.\n"
+            "                           ")
+
         ("ldr",
          value<rocblas_int>(),
             "Matrix size parameter.\n"
@@ -374,10 +392,16 @@ try
             "                           ")
 
 
+        ("strideH",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices/vectors H.\n"
+            "                           ")
+
         ("strideQ",
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
-            "                           Stride for vectors tauq.\n"
+            "                           Stride for vectors tauq, or for matrices Q.\n"
             "                           ")
 
         ("strideP",
