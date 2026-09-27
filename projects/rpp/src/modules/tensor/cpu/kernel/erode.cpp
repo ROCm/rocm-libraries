@@ -284,9 +284,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             }
                             pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
 
-                            if constexpr (std::is_same<T, Rpp8s>::value)
-                                pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
-
                             _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                             increment_row_ptrs(srcPtrTemp, kernelSize, 24);
                             dstPtrTemp += 24;
@@ -362,9 +359,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                         }
                         pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
 
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
-
                         _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 24);
                         dstPtrTemp += 24;
@@ -438,10 +432,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                         } else {
                             pxDst[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
                             pxDst[1] = _mm_packus_epi16(pxTemp[2], xmm_px0);
-                        }
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxDst[0] = _mm_sub_epi8(pxDst[0], xmm_pxConvertI8);
-                            pxDst[1] = _mm_sub_epi8(pxDst[1], xmm_pxConvertI8);
                         }
 
                         // convert from PKD3 to PLN3 and store channelwise
@@ -540,11 +530,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             pxResultPln[c] = _mm256_setr_m128i(pxDst[0], pxDst[1]);
                             increment_row_ptrs(srcPtrTemp[c], kernelSize, 24);
                         }
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxResultPln[0] = _mm256_sub_epi8(pxResultPln[0], avx_pxConvertI8);
-                            pxResultPln[1] = _mm256_sub_epi8(pxResultPln[1], avx_pxConvertI8);
-                            pxResultPln[2] = _mm256_sub_epi8(pxResultPln[2], avx_pxConvertI8);
-                        }
 
                         __m128i pxResultPkd[6];
                         // convert result from pln to pkd format and store in output buffer
@@ -641,9 +626,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             }
                             pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
 
-                            if constexpr (std::is_same<T, Rpp8s>::value)
-                                pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
-
                             _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                             increment_row_ptrs(srcPtrTemp, kernelSize, 24);
                             dstPtrTemp += 24;
@@ -717,8 +699,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             pxDst[1] = _mm_packus_epi16(pxTemp[2], xmm_px0);
                         }
                         pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
 
                         _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 18);
@@ -792,10 +772,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                         } else {
                             pxDst[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
                             pxDst[1] = _mm_packus_epi16(pxTemp[2], xmm_px0);
-                        }
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxDst[0] = _mm_sub_epi8(pxDst[0], xmm_pxConvertI8);
-                            pxDst[1] = _mm_sub_epi8(pxDst[1], xmm_pxConvertI8);
                         }
 
                         // convert from PKD3 to PLN3 and store channelwise
@@ -886,11 +862,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             }
                             pxResultPln[c] = _mm256_setr_m128i(pxDst[0], pxDst[1]);
                             increment_row_ptrs(srcPtrTemp[c], kernelSize, 24);
-                        }
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxResultPln[0] = _mm256_sub_epi8(pxResultPln[0], avx_pxConvertI8);
-                            pxResultPln[1] = _mm256_sub_epi8(pxResultPln[1], avx_pxConvertI8);
-                            pxResultPln[2] = _mm256_sub_epi8(pxResultPln[2], avx_pxConvertI8);
                         }
 
                         __m128i pxResultPkd[6];
@@ -986,9 +957,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             }
                             pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
 
-                            if constexpr (std::is_same<T, Rpp8s>::value)
-                                pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
-
                             _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                             increment_row_ptrs(srcPtrTemp, kernelSize, 24);
                             dstPtrTemp += 24;
@@ -1076,11 +1044,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
                             increment_row_ptrs(srcPtrTemp[c], kernelSize, 24);
                         }
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxResultPln[0] = _mm256_sub_epi8(pxResultPln[0], avx_pxConvertI8);
-                            pxResultPln[1] = _mm256_sub_epi8(pxResultPln[1], avx_pxConvertI8);
-                            pxResultPln[2] = _mm256_sub_epi8(pxResultPln[2], avx_pxConvertI8);
-                        }
 
                         __m128i pxResultPkd[6];
                         // convert result from pln to pkd format and store in output buffer
@@ -1153,8 +1116,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                             pxResult = _mm_packs_epi16(pxTemp[0], pxTemp[1]);
                         else
                             pxResult = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm_sub_epi8(pxResult, xmm_pxConvertI8);
 
                         _mm_storeu_si128((__m128i*)dstPtrTemp, pxResult);
                         increment_row_ptrs(srcPtrTemp, kernelSize, 12);
@@ -1224,9 +1185,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                         else
                             pxResult[0] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
                         pxResult[1] = xmm_px0;
-
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult[0] = _mm_sub_epi8(pxResult[0], xmm_pxConvertI8);
 
                         // convert from PKD3 to PLN3 and store channelwise
                         __m128i pxDstChn[3];
@@ -1308,9 +1266,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                 pxDst = _mm_packs_epi16(pxTemp[0], pxTemp[1]);
                             else
                                 pxDst = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
-
-                            if constexpr (std::is_same<T, Rpp8s>::value)
-                                pxDst = _mm_sub_epi8(pxDst, xmm_pxConvertI8);
 
                             _mm_storeu_si128((__m128i*)dstPtrTemp, pxDst);
                             increment_row_ptrs(srcPtrTemp, kernelSize, 16);
@@ -1402,9 +1357,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                         }
                         pxResult = _mm256_setr_m128i(pxDst[0], pxDst[1]);
 
-                        if constexpr (std::is_same<T, Rpp8s>::value)
-                            pxResult = _mm256_sub_epi8(pxResult, avx_pxConvertI8);
-
                         _mm256_storeu_si256((__m256i*)dstPtrTemp, pxResult);
                         dstPtrTemp += 32;
                     }
@@ -1479,11 +1431,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                 pxResultPln[c] = _mm_packus_epi16(pxTemp[0], pxTemp[1]);
 
                             increment_row_ptrs(srcPtrTemp[c], kernelSize, 16);
-                        }
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxResultPln[0] = _mm_sub_epi8(pxResultPln[0], xmm_pxConvertI8);
-                            pxResultPln[1] = _mm_sub_epi8(pxResultPln[1], xmm_pxConvertI8);
-                            pxResultPln[2] = _mm_sub_epi8(pxResultPln[2], xmm_pxConvertI8);
                         }
 
                         __m128i pxResultPkd[4];
@@ -1578,11 +1525,6 @@ RppStatus erode_char_host_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                         } else {
                             pxDst[0] = _mm_packus_epi16(px128[0], px128[1]);
                             pxDst[1] = _mm_packus_epi16(px128[2], px128[3]);
-                        }
-
-                        if constexpr (std::is_same<T, Rpp8s>::value) {
-                            pxDst[0] = _mm_sub_epi8(pxDst[0], xmm_pxConvertI8);
-                            pxDst[1] = _mm_sub_epi8(pxDst[1], xmm_pxConvertI8);
                         }
 
                         // convert from PKD3 to PLN3 and store
