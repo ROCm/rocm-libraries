@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,4 +55,29 @@ namespace rocsparse
                                                 J*               coo_col_ind,
                                                 J*               perm,
                                                 void*            temp_buffer);
+
+    typedef enum rocsparse_coosort_alg_
+    {
+        rocsparse_coosort_alg_default = 0
+    } rocsparse_coosort_alg;
+
+    rocsparse_status coosort_buffer_size(rocsparse_handle            handle,
+                                         rocsparse_coosort_alg       alg,
+                                         rocsparse_direction         dir,
+                                         rocsparse_const_spmat_descr source,
+                                         rocsparse_const_spmat_descr target,
+                                         size_t*                     buffer_size_in_bytes);
+
+    // Sorts the COO matrix source by row (dir == rocsparse_direction_row) or by column
+    // (dir == rocsparse_direction_column) into the COO matrix target, which must have the
+    // same sizes, types, index base and batch layout as source. Each array of target may
+    // either alias the matching array of source, in which case it is sorted in place, or
+    // not overlap it at all. Each batch is sorted independently.
+    rocsparse_status coosort(rocsparse_handle            handle,
+                             rocsparse_coosort_alg       alg,
+                             rocsparse_direction         dir,
+                             rocsparse_const_spmat_descr source,
+                             rocsparse_spmat_descr       target,
+                             size_t                      buffer_size_in_bytes,
+                             void*                       buffer);
 }

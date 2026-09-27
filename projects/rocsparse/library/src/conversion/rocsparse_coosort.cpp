@@ -27,11 +27,15 @@
 
 #include "rocsparse_utility.hpp"
 
+#include "../level1/rocsparse_gthr.hpp"
 #include "coosort_device.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_coosort.hpp"
+#include "rocsparse_gcoosort.hpp"
+#include "rocsparse_gcreate_identity_permutation.hpp"
 #include "rocsparse_identity.hpp"
 #include "rocsparse_primitives.hpp"
+#include "rocsparse_spmat_descr.hpp"
 
 namespace rocsparse
 {
@@ -652,3 +656,157 @@ catch(...)
 INSTANTIATE(int32_t);
 INSTANTIATE(int64_t);
 #undef INSTANTIATE
+
+namespace rocsparse
+{
+    // The buffer starts with the permutation array, which tracks where each entry moves
+    // while the indices are sorted, followed by scratch space shared by the index sort
+    // and the value permutation.
+    static size_t coosort_perm_size(int64_t nnz, rocsparse_indextype perm_indextype)
+    {
+        return rocsparse::align_size<char>(rocsparse::indextype_sizeof(perm_indextype) * nnz);
+    }
+}
+
+rocsparse_status rocsparse::coosort_buffer_size(rocsparse_handle            handle,
+                                                rocsparse_coosort_alg       alg,
+                                                rocsparse_direction         dir,
+                                                rocsparse_const_spmat_descr source,
+                                                rocsparse_const_spmat_descr target,
+                                                size_t*                     buffer_size_in_bytes)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    const int64_t nnz = target->nnz;
+
+    size_t sort_buffer_size = 0;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoosort_buffer_size(handle,
+                                                              target->rows,
+                                                              target->cols,
+                                                              nnz,
+                                                              target->row_type,
+                                                              target->const_row_data,
+                                                              target->const_col_data,
+                                                              &sort_buffer_size));
+
+    // Values sorted in place are gathered into scratch space first, since the gather cannot
+    // write over its own input.
+    const size_t gather_buffer_size
+        = (target->const_val_data == source->const_val_data)
+              ? rocsparse::align_size<char>(rocsparse::datatype_sizeof(target->data_type) * nnz)
+              : 0;
+
+    *buffer_size_in_bytes = rocsparse::coosort_perm_size(nnz, target->row_type)
+                            + rocsparse::max(sort_buffer_size, gather_buffer_size);
+
+    return rocsparse_status_success;
+}
+
+rocsparse_status rocsparse::coosort(rocsparse_handle            handle,
+                                    rocsparse_coosort_alg       alg,
+                                    rocsparse_direction         dir,
+                                    rocsparse_const_spmat_descr source,
+                                    rocsparse_spmat_descr       target,
+                                    size_t                      buffer_size_in_bytes,
+                                    void*                       buffer)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    size_t required_buffer_size;
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::coosort_buffer_size(handle, alg, dir, source, target, &required_buffer_size));
+    if(buffer_size_in_bytes < required_buffer_size)
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_invalid_size,
+            "the buffer is smaller than the size returned by the buffer size query");
+    }
+
+    const int64_t             m         = target->rows;
+    const int64_t             n         = target->cols;
+    const int64_t             nnz       = target->nnz;
+    const rocsparse_indextype idx_type  = target->row_type;
+    const rocsparse_datatype  data_type = target->data_type;
+    const size_t              idx_size  = rocsparse::indextype_sizeof(idx_type);
+    const size_t              val_size  = rocsparse::datatype_sizeof(data_type);
+
+    void* perm = buffer;
+    void* sort_buffer
+        = reinterpret_cast<char*>(buffer) + rocsparse::coosort_perm_size(nnz, idx_type);
+
+    // The batches run one after the other on the handle stream, so they share the buffer.
+    for(int64_t batch = 0; batch < source->batch_count; ++batch)
+    {
+        const int64_t offset_source = batch * source->batch_stride;
+        const int64_t offset_target = batch * target->batch_stride;
+
+        const void* row_ind_source
+            = reinterpret_cast<const char*>(source->const_row_data) + offset_source * idx_size;
+        const void* col_ind_source
+            = reinterpret_cast<const char*>(source->const_col_data) + offset_source * idx_size;
+        const void* val_source
+            = reinterpret_cast<const char*>(source->const_val_data) + offset_source * val_size;
+        void* row_ind_target = reinterpret_cast<char*>(target->row_data) + offset_target * idx_size;
+        void* col_ind_target = reinterpret_cast<char*>(target->col_data) + offset_target * idx_size;
+        void* val_target     = reinterpret_cast<char*>(target->val_data) + offset_target * val_size;
+
+        // The index sort works in place, so the indices of source are first copied into target.
+        if(row_ind_target != row_ind_source)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(row_ind_target,
+                                                         row_ind_source,
+                                                         idx_size * nnz,
+                                                         hipMemcpyDeviceToDevice,
+                                                         handle->stream));
+        }
+        if(col_ind_target != col_ind_source)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(col_ind_target,
+                                                         col_ind_source,
+                                                         idx_size * nnz,
+                                                         hipMemcpyDeviceToDevice,
+                                                         handle->stream));
+        }
+
+        // The index sort applies its reordering to perm, so it must start as the identity.
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::gcreate_identity_permutation(handle, nnz, idx_type, perm));
+
+        switch(dir)
+        {
+        case rocsparse_direction_row:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoosort_by_row(
+                handle, m, n, nnz, idx_type, row_ind_target, col_ind_target, perm, sort_buffer));
+            break;
+        }
+        case rocsparse_direction_column:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoosort_by_column(
+                handle, m, n, nnz, idx_type, row_ind_target, col_ind_target, perm, sort_buffer));
+            break;
+        }
+        }
+
+        // The gather cannot write over its own input, so in place values go through scratch.
+        const bool in_place_val = (val_target == val_source);
+        void*      sorted_val   = in_place_val ? sort_buffer : val_target;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthr(handle,
+                                                  nnz,
+                                                  data_type,
+                                                  val_source,
+                                                  data_type,
+                                                  sorted_val,
+                                                  idx_type,
+                                                  perm,
+                                                  rocsparse_index_base_zero));
+
+        if(in_place_val)
+        {
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                val_target, sorted_val, val_size * nnz, hipMemcpyDeviceToDevice, handle->stream));
+        }
+    }
+
+    return rocsparse_status_success;
+}
