@@ -515,6 +515,13 @@ typedef void* hipblasLtHandle_t;
  *
  *  \details
  *  This is a pointer to an opaque structure holding the description of the matrix multiplication operation \ref hipblasLtMatmul().
+ *
+ *  A matrix multiplication descriptor is not safe for concurrent use from multiple host threads. \ref hipblasLtMatmul() and
+ *  \ref hipblasLtMatmulAlgoGetHeuristic() update internal state stored in the descriptor, so calls that pass the same descriptor
+ *  must not overlap, even when none of them changes the descriptor attributes. A call to \ref hipblasLtMatmulDescSetAttribute()
+ *  must not overlap with any other call that uses the same descriptor. A descriptor can be reused for successive calls.
+ *  For multi-threaded execution, create one descriptor per thread, or serialize the calls that share a descriptor.
+ *
  *  Use the following functions to manipulate this descriptor:
  *
  *  \ref hipblasLtMatmulDescCreate(): To create one instance of the descriptor.
