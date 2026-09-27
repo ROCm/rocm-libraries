@@ -35,6 +35,7 @@ from __future__ import annotations
 import enum
 import os
 import sys
+import warnings
 from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 
@@ -146,6 +147,37 @@ LLVM_FLAVORS: Tuple[str, ...] = (
     LLVM_FLAVOR_LLVM22,
     LLVM_FLAVOR_LLVM23,
 )
+
+
+class ArchDomainWarning(UserWarning):
+    """A kernel demanded an intrinsic its target provably cannot lower.
+
+    Carries the measured cell as structured attributes as well as in the
+    message, so a gate can key on ``(key, arch, flavor)`` instead of parsing
+    prose. ``evidence`` is the toolchain diagnostic the artifact recorded when
+    the probe failed, which is the actionable part -- it is what the developer
+    would have seen at link time, only named and arriving earlier.
+    """
+
+    def __init__(
+        self, key: str, arch: str, flavor: str, status: str, evidence: str
+    ) -> None:
+        self.key = key
+        self.arch = arch
+        self.flavor = flavor
+        self.status = status
+        self.evidence = evidence
+        detail = f": {evidence}" if evidence else ""
+        super().__init__(
+            f"intrinsic {key!r} is not available on {arch} at {flavor} "
+            f"({status}){detail}"
+        )
+
+
+# ``warn`` (the default) reports an unavailable intrinsic and keeps going;
+# ``off`` disables the lookup entirely. AICK-2274 adds ``error``, which is why
+# this is a mode rather than a boolean.
+_ARCH_DOMAIN_ENV = "ROCKE_ARCH_DOMAIN"
 
 
 class LlvmDatalayoutKind(enum.Enum):
@@ -1538,11 +1570,21 @@ class _Lowerer:
     ) -> None:
         self.kernel = kernel
         # ISA backend selects the gfx-keyed LLVM details (datalayout, triple,
-        # waitcnt encoding). Defaults to gfx950 so existing callers and the
-        # gfx950 byte-identical baseline are preserved.
+        # waitcnt encoding).
+        #
+        # There is no default. A silent gfx950 was not a convenience: it meant a
+        # caller who forgot the arch lowered for gfx950 and then compiled for
+        # whatever target it actually wanted, with nothing anywhere saying the
+        # two disagreed. It also makes the arch-domain check below unanswerable,
+        # because the target the table is consulted for would be a guess.
         from .isa.backend import backend_for
 
-        self._backend = backend_for(arch or "gfx950")
+        if arch is None:
+            raise ValueError(
+                "lowering requires an explicit gfx target; "
+                "pass arch=... (there is no default)"
+            )
+        self._backend = backend_for(arch)
         flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
         if flavor not in LLVM_FLAVORS:
             raise ValueError(f"unknown LLVM flavor {flavor!r}")
@@ -1723,7 +1765,53 @@ class _Lowerer:
         return _llvm_type(v.type)
 
     def _need(self, key: str) -> None:
+        """Register a demand for an intrinsic declaration, and vet it.
+
+        This is the only place an intrinsic demand may be recorded. Every path
+        that wants a declare emitted must come through here, because this is
+        where the arch-domain table gets consulted -- a path that writes
+        ``self._needs_intrin`` directly gets the declare and skips the check,
+        which is the failure mode this function exists to make impossible.
+        ``tests/core/test_arch_domain_lane.py`` enforces that by AST walk.
+        """
+        if key in self._needs_intrin:
+            # Already demanded. Checking once per key rather than once per call
+            # keeps a key requested inside a loop from warning per iteration.
+            return
         self._needs_intrin[key] = True
+        self._check_arch_domain(key)
+
+    def _check_arch_domain(self, key: str) -> None:
+        """Warn if the arch-domain table says this target cannot lower ``key``.
+
+        Silence is the default and covers far more ground than the warning. A
+        flavor with no committed column, a target the generator never swept, a
+        key that is not in the table at all (the dynamically registered
+        ``llvm.smax.v<N>i<W>`` declares in ``_op_vector_smax``, for instance),
+        and every one of the no-data statuses all produce nothing. Only a
+        measured, definite negative speaks.
+
+        That asymmetry is deliberate. A missed warning costs a diagnostic the
+        developer was going to get from the compiler anyway; a spurious one
+        trains people to ignore the lane, and on an older ROCm there would be a
+        lot of them -- 14% of the llvm20 column is no-data.
+        """
+        if os.environ.get(_ARCH_DOMAIN_ENV, "").strip().lower() == "off":
+            return
+        from .arch import domain as arch_domain
+
+        table = arch_domain.load(self._flavor)
+        if table is None:
+            return
+        cell = table.lookup(key, self._backend.arch.gfx)
+        if cell is None or not arch_domain.is_negative(cell.status):
+            return
+        warnings.warn(
+            ArchDomainWarning(
+                key, self._backend.arch.gfx, self._flavor, cell.status, cell.evidence
+            ),
+            stacklevel=3,
+        )
 
     def _check_u16(self, op: str, field: str, value: object) -> int:
         """Reject an immediate that does not fit the declared ``i16``.
@@ -3046,7 +3134,7 @@ class _Lowerer:
         ``llvm.amdgcn.global.atomic.fadd.v2f16.p1`` (gfx940+).
         """
         ptr, idx, val = op.operands
-        self._needs_intrin["global.atomic.fadd.v2f16"] = True
+        self._need("global.atomic.fadd.v2f16")
         gep = self._fresh("gep")
         self._current().emit(
             f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
@@ -5616,6 +5704,12 @@ class _Lowerer:
         intrin = f"llvm.smax.v{count}i{width}"
         vec_llvm = _llvm_type(vec_ty)
         self._decls[intrin] = f"declare {vec_llvm} @{intrin}({vec_llvm}, {vec_llvm})"
+        # Registers the decl TEXT and then demands it through the chokepoint, so
+        # the arch-domain lookup still runs. It finds nothing: the key is
+        # synthesised per element width and is not in the static decl table the
+        # generator sweeps, so the table has no row for it and the demand is
+        # silent. That is the right answer -- ``llvm.smax`` is a target-agnostic
+        # LLVM intrinsic, not an AMDGCN one.
         self._need(intrin)
         self._current().emit(
             f"  {op.result.name} = call {vec_llvm} @{intrin}("

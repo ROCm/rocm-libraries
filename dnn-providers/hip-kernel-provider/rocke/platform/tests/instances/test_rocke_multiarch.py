@@ -249,7 +249,8 @@ class TestGfx950ByteIdentical(unittest.TestCase):
 
         k = self._kernel()
         self.assertEqual(
-            lower_kernel_to_llvm(k), lower_kernel_to_llvm(k, arch="gfx950")
+            lower_kernel_to_llvm(k, arch="gfx950"),
+            lower_kernel_to_llvm(k, arch="gfx950"),
         )
 
     def test_arch_param_default_is_cdna_byte_identical(self):

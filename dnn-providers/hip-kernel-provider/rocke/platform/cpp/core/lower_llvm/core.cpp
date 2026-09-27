@@ -602,7 +602,19 @@ static rocke_isa_backend_t LL_BACKEND_RESOLVED;
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
     const rocke_isa_backend_t* base = NULL;
-    if(arch == NULL || strcmp(arch, "gfx950") == 0)
+    /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
+     * that forgot the target lowered for gfx950 and then compiled for whatever
+     * it actually wanted, with nothing saying the two disagreed. Mirrors the
+     * Python lowerer, which raises on `arch=None`. */
+    if(arch == NULL)
+    {
+        if(st)
+        {
+            *st = ROCKE_ERR_VALUE;
+        }
+        return NULL;
+    }
+    if(strcmp(arch, "gfx950") == 0)
     {
         base = &LL_BACKEND_GFX950;
     }
@@ -2320,10 +2332,14 @@ static void ll_lower_into(rocke_lower_t* L,
     L->backend = rocke_ll_backend_for(arch, &bst);
     if(L->backend == NULL || bst != ROCKE_OK)
     {
-        rocke_ll_fail(L,
-                      bst != ROCKE_OK ? bst : ROCKE_ERR_KEY,
-                      "unknown arch backend %s",
-                      arch ? arch : "(null)");
+        if(arch == NULL)
+        {
+            rocke_ll_fail(L,
+                          ROCKE_ERR_VALUE,
+                          "lowering requires an explicit gfx target "
+                          "(there is no default)");
+        }
+        rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
     /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
      * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and

@@ -150,6 +150,12 @@ def main() -> int:
         help="skip the emitted-IR validity gate (compile+link every corpus case)",
     )
     ap.add_argument(
+        "--no-arch-domain",
+        action="store_true",
+        help="skip the arch-domain warning gate (lower every corpus case at "
+        "every committed LLVM flavor)",
+    )
+    ap.add_argument(
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
@@ -191,6 +197,17 @@ def main() -> int:
         if args.only:
             ir_gate += ["--only", args.only]
         status |= subprocess.run(ir_gate).returncode
+
+    if not args.no_arch_domain:
+        # The same question as the gate above, asked of committed data instead
+        # of a compiler: does any kernel demand an intrinsic its target provably
+        # cannot lower? Needs no toolchain, so unlike check_ir_validity it rules
+        # on every LLVM flavor on any host.
+        print("\n== arch-domain warning gate ==")
+        ad_gate = [sys.executable, str(TOOLS / "check_arch_domain.py")]
+        if args.only:
+            ad_gate += ["--only", args.only]
+        status |= subprocess.run(ad_gate).returncode
 
     if not args.no_pytest:
         print("\n== pytest ==")

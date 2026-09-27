@@ -138,7 +138,7 @@ def probe_intrinsic_counts(
     rows: list[dict] = []
     for label, kdef in entries:
         try:
-            ir = lower_kernel_to_llvm(kdef)
+            ir = lower_kernel_to_llvm(kdef, arch="gfx950")
         except Exception as e:  # noqa: BLE001
             print(f"\n=== {label} === LOWER-FAIL: {type(e).__name__}: {e}")
             continue
