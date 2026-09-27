@@ -57,7 +57,7 @@ from Tensile.Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrL
 from Tensile.Components.TDMFuse import tdmBothTensors, tdmGroupingAccepted, \
                                        tdmGroupingName, tdmPapRejectReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
-from Tensile.CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload
+from Tensile.CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config, \
                                                get_fp4_valid_blocks, get_fp8_valid_blocks, \
@@ -686,6 +686,8 @@ class Solution(collections.abc.Mapping):
     self.srcName = srcName
     self.splitGSU = splitGSU
     config = normalize_execution_policy(config, config.get("_ExplicitExecutionPolicyKeys"))
+    if isCustomKernelConfig(config):
+      validateCustomPersistentArgs(config)
     config.pop("_ExplicitExecutionPolicyKeys", None)
     targetIsas = list(isaInfoMap.keys())
 

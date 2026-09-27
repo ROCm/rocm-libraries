@@ -437,6 +437,8 @@ internalParameters = {
 
 # These parameters are used in ContractionSolutions for user arguments support.
 defaultInternalSupportParams = {
+    # Missing prebuilt metadata keeps layout 0; the generator selects the
+    # current scheduling layout after resolving the execution policy.
     "PersistentLoopArgsVersion": 0,
     "KernArgsVersion": 3,
     # Information about user input internal kernel argument support
