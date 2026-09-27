@@ -26,6 +26,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_coosort.hpp"
+#include "rocsparse_csrsort.hpp"
 #include "rocsparse_spsort.hpp"
 
 rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      descr,
@@ -66,6 +67,27 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
         }
         case rocsparse_format_csr:
         case rocsparse_format_csc:
+        {
+            // The offsets may be shared by all batches with a stride of zero, but the target
+            // can only share its offsets if the source does too.
+            const int64_t offsets_size
+                = ((source->format == rocsparse_format_csr) ? source->rows : source->cols) + 1;
+            ROCSPARSE_CHECKARG(2,
+                               source,
+                               (source->columns_values_batch_stride < source->nnz
+                                || (source->offsets_batch_stride != 0
+                                    && source->offsets_batch_stride < offsets_size)),
+                               rocsparse_status_invalid_size);
+            ROCSPARSE_CHECKARG(
+                3,
+                target,
+                (target->columns_values_batch_stride < target->nnz
+                 || (target->offsets_batch_stride != 0
+                     && target->offsets_batch_stride < offsets_size)
+                 || (target->offsets_batch_stride == 0 && source->offsets_batch_stride != 0)),
+                rocsparse_status_invalid_size);
+            break;
+        }
         case rocsparse_format_coo_aos:
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
@@ -85,6 +107,19 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
                        descr,
                        rocsparse::enum_utils::is_invalid(descr->get_dir()),
                        rocsparse_status_invalid_value);
+
+    // A CSR matrix can only have the column indices within each row sorted, and a CSC matrix
+    // can only have the row indices within each column sorted.
+    ROCSPARSE_CHECKARG(
+        1,
+        descr,
+        (source->format == rocsparse_format_csr && descr->get_dir() != rocsparse_direction_row),
+        rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG(
+        1,
+        descr,
+        (source->format == rocsparse_format_csc && descr->get_dir() != rocsparse_direction_column),
+        rocsparse_status_invalid_value);
 
     return rocsparse_status_success;
 }
@@ -112,12 +147,12 @@ namespace rocsparse
             switch(format)
             {
             case rocsparse_format_coo:
+            case rocsparse_format_csr:
             {
                 return rocsparse_status_success;
             }
 
                 // LCOV_EXCL_START
-            case rocsparse_format_csr:
             case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
@@ -148,9 +183,18 @@ namespace rocsparse
                                                              buffer));
                 return rocsparse_status_success;
             }
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsort(handle,
+                                                             rocsparse_csrsort_alg_default,
+                                                             source,
+                                                             target,
+                                                             buffer_size_in_bytes,
+                                                             buffer));
+                return rocsparse_status_success;
+            }
 
                 // LCOV_EXCL_START
-            case rocsparse_format_csr:
             case rocsparse_format_csc:
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
