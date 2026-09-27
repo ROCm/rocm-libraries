@@ -5,6 +5,9 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 5.2.0
 
+### Added
+* Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info`, which expose the internal fields of a `HYB` matrix structure through a stable API. This lets callers (e.g. hipSPARSE) inspect or, for test purposes, populate a `rocsparse_hyb_mat` without reinterpreting the opaque handle as a raw struct, which is fragile across any change to the internal layout.
+
 ### Resolved issues
 * Fixed an overflow issue in `rocsparse_roti` and the generic `rocsparse_rot` routine. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-index calculation could overflow, leaving some elements unrotated and causing low-index elements to be processed with incorrect data. The kernel now computes element indices in 64-bit arithmetic and uses a grid-stride loop with the launch grid clamped to the device limit.
 * Fixed an overflow issue in `rocsparse_Xsctr` and the generic `rocsparse_scatter` routine. When using 64-bit indices and `nnz` >= `2^32`, a 32-bit element-index calculation could overflow and prevent some elements from being scattered. The kernel now computes element indices in 64-bit arithmetic and uses a grid-stride loop with the launch grid clamped to the device limit.

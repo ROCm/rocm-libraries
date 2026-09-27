@@ -629,6 +629,110 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb);
 
 /*! \ingroup aux_module
+ *  \brief Get the internal fields of a \p HYB matrix structure.
+ *
+ *  \details
+ *  \p rocsparse_hyb_mat_get_info exposes the internal fields of a \p HYB matrix
+ *  structure through a stable API, instead of requiring callers to reinterpret
+ *  the opaque \ref rocsparse_hyb_mat as a raw struct (which breaks whenever the
+ *  internal layout changes, e.g. widening \p ell_nnz). Any of the output
+ *  pointers may be \p nullptr if that field is not needed.
+ *
+ *  @param[in]
+ *  hyb         the hybrid matrix structure.
+ *  @param[out]
+ *  m           number of rows.
+ *  @param[out]
+ *  n           number of columns.
+ *  @param[out]
+ *  partition   the \p HYB partitioning type.
+ *  @param[out]
+ *  ell_nnz     number of non-zero elements of the ELL part.
+ *  @param[out]
+ *  ell_width   width of the ELL part.
+ *  @param[out]
+ *  ell_col_ind column indices of the ELL part.
+ *  @param[out]
+ *  ell_val     values of the ELL part.
+ *  @param[out]
+ *  coo_nnz     number of non-zero elements of the COO part.
+ *  @param[out]
+ *  coo_row_ind row indices of the COO part.
+ *  @param[out]
+ *  coo_col_ind column indices of the COO part.
+ *  @param[out]
+ *  coo_val     values of the COO part.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer \p hyb pointer is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
+                                            rocsparse_int*           m,
+                                            rocsparse_int*           n,
+                                            rocsparse_hyb_partition* partition,
+                                            int64_t*                 ell_nnz,
+                                            rocsparse_int*           ell_width,
+                                            const rocsparse_int**    ell_col_ind,
+                                            const void**             ell_val,
+                                            rocsparse_int*           coo_nnz,
+                                            const rocsparse_int**    coo_row_ind,
+                                            const rocsparse_int**    coo_col_ind,
+                                            const void**             coo_val);
+
+/*! \ingroup aux_module
+ *  \brief Set the internal fields of a \p HYB matrix structure.
+ *
+ *  \details
+ *  \p rocsparse_hyb_mat_set_info is the counterpart to \ref rocsparse_hyb_mat_get_info
+ *  and is intended for test and internal use, so that callers never need to
+ *  reinterpret the opaque \ref rocsparse_hyb_mat as a raw struct. Any of the
+ *  input pointers may be \p nullptr, in which case the corresponding field is
+ *  left untouched.
+ *
+ *  @param[inout]
+ *  hyb         the hybrid matrix structure.
+ *  @param[in]
+ *  m           number of rows.
+ *  @param[in]
+ *  n           number of columns.
+ *  @param[in]
+ *  partition   the \p HYB partitioning type.
+ *  @param[in]
+ *  ell_nnz     number of non-zero elements of the ELL part.
+ *  @param[in]
+ *  ell_width   width of the ELL part.
+ *  @param[in]
+ *  ell_col_ind column indices of the ELL part.
+ *  @param[in]
+ *  ell_val     values of the ELL part.
+ *  @param[in]
+ *  coo_nnz     number of non-zero elements of the COO part.
+ *  @param[in]
+ *  coo_row_ind row indices of the COO part.
+ *  @param[in]
+ *  coo_col_ind column indices of the COO part.
+ *  @param[in]
+ *  coo_val     values of the COO part.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer \p hyb pointer is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
+                                            const rocsparse_int*           m,
+                                            const rocsparse_int*           n,
+                                            const rocsparse_hyb_partition* partition,
+                                            const int64_t*                 ell_nnz,
+                                            const rocsparse_int*           ell_width,
+                                            rocsparse_int* const*          ell_col_ind,
+                                            void* const*                   ell_val,
+                                            const rocsparse_int*           coo_nnz,
+                                            rocsparse_int* const*          coo_row_ind,
+                                            rocsparse_int* const*          coo_col_ind,
+                                            void* const*                   coo_val);
+
+/*! \ingroup aux_module
  *  \brief Create a matrix info structure.
  *
  *  \details
