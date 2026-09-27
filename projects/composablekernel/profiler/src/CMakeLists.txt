@@ -38,13 +38,22 @@ set(PROFILER_OPS
     profile_gemm_quantization.cpp
 )
 
+include(${PROJECT_SOURCE_DIR}/dispatcher/grouped_conv_arch_plan.cmake)
+ck_dispatcher_rdna_target("${SUPPORTED_GPU_TARGETS}" _DISPATCHER_RDNA_TARGET)
+
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1250")
   if(DTYPES MATCHES "fp32" OR DTYPES MATCHES "fp64" OR NOT DEFINED DTYPES)
     list(APPEND PROFILER_OPS profile_contraction_bilinear.cpp)
     list(APPEND PROFILER_OPS profile_contraction_scale.cpp)
   endif()
-  if(CK_EXPERIMENTAL_BUILDER OR CK_TILE_DISPATCHER)
+endif()
+
+ck_dispatcher_has_gfx9_or_gfx1250("${SUPPORTED_GPU_TARGETS}" _DISPATCHER_HAS_GFX9)
+if(CK_EXPERIMENTAL_BUILDER OR CK_TILE_DISPATCHER)
+  if(_DISPATCHER_RDNA_TARGET OR _DISPATCHER_HAS_GFX9)
     list(APPEND PROFILER_OPS profile_grouped_conv_fwd_tile.cpp)
+  endif()
+  if(_DISPATCHER_HAS_GFX9)
     list(APPEND PROFILER_OPS profile_grouped_conv_bwd_weight_tile.cpp)
     list(APPEND PROFILER_OPS profile_grouped_conv_bwd_data_tile.cpp)
   endif()
@@ -157,7 +166,8 @@ endif()
 # =============================================================================
 # CK Tile Dispatcher: Generate and compile CK Tile conv kernels
 # =============================================================================
-if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1250")
+if(CK_TILE_DISPATCHER AND
+   (SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1250" OR _DISPATCHER_RDNA_TARGET))
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
   # Build dispatcher instance libraries (defines ck_dispatcher_grouped_conv_* targets)

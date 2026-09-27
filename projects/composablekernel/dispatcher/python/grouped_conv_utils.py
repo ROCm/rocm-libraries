@@ -66,7 +66,7 @@ from dispatcher_common import (
 # =============================================================================
 
 VALID_VARIANTS = ("forward", "bwd_data", "bwd_weight")
-VALID_NDIM_SPATIAL = (1, 2, 3)
+VALID_NDIM_SPATIAL = (2, 3)
 BACKWARD_VARIANTS = ("bwd_data", "bwd_weight")
 BACKWARD_PIPELINES = ("compv3", "mem")
 

@@ -7,6 +7,51 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# The CK top-level build loads this directory in a restricted mode so the
+# grouped-convolution host gates are real targets without pulling in the full
+# standalone dispatcher test suite (GoogleTest, Python, or GPU tests).
+if(CK_DISPATCHER_HOST_TESTS_ONLY)
+    foreach(test_name
+            test_grouped_conv_problem
+            test_grouped_conv_registry
+            test_grouped_conv_backend)
+        add_executable(${test_name} ${test_name}.cpp)
+        if(test_name STREQUAL "test_grouped_conv_backend")
+            # This remains a host-only test, but the backend header contains
+            # CK Tile host/device declarations that require the HIP frontend.
+            set_source_files_properties(${test_name}.cpp PROPERTIES LANGUAGE HIP)
+            set_target_properties(${test_name} PROPERTIES
+                LINKER_LANGUAGE CXX
+                BUILD_RPATH "$<TARGET_FILE_DIR:hip::amdhip64>")
+            target_compile_options(${test_name} PRIVATE --offload-host-only)
+            target_link_libraries(${test_name} PRIVATE hip::amdhip64)
+        endif()
+        target_include_directories(${test_name} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+        target_compile_options(${test_name} PRIVATE
+            -Wno-global-constructors
+            -Wno-undef
+            # These tests assert() their expectations, so NDEBUG would turn them
+            # into no-ops under the default Release build.
+            -UNDEBUG)
+        add_test(NAME ${test_name} COMMAND ${test_name})
+        set_tests_properties(${test_name} PROPERTIES
+            LABELS "dispatcher;host;cpu")
+    endforeach()
+    add_test(
+        NAME test_grouped_conv_codegen
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+            -s ${CMAKE_CURRENT_SOURCE_DIR}
+            -p test_grouped_conv_codegen.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_grouped_conv_codegen PROPERTIES
+        LABELS "dispatcher;host;cpu;python"
+        TIMEOUT 120
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts")
+    return()
+endif()
+
 # Find Python
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -806,6 +851,11 @@ set(STANDALONE_TESTS
     test_grouped_conv_registry.cpp
     test_fmha_kernel_decl.cpp
 )
+
+# test_grouped_conv_backend.cpp is deliberately absent: it pulls in CK Tile
+# host/device headers that need the HIP language, which this standalone project
+# (LANGUAGES CXX, C++17) does not enable. The CK top-level build compiles it via
+# the CK_DISPATCHER_HOST_TESTS_ONLY block above.
 
 foreach(test_source ${STANDALONE_TESTS})
     get_filename_component(test_name ${test_source} NAME_WE)

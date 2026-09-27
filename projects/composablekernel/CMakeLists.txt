@@ -379,6 +379,14 @@ list(REMOVE_ITEM GPU_ARCHS ${CK_UNSUPPORTED_GPU_TARGETS})
 find_package(hip REQUIRED)
 enable_language(HIP)
 
+# Keep the Phase 0 dispatcher contract tests in the normal CK build. These
+# targets compile as host C++ and do not require generated kernels or a GPU.
+if(CK_TILE_DISPATCHER AND BUILD_TESTING)
+    set(CK_DISPATCHER_HOST_TESTS_ONLY ON)
+    add_subdirectory(dispatcher/tests dispatcher_host_tests)
+    unset(CK_DISPATCHER_HOST_TESTS_ONLY)
+endif()
+
 # No assumption that HIP kernels are launched with uniform block size for backward compatibility
 # SWDEV-413293 and https://reviews.llvm.org/D155213
 math(EXPR hip_VERSION_FLAT "(${hip_VERSION_MAJOR} * 1000 + ${hip_VERSION_MINOR}) * 100000 + ${hip_VERSION_PATCH}")

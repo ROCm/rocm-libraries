@@ -169,6 +169,11 @@ class TestValidateGroupedConvConfig(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertGreater(len(result.errors), 0)
 
+    def test_ndim_1_is_rejected(self):
+        from grouped_conv_utils import VALID_NDIM_SPATIAL
+        self.assertNotIn(1, VALID_NDIM_SPATIAL)
+        self.assertEqual(VALID_NDIM_SPATIAL, (2, 3))
+
 
 # =============================================================================
 # TestAutoCorrectGroupedConvConfig

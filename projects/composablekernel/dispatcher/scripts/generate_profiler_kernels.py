@@ -18,7 +18,9 @@
 #     [--mode tests|profiler]
 
 import argparse
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from registration_codegen import generate_chunked_registration
@@ -98,8 +100,9 @@ def main():
     parser.add_argument("--variant", required=True, choices=list(VARIANT_CONFIG.keys()))
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--arch", default="gfx950")
+    parser.add_argument("--datatype", nargs="+", choices=["fp16", "bf16", "fp32"])
     parser.add_argument("--rule-set", default="tests",
-                        choices=["profiler", "tests", "full", "full-tests", "tiny", "default"],
+                        choices=["profiler", "tests", "full", "full-tests", "tiny", "default", "rdna"],
                         help="Rule set: 'profiler'/'tests' (CK Builder "
                              "profiler/tests instance sets generated in memory "
                              "from the .conf configs), 'full' (full rule-derived "
@@ -110,63 +113,143 @@ def main():
 
     args = parser.parse_args()
     cfg = VARIANT_CONFIG[args.variant]
-
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    production = args.rule_set == "rdna"
+    requested_datatypes = args.datatype
+    if production:
+        _ensure_codegen_importable()
+        from grouped_conv.grouped_config_rules_rdna import supported_datatypes
 
-    _ensure_codegen_importable()
-    from unified_grouped_conv_codegen import (
-        UnifiedGroupedConvCodegen,
-        GroupedConvVariant,
-        get_default_configs,
+        # Default to the arch_specs-derived set so callers need not restate it;
+        # an explicit --datatype may only narrow that set.
+        allowed = supported_datatypes(args.arch)
+        requested_datatypes = requested_datatypes or allowed
+        if args.variant != "fwd":
+            parser.error("rdna production generation requires --variant fwd")
+        if not allowed:
+            parser.error(f"rdna production generation does not support --arch {args.arch}")
+        if not set(requested_datatypes) <= set(allowed):
+            parser.error(
+                f"rdna production generation for --arch {args.arch} supports "
+                f"--datatype from {allowed}"
+            )
+
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix=f".{output_dir.name}.tmp-", dir=output_dir.parent)
     )
 
-    variant_enum = GroupedConvVariant[VARIANT_MAP[args.variant]]
-    datatypes = ["fp16", "bf16", "fp32"]
+    try:
+        _ensure_codegen_importable()
+        from unified_grouped_conv_codegen import (
+            UnifiedGroupedConvCodegen,
+            GroupedConvVariant,
+            get_default_configs,
+        )
 
-    # --- Step 1: Generate configs from rules ---
-    print(f"Generating configs from rules (variant={args.variant}, "
-          f"arch={args.arch}, rule_set={args.rule_set})...")
+        variant_enum = GroupedConvVariant[VARIANT_MAP[args.variant]]
+        datatypes = requested_datatypes or ["fp16", "bf16", "fp32"]
+        print(
+            f"Generating configs from rules (variant={args.variant}, "
+            f"arch={args.arch}, datatypes={datatypes}, rule_set={args.rule_set})..."
+        )
+        configs = get_default_configs(
+            arch=args.arch,
+            variants=[variant_enum],
+            ndims=[2, 3],
+            datatypes=datatypes,
+            rule_set=args.rule_set,
+        )
+        configs = sorted(
+            configs, key=lambda config: config.name(config.datatype or datatypes[0])
+        )
+        print(f"Generated {len(configs)} configs from rules")
+        if not configs:
+            raise RuntimeError("No configs generated from rules")
 
-    configs = get_default_configs(
-        arch=args.arch,
-        variants=[variant_enum],
-        ndims=[2, 3],
-        datatypes=datatypes,
-        rule_set=args.rule_set,
-    )
-    print(f"Generated {len(configs)} configs from rules")
+        codegen = UnifiedGroupedConvCodegen(
+            output_dir=staging_dir,
+            gpu_target=args.arch,
+            enable_arch_filter=production,
+            require_arch_filter=production,
+        )
+        results = codegen.generate_all(configs, datatypes=datatypes)
+        if results["failed"]:
+            raise RuntimeError(
+                f"{len(results['failed'])} kernel instances failed generation"
+            )
 
-    if not configs:
-        print("ERROR: No configs generated from rules", file=sys.stderr)
-        sys.exit(1)
+        headers = collect_kernel_headers(staging_dir, cfg["glob_pattern"])
+        if not headers:
+            raise RuntimeError("No kernel headers generated")
+        if len(headers) != len(results["kernels"]):
+            raise RuntimeError(
+                "Generated artifact count mismatch: "
+                f"headers={len(headers)}, results={len(results['kernels'])}"
+            )
 
-    # --- Step 2: Generate kernel headers ---
-    codegen = UnifiedGroupedConvCodegen(
-        output_dir=output_dir, gpu_target=args.arch, enable_arch_filter=False,
-    )
-    codegen.generate_all(configs, datatypes=datatypes)
+        accepted = [
+            config for config in configs
+            if codegen.is_config_valid(config, config.datatype or datatypes[0])
+        ]
+        counts = {
+            ndim: sum(config.ndim_spatial == ndim for config in accepted)
+            for ndim in (2, 3)
+        }
+        print(
+            f"Catalog counts: input={len(configs)}, "
+            f"rejected={len(configs) - len(accepted)}, failed={len(results['failed'])}, "
+            f"2D={counts[2]}, 3D={counts[3]}"
+        )
+        if production and not all(counts.values()):
+            raise RuntimeError(
+                f"Production catalog must contain both 2D and 3D kernels: {counts}"
+            )
 
-    # --- Step 3: Collect headers and generate registration ---
-    headers = collect_kernel_headers(output_dir, cfg["glob_pattern"])
-    print(f"Found {len(headers)} generated kernel headers")
+        generate_include_all_header(
+            headers, staging_dir, cfg["include_all_header"], cfg["description"]
+        )
+        registration_files = generate_chunked_registration(
+            headers,
+            staging_dir,
+            variant=args.variant,
+            op_enum=cfg["op_enum"],
+            run_fn_maker=cfg["run_fn_maker"],
+            is_supported_fn_maker=cfg["is_supported_fn_maker"],
+            register_fn_name=f"{cfg['register_fn_name']}_{args.arch}",
+            arch=args.arch,
+        )
+        registration_count = sum(
+            path.read_text().count("registry.register_kernel(key, inst)")
+            for path in registration_files
+        )
+        if registration_count != len(headers):
+            raise RuntimeError(
+                "Generated artifact count mismatch: "
+                f"headers={len(headers)}, registrations={registration_count}"
+            )
 
-    if not headers:
-        print("ERROR: No kernel headers generated", file=sys.stderr)
-        sys.exit(1)
-
-    generate_include_all_header(headers, output_dir, cfg["include_all_header"], cfg["description"])
-    generate_chunked_registration(
-        headers, output_dir,
-        variant=args.variant,
-        op_enum=cfg["op_enum"],
-        run_fn_maker=cfg["run_fn_maker"],
-        is_supported_fn_maker=cfg["is_supported_fn_maker"],
-        register_fn_name=cfg["register_fn_name"],
-    )
+        backup = output_dir.with_name(f".{output_dir.name}.old")
+        if backup.exists():
+            shutil.rmtree(backup)
+        if output_dir.exists():
+            output_dir.rename(backup)
+        try:
+            staging_dir.rename(output_dir)
+        except Exception:
+            if backup.exists():
+                backup.rename(output_dir)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    except Exception as error:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
 
     print(f"\nDone. {len(headers)} kernels ready in {output_dir}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

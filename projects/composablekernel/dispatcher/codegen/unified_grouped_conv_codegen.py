@@ -11,13 +11,14 @@ This is the unified code generator for all grouped convolution kernel variants:
 - Backward data grouped convolution
 - Backward weight grouped convolution
 
-Generates both CK Tile kernels AND dispatcher wrappers.
+Generates CK Tile kernel headers and their per-kernel compilation units.
 Based on the GEMM codegen pattern.
 """
 
 import argparse
 import importlib
 import logging
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 from dataclasses import dataclass, field
@@ -31,6 +32,9 @@ from codegen_common import (
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
+
+# Rule modules import this module by name; preserve enum identity when run as a script.
+sys.modules.setdefault("unified_grouped_conv_codegen", sys.modules[__name__])
 
 # Import architecture filter for GPU-specific validation
 try:
@@ -1661,168 +1665,13 @@ constexpr const char* CONV_FWD_KERNEL_NAME = {ns_name}::CONV_FWD_KERNEL_NAME;
 """
 
 
-# ============================================================================
-# Dispatcher Wrapper Generator
-# ============================================================================
-
-
-class GroupedConvDispatcherWrapperGenerator:
-    """Generates dispatcher integration wrapper following GEMM pattern"""
-
-    # Static mappings for pipeline and scheduler enum names (matches kernel_key.hpp)
-    PIPELINE_TO_DISPATCHER = {
-        "mem": "Pipeline::Mem",
-        "compv1": "Pipeline::CompV1",
-        "compv2": "Pipeline::CompV2",
-        "basic_v1": "Pipeline::CompV1",
-        "basic_v2": "Pipeline::CompV2",
-        "compv3": "Pipeline::CompV3",
-        "compv4": "Pipeline::CompV4",
-        "compv5": "Pipeline::CompV5",
-        "compv6": "Pipeline::CompV6",
-        "preshufflev1": "Pipeline::PreShuffleV1",
-        "preshufflev2": "Pipeline::PreShuffleV2",
-        "wavelet": "Pipeline::Wavelet",
-    }
-
-    SCHEDULER_TO_DISPATCHER = {
-        "default": "Scheduler::Default",
-        "intrawave": "Scheduler::Intrawave",
-        "interwave": "Scheduler::Interwave",
-    }
-
-    def __init__(
-        self,
-        datatype: str,
-        variant: GroupedConvVariant = GroupedConvVariant.FORWARD,
-    ):
-        self.datatype = datatype
-        self.variant = variant
-
-    def _pipeline_to_dispatcher(self, pipeline: str) -> str:
-        """Convert pipeline string to dispatcher enum value"""
-        return self.PIPELINE_TO_DISPATCHER.get(
-            pipeline.lower(), f"Pipeline::{pipeline.capitalize()}"
-        )
-
-    def _scheduler_to_dispatcher(self, scheduler: str) -> str:
-        """Convert scheduler string to dispatcher enum value"""
-        return self.SCHEDULER_TO_DISPATCHER.get(
-            scheduler.lower(), f"Scheduler::{scheduler.capitalize()}"
-        )
-
-    # Map datatype string to dispatcher DataType enum
-    DTYPE_TO_DISPATCHER = {
-        "fp16": "DataType::FP16",
-        "bf16": "DataType::BF16",
-        "fp32": "DataType::FP32",
-    }
-
-    def generate(
-        self,
-        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
-        kernel_path: Path,
-        output_dir: Path,
-    ) -> str:
-        """Generate dispatcher wrapper with factory function for registry."""
-        kernel_name = config.name(self.datatype)
-        rel_path = kernel_path.relative_to(output_dir)
-        is_depthwise = isinstance(config, DepthwiseConvKernelConfig)
-
-        dtype_enum = self.DTYPE_TO_DISPATCHER.get(self.datatype, "DataType::FP16")
-
-        # Determine variant-specific fields
-        if is_depthwise or self.variant == GroupedConvVariant.FORWARD:
-            launcher_alias = "SelectedConvKernelLauncher"
-            host_args_type = "GroupedConvFwdHostArgs<>"
-            conv_type_str = "forward"
-        elif self.variant == GroupedConvVariant.BACKWARD_DATA:
-            launcher_alias = "SelectedConvBwdDataLauncher"
-            host_args_type = "GroupedConvBwdDataHostArgs"
-            conv_type_str = "bwd_data"
-        else:  # BACKWARD_WEIGHT
-            launcher_alias = "SelectedConvBwdWeightLauncher"
-            host_args_type = "GroupedConvBwdWeightHostArgs"
-            conv_type_str = "bwd_weight"
-
-        layout = config.layout
-
-        # Algorithm key fields differ between implicit GEMM and depthwise algorithms
-        if is_depthwise:
-            algorithm_spec = """    // Depthwise kernels have no GEMM tile parameters
-    key.algorithm.tile_shape = {0, 0, 0};
-    key.algorithm.wave_shape = {0, 0, 0};
-    key.algorithm.warp_tile_shape = {0, 0, 0};
-    key.algorithm.epilogue = Epilogue::None;"""
-        else:
-            algorithm_spec = f"""    key.algorithm.tile_shape = {{{config.tile.tile_m}, {config.tile.tile_n}, {config.tile.tile_k}}};
-    key.algorithm.wave_shape = {{{config.tile.warp_m}, {config.tile.warp_n}, 1}};
-    key.algorithm.warp_tile_shape = {{{config.tile.warp_tile_m}, {config.tile.warp_tile_n}, {config.tile.warp_tile_k}}};
-    key.algorithm.pipeline = {self._pipeline_to_dispatcher(config.trait.pipeline)};
-    key.algorithm.scheduler = {self._scheduler_to_dispatcher(config.trait.scheduler)};
-    key.algorithm.epilogue = Epilogue::CShuffle;"""
-
-        return f"""// SPDX-License-Identifier: MIT
-// Auto-generated dispatcher wrapper for: {kernel_name}
-#pragma once
-
-#include "ck_tile/dispatcher.hpp"
-#include "ck_tile/dispatcher/grouped_conv_utils.hpp"
-#include "../{rel_path}"
-
-namespace ck_tile {{
-namespace dispatcher {{
-namespace generated {{
-
-using ::ck_tile::dispatcher::GroupedConvKernelInstancePtr;
-using ::ck_tile::dispatcher::GroupedConvKernelKey;
-using ::ck_tile::dispatcher::DataType;
-using ::ck_tile::dispatcher::LayoutTag;
-using ::ck_tile::dispatcher::Pipeline;
-using ::ck_tile::dispatcher::Scheduler;
-using ::ck_tile::dispatcher::Epilogue;
-using Priority = ::ck_tile::dispatcher::GroupedConvRegistry::Priority;
-
-// Factory function to create kernel instance for registry
-inline GroupedConvKernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx942") {{
-    GroupedConvKernelKey key;
-    key.signature.dtype_in = {dtype_enum};
-    key.signature.dtype_wei = {dtype_enum};
-    key.signature.dtype_out = {dtype_enum};
-    key.signature.dtype_acc = DataType::FP32;
-    key.signature.layout = "{layout}";
-    key.signature.conv_type = "{conv_type_str}";
-    key.signature.num_dims = {config.ndim_spatial};
-    key.signature.groups = 1;
-
-    {algorithm_spec}
-    key.gfx_arch = gfx_arch;
-
-    // Create kernel instance that wraps the launcher
-    return std::make_shared<GroupedConvKernelInstance>(
-        key,
-        "{kernel_name}",
-        []({host_args_type}& args, const stream_config& cfg) -> float {{
-            return {kernel_name}_Launcher::launch(args, cfg);
-        }}
-    );
-}}
-
-}}  // namespace generated
-}}  // namespace dispatcher
-}}  // namespace ck_tile
-
-// Export launcher alias to global namespace for direct use
-using {launcher_alias} = {kernel_name}_Launcher;
-"""
-
-
 # Each rule set maps to a (module, entry-point) pair with the uniform
 # get_configs(arch, variants, ndims, datatypes) signature; get_default_configs
 # imports the module and calls the named function, so no rule-set-specific logic
 # lives in the codegen. Builder-derived sets (profiler/tests) and subset sets
 # (tiny) reuse a shared module's entry points rather than thin wrapper modules.
 _RULE_SET_MODULES = {
+    "rdna":       ("grouped_conv.grouped_config_rules_rdna",       "get_configs"),
     "default":    ("grouped_conv.grouped_config_rules_default",    "get_configs"),
     "full":       ("grouped_conv.grouped_config_rules_full",       "get_configs"),
     "full-tests": ("grouped_conv.grouped_config_rules_full_tests", "get_configs"),
@@ -1920,27 +1769,31 @@ class UnifiedGroupedConvCodegen:
         datatype: str = "fp16",
         ndim_spatial: int = 2,
         enable_arch_filter: bool = True,
+        require_arch_filter: bool = False,
     ):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create wrapper directory for dispatcher integration
-        self.wrapper_dir = self.output_dir / "dispatcher_wrappers"
-        self.wrapper_dir.mkdir(parents=True, exist_ok=True)
-
         self.generated_files: List[Path] = []
-        self.generated_wrappers: List[Path] = []
         self.gpu_target = gpu_target
         self.datatype = datatype
         self.ndim_spatial = ndim_spatial
 
         # Initialize architecture filter for GPU-specific validation
         self.arch_filter = None
+        if require_arch_filter and not enable_arch_filter:
+            raise RuntimeError("A required architecture filter cannot be disabled")
+        if require_arch_filter and not HAS_ARCH_FILTER:
+            raise RuntimeError("Architecture filter is required but unavailable")
         if enable_arch_filter and HAS_ARCH_FILTER:
             try:
-                self.arch_filter = ArchFilter(gpu_target, strict_mode=False)
+                self.arch_filter = ArchFilter(gpu_target, strict_mode=require_arch_filter)
                 log.info(f"Architecture filter enabled for {gpu_target}")
-            except ValueError as e:
+            except Exception as e:
+                if require_arch_filter:
+                    raise RuntimeError(
+                        f"Could not initialize required architecture filter: {e}"
+                    ) from e
                 log.warning(f"Could not create arch filter: {e}")
 
     def _get_configs(self) -> List[GroupedConvKernelConfig | DepthwiseConvKernelConfig]:
@@ -2007,15 +1860,12 @@ class UnifiedGroupedConvCodegen:
         config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
         datatype: str,
         variant: GroupedConvVariant = GroupedConvVariant.FORWARD,
-    ) -> Tuple[Path, Path]:
-        """Generate a single kernel file and dispatcher wrapper. Returns (kernel_path, wrapper_path)."""
+    ) -> Path:
+        """Generate a single kernel header and its compilation unit. Returns the header path."""
         if isinstance(config, DepthwiseConvKernelConfig):
             kernel_gen = CKTileDepthwiseConvKernelGenerator(datatype)
-            # Depthwise kernels are forward-only, use the forward wrapper generator
-            wrapper_gen = GroupedConvDispatcherWrapperGenerator(datatype, GroupedConvVariant.FORWARD)
         else:
             kernel_gen = CKTileGroupedConvKernelGenerator(datatype, variant)
-            wrapper_gen = GroupedConvDispatcherWrapperGenerator(datatype, variant)
 
         kernel_name = config.name(datatype)
         filename = f"{kernel_name}.hpp"
@@ -2025,11 +1875,6 @@ class UnifiedGroupedConvCodegen:
         content = kernel_gen.generate(config)
         filepath.write_text(content, encoding="utf-8")
         self.generated_files.append(filepath)
-
-        wrapper_content = wrapper_gen.generate(config, filepath, self.output_dir)
-        wrapper_path = self.wrapper_dir / f"dispatcher_wrapper_{kernel_name}.hpp"
-        wrapper_path.write_text(wrapper_content, encoding="utf-8")
-        self.generated_wrappers.append(wrapper_path)
 
         # Generate .cpp compilation unit for per-kernel parallel builds
         cpp_filename = f"{kernel_name}.cpp"
@@ -2046,20 +1891,18 @@ namespace ck_tile {{ namespace generated {{
 """
         cpp_filepath.write_text(cpp_content, encoding="utf-8")
 
-        return filepath, wrapper_path
+        return filepath
 
     def _generate_single_kernel(self, item: _GenItem):
-        """Generate one kernel (used by parallel_generate). Returns (kernel_path, wrapper_path) or raises."""
-        kernel_path, wrapper_path = self.generate_kernel(
-            item.config, item.datatype, item.variant
-        )
+        """Generate one kernel (used by parallel_generate). Returns kernel_path or raises."""
+        kernel_path = self.generate_kernel(item.config, item.datatype, item.variant)
         log.info(
             "Generated kernel %d/%d: %s",
             item.idx,
             item.total,
             item.config.name(item.datatype),
         )
-        return (kernel_path, wrapper_path)
+        return kernel_path
 
     def generate_all(
         self,
@@ -2070,14 +1913,15 @@ namespace ck_tile {{ namespace generated {{
         """Generate all kernel files (optionally in parallel).
 
         Configs are filtered using architecture validation before generation.
-        Returns dict with keys: kernels, wrappers, failed.
+        Returns dict with keys: kernels, failed.
         """
+        caller_supplied_configs = configs is not None
         if configs is None:
             configs = self._get_configs()
         if datatypes is None:
             datatypes = [self.datatype]
 
-        results = {"kernels": [], "wrappers": [], "failed": []}
+        results = {"kernels": [], "failed": []}
 
         # Filter configs using arch validation
         valid_tasks = []
@@ -2110,6 +1954,23 @@ namespace ck_tile {{ namespace generated {{
                 f"{len(valid_tasks)} remaining"
             )
 
+        if caller_supplied_configs and len(configs) > 0 and not valid_tasks:
+            results["failed"].append(
+                f"All {len(configs)} configs rejected for {self.gpu_target}"
+            )
+            return results
+
+        valid_tasks.sort(key=lambda task: task[0].name(task[1]))
+        names = [config.name(datatype) for config, datatype, _ in valid_tasks]
+        duplicate_names = sorted({name for name in names if names.count(name) > 1})
+        if duplicate_names:
+            results["failed"].extend(
+                f"Duplicate generated kernel identity: {name}" for name in duplicate_names
+            )
+            valid_tasks = [
+                task for task in valid_tasks if task[0].name(task[1]) not in duplicate_names
+            ]
+
         total = len(valid_tasks)
         items = [
             _GenItem(i, total, config, datatype, variant)
@@ -2119,10 +1980,9 @@ namespace ck_tile {{ namespace generated {{
         def _safe_generate(item: _GenItem):
             """Wrapper that catches exceptions for failure tracking."""
             try:
-                k, w = self._generate_single_kernel(item)
-                return ("ok", k, w, None)
+                return ("ok", self._generate_single_kernel(item), None)
             except Exception as e:
-                return ("fail", None, None, str(e))
+                return ("fail", None, str(e))
 
         raw = parallel_generate(
             _safe_generate, items, parallel=parallel and len(items) > 1
@@ -2130,19 +1990,20 @@ namespace ck_tile {{ namespace generated {{
         for r in raw:
             if r[0] == "ok":
                 results["kernels"].append(r[1])
-                results["wrappers"].append(r[2])
             else:
-                results["failed"].append(r[3])
-                log.error("Failed: %s", r[3])
+                results["failed"].append(r[2])
+                log.error("Failed: %s", r[2])
+
+        results["kernels"].sort(key=lambda path: path.name)
 
         # Generate include_all_*.hpp headers for Python ctypes libraries
-        if results["wrappers"]:
+        if results["kernels"]:
             self._generate_include_all_headers()
 
         return results
 
     def _generate_include_all_headers(self):
-        """Generate include_all_grouped_conv_*.hpp headers and registration header"""
+        """Generate include_all_grouped_conv_*.hpp headers"""
         # Scan output directory for ALL kernel files (not just this run's generated_files)
         # This handles the case where fwd and bwd kernels are generated in separate make targets
         fwd_headers = []
@@ -2213,108 +2074,13 @@ namespace ck_tile {{ namespace generated {{
             if kernel_headers:
                 log.info(f"Generated: {header_name} ({len(kernel_headers)} kernels)")
 
-        # Generate registration header (following GEMM pattern)
-        self._generate_registration_header(
-            fwd_kernels, bwd_data_kernels, bwd_weight_kernels
-        )
-
-    def _generate_registration_header(
-        self,
-        fwd_kernels: List[str],
-        bwd_data_kernels: List[str],
-        bwd_weight_kernels: List[str],
-    ):
-        """Generate master registration header for all grouped conv kernels"""
-        # Scan wrapper directory for ALL wrapper files
-        all_wrappers = []
-        for wrapper_path in self.wrapper_dir.glob(
-            "dispatcher_wrapper_grouped_conv_*.hpp"
-        ):
-            all_wrappers.append(wrapper_path.name)
-
-        wrapper_includes = "\n".join(f'#include "{w}"' for w in sorted(all_wrappers))
-
-        # Generate registration calls
-        fwd_registrations = "\n        ".join(
-            f"registry.register_kernel(generated::make_{k}(gfx_arch), priority);"
-            for k in sorted(fwd_kernels)
-        )
-        bwd_data_registrations = "\n        ".join(
-            f"registry.register_kernel(generated::make_{k}(gfx_arch), priority);"
-            for k in sorted(bwd_data_kernels)
-        )
-        bwd_weight_registrations = "\n        ".join(
-            f"registry.register_kernel(generated::make_{k}(gfx_arch), priority);"
-            for k in sorted(bwd_weight_kernels)
-        )
-
-        content = f"""// SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
-// Auto-generated master registration header for grouped conv kernels
-#pragma once
-
-#include "ck_tile/dispatcher.hpp"
-#include "ck_tile/dispatcher/grouped_conv_utils.hpp"
-
-{wrapper_includes}
-
-namespace ck_tile {{
-namespace dispatcher {{
-
-using Priority = GroupedConvRegistry::Priority;
-
-inline void register_all_grouped_conv_fwd_kernels(
-    const std::string& gfx_arch = "gfx942",
-    Priority priority = Priority::Normal)
-{{
-    auto& registry = GroupedConvRegistry::instance();
-    {fwd_registrations if fwd_registrations else "// No forward kernels"}
-}}
-
-inline void register_all_grouped_conv_bwd_data_kernels(
-    const std::string& gfx_arch = "gfx942",
-    Priority priority = Priority::Normal)
-{{
-    auto& registry = GroupedConvRegistry::instance();
-    {bwd_data_registrations if bwd_data_registrations else "// No backward data kernels"}
-}}
-
-inline void register_all_grouped_conv_bwd_weight_kernels(
-    const std::string& gfx_arch = "gfx942",
-    Priority priority = Priority::Normal)
-{{
-    auto& registry = GroupedConvRegistry::instance();
-    {bwd_weight_registrations if bwd_weight_registrations else "// No backward weight kernels"}
-}}
-
-inline void register_all_grouped_conv_kernels(
-    const std::string& gfx_arch = "gfx942",
-    Priority priority = Priority::Normal)
-{{
-    register_all_grouped_conv_fwd_kernels(gfx_arch, priority);
-    register_all_grouped_conv_bwd_data_kernels(gfx_arch, priority);
-    register_all_grouped_conv_bwd_weight_kernels(gfx_arch, priority);
-}}
-
-inline std::size_t get_grouped_conv_fwd_kernel_count() {{ return {len(fwd_kernels)}; }}
-inline std::size_t get_grouped_conv_bwd_data_kernel_count() {{ return {len(bwd_data_kernels)}; }}
-inline std::size_t get_grouped_conv_bwd_weight_kernel_count() {{ return {len(bwd_weight_kernels)}; }}
-inline std::size_t get_grouped_conv_kernel_count() {{ return {len(fwd_kernels) + len(bwd_data_kernels) + len(bwd_weight_kernels)}; }}
-
-}}  // namespace dispatcher
-}}  // namespace ck_tile
-"""
-        reg_path = self.wrapper_dir / "register_all_grouped_conv_kernels.hpp"
-        reg_path.write_text(content, encoding="utf-8")
-        log.info(f"Generated registration header: {reg_path}")
-
 
 # ============================================================================
 # CLI
 # ============================================================================
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Unified Grouped Convolution Code Generator"
     )
@@ -2349,7 +2115,7 @@ def main():
         type=int,
         nargs="+",
         default=[2, 3],
-        choices=[1, 2, 3],
+        choices=[2, 3],
         help="Spatial dimensions",
     )
     parser.add_argument(
@@ -2357,7 +2123,7 @@ def main():
         "-a",
         type=str,
         default="gfx942",
-        choices=["gfx90a", "gfx942", "gfx950", "gfx1201", "gfx1250"],
+        choices=["gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1200", "gfx1201", "gfx1250"],
         help="Target GPU architecture",
     )
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -2371,7 +2137,7 @@ def main():
         "-r",
         type=str,
         default="default",
-        choices=["default", "full", "full-tests", "profiler", "tests", "tiny"],
+        choices=["default", "full", "full-tests", "profiler", "tests", "tiny", "rdna"],
         help="Rule-set used in the instance generation",
     )
 
@@ -2535,10 +2301,14 @@ def main():
             filtered_configs.append(config)
     else:
         # Get predefined configurations for target arch with requested variants and ndims
-        filtered_configs = get_default_configs(
-            arch=args.arch, variants=requested_variants, ndims=args.ndim, datatypes=args.datatype,
-            rule_set=args.rule_set,
-        )
+        try:
+            filtered_configs = get_default_configs(
+                arch=args.arch, variants=requested_variants, ndims=args.ndim,
+                datatypes=args.datatype, rule_set=args.rule_set,
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
 
     if args.list_configs:
         print(f"Grouped convolution configurations for {args.arch}:")
@@ -2567,7 +2337,7 @@ def main():
                     print(
                         f"      Padding: M={cfg.trait.pad_m}, N={cfg.trait.pad_n}, K={cfg.trait.pad_k}"
                     )
-        return
+        return 0
 
     # Generate (disable arch filter when using pre-validated JSON configs)
     codegen = UnifiedGroupedConvCodegen(
@@ -2586,7 +2356,12 @@ def main():
         print(f"  Failed: {len(results['failed'])}")
         for err in results["failed"][:5]:
             print(f"    - {err}")
+        return 1
+    if args.rule_set == "rdna" and not results["kernels"]:
+        print("ERROR: rdna production catalog generated 0 kernels", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

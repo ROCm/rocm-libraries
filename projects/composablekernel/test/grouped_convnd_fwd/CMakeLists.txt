@@ -79,6 +79,19 @@ if(GPU_TARGETS MATCHES "gfx9|gfx1250")
   endif()
 endif()
 
+# RDNA GPU correctness is created by dispatcher/library. Pull that library in
+# from the test tree so the gate exists without widening the gfx9 tile gtest.
+include(${PROJECT_SOURCE_DIR}/dispatcher/grouped_conv_arch_plan.cmake)
+ck_dispatcher_rdna_target("${GPU_TARGETS}" _DISPATCHER_RDNA_TARGET)
+if(_DISPATCHER_RDNA_TARGET AND CK_TILE_DISPATCHER)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  if(NOT TARGET ck_dispatcher_grouped_conv_fwd)
+    add_subdirectory(
+      ${PROJECT_SOURCE_DIR}/dispatcher/library
+      ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library)
+  endif()
+endif()
+
 add_gtest_executable(test_grouped_convnd_fwd_multi_ab_interface test_grouped_convnd_fwd_multi_ab_interface.cpp)
 if(result EQUAL 0)
     target_link_libraries(test_grouped_convnd_fwd_multi_ab_interface PRIVATE utility)
