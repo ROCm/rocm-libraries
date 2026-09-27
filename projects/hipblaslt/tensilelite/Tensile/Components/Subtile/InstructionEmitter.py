@@ -109,7 +109,6 @@ class InstructionEmitter:
 
         # Derived state
         self.hasScale = scaleTileInfoA is not None and scaleTileInfoB is not None
-        self.subtileShapeK = tileInfoA.subtileShape[1]
         self.tileInfoMap = {'A': tileInfoA, 'B': tileInfoB}
         if self.hasScale:
             self.tileInfoMap['SA'] = scaleTileInfoA
@@ -220,11 +219,15 @@ class InstructionEmitter:
             # offset. Skip the modulo in that case.
             nUnroll = self.config.numUnroll.get(tensor, 1)
             per_uid_k = self._per_uid_k[tensor] if nUnroll > 1 else None
+            # K extent of one subtile is per-tensor: TLU=1 stacks along the free
+            # dim (K extent 1) while TLU=0 stacks along K, and NN / TT pair one
+            # of each in the same kernel.
+            subtileShapeK = int(ti.subtileShape[1])
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
                     local_k = (k % per_uid_k) if per_uid_k is not None else k
-                    subtileK = local_k // self.subtileShapeK
-                    subIterK_within = local_k % self.subtileShapeK
+                    subtileK = local_k // subtileShapeK
+                    subIterK_within = local_k % subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
@@ -256,10 +259,12 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             grGran = self.config.grA if tensor == 'A' else self.config.grB
             uid_k_base = placement.unrollId * grGran.k
+            subtileShapeK = int(ti.subtileShape[1])
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
-                    subtileK = (k - uid_k_base) // self.subtileShapeK
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
+                    subtileK = (k - uid_k_base) // subtileShapeK
+                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
+                                                    writer=self.writer))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))

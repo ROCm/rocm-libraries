@@ -362,15 +362,47 @@ std::vector<float> generateData(T                           dgen,
                                  : 0;
     size_t const scaleCols = static_cast<size_t>(sizes[1]);
 
+    // Holds the arch-specific swizzled order the device consumes; empty when the
+    // layout needs no swizzle. scaleBytes is deliberately left in the generator's
+    // natural order because getAlignedFloat below indexes it canonically as
+    // scale_id = kBlock * MN + mn.
+    std::vector<uint8_t> swizzledScaleBytes;
+
     switch(scaleLayout)
     {
     case MXScaleLayout::GFX950:
-        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+    {
+        bool const   kIsRows = (isMatrixA && isTranspose) || (!isMatrixA && !isTranspose);
+        size_t const kExtent = static_cast<size_t>(kIsRows ? sizes[0] : sizes[1]);
+        size_t const kBlocks
+            = (elementsPerMXBlock > 0)
+                  ? (kExtent + static_cast<size_t>(elementsPerMXBlock) - 1)
+                        / static_cast<size_t>(elementsPerMXBlock)
+                  : 0;
+
+        // Number of scale rows in scaleBytes. The generator emits one scale per
+        // (MN, K block) pair, so scaleBytes.size() == mnExtent * kBlocks and the
+        // row count divides straight back out.
+        //
+        // This is read from the buffer instead of from sizes[] because the
+        // generator sizes the buffer from the strides it was passed, which can
+        // span more rows than M*N when the caller pads its leading dimension.
+        // The swizzle rejects any grid whose product is not exactly
+        // scaleBytes.size(), so the grid has to describe the buffer that exists,
+        // not the logical extent.
+        size_t const mnExtent
+            = (kBlocks > 0 && scaleBytes.size() % kBlocks == 0)
+                  ? scaleBytes.size() / kBlocks
+                  : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
+
+        swizzledScaleBytes = DGen::preSwizzleScalesGFX950(
+            scaleBytes, {/*numScaleRows=*/mnExtent, /*numScaleCols=*/kBlocks});
         break;
+    }
     case MXScaleLayout::GFX1250:
         if(elementsPerMXBlock > 0)
         {
-            scaleBytes
+            swizzledScaleBytes
                 = DGen::preSwizzleScalesGFX1250(scaleBytes,
                                                 /*slowDim=*/scaleCols,
                                                 /*fastDim=*/scaleRows,
@@ -382,7 +414,9 @@ std::vector<float> generateData(T                           dgen,
         break;
     }
 
-    std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
+    std::vector<uint8_t> const& deviceScaleBytes
+        = swizzledScaleBytes.empty() ? scaleBytes : swizzledScaleBytes;
+    std::memcpy(scale, deviceScaleBytes.data(), deviceScaleBytes.size() * sizeof(uint8_t));
 
     if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
     {
