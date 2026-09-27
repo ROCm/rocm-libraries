@@ -538,6 +538,18 @@ set_tests_properties(dispatcher_test_fmha_codegen PROPERTIES
 )
 
 add_test(
+    NAME dispatcher_test_fmha_kernel_key
+    COMMAND ${Python3_EXECUTABLE} -m unittest test_fmha_kernel_key -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_fmha_kernel_key PROPERTIES
+    LABELS "dispatcher;python;fmha;registry"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+add_test(
     NAME dispatcher_test_fmha_rules
     COMMAND ${Python3_EXECUTABLE} -m unittest test_fmha_rules -v
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

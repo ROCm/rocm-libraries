@@ -62,6 +62,49 @@ TEST(FmhaRegistryTest, RegisterAndLookup)
     EXPECT_EQ(found->get_name(), "test_fwd_fp16");
 }
 
+// encode_identifier() feeds both register_kernel() and lookup(), while
+// fmha_signature_matches() compares has_logits_soft_cap. If the identifier omits
+// the field, two kernels differing only in it collide and the registry keeps one,
+// so a soft-cap problem loses its candidate. Asserting on the identifier text
+// alone cannot catch that: an encoder that reads the field and always emits the
+// same bytes still collides.
+TEST(FmhaRegistryTest, SoftCapKernelsDoNotCollide)
+{
+    auto key_off = make_stub_key(FmhaKernelFamily::Fwd, "fp16", "gfx950");
+    auto key_on  = key_off;
+
+    key_on.signature.has_logits_soft_cap = true;
+
+    // Pins the difference and the guarantee that adding the field left every
+    // identifier without a soft cap byte-identical.
+    EXPECT_EQ(key_off.encode_identifier() + "_sc", key_on.encode_identifier());
+
+    FmhaRegistry reg;
+    EXPECT_TRUE(reg.register_kernel(std::make_shared<StubFmhaKernel>(key_off, "no_soft_cap")));
+    EXPECT_TRUE(reg.register_kernel(std::make_shared<StubFmhaKernel>(key_on, "soft_cap")));
+    EXPECT_EQ(reg.size(), 2u);
+
+    auto found_off = reg.lookup(key_off);
+    auto found_on  = reg.lookup(key_on);
+    ASSERT_NE(found_off, nullptr);
+    ASSERT_NE(found_on, nullptr);
+    EXPECT_EQ(found_off->get_name(), "no_soft_cap");
+    EXPECT_EQ(found_on->get_name(), "soft_cap");
+}
+
+// Control for the test above: registration really does refuse a duplicate key,
+// so the two EXPECT_TRUEs there are a result rather than a property of the call.
+TEST(FmhaRegistryTest, IdenticalKeysDoCollide)
+{
+    auto key = make_stub_key(FmhaKernelFamily::Fwd, "fp16", "gfx950");
+
+    FmhaRegistry reg;
+    EXPECT_TRUE(reg.register_kernel(std::make_shared<StubFmhaKernel>(key, "first")));
+    EXPECT_FALSE(reg.register_kernel(std::make_shared<StubFmhaKernel>(key, "second")));
+    EXPECT_EQ(reg.size(), 1u);
+    EXPECT_EQ(reg.lookup(key)->get_name(), "first");
+}
+
 TEST(FmhaRegistryTest, GetAllReturnsSorted)
 {
     FmhaRegistry reg;
