@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,6 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
 # specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -41,9 +40,14 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-set( ROCFFT_CLIENTS_SAMPLES_BUILD_SCOPE ON )
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-samples LANGUAGES CXX )
+  find_package(rocfft REQUIRED)
+endif()
 
-project( rocfft-clients-samples LANGUAGES CXX )
+if( NOT HIP_FOUND )
+  find_package( hip REQUIRED PATHS /opt/rocm/lib/cmake/hip/ )
+endif()
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 

@@ -30,7 +30,7 @@ if( WIN32 )
 else( )
   set( CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH
     "Install path prefix, prepended onto install directories" )
-endif( )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -40,8 +40,10 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
     "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-project( rocfft-clients-samples-fixed-16 LANGUAGES CXX )
-
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  project( rocfft-clients-samples-fixed-16 LANGUAGES CXX )
+endif()
+  
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 if( NOT TARGET rocfft )
@@ -72,11 +74,11 @@ foreach( sample ${sample_list} )
   )
 
   if( ROCFFT_BUILD_SCOPE )
-    set( FIXED_16_OUT_DIR "/../../staging" )
+    set( FIXED_16_OUT_DIR "/clients/staging" )
   elseif( ROCFFT_CLIENTS_BUILD_SCOPE )
-    set( FIXED_16_OUT_DIR "/../../bin" )
+    set( FIXED_16_OUT_DIR "/bin" )
   elseif( ROCFFT_CLIENTS_SAMPLES_BUILD_SCOPE )
-    set( FIXED_16_OUT_DIR "/../bin" )
+    set( FIXED_16_OUT_DIR "/bin" )
   else()
     set( FIXED_16_OUT_DIR "/bin" )
   endif()

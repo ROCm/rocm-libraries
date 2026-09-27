@@ -589,7 +589,7 @@ TEST(hipfftTest, CheckBufferSizeC2C)
 
 #ifdef __HIP_PLATFORM_AMD__
     // No extra work buffer for C2C
-    EXPECT_EQ(workSize, 0);
+    EXPECT_EQ(workSize, static_cast<size_t>(0));
 #endif
     ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
 }
@@ -613,7 +613,7 @@ TEST(hipfftTest, CheckBufferSizeR2C)
     // cppcheck-suppress knownConditionTrueFalse
     if(n % 2 == 0)
     {
-        EXPECT_EQ(workSize, 0);
+        EXPECT_EQ(workSize, static_cast<size_t>(0));
     }
     else
     {
@@ -639,7 +639,7 @@ TEST(hipfftTest, CheckBufferSizeC2R)
     // cppcheck-suppress knownConditionTrueFalse
     if(n % 2 == 0)
     {
-        EXPECT_EQ(workSize, 0);
+        EXPECT_EQ(workSize, static_cast<size_t>(0));
     }
     else
     {
@@ -669,7 +669,7 @@ TEST(hipfftTest, CheckBufferSizeD2Z)
     // cppcheck-suppress knownConditionTrueFalse
     if(n % 2 == 0)
     {
-        EXPECT_EQ(workSize, 0);
+        EXPECT_EQ(workSize, static_cast<size_t>(0));
     }
     else
     {
@@ -697,7 +697,7 @@ TEST(hipfftTest, CheckBufferSizeZ2D)
     // cppcheck-suppress knownConditionTrueFalse
     if(n % 2 == 0)
     {
-        EXPECT_EQ(workSize, 0);
+        EXPECT_EQ(workSize, static_cast<size_t>(0));
     }
     else
     {

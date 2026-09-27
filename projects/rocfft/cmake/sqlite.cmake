@@ -1,4 +1,4 @@
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,6 +54,7 @@ else()
   FetchContent_MakeAvailable(sqlite_local)
 
   if(NOT TARGET sqlite3)
+    enable_language( C )
     add_library( sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c )
     target_include_directories( sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR} )
     set_target_properties( sqlite3 PROPERTIES

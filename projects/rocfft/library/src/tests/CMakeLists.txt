@@ -57,15 +57,18 @@ target_link_libraries( rocfft-internal-test PRIVATE
 
 # Use installed GTest, or build from source (BUILD_GTEST=ON forces this).
 if( NOT BUILD_GTEST )
-  find_package( GTest QUIET )
+  find_package( GTest 1.17 QUIET )
 endif()
 if( GTest_FOUND )
   target_link_libraries( rocfft-internal-test PRIVATE GTest::gtest GTest::gtest_main )
 else()
-  include( ${PROJECT_SOURCE_DIR}/cmake/build-gtest.cmake )
-  add_dependencies( rocfft-internal-test gtest )
-  target_include_directories( rocfft-internal-test PRIVATE ${GTEST_INCLUDE_DIRS} )
-  target_link_libraries( rocfft-internal-test PRIVATE ${GTEST_LIBRARIES} )
+  if( ALLOW_BUILD_DEPS OR NOT DEFINED ALLOW_BUILD_DEPS )
+    set( GTEST_TARGET rocfft-internal-test )
+    set( GTEST_LINK_MAIN ON )
+    include( ${PROJECT_SOURCE_DIR}/cmake/build-gtest.cmake )
+  else()
+    message(FATAL_ERROR "GTest was not found and ALLOW_BUILD_DEPS is disabled")
+  endif()
 endif()
 
 include( GoogleTest )
