@@ -31,6 +31,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace Tensile
 {
@@ -161,10 +162,16 @@ namespace Tensile
             // If condition in case two threads got into this function
             if(!library)
             {
-                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(
-                    (libraryDirectory + "/" + filePrefix + suffix).c_str());
-                auto mLibrary
-                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                const auto filename = libraryDirectory + "/" + filePrefix + suffix;
+                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(filename);
+                auto       mLibrary
+                    = dynamic_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+                // Missing or malformed metadata must not be dereferenced. Do not
+                // substitute another filename: its solution indices and code objects
+                // may belong to a different library build.
+                if(mLibrary == nullptr || mLibrary->library == nullptr)
+                    throw std::runtime_error("Failed to load Tensile placeholder library: "
+                                             + filename);
                 library = mLibrary->library;
                 std::lock_guard<std::mutex> lock(*solutionsGuard);
                 if(hardware == nullptr)
