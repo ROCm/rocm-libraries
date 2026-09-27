@@ -3690,7 +3690,7 @@ class Solution(collections.abc.Mapping):
 
       iterModeMask = state["TDMIterateMode"]
       autoTdmIterateMode = iterModeMask == -1
-      if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
+      if state["TDMInst"] and state["EnableMatrixInstruction"]:
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
           state.pop("_TDMIterateModeA", None)
