@@ -315,6 +315,19 @@ Tests:
   skip_hardware: gfx1151
 
 # Nightly
+# AISPARSE-676: the bsrgemm beta-scaling path (C = beta * D) launched its
+# copy_scale kernel with block_dim * block_dim * nnzb_D computed as a 32-bit
+# product, which overflows past 2^31 and drops the tail of the scaled block-value
+# array. This extra case scales an array with more than 2^31 elements and checks
+# every element (including those beyond the 2^31 boundary). It needs ~17 GB of
+# device buffers, so it is memory-guarded and auto-skips ("Insufficient memory")
+# on smaller cards.
+- name: spgemm_bsr_scal_product_overflow
+  category: nightly
+  function: spgemm_bsr_extra
+  host_memory_gb: 40
+  device_memory_gb: 18
+
 - name: spgemm_mult_bsr
   category: nightly
   function: spgemm_bsr
