@@ -911,11 +911,27 @@ if(ROCM_LIBS_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
 endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
-    target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
+    # HIP C++ compilation has separate host and device passes; ordinary C is host-only.
+    # Keep each host selector paired with its flag so CMake does not de-duplicate it.
+    target_compile_options(hipblaslt PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
 
-    target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_options(hipblaslt-clients-common PRIVATE
+        -g
+        -O0
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
+        "$<$<COMPILE_LANGUAGE:C>:-fprofile-instr-generate>"
+        "$<$<COMPILE_LANGUAGE:C>:-fcoverage-mapping>"
+    )
+    target_link_options(hipblaslt-clients-common PUBLIC "SHELL:-Xarch_host -fprofile-instr-generate")
     target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
