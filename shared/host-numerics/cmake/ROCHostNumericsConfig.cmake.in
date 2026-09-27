@@ -1,0 +1,7 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostNumericsTargets.cmake")
+check_required_components(ROCHostNumerics)
