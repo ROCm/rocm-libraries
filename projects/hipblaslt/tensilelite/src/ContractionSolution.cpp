@@ -5654,15 +5654,11 @@ namespace TensileLite
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
-        if(!customKernel.name.empty() || handwrittenCustomKernel())
+        // Handwritten custom kernels only support single-kernel (tree) reduction.
+        // Tensile-generated kernels also set customKernel.name, with generated=true,
+        // and still go through origami reduction selection.
+        if(handwrittenCustomKernel())
         {
-            // Custom kernels currently only support single-kernel (tree)
-            // reduction. Both spellings are checked, though today the second is
-            // implied by the first: customKernel.name is only ever the copy of
-            // sizeMapping.customKernelName made by the ContractionSolution
-            // MappingTraits in Serialization/ContractionSolution.hpp, and
-            // nothing sets customKernel.generated. Kept for a future path that
-            // populates customKernel directly.
             reductionStrat = origami::reduction_t::tree;
         }
         else if(sizeMapping.streamKForceDPOnly != 0)
