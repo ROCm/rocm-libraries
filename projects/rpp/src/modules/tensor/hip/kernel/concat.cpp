@@ -215,11 +215,18 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
         // - src2Offsets: batchSize elements
         // - dstOffsets: batchSize elements
         // - dimsBuffer: batchSize * (2 * numDims) elements
-        // Total: batchSize * (3 + 2 * numDims) elements
+        // - stridesBuffer: 3 * numDims elements (axis-remapped strides for src1/src2/dst; kept
+        //   in scratch memory instead of mutating the caller-owned descriptors in place, since
+        //   those descriptors may be reused by the caller after this call returns)
+        // Total: batchSize * (3 + 2 * numDims) + 3 * numDims elements
         Rpp32u* src1Offsets = offsetBuffer;
         Rpp32u* src2Offsets = offsetBuffer + batchSize;
         Rpp32u* dstOffsets = offsetBuffer + batchSize * 2;
         Rpp32u* dimsBuffer = offsetBuffer + batchSize * 3;
+        Rpp32u* stridesBuffer = dimsBuffer + batchSize * 2 * numDims;
+        Rpp32u* remappedStrides1 = stridesBuffer;
+        Rpp32u* remappedStrides2 = stridesBuffer + numDims;
+        Rpp32u* remappedStridesDst = stridesBuffer + numDims * 2;
 
         Rpp32u cumOffset1 = 0, cumOffset2 = 0, cumDstOffset = 0;
         for (int i = 0; i < batchSize; i++) {
@@ -246,17 +253,24 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
             cumDstOffset += dstSize;
         }
 
+        // Compute axis-remapped strides into scratch memory rather than mutating the caller's
+        // descriptors in place -- srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr
+        // are owned by the caller and may be read again after this call returns (e.g. by
+        // validation or by a subsequent op), so their strides[] must be left untouched.
         if (axis == 0) {
-            srcPtr1GenericDescPtr->strides[1] = srcPtr1GenericDescPtr->strides[0];
-            srcPtr1GenericDescPtr->strides[0] = 1;
-            srcPtr2GenericDescPtr->strides[1] = srcPtr2GenericDescPtr->strides[0];
-            srcPtr2GenericDescPtr->strides[0] = 1;
-            dstGenericDescPtr->strides[1] = dstGenericDescPtr->strides[0];
-            dstGenericDescPtr->strides[0] = 1;
+            remappedStrides1[0] = 1;
+            remappedStrides1[1] = srcPtr1GenericDescPtr->strides[0];
+            remappedStrides2[0] = 1;
+            remappedStrides2[1] = srcPtr2GenericDescPtr->strides[0];
+            remappedStridesDst[0] = 1;
+            remappedStridesDst[1] = dstGenericDescPtr->strides[0];
         } else if (axis == 1) {
-            srcPtr1GenericDescPtr->strides[0] = srcPtr1GenericDescPtr->strides[2];
-            srcPtr2GenericDescPtr->strides[0] = srcPtr2GenericDescPtr->strides[2];
-            dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[2];
+            remappedStrides1[0] = srcPtr1GenericDescPtr->strides[2];
+            remappedStrides1[1] = srcPtr1GenericDescPtr->strides[1];
+            remappedStrides2[0] = srcPtr2GenericDescPtr->strides[2];
+            remappedStrides2[1] = srcPtr2GenericDescPtr->strides[1];
+            remappedStridesDst[0] = dstGenericDescPtr->strides[2];
+            remappedStridesDst[1] = dstGenericDescPtr->strides[1];
         }
 
         for (int batchCount = 0; batchCount < batchSize; batchCount++) {
@@ -285,9 +299,9 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), srcPtr1 + src1Offsets[batchCount],
-                               srcPtr2 + src2Offsets[batchCount], srcPtr1GenericDescPtr->strides,
-                               srcPtr2GenericDescPtr->strides, dstPtr + dstOffsets[batchCount],
-                               dstGenericDescPtr->strides, srcDims1, srcDims2);
+                               srcPtr2 + src2Offsets[batchCount], remappedStrides1,
+                               remappedStrides2, dstPtr + dstOffsets[batchCount],
+                               remappedStridesDst, srcDims1, srcDims2);
             HIP_CHECK_LAUNCH_RETURN();
         }
     } else if (numDims == 3) {
@@ -301,11 +315,18 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
         // - src2Offsets: batchSize elements
         // - dstOffsets: batchSize elements
         // - dimsBuffer: batchSize * (2 * numDims) elements
-        // Total: batchSize * (3 + 2 * numDims) elements
+        // - stridesBuffer: 3 * numDims elements (axis-remapped strides for src1/src2/dst; kept
+        //   in scratch memory instead of mutating the caller-owned descriptors in place, since
+        //   those descriptors may be reused by the caller after this call returns)
+        // Total: batchSize * (3 + 2 * numDims) + 3 * numDims elements
         Rpp32u* src1Offsets = offsetBuffer;
         Rpp32u* src2Offsets = offsetBuffer + batchSize;
         Rpp32u* dstOffsets = offsetBuffer + batchSize * 2;
         Rpp32u* dimsBuffer = offsetBuffer + batchSize * 3;
+        Rpp32u* stridesBuffer = dimsBuffer + batchSize * 2 * numDims;
+        Rpp32u* remappedStrides1 = stridesBuffer;
+        Rpp32u* remappedStrides2 = stridesBuffer + numDims;
+        Rpp32u* remappedStridesDst = stridesBuffer + numDims * 2;
 
         Rpp32u cumOffset1 = 0, cumOffset2 = 0, cumDstOffset = 0;
         for (int i = 0; i < batchSize; i++) {
@@ -332,20 +353,34 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
             cumDstOffset += dstSize;
         }
 
+        // Compute axis-remapped strides into scratch memory rather than mutating the caller's
+        // descriptors in place -- srcPtr1GenericDescPtr/srcPtr2GenericDescPtr/dstGenericDescPtr
+        // are owned by the caller and may be read again after this call returns (e.g. by
+        // validation or by a subsequent op), so their strides[] must be left untouched.
         if (axis == 0) {
-            srcPtr1GenericDescPtr->strides[2] = srcPtr1GenericDescPtr->strides[0];
-            srcPtr1GenericDescPtr->strides[0] = srcPtr1GenericDescPtr->strides[1] = 1;
-            srcPtr2GenericDescPtr->strides[2] = srcPtr2GenericDescPtr->strides[0];
-            srcPtr2GenericDescPtr->strides[0] = srcPtr2GenericDescPtr->strides[1] = 1;
-            dstGenericDescPtr->strides[2] = dstGenericDescPtr->strides[0];
-            dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[1] = 1;
+            remappedStrides1[2] = srcPtr1GenericDescPtr->strides[0];
+            remappedStrides1[0] = remappedStrides1[1] = 1;
+            remappedStrides2[2] = srcPtr2GenericDescPtr->strides[0];
+            remappedStrides2[0] = remappedStrides2[1] = 1;
+            remappedStridesDst[2] = dstGenericDescPtr->strides[0];
+            remappedStridesDst[0] = remappedStridesDst[1] = 1;
         } else if (axis == 1) {
-            srcPtr1GenericDescPtr->strides[2] = srcPtr1GenericDescPtr->strides[1];
-            srcPtr1GenericDescPtr->strides[0] = srcPtr1GenericDescPtr->strides[1] = 1;
-            srcPtr2GenericDescPtr->strides[2] = srcPtr2GenericDescPtr->strides[1];
-            srcPtr2GenericDescPtr->strides[0] = srcPtr2GenericDescPtr->strides[1] = 1;
-            dstGenericDescPtr->strides[2] = dstGenericDescPtr->strides[1];
-            dstGenericDescPtr->strides[0] = dstGenericDescPtr->strides[1] = 1;
+            remappedStrides1[2] = srcPtr1GenericDescPtr->strides[1];
+            remappedStrides1[0] = remappedStrides1[1] = 1;
+            remappedStrides2[2] = srcPtr2GenericDescPtr->strides[1];
+            remappedStrides2[0] = remappedStrides2[1] = 1;
+            remappedStridesDst[2] = dstGenericDescPtr->strides[1];
+            remappedStridesDst[0] = remappedStridesDst[1] = 1;
+        } else {
+            remappedStrides1[0] = srcPtr1GenericDescPtr->strides[0];
+            remappedStrides1[1] = srcPtr1GenericDescPtr->strides[1];
+            remappedStrides1[2] = srcPtr1GenericDescPtr->strides[2];
+            remappedStrides2[0] = srcPtr2GenericDescPtr->strides[0];
+            remappedStrides2[1] = srcPtr2GenericDescPtr->strides[1];
+            remappedStrides2[2] = srcPtr2GenericDescPtr->strides[2];
+            remappedStridesDst[0] = dstGenericDescPtr->strides[0];
+            remappedStridesDst[1] = dstGenericDescPtr->strides[1];
+            remappedStridesDst[2] = dstGenericDescPtr->strides[2];
         }
 
         for (int batchCount = 0; batchCount < batchSize; batchCount++) {
@@ -384,9 +419,9 @@ RppStatus hip_exec_concat_tensor(T* srcPtr1, RpptGenericDescPtr srcPtr1GenericDe
                                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                                handle.GetStream(), srcPtr1 + src1Offsets[batchCount],
-                               srcPtr2 + src2Offsets[batchCount], srcPtr1GenericDescPtr->strides,
-                               srcPtr2GenericDescPtr->strides, dstPtr + dstOffsets[batchCount],
-                               dstGenericDescPtr->strides, srcDims1, srcDims2);
+                               srcPtr2 + src2Offsets[batchCount], remappedStrides1,
+                               remappedStrides2, dstPtr + dstOffsets[batchCount],
+                               remappedStridesDst, srcDims1, srcDims2);
             HIP_CHECK_LAUNCH_RETURN();
         }
     } else {
