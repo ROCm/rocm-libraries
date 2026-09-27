@@ -123,12 +123,6 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # the main MIOpen target and with how CK itself was built.
     miopen_apply_ck_compile_definitions(${lib_name} ${gpu_target})
 
-    # The source enables native pointwise WRW only if this arch's CK package
-    # also has the WMMA/BF16 registrar; older installed CK keeps staged WRW.
-    if(arch_base STREQUAL "gfx1250" OR arch_base STREQUAL "gfx1250-strict")
-        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_GFX1250_NCHW_WRW=1)
-    endif()
-
     # Select the wavefront-size-specialized depthwise instance set for this GPU.
     # CDNA (gfx9xx) uses 64-lane wavefronts; RDNA (gfx10xx/gfx11xx/gfx12xx) uses 32.
     if(arch_base MATCHES "^gfx9")

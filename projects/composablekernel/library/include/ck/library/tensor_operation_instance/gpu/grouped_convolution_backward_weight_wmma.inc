@@ -71,18 +71,6 @@ void add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_bf16_
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances);
-
-void add_device_grouped_conv2d_bwd_weight_nchw_pointwise_bf16_wmma_instances(
-    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
-                                                           NGCHW,
-                                                           GKCYX,
-                                                           NGKHW,
-                                                           BF16,
-                                                           BF16,
-                                                           BF16,
-                                                           PassThrough,
-                                                           PassThrough,
-                                                           PassThrough>>>& instances);
 #endif
 
 // conv3d backward weight

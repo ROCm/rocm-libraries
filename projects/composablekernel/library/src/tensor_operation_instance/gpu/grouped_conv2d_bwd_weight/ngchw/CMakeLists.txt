@@ -2,14 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # NGCHW layout instances for grouped_conv2d_bwd_weight
-set(GROUPED_CONV2D_BWD_WEIGHT_NGCHW)
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250" AND CK_USE_WMMA AND CK_ENABLE_BF16)
-    list(APPEND GROUPED_CONV2D_BWD_WEIGHT_NGCHW
-        wmma/ngchw_gkcyx_ngkhw/device_grouped_conv2d_bwd_weight_nchw_pointwise_bf16_wmma_instance.cpp)
-endif()
-
-if(NOT MIOPEN_REQ_LIBS_ONLY)
-    list(APPEND GROUPED_CONV2D_BWD_WEIGHT_NGCHW
+set(GROUPED_CONV2D_BWD_WEIGHT_NGCHW
    xdl/ngchw_gkcyx_ngkhw/device_grouped_conv2d_bwd_weight_two_stage_xdl_ngchw_gkcyx_ngkhw_bf16_pipev1_instance.cpp
    xdl/ngchw_gkcyx_ngkhw/device_grouped_conv2d_bwd_weight_two_stage_xdl_ngchw_gkcyx_ngkhw_bf16_pipev1_part2_instance.cpp
    xdl/ngchw_gkcyx_ngkhw/device_grouped_conv2d_bwd_weight_two_stage_xdl_ngchw_gkcyx_ngkhw_bf16_pipev2_instance.cpp
@@ -25,6 +18,5 @@ if(NOT MIOPEN_REQ_LIBS_ONLY)
    xdl/ngchw_gkyxc_ngkhw/device_grouped_conv2d_bwd_weight_two_stage_xdl_ngchw_gkyxc_ngkhw_f16_pipev1_instance.cpp
    xdl/ngchw_gkyxc_ngkhw/device_grouped_conv2d_bwd_weight_xdl_ngchw_gkyxc_ngkhw_f32_instance.cpp
 )
-endif()
 
 add_instance_library(device_grouped_conv2d_bwd_weight_ngchw_instance ${GROUPED_CONV2D_BWD_WEIGHT_NGCHW})
