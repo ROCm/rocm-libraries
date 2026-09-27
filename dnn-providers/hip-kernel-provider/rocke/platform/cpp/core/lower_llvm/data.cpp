@@ -271,9 +271,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"update.dpp.i32",
      "declare i32 @llvm.amdgcn.update.dpp.i32(i32, i32, i32 immarg, i32 immarg, i32 immarg, i1 "
      "immarg)"},
-    {"global.atomic.fadd.v2bf16",
-     "declare <2 x bfloat> @llvm.amdgcn.global.atomic.fadd.v2bf16.p1("
-     "ptr addrspace(1), <2 x bfloat>)"},
     {"global.atomic.fadd.v2f16",
      "declare <2 x half> @llvm.amdgcn.global.atomic.fadd.v2f16.p1("
      "ptr addrspace(1), <2 x half>)"},
@@ -338,10 +335,6 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.fp8(i32, float, i1)"},
     {"amdgcn.cvt.scalef32.pk.f32.bf8",
      "declare <2 x float> @llvm.amdgcn.cvt.scalef32.pk.f32.bf8(i32, float, i1)"},
-    {"amdgcn.cvt.scalef32.pk.fp8.f32",
-     "declare i32 @llvm.amdgcn.cvt.scalef32.pk.fp8.f32(i32, <2 x float>, float, i1)"},
-    {"amdgcn.cvt.scalef32.pk.bf8.f32",
-     "declare i32 @llvm.amdgcn.cvt.scalef32.pk.bf8.f32(i32, <2 x float>, float, i1)"},
     {"amdgcn.ds.swizzle", "declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)"},
     /* Not overloaded, so no name suffix, but the flags are immarg like every
      * other permlane* flag pair. */

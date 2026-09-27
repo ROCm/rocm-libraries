@@ -145,6 +145,11 @@ def main() -> int:
     ap.add_argument("--no-gate", action="store_true")
     ap.add_argument("--no-pytest", action="store_true")
     ap.add_argument(
+        "--no-ir-validity",
+        action="store_true",
+        help="skip the emitted-IR validity gate (compile+link every corpus case)",
+    )
+    ap.add_argument(
         "--no-both",
         action="store_true",
         help="skip the ROCKE_BACKEND=both differential pytest pass",
@@ -175,6 +180,17 @@ def main() -> int:
         if args.only:
             gate += ["--only", args.only]
         status |= subprocess.run(gate).returncode
+
+    if not args.no_ir_validity:
+        # Complements the gate above rather than duplicating it: byte-identity
+        # proves the two engines agree, this proves what they agree on is legal
+        # IR the AMDGPU toolchain accepts. Self-skips (green, loudly) on a host
+        # with no LLVM tools -- pass --strict there to make that a failure.
+        print("\n== emitted-IR validity gate ==")
+        ir_gate = [sys.executable, str(TOOLS / "check_ir_validity.py")]
+        if args.only:
+            ir_gate += ["--only", args.only]
+        status |= subprocess.run(ir_gate).returncode
 
     if not args.no_pytest:
         print("\n== pytest ==")
