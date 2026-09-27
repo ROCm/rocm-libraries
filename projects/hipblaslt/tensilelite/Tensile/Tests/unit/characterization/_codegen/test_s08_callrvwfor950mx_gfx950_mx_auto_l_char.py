@@ -1,0 +1,44 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+"""S08 - Solution calLRVWFor950MX auto-LRVW characterization.
+
+Drives the designed gfx950 MXFP8 auto-LRVW config
+(``data/test_data/_designed/gfx950/s08_callrvwfor950mx_gfx950_mx_auto_l.yaml``)
+through the config-driven emit harness. Targets the AUTO branch of
+``calLRVWFor950MX`` in ``Tensile/SolutionStructs/Solution.py`` (line 3659),
+reached only when the ISA is gfx950 AND (MXBlockA or MXBlockB) AND
+``LocalReadVectorWidth{A,B} == -1``. Existing gfx950 MX designed configs pin
+``LocalReadVectorWidth=16`` and take the ``!= -1`` validation arm instead, so
+they never enter the auto arm.
+
+``assignDerivedParameters`` runs during the emit call, so the target line fires
+while emitting the single forked kernel.
+
+CPU-only; no GPU, no compile, no hardware. pytestmark = pytest.mark.unit.
+"""
+
+import os
+
+import pytest
+
+from config_harness import assert_config_emits
+
+pytestmark = pytest.mark.unit
+
+_ARCH = "gfx950"
+
+_CONFIG = os.path.join(
+    os.path.dirname(__file__),
+    "data",
+    "test_data",
+    "_designed",
+    "gfx950",
+    "s08_callrvwfor950mx_gfx950_mx_auto_l.yaml",
+)
+
+
+def test_s08_callrvwfor950mx_gfx950_mx_auto_l_emits():
+    """The selected configuration emits valid assembly."""
+    assert_config_emits(_CONFIG, _ARCH, limit=8, validate_source=True)

@@ -548,3 +548,106 @@ the selectors after an intentional generation-input change.
 the exact emitter-status multiset for its bounded sample. Remove throwaway
 warm-up emits because canonicalization already removes the known scheduler-state
 difference.
+
+## D33 — Correct the disabled TDMSplit characterization
+
+**ADR:** [`adr/0015-correct-disabled-tdmsplit-test.md`](adr/0015-correct-disabled-tdmsplit-test.md)
+
+**Decision:** Replace the unreachable TDMSplit emission and saved-result checks
+with assertions that normal solution derivation returns no kernels and reports
+`TDMSplit is currently disabled`. The test no longer claims coverage of emitter
+code that product validation prevents it from reaching.
+
+## D34 — Refresh S00-S07 emit results after develop changes
+
+**ADR:** [`adr/0016-refresh-s00-s07-results-after-develop.md`](adr/0016-refresh-s00-s07-results-after-develop.md)
+
+**Decision:** Re-record only the 20 failing S00-S07 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D35 — Refresh S08-S11 emit results after develop changes
+
+**ADR:** [`adr/0017-refresh-s08-s11-results-after-develop.md`](adr/0017-refresh-s08-s11-results-after-develop.md)
+
+**Decision:** Re-record only the 11 failing S08-S11 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D36 — Rebaseline coverage after the develop rebase
+
+**ADR:** [`adr/0018-rebaseline-coverage-after-develop.md`](adr/0018-rebaseline-coverage-after-develop.md)
+
+**Decision:** Regenerate the per-file baseline from the green post-rebase unit
+run. The update raises 16 floors, adds 14 current files, removes two entries for
+files deleted by develop, and explicitly lowers the nine reproducibly stale
+floors listed in ADR 0018. The tolerance remains 1 percentage point. Superseded
+by D40, which corrects the reduction count and file classification.
+
+## D37 — Config-driven saved results include emitted assembly
+
+**ADR:** [`adr/0019-pin-config-driven-assembly.md`](adr/0019-pin-config-driven-assembly.md)
+
+**Decision:** Record a SHA-256 digest of the emitted opcode set next to each
+config-driven kernel's name and return code. This makes a change in instruction
+kinds observable while ignoring known register, label, count, and order
+variation. Superseded by D41 after the digest proved compiler-sensitive in the
+shared coverage lane.
+
+## D38 — Reject zero-width MX local reads before code generation
+
+**ADR:** [`adr/0020-reject-zero-width-mx-local-reads.md`](adr/0020-reject-zero-width-mx-local-reads.md)
+
+**Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
+when `MatrixInstK // MXBlock` is non-positive or an M-major local read is
+narrower than one scale block. Remove three tests that counted code reached only
+before the previous code-generation exception.
+
+## D39 — Select config problem groups explicitly
+
+**ADR:** [`adr/0021-select-config-problem-groups.md`](adr/0021-select-config-problem-groups.md)
+
+**Decision:** Include a `BenchmarkProblems` index in every set-cover case and
+pass it through the config-driven harness. This records which problem group is
+measured when a shared YAML contains more than one group. Superseded by D42
+because an index still changes meaning when a group is inserted or reordered.
+
+## D40 — Correct and refresh the post-mutation coverage baseline
+
+**ADR:** [`adr/0022-correct-coverage-rebaseline.md`](adr/0022-correct-coverage-rebaseline.md)
+
+**Decision:** Correct ADR 0018's accounting from nine to ten original floor
+reductions and document the omitted `Configuration.py` and `Solution.py`
+changes. This proposed refresh was subsequently superseded by D43; none of its
+floor reductions remain in the rebased branch.
+
+## D41 — Separate code-generation smoke coverage from semantic assertions
+
+**ADR:** [`adr/0023-separate-codegen-smoke-from-semantics.md`](adr/0023-separate-codegen-smoke-from-semantics.md)
+
+**Decision:** Remove the compiler-sensitive opcode-set hash from shared saved
+results and remove basename snapshots from the 75 set-cover cases and 29
+S00-S11 designed smoke cases. These tests require successful generation except
+where an existing emitter failure is allowed. Tests that claim a specific
+emitted behavior use explicit source-pattern assertions; the S11a conversion
+test still detects replacement of `v_cvt_f32_i32`, while cases without a stable
+final-assembly observable remain explicitly labeled generation smoke tests.
+
+## D42 — Select set-cover problem groups by content
+
+**ADR:** [`adr/0024-select-problem-groups-by-content.md`](adr/0024-select-problem-groups-by-content.md)
+
+**Decision:** Identify each selected `BenchmarkProblems` entry by a short
+SHA-256 fingerprint of its complete normalized YAML value. The harness searches
+for that fingerprint instead of assuming a list position, so inserting or
+reordering another group cannot silently redirect a set-cover test.
+
+## D43 — Verify the repaired coverage baseline
+
+**ADR:** [`adr/0025-verify-repaired-coverage-baseline.md`](adr/0025-verify-repaired-coverage-baseline.md)
+
+**Decision:** After reproducing ADR 0022's values with a green pre-rebase
+`coverage-unit` run, rebase the complete stack and retain current `develop`'s
+newer baseline through every conflict. The rebased run passed at 84.14%; use its
+report to raise 38 per-file floors without lowering any, and raise the exact
+whole-project floor from 75% to 82%.

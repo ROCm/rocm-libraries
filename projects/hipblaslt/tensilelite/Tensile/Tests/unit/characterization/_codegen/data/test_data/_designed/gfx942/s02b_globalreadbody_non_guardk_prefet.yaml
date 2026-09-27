@@ -1,0 +1,61 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S02b PROBE: globalReadBody non-guardK prefetch load arms in
+#   Tensile/KernelWriterAssembly.py globalReadDo (mode=1).
+#
+# Target lines:
+#   11734 : buffer-load unrollMirrorWithSoffset codeMod (mirror + soffset!=0)
+#   11752 : DTL + UseInstOffsetForGRO instOffset>=buff_load_inst_offset_max
+#   11764 : DTL + NumLoadsCoalesced>1 (nrc>1) m0 offset conversion (wSize)
+#   11810 : non-BufferLoad flat global-read addr path
+#   11830 : sparse DirectToVgprSparseMetadata, PGR==1 even iter offsetBlk
+#   11866 : sparse==2, DTLB & !DTLA & !DTLM swapMetadataGlobalReadTc
+#
+# The config_harness derives only BenchmarkProblems[0]; the leading entry
+# isolates the non-BufferLoad flat global-read addr path (line 11810).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # (c) non-BufferLoad flat global read -> 11810  [FIRST = the entry the
+  # config_harness derives; harness only processes BenchmarkProblems[0]]
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - BufferLoad: [False]
+        - DepthU: [16]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+  ########################################
+  # (a) DTL + UseInstOffsetForGRO=1 -> 11752 (and mirror 11734 via MirrorDims)
+  ########################################

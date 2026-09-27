@@ -1,0 +1,72 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S01: KernelWriterAssembly.lraOffsetConversionForDTLandNLC (DTL + NLC>1).
+#
+# Target: Tensile/KernelWriterAssembly.py lines 6061,6071 (and the 6060-6078
+# bit-rotation compute block).  The generateAsm=True arm (6080-6091) is
+# unreachable: the sole caller (Components/LocalRead.py:1753) always passes
+# generateAsm=False -> those lines are dead via emit.
+#
+# ARCH = gfx950 ONLY.  The branch guard in LocalRead.py:1751 needs
+#   DirectToLdsA and GlobalReadVectorWidthA*bpeDS > 4 and NOT UseGeneralizedNLCOneA.
+# GRVWA*bpe>4 forces a 16-byte (b128) DTL load, which requires
+# asmCaps.HasDirectToLdsx4 -> only gfx950 has it (gfx90a/gfx942 = b128 rejected,
+# so the guard can never fire there).
+#
+# Reaching the inner target lines needs, inside the fn:
+#   divisor(LVCA) < width(=DepthU for TLUA=False)  AND  NumLoadsCoalescedA(nrc) > 1.
+# But nrc>1 requires UseGeneralizedNLCOneA=False, else Solution.py:1250 hard-resets
+# NumLoadsCoalescedA to 1.  On gfx950 non-MX, GNLConeA is forced False only via
+# WaveSeparateGlobalReadA=1 (Solution.py:3903).
+#
+# WSGR=1 + DTL also demands (Solution.py:1566) LSCA*LSPA == WavefrontSize*GRVWA.
+# Geometry: bf16 TN, MI[16,16,16] MIWaveTile=[4,1] MIWaveGroup=[1,1] -> 1 wave,
+# NumThreads=64, MacroTile0=64. DepthU=256, GRVWA=8. NumLoadsA=64*256/8/64=32.
+# NumLoadsCoalescedA=2 -> LSCA=DepthU/2=128, NLPa=16, LSPa=MT0/16=4 -> 128*4=512
+# == 64*8.  LVCA=LSCA/GRVWA=16 < DepthU=256.  nrc=2>1 -> lines 6061,6071 fire.
+# LocalReadVectorWidth=4 (<=MIInputPerThread=4, and !=2 which DTL rejects).
+# DirectToLds=2 => A-only DTL (keeps B out of the b128 DTL rejection path).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    - # ProblemType: bf16 TN (TransposeA=True => TLUA=False)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1, 1, 4, 1, 1, 1]
+        - DepthU: [256]
+        - DirectToLds: [2]
+        - WaveSeparateGlobalReadA: [1]
+        - NumLoadsCoalescedA: [2]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LocalReadVectorWidth: [4]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 1024, 1, 2048]
