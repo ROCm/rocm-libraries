@@ -50,7 +50,13 @@ inline bool fmha_signature_matches(const FmhaKernelKey& key, const FmhaProblem& 
     if(!(sig.family == problem.requested_family && sig.data_type == problem.data_type &&
          sig.is_group_mode == problem.is_group_mode && sig.is_v_rowmajor == problem.is_v_rowmajor &&
          sig.has_logits_soft_cap == problem.has_logits_soft_cap &&
-         fmha_mask_compatible(sig.mask_type, problem.mask_type) &&
+         // The split-K combine kernel merges o_acc/lse_acc and is mask-agnostic,
+         // but codegen stamps its key from the parent split (0 from a mask=no
+         // build, 1 from a causal one). Without this exemption a combine built
+         // in one mask context fails to match a plan formed in another and the
+         // whole split-K plan is dropped.
+         (sig.family == FmhaKernelFamily::FwdSplitKvCombine ||
+          fmha_mask_compatible(sig.mask_type, problem.mask_type)) &&
          sig.bias_type == problem.bias_type && sig.has_lse == problem.has_lse &&
          sig.has_dropout == problem.has_dropout && sig.qscale_type == problem.qscale_type &&
          sig.rope_type == problem.rope_type && sig.use_paged_kv == problem.use_paged_kv &&

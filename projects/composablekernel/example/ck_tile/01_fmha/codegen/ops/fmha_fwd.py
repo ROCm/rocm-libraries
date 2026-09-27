@@ -749,6 +749,9 @@ class FmhaFwdTileSize:
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    # paged split-KV only: the page block may be shorter than F_bn0, so the
+    # pipeline has to merge a tile that straddles two page blocks
+    F_page_shorter_than_tile: bool = False
 
     @property
     def name(self) -> str:

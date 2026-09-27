@@ -56,8 +56,11 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kIsPagedKV        = Problem::kIsPagedKV;
-    static constexpr bool kHasUnevenSplits  = Problem::kHasUnevenSplits;
-    static constexpr bool kHasSink          = Problem::kHasSink;
+    // Only instances whose page block is shorter than kN0 pay for the
+    // cross-page merge; everything else compiles it out entirely.
+    static constexpr bool kPageShorterThanTile = Problem::kPageShorterThanTile;
+    static constexpr bool kHasUnevenSplits     = Problem::kHasUnevenSplits;
+    static constexpr bool kHasSink             = Problem::kHasSink;
 
     static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
                    (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
@@ -385,14 +388,48 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                 Policy::template MakeKDramTileDistribution<Problem>()); // K DRAM tile window for
                                                                         // load
 
-            auto k_block_tile = load_tile(k_dram_window);
+            // Paged KV with page_block_size < kN0: the seq tile overflows the
+            // current page block and the overflow rows read OOB-zero. Keep a
+            // mirror window on the next page so the two halves can be summed
+            // back into a whole tile.
+            auto k_dram_window_b = k_dram_window;
+            bool k_is_cross      = false;
+            if constexpr(kPageShorterThanTile)
+            {
+                k_is_cross =
+                    k_page_block_navigator.is_cross_block(i_page_block_k, k_dram_block_window);
+                if(k_is_cross)
+                {
+                    k_page_block_navigator.move_to_block(
+                        i_page_block_k, k_dram_window_b, i_page_block_k + 1);
+                }
+            }
+            auto load_k_merged = [&]() {
+                auto t = load_tile(k_dram_window);
+                if constexpr(kPageShorterThanTile)
+                {
+                    if(k_is_cross)
+                    {
+                        const auto tb = load_tile(k_dram_window_b);
+                        tile_elementwise_inout([](auto& a, const auto& b) { a += b; }, t, tb);
+                    }
+                }
+                return t;
+            };
+
+            auto k_block_tile = load_k_merged();
             {
                 // moving k_dram_window is an in-page-block operation, so there is
                 // no need to invoke k_page_block_navigator.move_tile_window() here.
                 move_tile_window(k_dram_window, {0, kK0});
+                if constexpr(kPageShorterThanTile)
+                {
+                    if(k_is_cross)
+                        move_tile_window(k_dram_window_b, {0, kK0});
+                }
                 clear_tile(s_acc); // initialize C
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-                k_block_tile = load_tile(k_dram_window);
+                k_block_tile = load_k_merged();
             }
             const bool is_sink_tile = ((num_sink_loop - 1) == i_total_loops);
 
@@ -432,16 +469,35 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVS
                            k_lds_window);
                     block_sync_lds();
                     move_tile_window(k_dram_window, {0, kK0});
+                    if constexpr(kPageShorterThanTile)
+                    {
+                        if(k_is_cross)
+                            move_tile_window(k_dram_window_b, {0, kK0});
+                    }
 
                     store_tile(
                         k_lds_window,
                         tile_elementwise_in(k_element_func, k_block_tile)); // LDS write i + 1
-                    k_block_tile = load_tile(k_dram_window);                // global read i + 2
+                    k_block_tile = load_k_merged();                         // global read i + 2
                 });
             }
 
-            const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
-            {                                                 // tail
+            auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
+            if constexpr(kPageShorterThanTile)
+            {
+                // Same overflow as K: pull the remainder from the next page and
+                // add it back (the OOB half of each read is zero).
+                if(v_page_block_navigator.is_cross_block(i_page_block_v, v_dram_window))
+                {
+                    auto v_dram_window_b = v_dram_window;
+                    v_page_block_navigator.move_to_block(
+                        i_page_block_v, v_dram_window_b, i_page_block_v + 1);
+                    const auto v_overflow = load_tile(v_dram_window_b);
+                    tile_elementwise_inout(
+                        [](auto& a, const auto& b) { a += b; }, v_prefetch, v_overflow);
+                }
+            }
+            { // tail
                 block_sync_lds();
                 gemm_0(s_acc,
                        get_slice_tile(q_tile,

@@ -148,7 +148,9 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kHasUnevenSplits_,
           bool kMergeNumHeadGroupsSeqLenQ_ = false,
           index_t kBlockPerCu_             = -1, /* overwrite occupancy if not -1 */
-          bool kHasSink_                   = false>
+          bool kHasSink_                   = false,
+          /* page block shorter than kN0, so a K/V tile straddles two pages */
+          bool kPageShorterThanTile_ = false>
 struct TileFmhaFwdSplitKVTraits
 {
     static constexpr bool kPadSeqLenQ       = kPadSeqLenQ_;
@@ -166,6 +168,7 @@ struct TileFmhaFwdSplitKVTraits
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = kMergeNumHeadGroupsSeqLenQ_;
     static constexpr index_t kBlockPerCu             = kBlockPerCu_;
     static constexpr bool kHasSink                   = kHasSink_;
+    static constexpr bool kPageShorterThanTile       = kPageShorterThanTile_;
 };
 
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,

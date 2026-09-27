@@ -1172,6 +1172,72 @@ TEST_P(SplitKV, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+// Paged KV combined with split-K. `SplitKV` above never pages and `PagedKV`
+// never splits, so the combination is otherwise never exercised. Pages stay at
+// 128 and above, like `PagedKV`: only gfx1100 has a tile that carries the
+// cross-page merge, and this suite builds for gfx9 and gfx12, where the runner
+// rejects anything smaller.
+class PagedSplitKV
+    : public TestWithParam<std::tuple<std::tuple<int, int>,
+                                      bool,
+                                      mode_enum,
+                                      int,
+                                      std::tuple<int, int, int, int, int, std::string>>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(PagedSplitKV);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         PagedSplitKV,
+                         Combine(SplitKVHDimValues,
+                                 Bool(), // layouts of k and v controlled by i_perm
+                                 ModeValues,
+                                 Values(128, 256), // page_block_size
+                                 Values(std::tuple{2, 3, 1, 200, 1024, "0"},
+                                        std::tuple{2, 2, -1, 128, 2000, "t:128,128"})));
+
+TEST_P(PagedSplitKV, DataTypeConfig)
+{
+    auto [hdims, i_perm, mode, page_block_size, dims_mask]     = GetParam();
+    auto [hdim_q, hdim_v]                                      = hdims;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str] = dims_mask;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                               batch,
+                                               nhead,
+                                               nhead_k,
+                                               {adjust_seqlen(seqlen_q)},
+                                               {adjust_seqlen(seqlen_k)},
+                                               hdim_q,
+                                               hdim_v,
+                                               0,                 // seqlen_knew
+                                               {-1},              // seqlen_qpads
+                                               {-1},              // seqlen_kpads
+                                               {},                // q_eff_lens_per_batch
+                                               {},                // kv_eff_lens_per_batch
+                                               0,                 // rotary_dim
+                                               i_perm,            // i_perm
+                                               false,             // o_perm
+                                               0,                 // scale_s
+                                               0,                 // logits_soft_cap
+                                               def_is_v_rowmajor, // is_v_rowmajor
+                                               def_lse,           // lse
+                                               page_block_size,   // page_block_size
+                                               false,             // use_cache_batch_idx
+                                               "n",               // bias_str
+                                               0.0f,              // p_drop
+                                               0,                 // drop_seed
+                                               0,                 // drop_offset
+                                               false,             // drop_prefs
+                                               mask_str,          // mask_str
+                                               qscale_str,
+                                               true, // is_rotary_interleaved
+                                               3,    // num_splits
+                                               COMMON_ARGS);
+    CHECK_RESULT(result);
+}
+
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
 
 #if CK_TILE_FMHA_FWD_APPENDKV_API

@@ -25,6 +25,7 @@ from codegen.cpp_symbol_map import (
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
 from codegen.ops.fmha_fwd import (
+    CppConstraint,
     FmhaFwdTileSize,
     DTYPE_BITS,
     K0_MAX_SUBMAX_MAP,
@@ -74,7 +75,8 @@ using fmha_trait = ck_tile::TileFmhaFwdSplitKVTraits<{F_spad},
                                                      kHasUnevenSplits,
                                                      kMergeNumHeadGroupsSeqLenQ,
                                                      {F_occupancy},
-                                                     {F_sink}>;
+                                                     {F_sink},
+                                                     {F_subtilepage}>;
 
 using fmha_pipeline_problem = ck_tile::BlockFmhaFwdSplitKVPipelineProblem<
     typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::QDataType,
@@ -283,7 +285,7 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
 """
 
 FMHA_FWD_SPLITKV_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.do_fp8_static_quant == {F_squant}) &&
-        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck})) {{
+        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && ({F_pagecheck}) && (t.has_sink == {F_sink}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck})) {{
     using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}>;
 
     // get combine kernel tile sizes
@@ -338,9 +340,26 @@ class FmhaFwdSplitKVApiTrait:
     pagedkv: str
     sink: str  # sink or not
     bn1comb: int  # tile size along v head_dim of combine kernel
+    constraint: str = "true"  # extra C++ condition the tile requires
+    page_shorter_than_tile: bool = False  # tile compiles the cross-page merge
     # Metadata-only hint (occupancy of the splitkv kernel), see
     # fmha_fwd_traits_::kOccupancy for rationale.
     occupancy: int = -1
+
+    @property
+    def pagecheck(self) -> str:
+        # A tile that compiles the cross-page merge reaches one page ahead, so it
+        # covers pages down to half its own length. Every other tile has to sit
+        # inside a single page, which is what a 128-row page always gave it.
+        if self.pagedkv != "t":
+            page = "true"
+        elif self.page_shorter_than_tile:
+            page = f"{self.bn0} <= 2 * a.page_block_size"
+        else:
+            page = f"{self.bn0} <= a.page_block_size"
+        if self.constraint == "true":
+            return page
+        return f"({page}) && ({self.constraint})"
 
     @property
     def name(self) -> str:
@@ -589,6 +608,7 @@ class FmhaFwdSplitKVApiPool:
                             F_lse=BOOL_MAP[trait.lse],
                             F_squant=BOOL_MAP[trait.squant],
                             F_pagedkv=BOOL_MAP[trait.pagedkv],
+                            F_pagecheck=trait.pagecheck,
                             F_sink=BOOL_MAP[trait.sink],
                             F_scheck=trait.scheck,
                             F_seqtune=trait.seqtune(max_bm0),
@@ -693,6 +713,11 @@ class FmhaFwdSplitKVKernel:
             F_pagedkv=BOOL_MAP[self.F_pipeline.F_pagedkv],
             F_occupancy=self.F_tile.F_occupancy,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_subtilepage=BOOL_MAP[
+                "t"
+                if (self.F_pipeline.F_pagedkv == "t" and self.F_tile.F_page_shorter_than_tile)
+                else "f"
+            ],
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
@@ -867,7 +892,13 @@ class KernelComponentFactoryGfx11(KernelComponentFactoryBase):
                 "64" : [FmhaFwdTileSize( 16,  64,  32,  64,  32,   64,  1, 4, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16,  -1),
                         FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
                 "128": [FmhaFwdTileSize( 16,  64,  32, 128,  32,  128,  1, 4, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16,  -1),
-                        FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
+                        FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1),
+                        # bn0=32 serves page_block_size=16 (the vLLM KV block size): the
+                        # pipeline merges a tile straddling one page, so bn0 <= 2*page.
+                        # Listed last so non-paged dispatch keeps preferring bn0=64,
+                        # and restricted to gfx1100, the only target it is tuned and
+                        # validated on.
+                        FmhaFwdTileSize( 64,  32,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint('device_name.compare(0, 7, "gfx1100") == 0'), True)],
                 "256": [FmhaFwdTileSize( 16,  64,  32, 256,  32,  256,  1, 4, 1,  1, 4, 1,  16, 16, 16,  16, 16, 16,  -1),
                         FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)],
             }  # fmt: skip
@@ -1175,6 +1206,8 @@ def write_blobs(
                 dpad=kernel.F_pipeline.F_dpad,
                 dvpad=kernel.F_pipeline.F_dvpad,
                 bn1comb=combine_kernel.F_tile.F_bn1,
+                constraint=str(kernel.F_tile.F_constraint),
+                page_shorter_than_tile=kernel.F_tile.F_page_shorter_than_tile,
                 occupancy=int(kernel.F_tile.F_occupancy),
             )
         )
