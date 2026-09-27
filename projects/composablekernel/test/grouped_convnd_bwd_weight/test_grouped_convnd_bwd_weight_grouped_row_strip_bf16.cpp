@@ -414,19 +414,58 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
     huge.out_lengths[3] = std::numeric_limits<ck::long_index_t>::max();
     EXPECT_FALSE(op.IsSupportedArgument(huge.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
 
-    for(int groups : {191, 513})
+    const Problem<ck::index_t> below_tile(Shape{2, 15, 13, 131});
+    EXPECT_FALSE(
+        op.IsSupportedArgument(below_tile.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    // Eligible geometry and R, but below 512 CTAs for newly admitted groups.
+    for(const Shape low_ctas : {Shape{336, 16, 5, 3},
+                                Shape{255, 17, 5, 3},
+                                Shape{255, 24, 5, 3},
+                                Shape{255, 32, 5, 3},
+                                Shape{127, 58, 5, 3},
+                                Shape{85, 88, 7, 3},
+                                Shape{63, 122, 9, 3},
+                                Shape{46, 176, 13, 3},
+                                Shape{2, 513, 13, 131},
+                                Shape{11, 513, 14, 14},
+                                Shape{2, 576, 18, 162},
+                                Shape{11, 576, 14, 14}})
     {
-        const Problem<ck::index_t> out_of_range(Shape{2, groups, 13, 131});
-        EXPECT_FALSE(op.IsSupportedArgument(
-            out_of_range.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+        const Problem<ck::index_t> narrow(low_ctas);
+        const Problem<ck::long_index_t> wide(low_ctas);
+        EXPECT_FALSE(
+            op.IsSupportedArgument(narrow.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()))
+            << "groups=" << low_ctas.g << " CTAs=" << low_ctas.Strips() * ((low_ctas.g + 15) / 16);
+        EXPECT_FALSE(
+            op.IsSupportedArgument(wide.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
     }
-    for(int groups : {192, 256, 257, 512})
+    for(const Shape boundary : {Shape{256, 17, 5, 3},
+                                Shape{256, 24, 5, 3},
+                                Shape{256, 32, 5, 3},
+                                Shape{128, 58, 5, 3},
+                                Shape{256, 88, 5, 3},
+                                Shape{64, 122, 9, 3},
+                                Shape{47, 176, 13, 3},
+                                Shape{2, 192, 13, 131},
+                                Shape{2, 256, 13, 131},
+                                Shape{2, 257, 13, 131},
+                                Shape{2, 512, 13, 131},
+                                Shape{16, 513, 14, 14},  // S=16, 528 CTAs
+                                Shape{16, 576, 14, 14}}) // S=16, 576 CTAs
     {
-        const Shape boundary{2, groups, 13, 131};
-        const Problem<ck::index_t> supported(boundary);
-        auto arg = supported.MakeArgument(op, nullptr, nullptr, nullptr, 1);
-        ASSERT_TRUE(op.IsSupportedArgument(arg.get())) << "groups=" << groups;
-        EXPECT_EQ(op.GetWorkSpaceSize(arg.get()), WorkspaceBytes(boundary));
+        const Problem<ck::index_t> narrow(boundary);
+        const Problem<ck::long_index_t> wide(boundary);
+        for(const ck::index_t split : {-1, 0, 1})
+        {
+            auto narrow_arg = narrow.MakeArgument(op, nullptr, nullptr, nullptr, split);
+            auto wide_arg   = wide.MakeArgument(op, nullptr, nullptr, nullptr, split);
+            ASSERT_TRUE(op.IsSupportedArgument(narrow_arg.get()))
+                << "groups=" << boundary.g << " split=" << split;
+            ASSERT_TRUE(op.IsSupportedArgument(wide_arg.get()))
+                << "long groups=" << boundary.g << " split=" << split;
+            EXPECT_EQ(op.GetWorkSpaceSize(narrow_arg.get()), WorkspaceBytes(boundary));
+            EXPECT_EQ(op.GetWorkSpaceSize(wide_arg.get()), WorkspaceBytes(boundary));
+        }
     }
     // Large resource-eligible candidate retains wide indexing and bounded P.
     const Problem<ck::long_index_t> wide_problem(Shape{2, 512, 630, 640, 2});
@@ -437,6 +476,8 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
                                 Shape{21, 192, 120, 80, 1},
                                 Shape{8, 192, 120, 127, 1},
                                 Shape{48, 512, 56, 64, 1},
+                                Shape{325, 513, 1, 3}, // S=325, 10725 CTAs
+                                Shape{298, 576, 1, 3}, // S=298, 10728 CTAs
                                 Shape{2, 193, 9, 160, 1}})
     {
         const Problem<ck::index_t> narrow_descriptor(admitted);
@@ -462,12 +503,15 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
     }
     const Shape max_workspace{48, 512, 56, 64, 1};
     EXPECT_EQ(WorkspaceBytes(max_workspace), 6193152u);
-    const Shape just_over_r{1, 192, 8, 25201, 1}; // R=201608; S=316 fits
-    const Shape just_over_s{337, 192, 1, 2, 1};   // R=674; S=337
-    const Shape just_over_p{337, 512, 1, 2, 1};   // P exceeds max by one plane
-    EXPECT_EQ(WorkspaceBytes(just_over_p), 6211584u);
-    // With G<=512 and S<=336 the P bound cannot be exceeded in isolation.
-    for(const Shape excluded : {just_over_r, just_over_s, just_over_p})
+    const Shape just_over_r{1, 192, 8, 25201, 1};    // R=201608; S=316 fits
+    const Shape just_over_s{337, 192, 1, 2, 1};      // R=674; S=337
+    const Shape just_over_ctas{326, 513, 1, 3};      // S=326, CTAs=10758; P still fits
+    const Shape just_over_workspace{299, 576, 1, 3}; // S=299, CTAs=10764; P=6200064
+    EXPECT_EQ(WorkspaceBytes(just_over_ctas), 6020608u);
+    EXPECT_EQ(WorkspaceBytes(just_over_workspace), 6200064u);
+    // Since G <= 16 * ceil(G / 16), the CTA cap also bounds scratch bytes:
+    // P = 36 * S * G <= 36 * 16 * 10752 = 6193152.
+    for(const Shape excluded : {just_over_r, just_over_s, just_over_ctas, just_over_workspace})
     {
         const Problem<ck::index_t> narrow_descriptor(excluded);
         const Problem<ck::long_index_t> wide_descriptor(excluded);
@@ -526,6 +570,15 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, NchwSerialReferenceAndWorksp
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only candidate";
 
+    CheckShape({256, 17, 5, 3});            // 512 CTAs, first group-tail tile
+    CheckShape({256, 24, 5, 3});            // 512 CTAs, half-filled last tile
+    CheckShape({256, 32, 5, 3});            // 512 CTAs, two full tiles
+    CheckShape({128, 58, 5, 3});            // 512 CTAs, partial fourth tile
+    CheckShape({256, 88, 5, 3});            // 1536 CTAs, partial sixth tile
+    CheckShape({64, 122, 9, 3});            // 512 CTAs, partial eighth tile
+    CheckShape({47, 176, 13, 3});           // 517 CTAs, eleven full tiles
+    CheckShape({16, 513, 14, 14});          // 528 CTAs, odd group tail
+    CheckShape({16, 576, 14, 14}, true);    // 576 CTAs, adjusted right padding
     CheckShape({2, 193, 13, 131});          // one strip, odd width and the ninth group-lane tail
     CheckShape({5, 193, 25, 17});           // two strips per image, short width and row tails
     CheckShape({7, 193, 1, 159});           // both outer filter rows are empty for every split

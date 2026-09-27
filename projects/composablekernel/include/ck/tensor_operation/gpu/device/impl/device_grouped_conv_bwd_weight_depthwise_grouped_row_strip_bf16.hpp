@@ -246,10 +246,12 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
                ol[d] > MaxIndex)
                 return false;
         }
-        // Exact packed NHWGC/NHWGK, GKYXC with singleton C and K.
+        // Exact packed NHWGC/NHWGK, GKYXC with singleton C and K. A full
+        // 16-group CTA is the minimum useful tile; the checked CTA and scratch
+        // limits below, rather than a workload-specific group cap, bound larger G.
         const long_index_t g = il[0];
-        if(g < 192 || g > 512 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 ||
-           wl[1] != 1 || wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3)
+        if(g < 16 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 || wl[1] != 1 ||
+           wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3)
             return false;
         if((fs[0] != 1 && fs[0] != 2) || fs[0] != fs[1] || fd[0] != 1 || fd[1] != 1 || lp[0] != 1 ||
            lp[1] != 1 || rp[0] < 0 || rp[0] > 1 || rp[1] < 0 || rp[1] > 1)
@@ -290,6 +292,10 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
             return false;
         const auto logical_bytes = static_cast<size_t>(partials) * sizeof(float);
         if(logical_bytes > 6193152 || logical_bytes > static_cast<size_t>(MaxBytes - 255))
+            return false;
+        // Empirical occupancy gate for newly admitted groups, not an arithmetic
+        // safety limit. Preserve the original G=192..512 low-CTA domain.
+        if((g < 192 || g > 512) && ctas < 512)
             return false;
         a.groups           = g;
         a.in_h             = il[3];
