@@ -803,6 +803,14 @@ def validate_config(
     ):
         result.add_error(f"pipeline {pipeline} is not supported on {arch}")
 
+    # The arch allowlist says which pipelines a target can build, not which
+    # family may ask for them. Only the batch_prefill kernel body knows this
+    # pipeline; every other family reaches a lookup that has no entry for it.
+    if pipeline == "batch_prefill_gfx11" and family != "batch_prefill":
+        result.add_error(
+            f"batch_prefill_gfx11 is only valid for family batch_prefill, got {family}"
+        )
+
     if pipeline in {"v3", "qr_async_trload_v3"} and not arch_info.get(
         "supports_v3", False
     ):
@@ -881,8 +889,42 @@ def validate_config(
             result.add_error("batch_prefill page_size must be a positive power of two")
         if sig.get("mode", "batch") != "group":
             result.add_error("batch_prefill requires group mode")
-        if pipeline != "qr_async":
-            result.add_error("batch_prefill currently uses qr_async pipeline")
+        if pipeline not in {"qr_async", "batch_prefill_gfx11"}:
+            result.add_error(
+                "batch_prefill currently uses qr_async or batch_prefill_gfx11 pipeline"
+            )
+        if arch == "gfx1100" and pipeline != "batch_prefill_gfx11":
+            result.add_error(
+                "gfx1100 batch_prefill must use batch_prefill_gfx11 policy"
+            )
+        if pipeline == "batch_prefill_gfx11":
+            # Mirror of Gfx11Policy::UseIndependentVBuffer. Outside this
+            # predicate gemm1 falls back to a shape gfx11 WMMA cannot consume.
+            if arch != "gfx1100":
+                result.add_error("batch_prefill_gfx11 is only supported on gfx1100")
+            if sig.get("kv_memory_layout") != "linear":
+                result.add_error(
+                    "batch_prefill_gfx11 currently supports only linear KV layout"
+                )
+            if (hdim_q, hdim_v) != (128, 128):
+                result.add_error("batch_prefill_gfx11 currently supports only hdim 128")
+            if sig.get("dropout", False):
+                result.add_error("batch_prefill_gfx11 does not support dropout")
+            wave = alg["wave"]
+            if len(wave) >= 3 and wave[0] * wave[1] * wave[2] * 32 != 256:
+                result.add_error("batch_prefill_gfx11 requires block size 256")
+            if len(tile) >= 5 and (tile[1], tile[3], tile[4]) != (32, 128, 32):
+                result.add_error(
+                    "batch_prefill_gfx11 requires tile N0=32, N1=128, K1=32"
+                )
+            # The async copy strides K into LDS by kK1 while gemm0 reads kK0-deep
+            # chunks out of the same buffer, so the pipeline static_asserts that
+            # the two agree; see block_fmha_batch_prefill_pipeline_qr_ks_vs_async.
+            if len(tile) >= 5 and tile[2] != tile[4]:
+                result.add_error(
+                    f"batch_prefill_gfx11 requires tile K0 == K1, got "
+                    f"K0={tile[2]}, K1={tile[4]}"
+                )
 
     if family == "fwd_appendkv":
         if sig.get("mode", "batch") != "batch":
