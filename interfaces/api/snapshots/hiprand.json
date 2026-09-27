@@ -1,0 +1,1059 @@
+{
+  "declarations": [
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 222,
+      "linkage_name": "hiprandCreateGenerator",
+      "name": "hiprandCreateGenerator",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t *"
+        },
+        {
+          "name": "rng_type",
+          "type": "hiprandRngType_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t *, hiprandRngType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 256,
+      "linkage_name": "hiprandCreateGeneratorHost",
+      "name": "hiprandCreateGeneratorHost",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t *"
+        },
+        {
+          "name": "rng_type",
+          "type": "hiprandRngType_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t *, hiprandRngType_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 776,
+      "linkage_name": "hiprandCreatePoissonDistribution",
+      "name": "hiprandCreatePoissonDistribution",
+      "parameters": [
+        {
+          "name": "lambda",
+          "type": "double"
+        },
+        {
+          "name": "discrete_distribution",
+          "type": "hiprandDiscreteDistribution_t *"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (double, hiprandDiscreteDistribution_t *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 791,
+      "linkage_name": "hiprandDestroyDistribution",
+      "name": "hiprandDestroyDistribution",
+      "parameters": [
+        {
+          "name": "discrete_distribution",
+          "type": "hiprandDiscreteDistribution_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandDiscreteDistribution_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 270,
+      "linkage_name": "hiprandDestroyGenerator",
+      "name": "hiprandDestroyGenerator",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 178,
+      "name": "hiprandDirectionVectorSet",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_DIRECTION_VECTORS_32_JOEKUO6",
+          "value": "101"
+        },
+        {
+          "name": "HIPRAND_SCRAMBLED_DIRECTION_VECTORS_32_JOEKUO6",
+          "value": "102"
+        },
+        {
+          "name": "HIPRAND_DIRECTION_VECTORS_64_JOEKUO6",
+          "value": "103"
+        },
+        {
+          "name": "HIPRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6",
+          "value": "104"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 184,
+      "name": "hiprandDirectionVectorSet_t",
+      "underlying_type": "enum hiprandDirectionVectorSet"
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 34,
+      "name": "hiprandDirectionVectors32_t",
+      "underlying_type": "unsigned int[32]"
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 37,
+      "name": "hiprandDirectionVectors64_t",
+      "underlying_type": "unsigned long long[64]"
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 28,
+      "name": "hiprandDiscreteDistribution_st",
+      "underlying_type": "struct rocrand_discrete_distribution_st"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 90,
+      "name": "hiprandDiscreteDistribution_t",
+      "underlying_type": "hiprandDiscreteDistribution_st *"
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 294,
+      "linkage_name": "hiprandGenerate",
+      "name": "hiprandGenerate",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned int *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 316,
+      "linkage_name": "hiprandGenerateChar",
+      "name": "hiprandGenerateChar",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned char *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned char *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 540,
+      "linkage_name": "hiprandGenerateLogNormal",
+      "name": "hiprandGenerateLogNormal",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "float *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, float *, size_t, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 565,
+      "linkage_name": "hiprandGenerateLogNormalDouble",
+      "name": "hiprandGenerateLogNormalDouble",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "double *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, double *, size_t, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 590,
+      "linkage_name": "hiprandGenerateLogNormalHalf",
+      "name": "hiprandGenerateLogNormalHalf",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "half *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "half"
+        },
+        {
+          "name": "stddev",
+          "type": "half"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, half *, size_t, half, half)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 362,
+      "linkage_name": "hiprandGenerateLongLong",
+      "name": "hiprandGenerateLongLong",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned long long *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned long long *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 465,
+      "linkage_name": "hiprandGenerateNormal",
+      "name": "hiprandGenerateNormal",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "float *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "float"
+        },
+        {
+          "name": "stddev",
+          "type": "float"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, float *, size_t, float, float)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 490,
+      "linkage_name": "hiprandGenerateNormalDouble",
+      "name": "hiprandGenerateNormalDouble",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "double *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "double"
+        },
+        {
+          "name": "stddev",
+          "type": "double"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, double *, size_t, double, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 515,
+      "linkage_name": "hiprandGenerateNormalHalf",
+      "name": "hiprandGenerateNormalHalf",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "half *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "mean",
+          "type": "half"
+        },
+        {
+          "name": "stddev",
+          "type": "half"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, half *, size_t, half, half)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 614,
+      "linkage_name": "hiprandGeneratePoisson",
+      "name": "hiprandGeneratePoisson",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned int *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        },
+        {
+          "name": "lambda",
+          "type": "double"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned int *, size_t, double)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 637,
+      "linkage_name": "hiprandGenerateSeeds",
+      "name": "hiprandGenerateSeeds",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 338,
+      "linkage_name": "hiprandGenerateShort",
+      "name": "hiprandGenerateShort",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "unsigned short *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned short *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 387,
+      "linkage_name": "hiprandGenerateUniform",
+      "name": "hiprandGenerateUniform",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "float *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, float *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 417,
+      "linkage_name": "hiprandGenerateUniformDouble",
+      "name": "hiprandGenerateUniformDouble",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "double *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, double *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 441,
+      "linkage_name": "hiprandGenerateUniformHalf",
+      "name": "hiprandGenerateUniformHalf",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "output_data",
+          "type": "half *"
+        },
+        {
+          "name": "n",
+          "type": "size_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, half *, size_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand_rocm.h",
+      "kind": "typedef",
+      "line": 26,
+      "name": "hiprandGenerator_st",
+      "underlying_type": "struct rocrand_generator_base_type"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 85,
+      "name": "hiprandGenerator_t",
+      "underlying_type": "hiprandGenerator_st *"
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 803,
+      "linkage_name": "hiprandGetDirectionVectors32",
+      "name": "hiprandGetDirectionVectors32",
+      "parameters": [
+        {
+          "name": "vectors",
+          "type": "hiprandDirectionVectors32_t **"
+        },
+        {
+          "name": "set",
+          "type": "hiprandDirectionVectorSet_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandDirectionVectors32_t **, hiprandDirectionVectorSet_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 816,
+      "linkage_name": "hiprandGetDirectionVectors64",
+      "name": "hiprandGetDirectionVectors64",
+      "parameters": [
+        {
+          "name": "vectors",
+          "type": "hiprandDirectionVectors64_t **"
+        },
+        {
+          "name": "set",
+          "type": "hiprandDirectionVectorSet_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandDirectionVectors64_t **, hiprandDirectionVectorSet_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 827,
+      "linkage_name": "hiprandGetScrambleConstants32",
+      "name": "hiprandGetScrambleConstants32",
+      "parameters": [
+        {
+          "name": "constants",
+          "type": "const unsigned int **"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (const unsigned int **)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 837,
+      "linkage_name": "hiprandGetScrambleConstants64",
+      "name": "hiprandGetScrambleConstants64",
+      "parameters": [
+        {
+          "name": "constants",
+          "type": "const unsigned long long **"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (const unsigned long long **)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 759,
+      "linkage_name": "hiprandGetVersion",
+      "name": "hiprandGetVersion",
+      "parameters": [
+        {
+          "name": "version",
+          "type": "int *"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (int *)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 160,
+      "name": "hiprandOrdering",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_BEST",
+          "value": "100"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_DEFAULT",
+          "value": "101"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_SEEDED",
+          "value": "102"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_LEGACY",
+          "value": "103"
+        },
+        {
+          "name": "HIPRAND_ORDERING_PSEUDO_DYNAMIC",
+          "value": "104"
+        },
+        {
+          "name": "HIPRAND_ORDERING_QUASI_DEFAULT",
+          "value": "201"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 173,
+      "name": "hiprandOrdering_t",
+      "underlying_type": "enum hiprandOrdering"
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 140,
+      "name": "hiprandRngType",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_RNG_TEST",
+          "value": "0"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_DEFAULT",
+          "value": "400"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_XORWOW",
+          "value": "401"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_MRG32K3A",
+          "value": "402"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_MTGP32",
+          "value": "403"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_MT19937",
+          "value": "404"
+        },
+        {
+          "name": "HIPRAND_RNG_PSEUDO_PHILOX4_32_10",
+          "value": "405"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_DEFAULT",
+          "value": "500"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SOBOL32",
+          "value": "501"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL32",
+          "value": "502"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SOBOL64",
+          "value": "503"
+        },
+        {
+          "name": "HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL64",
+          "value": "504"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 155,
+      "name": "hiprandRngType_t",
+      "underlying_type": "enum hiprandRngType"
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 695,
+      "linkage_name": "hiprandSetGeneratorOffset",
+      "name": "hiprandSetGeneratorOffset",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "offset",
+          "type": "unsigned long long"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned long long)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 722,
+      "linkage_name": "hiprandSetGeneratorOrdering",
+      "name": "hiprandSetGeneratorOrdering",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "order",
+          "type": "hiprandOrdering_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, hiprandOrdering_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 672,
+      "linkage_name": "hiprandSetPseudoRandomGeneratorSeed",
+      "name": "hiprandSetPseudoRandomGeneratorSeed",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "seed",
+          "type": "unsigned long long"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned long long)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 744,
+      "linkage_name": "hiprandSetQuasiRandomGeneratorDimensions",
+      "name": "hiprandSetQuasiRandomGeneratorDimensions",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "dimensions",
+          "type": "unsigned int"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, unsigned int)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "c_linkage": true,
+      "file": "hiprand.h",
+      "inline_specified": false,
+      "kind": "function",
+      "line": 653,
+      "linkage_name": "hiprandSetStream",
+      "name": "hiprandSetStream",
+      "parameters": [
+        {
+          "name": "generator",
+          "type": "hiprandGenerator_t"
+        },
+        {
+          "name": "stream",
+          "type": "hipStream_t"
+        }
+      ],
+      "return_type": "hiprandStatus_t",
+      "templated_kind": 0,
+      "type": "hiprandStatus_t (hiprandGenerator_t, hipStream_t)",
+      "variadic": false,
+      "visibility": 2
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "enum",
+      "line": 118,
+      "name": "hiprandStatus",
+      "underlying_type": "unsigned int",
+      "values": [
+        {
+          "name": "HIPRAND_STATUS_SUCCESS",
+          "value": "0"
+        },
+        {
+          "name": "HIPRAND_STATUS_VERSION_MISMATCH",
+          "value": "100"
+        },
+        {
+          "name": "HIPRAND_STATUS_NOT_INITIALIZED",
+          "value": "101"
+        },
+        {
+          "name": "HIPRAND_STATUS_ALLOCATION_FAILED",
+          "value": "102"
+        },
+        {
+          "name": "HIPRAND_STATUS_TYPE_ERROR",
+          "value": "103"
+        },
+        {
+          "name": "HIPRAND_STATUS_OUT_OF_RANGE",
+          "value": "104"
+        },
+        {
+          "name": "HIPRAND_STATUS_LENGTH_NOT_MULTIPLE",
+          "value": "105"
+        },
+        {
+          "name": "HIPRAND_STATUS_DOUBLE_PRECISION_REQUIRED",
+          "value": "106"
+        },
+        {
+          "name": "HIPRAND_STATUS_LAUNCH_FAILURE",
+          "value": "201"
+        },
+        {
+          "name": "HIPRAND_STATUS_PREEXISTING_FAILURE",
+          "value": "202"
+        },
+        {
+          "name": "HIPRAND_STATUS_INITIALIZATION_FAILED",
+          "value": "203"
+        },
+        {
+          "name": "HIPRAND_STATUS_ARCH_MISMATCH",
+          "value": "204"
+        },
+        {
+          "name": "HIPRAND_STATUS_INTERNAL_ERROR",
+          "value": "999"
+        },
+        {
+          "name": "HIPRAND_STATUS_NOT_IMPLEMENTED",
+          "value": "1000"
+        }
+      ]
+    },
+    {
+      "file": "hiprand.h",
+      "kind": "typedef",
+      "line": 135,
+      "name": "hiprandStatus_t",
+      "underlying_type": "enum hiprandStatus"
+    }
+  ],
+  "schema_version": 1
+}

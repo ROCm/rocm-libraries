@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Broker specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Broker specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terms" id="toc-terms">Terms</a></li>
+<li><a href="#position-in-the-architecture"
+id="toc-position-in-the-architecture">Position in the
+architecture</a></li>
+<li><a href="#discovery-inputs" id="toc-discovery-inputs">Discovery
+inputs</a>
+<ul>
+<li><a href="#manifest-path-resolution"
+id="toc-manifest-path-resolution">Manifest path resolution</a></li>
+<li><a href="#direct-module-override"
+id="toc-direct-module-override">Direct-module override</a></li>
+<li><a href="#device-key" id="toc-device-key">Device key</a></li>
+</ul></li>
+<li><a href="#manifest-processing" id="toc-manifest-processing">Manifest
+processing</a></li>
+<li><a href="#candidate-ordering" id="toc-candidate-ordering">Candidate
+ordering</a></li>
+<li><a href="#compatibility-checks"
+id="toc-compatibility-checks">Compatibility checks</a>
+<ul>
+<li><a href="#preconditions-on-the-request"
+id="toc-preconditions-on-the-request">Preconditions on the
+request</a></li>
+<li><a href="#the-query-call" id="toc-the-query-call">The query
+call</a></li>
+<li><a href="#response-checks" id="toc-response-checks">Response
+checks</a></li>
+<li><a href="#dispatch-table-checks"
+id="toc-dispatch-table-checks">Dispatch-table checks</a></li>
+<li><a href="#checks-the-broker-does-not-perform"
+id="toc-checks-the-broker-does-not-perform">Checks the broker does NOT
+perform</a></li>
+</ul></li>
+<li><a href="#cohort-selection" id="toc-cohort-selection">Cohort
+selection</a></li>
+<li><a href="#what-the-broker-hands-a-facade"
+id="toc-what-the-broker-hands-a-facade">What the broker hands a
+facade</a></li>
+<li><a href="#failure-behavior" id="toc-failure-behavior">Failure
+behavior</a></li>
+<li><a href="#diagnostics" id="toc-diagnostics">Diagnostics</a></li>
+<li><a href="#concurrency" id="toc-concurrency">Concurrency</a></li>
+<li><a href="#process-and-context-scope"
+id="toc-process-and-context-scope">Process and context scope</a></li>
+<li><a href="#module-lifetime-interaction"
+id="toc-module-lifetime-interaction">Module lifetime
+interaction</a></li>
+<li><a href="#open-decisions-tbd" id="toc-open-decisions-tbd">Open
+decisions (TBD)</a></li>
+<li><a href="#related-specifications"
+id="toc-related-specifications">Related specifications</a></li>
+</ul>
+</nav>
+<p>Status: proposed specification. Non-normative evidence for every
+requirement here includes current implementation status, source
+citations, named test coverage, and prototype measurements. Where an
+obligation is not yet decided it is marked TBD rather than written as a
+requirement.</p>
+<h2 id="scope">Scope</h2>
+<p>This document specifies the broker: the distribution-private
+component that turns a request for a domain on a device into a
+validated, retained provider binding when a public context is
+established.</p>
+<p>In scope: discovery inputs; manifest validation invocation; candidate
+ordering; the compatibility-check sequence; cohort-selection invocation;
+what the broker hands a facade; failure behavior; rejection diagnostics;
+concurrency and scope; module lifetime as a consequence of lease
+ownership.</p>
+<h2 id="non-goals">Non-goals</h2>
+<p>This document does not specify:</p>
+<ul>
+<li>the manifest schema, its fields, or its trust rules — Provider
+manifest specification,</li>
+<li>the protocol wire format, table layout, or status taxonomy —
+Provider protocol specification,</li>
+<li>the binding object a facade builds — Provider binding
+specification,</li>
+<li>what a facade does after selection — Facade specification,</li>
+<li>what a cohort asserts — Cohort specification,</li>
+<li>module load mechanics and export surface — Provider module
+specification,</li>
+<li>provider-side obligations — Provider and Provider adapter
+specifications.</li>
+</ul>
+<p>The broker has no public surface. No symbol named in this document is
+part of a public library contract.</p>
+<h2 id="terms">Terms</h2>
+<ul>
+<li><strong>Broker</strong> — the distribution-private component that
+selects a provider lease during public context establishment. It does
+not run during ordinary operation dispatch.</li>
+<li><strong>Public context</strong> — the client-visible stateful object
+whose creation requests provider selection. Its facade retains the
+returned lease.</li>
+<li><strong>Discovery input</strong> — one source of candidates: a
+resolved manifest path, direct-module registration, or builtin
+registration.</li>
+<li><strong>Manifest validation</strong> — the all-or-nothing check that
+validates every manifest entry before any entry becomes selectable.</li>
+<li><strong>Candidate</strong> — one registry entry, a
+<code>(domain, architecture, id)</code> triple from a discovery input
+that survives filtering for the requested domain, architecture, and
+cohort.</li>
+<li><strong>Candidate ordering</strong> — the total, content-derived
+ordering applied after filtering. It never depends on registration
+order, JSON key order, or manifest load order.</li>
+<li><strong>Compatibility check</strong> — the fail-closed validation of
+a candidate's query response and dispatch-table header before the broker
+returns a lease.</li>
+<li><strong>Cohort selection</strong> — filtering or constraining
+candidates by cohort identity so a caller can establish a compatible
+multi-domain set.</li>
+<li><strong>ProviderLease</strong> — the immutable C++ object containing
+the selected module reference, validated table, selected identity,
+cohort identity, and advertised capabilities.</li>
+<li><strong>Lease</strong> —
+<code>std::shared_ptr&lt;const ProviderLease&gt;</code>, the broker's
+returned ownership handle.</li>
+<li><strong>Provider binding</strong> — facade-private state built from
+a lease and a provider context. User code never receives it
+directly.</li>
+<li><strong>Provider context</strong> — opaque provider-owned state
+created by the facade through the selected table and retained with the
+lease.</li>
+<li><strong>Rejection diagnostic</strong> — one traceable reason
+explaining why a candidate was not selected.</li>
+<li><strong>Broker scope</strong> — process-wide registry state and
+per-public-context lease state. These scopes have different ownership
+and lifetime rules.</li>
+<li><strong>Module lifetime</strong> — the selected provider module
+remains resident while at least one lease retains its strong module
+reference.</li>
+</ul>
+<h2 id="position-in-the-architecture">Position in the architecture</h2>
+<p>The broker participates in context establishment. It MUST NOT
+participate in ordinary operation dispatch.</p>
+<p>A facade MUST call the broker at most once per public context, MUST
+retain the returned lease and the provider context for the lifetime of
+that public object, and MUST reach the provider on every later operation
+through the retained dispatch-table pointer without re-entering the
+broker. An established context MUST NOT be rebound to a different
+provider.</p>
+<p>Each domain MUST define one establishment moment. Deferring selection
+past construction to the first operation is permitted only if selection
+remains once-only for the lifetime of the context; which domains may do
+so is TBD-14.</p>
+<pre class="mermaid"><code>flowchart TD
+    A[Facade public entry point creates a context] --&gt; B[Resolve discovery inputs]
+    B --&gt; C[Obtain or construct a registry]
+    C --&gt; D[Load manifest or register direct module]
+    D --&gt; E[Filter candidates by domain, architecture, cohort]
+    E --&gt; F[Sort candidates deterministically]
+    F --&gt; G[Query next candidate]
+    G --&gt; H{Response and table pass compatibility checks}
+    H -- no --&gt; I[Trace rejection, keep reason, next candidate]
+    I --&gt; G
+    H -- yes --&gt; J[Return lease]
+    J --&gt; K[Facade checks required callbacks and capabilities]
+    K --&gt; L[Facade creates provider context and retains binding]
+    L --&gt; M[Later operations dispatch through the retained table]
+    M -.-&gt; N[Broker is not on this path]</code></pre>
+<h2 id="discovery-inputs">Discovery inputs</h2>
+<p>The broker's inputs MUST be limited to: a manifest path,
+direct-module registrations, builtin registrations, the requested
+domain, the requested base architecture string, the required table
+prefix size, the required protocol minor, and an optional required
+cohort. The broker MUST NOT consult the caller's arguments to a math
+operation.</p>
+<h3 id="manifest-path-resolution">Manifest path resolution</h3>
+<p>Each facade MUST carry a compiled-in default manifest path, expressed
+relative to the facade module's own installed directory, and MUST
+resolve it against that module rather than against the process working
+directory or a search path. Resolution MUST yield an empty path - never
+a guess - for an empty input, an absolute input, or an undeterminable
+module path.</p>
+<p>The broker MUST accept a per-facade environment override of the
+manifest path.</p>
+<p>Discovery is single-file: the broker MUST load exactly the one
+resolved manifest. Directory enumeration and multi-vendor
+<code>manifest.d</code> conventions do not exist; see TBD-6.</p>
+<h3 id="direct-module-override">Direct-module override</h3>
+<p>The broker MUST support registering a module directly, bypassing the
+manifest, for development and test configurations. Where both a
+direct-module override and a manifest path are set, the direct-module
+override MUST be consulted first.</p>
+<p>A direct-module registration carries no configured provider identity.
+The broker MUST therefore skip the identity-equality check for it and
+MUST use the normalized module path as that entry's ordering
+identity.</p>
+<h3 id="device-key">Device key</h3>
+<p>The requested architecture MUST be a canonical base <code>gfx</code>
+name with no target-ID feature suffix. Deriving it from the device MUST
+split the reported architecture name at the first <code>:</code>,
+validate the base, and fold only <code>xnack+</code>,
+<code>xnack-</code>, <code>sramecc+</code>, <code>sramecc-</code> into a
+feature mask; a repeated or contradictory feature token MUST invalidate
+the whole string.</p>
+<p>Selection MUST reject the wildcard <code>*</code> as a requested
+architecture, and MUST accept the reserved
+<code>ROCM_INTERFACES_ARCHITECTURE_UNKNOWN</code> ("gfx000") only as a
+request, never as a registration.</p>
+<p>Feature bits are carried to the provider but MUST NOT participate in
+candidate filtering; only the base architecture string is matched.</p>
+<h2 id="manifest-processing">Manifest processing</h2>
+<p>The Provider manifest specification defines schema, field rules, path
+trust, load atomicity, symlink and TOCTOU handling, and the platform
+scope of trust checks. The broker's obligations are:</p>
+<ul>
+<li>The broker MUST run that validation procedure in full, and MUST NOT
+let any entry of a manifest become visible to selection unless the whole
+manifest validated.</li>
+<li>The broker MUST NOT claim the trusted-path property on a platform
+where that specification says the checks are unavailable. See
+TBD-7.</li>
+<li>Registry entries are append-only. There is no unload, remove, or
+replace. Duplicate detection spans one load only; whether cross-manifest
+duplication is legal is TBD-5, and whether a repeated load of the same
+path must be idempotent is TBD-13.</li>
+</ul>
+<h2 id="candidate-ordering">Candidate ordering</h2>
+<p>Candidate order MUST be total, content-derived, and independent of
+registration order, JSON key order, and manifest load order. Every tie
+MUST be broken by content; no ordering tier may fall back on insertion
+sequence. The comparison, in order:</p>
+<ol type="1">
+<li>exact architecture before wildcard <code>*</code>,</li>
+<li>higher <code>priority</code> first,</li>
+<li>provider identity ascending, where identity is the configured
+<code>id</code> or, when empty, the normalized generic-form module
+path,</li>
+<li><code>cohort</code> ascending,</li>
+<li>normalized module path ascending,</li>
+<li>module entries before builtin registrations,</li>
+<li><code>query_symbol</code> ascending.</li>
+</ol>
+<p>Priority MUST remain strictly subordinate to architecture exactness:
+an exact-architecture entry outranks a wildcard entry of any higher
+priority.</p>
+<p>Cohort enumeration MUST use the same order minus tiers 5 through 7,
+and MUST return the deduplicated nonempty cohort identifiers only.</p>
+<h2 id="compatibility-checks">Compatibility checks</h2>
+<p>The broker MUST fail closed. A candidate is accepted only when every
+check below passes; the first candidate that passes wins and no further
+candidate is queried.</p>
+<h3 id="preconditions-on-the-request">Preconditions on the request</h3>
+<p>Selection MUST reject a required table size smaller than
+<code>sizeof(rocm_interfaces_abi_header)</code>, and MUST reject a
+required protocol minor greater than the minor the broker was built
+from, without querying any candidate. The broker MUST NOT ask a provider
+for semantics newer than its own headers.</p>
+<h3 id="the-query-call">The query call</h3>
+<p>The broker MUST stamp the request header itself: it MUST set the
+requested protocol minor, carry the requested prefix as the required
+table size, set the domain, and pass its own host services pointer. It
+MUST resolve the entry's query symbol - the well-known
+<code>ROCM_INTERFACES_PROVIDER_QUERY_SYMBOL</code> unless the manifest
+overrode it - from the module handle. Symbol resolution MUST fail
+closed: a query symbol absent from the module MUST reject that candidate
+with a diagnostic naming the symbol, never fall back to another symbol.
+Whether an overridden query symbol is supported at all is TBD-4.</p>
+<h3 id="response-checks">Response checks</h3>
+<p>The broker MUST apply these in order:</p>
+<ol type="1">
+<li>a non-success return rejects the candidate,</li>
+<li>the response header <code>struct_size</code> MUST be at least
+<code>sizeof(rocm_interfaces_provider_response)</code>,</li>
+<li>the response <code>abi_major</code> MUST equal the broker's
+<code>ROCM_INTERFACES_ABI_MAJOR</code>,</li>
+<li>the response <code>abi_minor</code> MUST be at least the requested
+minor,</li>
+<li>the dispatch table MUST pass the table checks below,</li>
+<li>the returned provider identity MUST be non-null and nonempty,</li>
+<li>when the entry has a configured identity, the returned identity MUST
+equal it.</li>
+</ol>
+<h3 id="dispatch-table-checks">Dispatch-table checks</h3>
+<p>The Provider protocol specification defines table shape and layout.
+The broker MUST reject a candidate whose table is null, whose advertised
+table size is below <code>sizeof(rocm_interfaces_abi_header)</code> or
+below the requested prefix, whose table header <code>struct_size</code>
+disagrees with the advertised table size or is below the requested
+prefix, whose table <code>abi_major</code> differs from the broker's,
+whose table <code>abi_minor</code> is below the requested minor, or
+whose response header and table header disagree on the version pair.</p>
+<p>The broker MUST read the table header with a byte copy after the size
+boundary check, so that a malformed provider cannot force an unaligned
+typed load.</p>
+<h3 id="checks-the-broker-does-not-perform">Checks the broker does NOT
+perform</h3>
+<p>The broker inspects neither individual function pointers nor
+capability bits. Both are the caller's responsibility after selection
+returns:</p>
+<ul>
+<li><strong>Required callbacks.</strong> A null mandatory callback
+discovered after a successful negotiation MUST be a fail-closed
+configuration error. It MUST NOT trigger a fallback to another
+candidate.</li>
+<li><strong>Capability bits.</strong> The broker forwards the
+provider-advertised mask unchecked; the facade decides whether the
+advertised capabilities meet its needs.</li>
+<li><strong>Build identity.</strong> The build identity declared in the
+response is not a compatibility constraint. See TBD-2.</li>
+</ul>
+<p>Whether required-callback and capability checking SHOULD move into
+the broker, so that a deficient candidate falls through to the next one
+instead of aborting the whole selection, is TBD-8.</p>
+<h2 id="cohort-selection">Cohort selection</h2>
+<p>The Cohort specification defines what a cohort identity asserts and
+how it is matched. The broker adds no cohort-matching rules of its own.
+Its obligations are:</p>
+<ul>
+<li>The broker MUST apply the Cohort specification's matching rule when
+filtering candidates, and MUST NOT introduce any additional or relaxed
+matching of its own.</li>
+<li>The broker MUST support enumerating candidate cohorts for a
+<code>(domain, architecture)</code> pair before committing to any
+domain, so a caller needing several domains can pick a bundle rather
+than selecting one domain and discovering afterwards that its dependency
+is absent.</li>
+<li>The broker MUST support constraining a selection to a named cohort,
+so a caller can thread the cohort of a first selection into a
+second.</li>
+</ul>
+<p>The atomic complete-set rule is enforced by the caller, not by a
+single selection call: an incomplete set MUST be rejected before a
+public context is returned. A caller MAY satisfy it either by iterating
+enumerated cohorts and committing only to a complete one, or by
+threading the first selection's cohort into every later selection.</p>
+<p>Not every domain is cohort-constrained today. Whether the
+cohort-unconstrained domains are intentionally exempt is TBD-9.</p>
+<p>Cohort identity remains a manifest assertion. The broker MUST NOT
+treat a matching cohort string as proof of distribution
+compatibility.</p>
+<h2 id="what-the-broker-hands-a-facade">What the broker hands a
+facade</h2>
+<p><code>ProviderRegistry::select</code> is the broker entry point a
+facade calls during context establishment. On success it returns
+<code>std::shared_ptr&lt;const ProviderLease&gt;</code>. The facade
+retains that lease while it uses the selected provider.</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">namespace</span> rocm<span class="op">::</span>interfaces <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> ProviderLease<span class="op">;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> ProviderRegistry <span class="op">{</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span><span class="op">:</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>shared_ptr<span class="op">&lt;</span><span class="at">const</span> ProviderLease<span class="op">&gt;</span> select<span class="op">(</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    rocm_interfaces_domain domain<span class="op">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="bu">std::</span>string_view architecture<span class="op">,</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint32_t</span> required_table_size<span class="op">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">const</span> <span class="bu">std::</span>string<span class="op">&amp;</span> required_cohort <span class="op">=</span> <span class="op">{},</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint16_t</span> required_abi_minor <span class="op">=</span> ROCM_INTERFACES_ABI_MINOR<span class="op">);</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> ProviderLease <span class="op">{</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span><span class="op">:</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="at">const</span> <span class="bu">std::</span>string<span class="op">&amp;</span> provider_id<span class="op">()</span> <span class="at">const</span> <span class="kw">noexcept</span><span class="op">;</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="at">const</span> <span class="bu">std::</span>string<span class="op">&amp;</span> cohort_id<span class="op">()</span> <span class="at">const</span> <span class="kw">noexcept</span><span class="op">;</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="at">const</span> <span class="dt">void</span><span class="op">*</span> table<span class="op">()</span> <span class="at">const</span> <span class="kw">noexcept</span><span class="op">;</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a><span class="dt">uint32_t</span> table_size<span class="op">()</span> <span class="at">const</span> <span class="kw">noexcept</span><span class="op">;</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="dt">uint64_t</span> capability_mask<span class="op">()</span> <span class="at">const</span> <span class="kw">noexcept</span><span class="op">;</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> <span class="co">// namespace rocm::interfaces</span></span></code></pre></div>
+<p>The facade may use only these accessors. ProviderLease implementation
+storage remains private. The broker's private candidate-query helper
+creates ProviderLease only after validation succeeds.</p>
+<p>Normative properties:</p>
+<ul>
+<li><code>provider_id()</code> is the identity the provider returned,
+already checked against the configured identity when one exists.</li>
+<li><code>cohort_id()</code> is the identity configured for the selected
+entry, not a value the provider returned. A facade MUST NOT read it as a
+provider assertion.</li>
+<li><code>table()</code> is the validated dispatch-table pointer. Its
+dynamic type is the domain's table type and the facade MUST cast it; the
+broker returns an untyped pointer because it is domain-agnostic.</li>
+<li><code>table_size()</code> is the provider-advertised size, already
+checked against the requested prefix and the table header.</li>
+<li><code>capability_mask()</code> is the provider-advertised mask,
+unchecked by the broker.</li>
+<li>The lease privately owns the module reference. Holding the lease
+keeps the module resident; this is the whole of the module-pinning
+mechanism.</li>
+</ul>
+<p>The lease is the broker's entire output. The broker MUST NOT create a
+provider context. The facade MUST retain the lease for at least as long
+as the provider context it created through that table.</p>
+<h2 id="failure-behavior">Failure behavior</h2>
+<ul>
+<li>Selection failure MUST be reported by throwing
+<code>std::runtime_error</code> carrying the domain name and numeric
+value, the requested architecture, the required cohort when one was
+given, and either "no registered candidate matched the request" or the
+accumulated per-candidate rejection reasons. Callers translate that into
+a domain status; the broker does not know the domain's status type.</li>
+<li>Argument-precondition failures and manifest-validation failures MUST
+throw <code>std::invalid_argument</code>.</li>
+<li>An exception escaping a provider query MUST be caught per candidate
+and turned into that candidate's rejection reason, including the
+non-standard-exception case. It MUST NOT abort the search.</li>
+<li>Failures MUST NOT be cached. A rejected candidate MUST store
+nothing, so a transiently failing provider and a module that failed to
+open are both retried on the next selection.</li>
+<li>Backend absence and backend incompleteness at the provider MUST
+surface as ordinary candidate rejections rather than crashes.</li>
+<li>There is no fallback provider after a successful negotiation.</li>
+</ul>
+<p>Whether process abort is ever the required failure behavior for a
+provider create or destroy failure is TBD-10; the broker itself MUST NOT
+abort.</p>
+<h2 id="diagnostics">Diagnostics</h2>
+<p>Every rejected candidate MUST produce exactly one diagnostic line.
+The label MUST be <code>provider '&lt;id&gt;' (builtin)</code>,
+<code>provider '&lt;id&gt;' (module '&lt;path&gt;')</code>, or
+<code>module '&lt;path&gt;'</code> depending on what was registered,
+followed by the reason, with "rejected without a reason" as the fallback
+text.</p>
+<p>The broker MUST deliver diagnostics through the host trace callback
+with domain <code>"runtime"</code> and operation
+<code>"provider_candidate_rejected"</code>, and MUST wrap the callback
+so that a misbehaving or throwing host diagnostic cannot alter selection
+semantics.</p>
+<p>The same rejection strings MUST also be accumulated into the final
+selection error, so a caller with no trace callback still gets the full
+picture.</p>
+<p>Diagnostics MUST NOT be load-bearing: no code path may change its
+decision based on whether a trace callback exists, or on anything the
+callback does.</p>
+<h2 id="concurrency">Concurrency</h2>
+<ul>
+<li>The registry entry set MUST be guarded by a lock held during
+manifest splice, direct registration, builtin registration, and the
+candidate-filter snapshot, and released before any provider is
+queried.</li>
+<li>Per-entry module opening and querying MUST be serialized by a
+per-entry recursive lock, so that a provider whose query path re-enters
+the broker is legal rather than a deadlock.</li>
+<li>Every dynamic-loader call the broker makes MUST be serialized
+process-wide through the single shared dynamic-loader lock, so that
+independently loaded facades share one lock. The Provider module
+specification defines the module-side loading rules.</li>
+<li>Because the filter snapshot is taken under the lock and providers
+are queried outside it, a concurrent manifest load MAY add entries a
+concurrent selection does not see. That is intentional and MUST NOT be
+relied upon in either direction.</li>
+</ul>
+<h2 id="process-and-context-scope">Process and context scope</h2>
+<p>The broker's state has two scopes and they MUST NOT be confused.</p>
+<p><strong>Process scope.</strong> A registry instance is process-wide
+and shared by every context that uses the same configuration; a registry
+MUST be keyed by its full configuration, not by manifest path alone.
+Retention today is unbounded: registry and binding caches never evict.
+Whether unbounded retention is accepted policy is TBD-11.</p>
+<p><strong>Context scope.</strong> The lease and provider context
+returned for one public object belong to that object, and the binding
+MUST NOT outlive or migrate away from it.</p>
+<p>There is presently no single broker instance for the process as a
+whole; each facade builds its own registry. Ownership is TBD-1.</p>
+<h2 id="module-lifetime-interaction">Module lifetime interaction</h2>
+<p>The Provider module specification defines load mechanics, export
+surface, and unload rules. The broker MUST NOT pin provider modules by
+itself: the registry holds only a weak module reference, and the lease
+holds the strong one. The following consequences MUST hold:</p>
+<ul>
+<li>a module stays resident exactly as long as at least one lease
+references it,</li>
+<li>a module is unloaded when the last lease drops,</li>
+<li>the same module can be reloaded afterwards.</li>
+</ul>
+<p>Whether a facade may defeat this by retaining leases for the process
+lifetime is undecided in Provider protocol specification TBD-7; this
+specification states no rule either way until that decision closes.</p>
+<h2 id="open-decisions-tbd">Open decisions (TBD)</h2>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Open question</th>
+<th>What it blocks</th>
+<th>What would close it</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>Who owns the broker in the production layout: one shared service, or
+a private registry per facade as today?</td>
+<td>The ownership and coordination model; whether process scope
+describes one instance or N</td>
+<td>An architecture decision naming the owning component and its
+packaging unit, plus a check that two facades in one process observe one
+broker</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>Does build identity ever become a selection or compatibility
+constraint?</td>
+<td>Treating a cohort identity as proof of distribution
+compatibility</td>
+<td>A manifest key for build identity, a rule for what a mismatch does,
+and a named check</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Is "one global <code>(abi_major, abi_minor)</code> release tuple
+across all domains" normative, or a description of the current
+single-release state?</td>
+<td>Whether a mixed-domain deployment is legal; nothing compares tuples
+across domains</td>
+<td>Either a cross-domain check, or demotion of the Provider protocol
+statement to a non-normative note</td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>Is a manifest <code>query_symbol</code> override supported, or
+vestigial?</td>
+<td>The manifest allowed-key set and the provider export allowlist,
+which contradict each other</td>
+<td>Either an export-allowlist rule for alternate names, or removal of
+the key</td>
+</tr>
+<tr class="odd">
+<td>TBD-5</td>
+<td>Is cross-manifest duplication of
+<code>(domain, architecture, id)</code> legal?</td>
+<td>Whether "last loaded wins by tie-break" is a contract or a
+defect</td>
+<td>A decision plus, if illegal, a registry-wide identity set and a
+rejection test</td>
+</tr>
+<tr class="even">
+<td>TBD-6</td>
+<td>Can multiple vendors ship providers for one domain and be discovered
+together?</td>
+<td>Third-party or out-of-tree providers; no directory scan exists</td>
+<td>A discovery-model decision and, if adopted, an ordering and trust
+rule for multi-file discovery</td>
+</tr>
+<tr class="odd">
+<td>TBD-7</td>
+<td>Is the trusted-path requirement Linux-only by design, or must a
+native owner/ACL equivalent exist before the contract says MUST?</td>
+<td>Enabling discovery on non-Linux platforms at all</td>
+<td>A native trust and signing policy plus a platform-equivalent
+check</td>
+</tr>
+<tr class="even">
+<td>TBD-8</td>
+<td>Should required-callback and capability checking move into the
+broker so a failing candidate falls through to the next?</td>
+<td>Whether one deficient provider can fail selection while a good one
+is registered behind it</td>
+<td>A decision; the cohort-iterating caller already falls through per
+cohort while single-domain callers do not</td>
+</tr>
+<tr class="odd">
+<td>TBD-9</td>
+<td>Are the cohort-unconstrained domains intentionally exempt from the
+atomic complete-set rule?</td>
+<td>Whether the cohort rule is architecture-wide or specific to the
+coordinated paths</td>
+<td>A per-domain statement of which domains require a cohort, plus tests
+for those that do</td>
+</tr>
+<tr class="even">
+<td>TBD-10</td>
+<td>Is process abort on provider create or destroy failure adopted
+behavior or inherited placeholder behavior?</td>
+<td>The failure contract a facade can rely on</td>
+<td>A decision recorded in the failure contract, and if abort is kept, a
+named check</td>
+</tr>
+<tr class="odd">
+<td>TBD-11</td>
+<td>Is process-lifetime retention (never-evicting caches,
+never-shrinking lease pins) accepted policy?</td>
+<td>Memory behavior under many devices or configurations; module unload
+semantics, which lease pinning defeats</td>
+<td>A retention policy decision plus a measurement</td>
+</tr>
+<tr class="even">
+<td>TBD-12</td>
+<td>Is <code>schema_version</code> forward compatibility reject-only, or
+accept-and-ignore-new-optional-fields?</td>
+<td>Shipping a newer-schema manifest to an older runtime</td>
+<td>A versioning-contract entry and a single source of truth for the
+schema literal</td>
+</tr>
+<tr class="odd">
+<td>TBD-13</td>
+<td>Should a repeated load of the same manifest path be idempotent,
+given an append-only registry with no unload API?</td>
+<td>Any caller that may load the same manifest twice</td>
+<td>Either an idempotence rule or an explicit "callers MUST load once"
+requirement</td>
+</tr>
+<tr class="even">
+<td>TBD-14</td>
+<td>Which establishment moment does each domain use, and may any domain
+defer selection past context construction?</td>
+<td>Whether "the broker runs at context establishment" has one
+sanctioned exception or an unbounded number; whether a context may be
+created and never bound</td>
+<td>A per-domain statement of the establishment moment, and either a
+rationale for each deferral or a change that binds at construction</td>
+</tr>
+</tbody>
+</table>
+<h2 id="related-specifications">Related specifications</h2>
+<ul>
+<li><strong>Architecture component model</strong> — where the broker
+sits.</li>
+<li><strong>Facade</strong> — the caller that establishes a context and
+retains the binding.</li>
+<li><strong>Provider binding</strong> — what the facade builds on the
+returned lease.</li>
+<li><strong>Cohort</strong> — what a cohort identity asserts and what it
+does not.</li>
+<li><strong>Provider manifest</strong> — the schema and trust rules this
+document consumes.</li>
+<li><strong>Provider protocol</strong> — the query envelope, table
+layout, and status taxonomy.</li>
+<li><strong>Provider</strong>, <strong>Provider adapter</strong>, and
+<strong>Provider module</strong> — the private side of the boundary the
+broker queries.</li>
+</ul>
+</body>
+</html>

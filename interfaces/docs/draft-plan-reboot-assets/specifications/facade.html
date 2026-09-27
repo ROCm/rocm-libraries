@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Facade specification</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="spec-review.css" />
+</head>
+<body>
+<nav class="spec-navigation" aria-label="Specification navigation">
+  <a class="spec-navigation__brand" href="index.html">ROCm interfaces<br><strong>Specifications</strong></a>
+  <div class="spec-navigation__label">Review set</div>
+  <a href="architecture-component-model.html">Architecture component model</a>
+  <a href="broker.html">Broker</a>
+  <a href="cohort.html">Cohort</a>
+  <a href="facade.html">Facade</a>
+  <a href="hipblaslt-horizontal.html">hipBLASLt horizontal</a>
+  <a href="hipblaslt-facade-path.html">hipBLASLt facade path</a>
+  <a href="manifest.html">Manifest</a>
+  <a href="provider-adapter.html">Provider adapter</a>
+  <a href="provider-binding.html">Provider binding</a>
+  <a href="provider-module.html">Provider module</a>
+  <a href="provider-protocol.html">Provider protocol</a>
+  <a href="provider.html">Provider</a>
+</nav>
+<header id="title-block-header">
+<h1 class="title">Facade specification</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#scope" id="toc-scope">Scope</a></li>
+<li><a href="#non-goals" id="toc-non-goals">Non-goals</a></li>
+<li><a href="#terminology" id="toc-terminology">Terminology</a></li>
+<li><a href="#1-what-a-facade-is" id="toc-1-what-a-facade-is">1. What a
+facade is</a></li>
+<li><a href="#2-library-identity-and-naming"
+id="toc-2-library-identity-and-naming">2. Library identity and
+naming</a>
+<ul>
+<li><a href="#21-target-state" id="toc-21-target-state">2.1 Target
+state</a></li>
+<li><a href="#22-shadow-qualification-identity"
+id="toc-22-shadow-qualification-identity">2.2 Shadow qualification
+identity</a></li>
+</ul></li>
+<li><a href="#3-public-api" id="toc-3-public-api">3. Public API</a></li>
+<li><a href="#4-public-abi" id="toc-4-public-abi">4. Public ABI</a>
+<ul>
+<li><a
+href="#41-exports-are-an-allowlist-not-a-consequence-of-visibility"
+id="toc-41-exports-are-an-allowlist-not-a-consequence-of-visibility">4.1
+Exports are an allowlist, not a consequence of visibility</a></li>
+<li><a href="#42-symbol-versioning" id="toc-42-symbol-versioning">4.2
+Symbol versioning</a></li>
+<li><a href="#43-dynamic-dependencies"
+id="toc-43-dynamic-dependencies">4.3 Dynamic dependencies</a></li>
+</ul></li>
+<li><a href="#5-prohibited-provider-specific-dependencies"
+id="toc-5-prohibited-provider-specific-dependencies">5. Prohibited
+provider-specific dependencies</a></li>
+<li><a href="#6-client-visible-state" id="toc-6-client-visible-state">6.
+Client-visible state</a></li>
+<li><a href="#7-broker-and-the-retained-binding"
+id="toc-7-broker-and-the-retained-binding">7. Broker and the retained
+binding</a></li>
+<li><a href="#8-validation" id="toc-8-validation">8. Validation</a></li>
+<li><a href="#9-error-translation" id="toc-9-error-translation">9. Error
+translation</a></li>
+<li><a href="#10-behavioral-compatibility"
+id="toc-10-behavioral-compatibility">10. Behavioral
+compatibility</a></li>
+<li><a href="#11-concurrency" id="toc-11-concurrency">11.
+Concurrency</a></li>
+<li><a href="#12-legacy-to-facade-transition"
+id="toc-12-legacy-to-facade-transition">12. Legacy-to-facade
+transition</a></li>
+<li><a href="#13-shadow-qualification"
+id="toc-13-shadow-qualification">13. Shadow qualification</a></li>
+<li><a href="#14-versioning" id="toc-14-versioning">14.
+Versioning</a></li>
+<li><a href="#15-supported-platforms"
+id="toc-15-supported-platforms">15. Supported platforms</a></li>
+<li><a href="#16-build-and-packaging-obligations"
+id="toc-16-build-and-packaging-obligations">16. Build and packaging
+obligations</a></li>
+<li><a href="#open-decisions-tbd" id="toc-open-decisions-tbd">Open
+decisions (TBD)</a></li>
+<li><a href="#cross-links" id="toc-cross-links">Cross-links</a></li>
+</ul>
+</nav>
+<p>Status: normative specification. It states what a compatibility
+facade MUST do, not what the tree does today; implementation status,
+source citations, test inventories, and prototype evidence are
+non-normative and live in <a href="facade.html">ledger/facade</a>. No
+facade in the tree owns a canonical public library identity today; every
+one is a shadow. That gap is TBD-1 and does not weaken any requirement
+below.</p>
+<h2 id="scope">Scope</h2>
+<p>This document specifies the compatibility facade: the component that
+owns an established public API, ABI, and library identity while
+delegating implementation work across a distribution-private boundary.
+In scope: what a facade exposes and hides; library identity and naming;
+the public ABI surface; client-visible state, context establishment, and
+teardown; validation, error translation, and behavioral compatibility;
+dispatch through a retained binding; prohibited provider-specific
+dependencies; the shadow overlay and the legacy-to-facade transition;
+versioning, platforms, and packaging obligations that fall on the facade
+artifact.</p>
+<h2 id="non-goals">Non-goals</h2>
+<p>Nothing here specifies candidate discovery and ordering (<a
+href="broker.html">broker</a>), the manifest (<a
+href="manifest.html">manifest</a>), the private wire format,
+dispatch-table layout, or the status taxonomy (<a
+href="provider-protocol.html">provider-protocol</a>), provider
+composition (<a href="provider.html">provider</a>, <a
+href="provider-adapter.html">provider-adapter</a>, <a
+href="provider-module.html">provider-module</a>), the binding object's
+internals (<a href="provider-binding.html">provider-binding</a>), or
+cohort identity (<a href="cohort.html">cohort</a>). A facade also does
+not define the public contract of any math library; it inherits it, and
+<code>rocblas.h</code> remains owned by rocBLAS.</p>
+<h2 id="terminology">Terminology</h2>
+<p>Architecture-wide terms (broker, provider, provider binding, provider
+protocol, cohort) are defined in ../draft-plan-reboot and used here
+unchanged. Two are local:</p>
+<ul>
+<li><strong>Public context</strong> - the client-visible stateful object
+whose creation triggers selection and whose lifetime pins the binding.
+<code>rocblas_handle</code>, <code>hiprandGenerator_t</code>, and
+<code>hipsolverHandle_t</code> are public contexts.</li>
+<li><strong>Shadow facade</strong> - a facade built and installed under
+a deliberately distinct library identity so it can coexist with the
+canonical library during qualification. Shadow is a stage, not a
+product.</li>
+</ul>
+<h2 id="1-what-a-facade-is">1. What a facade is</h2>
+<p>A facade is the only component with a public surface; everything
+below it is private.</p>
+<pre class="mermaid"><code>flowchart TD
+  client[&quot;Client binary\nlinked against the public SONAME&quot;]
+  facade[&quot;Compatibility facade\npublic API + ABI + library identity&quot;]
+  broker[&quot;Broker\n(distribution-private)&quot;]
+  binding[&quot;Provider binding\nretained by the public context&quot;]
+  provider[&quot;Provider module\n(distribution-private)&quot;]
+
+  client --&gt;|&quot;public call&quot;| facade
+  facade --&gt;|&quot;context creation only&quot;| broker
+  broker --&gt;|&quot;validated lease + table&quot;| binding
+  facade --&gt;|&quot;retains&quot;| binding
+  binding --&gt;|&quot;every later operation&quot;| provider
+  facade -.-&gt;|&quot;MUST NOT&quot;| provider</code></pre>
+<p>The dotted edge is a prohibition: a facade MUST NOT reach a provider
+except through a binding it obtained from the broker.</p>
+<ul>
+<li>A facade MUST expose exactly the public API of the library whose
+identity it owns, and nothing else.</li>
+<li>A facade MUST NOT expose the provider protocol, the broker, manifest
+contents, provider identities, cohort identities, or dispatch-table
+pointers through any public declaration.</li>
+<li>A facade MUST resolve provider selection at public-context creation
+and MUST NOT reselect on the operation path.</li>
+<li>Selection MUST happen at most once per public context. Whether a
+facade MAY defer selection to the first operation that supplies the
+device is TBD-16, tracked as <a
+href="architecture-component-model.html">architecture-component-model</a>
+TBD-24. This document MUST NOT be read as granting that permission.</li>
+<li>A facade MUST NOT be a thin symbol forwarder to a single
+implementation library. If it links the implementation it shadows, it is
+not a facade; see section 5.</li>
+</ul>
+<h2 id="2-library-identity-and-naming">2. Library identity and
+naming</h2>
+<h3 id="21-target-state">2.1 Target state</h3>
+<ul>
+<li>A facade MUST own the SONAME of the library whose contract it
+presents.</li>
+<li>A facade MUST NOT introduce a new public SONAME for a contract that
+already has one. Owning the contract means inheriting the identity, not
+adding one beside it.</li>
+<li>Exactly one installed DSO MUST provide a given public SONAME in a
+distribution. Two DSOs both claiming <code>librocblas.so.5</code> in one
+install tree is a packaging defect, not a fallback.</li>
+</ul>
+<h3 id="22-shadow-qualification-identity">2.2 Shadow qualification
+identity</h3>
+<ul>
+<li>A shadow facade MUST use a distinct SONAME so it can be installed
+alongside the canonical library, and that SONAME SHOULD be formed as
+<code>lib&lt;library&gt;-loader.so.&lt;soversion&gt;</code>.</li>
+<li>A shadow facade MUST carry the same SOVERSION as the canonical
+library whose contract it presents, because a client that switches to it
+by <code>LD_PRELOAD</code> or by relinking must still see a compatible
+version discipline. Nothing derives or checks that agreement today; see
+TBD-3.</li>
+<li>Experimental or staging facades that are never installed MUST NOT be
+packaged.</li>
+<li>A facade CMake target name SHOULD be
+<code>&lt;library&gt;_loader_shadow</code> while it is a shadow, and its
+<code>EXPORT_NAME</code> SHOULD be
+<code>&lt;library&gt;_loader</code>.</li>
+<li>The shadow export set MUST be namespaced away from the production
+namespace so a consumer cannot pick up a shadow by accident.</li>
+<li>The shadow package config MUST fail to be found, rather than
+silently mismatch, when the headers it was built against are not the
+headers now present.</li>
+</ul>
+<p>The four contracts in scope: <code>librocblas.so.5</code> (shadowed
+as <code>librocblas-loader.so.5</code> and
+<code>librocblas-loader-narrow-v2.so.5</code>, version node
+<code>ROCBLAS_ABI_5</code>), <code>libhiprand.so.1</code>
+(<code>libhiprand-loader.so.1</code>, <code>HIPRAND_ABI_1</code>),
+<code>libhipblaslt.so.1</code> (<code>libhipblaslt-loader.so.1</code>,
+<code>HIPBLASLT_ABI_1</code>), and <code>libhipsolver.so.1</code>
+(<code>libhipsolver-loader.so.1</code>,
+<code>HIPSOLVER_ABI_1</code>).</p>
+<h2 id="3-public-api">3. Public API</h2>
+<ul>
+<li>The facade's public headers MUST be the imitated library's own
+headers. A facade MUST NOT ship a parallel header describing the same
+functions.</li>
+<li>The facade MUST compile against those headers with the imitated
+library's export macro defined, so declarations carry their normal
+default visibility.</li>
+<li>A facade MUST NOT add, remove, or re-type any declaration in those
+headers.</li>
+<li>Where the public API is a C++ surface, the facade MUST preserve
+mangled-name compatibility, not merely source compatibility.</li>
+<li>A facade MUST define every public entry point of the contract it
+owns, including entry points it cannot service. An undefined symbol is a
+link failure for an existing client and is therefore a public ABI break
+even when the function would have failed at runtime.</li>
+<li>An entry point with no provider backing MUST return the contract's
+own "not supported" status rather than abort or crash.</li>
+</ul>
+<h2 id="4-public-abi">4. Public ABI</h2>
+<h3 id="41-exports-are-an-allowlist-not-a-consequence-of-visibility">4.1
+Exports are an allowlist, not a consequence of visibility</h3>
+<p>The threat: a facade compiled from ordinary C++ sources exports far
+more than the contract - inline helpers, typeinfo, and any symbol whose
+visibility was inherited from a header. A client or another DSO then
+binds to a symbol the facade never promised, and removing it later
+breaks that client.</p>
+<ul>
+<li>Every facade MUST be built with hidden default visibility, including
+hidden inlines.</li>
+<li>Every facade MUST be linked with a version script on ELF platforms,
+and that script MUST list the public contract explicitly with
+<code>local: *;</code> catching everything else.</li>
+<li>The installed export set MUST equal a checked-in or generated
+baseline exactly. Extra exports are a failure; missing exports are a
+failure.</li>
+<li>Every exported symbol MUST carry the contract's named version node.
+A bare (unversioned) definition is a failure.</li>
+<li>The export baseline SHOULD be cross-checked against the generated
+API snapshot of the imitated header, so the allowlist cannot drift away
+from the contract.</li>
+</ul>
+<h3 id="42-symbol-versioning">4.2 Symbol versioning</h3>
+<ul>
+<li>On ELF platforms every public export MUST be bound to a named
+version node whose name encodes the contract's major line (the nodes
+named at the end of section 2.2).</li>
+<li>A facade MUST NOT define the same symbol at two default-visibility
+versions in one DSO.</li>
+<li>A facade MUST NOT rely on <code>-Bsymbolic</code> to make its own
+internal references safe against interposition of its public names;
+<code>-Bsymbolic</code> is inert for the versioned public path.</li>
+</ul>
+<h3 id="43-dynamic-dependencies">4.3 Dynamic dependencies</h3>
+<ul>
+<li>A facade's <code>DT_NEEDED</code> list MUST NOT name any canonical
+math implementation library.</li>
+<li>A facade MUST depend on the package-private dynamic-loader lock DSO,
+so that module loading is serialized process-wide across facades
+(section 11).</li>
+<li>A facade MUST carry no installed RPATH. Provider modules are located
+by the manifest and its containment rules, not by a search path baked
+into the facade.</li>
+<li>Any check of the above MUST have a positive control that fails, so a
+green result cannot mean the check inspected nothing.</li>
+</ul>
+<h2 id="5-prohibited-provider-specific-dependencies">5. Prohibited
+provider-specific dependencies</h2>
+<p>The threat: a facade that links the library it is supposed to replace
+cannot be swapped for a different provider, cannot be installed without
+that library, and will resolve the implementation's symbols against
+itself once it owns the public identity.</p>
+<ul>
+<li>A facade MUST NOT link any canonical math implementation target.
+This MUST be rejected at configure time, not only at test time.</li>
+<li>A facade MUST NOT <code>dlopen</code> an implementation library.
+Backend loading belongs to the provider.</li>
+<li>A facade MUST NOT include an implementation-private header.</li>
+<li>A facade MUST NOT branch on a provider identity, cohort identity, or
+module path to change public behavior. Behavior differences belong in
+capability bits negotiated through the protocol, not in string
+comparisons against provider names.</li>
+<li>A facade MAY depend on the imitated library's header-only CMake
+target, and MUST NOT depend on anything else from that library.</li>
+</ul>
+<h2 id="6-client-visible-state">6. Client-visible state</h2>
+<p>A public context carries two kinds of state: state the public
+contract says the client owns and can read back, and state that exists
+only to reach a provider. The second kind MUST NOT be observable.</p>
+<ul>
+<li>The facade MUST own every client-visible setting of the public
+context and MUST be able to answer every public getter from its own
+state without calling the provider.</li>
+<li>A setter the contract defines as taking effect on subsequent
+operations MUST be recorded by the facade and applied at the next
+operation, not eagerly forwarded in a way that changes the observable
+ordering.</li>
+<li>Every public operation MUST observe a single coherent snapshot of
+the public context's settings. A concurrent setter MUST NOT be able to
+split a call across two configurations. Whether this binds every facade
+or only contracts that permit concurrent use of one context is
+TBD-12.</li>
+<li>Provider-owned state (the opaque provider context, the
+dispatch-table pointer, the lease, the registry reference) MUST be
+unreachable from any public declaration.</li>
+<li>The facade MUST NOT expose the provider's own handle type. Runtime
+handles such as streams and events cross the private boundary as opaque
+pointers, cast on the adapter side.</li>
+<li>The facade MUST supply the host-services pointer used by the
+provider and MUST NOT honour a caller-supplied one.</li>
+<li>The facade MUST stamp the protocol ABI header on every record it
+forwards, and MUST NOT trust a header value that reached it from public
+API data.</li>
+</ul>
+<h2 id="7-broker-and-the-retained-binding">7. Broker and the retained
+binding</h2>
+<ul>
+<li>The facade MUST call the broker exactly at public-context creation,
+and MUST NOT call it again for that context. The first-operation shape
+is the open deferral question of section 1 (TBD-16), not a sanctioned
+alternative.</li>
+<li>The facade MUST retain the binding for the lifetime of the public
+context: the lease, the validated dispatch-table pointer, and the opaque
+provider context. The object itself is specified in <a
+href="provider-binding.html">provider-binding</a>.</li>
+<li>The facade MUST NOT allow an established public context to move to a
+different provider.</li>
+<li>When the public contract requires several domains to work together,
+the facade MUST acquire the complete set before it returns a public
+context, and MUST return failure rather than a partially bound context.
+Cohort consistency itself is specified in <a
+href="cohort.html">cohort</a>.</li>
+<li>Capability requirements are the facade's to state: it declares the
+capability bits its public contract needs and MUST reject a lease that
+lacks them. Whether that gating belongs to the facade or the broker is
+TBD-14.</li>
+<li>The facade MUST NOT cache a selection failure. Retry on the next
+context creation is required so a transient condition does not poison
+the process.</li>
+</ul>
+<h2 id="8-validation">8. Validation</h2>
+<p>Validation splits across three layers - facade, protocol boundary (<a
+href="provider-protocol.html">provider-protocol</a>), and provider
+adapter (<a href="provider-adapter.html">provider-adapter</a>) - and the
+split MUST be explicit or the same argument gets checked twice with two
+different answers. The facade layer owns exactly these checks, each
+failing with the public contract's own status: public handle non-null,
+required public pointer arguments, public enum validity, and
+contract-level shape rules the contract documents.</p>
+<ul>
+<li>The facade MUST reject a null public handle before dereferencing it,
+with the contract's invalid-handle status.</li>
+<li>The facade MUST validate that a public context it was handed is one
+of its own. A pointer from a different facade, a different process-local
+table, or a destroyed context MUST be rejected, not dereferenced.</li>
+<li>The facade MUST NOT duplicate provider-side semantic validation.
+Where the provider is the authority - index-width range, feature
+support, backend availability - the facade MUST forward and translate
+rather than pre-judge.</li>
+<li>The facade MUST NOT skip validation on the grounds that the provider
+will catch it. A null dereference in the facade is a crash in the
+client's process attributed to the public library. Where the
+facade/adapter split actually falls is TBD-11.</li>
+</ul>
+<h2 id="9-error-translation">9. Error translation</h2>
+<p>The threat: the private layers signal failure in three vocabularies
+at once - a C++ exception, a protocol transport code, and a domain
+status - and every one of them is invisible to the client. If any of
+them escapes, the client sees a crash or a status its contract does not
+define.</p>
+<ul>
+<li>Every public entry point of a facade MUST be <code>noexcept</code>
+in effect. No C++ exception may cross the public ABI, regardless of the
+client's language or its own exception configuration.</li>
+<li>Every public entry point MUST return a value drawn from the public
+contract's own status enumeration. The private status taxonomy defined
+in <a href="provider-protocol.html">provider-protocol</a> MUST NOT be
+returned to a client.</li>
+<li>The translation MUST be total. Every private status value and every
+exception type MUST map to exactly one public status, including a
+catch-all arm.</li>
+<li>An allocation failure MUST map to the contract's allocation-failure
+status, not to a generic internal error, because a client can act on
+out-of-memory and cannot act on "internal error".</li>
+<li>A protocol-boundary transport failure MUST be distinguishable in
+diagnostics from a semantic failure, even where the public status
+collapses them.</li>
+<li>Where the same underlying condition must produce different public
+statuses on two different public contracts, the divergence MUST be
+deliberate and documented at the translation site.</li>
+<li>A facade MUST NOT call <code>std::abort()</code> to report a failure
+that the public contract can express. Aborting is a process-level
+outcome the client cannot handle. See TBD-6.</li>
+</ul>
+<h2 id="10-behavioral-compatibility">10. Behavioral compatibility</h2>
+<p>Structural compatibility is not sufficient: a facade that exports the
+right symbols at the right versions and computes different answers has
+broken the public API.</p>
+<ul>
+<li>A facade MUST preserve documented semantics of the contract it owns,
+including default values, ownership rules, error precedence, and the
+meaning of edge-case inputs. Zero-increment vectors, zero-size early
+returns, and alias rules are contract, not implementation detail.</li>
+<li>A facade MUST preserve the observable status for a given input, not
+merely "some failure". Two distinct failures that the contract
+distinguishes MUST remain distinguished.</li>
+<li>A facade MUST preserve asynchronous semantics: which stream work is
+enqueued on, whether a call synchronizes, and when a completion is
+observable.</li>
+<li>A facade MUST NOT change numerical results outside what the contract
+already permits. Where the contract does not promise bitwise
+reproducibility, a facade MUST still be qualified against the canonical
+implementation by differential test rather than by inspection.</li>
+<li>A facade MUST preserve the destruction contract, including the order
+in which dependent provider-side objects are released.</li>
+<li>A public destroy entry point MUST release the public object.
+Returning a failure status MUST NOT leave the object allocated, because
+the client has no second chance to free it. See TBD-7.</li>
+</ul>
+<h2 id="11-concurrency">11. Concurrency</h2>
+<ul>
+<li>A facade MUST be safe for concurrent use of distinct public contexts
+from distinct threads without external synchronization.</li>
+<li>Concurrent use of a single public context MUST behave as the
+contract specifies. Where the contract permits it, the facade MUST
+provide the coherent snapshot required by section 6.</li>
+<li>A facade MUST NOT hold a lock across a provider call that can block
+indefinitely unless the public contract already serializes that
+call.</li>
+<li>Module loading MUST be serialized process-wide across all facades in
+the process, through the shared dynamic-loader lock DSO required in
+section 4.3.</li>
+</ul>
+<h2 id="12-legacy-to-facade-transition">12. Legacy-to-facade
+transition</h2>
+<p>The transition has four states, and a distribution MUST be in exactly
+one of them for a given contract at a given time: State 0, the legacy
+library owns <code>librocblas.so.5</code>; State 1, a shadow facade is
+installed beside it; State 2, the facade owns
+<code>librocblas.so.5</code> and the legacy library becomes a provider
+backend; State 3, the legacy backend is retired or kept as one provider
+among several. State 2 rolls back to State 0.</p>
+<ul>
+<li>The transition MUST be reversible at State 2. A distribution MUST be
+able to reinstall the legacy library and have existing compiled clients
+keep working, without relinking.</li>
+<li>A client compiled against the legacy library MUST NOT need to be
+recompiled or relinked to run against the facade. That is the whole
+compatibility claim; if it fails, the facade is a new library.</li>
+<li>In State 2 the legacy implementation MUST be reachable only as a
+provider backend behind the private boundary, and MUST NOT retain the
+public identity.</li>
+<li>The private path by which a provider reaches the legacy
+implementation MUST be declared private and MUST guarantee that
+references originating inside the legacy DSO bind to that DSO's own
+implementation, even when a facade exporting the same public names was
+loaded first.</li>
+<li>Package upgrade and rollback MUST be tested as a sequence, not as
+two independent installs.</li>
+<li><code>ldconfig</code> behavior MUST be preserved across the swap: a
+stub or symlink the distribution relies on MUST survive.</li>
+</ul>
+<h2 id="13-shadow-qualification">13. Shadow qualification</h2>
+<p>Shadow qualification proves a facade against the canonical library
+while both are installed. It exists because the alternative - swapping
+the identity and finding out in production - has no rollback faster than
+a package rebuild.</p>
+<ul>
+<li>A shadow facade MUST be installable alongside the canonical library
+with no file conflict and no SONAME conflict.</li>
+<li>A test application MUST be able to select the shadow explicitly, and
+MUST NOT select it by accident. Selection is by linking against the
+shadow SONAME or by preload; a shadow MUST NOT interpose itself by
+default.</li>
+<li>The shadow MUST be subject to every ABI check the production facade
+will be subject to: export allowlist, version node, no canonical
+dependency, dynamic-loader dependency, no RPATH.</li>
+<li>A shadow MUST be qualified by compiled-consumer tests from an
+installed tree, not only from the build tree, because install-time
+properties (RPATH removal, namelink placement, config package contents)
+differ from build-time ones.</li>
+<li>Exit criteria for leaving shadow qualification MUST be written down
+before the identity transfer. See TBD-2.</li>
+</ul>
+<h2 id="14-versioning">14. Versioning</h2>
+<p>Three version lines meet at a facade and MUST NOT be conflated: the
+public library version and SONAME, owned by the contract owner and
+constraining client binary compatibility; the provider protocol ABI,
+owned by <a href="provider-protocol.html">provider-protocol</a> and
+constraining facade-to-provider compatibility; and the header build
+version, owned by the distribution and recording which headers the
+facade was compiled against.</p>
+<ul>
+<li>A change to the provider protocol MUST NOT change the public SONAME
+or version node. The private ABI is private precisely so it can
+move.</li>
+<li>A facade MUST request the lowest protocol minor it can actually work
+with, not the current one, so an older conforming provider remains
+selectable. A facade that needs only a prefix of a dispatch table MUST
+derive its required table size from that prefix, not from the current
+size.</li>
+<li>A facade MUST NOT stamp a protocol minor it did not negotiate.</li>
+<li>A facade MUST be rejected at configure time when the headers present
+do not match the headers it was built against.</li>
+<li>A distribution MUST express the facade-to-provider compatibility
+window as a package dependency constraint, not only as a runtime
+check.</li>
+</ul>
+<h2 id="15-supported-platforms">15. Supported platforms</h2>
+<ul>
+<li>On Linux ELF targets, everything in section 4 is required: version
+script, named version node, export allowlist, dependency assertions, no
+RPATH.</li>
+<li>A facade MUST NOT be built on a platform where its
+provider-discovery trust model has not been defined. Manifest trust is
+specified in <a href="manifest.html">manifest</a> and is Linux-only
+today.</li>
+<li>Windows and macOS are out of scope: TBD-4. Nothing here claims a
+facade works on them.</li>
+</ul>
+<h2 id="16-build-and-packaging-obligations">16. Build and packaging
+obligations</h2>
+<ul>
+<li>A facade MUST be installed with its runtime library in the runtime
+component and its namelink in the devel component, so a runtime-only
+install does not ship a development symlink.</li>
+<li>A facade MUST carry a compiled-in default provider-manifest path.
+How that path is resolved is specified in <a
+href="broker.html">broker</a>.</li>
+<li>Environment overrides of provider or manifest selection MUST be
+treated as a development and test facility, not a supported client
+interface, and MUST NOT be documented in the public library's
+documentation. Whether they ship at all is TBD-5.</li>
+</ul>
+<h2 id="open-decisions-tbd">Open decisions (TBD)</h2>
+<table>
+<thead>
+<tr class="header">
+<th>ID</th>
+<th>Open question</th>
+<th>What would close it</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>TBD-1</td>
+<td>How is the public identity transferred - renamed artifact, packaging
+swap, or symlink? No facade owns a canonical SONAME today.</td>
+<td>A packaging decision naming the mechanism, plus an upgrade/rollback
+test installing a real facade under the canonical SONAME with a
+legacy-compiled consumer</td>
+</tr>
+<tr class="even">
+<td>TBD-2</td>
+<td>What are the exit criteria for shadow qualification (section
+13)?</td>
+<td>A written gate listing required test families, device matrix, and
+operation coverage per contract</td>
+</tr>
+<tr class="odd">
+<td>TBD-3</td>
+<td>Is <code>lib&lt;library&gt;-loader.so.&lt;soversion&gt;</code>
+normative, and must SOVERSION be derived from the canonical library
+rather than written as a literal?</td>
+<td>A rule plus a configure-time or ctest check comparing each facade
+SOVERSION against the canonical SONAME</td>
+</tr>
+<tr class="even">
+<td>TBD-4</td>
+<td>Are non-Linux platforms in scope, given there is no version-script
+equivalent and no native manifest trust model?</td>
+<td>A platform decision plus, if in scope, an adopted export-control and
+trust mechanism per platform</td>
+</tr>
+<tr class="odd">
+<td>TBD-5</td>
+<td>Do provider and manifest environment overrides ship in a production
+facade?</td>
+<td>A decision, and if they ship, a trust rule for the override path
+equal to the manifest trust rule</td>
+</tr>
+<tr class="even">
+<td>TBD-6</td>
+<td>Is <code>std::abort()</code> on provider create failure the adopted
+contract, justified as canonical rocBLAS behavior, or inherited
+placeholder behavior?</td>
+<td>Confirming canonical rocBLAS behavior for the equivalent failure,
+then documenting the abort or replacing it with a status</td>
+</tr>
+<tr class="odd">
+<td>TBD-7</td>
+<td>Must a failing destroy still release the public object, or does the
+upstream contract leak too?</td>
+<td>Comparing against the upstream rocBLAS destroy contract</td>
+</tr>
+<tr class="even">
+<td>TBD-8</td>
+<td>Is link-completeness (section 3) required per contract, or is the
+export allowlist sufficient for hipRAND, hipBLASLt, and hipSOLVER?</td>
+<td>A decision, and if link tests are required, a generated link-test
+source per contract</td>
+</tr>
+<tr class="odd">
+<td>TBD-9</td>
+<td>Is the internal C++ context layer part of the facade pattern or an
+artifact? Facades link it inconsistently.</td>
+<td>An architecture decision on whether the context classes are the
+required facade implementation layer</td>
+</tr>
+<tr class="even">
+<td>TBD-10</td>
+<td>Is the never-installed narrow shadow a permanent test fixture or
+migration staging to delete?</td>
+<td>A decision to keep it as a fixture or remove it once narrow-v2 is
+complete</td>
+</tr>
+<tr class="odd">
+<td>TBD-11</td>
+<td>Where must argument validation live (section 8)? Today the facade
+row of that table is effectively empty.</td>
+<td>A decision on the split, plus a negative test per contract asserting
+the facade rejects a null handle without reaching a provider</td>
+</tr>
+<tr class="even">
+<td>TBD-12</td>
+<td>Is the coherent-snapshot rule (section 6) universal, or only for
+contracts that permit concurrent use of one context?</td>
+<td>A decision plus a concurrency test per facade that a setter cannot
+split a call</td>
+</tr>
+<tr class="odd">
+<td>TBD-13</td>
+<td>Is there a required minimum registered test set? Whole families
+silently do not register when a provider target is absent.</td>
+<td>A configure-time check that fails when the minimum set cannot be
+registered</td>
+</tr>
+<tr class="even">
+<td>TBD-14</td>
+<td>Does the facade or the broker own required-capability and
+required-callback gating? Facade-side gating fails selection instead of
+falling through to the next candidate.</td>
+<td>A decision; see the parallel TBD in <a
+href="broker.html">broker</a></td>
+</tr>
+<tr class="odd">
+<td>TBD-15</td>
+<td>Is the three-part <code>VERSION</code> of a shadow, as distinct from
+its SOVERSION, constrained against the canonical library?</td>
+<td>Reading the canonical package SONAME and VERSION and recording the
+rule</td>
+</tr>
+<tr class="even">
+<td>TBD-16</td>
+<td>MAY a facade defer selection past construction to the first
+operation that supplies the device?</td>
+<td>Resolving TBD-24 in <a
+href="architecture-component-model.html">architecture-component-model</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="cross-links">Cross-links</h2>
+<ul>
+<li>Parent concepts: ../draft-plan-reboot; <a
+href="architecture-component-model.html">architecture-component-model</a>
+for where the facade sits.</li>
+<li><a href="broker.html">broker</a> - what the facade calls at context
+creation; <a href="provider-binding.html">provider-binding</a> - the
+object it retains; <a href="cohort.html">cohort</a> - what a cohort
+identity asserts.</li>
+<li><a href="provider-protocol.html">provider-protocol</a> - private
+ABI, status taxonomy, versioning line; <a
+href="manifest.html">manifest</a> - the discovery input whose default
+path the facade supplies.</li>
+<li><a href="provider.html">provider</a>, <a
+href="provider-adapter.html">provider-adapter</a>, <a
+href="provider-module.html">provider-module</a> - the other side of the
+boundary.</li>
+<li>Non-normative evidence for this spec: <a
+href="facade.html">ledger/facade</a></li>
+</ul>
+</body>
+</html>
