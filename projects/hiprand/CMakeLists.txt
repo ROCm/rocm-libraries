@@ -59,7 +59,10 @@ project(hipRAND CXX)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
+# Declared here as well as in fortran/, so that print_configuration_summary()
+# below, which runs before add_subdirectory(fortran), has a value to report.
+# The second option() call in the subdirectory reuses this cache entry.
+option(BUILD_FORTRAN_BINDINGS "Build the hipRAND Fortran bindings" ON)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DISABLE_WERROR "Disable building with Werror" ON)
@@ -199,9 +202,13 @@ include(Summary)
 print_configuration_summary()
 
 # hipRAND library
-# This adds library targets: hiprand,
-# also includes Fortran wrapper
+# This adds library targets: hiprand
 add_subdirectory(library)
+
+# Fortran bindings, generated from the headers above and committed next to
+# them. Self-guarded: the subdirectory returns early when BUILD_FORTRAN_BINDINGS
+# is OFF or when no Fortran compiler is available, so a C-only site is unaffected.
+add_subdirectory(fortran)
 
 # Tests
 if(BUILD_TEST)
