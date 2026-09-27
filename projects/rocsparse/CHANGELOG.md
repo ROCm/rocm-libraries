@@ -13,6 +13,22 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.1.0
 
 ### Added
+
+* Generated Fortran bindings, as a single self-contained `rocsparse` module (`use rocsparse`,
+  link `roc::rocsparse_fortran`). Built by default when a Fortran compiler is available;
+  controlled by `BUILD_FORTRAN_BINDINGS`, with `BUILD_FORTRAN_TESTS` and the tri-state
+  `FORTRAN_ARRAY_INTERFACES`. Found with `find_package(rocsparse-fortran)`, installed per
+  compiler under `lib/fortran/<compiler>` and `include/fortran/<compiler>`.
+
+### Changed
+
+* The Fortran binding is now generated from the rocSPARSE headers instead of hand-written.
+  The hand-written `library/src/rocsparse.f90` and `library/src/rocsparse_enums.f90` are
+  removed, and are no longer installed into `include/rocsparse`. The module keeps the name
+  `rocsparse`, so `use rocsparse` is unchanged, but the separate `rocsparse_enums` module is
+  gone: its constants are part of `rocsparse`. Code that said `use rocsparse_enums` should say
+  `use rocsparse`. Rather than shipping `.f90` sources to compile yourself, a compiled archive
+  and `.mod` are installed; link `roc::rocsparse_fortran`.
 * Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
 * Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split` and `rocsparse_spmm_alg_csr_merge_path`.

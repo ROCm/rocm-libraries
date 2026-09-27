@@ -226,11 +226,10 @@ endif()
 include(GenerateExportHeader)
 generate_export_header(rocsparse EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-export.h)
 
-# Force installation of .f module file
-rocm_install(FILES "${CMAKE_SOURCE_DIR}/library/src/rocsparse.f90"
-              "${CMAKE_SOURCE_DIR}/library/src/rocsparse_enums.f90"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"
-)
+# The Fortran binding is generated from the headers above and lives in
+# ../fortran, which installs its own archive and .mod set. Nothing to install
+# here any more: the hand-written rocsparse.f90 / rocsparse_enums.f90 sources
+# that used to be shipped from library/src have been superseded and removed.
 
 # Get all header files from the source include directory
 file(GLOB_RECURSE ROCSPARSE_SOURCE_HEADERS "${PROJECT_SOURCE_DIR}/library/include/*")
