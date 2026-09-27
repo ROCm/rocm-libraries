@@ -107,7 +107,7 @@ void print_reference_lib_warning()
 #ifdef ROCBLAS_REFERENCE_LIB_WARN
     rocblas_cout << "rocBLAS warning: Reference library may not support 64-bit input arguments. "
                     "If running a test suite, please use "
-                 << "--gtest_filter=-*stress*ILP64* to avoid 64-bit test failures.\n";
+                 << "--gtest_filter=-*stress* to avoid 64-bit test failures.\n";
 #endif
 }
 

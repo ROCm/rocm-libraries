@@ -368,7 +368,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   message(STATUS "Linking reference BLAS LIB: ${BLAS_LIBRARY}")
 
   if ( WARN_NOT_ILP64_PREFERRED )
-    message( WARNING "Using ${BLAS_LIBRARY} as reference library, 64-bit tests may fail. Test suite should be run with --gtest_filter=-*stress*ILP64*")
+    message( WARNING "Using ${BLAS_LIBRARY} as reference library, 64-bit tests may fail. Test suite should be run with --gtest_filter=-*stress*")
   endif()
 
   # Find the package AMD SMI

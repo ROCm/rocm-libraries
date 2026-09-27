@@ -166,11 +166,17 @@ to specify a custom AOCL location, or manually install AOCL from
 
 .. note::
 
-   If using a BLAS library without ILP64 support, the ILP64 stress tests might fail, because
-   the reference BLAS narrows their 64-bit sizes and increments to 32 bits and so computes a
-   different operation. To exclude those tests, use the ``--gtest_filter=-*stress*ILP64*``
-   option. Prefer ``-*stress*ILP64*`` over ``-*stress*``, which also drops stress tests that
-   do not depend on the reference integer width.
+   If using a BLAS library without ILP64 support, stress tests might fail, because the
+   reference BLAS computes its internal indices in 32-bit integers and so performs a
+   different operation than the one requested. To exclude these tests, use the
+   ``--gtest_filter=-*stress*`` option.
+
+   The whole ``stress`` category has to be excluded, not just the cases named ``*ILP64*``.
+   A case can exceed the reference's 32-bit index range while every individual argument
+   still fits in 32 bits: the ``*size_t*`` cases pass increments such as ``-1073741825``,
+   which is a valid ``int``, but span ``(n-1) * |inc|`` elements, which is not. Measured
+   against LP64 OpenBLAS on gfx90a, ``-*stress*ILP64*`` leaves 31 failing cases across
+   ``hbmv``, ``hpmv``, ``tbsv``, ``tpmv``, ``tpsv``, ``trmv`` and ``trsv``.
 
 Building the library dependencies and library
 ---------------------------------------------
