@@ -271,6 +271,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_org2l_ung2l.cpp
   auxiliary/rocauxiliary_orgql_ungql.cpp
   auxiliary/rocauxiliary_orgbr_ungbr.cpp
+  auxiliary/rocauxiliary_orghr_unghr.cpp
   auxiliary/rocauxiliary_orgtr_ungtr.cpp
   auxiliary/rocauxiliary_orm2r_unm2r.cpp
   auxiliary/rocauxiliary_ormqr_unmqr.cpp
@@ -542,6 +543,9 @@ if(ROCSOLVER_ENABLE_EIG_2STAGE)
 endif()
 if(ROCSOLVER_ENABLE_HESSENBERG)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
+endif()
+if(ROCSOLVER_ENABLE_XXGHR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_XXGHR)
 endif()
 
 target_compile_definitions(rocsolver PRIVATE
