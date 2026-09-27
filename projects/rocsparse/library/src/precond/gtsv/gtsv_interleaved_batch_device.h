@@ -39,11 +39,18 @@ namespace rocsparse
     // [ 0  0  0  0  0  a6 b6 c6]
     // [ 0  0  0  0  0  0  a7 b7]
 
+    // batch_count and batch_stride are taken as int64_t although the public interface
+    // limits both to rocsparse_int. The interleaved layout makes every array
+    // batch_stride * m elements long, so the batch_count * k and batch_stride * k
+    // offsets below walk the full extent of the data and overflow 32-bit arithmetic
+    // well before either operand does. Widening the two operands promotes every one
+    // of those products; the offsets they feed are int64_t for the same reason.
+
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_interleaved_batch_thomas_kernel(rocsparse_int m,
-                                              rocsparse_int batch_count,
-                                              rocsparse_int batch_stride,
+                                              int64_t       batch_count,
+                                              int64_t       batch_stride,
                                               const T* __restrict__ a0,
                                               const T* __restrict__ b0,
                                               const T* __restrict__ c0,
@@ -51,7 +58,7 @@ namespace rocsparse
                                               T* __restrict__ x1,
                                               T* __restrict__ x)
     {
-        rocsparse_int gid = hipThreadIdx_x + BLOCKSIZE * hipBlockIdx_x;
+        int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= batch_count)
         {
@@ -64,8 +71,8 @@ namespace rocsparse
 
         for(rocsparse_int k = 1; k < m; k++)
         {
-            rocsparse_int index = batch_count * k + gid;
-            rocsparse_int minus = batch_count * (k - 1) + gid;
+            int64_t index = batch_count * k + gid;
+            int64_t minus = batch_count * (k - 1) + gid;
 
             T tc0 = c0[batch_stride * k + gid];
             T tb0 = b0[batch_stride * k + gid];
@@ -81,7 +88,7 @@ namespace rocsparse
 
         for(rocsparse_int k = m - 2; k >= 0; k--)
         {
-            rocsparse_int index = batch_count * k + gid;
+            int64_t index = batch_count * k + gid;
 
             x[batch_stride * k + gid] = x1[index] - c1[index] * x[batch_stride * (k + 1) + gid];
         }
@@ -90,8 +97,8 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_interleaved_batch_lu_kernel(rocsparse_int m,
-                                          rocsparse_int batch_count,
-                                          rocsparse_int batch_stride,
+                                          int64_t       batch_count,
+                                          int64_t       batch_stride,
                                           T* __restrict__ dl,
                                           T* __restrict__ d,
                                           T* __restrict__ du,
@@ -99,7 +106,7 @@ namespace rocsparse
                                           rocsparse_int* __restrict__ p,
                                           T* __restrict__ x)
     {
-        rocsparse_int gid = hipThreadIdx_x + BLOCKSIZE * hipBlockIdx_x;
+        int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= batch_count)
         {
@@ -111,8 +118,8 @@ namespace rocsparse
         // LU decomposition
         for(rocsparse_int k = 0; k < m - 1; k++)
         {
-            rocsparse_int ind_k   = batch_stride * k + gid;
-            rocsparse_int ind_k_1 = batch_stride * (k + 1) + gid;
+            int64_t ind_k   = batch_stride * k + gid;
+            int64_t ind_k_1 = batch_stride * (k + 1) + gid;
 
             T ak_1 = dl[ind_k_1];
             T bk   = d[ind_k];
@@ -161,7 +168,7 @@ namespace rocsparse
         rocsparse_int start = 0;
         for(rocsparse_int k = 1; k < m; k++)
         {
-            rocsparse_int ind_k = batch_stride * k + gid;
+            int64_t ind_k = batch_stride * k + gid;
             if(p[batch_count * k + gid] <= k) // no pivoting occurred, sum up result
             {
                 T temp = static_cast<T>(0);
@@ -183,9 +190,9 @@ namespace rocsparse
               / d[batch_stride * (m - 2) + gid];
         for(rocsparse_int k = m - 3; k >= 0; k--)
         {
-            rocsparse_int ind_k   = batch_stride * k + gid;
-            rocsparse_int ind_k_1 = batch_stride * (k + 1) + gid;
-            rocsparse_int ind_k_2 = batch_stride * (k + 2) + gid;
+            int64_t ind_k   = batch_stride * k + gid;
+            int64_t ind_k_1 = batch_stride * (k + 1) + gid;
+            int64_t ind_k_2 = batch_stride * (k + 2) + gid;
 
             x[ind_k] = (x[ind_k] - du[ind_k] * x[ind_k_1] - u2[batch_count * k + gid] * x[ind_k_2])
                        / d[ind_k];
@@ -195,15 +202,15 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_interleaved_batch_qr_kernel(rocsparse_int m,
-                                          rocsparse_int batch_count,
-                                          rocsparse_int batch_stride,
+                                          int64_t       batch_count,
+                                          int64_t       batch_stride,
                                           const T* __restrict__ dl,
                                           T* __restrict__ d,
                                           T* __restrict__ du,
                                           T* __restrict__ r2,
                                           T* __restrict__ x)
     {
-        rocsparse_int gid = hipThreadIdx_x + BLOCKSIZE * hipBlockIdx_x;
+        int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= batch_count)
         {
@@ -212,8 +219,8 @@ namespace rocsparse
 
         for(rocsparse_int i = 0; i < m - 1; i++)
         {
-            rocsparse_int ind_k   = batch_stride * i + gid;
-            rocsparse_int ind_k_1 = batch_stride * (i + 1) + gid;
+            int64_t ind_k   = batch_stride * i + gid;
+            int64_t ind_k_1 = batch_stride * (i + 1) + gid;
 
             T ak_1 = dl[ind_k_1];
             T bk   = d[ind_k];
@@ -256,9 +263,9 @@ namespace rocsparse
 
         for(rocsparse_int i = m - 3; i >= 0; i--)
         {
-            rocsparse_int ind_k   = batch_stride * i + gid;
-            rocsparse_int ind_k_1 = batch_stride * (i + 1) + gid;
-            rocsparse_int ind_k_2 = batch_stride * (i + 2) + gid;
+            int64_t ind_k   = batch_stride * i + gid;
+            int64_t ind_k_1 = batch_stride * (i + 1) + gid;
+            int64_t ind_k_2 = batch_stride * (i + 2) + gid;
 
             x[ind_k] = (x[ind_k] - du[ind_k] * x[ind_k_1] - r2[batch_count * i + gid] * x[ind_k_2])
                        / d[ind_k];
