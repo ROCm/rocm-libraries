@@ -61,7 +61,8 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         or atom.a_scale_dtype != MmaScaleDType.E8M0
         or atom.b_scale_dtype != MmaScaleDType.E8M0
         or atom.scale_block_k not in (16, 32)
-        or atom.c_dtype != "fp32"
+        or atom.srcs[2].dtype != "fp32"
+        or atom.dst.dtype != "fp32"
         or atom.shape != (16, 16, 128)
     ):
         raise ValueError(f"unsupported scaled WMMA backend contract: {atom.op_id}")

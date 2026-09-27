@@ -49,9 +49,9 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
 {
     rocke_scaled_wmma_op_t spec = {};
     spec.op_id = atom->op_id;
-    const char* dtypes[2] = {atom->a_dtype, atom->b_dtype};
-    const int words[2] = {atom->a_frag_len, atom->b_frag_len};
-    const char* scale_dtypes[2] = {atom->a_scale_dtype, atom->b_scale_dtype};
+    const char* dtypes[2] = {atom->srcs[0].dtype, atom->srcs[1].dtype};
+    const int words[2] = {atom->srcs[0].frag_len, atom->srcs[1].frag_len};
+    const char* scale_dtypes[2] = {atom->srcs[0].scale_dtype, atom->srcs[1].scale_dtype};
     for(int i = 0; i < 2; ++i)
     {
         if(strcmp(dtypes[i], "fp8e4m3") == 0)
@@ -65,14 +65,16 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
         spec.scale_formats[i] = 0; // E8M0.
         spec.matrix_words[i] = words[i];
     }
-    if((atom->scale_block_k != 16 && atom->scale_block_k != 32)
-       || strcmp(atom->c_dtype, "fp32") != 0 || atom->m != 16 || atom->n != 16 || atom->k != 128)
+    if((atom->srcs[0].scale_block_size != 16 && atom->srcs[0].scale_block_size != 32)
+       || atom->srcs[0].scale_block_size != atom->srcs[1].scale_block_size
+       || strcmp(atom->srcs[2].dtype, "fp32") != 0 || strcmp(atom->dst.dtype, "fp32") != 0
+       || atom->m != 16 || atom->n != 16 || atom->k != 128)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA backend contract");
-    spec.scales.block_k = atom->scale_block_k;
+    spec.scales.block_k = atom->srcs[0].scale_block_size;
     const int count = atom->k / spec.scales.block_k;
-    if(atom->a_scale_frag_len != count || atom->b_scale_frag_len != count)
+    if(atom->srcs[0].scale_frag_len != count || atom->srcs[1].scale_frag_len != count)
         ckc::raise_status(ROCKE_ERR_VALUE, "unsupported scaled WMMA scale fragment lengths");
-    spec.scales.count = atom->a_scale_frag_len;
+    spec.scales.count = atom->srcs[0].scale_frag_len;
     char suffix[96];
     snprintf(suffix,
              sizeof(suffix),
@@ -80,7 +82,7 @@ static inline rocke_scaled_wmma_op_t rocke_scaled_wmma_contract(const rocke_mma_
              atom->m,
              atom->n,
              atom->k,
-             atom->c_frag_len,
+             atom->dst.frag_len,
              spec.matrix_words[0],
              spec.matrix_words[1]);
     snprintf(spec.intrinsic,

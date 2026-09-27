@@ -72,7 +72,11 @@ def test_scale_coordinates(dtype, block_k, role):
     layout = getattr(atom, f"{role}_layout")()
     count = 128 // block_k
     assert getattr(atom, f"{role}_frag_len") == count
-    assert (layout.role, layout.wave_size, layout.frag_len) == (role, 32, count)
+    assert (layout.role, layout.wave_size, layout.frag_len) == (
+        "scale_src0" if role == "a_scale" else "scale_src1",
+        32,
+        count,
+    )
     b = IRBuilder("scale_coordinates")
     lane = b.thread_id_x()
     coords = [layout.coord(b, lane, slot) for slot in range(count)]
@@ -99,10 +103,16 @@ def test_scale_defaults_and_unavailable_maps():
                     with pytest.raises(NotImplementedError, match="no verified"):
                         accessor()
     atom = _atom("fp8", 32)
-    unknown = replace(atom, _a_scale_layout=None, _b_scale_layout=None)
-    with pytest.raises(NotImplementedError, match="a_scale"):
+    unknown = replace(
+        atom,
+        srcs=tuple(
+            replace(src, scale=replace(src.scale, layout=None)) if src.scale else src
+            for src in atom.srcs
+        ),
+    )
+    with pytest.raises(NotImplementedError, match="scale_src0"):
         unknown.a_scale_layout()
-    with pytest.raises(NotImplementedError, match="b_scale"):
+    with pytest.raises(NotImplementedError, match="scale_src1"):
         unknown.b_scale_layout()
     # Adding scale maps does not invent unverified matrix operand maps.
     for accessor in (atom.a_layout, atom.b_layout):
@@ -110,7 +120,17 @@ def test_scale_defaults_and_unavailable_maps():
             accessor()
     assert (
         replace(
-            atom, _a_scale_layout=replace(atom.a_scale_layout(), fn=lambda *_: None)
+            atom,
+            srcs=(
+                replace(
+                    atom.srcs[0],
+                    scale=replace(
+                        atom.srcs[0].scale,
+                        layout=replace(atom.a_scale_layout(), fn=lambda *_: None),
+                    ),
+                ),
+                *atom.srcs[1:],
+            ),
         )
         == atom
     )
@@ -120,12 +140,19 @@ def test_scale_defaults_and_unavailable_maps():
 def test_scale_metadata_rejects_inconsistent_maps(role):
     atom = _atom("fp8", 32)
     layout = getattr(atom, f"{role}_layout")()
+    index = 0 if role == "a_scale" else 1
+
+    def update_scale(**kwargs):
+        srcs = list(atom.srcs)
+        srcs[index] = replace(srcs[index], scale=replace(srcs[index].scale, **kwargs))
+        return replace(atom, srcs=tuple(srcs))
+
     for change in ({"role": "a"}, {"frag_len": 8}, {"wave_size": 64}):
         with pytest.raises(ValueError, match="layout does not match"):
-            replace(atom, **{f"_{role}_layout": replace(layout, **change)})
+            update_scale(layout=replace(layout, **change))
     for count in (-1, True, 1.5):
         with pytest.raises(ValueError, match="fragment length"):
-            replace(atom, **{f"{role}_frag_len": count})
+            update_scale(frag_len=count)
 
 
 @pytest.mark.parametrize("dtype", ["fp8", "bf8"])

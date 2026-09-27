@@ -6,13 +6,26 @@ select matrix operations. For the overall kernel-building workflow, see the
 
 ## Operand Metadata
 
-MMA metadata uses `a_dtype`, `b_dtype`, and `c_dtype`, with C describing both
-the accumulator input and result. Optional `a_scale_dtype`, `b_scale_dtype`,
-and `scale_block_k` fields describe independent scale types and a shared K-group
-size. `MmaScaleBlockK.K16` and `MmaScaleBlockK.K32` are the only scaled sizes;
-all three fields are `None` for unscaled atoms. Integer 16/32 values from JSON
-are normalized to the enum. Scale types are independent of matrix dtypes and
-packed register types. Matrix fragment and layout accessors retain their A/B/C roles.
+MMA metadata stores three `srcs` and an independent `dst`. `srcs[0]` and
+`srcs[1]` are the multiplicands; `srcs[2]` is the accumulator input. Each source
+and the destination have their own dtype, fragment length, and layout. Historical
+A/B projections refer to `srcs[0]`/`srcs[1]`; C projections refer to `dst`.
+
+A source's optional `MmaScaleOperand` owns its scale `dtype`, `block_size`,
+logical `frag_len`, and `layout`. Scale values are independent of matrix dtypes
+and register carriers. Block sizes normalize to `MmaScaleBlockK.K16` or `K32`.
+Generic metadata can describe different block sizes for each source. Scaled
+WMMA requires a complete pair with a shared block size; its backend also checks
+supported formats, fragment counts, and both accumulator and result dtypes.
+
+`a_scale_dtype`, `b_scale_dtype`, `a_scale_frag_len`, and `b_scale_frag_len`
+are computed compatibility properties. `scale_block_k` projects the shared
+block size and raises when the two sources cannot form that shared contract.
+Unscaled sources have `scale=None`; the compatibility properties return
+`None` for their dtypes and shared block size, and zero for fragment counts.
+Construct or replace the nested source descriptors to change scale metadata.
+The JSON loader accepts indexed rows and legacy A/B/C rows with top-level scales;
+conflicting indexed and legacy scales are rejected.
 
 Scale dtypes normalize to the string-backed `MmaScaleDType` enum: `E8M0`,
 `E4M3`, or `E5M3`. Existing string inputs remain accepted, and string formatting
@@ -32,8 +45,11 @@ target catalog and backend.
 are separate from register byte packing and global tensor strides. Unscaled
 atoms default to zero scale fragments and absent maps. An unavailable map raises
 `NotImplementedError`, including for a scaled atom whose layout is not verified.
-The native record appends corresponding counts and map pointers, so native
-consumers must rebuild; existing role enum values remain unchanged.
+The canonical accessor is `src_scale_layout(index)`; stored roles are
+`scale_src0` and `scale_src1`, matching the ISA fields `SCALE_SRC0` and
+`SCALE_SRC1`. The C source record owns `scale_dtype`,
+`scale_block_size`, `scale_frag_len`, and `scale_layout`. Native consumers must
+rebuild for the indexed struct layout and role enum changes.
 
 ### gfx1250 Scale Mapping and Packing
 
@@ -54,13 +70,17 @@ from rocke.core.arch import ArchTarget, MmaScaleBlockK, MmaScaleDType
 
 atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
     family="wmma_scaled",
-    a_dtype="fp8", b_dtype="fp8", c_dtype="fp32",
+    src_dtypes=("fp8", "fp8", "fp32"), dst_dtype="fp32",
     scales=(MmaScaleDType.E8M0, MmaScaleDType.E8M0, MmaScaleBlockK.K32),
     m=16, n=16, k=128,
 )
 assert atom is not None
 # result = builder.mma(atom, a, b, c, scale_a, scale_b)
 ```
+
+All Python query methods accept `src_dtypes` and `dst_dtype`; native queries
+provide corresponding `_indexed` entry points with the same optional scale filter.
+Legacy three-dtype queries default `dst` to `src2`.
 
 Omitting `scales` leaves scales unconstrained. Passing `(a_type, b_type, block_k)`
 matches the scale contract exactly; `(None, None, None)` selects unscaled atoms.

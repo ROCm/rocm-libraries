@@ -60,7 +60,13 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
     def test_backend_rejects_unsupported_scale_type_on_either_input(self):
         catalog = ArchTarget.from_gfx("gfx1250").mma
         for field in ("a_scale_dtype", "b_scale_dtype"):
-            atom = replace(_scaled_atom(), **{field: "e4m3"})
+            atom = _scaled_atom()
+            index = 0 if field == "a_scale_dtype" else 1
+            srcs = list(atom.srcs)
+            srcs[index] = replace(
+                srcs[index], scale=replace(srcs[index].scale, dtype="e4m3")
+            )
+            atom = replace(atom, srcs=tuple(srcs))
             with (
                 self.subTest(field=field),
                 mock.patch.object(catalog, "by_op_id", return_value=atom),
@@ -72,13 +78,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         catalog = ArchTarget.from_gfx("gfx1250").mma
         for role in ("a_scale", "b_scale"):
             for count in (0, 8):
-                atom = replace(
-                    _scaled_atom(),
-                    **{
-                        f"{role}_frag_len": count,
-                        f"_{role}_layout": None,
-                    },
+                atom = _scaled_atom()
+                index = 0 if role == "a_scale" else 1
+                srcs = list(atom.srcs)
+                srcs[index] = replace(
+                    srcs[index],
+                    scale=replace(srcs[index].scale, frag_len=count, layout=None),
                 )
+                atom = replace(atom, srcs=tuple(srcs))
                 with (
                     self.subTest(role=role, count=count),
                     mock.patch.object(catalog, "by_op_id", return_value=atom),
@@ -88,7 +95,13 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
 
     def test_loader_requires_both_scale_maps(self):
         for role in ("a_scale", "b_scale"):
-            atom = replace(_scaled_atom(), **{f"_{role}_layout": None})
+            atom = _scaled_atom()
+            index = 0 if role == "a_scale" else 1
+            srcs = list(atom.srcs)
+            srcs[index] = replace(
+                srcs[index], scale=replace(srcs[index].scale, layout=None)
+            )
+            atom = replace(atom, srcs=tuple(srcs))
             spec = BlockScaledGemmSpec(
                 "missing_scale_map",
                 M=16,
@@ -103,7 +116,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     "rocke.instances.gfx1250.block_scaled_gemm._native_scaled_atom",
                     return_value=atom,
                 ),
-                self.assertRaisesRegex(NotImplementedError, role),
+                self.assertRaisesRegex(NotImplementedError, f"scale_src{index}"),
             ):
                 build_block_scaled_gemm(spec, arch="gfx1250")
             # Lowering prepacked operands needs the carrier contract, not a loader map.
@@ -114,7 +127,15 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
 
     def test_backend_derives_each_matrix_carrier_and_selector(self):
         # Synthetic metadata exercises the lowering contract without adding atoms.
-        atom = replace(_scaled_atom(), b_dtype="bf8e5m2", b_frag_len=8)
+        atom = _scaled_atom()
+        atom = replace(
+            atom,
+            srcs=(
+                atom.srcs[0],
+                replace(atom.srcs[1], dtype="bf8e5m2", frag_len=8),
+                atom.srcs[2],
+            ),
+        )
         catalog = ArchTarget.from_gfx("gfx1250").mma
         with mock.patch.object(catalog, "by_op_id", return_value=atom):
             spec = gfx1250_scaled_wmma(atom.op_id)
