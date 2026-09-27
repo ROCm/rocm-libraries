@@ -57,6 +57,13 @@ SOFTWARE.
 #define RGB_TO_GREY_WEIGHT_GREEN 0.587f
 #define RGB_TO_GREY_WEIGHT_BLUE 0.114f
 #define INTERP_BILINEAR_KERNEL_SIZE 2       // Kernel size needed for Bilinear Interpolation
+
+// Intra-image multithreading parameters
+// Minimum rows per thread for effective parallelization (avoid overhead on small images)
+// Tune this based on target platform: lower for high-performance CPUs, higher for embedded
+#ifndef RPP_MIN_ROWS_PER_THREAD
+#define RPP_MIN_ROWS_PER_THREAD 4
+#endif
 #define INTERP_BILINEAR_KERNEL_RADIUS 1.0f  // Kernel radius needed for Bilinear Interpolation
 #define INTERP_BILINEAR_NUM_COEFFS 4  // Number of coefficents needed for Bilinear Interpolation
 #define NEWTON_METHOD_INITIAL_GUESS \
@@ -271,6 +278,30 @@ inline void saturate_pixel(Rpp32f& pixel, Rpp32f* dst) {
 
 inline void saturate_pixel(Rpp32f& pixel, Rpp16f* dst) {
     *dst = static_cast<Rpp16f>(RPPPIXELCHECKF32(pixel));
+}
+
+// Compute the number of threads to use for intra-image parallelization
+// Based on batch size and image height
+inline Rpp32u get_intra_image_threads(const rpp::Handle& handle, Rpp32u batchSize,
+                                      Rpp32u imageHeight) {
+    // If processing multiple images in batch, don't parallelize within image
+    // The outer loop will parallelize across batch items
+    if (batchSize > 1) {
+        return 1;
+    }
+
+    // For single image, determine threads based on height
+    Rpp32u availableThreads = handle.GetNumThreads();
+
+    // If image is too small, parallelization overhead outweighs benefits
+    Rpp32u minHeightForParallelization = availableThreads * RPP_MIN_ROWS_PER_THREAD;
+
+    if (imageHeight < minHeightForParallelization) {
+        return 1;
+    }
+
+    // For large images, use all available threads
+    return availableThreads;
 }
 
 #endif  // RPP_CPU_COMMON_HPP
