@@ -72,14 +72,14 @@ std::string to_str(io_data_label io)
     }
 }
 
-#define IO_DATA_LAYOUT_ACCESSOR_BODY(AXIS_IDX)                                        \
-    do                                                                                \
-    {                                                                                 \
-        if(AXIS_IDX >= get_full_rank())                                               \
-            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION                       \
-                                        + " accessing an out-of-range layout axis."); \
-        return AXIS_IDX < len_axes.size() ? len_axes[AXIS_IDX]                        \
-                                          : batch_axes[AXIS_IDX - len_axes.size()];   \
+#define IO_DATA_LAYOUT_ACCESSOR_BODY(AXIS_IDX)                                      \
+    do                                                                              \
+    {                                                                               \
+        if(AXIS_IDX >= get_full_rank())                                             \
+            throw std::out_of_range(ROCFFT_CURRENT_FUNCTION                         \
+                                    + " accessing an out-of-range layout axis.");   \
+        return AXIS_IDX < len_axes.size() ? len_axes[AXIS_IDX]                      \
+                                          : batch_axes[AXIS_IDX - len_axes.size()]; \
     } while(0)
 
 const data_layout_t::axis_t& data_layout_t::operator[](size_t axis_idx) const
@@ -95,8 +95,7 @@ data_layout_t::axis_t& data_layout_t::operator[](size_t axis_idx)
 data_layout_t::data_layout_t(const std::vector<size_t>& lower,
                              const std::vector<size_t>& upper,
                              const std::vector<size_t>& strides,
-                             size_t                     batch_rank,
-                             bool                       is_partial)
+                             size_t                     batch_rank)
     : len_axes(batch_rank < lower.size() ? lower.size() - batch_rank : 0)
     , batch_axes(batch_rank)
 {
@@ -119,17 +118,10 @@ data_layout_t::data_layout_t(const std::vector<size_t>& lower,
                 + std::to_string(dim) + ": lower (" + std::to_string(lower[dim])
                 + ") is larger than upper (" + std::to_string(upper[dim]) + ").");
         }
-        if(!is_partial && lower[dim] != 0)
-            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                        + " requires the logical range's lower bounds to be 0 for "
-                                          "non-partial data layouts (lower["
-                                        + std::to_string(dim) + "] is " + std::to_string(lower[dim])
-                                        + ").");
 
         (*this)[dim].lower           = lower[dim];
         (*this)[dim].upper           = upper[dim];
         (*this)[dim].inbuffer_stride = strides[dim];
-        (*this)[dim].is_partial      = is_partial;
     }
 }
 
@@ -141,19 +133,18 @@ data_layout_t data_layout_t::full_layout(const std::vector<size_t>& lengths,
     return data_layout_t{std::vector<size_t>(lengths.size() + 1, 0),
                          concatenate(lengths, batch),
                          concatenate(strides, distance),
-                         1,
-                         false /* : is_partial */};
+                         1};
 }
 
 data_layout_t data_layout_t::default_full_layout(const std::vector<size_t>& lengths,
-                                                 size_t                     batch,
+                                                 const std::vector<size_t>& batches,
                                                  bool                       real_case_with_padding)
 {
     data_layout_t             ret;
     const std::vector<size_t> empty_for_default_strides_and_dist = {};
     ret.full_range_reset(lengths,
                          empty_for_default_strides_and_dist,
-                         {batch},
+                         batches,
                          empty_for_default_strides_and_dist,
                          real_case_with_padding);
     return ret;
@@ -335,8 +326,6 @@ data_layout_t data_layout_t::make_contiguous_intersection_of(const data_layout_t
     {
         ret[dim].lower = std::max(first[dim].lower, second[dim].lower);
         ret[dim].upper = std::max(std::min(first[dim].upper, second[dim].upper), ret[dim].lower);
-        ret[dim].is_partial = first[dim].is_partial || second[dim].is_partial
-                              || !first[dim].has_same_logical_range_as(second[dim]);
         if(dim == 0)
             ret[dim].inbuffer_stride = 1;
         else
@@ -512,8 +501,7 @@ void data_layout_t::full_range_reset(const std::vector<size_t>& lengths,
     batch_axes.resize(batches.size());
     for(size_t dim = 0; dim < get_full_rank(); dim++)
     {
-        (*this)[dim].is_partial = false;
-        (*this)[dim].lower      = 0;
+        (*this)[dim].lower = 0;
         (*this)[dim].upper = dim < lengths.size() ? lengths[dim] : batches[dim - lengths.size()];
         const bool set_default_axis_stride = (dim < lengths.size() && strides.empty())
                                              || (dim >= lengths.size() && distances.empty());
@@ -548,12 +536,6 @@ bool data_layout_t::is_dimensionally_consistent_with(const data_layout_t& other)
     return get_batch_rank() == other.get_batch_rank() && get_len_rank() == other.get_len_rank();
 }
 
-bool data_layout_t::has_some_partial_length_axis() const
-{
-    return std::any_of(
-        len_axes.begin(), len_axes.end(), [](const auto& len_axis) { return len_axis.is_partial; });
-}
-
 std::optional<data_layout_t>
     data_layout_t::get_other_inplace_layout_for(io_data_label         other_io,
                                                 rocfft_transform_type fft_type,
@@ -565,9 +547,13 @@ std::optional<data_layout_t>
     if(is_empty())
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " queried on an empty layout");
 
-    if(has_some_partial_length_axis())
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + " queried on a layout involving partial length axes");
+    if(std::any_of(
+           len_axes.begin(), len_axes.end(), [](const auto& axis) { return axis.lower != 0; }))
+    {
+        throw std::logic_error(
+            ROCFFT_CURRENT_FUNCTION
+            + " is assuming full length axes, non-zero lower bounds are rejected for length axes.");
+    }
 
     if(fft_type == rocfft_transform_type_complex_forward
        || fft_type == rocfft_transform_type_complex_inverse)
