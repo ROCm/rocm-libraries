@@ -32,6 +32,18 @@ void add_device_grouped_conv2d_bwd_weight_depthwise_row_strip_nhwgc_gkyxc_nhwgk_
                                                            PassThrough,
                                                            PassThrough,
                                                            PassThrough>>>& instances);
+
+void add_device_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_nhwgc_gkyxc_nhwgk_bf16_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           BF16,
+                                                           BF16,
+                                                           BF16,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances);
 #endif
 
 } // namespace instance

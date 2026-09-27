@@ -3,6 +3,7 @@
 
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_bf16.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_row_strip_bf16.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_bwd_weight_depthwise_grouped_row_strip_bf16.hpp"
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_weight.hpp"
 
 namespace ck {
@@ -39,6 +40,22 @@ void add_device_grouped_conv2d_bwd_weight_depthwise_row_strip_nhwgc_gkyxc_nhwgk_
                                                            PassThrough>>>& instances)
 {
     instances.emplace_back(std::make_unique<DeviceGroupedConvBwdWeightDepthwiseRowStripBf16>());
+}
+
+void add_device_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_nhwgc_gkyxc_nhwgk_bf16_instances(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdWeight<2,
+                                                           NHWGC,
+                                                           GKYXC,
+                                                           NHWGK,
+                                                           BF16,
+                                                           BF16,
+                                                           BF16,
+                                                           PassThrough,
+                                                           PassThrough,
+                                                           PassThrough>>>& instances)
+{
+    instances.emplace_back(
+        std::make_unique<DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16>());
 }
 #endif
 
