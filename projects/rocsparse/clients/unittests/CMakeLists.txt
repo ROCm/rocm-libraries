@@ -194,6 +194,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- csrmm merge path / nnz split grid.x extents [AISPARSE-671, 672] -------
+  # Distinct anchor at the end of the list so this leaf does not conflict with
+  # the sibling unit-test branches above. Drives the public rocsparse_spmm entry
+  # point with handle->properties.maxGridSize[0] shrunk, so no internal
+  # translation unit has to be compiled in.
+  unit_test_internal_level3_csrmm_grids.cpp
 )
 
 # Host building-block library translation units under test by the
