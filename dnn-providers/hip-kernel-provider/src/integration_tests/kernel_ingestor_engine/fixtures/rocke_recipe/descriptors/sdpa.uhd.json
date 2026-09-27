@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "77df042a-ecf0-4c3f-ba3f-f76622cd89bc",
+  "name": "SDPA recipe ordering",
+  "kind": "native",
+  "payload": "hipkernel.rocke_sdpa.score"
+}

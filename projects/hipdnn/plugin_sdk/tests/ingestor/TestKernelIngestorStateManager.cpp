@@ -835,7 +835,10 @@ TEST(TestKernelIngestorStateManager, RejectsAnUnadaptedSourceKind)
     hsaco.source.kind = KernelSourceKind::HSACO_FILE;
     KernelDescriptor rocke = makeKernel(testId(0x78), "kernel_rocke", 256, "FLOAT");
     rocke.source.kind = KernelSourceKind::ROCKE_BUILDER;
-    pack.kernels = {hsaco, rocke};
+    KernelDescriptor recipe = makeKernel(testId(0x79), "kernel_recipe", 128, "FLOAT");
+    recipe.source.kind = KernelSourceKind::ROCKE_RECIPE;
+    recipe.source.recipe = RecipeSource{"sdpa.cbor", "sdpa"};
+    pack.kernels = {hsaco, rocke, recipe};
 
     const StateManager manager(makeSchema(),
                                makeTestMatchers(),
