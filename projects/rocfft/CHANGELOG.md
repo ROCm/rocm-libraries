@@ -32,6 +32,7 @@ Documentation for rocFFT is available at
   support will be added in a future release of rocFFT.
 
 * Added support for very large FFTs on gfx1250.
+* Extended the optional RCCL backend to multi-process plans when built with both ``ROCFFT_RCCL_ENABLE`` and ``ROCFFT_MPI_ENABLE``. RCCL is used for the transpose data plane when every MPI rank has exactly one GPU; otherwise the existing MPI paths remain. Set ``ROCFFT_RCCL_DISABLE=1`` to force the MPI fallback.
 
 ### Deprecations
 

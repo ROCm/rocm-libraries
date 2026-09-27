@@ -48,6 +48,7 @@
 #include "load_store_ops.h"
 #include "logging.h"
 #include "rocfft_current_function.h"
+#include "rocfft_location.h"
 #include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
@@ -181,53 +182,6 @@ extern SchemeVec EmptySchemeVec;
 class TreeNode;
 class LeafNode;
 class function_pool;
-
-// Identifier for a location that a buffer lives on, or that a kernel
-// will execute on.  this specifies a multi-process rank as well as a
-// device ID.
-struct rocfft_location_t
-{
-    rocfft_location_t() = default;
-    rocfft_location_t(int _comm_rank, int _device)
-        : comm_rank(_comm_rank)
-        , device(_device)
-    {
-    }
-
-    // return a location for the current device on comm rank 0
-    static rocfft_location_t rank0_current_device()
-    {
-        rocfft_location_t id;
-        if(hipGetDevice(&id.device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failed");
-        return id;
-    }
-
-    // allow locations to be sorted
-    bool operator<(const rocfft_location_t& other) const
-    {
-        if(comm_rank != other.comm_rank)
-            return comm_rank < other.comm_rank;
-        return device < other.device;
-    }
-
-    bool operator==(const rocfft_location_t& other) const
-    {
-        return comm_rank == other.comm_rank && device == other.device;
-    }
-
-    std::string str() const
-    {
-        std::string ret = "comm rank ";
-        ret += std::to_string(comm_rank);
-        ret += " device ";
-        ret += std::to_string(device);
-        return ret;
-    }
-
-    int comm_rank = 0;
-    int device    = 0;
-};
 
 // Conceptual representation of temporary buffers, e.g., for
 // workspaces or communications.
@@ -1320,10 +1274,11 @@ private:
 struct CommRCCLAllToAll : public MultiPlanItem
 {
     // per-rank state for one all-to-all participant. Caller fills
-    // sendBuffer/recvBuffer; the constructor allocates the completion
-    // event. The collective runs on the comm-owned stream; the event is
-    // recorded on it after ncclGroupEnd so Wait() can sync on events like
-    // every other MultiPlanItem.
+    // sendBuffer/recvBuffer for every world rank; only local ranks
+    // have real buffers and a completion event. The collective runs
+    // on the comm-owned stream; the event is recorded on it after
+    // ncclGroupEnd so Wait() can sync on events like every other
+    // MultiPlanItem.
     struct agent_t
     {
         BufferPtr          sendBuffer;
@@ -1331,11 +1286,9 @@ struct CommRCCLAllToAll : public MultiPlanItem
         hipEvent_wrapper_t event;
     };
 
-    // _agents must be indexed by RCCL rank. The rocfft_rccl_comm_t type
-    // assigns ranks in sorted device-id order (this holds even for non-contiguous
-    // device sets such as {1, 3, 6}), so building the vector in the same
-    // order as _rccl.get_devices(), or equivalently in ascending device-id
-    // order, satisfies the contract.
+    // _agents must be indexed by NCCL rank (sorted world locations).
+    // Remote ranks may have empty buffers; events are allocated only
+    // for local locations.
     CommRCCLAllToAll(const rocfft_rccl_comm_t& _rccl,
                      rocfft_precision          _precision,
                      rocfft_array_type         _arrayType,
@@ -1347,24 +1300,16 @@ struct CommRCCLAllToAll : public MultiPlanItem
         , count_per_rank(_count_per_rank)
         , agents(std::move(_agents))
     {
-        // single-process RCCL only, so the local rank is always 0;
-        // ExecutesOnRank() relies on this being set explicitly since
-        // the MultiPlanItem base does not default-initialize it
-        local_comm_rank = 0;
-
-        // validate caller-supplied agent count against the communicator
         const auto nranks = rccl.num_ranks();
         if(agents.size() != nranks)
             throw std::invalid_argument(
                 "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())
                 + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
 
-        // one completion event per device, on that device, so recording
-        // it on the comm stream is valid. The stream is comm-owned.
-        const auto devices = rccl.get_devices();
-        for(size_t r = 0; r < devices.size(); ++r)
+        for(const auto& loc : rccl.get_local_locations())
         {
-            rocfft_scoped_device scoped(devices[r]);
+            const int            r = rccl.get_rank(loc);
+            rocfft_scoped_device scoped(loc.device);
             agents[r].event.alloc();
         }
     }
@@ -1382,28 +1327,27 @@ struct CommRCCLAllToAll : public MultiPlanItem
     {
         for(const auto& a : agents)
         {
-            if(ptr == a.recvBuffer)
+            if(a.recvBuffer && ptr == a.recvBuffer)
                 return true;
         }
         return false;
     }
 
-    // the collective consumes each per-agent send buffer.
     bool ReadsFromBuffer(const BufferPtr& ptr) const override
     {
         for(const auto& a : agents)
         {
-            if(ptr == a.sendBuffer)
+            if(a.sendBuffer && ptr == a.sendBuffer)
                 return true;
         }
         return false;
     }
 
-    // single-process RCCL: all participating devices belong to the local
-    // process, so the collective runs on local_comm_rank only.
-    bool ExecutesOnRank(int comm_rank) const override
+    // ncclAllToAll is collective: every rank that owns a world
+    // location must launch its local participant(s).
+    bool ExecutesOnRank(int) const override
     {
-        return comm_rank == local_comm_rank;
+        return true;
     }
 
 private:
@@ -1411,10 +1355,8 @@ private:
 
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
-    const size_t            count_per_rank; // elements per rank (uniform)
+    const size_t            count_per_rank;
 
-    // per-rank send/recv buffers, indexed by RCCL rank to
-    // match the ordering returned by rccl.get_devices().
     std::vector<agent_t> agents;
 };
 
@@ -1516,8 +1458,7 @@ private:
     struct Transfer
     {
         // peer and local endpoints, both as (comm_rank, device) pairs;
-        // the peer's RCCL rank is derived at execution time from
-        // peer_location.device via rccl.get_rank().
+        // the peer's NCCL rank is rccl.get_rank(peer_location).
         rocfft_location_t peer_location;
         rocfft_location_t local_location;
         BufferPtr         buffer;

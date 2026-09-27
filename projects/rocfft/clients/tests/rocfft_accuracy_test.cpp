@@ -120,7 +120,8 @@ TEST_P(accuracy_test, vs_fftw)
     }
     case fft_params::fft_mp_lib_mpi:
     {
-        // Multi-proc FFT.
+        // Multi-proc FFT. With ROCFFT_RCCL_ENABLE, the worker uses RCCL for
+        // the transpose when every rank has one GPU; otherwise MPI A2A/P2P.
         static const auto mp_launch_command = get_mp_launch_command();
 
         if(mp_launch_command.exe.empty())

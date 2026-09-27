@@ -407,11 +407,10 @@ struct rocfft_plan_t
     rocfft_plan_description_t desc;
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL communicator used by GlobalTransposeRCCL.  Populated only
-    // when the plan runs in a single process (local_comm_size == 1)
-    // and has >= 2 local devices; empty otherwise, in which case
-    // GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
-    // Value-semantic handle; copies share state via shared_ptr<Impl>.
+    // RCCL communicator used by GlobalTransposeRCCL.  Populated for
+    // single-process multi-GPU plans, and for multi-process plans when
+    // every MPI rank has exactly one device. Empty otherwise, in which
+    // case GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
     rocfft_rccl_comm_t rccl;
 #endif
 
@@ -445,10 +444,11 @@ struct rocfft_plan_t
     bool BuildMultiDevicePlan();
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // populate the rccl communicator from the description's local devices,
-    // before any plan-building path is chosen,  empty when not applicable.
-    // any failure is swallowed internally, leaving rccl empty so
-    // the caller falls back to the P2P / A2A paths
+    // populate the rccl communicator from the plan's world locations
+    // before any plan-building path is chosen. empty when not applicable.
+    // multi-process init is collective; local failure is synchronized so
+    // no rank enters ncclCommInitRank alone. on failure rccl is left
+    // empty so the caller falls back to P2P / A2A.
     void InitRCCLCommunicator() noexcept;
 #endif
 
@@ -804,9 +804,8 @@ private:
                                            const std::vector<size_t>& antecedents);
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL-based global transpose for single-process multi-GPU plans.
-    // Dispatches to ncclAllToAll for uniform NxN patterns and to a
-    // grouped ncclSend/ncclRecv path for everything else.
+    // RCCL-based global transpose. Dispatches to ncclAllToAll for
+    // uniform NxN patterns and to grouped ncclSend/ncclRecv otherwise.
     std::vector<size_t> GlobalTransposeRCCL(const field_view_t&        input,
                                             const field_view_t&        output,
                                             const std::vector<size_t>& antecedents);
