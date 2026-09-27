@@ -47,6 +47,13 @@ namespace TensileLite
     class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
     {
     public:
+        // Defined out of line rather than inherited from LazySingleton. That base
+        // holds the instance in a function-local static of an inline template
+        // member, which VISIBILITY_INLINES_HIDDEN gives hidden visibility, so a
+        // shared tensilelite-host and its consumer each get their own Debug and
+        // one side's reloadDebugBitsForTest() cannot be seen by the other.
+        static Debug& Instance();
+
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
         bool printPredicateEvaluationVerbose() const;
@@ -185,11 +192,10 @@ namespace TensileLite
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
-        int         m_streamK5ForceMode   = -1;
-        bool        m_usePreciseSMTarget  = false;
-        StringSet   m_excludedFromGetAll;
+        int       m_streamK5ForceMode  = -1;
+        bool      m_usePreciseSMTarget = false;
+        StringSet m_excludedFromGetAll;
 
         Debug();
     };
 } // namespace TensileLite
-

@@ -104,20 +104,6 @@ namespace TensileLite
                 return false;
             }
 
-            // The all-solutions benchmark path selects kernels by index instead
-            // of going through a SolutionLibrary search. Apply the dynamic
-            // StreamK topology predicate explicitly so this path has the same
-            // support boundary as normal library selection. In particular, a
-            // gfx942 MI300A reports six XCDs while these kernels bake eight
-            // per-XCD queues; launching one is invalid, but static StreamK and
-            // non-StreamK solutions in the same config remain runnable.
-            if(!solution.streamKDynamicQueueSupported(problem, *m_hardware))
-            {
-                if(isReportValid)
-                    m_reporter->report(ResultKey::Validation, "UNSUPPORTED_XCD_TOPOLOGY");
-                return false;
-            }
-
             // Test if the persistent kernel is eligible for the current hw and solution
             problem.checkPersistentKernelEligibility(solution, *m_hardware);
             Task task(*m_hardware, problem, solution);
@@ -136,6 +122,15 @@ namespace TensileLite
                         m_reporter->log(LogLevel::Verbose, msg.str());
                 }
 
+                return false;
+            }
+
+            // Explicit index selection bypasses SolutionLibrary; apply its
+            // StreamK topology predicate after the same problem/task checks.
+            if(!solution.streamKDynamicQueueSupported(problem, *m_hardware))
+            {
+                if(isReportValid)
+                    m_reporter->report(ResultKey::Validation, "UNSUPPORTED_XCD_TOPOLOGY");
                 return false;
             }
 
