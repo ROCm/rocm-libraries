@@ -426,7 +426,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
             tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[number<1>{}];
             tdm_config_q.pad_config.pad_interval = LdsPaddingConfigQ[number<2>{}];
 
-            constexpr auto LdsPaddingConfigDO = Policy::template GetLdsPaddingConfigOGrad<Problem>();
+            constexpr auto LdsPaddingConfigDO =
+                Policy::template GetLdsPaddingConfigOGrad<Problem>();
             tdm_config_do.pad_enable              = LdsPaddingConfigDO[number<0>{}];
             tdm_config_do.pad_config.pad_amount   = LdsPaddingConfigDO[number<1>{}];
             tdm_config_do.pad_config.pad_interval = LdsPaddingConfigDO[number<2>{}];
