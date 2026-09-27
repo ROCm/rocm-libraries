@@ -58,6 +58,20 @@ test_categories:
       - "pr"
       - "precheckin"
 
+  # Host-ASAN coverage mirrors the standard Python selection and excludes every
+  # test marked as requiring a GPU.
+  host-asan:
+    description: "GPU-independent rocisa and TensileLite Python unit tests for host ASAN"
+    test_paths:
+      - "rocisa_tests"
+      - "Tensile/Tests/unit"
+    exclude_markers:
+      - "gpu"
+    pytest_args:
+      - "--snapshot-warn-unused"
+    labels:
+      - "host-asan"
+
   comprehensive:
     description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
@@ -183,6 +197,7 @@ execution_settings:
   category_timeouts:
     quick: 300            # 5 minutes
     standard: 2700        # 45 minutes
+    host-asan: 2700       # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
     # Hang guard only; Math CI runs this suite with no per-test timeout. The
