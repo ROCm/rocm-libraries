@@ -46,7 +46,7 @@ struct Shape
 
     int OutH() const { return (h - 1) / stride + 1; }
     int OutW() const { return (w - 1) / stride + 1; }
-    int Strips() const { return (OutH() + 7) / 8; }
+    int Strips() const { return (OutH() + 7) / 8 * ((OutW() + 79) / 80); }
 };
 
 template <typename Index>
@@ -142,10 +142,12 @@ Reference ComputeReference(Shape shape,
                                 continue;
                             const double x = ck::type_convert<float>(
                                 x_nchw[NchwOffset(n, g, hi, wi, shape.g, shape.h, shape.w)]);
-                            const double dy      = ck::type_convert<float>(dy_nchw[NchwOffset(
+                            const double dy        = ck::type_convert<float>(dy_nchw[NchwOffset(
                                 n, g, ho, wo, shape.g, shape.OutH(), shape.OutW())]);
-                            const double product = x * dy;
-                            const auto p = (static_cast<std::size_t>(n) * shape.Strips() + ho / 8) *
+                            const double product   = x * dy;
+                            const int width_strips = (shape.OutW() + 79) / 80;
+                            const auto p           = (static_cast<std::size_t>(n) * shape.Strips() +
+                                            (ho / 8) * width_strips + wo / 80) *
                                                weight_count +
                                            f;
                             ref.weights[f] += product;
@@ -231,11 +233,13 @@ std::size_t WorkspaceBytes(Shape shape)
     return (logical + 255) / 256 * 256;
 }
 
-void CheckShape(Shape shape)
+void CheckShape(Shape shape, bool canonical_right_pad = false)
 {
     RowStripOp concrete;
     BaseOp& op = concrete;
-    const Problem<ck::index_t> problem(shape);
+    Problem<ck::index_t> problem(shape);
+    if(canonical_right_pad)
+        problem.right_pads = {0, 0};
     EXPECT_EQ(op.GetTypeString().find("DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<"),
               0u);
 
@@ -273,6 +277,8 @@ void CheckShape(Shape shape)
         x_device.ToDevice(x_packed.data());
         dy_device.ToDevice(dy_packed.data());
 
+        std::vector<float> first_weights;
+        std::vector<float> first_partials;
         for(const ck::index_t split : {-1, 0, 1})
         {
             auto arg = problem.MakeArgument(op,
@@ -289,6 +295,22 @@ void CheckShape(Shape shape)
             invoker->Run(arg.get(), StreamConfig{nullptr, false});
             dw_device.FromDevice(actual.data());
             workspace.FromDevice(observed_partials.data());
+            if(split == -1)
+            {
+                first_weights.reserve(weight_count);
+                for(const auto value : actual)
+                    first_weights.push_back(ck::type_convert<float>(value));
+                first_partials.assign(observed_partials.begin(),
+                                      observed_partials.begin() + reference.partials.size());
+            }
+            else
+            {
+                for(std::size_t i = 0; i < weight_count; ++i)
+                    EXPECT_EQ(ck::type_convert<float>(actual[i]), first_weights[i])
+                        << "weight=" << i;
+                for(std::size_t i = 0; i < reference.partials.size(); ++i)
+                    EXPECT_EQ(observed_partials[i], first_partials[i]) << "partial=" << i;
+            }
 
             for(std::size_t i = 0; i < weight_count; ++i)
             {
@@ -406,6 +428,54 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
         ASSERT_TRUE(op.IsSupportedArgument(arg.get())) << "groups=" << groups;
         EXPECT_EQ(op.GetWorkSpaceSize(arg.get()), WorkspaceBytes(boundary));
     }
+    // Large resource-eligible candidate retains wide indexing and bounded P.
+    const Problem<ck::long_index_t> wide_problem(Shape{2, 512, 630, 640, 2});
+    auto wide_dry = wide_problem.MakeArgument(op, nullptr, nullptr, nullptr, 1);
+    ASSERT_TRUE(op.IsSupportedArgument(wide_dry.get()));
+    EXPECT_EQ(op.GetWorkSpaceSize(wide_dry.get()), WorkspaceBytes({2, 512, 630, 640, 2}));
+    for(const Shape admitted : {Shape{48, 192, 56, 64, 1},
+                                Shape{21, 192, 120, 80, 1},
+                                Shape{8, 192, 120, 127, 1},
+                                Shape{48, 512, 56, 64, 1},
+                                Shape{2, 193, 9, 160, 1}})
+    {
+        const Problem<ck::index_t> narrow_descriptor(admitted);
+        const Problem<ck::long_index_t> wide_descriptor(admitted);
+        for(const ck::index_t split : {-1, 0, 1})
+        {
+            auto narrow = narrow_descriptor.MakeArgument(op, nullptr, nullptr, nullptr, split);
+            auto wide   = wide_descriptor.MakeArgument(op, nullptr, nullptr, nullptr, split);
+            ASSERT_TRUE(op.IsSupportedArgument(narrow.get()))
+                << "n=" << admitted.n << " split=" << split;
+            ASSERT_TRUE(op.IsSupportedArgument(wide.get()))
+                << "wide n=" << admitted.n << " split=" << split;
+            EXPECT_EQ(op.GetWorkSpaceSize(narrow.get()), WorkspaceBytes(admitted));
+            EXPECT_EQ(op.GetWorkSpaceSize(wide.get()), WorkspaceBytes(admitted));
+        }
+        for(const ck::index_t split : {2, 3})
+        {
+            EXPECT_FALSE(op.IsSupportedArgument(
+                narrow_descriptor.MakeArgument(op, nullptr, nullptr, nullptr, split).get()));
+            EXPECT_FALSE(op.IsSupportedArgument(
+                wide_descriptor.MakeArgument(op, nullptr, nullptr, nullptr, split).get()));
+        }
+    }
+    const Shape max_workspace{48, 512, 56, 64, 1};
+    EXPECT_EQ(WorkspaceBytes(max_workspace), 6193152u);
+    const Shape just_over_r{1, 192, 8, 25201, 1}; // R=201608; S=316 fits
+    const Shape just_over_s{337, 192, 1, 2, 1};   // R=674; S=337
+    const Shape just_over_p{337, 512, 1, 2, 1};   // P exceeds max by one plane
+    EXPECT_EQ(WorkspaceBytes(just_over_p), 6211584u);
+    // With G<=512 and S<=336 the P bound cannot be exceeded in isolation.
+    for(const Shape excluded : {just_over_r, just_over_s, just_over_p})
+    {
+        const Problem<ck::index_t> narrow_descriptor(excluded);
+        const Problem<ck::long_index_t> wide_descriptor(excluded);
+        EXPECT_FALSE(op.IsSupportedArgument(
+            narrow_descriptor.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+        EXPECT_FALSE(op.IsSupportedArgument(
+            wide_descriptor.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    }
     const Problem<ck::index_t> too_short(Shape{1, 193, 1, 159});
     EXPECT_FALSE(
         op.IsSupportedArgument(too_short.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
@@ -456,12 +526,18 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, NchwSerialReferenceAndWorksp
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only candidate";
 
-    CheckShape({2, 193, 13, 131});   // one strip, odd width and the ninth group-lane tail
-    CheckShape({5, 193, 25, 17});    // two strips per image, short width and row tails
-    CheckShape({7, 193, 1, 159});    // both outer filter rows are empty for every split
-    CheckShape({3, 257, 25, 17, 1}); // group tail, four strips with one row in the last
-    CheckShape({2, 512, 13, 39, 1}); // upper group bound and a five-row strip tail
-    CheckShape({7, 193, 1, 79, 1});  // empty outer filter rows at stride one
+    CheckShape({2, 193, 13, 131});          // one strip, odd width and the ninth group-lane tail
+    CheckShape({5, 193, 25, 17});           // two strips per image, short width and row tails
+    CheckShape({7, 193, 1, 159});           // both outer filter rows are empty for every split
+    CheckShape({3, 257, 25, 17, 1});        // group tail, four strips with one row in the last
+    CheckShape({2, 512, 13, 39, 1});        // upper group bound and a five-row strip tail
+    CheckShape({7, 193, 1, 79, 1});         // empty outer filter rows at stride one
+    CheckShape({7, 193, 1, 81, 1});         // new width strip, empty outer filter rows
+    CheckShape({2, 193, 7, 127, 1});        // row seven and a short second width strip
+    CheckShape({2, 257, 8, 159, 1});        // eight rows, group tail, second width strip
+    CheckShape({2, 193, 9, 160, 1});        // ninth row and exact two-strip width
+    CheckShape({2, 193, 17, 161, 2});       // stride two, width 81
+    CheckShape({2, 193, 18, 162, 2}, true); // even extents, canonical right pad zero
 }
 
 } // namespace

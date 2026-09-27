@@ -24,7 +24,8 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 
-// P[s, g, f], s = n * ceil(Ho / 8) + strip, f = fy * 3 + fx.
+// P[s, g, f], s = n * ceil(Ho / 8) * ceil(Wo / 80)
+//                 + ystrip * ceil(Wo / 80) + xstrip, f = fy * 3 + fx.
 struct DepthwiseGroupedRowStripBf16Params
 {
     const bhalf_t* in;
@@ -37,6 +38,7 @@ struct DepthwiseGroupedRowStripBf16Params
     long_index_t out_h;
     long_index_t out_w;
     long_index_t strips_per_image;
+    long_index_t width_strips;
     long_index_t partial_splits;
 };
 
@@ -49,9 +51,9 @@ struct DepthwiseGroupedRowStripBf16Argument : BaseArgument,
     size_t workspace_bytes = 0;
 };
 
-// Each CTA owns one eight-row output strip and sixteen adjacent groups. The
-// 16 reduction lanes visit five 16-column waves; every valid output contributes
-// once to each of its nine filter weights, including masked edge taps.
+// Each CTA owns one eight-row by at-most-80-column output strip and sixteen
+// adjacent groups. The 16 reduction lanes visit five 16-column waves;
+// every valid output contributes once to each of its nine filter weights.
 template <index_t ConvStride>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16(
     DepthwiseGroupedRowStripBf16Params a)
@@ -67,6 +69,8 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
     const long_index_t s             = blockIdx.x;
     const long_index_t n             = s / a.strips_per_image;
     const long_index_t strip         = s % a.strips_per_image;
+    const long_index_t ystrip        = strip / a.width_strips;
+    const long_index_t xstrip        = strip % a.width_strips;
     const long_index_t group    = static_cast<long_index_t>(blockIdx.y) * GroupLanes + group_lane;
     float accum[FilterElements] = {};
 
@@ -74,13 +78,13 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
     {
         for(index_t j = 0; j < 8; ++j)
         {
-            const long_index_t ho = strip * 8 + j;
+            const long_index_t ho = ystrip * 8 + j;
             if(ho >= a.out_h)
                 continue;
 
             for(index_t wave = 0; wave < 5; ++wave)
             {
-                const long_index_t wo = reduction_lane + wave * ReductionLanes;
+                const long_index_t wo = xstrip * 80 + reduction_lane + wave * ReductionLanes;
                 if(wo >= a.out_w)
                     continue;
 
@@ -108,35 +112,49 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
         }
     }
 
-    // Every group, including the final partial tile, joins the same fixed
-    // reduction. Only reduction lane zero writes each owned P[s, g, f].
-    __shared__ float reduction[FilterElements][ReductionLanes][GroupLanes];
+    // Each wave has two lanes for each of sixteen groups. Cross-half exchange
+    // combines those lanes without ever mixing adjacent groups.
+    const index_t lane = tid % 32;
 #pragma unroll
     for(index_t f = 0; f < FilterElements; ++f)
-        reduction[f][reduction_lane][group_lane] = accum[f];
-    __syncthreads();
-    for(index_t step = ReductionLanes / 2; step > 0; step /= 2)
     {
-        if(reduction_lane < step)
-        {
-#pragma unroll
-            for(index_t f = 0; f < FilterElements; ++f)
-                reduction[f][reduction_lane][group_lane] +=
-                    reduction[f][reduction_lane + step][group_lane];
-        }
-        __syncthreads();
+        const float other = __builtin_bit_cast(
+            float,
+            __builtin_amdgcn_ds_bpermute(((lane ^ 16) << 2), __builtin_bit_cast(int, accum[f])));
+        if(lane < GroupLanes)
+            accum[f] += other;
     }
+    constexpr index_t Waves = 8;
+    __shared__ float reduction[FilterElements][Waves][GroupLanes];
+    if(lane < GroupLanes)
+    {
+#pragma unroll
+        for(index_t f = 0; f < FilterElements; ++f)
+            reduction[f][tid / 32][group_lane] = accum[f];
+    }
+    __syncthreads();
     if(reduction_lane == 0 && group < a.groups)
     {
         const long_index_t offset = (s * a.groups + group) * FilterElements;
 #pragma unroll
         for(index_t f = 0; f < FilterElements; ++f)
-            a.partial[offset + f] = reduction[f][0][group_lane];
+        {
+            float wave_sums[Waves];
+#pragma unroll
+            for(index_t w = 0; w < Waves; ++w)
+                wave_sums[w] = reduction[f][w][group_lane];
+#pragma unroll
+            for(index_t step = Waves / 2; step > 0; step /= 2)
+#pragma unroll
+                for(index_t w = 0; w < step; ++w)
+                    wave_sums[w] += wave_sums[w + step];
+            a.partial[offset + f] = wave_sums[0];
+        }
     }
 }
 
 // Adjacent weight lanes load adjacent taps/groups; each split lane accumulates
-// disjoint strips, followed by one FP32 tree and a single BF16 Set per weight.
+// disjoint strips before wave-local and inter-wave FP32 reduction.
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_finalize_bf16(
     DepthwiseGroupedRowStripBf16Params a)
 {
@@ -154,17 +172,29 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_fin
             sum += a.partial[s * weight_count + weight];
     }
 
-    __shared__ float reduction[SplitLanes][WeightLanes];
-    reduction[split_lane][weight_lane] = sum;
+    // Wave-local pair reduction retains all sixteen independent weights.
+    constexpr index_t Waves = 8;
+    const float other       = __builtin_bit_cast(
+        float, __builtin_amdgcn_ds_bpermute(((tid % 32 ^ 16) << 2), __builtin_bit_cast(int, sum)));
+    if(split_lane % 2 == 0)
+        sum += other;
+    __shared__ float reduction[Waves][WeightLanes];
+    if(split_lane % 2 == 0)
+        reduction[split_lane / 2][weight_lane] = sum;
     __syncthreads();
-    for(index_t step = SplitLanes / 2; step > 0; step /= 2)
-    {
-        if(split_lane < step)
-            reduction[split_lane][weight_lane] += reduction[split_lane + step][weight_lane];
-        __syncthreads();
-    }
     if(split_lane == 0 && weight < weight_count)
-        a.wei[weight] = type_convert<bhalf_t>(reduction[0][weight_lane]);
+    {
+        float wave_sums[Waves];
+#pragma unroll
+        for(index_t w = 0; w < Waves; ++w)
+            wave_sums[w] = reduction[w][weight_lane];
+#pragma unroll
+        for(index_t step = Waves / 2; step > 0; step /= 2)
+#pragma unroll
+            for(index_t w = 0; w < step; ++w)
+                wave_sums[w] += wave_sums[w + step];
+        a.wei[weight] = type_convert<bhalf_t>(wave_sums[0]);
+    }
 }
 
 struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
@@ -206,7 +236,6 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
     {
         if(!is_gfx125_supported() || (split != -1 && split != 0 && split != 1))
             return false;
-
         constexpr long_index_t MaxIndex         = std::numeric_limits<index_t>::max();
         constexpr long_index_t MaxBytes         = std::numeric_limits<std::ptrdiff_t>::max();
         constexpr long_index_t MaxBf16Elements  = MaxBytes / sizeof(bhalf_t);
@@ -219,9 +248,8 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
         }
         // Exact packed NHWGC/NHWGK, GKYXC with singleton C and K.
         const long_index_t g = il[0];
-        if(g < 192 || g > 512 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[1] > 42 ||
-           il[2] != 1 || wl[1] != 1 || wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3 ||
-           ol[3] > 60 || ol[4] > 80)
+        if(g < 192 || g > 512 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 ||
+           wl[1] != 1 || wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3)
             return false;
         if((fs[0] != 1 && fs[0] != 2) || fs[0] != fs[1] || fd[0] != 1 || fd[1] != 1 || lp[0] != 1 ||
            lp[1] != 1 || rp[0] < 0 || rp[0] > 1 || rp[1] < 0 || rp[1] > 1)
@@ -233,6 +261,7 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
             return false;
 
         long_index_t image_rows, r;
+        // R is the logical output work, distinct from the number of P planes.
         if(!CheckedMultiply(ol[1], ol[3], MaxIndex, image_rows) ||
            !CheckedMultiply(image_rows, ol[4], MaxIndex, r) || r < 513 || r > 201600)
             return false;
@@ -250,14 +279,17 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
            ws[0] != 9 || ws[1] != 9 || ws[2] != 1 || ws[3] != 3 || ws[4] != 1)
             return false;
 
-        const long_index_t strips = (ol[3] - 1) / 8 + 1;
-        long_index_t splits, weights, partials;
-        if(!CheckedMultiply(il[1], strips, MaxIndex, splits) ||
+        const long_index_t height_strips = (ol[3] - 1) / 8 + 1;
+        const long_index_t width_strips  = (ol[4] - 1) / 80 + 1;
+        long_index_t strips, splits, ctas, weights, partials;
+        if(!CheckedMultiply(height_strips, width_strips, MaxIndex, strips) ||
+           !CheckedMultiply(il[1], strips, 336, splits) ||
+           !CheckedMultiply(splits, (g - 1) / 16 + 1, 10752, ctas) ||
            !CheckedMultiply(g, 9, MaxBf16Elements, weights) ||
            !CheckedMultiply(splits, weights, MaxFloatElements, partials))
             return false;
         const auto logical_bytes = static_cast<size_t>(partials) * sizeof(float);
-        if(logical_bytes > static_cast<size_t>(MaxBytes - 255))
+        if(logical_bytes > 6193152 || logical_bytes > static_cast<size_t>(MaxBytes - 255))
             return false;
         a.groups           = g;
         a.in_h             = il[3];
@@ -265,6 +297,7 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
         a.out_h            = ol[3];
         a.out_w            = ol[4];
         a.strips_per_image = strips;
+        a.width_strips     = width_strips;
         a.partial_splits   = splits;
         a.workspace_bytes  = (logical_bytes + 255) & ~size_t{255};
         return true;
@@ -286,12 +319,13 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
                                                       const std::array<Index, 2>& rp,
                                                       index_t split)
     {
-        auto a           = std::make_unique<Argument>();
-        a->in            = static_cast<const bhalf_t*>(in);
-        a->wei           = static_cast<bhalf_t*>(wei);
-        a->out           = static_cast<const bhalf_t*>(out);
-        a->partial       = nullptr;
-        a->k_batch_      = (split == -1 || split == 0) ? 1 : split;
+        auto a      = std::make_unique<Argument>();
+        a->in       = static_cast<const bhalf_t*>(in);
+        a->wei      = static_cast<bhalf_t*>(wei);
+        a->out      = static_cast<const bhalf_t*>(out);
+        a->partial  = nullptr;
+        a->k_batch_ = (split == -1 || split == 0) ? 1 : split;
+        // The checked resource envelope bounds new row and width strips.
         a->valid         = Validate(il, is, wl, ws, ol, os, fs, fd, lp, rp, split, *a);
         a->filter_stride = a->valid ? static_cast<index_t>(fs[0]) : 0;
         return a;
