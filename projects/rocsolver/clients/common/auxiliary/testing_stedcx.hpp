@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -253,7 +253,7 @@ void stedcx_getError(const rocblas_handle handle,
         // error is ||hW - hWRes|| / ||hW||
         // using frobenius norm
         double err = norm_error('F', 1, nn, 1, hW[0], hWRes[0]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
 
         if(evect != rocblas_evect_none)
         {
@@ -269,7 +269,7 @@ void stedcx_getError(const rocblas_handle handle,
                 cpu_gemm(rocblas_operation_conjugate_transpose, rocblas_operation_none, nn, nn, n,
                          T(1), hCRes[0], ldc, hCRes[0], ldc, T(0), CCres.data(), nn);
                 err = norm_error('F', nn, nn, nn, I.data(), CCres.data());
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
 
             // for each of the nev eigenvalues w_j, verify that the associated eigenvector is in the
@@ -297,7 +297,7 @@ void stedcx_getError(const rocblas_handle handle,
             // error is then ||hC - hCRes|| / ||hC||
             // using frobenius norm
             err = norm_error('F', n, nn, ldc, hC[0], hCRes[0]);
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }
