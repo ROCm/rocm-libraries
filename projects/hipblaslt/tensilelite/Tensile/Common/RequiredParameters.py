@@ -174,5 +174,10 @@ def getRequiredParametersMin() -> set:
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
+        # Changes the emitted assembly, so it has to key the kernel name or two
+        # kernels differing only in the StinkyTofu post-pass dedup to one.
+        # _getName drops it again when it is 0, so shipped kernels keep their
+        # current names.
+        'StinkySubtile',
         'ClusterDim',
     })

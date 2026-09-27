@@ -5296,6 +5296,113 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
+  # StinkyTofu module options that do not depend on which path emitted the
+  # kernel: the debug group from globalParameters, the tile shape emitAssembly
+  # renders into the kernel header, and the arch capabilities the hazard passes
+  # read. A caller adds the options that describe its own pipeline configuration.
+  ##############################################################################
+  def _stinkyTofuModuleOptions(self, kernel):
+    return {# gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
+            # colliding stepping is targeted) tells StinkyTofu which cost table to use.
+            "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
+            "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+            "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
+            "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
+            "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
+            "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
+            "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
+            "TileA0": kernel["ThreadTile0"],
+            "TileB0": kernel["ThreadTile1"],
+            "TileM0": kernel["MacroTile0"],
+            "wavefrontSize": kernel["WavefrontSize"],
+            "SubGroup0": kernel["SubGroup0"],
+            "SubGroup1": kernel["SubGroup1"],
+            "WaveGroup0": kernel["MIWaveGroup"][0],
+            "WaveGroup1": kernel["MIWaveGroup"][1],
+            "VectorWidthA": kernel["VectorWidthA"],
+            "VectorWidthB": kernel["VectorWidthB"],
+            "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
+            "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
+            "DirectToLdsA": bool(kernel["DirectToLdsA"]),
+            "DirectToLdsB": bool(kernel["DirectToLdsB"]),
+            "UseSgprForGRO": kernel["_UseSgprForGRO"],
+            # Auto-allocated 3-SGPR triple (even-aligned pair + scratch),
+            # reserved in _initKernel and freed at label_MultiGemmEnd; -1 when
+            # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
+            "SwInstructionPrefetchAbsBaseSgpr": int(self.states.swPrefetchAbsBaseSgpr),
+            # Arch capability read by Gfx1250HazardPass: XNACK replay
+            # can reorder in-flight memory ops, so the pass inserts
+            # s_wait_xcnt drains to order them.
+            "RequiresXCntForVolatileVMEM": bool(self.states.archCaps["RequiresXCntForVolatileVMEM"]),
+            "EnableXnackReplay": bool(self.states.archCaps["EnableXnackReplay"]),
+           }
+
+  ##############################################################################
+  # StinkyTofu post-pass over a finished subtile kernel: the same OptLevel 0
+  # pipeline kernelBody already runs for a classic gfx1250 kernel, adding one pass
+  # per StinkySubtile level. See ValidParameters for the levels and for why none
+  # of them can reorder an instruction or rewrite a wait.
+  #
+  # Returns the optimized assembly, or None to keep the subtile output as-is.
+  ##############################################################################
+  def _stinkyTofuSubtilePostPass(self, kernel, moduleKernelBody, fs):
+    level = kernel["StinkySubtile"]
+    # A kernel from MT320x256 up with PrefetchGL2 >= 1 references a VGPR through
+    # an offset expression, which rocIsaPass's buildGraph rejects with "GPR index
+    # out of range". Unguarded, TensileCreateLibrary drops the kernel with only a
+    # warning, so the library would quietly shrink.
+    try:
+      return self._stinkyTofuSubtileOptimize(kernel, moduleKernelBody, fs, level)
+    except RuntimeError as e:
+      printWarning(f"StinkySubtile={level}: keeping the un-optimized subtile assembly for "
+                   f"{self.states.kernelName}: {e}")
+      return None
+
+  def _stinkyTofuSubtileOptimize(self, kernel, moduleKernelBody, fs, level):
+    # StinkyTofu reasons about physical register numbers, and only rocIsaPass
+    # resolves a symbolic one: buildGraph -> _setName2RegNum turns s[sgprFoo]
+    # into sN. VGPRs carry their own index, so without this every SGPR reaches
+    # StinkyTofu as -1 and Gfx1250HazardPass reads an unrelated register.
+    ripo = rocIsaPassOption()
+    # The bank-conflict analysis behind getCycles throws on a kernel with no
+    # "Local Read Addresses" module, which subtile does not emit.
+    ripo.getCycles = False
+    # Off even though the classic path turns it on for HasSchedMode: delay_alu
+    # placement is scheduling, which Components/Subtile owns.
+    ripo.insertDelayAlu = False
+    ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
+    if kernel["ProblemType"]["ActivationType"] == "all":
+      ripo.removeDupAssign = False
+    rocIsaPass(moduleKernelBody, ripo)
+
+    # Resolved from the same knob as on the classic path, so the flavour is the
+    # config's choice and not this hook's. The knob defaults to Relative(1), not
+    # Auto(-1), so a config that does not mention it gets the PC-relative passes.
+    swpRelEnable, swpAbsEnable = (False, False)
+    if level >= 4:
+      swpRelEnable, swpAbsEnable = resolveSwInstructionPrefetch(
+          kernel.get("SwInstructionPrefetch", SW_INSTRUCTION_PREFETCH_AUTO),
+          self.states.version == (12, 5, 0),
+          bool(kernel.get("StreamK", 0)),
+          kernel["ProblemType"]["DataType"].isDouble())
+
+    stinky_module_options = {**self._stinkyTofuModuleOptions(kernel),
+                             # The gate that keeps scheduling with Components/Subtile.
+                             "OptLevel": 0,
+                             "EnableHazardCoverage": level >= 2,
+                             "EnableMovePropagation": level >= 3,
+                             "EnableSwInstructionPrefetchRelStatic": swpRelEnable,
+                             "EnableSwInstructionPrefetchAbs": swpAbsEnable,
+                            }
+
+    print2(f"StinkyTofu subtile module options: {stinky_module_options}")
+    moduleKernelBody.body.setParent()
+    stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
+                                         signature=fs, options=stinky_module_options)
+    stModule.runOptimizationPipeline()
+    return stModule.emitAssembly()
+
+  ##############################################################################
   # Kernel Body - Subtiled version
   ##############################################################################
   def kernelBodySubtile(self, kernel, tensorParametersA, tensorParametersB):
@@ -5639,6 +5746,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
+
+    if kernel["StinkySubtile"]:
+      st_asm = self._stinkyTofuSubtilePostPass(kernel, moduleKernelBody, fs)
+      if st_asm is not None:
+        return (error, st_asm)
 
     return (error, str(moduleKernelBody))
 
@@ -7299,35 +7411,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                 or not globalParameters.get("DisableSTWaitCnt", True))
 
       # Set StinkyTofu module options
-      stinky_module_options = {"OptLevel": stinky_opt_level,
-                               # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
-                               # colliding stepping is targeted) tells StinkyTofu which cost table to use.
-                               "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
-                               "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
-                               "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
-                               "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
-                               "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
-                               "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
-                               "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
+      stinky_module_options = {**self._stinkyTofuModuleOptions(kernel),
+                               "OptLevel": stinky_opt_level,
                                "EnableWaitCntInsertion": enableWaitCntInsertion,
                                # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
                                "EnableESM2": kernel["EnableStinkyTofuESM2"],
                                "EnableESM2TrackValuVsrc": kernel["EnableESM2TrackValuVsrc"],
-                               "TileA0": kernel["ThreadTile0"],
-                               "TileB0": kernel["ThreadTile1"],
-                               "TileM0": kernel["MacroTile0"],
-                               "wavefrontSize": kernel["WavefrontSize"],
-                               "SubGroup0": kernel["SubGroup0"],
-                               "SubGroup1": kernel["SubGroup1"],
-                               "WaveGroup0": kernel["MIWaveGroup"][0],
-                               "WaveGroup1": kernel["MIWaveGroup"][1],
-                               "VectorWidthA": kernel["VectorWidthA"],
-                               "VectorWidthB": kernel["VectorWidthB"],
-                               "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
-                               "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
-                               "DirectToLdsA": bool(kernel["DirectToLdsA"]),
-                               "DirectToLdsB": bool(kernel["DirectToLdsB"]),
-                               "UseSgprForGRO": kernel["_UseSgprForGRO"],
                                "EnableSwInstructionPrefetchRelStatic": swpRelEnable,
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
@@ -7351,18 +7440,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Abs SW prefetch: mutually exclusive with PC-rel.
                                # Abs takes priority when both are True (backend enforces via else-if).
                                "EnableSwInstructionPrefetchAbs": swpAbsEnable,
-                               # Auto-allocated 3-SGPR triple (even-aligned pair + scratch),
-                               # reserved in _initKernel and freed at label_MultiGemmEnd; -1 when
-                               # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
-                               "SwInstructionPrefetchAbsBaseSgpr": int(
-                                   self.states.swPrefetchAbsBaseSgpr),
-                               # Arch capability read by Gfx1250HazardPass: XNACK replay
-                               # can reorder in-flight memory ops, so the pass inserts
-                               # s_wait_xcnt drains to order them.
-                               "RequiresXCntForVolatileVMEM": bool(
-                                   self.states.archCaps["RequiresXCntForVolatileVMEM"]),
-                               "EnableXnackReplay": bool(
-                                   self.states.archCaps["EnableXnackReplay"]),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
