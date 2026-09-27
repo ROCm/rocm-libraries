@@ -42,6 +42,10 @@
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
+#include <optional>
+#include <string>
+#include <string_view>
+
 namespace miopen {
 
 namespace conv {
@@ -476,6 +480,71 @@ inline void DebugPrintConvTensors(const ConvTensors& conv_tensors)
 inline size_t GetPackedSize(const TensorDescriptor& td)
 {
     return td.GetElementSize() * GetTypeSize(td.GetType());
+}
+
+// Only selected CK families whose complete invocation defines the packed E tensor
+// independently of its previous contents may omit the NCHW old-output transpose.
+// Keep this list tied to the CK implementations, not to dtype, spatial-size or
+// beta-zero heuristics. The caller also checks invocation scalars and disjoint
+// descriptors/pointers; unsupported or newly introduced families default to false.
+inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescription& problem,
+                                               const std::string& selected_id,
+                                               std::optional<int> split_k)
+{
+    if(!problem.Is2d() || !problem.IsLayoutDefault() ||
+       problem.GetConv().mode != miopenConvolution ||
+       problem.GetConv().trans_output_pads.size() != 2 ||
+       problem.GetConv().trans_output_pads[0] != 0 || problem.GetConv().trans_output_pads[1] != 0 ||
+       (!problem.IsFp16() && !problem.IsBfp16()) || problem.HasNonPackedTensors() ||
+       problem.GetGroupCount() == 0 || problem.GetAlphaBetaCase() != DEFAULT)
+        return false;
+
+    for(const auto* desc : {&problem.GetIn(), &problem.GetWeights(), &problem.GetOut()})
+        for(const auto length : desc->GetLengths())
+            if(length == 0)
+                return false;
+
+    const auto starts_with = [&](const char* prefix) { return selected_id.rfind(prefix, 0) == 0; };
+    const auto ends_with   = [&](const char* suffix) {
+        const std::string_view end{suffix};
+        return selected_id.size() >= end.size() &&
+               selected_id.compare(selected_id.size() - end.size(), end.size(), end) == 0;
+    };
+
+    if(problem.IsDirectionForward())
+    {
+        // Ordinary unmerged packed FWD runs a Set epilogue over every logical
+        // M/N coordinate, including partial tiles. Exclude both merge modes.
+        return !split_k &&
+               ((starts_with("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<") &&
+                 ends_with(", 1, 1>")) ||
+                ((starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<") ||
+                  starts_with("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<")) &&
+                 ends_with(", 1>")));
+    }
+    if(problem.GetDirection() == miopen::conv::Direction::BackwardData)
+    {
+        // No-D XDL v1/v3 always clear full packed E before the residue GEMMs;
+        // no-D WMMA v3 either does the same or proves a split-1 pointwise Set.
+        // A positive filter guarantees at least one nonempty residue/slice.
+        return split_k && *split_k > 0 &&
+               (starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<") ||
+                starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3<") ||
+                starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_WmmaPorted<") ||
+                starts_with("DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffleV3<"));
+    }
+    if(problem.GetDirection() == miopen::conv::Direction::BackwardWeights)
+    {
+        // Both depthwise row-strip finalizers Set every packed weight exactly
+        // once after reducing all partials. Other direct/two-stage WRW mappings
+        // have not established a complete selected-argument proof here.
+        return split_k && *split_k == 1 && problem.IsBfp16() &&
+               (selected_id ==
+                    "DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16<16, 8, 9, Split1>" ||
+                selected_id == "DeviceGroupedConvBwdWeightDepthwiseRowStripBf16<12, 128, 11, 16, "
+                               "Fy2, Split1>");
+    }
+    return false;
 }
 
 inline size_t GetCKAlphaBetaWorkspace(const miopen::conv::ProblemDescription& problem)
