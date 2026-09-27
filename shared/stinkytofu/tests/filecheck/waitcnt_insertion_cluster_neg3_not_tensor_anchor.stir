@@ -1,0 +1,25 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Cluster s_barrier_signal/wait -3 is a handshake, not a tensor fence.
+# CHECK-LABEL: @waitcnt_insertion_cluster_neg3_not_tensor_anchor
+# CHECK: tensor_load_to_lds
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: "st.s_barrier_signal"(-3)
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: "st.s_barrier_wait"(-3)
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: s_barrier_signal
+# CHECK-SAME: -1
+
+st.func @waitcnt_insertion_cluster_neg3_not_tensor_anchor() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-3) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_wait"(-3) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1 }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}

@@ -185,6 +185,9 @@ class PersistentLoopOn(PersistentLoop):
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
             module.add(sk5CloseDoneLabel)
         else:
+            # Do not tdmWait here (vlcnt=0 stalls persist overlap). Wait persist USER -3.
+            skComponent = Component.StreamK.find(writer)
+            module.add(skComponent.persistDpMulticastCloseWait(writer, kernel))
             module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if done all StreamK iterations"))
             # Under RAP the compute section is peeled, so later tiles re-enter at
             # the second copy rather than at the loop head; the first copy exists

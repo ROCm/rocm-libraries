@@ -206,6 +206,10 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
                 WaitCntInsertionOptions waitCntOptions;
                 waitCntOptions.enableLoopCarriedTokenDeps =
                     moduleOptions.EnableLoopCarriedTokenDeps;
+                // Only the multicast producer re-reads its tensor descriptor after issue;
+                // InsertClusterBarrierPass gates its prologue drain on the same condition.
+                waitCntOptions.enableTensorDescriptorWar =
+                    moduleOptions.StreamKMulticast >= kStreamKMulticastOn;
                 innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
                 if (runScheduler) innerPM.addPass(createRemoveDscntPass());
             }
@@ -240,8 +244,7 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // branches/labels are present when MSB configuration is materialized.
         if (moduleOptions.ClusterBarrier) {
             pm.addPass(createInsertClusterBarrierPass(
-                /*streamKMulticast=*/moduleOptions.StreamKMulticast,
-                /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
+                static_cast<StreamKMulticastMode>(moduleOptions.StreamKMulticast),
                 /*rule3SignalLeadCycles=*/
                 resolvedKnobs.clusterBarrierRule3SignalLeadCycles));
         }

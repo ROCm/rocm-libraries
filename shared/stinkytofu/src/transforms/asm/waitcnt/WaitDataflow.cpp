@@ -29,6 +29,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 #define DEBUG_TYPE "WaitDataflow"
@@ -187,7 +188,13 @@ bool isPhi(const StinkyInstruction& inst) {
 }
 
 bool isTensorAnchor(const StinkyInstruction& inst) {
-    return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+    if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return true;
+    // Cluster -3 is a handshake, not an LDS/tensor fence.
+    return isBarrier(inst) && !isClusterSplitBarrier(inst);
+}
+
+bool isLdsFenceBarrier(const StinkyInstruction& inst) {
+    return isBarrier(inst) && !isClusterSplitBarrier(inst);
 }
 
 bool hasUntaggedTensorAnchor(BasicBlock& bb) {
@@ -210,6 +217,16 @@ bool isOnSamePipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
 bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     for (int t : a) {
         if (std::find(b.begin(), b.end(), t) != b.end()) return true;
+    }
+    return false;
+}
+
+bool instWritesSrcOf(const StinkyInstruction& writer, const StinkyInstruction& reader) {
+    for (const StinkyRegister& dst : writer.getDestRegs()) {
+        if (!dst.isRegister()) continue;
+        for (const StinkyRegister& src : reader.getSrcRegs()) {
+            if (src.isRegister() && dst.isOverlap(src)) return true;
+        }
     }
     return false;
 }
@@ -728,7 +745,7 @@ int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowSta
 // Compute per-counter required waits for `inst` against the live `state`.
 void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                           const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& rawNeedsWait,
-                          int required[CK_Count]) {
+                          bool tensorDescriptorWarEnabled, int required[CK_Count]) {
     // Required wait per counter. -1 = no constraint yet.
     for (int c = 0; c < CK_Count; ++c) required[c] = WaitCountSpec::kUnused;
 
@@ -782,6 +799,23 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         return false;
     };
 
+    // WAR on in-flight tensor_load_to_lds descriptors: drain TDM before s_add/s_xor of src SGPRs.
+    // Off unless the caller opts in, because the plain TDM double-buffer idiom issues a load and
+    // then immediately advances that same descriptor; draining there would serialise every fill.
+    if (tensorDescriptorWarEnabled && !inst->is(InstFlag::IF_WaitCnt) &&
+        !inst->is(InstFlag::IF_WaitTensorCnt) && !inst->getDestRegs().empty()) {
+        for (const auto& q : state.queues[CK_Tensor]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == nullptr || op == inst) continue;
+                if (!isTensorLoad(*op)) continue;
+                if (!instWritesSrcOf(*inst, *op)) continue;
+                tightenRequired(CK_Tensor, clampWaitCount(qsize - idx - 1));
+            }
+        }
+    }
+
     // WAR-on-LDS / barrier ordering: the SSA def-use chain captures
     // RAW (consumer's src == producer) but NOT anti-dependencies. An
     // LDS writer must wait for prior LDS readers on the same token,
@@ -818,7 +852,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
     }
-    if (isBarrier(*inst)) {
+    if (isLdsFenceBarrier(*inst)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
     }
@@ -859,7 +893,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         }
     };
 
-    if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
+    if (isLdsWriterAnchor(*inst) || isLdsFenceBarrier(*inst)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanAsyncAntiDeps(tk->tokens);
     }
@@ -871,7 +905,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         anyOpInFlight(CK_Tensor)) {
         required[CK_Tensor] = 0;
     }
-    if ((isLdsWriterAnchor(*inst) || isBarrier(*inst)) &&
+    if ((isLdsWriterAnchor(*inst) || isLdsFenceBarrier(*inst)) &&
         inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Async)) {
         required[CK_Async] = 0;
     }
@@ -879,7 +913,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
         required[CK_DS] = 0;
     }
-    if (isBarrier(*inst) && anyOpInFlight(CK_DS)) {
+    if (isLdsFenceBarrier(*inst) && anyOpInFlight(CK_DS)) {
         bool needs = inst->getModifier<MemTokenData>() == nullptr;
         if (!needs) {
             for (const auto& q : state.queues[CK_DS]) {
@@ -943,7 +977,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         if (creditIfObservedWait(*inst, state, emit)) continue;
 
         int required[CK_Count];
-        computeRequiredWaits(inst, state, rawNeedsWait, required);
+        computeRequiredWaits(inst, state, rawNeedsWait, tensorDescriptorWarEnabled, required);
 
         // Decide what to emit (apply redundancy elision) and trim per-pred
         // queues accordingly.
@@ -1135,7 +1169,8 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 if (creditIfObservedWait(*inst, state, emit)) continue;
 
                 int computed[CK_Count];
-                computeRequiredWaits(inst, state, rawNeedsWait, computed);
+                computeRequiredWaits(inst, state, rawNeedsWait, tensorDescriptorWarEnabled,
+                                     computed);
 
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.

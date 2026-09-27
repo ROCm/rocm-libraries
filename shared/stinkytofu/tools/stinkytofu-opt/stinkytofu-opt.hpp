@@ -230,6 +230,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
+         options.enableTensorDescriptorWar = hasPassArg(args, "enableTensorDescriptorWar");
          return createStinkyWaitCntInsertionPass(options);
      }},
     // Gfx1250HazardPass accepts:
@@ -396,7 +397,25 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertInitialUnclausedVmemPass",
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
-    {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
+    // InsertClusterBarrierPass accepts:
+    //   streamKMulticast          — StreamK cluster multicast is on, i.e. the
+    //                               kernel has TDM broadcast (ld_bcst). Emits the
+    //                               producer-side tensor drain and suppresses the
+    //                               Rule 1/2/3/4 cluster handshakes. Absent means
+    //                               multicast off (gfx1250 v0): handshakes only,
+    //                               no drain.
+    //   rule3SignalLeadCycles=N   — how far ahead of its wait the Rule 3 signal is
+    //                               targeted (default 100; 0 co-locates them).
+    {"InsertClusterBarrierPass",
+     [](const std::vector<std::string>& args) {
+         constexpr int kDefaultRule3SignalLeadCycles = 100;
+         const StreamKMulticastMode multicast = hasPassArg(args, "streamKMulticast")
+                                                    ? kStreamKMulticastOn
+                                                    : kStreamKMulticastOff;
+         const std::string lead = passArgValue(args, "rule3SignalLeadCycles");
+         return createInsertClusterBarrierPass(
+             multicast, lead.empty() ? kDefaultRule3SignalLeadCycles : std::atoi(lead.c_str()));
+     }},
     {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",

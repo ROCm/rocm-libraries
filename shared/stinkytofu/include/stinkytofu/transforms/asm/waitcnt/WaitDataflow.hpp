@@ -197,6 +197,14 @@ class WaitDataflow {
         loopCarriedTokenDepsEnabled = enabled;
     }
 
+    /// Enable or disable the tensor-descriptor WAR rule, which drains the
+    /// tensor counter before an instruction overwrites an SGPR that an
+    /// in-flight tensor_load_to_lds reads. Disabled by default: only the
+    /// cluster-multicast producer keeps reading its descriptor after issue.
+    void setTensorDescriptorWarEnabled(bool enabled) {
+        tensorDescriptorWarEnabled = enabled;
+    }
+
     /// Materialise the conservative per-consumer wait plan from the
     /// converged dataflow state. Run WaitPlanOptimizer(s) on the result,
     /// then finalizePlan() before emit.
@@ -235,6 +243,7 @@ class WaitDataflow {
     bool capHit = false;
     unsigned iterationCap = 0;
     bool loopCarriedTokenDepsEnabled = false;
+    bool tensorDescriptorWarEnabled = false;
 
     /// (block, counter) pairs whose per-pred queue exceeded the bounded
     /// hardware-count window during a solver sweep. Older producers are

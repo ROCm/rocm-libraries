@@ -1,7 +1,11 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250v0]
+
 GlobalParameters:
   SyncsPerBenchmark: 0
+  Architecture: gfx1250
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
@@ -13,22 +17,19 @@ GlobalParameters:
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
+  DataInitTypeC: 3
+  DataInitSeed: 12345
   PrintLevel: 2
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
 
 BenchmarkProblems:
-  #######################################
-  # TN - StreamK=3, full tree-reduction (no StreamKForceDPOnly), 1-D ClusterDim
-  # range [2,1]/[4,1]/[8,1]. Same base sweep as sk_mxf4gemm_tdm.yaml with a 1-D
-  # ClusterDim range added: exercises the enableCluster guard in
-  # StreamKTwoTileDPFirst.preLoop on the general/split tile-splitting + fixup path
-  # (not just the DP-only grid-stride path) across cluster widths 2/4/8.
-  #######################################
+  # One physical tile plane persists through two or three logical batches.
+  # N has seven tiles, so Ck=4 also exercises padded peers on each batch pass.
   -
-    - # ProblemType, TN
+    -
       OperationType: GEMM
-      DataType: F4
+      DataType: F8
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
@@ -42,18 +43,14 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # BenchmarkProblemSizeGroup - Standard
+    -
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [true]
-        - MatrixInstruction:
-          - [16, 16, 128, 1,  1,  1, 1,  2, 2]
-          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
-          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction: [[16, 16, 128, 1, 1, 2, 2, 2, 2]]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -66,17 +63,16 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [True, False]
-        - TDMInst: [3]
+        - LDSTrInst: [False]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [0, 4]
-        - SourceSwap: [false]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [false]
+        - ExpandPointerSwap: [False]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
@@ -84,18 +80,23 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - StreamKForceDPOnly: [0]
+        - StreamKFixupTreeReduction: [0]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - WorkGroupMapping: [1]
-        - ClusterDim: [[2, 1], [4, 1], [8, 1]]
+        - TDMInst: [3]
+        - MXLoadInst: ["TDM"]
+        - MXScaleFormat: ["InMemorySwizzle"]
+        - ClusterDim: [[2, 4]]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [2048, 256, 1, 1024]
-          - Exact: [2048, 512, 1, 1056]
+          - Exact: [128, 448, 2, 1024]
+          - Exact: [128, 448, 3, 1024]
         - ActivationArgs:
           - [Enum: none]

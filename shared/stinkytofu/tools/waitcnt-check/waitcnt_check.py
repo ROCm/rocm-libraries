@@ -659,6 +659,17 @@ def is_barrier(inst: Instruction) -> bool:
     return inst.opcode.startswith("s_barrier")
 
 
+def is_cluster_split_barrier(inst: Instruction) -> bool:
+    """Cluster s_barrier_signal|wait -3. Mirrors C++ isClusterSplitBarrier."""
+    if inst.opcode not in ("s_barrier_signal", "s_barrier_wait"):
+        return False
+    return any(s == -3 for s in inst.srcs if isinstance(s, int))
+
+
+def is_lds_fence_barrier(inst: Instruction) -> bool:
+    return is_barrier(inst) and not is_cluster_split_barrier(inst)
+
+
 def is_ds_read(inst: Instruction) -> bool:
     return inst.opcode.startswith("ds_read") or inst.opcode.startswith("ds_load")
 
@@ -672,9 +683,9 @@ def is_ds_atomic(inst: Instruction) -> bool:
 
 
 def is_tensor_anchor(inst: Instruction) -> bool:
-    return (
-        is_barrier(inst) or is_ds_read(inst) or is_ds_write(inst) or is_ds_atomic(inst)
-    )
+    if is_ds_read(inst) or is_ds_write(inst) or is_ds_atomic(inst):
+        return True
+    return is_lds_fence_barrier(inst)
 
 
 def is_lds_writer_anchor(inst: Instruction) -> bool:
@@ -721,7 +732,7 @@ def is_on_same_pipeline(a: Instruction, b: Instruction) -> bool:
 
 
 def raw_needs_wait_tensor(inst: Instruction, num_waves: int) -> bool:
-    return is_barrier(inst) or num_waves == 1
+    return is_lds_fence_barrier(inst) or num_waves == 1
 
 
 def raw_needs_wait(inst: Instruction, ck: CK, num_waves: int) -> bool:
@@ -967,7 +978,7 @@ def collect_war_deps(
     inst: Instruction, state: CounterState
 ) -> List[Tuple[Instruction, CK]]:
     deps: List[Tuple[Instruction, CK]] = []
-    barrier_mode = is_barrier(inst)
+    barrier_mode = is_lds_fence_barrier(inst)
     if not is_lds_writer_anchor(inst) and not barrier_mode:
         return deps
 
@@ -1041,7 +1052,7 @@ def collect_conservative_deps(
             for prod in state.iter_ops(CK.DS):
                 if state.count_from(CK.DS, prod) > 0:
                     deps.append((prod, CK.DS))
-    if is_barrier(inst) and state.in_flight(CK.DS):
+    if is_lds_fence_barrier(inst) and state.in_flight(CK.DS):
         barrier_untagged = not inst.memtokens()
         for prod in state.iter_ops(CK.DS):
             if barrier_untagged or not prod.memtokens():
@@ -1053,11 +1064,41 @@ def collect_conservative_deps(
                 deps.append((prod, CK.TENSOR))
     # Untagged LDS writer / barrier cannot be proven disjoint from any in-flight
     # async LDS reader, so drain asynccnt fully.
-    if (is_lds_writer_anchor(inst) or is_barrier(inst)) and not inst.memtokens():
+    if (
+        is_lds_writer_anchor(inst) or is_lds_fence_barrier(inst)
+    ) and not inst.memtokens():
         if state.in_flight(CK.ASYNC):
             for prod in state.iter_ops(CK.ASYNC):
                 if state.count_from(CK.ASYNC, prod) > 0:
                     deps.append((prod, CK.ASYNC))
+    return deps
+
+
+def collect_tensor_descriptor_war_deps(
+    inst: Instruction, state: CounterState
+) -> List[Tuple[Instruction, CK]]:
+    """SGPR WAR on an in-flight tensor_load_to_lds descriptor.
+
+    Hardware keeps reading the descriptor after issue. SIA=4 can schedule
+    s_add/s_xor of tdm*Group0 before wait_tensorcnt; drain the overlapping
+    TDM first. Mirrors WaitDataflow.cpp instWritesSrcOf.
+    """
+    if inst.opcode.startswith("s_wait") or not inst.dests:
+        return []
+    dests = {(r.cls, r.index) for r in inst.dests}
+    deps: List[Tuple[Instruction, CK]] = []
+    seen: Set[int] = set()
+    for prod in state.iter_ops(CK.TENSOR):
+        if prod.uid == inst.uid or prod.opcode != "tensor_load_to_lds":
+            continue
+        srcs = {(r.cls, r.index) for r in _operand_regs(prod.srcs)}
+        if not (dests & srcs):
+            continue
+        if prod.uid in seen:
+            continue
+        if state.count_from(CK.TENSOR, prod) > 0:
+            deps.append((prod, CK.TENSOR))
+            seen.add(prod.uid)
     return deps
 
 
@@ -1074,6 +1115,7 @@ def collect_all_deps(
         collect_war_deps,
         collect_async_war_deps,
         collect_conservative_deps,
+        collect_tensor_descriptor_war_deps,
     ):
         for prod, ck in collector(inst, state):
             key = (prod.uid, ck)
