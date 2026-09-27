@@ -24,9 +24,37 @@
 #include "rocsparse_utility.hpp"
 
 #include "internal/conversion/rocsparse_csr2coo.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csr2coo.hpp"
 
 #include "csr2coo_device.h"
+
+namespace
+{
+    // Blocks needed to cover m rows at (BLOCKSIZE / WF_SIZE) rows each, clamped to the
+    // device grid.x limit. csr2coo_kernel grid-strides over the block rows the clamp
+    // drops.
+    //
+    // The int64_t cast on WF_SIZE * m is the pre-existing, deliberate one: it is the
+    // reference idiom of this epic and the arithmetic below it was never the problem.
+    // What was missing (AISPARSE-685) is that the correctly computed 64-bit result was
+    // assigned straight into a dim3, narrowing it back to unsigned int with nothing
+    // behind it. Eight call sites differ only in WF_SIZE, so they share this.
+    //
+    // Deliberately local: AISPARSE-696 (PR #11512) adds rocsparse::ceil_div() and
+    // rocsparse::get_grid_size() to rocsparse_common.h, but it has not merged and
+    // rocsparse_common.h/.hpp are a live conflict zone (AISPARSE-677/678/696). Once
+    // #11512 lands the body below is the one-line
+    //   return rocsparse::get_grid_size(
+    //       rocsparse::ceil_div(static_cast<int64_t>(WF_SIZE) * m, BLOCKSIZE),
+    //       handle->properties.maxGridSize[0]);
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE>
+    int64_t csr2coo_grid_size_x(rocsparse_handle handle, int64_t m)
+    {
+        return rocsparse::min((static_cast<int64_t>(WF_SIZE) * m - 1) / BLOCKSIZE + 1,
+                              static_cast<int64_t>(handle->properties.maxGridSize[0]));
+    }
+}
 
 template <typename I, typename J>
 rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
@@ -48,7 +76,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     if(nnz_per_row < 4)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 2>),
-                                           dim3(((int64_t)2 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 2>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -61,7 +89,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else if(nnz_per_row < 8)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 4>),
-                                           dim3(((int64_t)4 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 4>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -74,7 +102,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else if(nnz_per_row < 16)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 8>),
-                                           dim3(((int64_t)8 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 8>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -87,7 +115,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else if(nnz_per_row < 32)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 16>),
-                                           dim3(((int64_t)16 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 16>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -100,7 +128,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else if(nnz_per_row < 64)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 32>),
-                                           dim3(((int64_t)32 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 32>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -113,7 +141,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else if(nnz_per_row < 128)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 64>),
-                                           dim3(((int64_t)64 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 64>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -126,7 +154,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else if(nnz_per_row < 256)
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 128>),
-                                           dim3(((int64_t)128 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 128>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
@@ -139,7 +167,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
     else
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csr2coo_kernel<CSR2COO_DIM, 256>),
-                                           dim3(((int64_t)256 * m - 1) / CSR2COO_DIM + 1),
+                                           dim3(csr2coo_grid_size_x<CSR2COO_DIM, 256>(handle, m)),
                                            dim3(CSR2COO_DIM),
                                            0,
                                            stream,
