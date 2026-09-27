@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,7 +56,7 @@ extern "C" {
 *  If \p nnz is zero, the function returns successfully with \p result set to zero.
 *
 *  \deprecated
-*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
 *  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
@@ -80,7 +80,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p result is nullptr, \p nnz is negative,
-*          \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero, or \p idxBase 
+*          \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero, or \p idxBase
 *          is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the dot product reduction
 *          could not be allocated.
@@ -96,6 +96,63 @@ hipsparseStatus_t hipsparseCdotci(hipsparseHandle_t    handle,
                                   const hipComplex*    y,
                                   hipComplex*          result,
                                   hipsparseIndexBase_t idxBase);
+/*! \ingroup level1_module
+*  \brief Compute the dot product of a complex conjugate sparse vector with a dense
+*  vector.
+*
+*  \details
+*  \p hipsparseXdotci computes the dot product of the complex conjugate sparse vector
+*  \f$x\f$ with the dense vector \f$y\f$, such that
+*  \f[
+*    result := \bar{x}^H y
+*  \f]
+*
+*  \code{.c}
+*      result = 0
+*      for(i = 0; i < nnz; ++i)
+*      {
+*          result += conj(xVal[i]) * y[xInd[i]];
+*      }
+*  \endcode
+*
+*  \note
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
+*
+*  \note
+*  If \p nnz is zero, the function returns successfully with \p result set to zero.
+*
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
+*  @param[in]
+*  handle      handle to the hipSPARSE library context queue.
+*  @param[in]
+*  nnz         number of non-zero entries of vector \f$x\f$. Must be non-negative.
+*  @param[in]
+*  xVal        array of \p nnz values containing the elements of \f$x\f$.
+*  @param[in]
+*  xInd        array of \p nnz elements containing the indices of the non-zero
+*              values of \f$x\f$.
+*  @param[in]
+*  y           array of values in dense format. Must be pre-allocated with sufficient
+*              size to accommodate all indices specified in \p xInd.
+*  @param[out]
+*  result      pointer to the result, which can be host or device memory.
+*  @param[in]
+*  idxBase     index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*              \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p result is nullptr, \p nnz is negative,
+*          \p xVal, \p xInd, or \p y is nullptr when \p nnz is greater than zero, or \p idxBase
+*          is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the dot product reduction
+*          could not be allocated.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZdotci(hipsparseHandle_t       handle,

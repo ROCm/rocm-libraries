@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -222,6 +222,90 @@ hipsparseStatus_t hipsparseScsrgeam(hipsparseHandle_t         handle,
                                     float*                    csrValC,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC);
+/*! \ingroup extra_module
+*  \brief Sparse matrix sparse matrix addition using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrgeam multiplies the scalar \f$\alpha\f$ with the sparse
+*  \f$m \times n\f$ matrix \f$A\f$, defined in CSR storage format, multiplies the
+*  scalar \f$\beta\f$ with the sparse \f$m \times n\f$ matrix \f$B\f$, defined in CSR
+*  storage format, and adds both resulting matrices to obtain the sparse
+*  \f$m \times n\f$ matrix \f$C\f$, defined in CSR storage format, such that
+*  \f[
+*    C := \alpha \cdot A + \beta \cdot B.
+*  \f]
+*
+*  This computation involves a multi-step process. First, the user must allocate \p csrRowPtrC
+*  to have size \p m+1. The user then calls \ref hipsparseXcsrgeamNnz, which fills in the \p csrRowPtrC
+*  array and computes the total number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both
+*  arrays \p csrColIndC and \p csrValC to have size \p nnzC and calls \p hipsparseXcsrgeam to complete
+*  the computation. The desired index base in the output CSR matrix \f$C\f$ is set in the
+*  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*
+*  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
+*  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  \note This function is non-blocking and executed asynchronously with respect to the
+*        host. It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated and will be removed in a future release.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n               number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha           scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrValA         array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrColIndA      array of \p nnzA elements containing the column indices of the
+*                  sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta            scalar \f$\beta\f$.
+*  @param[in]
+*  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrValB         array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrRowPtrB      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrColIndB      array of \p nnzB elements containing the column indices of the
+*                  sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC          descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrValC         array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrRowPtrC      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrColIndC      array of elements containing the column indices of the
+*                  sparse CSR matrix \f$C\f$.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p beta,
+*          \p descrB, \p csrValB, \p csrRowPtrB, \p csrColIndB, \p descrC, \p csrValC,
+*          \p csrRowPtrC, or \p csrColIndC is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrgeam(hipsparseHandle_t         handle,
@@ -243,6 +327,90 @@ hipsparseStatus_t hipsparseDcsrgeam(hipsparseHandle_t         handle,
                                     double*                   csrValC,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC);
+/*! \ingroup extra_module
+*  \brief Sparse matrix sparse matrix addition using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrgeam multiplies the scalar \f$\alpha\f$ with the sparse
+*  \f$m \times n\f$ matrix \f$A\f$, defined in CSR storage format, multiplies the
+*  scalar \f$\beta\f$ with the sparse \f$m \times n\f$ matrix \f$B\f$, defined in CSR
+*  storage format, and adds both resulting matrices to obtain the sparse
+*  \f$m \times n\f$ matrix \f$C\f$, defined in CSR storage format, such that
+*  \f[
+*    C := \alpha \cdot A + \beta \cdot B.
+*  \f]
+*
+*  This computation involves a multi-step process. First, the user must allocate \p csrRowPtrC
+*  to have size \p m+1. The user then calls \ref hipsparseXcsrgeamNnz, which fills in the \p csrRowPtrC
+*  array and computes the total number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both
+*  arrays \p csrColIndC and \p csrValC to have size \p nnzC and calls \p hipsparseXcsrgeam to complete
+*  the computation. The desired index base in the output CSR matrix \f$C\f$ is set in the
+*  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*
+*  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
+*  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  \note This function is non-blocking and executed asynchronously with respect to the
+*        host. It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated and will be removed in a future release.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n               number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha           scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrValA         array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrColIndA      array of \p nnzA elements containing the column indices of the
+*                  sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta            scalar \f$\beta\f$.
+*  @param[in]
+*  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrValB         array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrRowPtrB      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrColIndB      array of \p nnzB elements containing the column indices of the
+*                  sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC          descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrValC         array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrRowPtrC      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrColIndC      array of elements containing the column indices of the
+*                  sparse CSR matrix \f$C\f$.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p beta,
+*          \p descrB, \p csrValB, \p csrRowPtrB, \p csrColIndB, \p descrC, \p csrValC,
+*          \p csrRowPtrC, or \p csrColIndC is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrgeam(hipsparseHandle_t         handle,
@@ -264,6 +432,90 @@ hipsparseStatus_t hipsparseCcsrgeam(hipsparseHandle_t         handle,
                                     hipComplex*               csrValC,
                                     int*                      csrRowPtrC,
                                     int*                      csrColIndC);
+/*! \ingroup extra_module
+*  \brief Sparse matrix sparse matrix addition using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrgeam multiplies the scalar \f$\alpha\f$ with the sparse
+*  \f$m \times n\f$ matrix \f$A\f$, defined in CSR storage format, multiplies the
+*  scalar \f$\beta\f$ with the sparse \f$m \times n\f$ matrix \f$B\f$, defined in CSR
+*  storage format, and adds both resulting matrices to obtain the sparse
+*  \f$m \times n\f$ matrix \f$C\f$, defined in CSR storage format, such that
+*  \f[
+*    C := \alpha \cdot A + \beta \cdot B.
+*  \f]
+*
+*  This computation involves a multi-step process. First, the user must allocate \p csrRowPtrC
+*  to have size \p m+1. The user then calls \ref hipsparseXcsrgeamNnz, which fills in the \p csrRowPtrC
+*  array and computes the total number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both
+*  arrays \p csrColIndC and \p csrValC to have size \p nnzC and calls \p hipsparseXcsrgeam to complete
+*  the computation. The desired index base in the output CSR matrix \f$C\f$ is set in the
+*  \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*
+*  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
+*  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  \note This function is non-blocking and executed asynchronously with respect to the
+*        host. It can return before the actual computation has finished.
+*
+*  \deprecated
+*  This function is deprecated and will be removed in a future release.
+*
+*  @param[in]
+*  handle          handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m               number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n               number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha           scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrValA         array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrColIndA      array of \p nnzA elements containing the column indices of the
+*                  sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta            scalar \f$\beta\f$.
+*  @param[in]
+*  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrValB         array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrRowPtrB      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrColIndB      array of \p nnzB elements containing the column indices of the
+*                  sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC          descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrValC         array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrRowPtrC      array of \p m+1 elements that point to the start of every row of the
+*                  sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrColIndC      array of elements containing the column indices of the
+*                  sparse CSR matrix \f$C\f$.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p beta,
+*          \p descrB, \p csrValB, \p csrRowPtrB, \p csrColIndB, \p descrC, \p csrValC,
+*          \p csrRowPtrC, or \p csrColIndC is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_DEPRECATED_MSG("This function is deprecated and will be removed in a future release")
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrgeam(hipsparseHandle_t         handle,
@@ -380,6 +632,75 @@ hipsparseStatus_t hipsparseScsrgeam2_bufferSizeExt(hipsparseHandle_t         han
                                                    const int*                csrSortedColIndC,
                                                    size_t*                   pBufferSizeInBytes);
 
+/*! \ingroup extra_module
+*  \details
+*  \p hipsparseXcsrgeam2_bufferSizeExt returns the size of the temporary storage buffer
+*  in bytes that is required by \ref hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2
+*  "hipsparseXcsrgeam2()". The temporary storage buffer must be allocated by the user.
+*
+*  \note
+*  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*
+*  @param[in]
+*  handle             handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                  number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n                  number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha              scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA             descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA               number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedValA      array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA   array of \p nnzA elements containing the column indices of the
+*                     sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta               scalar \f$\beta\f$.
+*  @param[in]
+*  descrB             descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB               number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedValB      array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedRowPtrB   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedColIndB   array of \p nnzB elements containing the column indices of the
+*                     sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC             descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrSortedValC      array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrSortedRowPtrC   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrSortedColIndC   array of elements containing the column indices of the
+*                     sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
+*          \p beta, \p descrB, \p csrSortedValB, \p csrSortedRowPtrB, \p csrSortedColIndB,
+*          \p descrC, \p csrSortedValC, \p csrSortedRowPtrC, \p csrSortedColIndC, or
+*          \p pBufferSizeInBytes is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrgeam2_bufferSizeExt(hipsparseHandle_t         handle,
                                                    int                       m,
@@ -402,6 +723,75 @@ hipsparseStatus_t hipsparseDcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
                                                    const int*                csrSortedColIndC,
                                                    size_t*                   pBufferSizeInBytes);
 
+/*! \ingroup extra_module
+*  \details
+*  \p hipsparseXcsrgeam2_bufferSizeExt returns the size of the temporary storage buffer
+*  in bytes that is required by \ref hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2
+*  "hipsparseXcsrgeam2()". The temporary storage buffer must be allocated by the user.
+*
+*  \note
+*  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*
+*  @param[in]
+*  handle             handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                  number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n                  number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha              scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA             descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA               number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedValA      array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA   array of \p nnzA elements containing the column indices of the
+*                     sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta               scalar \f$\beta\f$.
+*  @param[in]
+*  descrB             descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB               number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedValB      array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedRowPtrB   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedColIndB   array of \p nnzB elements containing the column indices of the
+*                     sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC             descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrSortedValC      array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrSortedRowPtrC   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrSortedColIndC   array of elements containing the column indices of the
+*                     sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
+*          \p beta, \p descrB, \p csrSortedValB, \p csrSortedRowPtrB, \p csrSortedColIndB,
+*          \p descrC, \p csrSortedValC, \p csrSortedRowPtrC, \p csrSortedColIndC, or
+*          \p pBufferSizeInBytes is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrgeam2_bufferSizeExt(hipsparseHandle_t         handle,
                                                    int                       m,
@@ -424,6 +814,75 @@ hipsparseStatus_t hipsparseCcsrgeam2_bufferSizeExt(hipsparseHandle_t         han
                                                    const int*                csrSortedColIndC,
                                                    size_t*                   pBufferSizeInBytes);
 
+/*! \ingroup extra_module
+*  \details
+*  \p hipsparseXcsrgeam2_bufferSizeExt returns the size of the temporary storage buffer
+*  in bytes that is required by \ref hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2
+*  "hipsparseXcsrgeam2()". The temporary storage buffer must be allocated by the user.
+*
+*  \note
+*  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*
+*  @param[in]
+*  handle             handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                  number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n                  number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha              scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA             descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA               number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedValA      array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA   array of \p nnzA elements containing the column indices of the
+*                     sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta               scalar \f$\beta\f$.
+*  @param[in]
+*  descrB             descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB               number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedValB      array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedRowPtrB   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedColIndB   array of \p nnzB elements containing the column indices of the
+*                     sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC             descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrSortedValC      array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrSortedRowPtrC   array of \p m+1 elements that point to the start of every row of the
+*                     sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrSortedColIndC   array of elements containing the column indices of the
+*                     sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
+*                     hipsparseXcsrgeam2Nnz() and \ref hipsparseScsrgeam2 "hipsparseXcsrgeam2()".
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
+*          \p beta, \p descrB, \p csrSortedValB, \p csrSortedRowPtrB, \p csrSortedColIndB,
+*          \p descrC, \p csrSortedValC, \p csrSortedRowPtrC, \p csrSortedColIndC, or
+*          \p pBufferSizeInBytes is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrgeam2_bufferSizeExt(hipsparseHandle_t         handle,
                                                    int                       m,
@@ -638,6 +1097,91 @@ hipsparseStatus_t hipsparseScsrgeam2(hipsparseHandle_t         handle,
                                      int*                      csrSortedColIndC,
                                      void*                     pBuffer);
 
+/*! \ingroup extra_module
+*  \brief Sparse matrix sparse matrix addition using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrgeam2 multiplies the scalar \f$\alpha\f$ with the sparse
+*  \f$m \times n\f$ matrix \f$A\f$, defined in CSR storage format, multiplies the
+*  scalar \f$\beta\f$ with the sparse \f$m \times n\f$ matrix \f$B\f$, defined in CSR
+*  storage format, and adds both resulting matrices to obtain the sparse
+*  \f$m \times n\f$ matrix \f$C\f$, defined in CSR storage format, such that
+*  \f[
+*    C := \alpha \cdot A + \beta \cdot B.
+*  \f]
+*
+*  This computation involves a multi-step process. First, the user must call
+*  \ref hipsparseScsrgeam2_bufferSizeExt "hipsparseXcsrgeam2_bufferSizeExt()" to determine the
+*  required user allocated temporary buffer size. The user then allocates this buffer and also allocates
+*  \p csrRowPtrC to have size \p m+1. Both the temporary storage buffer and \p csrRowPtrC array are then
+*  passed to \ref hipsparseXcsrgeam2Nnz, which fills in the \p csrRowPtrC array and computes the total
+*  number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both arrays \p csrColIndC and \p csrValC to have
+*  size \p nnzC and calls \p hipsparseXcsrgeam2 to complete the computation. The desired index base in
+*  the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*
+*  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
+*  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  \note This function is non-blocking and executed asynchronously with respect to the
+*        host. It can return before the actual computation has finished.
+*
+*  @param[in]
+*  handle           handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n                number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha            scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA           descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA             number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedValA    array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA array of \p nnzA elements containing the column indices of the
+*                   sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta             scalar \f$\beta\f$.
+*  @param[in]
+*  descrB           descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB             number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedValB    array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedRowPtrB array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedColIndB array of \p nnzB elements containing the column indices of the
+*                   sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC           descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrSortedValC    array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrSortedRowPtrC array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrSortedColIndC array of elements containing the column indices of the
+*                   sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  pBuffer          temporary storage buffer allocated by the user.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p beta,
+*          \p descrB, \p csrSortedValB, \p csrSortedRowPtrB, \p csrSortedColIndB, \p descrC, \p csrSortedValC,
+*          \p csrSortedRowPtrC, \p csrSortedColIndC, or \p pBuffer is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDcsrgeam2(hipsparseHandle_t         handle,
                                      int                       m,
@@ -660,6 +1204,91 @@ hipsparseStatus_t hipsparseDcsrgeam2(hipsparseHandle_t         handle,
                                      int*                      csrSortedColIndC,
                                      void*                     pBuffer);
 
+/*! \ingroup extra_module
+*  \brief Sparse matrix sparse matrix addition using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrgeam2 multiplies the scalar \f$\alpha\f$ with the sparse
+*  \f$m \times n\f$ matrix \f$A\f$, defined in CSR storage format, multiplies the
+*  scalar \f$\beta\f$ with the sparse \f$m \times n\f$ matrix \f$B\f$, defined in CSR
+*  storage format, and adds both resulting matrices to obtain the sparse
+*  \f$m \times n\f$ matrix \f$C\f$, defined in CSR storage format, such that
+*  \f[
+*    C := \alpha \cdot A + \beta \cdot B.
+*  \f]
+*
+*  This computation involves a multi-step process. First, the user must call
+*  \ref hipsparseScsrgeam2_bufferSizeExt "hipsparseXcsrgeam2_bufferSizeExt()" to determine the
+*  required user allocated temporary buffer size. The user then allocates this buffer and also allocates
+*  \p csrRowPtrC to have size \p m+1. Both the temporary storage buffer and \p csrRowPtrC array are then
+*  passed to \ref hipsparseXcsrgeam2Nnz, which fills in the \p csrRowPtrC array and computes the total
+*  number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both arrays \p csrColIndC and \p csrValC to have
+*  size \p nnzC and calls \p hipsparseXcsrgeam2 to complete the computation. The desired index base in
+*  the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*
+*  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
+*  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  \note This function is non-blocking and executed asynchronously with respect to the
+*        host. It can return before the actual computation has finished.
+*
+*  @param[in]
+*  handle           handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n                number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha            scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA           descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA             number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedValA    array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA array of \p nnzA elements containing the column indices of the
+*                   sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta             scalar \f$\beta\f$.
+*  @param[in]
+*  descrB           descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB             number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedValB    array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedRowPtrB array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedColIndB array of \p nnzB elements containing the column indices of the
+*                   sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC           descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrSortedValC    array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrSortedRowPtrC array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrSortedColIndC array of elements containing the column indices of the
+*                   sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  pBuffer          temporary storage buffer allocated by the user.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p beta,
+*          \p descrB, \p csrSortedValB, \p csrSortedRowPtrB, \p csrSortedColIndB, \p descrC, \p csrSortedValC,
+*          \p csrSortedRowPtrC, \p csrSortedColIndC, or \p pBuffer is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCcsrgeam2(hipsparseHandle_t         handle,
                                      int                       m,
@@ -682,6 +1311,91 @@ hipsparseStatus_t hipsparseCcsrgeam2(hipsparseHandle_t         handle,
                                      int*                      csrSortedColIndC,
                                      void*                     pBuffer);
 
+/*! \ingroup extra_module
+*  \brief Sparse matrix sparse matrix addition using the CSR storage format.
+*
+*  \details
+*  \p hipsparseXcsrgeam2 multiplies the scalar \f$\alpha\f$ with the sparse
+*  \f$m \times n\f$ matrix \f$A\f$, defined in CSR storage format, multiplies the
+*  scalar \f$\beta\f$ with the sparse \f$m \times n\f$ matrix \f$B\f$, defined in CSR
+*  storage format, and adds both resulting matrices to obtain the sparse
+*  \f$m \times n\f$ matrix \f$C\f$, defined in CSR storage format, such that
+*  \f[
+*    C := \alpha \cdot A + \beta \cdot B.
+*  \f]
+*
+*  This computation involves a multi-step process. First, the user must call
+*  \ref hipsparseScsrgeam2_bufferSizeExt "hipsparseXcsrgeam2_bufferSizeExt()" to determine the
+*  required user allocated temporary buffer size. The user then allocates this buffer and also allocates
+*  \p csrRowPtrC to have size \p m+1. Both the temporary storage buffer and \p csrRowPtrC array are then
+*  passed to \ref hipsparseXcsrgeam2Nnz, which fills in the \p csrRowPtrC array and computes the total
+*  number of non-zeros in \f$C\f$, \p nnzC. The user then allocates both arrays \p csrColIndC and \p csrValC to have
+*  size \p nnzC and calls \p hipsparseXcsrgeam2 to complete the computation. The desired index base in
+*  the output CSR matrix \f$C\f$ is set in the \ref hipsparseMatDescr_t \p descrC. See \ref hipsparseSetMatIndexBase().
+*
+*  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
+*  \note Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  \note This function is non-blocking and executed asynchronously with respect to the
+*        host. It can return before the actual computation has finished.
+*
+*  @param[in]
+*  handle           handle to the hipSPARSE library context queue.
+*  @param[in]
+*  m                number of rows of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  n                number of columns of the sparse CSR matrices \f$A\f$, \f$B\f$, and \f$C\f$.
+*  @param[in]
+*  alpha            scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA           descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzA             number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedValA    array of \p nnzA elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA array of \p nnzA elements containing the column indices of the
+*                   sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  beta             scalar \f$\beta\f$.
+*  @param[in]
+*  descrB           descriptor of the sparse CSR matrix \f$B\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  nnzB             number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedValB    array of \p nnzB elements of the sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedRowPtrB array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  csrSortedColIndB array of \p nnzB elements containing the column indices of the
+*                   sparse CSR matrix \f$B\f$.
+*  @param[in]
+*  descrC           descriptor of the sparse CSR matrix \f$C\f$. Currently, only
+*                   \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[out]
+*  csrSortedValC    array of elements of the sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  csrSortedRowPtrC array of \p m+1 elements that point to the start of every row of the
+*                   sparse CSR matrix \f$C\f$.
+*  @param[out]
+*  csrSortedColIndC array of elements containing the column indices of the
+*                   sparse CSR matrix \f$C\f$.
+*  @param[in]
+*  pBuffer          temporary storage buffer allocated by the user.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB,
+*          \p alpha, \p descrA, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p beta,
+*          \p descrB, \p csrSortedValB, \p csrSortedRowPtrB, \p csrSortedColIndB, \p descrC, \p csrSortedValC,
+*          \p csrSortedRowPtrC, \p csrSortedColIndC, or \p pBuffer is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
+*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*/
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseZcsrgeam2(hipsparseHandle_t         handle,
                                      int                       m,
