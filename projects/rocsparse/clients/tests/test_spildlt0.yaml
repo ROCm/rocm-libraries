@@ -63,6 +63,22 @@ Tests:
   indextype: *i32
   batch_count: [1]
 
+# AISPARSE-690 regression: see the equivalent block in test_spic0.yaml.
+# rocsparse_spildlt0 is the only public entry point that reaches csrildlt0, and
+# it also drives the csrildlt0_copy_diag launch which had the same grid.y issue.
+- name: spildlt0_large_batch_count
+  category: quick
+  function: spildlt0
+  precision: *single_precision
+  M_N:
+    - { M: 64, N: 64 }
+  apol: [rocsparse_analysis_policy_reuse]
+  baseA: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr]
+  matrix: [rocsparse_matrix_random]
+  indextype: *i32
+  batch_count: [65536]
+
 - name: spildlt0
   category: quick
   function: spildlt0

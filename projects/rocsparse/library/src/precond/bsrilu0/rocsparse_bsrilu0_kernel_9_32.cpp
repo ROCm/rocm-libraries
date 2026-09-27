@@ -374,6 +374,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_kernel_9_32(rocsparse_direction dir,
                              J                   mb,
+                             int64_t             batch_count,
                              const I* __restrict__ bsr_row_ptr,
                              const J* __restrict__ bsr_col_ind,
                              T*      bsr_val,
@@ -394,7 +395,6 @@ namespace rocsparse
                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
                              bool is_val_host_mode)
     {
-        const auto batch_index = hipBlockIdx_y;
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
             enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
@@ -402,21 +402,25 @@ namespace rocsparse
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_val_host_mode, boost_val);
         const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
-        rocsparse::bsrilu0_device_9_32<BLOCKSIZE, WFSIZE, BBDIM>(
-            dir,
-            mb,
-            bsr_row_ptr,
-            bsr_col_ind,
-            bsr_val + batch_index * bsr_val_stride,
-            bsr_diag_ind,
-            bsr_dim,
-            done_array + batch_index * done_array_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            idx_base,
-            enable_boost,
-            boost_tol,
-            boost_val);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::bsrilu0_device_9_32<BLOCKSIZE, WFSIZE, BBDIM>(
+                dir,
+                mb,
+                bsr_row_ptr,
+                bsr_col_ind,
+                bsr_val + batch_index * bsr_val_stride,
+                bsr_diag_ind,
+                bsr_dim,
+                done_array + batch_index * done_array_stride,
+                map,
+                zero_pivot + batch_index * zero_pivot_stride,
+                idx_base,
+                enable_boost,
+                boost_tol,
+                boost_val);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -453,12 +457,13 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_9_32<BLOCKSIZE, WFSIZE, BBDIM>),
-            dim3(A->rows, A->batch_count),
+            dim3(A->rows, rocsparse::get_batch_grid_size(A->batch_count)),
             dim3(BBDIM, 64 / BBDIM),
             0,
             handle->stream,
             A->block_dir,
             static_cast<J>(A->rows),
+            A->batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

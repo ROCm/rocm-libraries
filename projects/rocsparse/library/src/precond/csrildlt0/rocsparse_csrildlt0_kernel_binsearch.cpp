@@ -220,7 +220,8 @@ namespace rocsparse
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrildlt0_kernel_binsearch(J m,
+    void csrildlt0_kernel_binsearch(J       m,
+                                    int64_t batch_count,
                                     const I* __restrict__ csr_row_ptr,
                                     const J* __restrict__ csr_col_ind,
                                     T*      csr_val,
@@ -265,22 +266,25 @@ namespace rocsparse
 
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost, is_boost_val_host_mode, boost_val);
 
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::csrildlt0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + batch_index * csr_val_stride,
-            csr_diag_ind,
-            done + batch_index * done_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            singular_pivot + batch_index * singular_pivot_stride,
-            tolerance,
-            idx_base,
-            boost,
-            b_tol,
-            boost_val);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csrildlt0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val + batch_index * csr_val_stride,
+                csr_diag_ind,
+                done + batch_index * done_stride,
+                map,
+                zero_pivot + batch_index * zero_pivot_stride,
+                singular_pivot + batch_index * singular_pivot_stride,
+                tolerance,
+                idx_base,
+                boost,
+                b_tol,
+                boost_val);
+        }
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
@@ -298,7 +302,7 @@ namespace rocsparse
         const int64_t done_array_stride = A->rows;
 
         const dim3 csrildlt0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                    A->batch_count);
+                                    rocsparse::get_batch_grid_size(A->batch_count));
         const dim3 csrildlt0_threads(BLOCKSIZE);
 
         auto numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
@@ -334,6 +338,7 @@ namespace rocsparse
             0,
             handle->stream,
             A->rows,
+            A->batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),

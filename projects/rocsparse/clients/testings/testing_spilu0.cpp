@@ -1343,7 +1343,123 @@ void testing_spilu0(const Arguments& arg_)
     }
 }
 
-void testing_spilu0_extra(const Arguments& arg) {}
+void testing_spilu0_extra(const Arguments& arg)
+{
+    // Regression test for AISPARSE-690, zero-batch-stride variation.
+    //
+    // csrilu0_kernel_hash_launch is the only incomplete-factorization launch
+    // that does not put A->batch_count on grid.y directly: a zero batch stride
+    // means every batch instance aliases the same values, so it collapses the
+    // batch to a single instance via
+    //     A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count
+    // and the done array is sized accordingly. The grid.y clamp added for
+    // AISPARSE-690 has to be applied to A_batch_count, not to A->batch_count.
+    //
+    // With a batch count past the grid.y cap, clamping the wrong value leaves
+    // the launch running 65535 y-blocks over a done array that only has room
+    // for one instance, and every one of them rewrites the same csr_val. So
+    // this drives a large batch count with stride 0 and checks that the single
+    // shared factorization still matches the host reference. The matrix is a
+    // 4 x 4 tridiagonal, so the device footprint is a few hundred bytes.
+    //
+    // batch_count is 65536 rather than something larger because the shared
+    // singularity-position helper (rocsparse::assign_async) puts the batch
+    // count on grid.y too and still fails above that; see AISPARSE-697. Raise
+    // this once that fix lands.
+    using T = float;
+    using I = int32_t;
+    using J = int32_t;
+
+    static constexpr int64_t size        = 4;
+    static constexpr int64_t batch_count = 65536;
+
+    rocsparse_error*       p_error = nullptr;
+    rocsparse_local_handle local_handle(arg);
+    rocsparse_handle       handle = local_handle;
+
+    hipStream_t stream;
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+
+    host_csr_matrix<T, I, J>*  h_A = rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(size);
+    device_csr_matrix<T, I, J> d_A(h_A[0]);
+    rocsparse_local_spmat      A(d_A);
+
+    // batch_count instances, all aliasing the same values (stride 0).
+    CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(A, batch_count, 0, 0));
+
+    const rocsparse_spilu0_alg      alg                      = rocsparse_spilu0_alg_default;
+    const rocsparse_analysis_policy analysis_policy          = rocsparse_analysis_policy_reuse;
+    const rocsparse_datatype        compute_datatype         = get_datatype<T>();
+    const int32_t                   boost_enable             = 0;
+    const double                    singular_pivot_tolerance = 0.0;
+
+    rocsparse_clients::spilu0_descr spilu0_descr(handle, batch_count);
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(
+        handle, spilu0_descr, rocsparse_spilu0_input_alg, &alg, sizeof(alg), p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(handle,
+                                                     spilu0_descr,
+                                                     rocsparse_spilu0_input_analysis_policy,
+                                                     &analysis_policy,
+                                                     sizeof(analysis_policy),
+                                                     p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(handle,
+                                                     spilu0_descr,
+                                                     rocsparse_spilu0_input_compute_datatype,
+                                                     &compute_datatype,
+                                                     sizeof(compute_datatype),
+                                                     p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(handle,
+                                                     spilu0_descr,
+                                                     rocsparse_spilu0_input_boost_enable,
+                                                     &boost_enable,
+                                                     sizeof(boost_enable),
+                                                     p_error));
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_set_input(handle,
+                                                     spilu0_descr,
+                                                     rocsparse_spilu0_input_singularity_tolerance,
+                                                     &singular_pivot_tolerance,
+                                                     sizeof(double),
+                                                     p_error));
+
+    for(auto stage : {rocsparse_spilu0_stage_analysis, rocsparse_spilu0_stage_compute})
+    {
+        size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
+        CHECK_ROCSPARSE_ERROR(rocsparse_spilu0_buffer_size(
+            handle, spilu0_descr, A, A, stage, &buffer_size_in_bytes, p_error));
+
+        device_dense_vector<char> buffer(buffer_size_in_bytes);
+        CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spilu0(
+            handle, spilu0_descr, A, A, stage, buffer_size_in_bytes, buffer, p_error));
+    }
+
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    // Host reference: one factorization, since every instance aliases the same
+    // values.
+    int64_t struct_pivot   = -1;
+    int64_t numeric_pivot  = -1;
+    int64_t singular_pivot = -1;
+    host_csrilu0<T, I, J>(h_A->m,
+                          h_A->ptr,
+                          h_A->ind,
+                          h_A->val,
+                          h_A->base,
+                          &struct_pivot,
+                          &numeric_pivot,
+                          &singular_pivot,
+                          &singular_pivot_tolerance,
+                          boost_enable,
+                          nullptr,
+                          nullptr);
+
+    h_A->near_check(d_A);
+
+    delete h_A;
+}
 
 #define INSTANTIATE(I, J, T)                                             \
     template void testing_spilu0_bad_arg<I, J, T>(const Arguments& arg); \
