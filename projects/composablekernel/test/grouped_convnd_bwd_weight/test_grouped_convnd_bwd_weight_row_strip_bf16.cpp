@@ -333,6 +333,29 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
     ASSERT_NE(wide_indices, nullptr);
     EXPECT_FALSE(wide_indices->narrow_device_indices);
     EXPECT_EQ(op.GetWorkSpaceSize(wide_dry.get()), WorkspaceBytes({1, 3, 1, 715827881}));
+    // The group cap is independent of batch, spatial extent and split policy.
+    for(const int groups : {1, 2, 3, 4, 5, 6, 7})
+    {
+        for(const Shape covered :
+            {Shape{2, groups, 13, 131}, Shape{1, groups, 25, 17}, Shape{1, groups, 1, 1}})
+        {
+            const Problem<ck::index_t> covered_problem(covered);
+            const Problem<ck::long_index_t> covered_long_problem(covered);
+            for(const ck::index_t split : {-1, 0, 1})
+            {
+                auto covered_dry =
+                    covered_problem.MakeArgument(op, nullptr, nullptr, nullptr, split);
+                ASSERT_TRUE(op.IsSupportedArgument(covered_dry.get()))
+                    << "G=" << groups << " split=" << split;
+                EXPECT_EQ(op.GetWorkSpaceSize(covered_dry.get()), WorkspaceBytes(covered));
+                auto covered_long_dry =
+                    covered_long_problem.MakeArgument(op, nullptr, nullptr, nullptr, split);
+                ASSERT_TRUE(op.IsSupportedArgument(covered_long_dry.get()))
+                    << "long G=" << groups << " split=" << split;
+                EXPECT_EQ(op.GetWorkSpaceSize(covered_long_dry.get()), WorkspaceBytes(covered));
+            }
+        }
+    }
     for(const ck::index_t split : {-2, 2, 3})
     {
         auto dry = problem.MakeArgument(op, nullptr, nullptr, nullptr, split);
@@ -355,20 +378,34 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, DryQueriesAndAdmission)
     wrong_filter.wei_lengths[3] = 3;
     EXPECT_FALSE(
         op.IsSupportedArgument(wrong_filter.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    auto wrong_filter_width           = problem;
+    wrong_filter_width.wei_lengths[4] = 3;
+    EXPECT_FALSE(op.IsSupportedArgument(
+        wrong_filter_width.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
     auto wrong_pad         = problem;
     wrong_pad.left_pads[0] = 4;
     EXPECT_FALSE(
         op.IsSupportedArgument(wrong_pad.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    auto wrong_right_pad          = problem;
+    wrong_right_pad.right_pads[1] = 4;
+    EXPECT_FALSE(op.IsSupportedArgument(
+        wrong_right_pad.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
     auto wrong_dilation                = problem;
     wrong_dilation.filter_dilations[1] = 2;
     EXPECT_FALSE(op.IsSupportedArgument(
         wrong_dilation.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
-    // G1/2/4/7 are algebraically valid but remain outside the measured reuse domain.
-    for(const int groups : {1, 2, 4, 7})
+    auto wrong_filter_stride              = problem;
+    wrong_filter_stride.filter_strides[0] = 2;
+    EXPECT_FALSE(op.IsSupportedArgument(
+        wrong_filter_stride.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    // Byte-span safety alone must not admit increasingly scattered lane loads
+    // and unbounded group-local scratch or producer work.
+    for(const int groups : {8, 64, 4096})
     {
-        const Problem<ck::index_t> unmeasured(Shape{2, groups, 13, 131});
+        const Problem<ck::index_t> beyond_group_cap(Shape{2, groups, 13, 131});
         EXPECT_FALSE(op.IsSupportedArgument(
-            unmeasured.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+            beyond_group_cap.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()))
+            << "G=" << groups;
     }
     auto huge           = long_problem;
     huge.out_lengths[3] = std::numeric_limits<ck::long_index_t>::max();
@@ -380,9 +417,15 @@ TEST(TestGroupedConvndBwdWeightRowStripBf16, NchwSerialReferenceAndWorkspaceOwne
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only candidate";
 
-    CheckShape({2, 3, 13, 131}); // row, column, batch and filter tails
-    CheckShape({1, 3, 25, 17});  // three strips; two are not a hardcoded partition count
-    CheckShape({1, 3, 1, 1});    // padded taps and entire empty filter-row/column partials
+    CheckShape({2, 1, 13, 131}); // batch, multiple strips, 128-lane column tail
+    CheckShape({1, 2, 25, 17});  // three strips, short columns
+    CheckShape({2, 3, 13, 131}); // original G3 row, column, batch and filter tails
+    CheckShape({1, 3, 25, 17});  // original G3 three-strip workload
+    CheckShape({1, 3, 1, 1});    // original G3 empty filter-row/column partials
+    CheckShape({2, 4, 13, 131});
+    CheckShape({1, 5, 1, 1});
+    CheckShape({2, 6, 25, 17});
+    CheckShape({2, 7, 13, 131});
 }
 
 } // namespace

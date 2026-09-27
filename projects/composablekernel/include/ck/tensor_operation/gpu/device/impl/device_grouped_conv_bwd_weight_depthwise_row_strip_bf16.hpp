@@ -279,13 +279,15 @@ struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
                ol[d] > MaxIndex)
                 return false;
         }
-        // Exact packed NHWGC, NHWGK and GKYXC (C=K=1) only.
-        // The arithmetic supports other G, but channels-last reuse/selection
-        // outside the measured G3 family has not been established.
-        const long_index_t g = il[0];
-        if(g != 3 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 || wl[1] != 1 ||
-           wl[2] != 1 || ol[2] != 1 || wl[3] != 11 || wl[4] != 11 || il[3] != ol[3] ||
-           il[4] != ol[4])
+        // Packed NHWGC, NHWGK and GKYXC (C=K=1) only. Bound the group-local
+        // filter span independently of N/H/W: at most 7*121 FP32 partials
+        // (3388 bytes) and 7*6 producer blocks per strip. This also limits
+        // the G-dependent lane pitch to 14 bytes; an arbitrary G admitted
+        // solely by ptrdiff_t-sized tensors would scatter these lane loads.
+        constexpr long_index_t MaxGroupFilterElements = 7 * 121;
+        const long_index_t g                          = il[0];
+        if(ol[0] != g || wl[0] != g || il[1] != ol[1] || il[2] != 1 || wl[1] != 1 || wl[2] != 1 ||
+           ol[2] != 1 || wl[3] != 11 || wl[4] != 11 || il[3] != ol[3] || il[4] != ol[4])
             return false;
         if(fs[0] != 1 || fs[1] != 1 || fd[0] != 1 || fd[1] != 1 || lp[0] != 5 || lp[1] != 5 ||
            rp[0] != 5 || rp[1] != 5)
@@ -307,7 +309,7 @@ struct DeviceGroupedConvBwdWeightDepthwiseRowStripBf16 final
         const long_index_t strips = (ol[3] - 1) / 12 + 1;
         long_index_t s, weights, partials;
         if(!CheckedMultiply(il[1], strips, MaxIndex, s) ||
-           !CheckedMultiply(g, 121, MaxBf16Elements, weights) ||
+           !CheckedMultiply(g, 121, MaxGroupFilterElements, weights) ||
            !CheckedMultiply(s, weights, MaxFloatElements, partials))
             return false;
         const auto logical_bytes = static_cast<size_t>(partials) * sizeof(float);
