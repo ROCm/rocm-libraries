@@ -471,6 +471,7 @@ class FmhaFwdApiTrait:
             return "true"
         return "a.block_mask_ptr == nullptr"
 
+
 @dataclass
 class FmhaFwdPipeline:
     tag: str
