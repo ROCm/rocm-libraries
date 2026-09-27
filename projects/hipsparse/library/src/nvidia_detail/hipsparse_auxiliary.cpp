@@ -196,6 +196,159 @@ hipsparseStatus_t hipsparseDestroyHybMat(hipsparseHybMat_t hybA)
 {
     return hipsparse::hipCUSPARSEStatusToHIPStatus(cusparseDestroyHybMat((cusparseHybMat_t)hybA));
 }
+
+// cuSPARSE exposes no public accessor for its opaque cusparseHybMat_t, so this
+// mirrors its internal layout the same way the pre-11.0 cuSPARSE HYB routines
+// have always been assumed to lay it out. Kept private to this translation
+// unit: callers only ever go through hipsparseHybMatGetInfo/SetInfo.
+struct cusparse_hyb_mat_mirror
+{
+    int                    m;
+    int                    n;
+    cusparseHybPartition_t partition;
+    int                    ell_nnz;
+    int                    ell_width;
+    int*                   ell_col_ind;
+    void*                  ell_val;
+    int                    coo_nnz;
+    int*                   coo_row_ind;
+    int*                   coo_col_ind;
+    void*                  coo_val;
+};
+
+hipsparseStatus_t hipsparseHybMatGetInfo(const hipsparseHybMat_t  hyb,
+                                         int*                     m,
+                                         int*                     n,
+                                         hipsparseHybPartition_t* partition,
+                                         int64_t*                 ell_nnz,
+                                         int*                     ell_width,
+                                         const int**              ell_col_ind,
+                                         const void**             ell_val,
+                                         int*                     coo_nnz,
+                                         const int**              coo_row_ind,
+                                         const int**              coo_col_ind,
+                                         const void**             coo_val)
+{
+    if(hyb == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    const cusparse_hyb_mat_mirror* dhyb = (const cusparse_hyb_mat_mirror*)hyb;
+
+    if(m != nullptr)
+    {
+        *m = dhyb->m;
+    }
+    if(n != nullptr)
+    {
+        *n = dhyb->n;
+    }
+    if(partition != nullptr)
+    {
+        *partition = hipsparse::cudaHybPartitionToHipHybPartition(dhyb->partition);
+    }
+    if(ell_nnz != nullptr)
+    {
+        *ell_nnz = dhyb->ell_nnz;
+    }
+    if(ell_width != nullptr)
+    {
+        *ell_width = dhyb->ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        *ell_col_ind = dhyb->ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        *ell_val = dhyb->ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        *coo_nnz = dhyb->coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        *coo_row_ind = dhyb->coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        *coo_col_ind = dhyb->coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        *coo_val = dhyb->coo_val;
+    }
+    return HIPSPARSE_STATUS_SUCCESS;
+}
+
+hipsparseStatus_t hipsparseHybMatSetInfo(hipsparseHybMat_t              hyb,
+                                         const int*                     m,
+                                         const int*                     n,
+                                         const hipsparseHybPartition_t* partition,
+                                         const int64_t*                 ell_nnz,
+                                         const int*                     ell_width,
+                                         int* const*                    ell_col_ind,
+                                         void* const*                   ell_val,
+                                         const int*                     coo_nnz,
+                                         int* const*                    coo_row_ind,
+                                         int* const*                    coo_col_ind,
+                                         void* const*                   coo_val)
+{
+    if(hyb == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
+    cusparse_hyb_mat_mirror* dhyb = (cusparse_hyb_mat_mirror*)hyb;
+
+    if(m != nullptr)
+    {
+        dhyb->m = *m;
+    }
+    if(n != nullptr)
+    {
+        dhyb->n = *n;
+    }
+    if(partition != nullptr)
+    {
+        dhyb->partition = hipsparse::hipHybPartitionToCudaHybPartition(*partition);
+    }
+    if(ell_nnz != nullptr)
+    {
+        dhyb->ell_nnz = static_cast<int>(*ell_nnz);
+    }
+    if(ell_width != nullptr)
+    {
+        dhyb->ell_width = *ell_width;
+    }
+    if(ell_col_ind != nullptr)
+    {
+        dhyb->ell_col_ind = *ell_col_ind;
+    }
+    if(ell_val != nullptr)
+    {
+        dhyb->ell_val = *ell_val;
+    }
+    if(coo_nnz != nullptr)
+    {
+        dhyb->coo_nnz = *coo_nnz;
+    }
+    if(coo_row_ind != nullptr)
+    {
+        dhyb->coo_row_ind = *coo_row_ind;
+    }
+    if(coo_col_ind != nullptr)
+    {
+        dhyb->coo_col_ind = *coo_col_ind;
+    }
+    if(coo_val != nullptr)
+    {
+        dhyb->coo_val = *coo_val;
+    }
+    return HIPSPARSE_STATUS_SUCCESS;
+}
 #endif
 
 #if CUDART_VERSION < 14000

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -316,31 +316,46 @@ void testing_csr2hyb(Arguments argus)
             handle, m, n, descr, dcsr_val, dcsr_row_ptr, dcsr_col_ind, hyb, user_ell_width, part));
 
         // Copy output from device to host
-        testhyb* dhyb = (testhyb*)hyb;
+        int         h_m;
+        int         h_n;
+        int         h_ell_width;
+        int64_t     h_ell_nnz;
+        int         h_coo_nnz;
+        const int*  d_ell_col_ind;
+        const void* d_ell_val;
+        const int*  d_coo_row_ind;
+        const int*  d_coo_col_ind;
+        const void* d_coo_val;
+        CHECK_HIPSPARSE_ERROR(hipsparseHybMatGetInfo(hyb,
+                                                     &h_m,
+                                                     &h_n,
+                                                     nullptr,
+                                                     &h_ell_nnz,
+                                                     &h_ell_width,
+                                                     &d_ell_col_ind,
+                                                     &d_ell_val,
+                                                     &h_coo_nnz,
+                                                     &d_coo_row_ind,
+                                                     &d_coo_col_ind,
+                                                     &d_coo_val));
 
         // Check if sizes match
-        unit_check_general(1, 1, 1, &m, &dhyb->m);
-        unit_check_general(1, 1, 1, &n, &dhyb->n);
-        unit_check_general(1, 1, 1, &ell_width, &dhyb->ell_width);
-        unit_check_general(1, 1, 1, &ell_nnz, &dhyb->ell_nnz);
-        unit_check_general(1, 1, 1, &coo_nnz, &dhyb->coo_nnz);
+        unit_check_general(1, 1, 1, &m, &h_m);
+        unit_check_general(1, 1, 1, &n, &h_n);
+        unit_check_general(1, 1, 1, &ell_width, &h_ell_width);
+        unit_check_general(1, 1, 1, &ell_nnz, &h_ell_nnz);
+        unit_check_general(1, 1, 1, &coo_nnz, &h_coo_nnz);
 
-        CHECK_HIP_ERROR(hipMemcpy(hhyb_ell_col_ind.data(),
-                                  dhyb->ell_col_ind,
-                                  sizeof(int) * ell_nnz,
-                                  hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(
-            hhyb_ell_val.data(), dhyb->ell_val, sizeof(T) * ell_nnz, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hhyb_coo_row_ind.data(),
-                                  dhyb->coo_row_ind,
-                                  sizeof(int) * coo_nnz,
-                                  hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hhyb_coo_col_ind.data(),
-                                  dhyb->coo_col_ind,
-                                  sizeof(int) * coo_nnz,
-                                  hipMemcpyDeviceToHost));
+            hhyb_ell_col_ind.data(), d_ell_col_ind, sizeof(int) * ell_nnz, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hhyb_ell_val.data(), d_ell_val, sizeof(T) * ell_nnz, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(
-            hhyb_coo_val.data(), dhyb->coo_val, sizeof(T) * coo_nnz, hipMemcpyDeviceToHost));
+            hhyb_coo_row_ind.data(), d_coo_row_ind, sizeof(int) * coo_nnz, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(
+            hhyb_coo_col_ind.data(), d_coo_col_ind, sizeof(int) * coo_nnz, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hhyb_coo_val.data(), d_coo_val, sizeof(T) * coo_nnz, hipMemcpyDeviceToHost));
 
         // Unit check
         unit_check_general(1, ell_nnz, 1, hhyb_ell_col_ind_gold.data(), hhyb_ell_col_ind.data());

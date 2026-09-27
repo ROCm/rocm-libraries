@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,12 +56,22 @@ void testing_hyb2csr_bad_arg(const Arguments& argus)
     std::unique_ptr<hyb_struct> unique_ptr_hyb(new hyb_struct);
     hipsparseHybMat_t           hyb = unique_ptr_hyb->hyb;
 
-    testhyb* dhyb = (testhyb*)hyb;
-
-    dhyb->m       = safe_size;
-    dhyb->n       = safe_size;
-    dhyb->ell_nnz = safe_size;
-    dhyb->coo_nnz = safe_size;
+    const int     h_m       = safe_size;
+    const int     h_n       = safe_size;
+    const int64_t h_ell_nnz = safe_size;
+    const int     h_coo_nnz = safe_size;
+    CHECK_HIPSPARSE_ERROR(hipsparseHybMatSetInfo(hyb,
+                                                 &h_m,
+                                                 &h_n,
+                                                 nullptr,
+                                                 &h_ell_nnz,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 &h_coo_nnz,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr));
 
     auto csr_row_ptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -208,9 +218,22 @@ void testing_hyb2csr(Arguments argus)
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
-        testhyb* dhyb = (testhyb*)hyb;
+        int64_t h_ell_nnz;
+        int     h_coo_nnz;
+        CHECK_HIPSPARSE_ERROR(hipsparseHybMatGetInfo(hyb,
+                                                     nullptr,
+                                                     nullptr,
+                                                     nullptr,
+                                                     &h_ell_nnz,
+                                                     nullptr,
+                                                     nullptr,
+                                                     nullptr,
+                                                     &h_coo_nnz,
+                                                     nullptr,
+                                                     nullptr,
+                                                     nullptr));
 
-        double gbyte_count = hyb2csr_gbyte_count<T>(m, nnz, dhyb->ell_nnz, dhyb->coo_nnz);
+        double gbyte_count = hyb2csr_gbyte_count<T>(m, nnz, h_ell_nnz, h_coo_nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
