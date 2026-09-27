@@ -42,6 +42,10 @@ namespace {
 constexpr size_t kMaxInFlight = 64;
 constexpr int kMaxWaitCount = static_cast<int>(kMaxInFlight) - 1;
 
+// Ceiling on QueuedOp::tripsBack. Bounds the lattice so the solver converges;
+// set well above any ring depth, since a dependence distance is always < ring.
+constexpr unsigned kMaxTripsBack = 16;
+
 int clampWaitCount(int w) {
     return std::min(w, kMaxWaitCount);
 }
@@ -190,11 +194,19 @@ bool isTensorAnchor(const StinkyInstruction& inst) {
     return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
 }
 
-bool hasUntaggedTensorAnchor(BasicBlock& bb) {
+/// Whether BB's live CK_Tensor state must survive the sweep-0 freeze.
+///
+/// Two reasons it must. An untagged tensor anchor is a fence: nothing proves it
+/// disjoint from the loads in flight, so those loads have to reach it. And a
+/// declared loop-carried RAW names a producer from an earlier trip, which is
+/// exactly the state restoreTensorState throws away -- freezing would leave the
+/// scan looking into an empty queue.
+bool needsLiveTensorState(BasicBlock& bb) {
     for (IRBase& ir : bb) {
         auto* inst = dyn_cast<StinkyInstruction>(&ir);
         if (inst == nullptr) continue;
         if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr) return true;
+        if (inst->getModifier<LoopCarriedRawData>() != nullptr) return true;
     }
     return false;
 }
@@ -214,27 +226,46 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     return false;
 }
 
-// Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
-// of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
-// queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
-// W is a min across predecessor queues, at a CFG merge this union is a conservative
-// superset of what any single path drains. Drained ops without MemTokenData
-// contribute nothing (no token to add).
-std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount) {
-    std::vector<int> out;
-    if (tensorCount < 0) return out;
-    for (const auto& q : state.queues[CK_Tensor]) {
+// Sorted-unique logical LDS instances carried by the ops a wait drains. A wait
+// of W keeps the W newest ops of each per-pred queue in flight and drains the
+// older prefix q.ops[0 .. size-W-1]. Keeping tripsBack distinguishes token
+// instances arriving from different loop iterations at a CFG merge.
+std::vector<DrainedLdsToken> drainedTokenInstances(const std::vector<PerPredQueue>& queues,
+                                                   int waitCount) {
+    std::vector<DrainedLdsToken> out;
+    if (waitCount < 0) return out;
+    for (const auto& q : queues) {
         const int qsize = static_cast<int>(q.ops.size());
-        const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
+        const int drainedEnd = qsize - waitCount;  // ops [0, drainedEnd) are drained
+        const std::string predecessor = q.pred == nullptr ? "local" : q.pred->getLabel();
         for (int idx = 0; idx < drainedEnd; ++idx) {
-            StinkyInstruction* op = q.ops[idx];
+            StinkyInstruction* op = q.ops[idx].op;
             if (op == nullptr) continue;
             const auto* mt = op->getModifier<MemTokenData>();
             if (mt == nullptr) continue;
-            out.insert(out.end(), mt->tokens.begin(), mt->tokens.end());
+            for (int token : mt->tokens) {
+                out.push_back({token, q.ops[idx].tripsBack, predecessor});
+            }
         }
     }
-    std::sort(out.begin(), out.end());
+    std::sort(out.begin(), out.end(), [](const DrainedLdsToken& a, const DrainedLdsToken& b) {
+        if (a.token != b.token) return a.token < b.token;
+        if (a.tripsBack != b.tripsBack) return a.tripsBack < b.tripsBack;
+        return a.predecessor < b.predecessor;
+    });
+    out.erase(std::unique(out.begin(), out.end(),
+                          [](const DrainedLdsToken& a, const DrainedLdsToken& b) {
+                              return a.token == b.token && a.tripsBack == b.tripsBack &&
+                                     a.predecessor == b.predecessor;
+                          }),
+              out.end());
+    return out;
+}
+
+std::vector<int> tokenUnion(const std::vector<DrainedLdsToken>& instances) {
+    std::vector<int> out;
+    out.reserve(instances.size());
+    for (const auto& instance : instances) out.push_back(instance.token);
     out.erase(std::unique(out.begin(), out.end()), out.end());
     return out;
 }
@@ -247,7 +278,7 @@ std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount
 
 int PerPredQueue::countFrom(StinkyInstruction* op) const {
     if (saturatedOps.find(op) != saturatedOps.end()) return static_cast<int>(kMaxInFlight);
-    auto it = std::find(ops.begin(), ops.end(), op);
+    auto it = std::find_if(ops.begin(), ops.end(), [op](const QueuedOp& e) { return e.op == op; });
     if (it == ops.end()) return 0;
     return static_cast<int>(std::distance(it, ops.end()));
 }
@@ -277,6 +308,8 @@ bool DataflowState::operator==(const DataflowState& other) const {
 WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
                            const std::vector<BasicBlock*>& rpo)
     : rpo(rpo) {
+    for (unsigned i = 0; i < rpo.size(); ++i) rpoIndex[rpo[i]] = i;
+
     const unsigned n = static_cast<unsigned>(rpo.size());
     // Wait-count immediates are capped to the hardware window
     // (kMaxInFlight - 1). Keep a floor above that window so loop-carried
@@ -320,12 +353,22 @@ DataflowState WaitDataflow::mergeFromPredecessors(
         auto it = exitState.find(p);
         if (it == exitState.end()) continue;
         const auto& predState = it->second;
+        const bool backEdge = isBackEdge(p, &bb);
         for (int c = 0; c < CK_Count; ++c) {
             for (const auto& predQ : predState.queues[c]) {
                 PerPredQueue q;
                 q.pred = p;
                 q.ops = predQ.ops;
                 q.saturatedOps = predQ.saturatedOps;
+                // Crossing a back edge ages every entry by one trip; that count is
+                // what lets a distance-d hazard name the instance it means. Capped
+                // so the lattice stays finite -- anything past the cap is older
+                // than any distance a rotating ring can express.
+                if (backEdge) {
+                    for (QueuedOp& e : q.ops) {
+                        if (e.tripsBack < kMaxTripsBack) ++e.tripsBack;
+                    }
+                }
                 // Dedup identical (pred, ops) queues. A back-edge otherwise
                 // re-copies the same per-pred queue on every fixed-point
                 // iteration: the predecessor's exit already contains the
@@ -434,14 +477,19 @@ struct CounterEmitState {
     }
 };
 
+// Drop the `n` oldest entries from a queue.
+void dropOldest(PerPredQueue& q, size_t n) {
+    q.ops.erase(q.ops.begin(), q.ops.begin() + n);
+}
+
 // Trim every per-pred queue in a counter to keep at most `keep` tail ops.
 void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
     for (auto& q : qs) {
         q.saturatedOps.clear();
         if (keep <= 0) {
-            q.ops.clear();
+            dropOldest(q, q.ops.size());
         } else if (static_cast<int>(q.ops.size()) > keep) {
-            q.ops.erase(q.ops.begin(), q.ops.end() - keep);
+            dropOldest(q, q.ops.size() - static_cast<size_t>(keep));
         }
     }
 }
@@ -573,9 +621,10 @@ bool appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     if (qs.empty()) qs.push_back(PerPredQueue{});
     bool saturated = false;
     for (auto& q : qs) {
-        q.ops.push_back(op);
+        // tripsBack 0: issued in the block currently being walked.
+        q.ops.push_back(QueuedOp{op, 0});
         while (q.ops.size() > kMaxInFlight) {
-            q.saturatedOps.insert(q.ops.front());
+            q.saturatedOps.insert(q.ops.front().op);
             q.ops.pop_front();
             saturated = true;
         }
@@ -646,9 +695,9 @@ void trimPredQueues(std::vector<PerPredQueue>& qs, BasicBlock* pred, int keep) {
         if (q.pred != pred) continue;
         q.saturatedOps.clear();
         if (keep <= 0) {
-            q.ops.clear();
+            dropOldest(q, q.ops.size());
         } else if (static_cast<int>(q.ops.size()) > keep) {
-            q.ops.erase(q.ops.begin(), q.ops.end() - keep);
+            dropOldest(q, q.ops.size() - static_cast<size_t>(keep));
         }
     }
 }
@@ -794,12 +843,19 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     //
     // Conservative fallbacks live below: if either side lacks
     // MemTokenData we cannot prove disjointness and force wait 0.
+    //
+    // minTripsBack > 0 restricts the scan to ops from an earlier trip, which is
+    // what the loop-carried case wants. Matching on >= rather than == is both
+    // exact and robust: entries nearer than the distance do not alias and are
+    // excluded, and among those that remain the one at exactly the distance is
+    // the newest, so it sets the min. Older ones only ever relax it.
     auto scanDsAntiDeps = [&](const StinkyInstruction& anchor, const std::vector<int>& anchorTokens,
-                              bool barrierMode) {
+                              bool barrierMode, unsigned minTripsBack = 0) {
         for (const auto& q : state.queues[CK_DS]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+                if (q.ops[idx].tripsBack < minTripsBack) continue;
+                StinkyInstruction* op = q.ops[idx].op;
                 if (op == inst) continue;
                 // Barrier guards every DS op on a matching token; LDS
                 // writer guards only readers/atomics.
@@ -823,6 +879,41 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
     }
 
+    // Loop-carried WAR. Under a rotating ring the aliasing reads carry a different
+    // tag than the write this anchor guards, so the scans above find no overlap;
+    // LoopCarriedWarData supplies that tag. Only previous trips match -- this
+    // trip's reads name a different buffer, and draining them would cost exactly
+    // the overlap the extra buffer buys.
+    //
+    if (const auto* war = inst->getModifier<LoopCarriedWarData>()) {
+        scanDsAntiDeps(*inst, war->tokens, /*barrierMode=*/false,
+                       /*minTripsBack=*/static_cast<unsigned>(std::max(1, war->distance)));
+    }
+
+    // Loop-carried RAW, the mirror of the WAR above: this instruction reads LDS a
+    // fill from an earlier trip produced, and that fill carried a different tag.
+    // The SSA chain through LDS<token> cannot connect them for the same reason
+    // token overlap cannot -- the tags only agree within one trip.
+    //
+    // Scanned on the producer's counter, and only from `distance` trips back so
+    // nearer fills -- a different buffer under rotation -- are not matched.
+    if (const auto* raw = inst->getModifier<LoopCarriedRawData>()) {
+        const unsigned minTripsBack = static_cast<unsigned>(std::max(1, raw->distance));
+        for (const auto& q : state.queues[CK_Tensor]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                if (q.ops[idx].tripsBack < minTripsBack) continue;
+                StinkyInstruction* op = q.ops[idx].op;
+                if (op == inst) continue;
+                const auto* opTokens = op->getModifier<MemTokenData>();
+                if (opTokens != nullptr && !hasTokenOverlap(opTokens->tokens, raw->tokens)) {
+                    continue;
+                }
+                tightenRequired(CK_Tensor, waitToDrain(CK_Tensor, qsize - idx));
+            }
+        }
+    }
+
     // Tensor-side conservative scan: any tensor_load_to_lds in flight
     // that lacks MemTokenData cannot be proven disjoint from a tensor
     // anchor, so treat it as an extra dep. Tagged overlaps are already
@@ -831,7 +922,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         for (const auto& q : state.queues[CK_Tensor]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+                StinkyInstruction* op = q.ops[idx].op;
                 if (op == inst) continue;
                 if (op->getModifier<MemTokenData>() == nullptr) {
                     tightenRequired(CK_Tensor, waitToDrain(CK_Tensor, qsize - idx));
@@ -848,7 +939,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         for (const auto& q : state.queues[CK_Async]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+                StinkyInstruction* op = q.ops[idx].op;
                 if (op == inst) continue;
                 auto* opTokens = op->getModifier<MemTokenData>();
                 bool overlap =
@@ -883,7 +974,8 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         bool needs = inst->getModifier<MemTokenData>() == nullptr;
         if (!needs) {
             for (const auto& q : state.queues[CK_DS]) {
-                for (StinkyInstruction* op : q.ops) {
+                for (const QueuedOp& e : q.ops) {
+                    StinkyInstruction* op = e.op;
                     if (op->getModifier<MemTokenData>() == nullptr) {
                         needs = true;
                         break;
@@ -1035,7 +1127,7 @@ bool WaitDataflow::solve() {
         // exactly the steady-state queue saturations.
         overflowSites.clear();
         for (BasicBlock* bb : rpo) {
-            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
+            const bool keepLiveTensorState = needsLiveTensorState(*bb);
             DataflowState entry = mergeFromPredecessors(*bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
                 restoreTensorState(entry, result.entryState[bb], keepLiveTensorState);
@@ -1113,7 +1205,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
         newAnchors.clear();
 
         for (BasicBlock* bb : rpo) {
-            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
+            const bool keepLiveTensorState = needsLiveTensorState(*bb);
             // Entry = merge of recomputed predecessor exits (back-edges
             // start at bottom and tighten over iterations), then apply the
             // optimizer's predecessor tail drains.
@@ -1141,12 +1233,16 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 // else the freshly recomputed requirement.
                 WaitCountSpec applySpec = mergePlanAndComputed(optimizerPlan, inst, computed, emit);
 
-                // Capture the drained tensor-token union from the LIVE (pre-trim)
-                // queues, so the emitted s_wait_tensorcnt can carry it. This is the
-                // final anchor set (finalizePlan overwrites plan.anchorWaits below),
-                // and the queues here are exactly those the wait drains.
+                // Capture drained LDS instances from the live, pre-trim queues.
+                // These are the final waits and exactly the operations they drain.
+                if (applySpec.dsCount != WaitCountSpec::kUnused) {
+                    applySpec.dsDrains =
+                        drainedTokenInstances(state.queues[CK_DS], applySpec.dsCount);
+                }
                 if (applySpec.tensorCount != WaitCountSpec::kUnused) {
-                    applySpec.tensorTokens = drainedTensorTokens(state, applySpec.tensorCount);
+                    applySpec.tensorDrains =
+                        drainedTokenInstances(state.queues[CK_Tensor], applySpec.tensorCount);
+                    applySpec.tensorTokens = tokenUnion(applySpec.tensorDrains);
                 }
 
                 for (int c = 0; c < CK_Count; ++c) {

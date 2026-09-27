@@ -1477,15 +1477,42 @@ namespace rocisa
     {
         std::vector<int> tokens;
 
-        MemTokenData(const std::vector<int>& tokens = {})
+        // A loop-carried write-after-read this instruction guards: `warTokens` are
+        // the tags the aliasing reads carried `warDistance` trips ago, which differ
+        // from `tokens` because a memtoken names a physical buffer only for the trip
+        // it was emitted from. Zero distance means no such relation, i.e. any kernel
+        // whose tokens do not rotate. Lowered to StinkyTofu's LoopCarriedWarData.
+        std::vector<int> warTokens;
+        int              warDistance = 0;
+
+        // The mirror: a loop-carried read-after-write this instruction depends on.
+        // `rawTokens` are the tags the producing fill carried `rawDistance` trips
+        // ago. Rides the reader, where WAR rides the writer. Lowered to
+        // StinkyTofu's LoopCarriedRawData.
+        std::vector<int> rawTokens;
+        int              rawDistance = 0;
+
+        MemTokenData(const std::vector<int>& tokens      = {},
+                     const std::vector<int>& warTokens   = {},
+                     int                     warDistance = 0,
+                     const std::vector<int>& rawTokens   = {},
+                     int                     rawDistance = 0)
             : Container()
             , tokens(tokens)
+            , warTokens(warTokens)
+            , warDistance(warDistance)
+            , rawTokens(rawTokens)
+            , rawDistance(rawDistance)
         {
         }
 
         MemTokenData(const MemTokenData& other)
             : Container()
             , tokens(other.tokens)
+            , warTokens(other.warTokens)
+            , warDistance(other.warDistance)
+            , rawTokens(other.rawTokens)
+            , rawDistance(other.rawDistance)
         {
         }
 
@@ -1502,6 +1529,26 @@ namespace rocisa
                 if(i > 0)
                     result += ",";
                 result += " " + std::to_string(tokens[i]);
+            }
+            if(warDistance > 0)
+            {
+                result += " war(d=" + std::to_string(warDistance) + "):";
+                for(size_t i = 0; i < warTokens.size(); ++i)
+                {
+                    if(i > 0)
+                        result += ",";
+                    result += " " + std::to_string(warTokens[i]);
+                }
+            }
+            if(rawDistance > 0)
+            {
+                result += " raw(d=" + std::to_string(rawDistance) + "):";
+                for(size_t i = 0; i < rawTokens.size(); ++i)
+                {
+                    if(i > 0)
+                        result += ",";
+                    result += " " + std::to_string(rawTokens[i]);
+                }
             }
             return result;
         }

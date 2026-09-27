@@ -135,7 +135,8 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
 ##############################################################################
 # SyncThreads
 ##############################################################################
-def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None):
+def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None,
+                warTokens=None, warDistance=0):
     imod = Module("syncThreads")
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
         if asmCaps["SeparateVscnt"]:
@@ -149,7 +150,11 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
 
         _barrier = SBarrier(comment=comment)
         if memoryToken is not None:
-            _barrier.setMemToken(MemTokenData(memoryToken))
+            # warTokens/warDistance name a loop-carried WAR this barrier guards; see
+            # MemTokenData.
+            _barrier.setMemToken(MemTokenData(memoryToken,
+                                              warTokens if warTokens is not None else [],
+                                              warDistance))
         imod.add(_barrier)
     else:
         imod.addComment("Skip barrier: NumThreads=%s"%(kernel["NumThreads"]) + \

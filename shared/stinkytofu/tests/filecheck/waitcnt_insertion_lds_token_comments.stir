@@ -1,0 +1,33 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --emit-asm --preserve-comments
+#
+# Waits identify the LDS-buffer token, dynamic loop iteration, and direct CFG
+# predecessor of the operations they drain. The tensor wait merges an entry-path
+# LDS1 fill with a previous-trip LDS2 fill; the comment keeps them distinct.
+#
+# CHECK: tensor_load_to_lds
+# CHECK-NEXT: s_branch
+# CHECK-NEXT: s_wait_tensorcnt 0
+# CHECK-SAME: drains LDS1[k] via entry,LDS2[k-1] via loop
+# CHECK-NEXT: s_barrier_signal
+# CHECK-NEXT: s_barrier_wait
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: s_wait_dscnt 0
+# CHECK-SAME: drains LDS0[k] via loop
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: tensor_load_to_lds
+# CHECK-NEXT: s_branch
+
+st.func @waitcnt_insertion_lds_token_comments() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [1] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [1] }, mod.loopcarriedraw = { tokens = [2], distance = 1 } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [1] } }
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  "st.tensor_load_to_lds"(s[0:3], s[16:23]) { mod.memtoken = { tokens = [2] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+}

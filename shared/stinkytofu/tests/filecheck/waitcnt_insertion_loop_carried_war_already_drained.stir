@@ -1,0 +1,43 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The WAR of waitcnt_insertion_loop_carried_war_annotated.stir, in a loop that
+# has already discharged it: both reads are consumed in-trip, so the trailing
+# drain is dlcnt = 0 and the DS queue is empty across the back edge. Nothing is
+# carried in, so the annotation must emit no wait -- conjuring one would cost a
+# full pipeline drain per trip to guard a read that has already retired.
+#
+# This is the shape production TDM kernels have today, and why the triple-buffer
+# WAR has never surfaced as a miscompile: safe by accident of the schedule
+# rather than by construction.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_carried_war_already_drained
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# Nothing between the reads and the barrier: the annotation finds no carried-in read.
+# CHECK-NEXT: s_barrier_signal{{.*}}tokens = [2]
+# CHECK-NEXT: s_barrier_wait{{.*}}tokens = [2]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [2]
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 1
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 0
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+
+st.func @waitcnt_insertion_loop_carried_war_already_drained() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] } }
+  # both reads consumed in-trip, so the trip ends with the DS queue empty
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  a[18:25] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[30:37], a[18:25])
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

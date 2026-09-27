@@ -1,0 +1,64 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The same WAR as waitcnt_insertion_loop_carried_war_annotated.stir with NO
+# barrier to hang the annotation on, so it rides the tensor_load itself.
+#
+# At NumWaves=1 nothing emits a barrier (postMainLoopBarrierCheckAndReset needs
+# numWaves > 1), yet the ring still rotates and the fill still lands on a buffer
+# the previous trip read. The scan is not gated on isBarrier, so tagging the
+# fill works with no backend change.
+#
+# Two token-[0] reads, one consumed and one not, plus a token-[1] prefetch of
+# next trip's data. Ring 3, one step per trip:
+#
+#                           iter 0   iter 1   iter 2   iter 3
+#   ds_load A   (Read,  [0])  LDS0     LDS1     LDS2     LDS0
+#   ds_load B   (Read,  [1])  LDS1     LDS2     LDS0     LDS1
+#   tensor_load (Write, [2])  LDS2     LDS0     LDS1     LDS2
+#
+# The fill has TWO WAR partners: against A at d = 1 (iter 1 fills LDS0, iter 0's
+# A read it) and against B at d = 2 (iter 2 fills LDS1, iter 0's B read it).
+# Naming only the nearest is enough -- CK_DS is in-order, so a wait that retires
+# the d = 1 reads retires everything behind them, d = 2 included.
+#
+# Steady state at the fill, oldest first:
+#
+#   [ A2(k-1), B(k-1), A1(k), A2(k), B(k) ]
+#     ^^^^^^^ carried in and tagged [0] -- the only match
+#
+# 5 from the tail, so the wait is 4, leaving all three of this trip's reads in
+# flight. B(k-1) is carried in too, but tagged [1].
+#
+# Scope: WAR only. The same ring also carries a RAW on each read (A at d = 2,
+# B at d = 1), deliberately left unannotated here so the dscnt result is not
+# entangled with tensorcnt. waitcnt_insertion_loop_carried_raw_distance1 is this
+# loop annotated from the RAW side; do not read this file as a model of a
+# complete main loop.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_carried_war_single_wave
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [1]
+# The loop-carried drain, with no barrier anywhere in the block.
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 4
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [2]
+# CHECK-NEXT: s_wait_dscnt{{.*}}dlcnt = 2
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NOT: s_barrier
+
+st.func @waitcnt_insertion_loop_carried_war_single_wave() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[60:61] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

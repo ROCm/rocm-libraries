@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -72,6 +73,15 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
         // Tensor counter drains only at barriers or when there is a single wave.
+        //
+        // The barrier drain looks like over-draining on a rotating ring -- the
+        // barrier's own tensor edge names the previous trip's fill on the same
+        // tag, a different buffer -- but it is what makes a cross-wave fill safe.
+        // tensor_load_to_lds is split across waves (even waves fill A, odd fill
+        // B) while every wave reads both, so a fill must land before the LAST
+        // barrier preceding the reads that consume it, in the filling wave. A
+        // per-wave wait at the reads cannot do that. See the cross-wave section
+        // of docs/developer/loop-carried-memory-dependence.md.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
         df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
             return isBarrier(i) || numWaves == 1;
@@ -125,6 +135,50 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         }
     }
 
+    /// Record on the emitted s_wait_dscnt that it covers the loop-carried WAR its
+    /// anchor names. Nothing else in the output says why a rotating LDS buffer
+    /// needs draining here: the reads it guards carry a different memtoken, one
+    /// trip back, so the assembly alone gives a reader no way to reconstruct it.
+    ///
+    /// Always accurate: computeRequiredWaits takes the MIN over every dependency
+    /// at the anchor, so a ds wait emitted here is at least as strict as the WAR
+    /// scan asked for, whichever dep ended up binding.
+    void annotateLoopCarriedWar(StinkyInstruction* wait, const StinkyInstruction* anchor) {
+        const auto* war = anchor ? anchor->getModifier<LoopCarriedWarData>() : nullptr;
+        if (war == nullptr || war->tokens.empty()) return;
+
+        std::string text = "covers loop-carried WAR on LDS";
+        for (size_t i = 0; i < war->tokens.size(); ++i) {
+            if (i > 0) text += ",LDS";
+            text += std::to_string(war->tokens[i]);
+        }
+        text += " (" + std::to_string(war->distance) + " trip back)";
+        wait->addModifier<CommentData>(CommentData{text});
+    }
+
+    void annotateDrainedLdsTokens(StinkyInstruction* wait,
+                                  const std::vector<DrainedLdsToken>& drains) {
+        if (drains.empty()) return;
+
+        std::string text = "drains LDS";
+        for (size_t i = 0; i < drains.size(); ++i) {
+            if (i > 0) text += ",LDS";
+            text += std::to_string(drains[i].token);
+            if (drains[i].tripsBack == 0) {
+                text += "[k]";
+            } else {
+                text += "[k-" + std::to_string(drains[i].tripsBack) + "]";
+            }
+            text += " via " + drains[i].predecessor;
+        }
+
+        if (auto* comment = wait->getModifier<CommentData>()) {
+            comment->comment += "; " + text;
+        } else {
+            wait->addModifier<CommentData>(CommentData{text});
+        }
+    }
+
     void emitOneSpec(AsmIRBuilder& builder, GfxArchID arch, StinkyInstruction* anchor,
                      const WaitCountSpec& spec) {
         if (spec.dsCount != WaitCountSpec::kUnused) {
@@ -133,6 +187,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitCntData d;
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
+            annotateLoopCarriedWar(w, anchor);
+            annotateDrainedLdsTokens(w, spec.dsDrains);
         }
         if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);
@@ -161,6 +217,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             if (!spec.tensorTokens.empty()) {
                 w->addModifier<MemTokenData>(MemTokenData{spec.tensorTokens});
             }
+            annotateDrainedLdsTokens(w, spec.tensorDrains);
         }
         if (spec.asyncCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_asynccnt, arch), anchor);
