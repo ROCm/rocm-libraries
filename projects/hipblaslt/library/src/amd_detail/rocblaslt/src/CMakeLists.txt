@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier:  MIT
+# SPDX-License-Identifier: MIT
 
 
 
@@ -20,7 +20,11 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
 )
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
+target_include_directories(hipblaslt PRIVATE
+    "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/fp_emulation/include"
+)
 
+add_subdirectory(fp_emulation)
 if(HIPBLASLT_ENABLE_ROCROLLER)
     add_subdirectory(rocroller)
 endif()

@@ -28,6 +28,7 @@
 #include "UserDrivenTuningParser.hpp"
 #include "check_numerics_matrix.hpp"
 #include "exceptions.hpp"
+#include "emulation.hpp"
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
@@ -1194,6 +1195,43 @@ try
         requestedAlgoCount,
         (rocblaslt_matmul_heuristic_result*)heuristicResultsArray,
         returnAlgoCount));
+
+    /* FP64 emulation workspace override. Only inspect descriptors after the
+     * normal heuristic path has accepted the caller's arguments. */
+    if(status == HIPBLAS_STATUS_SUCCESS && handle && matmulDesc && Adesc && Ddesc
+       && heuristicResultsArray && returnAlgoCount)
+    {
+        const auto* h = reinterpret_cast<const _rocblaslt_handle*>(handle);
+        /* Read layout dimensions directly from the internal struct — the public
+         * get_attribute API only exposes attributes managed via set_attribute;
+         * creation-time fields (m, n, type) live in the struct itself.        */
+        const auto* A_layout = reinterpret_cast<const _rocblaslt_matrix_layout*>(Adesc);
+        const auto* D_layout = reinterpret_cast<const _rocblaslt_matrix_layout*>(Ddesc);
+        const auto* desc_ptr = reinterpret_cast<const _rocblaslt_matmul_desc*>(matmulDesc);
+
+        const int64_t     m           = static_cast<int64_t>(D_layout->m);
+        const int64_t     n           = static_cast<int64_t>(D_layout->n);
+        const int64_t     k           = (desc_ptr->op_A == HIPBLAS_OP_N)
+                                        ? static_cast<int64_t>(A_layout->n)
+                                        : static_cast<int64_t>(A_layout->m);
+        const int32_t     batch_count = A_layout->batch_count;
+        const hipDataType type_a      = A_layout->type;
+
+        const FixedPointEmulationDecision emulDecision =
+            fixedPointEmulationDecision(h, desc_ptr, type_a, desc_ptr->op_A, desc_ptr->op_B, m, n, k, batch_count,
+                                          reinterpret_cast<const _rocblaslt_matmul_preference*>(pref)->max_workspace_bytes);
+        if(emulDecision.status != rocblaslt_status_success)
+            return RocBlasLtStatusToHIPStatus(emulDecision.status);
+        if(emulDecision.apply && *returnAlgoCount > 0)
+        {
+            const size_t emul_ws =
+                fixedPointEmulationWorkspaceSize(h, type_a, desc_ptr->op_A, desc_ptr->op_B,
+                                           m, n, k, emulDecision);
+            for(int i = 0; i < *returnAlgoCount; ++i)
+                heuristicResultsArray[i].workspaceSize = emul_ws;
+        }
+    }
+
     rocblaslt::Debug::Instance().markerStop();
     return status;
 }
@@ -1486,6 +1524,49 @@ catch(...)
         *archName = nullptr;
     }
     return exception_to_hipblas_status();
+}
+
+/* =========================================================================
+ * Emulation API — per-matmul settings via HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT
+ * See hipblasLtMatmulDescSetAttribute / hipblasLtMatmulDescGetAttribute.
+ * The old handle-level setters have been removed; use matmul desc attributes.
+ * ========================================================================= */
+
+size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
+                                       hipblasLtMatmulDesc_t matmulDesc,
+                                       hipblasOperation_t    opA,
+                                       hipblasOperation_t    opB,
+                                       int64_t               m,
+                                       int64_t               n,
+                                       int64_t               k,
+                                       int32_t               batch_count)
+try
+{
+    if(m < 0 || n < 0 || k < 0) return 0;
+    /* batch_count != 1: emulation only supports non-batched GEMMs for now.
+     * Return 0 so callers can detect the unsupported configuration.
+     * Reserved for future batched support. */
+    if(batch_count != 1) return 0;
+    /* Resolve emulation settings via the canonical decision function.
+     * Reads from matmulDesc (if non-null) then falls back to env vars.
+     * Checks FP64 first, then FP32 — the workspace formula is type-independent
+     * (depends only on m, n, k, and num_moduli), so the first applicable type
+     * returns the correct size for either data type.
+     * Returns 0 when no type has emulation enabled or the device is unsupported. */
+    const auto* h    = reinterpret_cast<const _rocblaslt_handle*>(handle);
+    const auto* desc = reinterpret_cast<const _rocblaslt_matmul_desc*>(matmulDesc);
+    for(hipDataType t : {HIP_R_64F, HIP_R_32F})
+    {
+        const FixedPointEmulationDecision d =
+            fixedPointEmulationDecision(h, desc, t, opA, opB, m, n, k, 1, ~size_t{0});
+        if(d.status != rocblaslt_status_success || !d.apply) continue;
+        return fixedPointEmulationWorkspaceSize(h, t, opA, opB, m, n, k, d);
+    }
+    return 0;
+}
+catch(...)
+{
+    return 0;
 }
 
 #ifdef __cplusplus

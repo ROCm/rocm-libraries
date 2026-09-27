@@ -373,42 +373,57 @@ struct _rocblaslt_matmul_desc
     const struct hipblasLtFusedEpilogueDescriptor* fused_epilogue = nullptr;
 #endif
 
+    /* Per-matmul emulation settings (HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT).
+     * Sentinel values mean "inherit from env var / built-in default":
+     *   emulation_enabled      : -1 = inherit, 0 = force off, 1 = force on
+     *   emulation_strategy     : -1 = inherit, 0/1/2 = DEFAULT/PERFORMANT/EAGER
+     *   emulation_sv_mask      : ~0u = inherit (default=0x3)
+     *   emulation_mantissa_bits: 0 = inherit, 1..52 = explicit bit count    */
+    int          emulation_enabled       = -1;
+    int          emulation_strategy      = -1;
+    unsigned int emulation_sv_mask       = ~0u;
+    int          emulation_mantissa_bits = 0;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
     {
-        this->op_A                    = src.op_A;
-        this->op_B                    = src.op_B;
-        this->epilogue                = src.epilogue;
-        this->bias                    = src.bias;
-        this->scaleA                  = src.scaleA;
-        this->scaleB                  = src.scaleB;
-        this->scaleC                  = src.scaleC;
-        this->scaleD                  = src.scaleD;
-        this->scaleE                  = src.scaleE;
-        this->scaleAType              = src.scaleAType;
-        this->scaleBType              = src.scaleBType;
-        this->pointermode             = src.pointermode;
-        this->amaxD                   = src.amaxD;
-        this->bias_type               = src.bias_type;
-        this->e                       = src.e;
-        this->aux_type                = src.aux_type;
-        this->lde                     = src.lde;
-        this->stride_e                = src.stride_e;
-        this->compute_type            = src.compute_type;
-        this->compute_type_original   = src.compute_type_original;
-        this->compute_input_typeA     = src.compute_input_typeA;
-        this->compute_input_typeB     = src.compute_input_typeB;
-        this->scale_type              = src.scale_type;
-        this->act0                    = src.act0;
-        this->act1                    = src.act1;
-        this->sm_count_target         = src.sm_count_target;
+        this->op_A                        = src.op_A;
+        this->op_B                        = src.op_B;
+        this->epilogue                    = src.epilogue;
+        this->bias                        = src.bias;
+        this->scaleA                      = src.scaleA;
+        this->scaleB                      = src.scaleB;
+        this->scaleC                      = src.scaleC;
+        this->scaleD                      = src.scaleD;
+        this->scaleE                      = src.scaleE;
+        this->scaleAType                  = src.scaleAType;
+        this->scaleBType                  = src.scaleBType;
+        this->pointermode                 = src.pointermode;
+        this->amaxD                       = src.amaxD;
+        this->bias_type                   = src.bias_type;
+        this->e                           = src.e;
+        this->aux_type                    = src.aux_type;
+        this->lde                         = src.lde;
+        this->stride_e                    = src.stride_e;
+        this->compute_type                = src.compute_type;
+        this->compute_type_original       = src.compute_type_original;
+        this->compute_input_typeA         = src.compute_input_typeA;
+        this->compute_input_typeB         = src.compute_input_typeB;
+        this->scale_type                  = src.scale_type;
+        this->act0                        = src.act0;
+        this->act1                        = src.act1;
+        this->sm_count_target             = src.sm_count_target;
         this->streamk_tile_scheduling_ext = src.streamk_tile_scheduling_ext;
         this->uniform_summation_order = src.uniform_summation_order;
         this->bias_stride             = src.bias_stride;
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         this->fused_epilogue          = src.fused_epilogue;
 #endif
+        this->emulation_enabled           = src.emulation_enabled;
+        this->emulation_strategy          = src.emulation_strategy;
+        this->emulation_sv_mask           = src.emulation_sv_mask;
+        this->emulation_mantissa_bits     = src.emulation_mantissa_bits;
     }
 };
 
