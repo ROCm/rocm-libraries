@@ -296,20 +296,24 @@ namespace rocsparse
 #undef COOMMN_DIM
 #undef LOOPS
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coommnn_general_block_reduce<1024>),
-                                               dim3(n, 1, get_batch_grid_size<I>(batch_count_C)),
-                                               1024,
-                                               0,
-                                               stream,
-                                               n,
-                                               nblocks,
-                                               row_block_red,
-                                               val_block_red,
-                                               dense_C,
-                                               ldc,
-                                               batch_stride_C,
-                                               order_C,
-                                               batch_count_C);
+            const int64_t block_reduce_grid_x = rocsparse::min(
+                static_cast<int64_t>(n), static_cast<int64_t>(handle->properties.maxGridSize[0]));
+
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coommnn_general_block_reduce<1024>),
+                dim3(block_reduce_grid_x, 1, get_batch_grid_size<I>(batch_count_C)),
+                1024,
+                0,
+                stream,
+                n,
+                nblocks,
+                row_block_red,
+                val_block_red,
+                dense_C,
+                ldc,
+                batch_stride_C,
+                order_C,
+                batch_count_C);
         }
         else
         {
