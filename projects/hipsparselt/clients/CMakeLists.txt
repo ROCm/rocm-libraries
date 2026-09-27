@@ -4,14 +4,20 @@
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
 
-if(HIPSPARSELT_ENABLE_THEROCK)
-    # TheRock's cblas package provides OpenBLAS which includes BLAS, CBLAS, and LAPACK Use NO_*_PATH
-    # to prevent finding system packages and rely solely on theRock's packages
-    find_package(cblas REQUIRED CONFIG HINTS ${CMAKE_PREFIX_PATH})
-elseif(HIPSPARSELT_ENABLE_BLIS)
+# The CPU reference BLAS is an independent choice from how hipBLASLt is
+# consumed. HIPSPARSELT_ENABLE_THEROCK used to select both, so enabling the
+# staged-package path also forced TheRock's cblas/OpenBLAS -- which is absent
+# outside TheRock, leaving the clients without LAPACK or the Fortran runtime.
+# Check the explicit BLAS selection first so a non-TheRock build can consume a
+# staged hipBLASLt package and still link BLIS or plain LAPACK.
+if(HIPSPARSELT_ENABLE_BLIS)
     # Use BLIS as an AMD optimized BLAS alternative, this may be removed in the future to
     # consolidate the vendoring strategy of BLAS/LAPACK, but remains for historical purposes
     find_package(BLIS REQUIRED)
+elseif(HIPSPARSELT_ENABLE_THEROCK)
+    # TheRock's cblas package provides OpenBLAS which includes BLAS, CBLAS, and LAPACK Use NO_*_PATH
+    # to prevent finding system packages and rely solely on theRock's packages
+    find_package(cblas REQUIRED CONFIG HINTS ${CMAKE_PREFIX_PATH})
 endif()
 
 add_library(hipsparselt-clients-common OBJECT)
