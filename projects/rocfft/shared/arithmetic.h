@@ -26,12 +26,33 @@
 #include <stddef.h>
 #include <stdexcept>
 #include <tuple>
+#include <vector>
 
 // arithmetic helper functions
 
 static inline bool IsPo2(size_t u)
 {
     return (u != 0) && (0 == (u & (u - 1)));
+}
+
+// True when the batch distance is smaller than an FFT stride (batch interleaved inside each transform).
+static inline bool is_inner_batched(size_t                     batch,
+                                    const std::vector<size_t>& inStride,
+                                    size_t                     iDist,
+                                    const std::vector<size_t>& outStride,
+                                    size_t                     oDist)
+{
+    if(batch <= 1)
+        return false;
+
+    for(auto stride : inStride)
+        if(iDist < stride)
+            return true;
+    for(auto stride : outStride)
+        if(oDist < stride)
+            return true;
+
+    return false;
 }
 
 //	help function: Find the smallest power of 2 that is >= n; return its
