@@ -32,6 +32,8 @@ enum class TensorPlacement
 struct HarnessPolicy
 {
     VerificationMode mode = VerificationMode::AUTO;
+    /// Where comparisons run; AUTO follows the reference that produced the expectation.
+    ValidatorDevice validator = ValidatorDevice::AUTO;
     bool enforceSupportClaims = false;
     TensorPlacement placement = TensorPlacement::DEVICE;
 

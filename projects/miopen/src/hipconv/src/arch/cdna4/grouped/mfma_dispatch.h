@@ -35,7 +35,7 @@ __device__ inline fp32x4_t mfma_4x4x4_16b(bf16x4_t a, bf16x4_t b, fp32x4_t c)
 
 // TF32 (simulated): inputs are fp32, computed via 3x BF16 MFMA.
 // Caller is responsible for splitting each fp32x4 operand into a (big, small)
-// bf16 pair via fp32x4_to_bf16_pair() — typically once per operand in the
+// bf16 pair via fp32xN_to_bf16_pair() — typically once per operand in the
 // weight / input LDS->VGPR prologue, so the main loop reuses the prebuilt
 // pair without recomputing the split. The wrapper expands to three BF16
 // MFMAs (big*big + big*small + small*big); the 4th term (small*small) is

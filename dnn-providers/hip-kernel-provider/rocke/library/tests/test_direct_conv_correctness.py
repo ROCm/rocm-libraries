@@ -57,6 +57,7 @@ def _skip_reason() -> str:
 _SKIP_REASON = _skip_reason()
 
 _TOL = 5e-2
+_TOL_BF16 = 1e-1  # bf16 has 3 fewer mantissa bits than fp16 (~8x coarser precision)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +151,7 @@ def _conv_ref_grouped(A_t, B_t, p) -> "torch.Tensor":
     return out_nchw.permute(0, 2, 3, 1).contiguous().cuda()
 
 
-def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
+def _run_grouped_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[bool, str]:
     """Build, compile, launch, and verify one grouped direct-conv kernel.
 
     Uses the generic ``DirectConvSpec`` dispatcher which selects the right
@@ -184,6 +185,7 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         KW=shape.KW,
         PAD=shape.PAD,
         stride=shape.stride,
+        dtype=dtype,
     )
 
     spec = DirectConvSpec(
@@ -208,11 +210,10 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     torch.manual_seed(0)
     total_c = shape.groups * shape.cpg
     total_k = shape.groups * shape.cpg
-    A_t = torch.empty(p.N, p.H, p.W, total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    B_t = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=torch.float16).uniform_(
-        -1.0, 1.0
-    )
-    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16)
+    _td = torch.bfloat16 if dtype == "bf16" else torch.float16
+    A_t = torch.empty(p.N, p.H, p.W, total_c, dtype=_td).uniform_(-1.0, 1.0)
+    B_t = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=_td).uniform_(-1.0, 1.0)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=_td)
 
     ref = _conv_ref_grouped(A_t, B_t, p)
 
@@ -224,7 +225,7 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     rt.memcpy_h2d(B_dev, _u8(B_t), B_t.nbytes)
     rt.memset(D_dev, 0, D_t.nbytes)
 
-    sig = conv_args_signature("fp16")
+    sig = conv_args_signature(dtype)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -264,11 +265,12 @@ def _run_grouped_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    passed = rel_err < _TOL
+    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    passed = rel_err < tol
     if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
     print(
-        f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}",
+        f"  PASS  {shape.id}  {arch}  {dtype}  rel_err={rel_err:.2e}",
         flush=True,
     )
     return True, ""
@@ -621,7 +623,7 @@ _DW_DGRAD_SHAPES: List[_Shape] = [
 ]
 
 
-def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
+def _run_dgrad_one(arch: str, shape: _Shape, dtype: str = "fp16") -> Tuple[bool, str]:
     """Build, compile, launch, and verify the direct dgrad kernel.
 
     Returns ``(passed, reason)``.
@@ -653,6 +655,7 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
         KW=shape.KW,
         PAD=shape.PAD,
         stride=shape.stride,
+        dtype=dtype,
     )
     spec_kwargs = {"problem": p, "name": f"test_dgrad_{shape.id}"}
     if shape.block_groups > 0:
@@ -676,14 +679,13 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     torch.manual_seed(42)
     total_c = shape.groups * shape.cpg
     total_k = shape.groups * kpg
+    _td = torch.bfloat16 if dtype == "bf16" else torch.float16
 
     # dY: output gradient [N, Ho, Wo, K]
-    dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=torch.float16).uniform_(-0.5, 0.5)
+    dY = torch.empty(p.N, p.Ho, p.Wo, total_k, dtype=_td).uniform_(-0.5, 0.5)
     # W:  weights         [K, KH, KW, cpg]
-    W = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=torch.float16).uniform_(
-        -0.5, 0.5
-    )
-    dX = torch.zeros(p.N, p.H, p.W, total_c, dtype=torch.float16)
+    W = torch.empty(total_k, p.KH, p.KW, shape.cpg, dtype=_td).uniform_(-0.5, 0.5)
+    dX = torch.zeros(p.N, p.H, p.W, total_c, dtype=_td)
 
     # Reference: dX = conv_transpose2d(dY, W)
     # output_padding recovers the exact input H, W (matters when stride > 1).
@@ -709,7 +711,7 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     rt.memcpy_h2d(W_dev, _u8(W), W.nbytes)
     rt.memset(dX_dev, 0, dX.nbytes)
 
-    sig = conv_args_signature("fp16")
+    sig = conv_args_signature(dtype)
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -751,10 +753,11 @@ def _run_dgrad_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
-    passed = rel_err < _TOL
+    tol = _TOL_BF16 if dtype == "bf16" else _TOL
+    passed = rel_err < tol
     if not passed:
-        return False, f"rel_err={rel_err:.3e} > tol={_TOL:.1e}"
-    print(f"  PASS  {shape.id}  {arch}  rel_err={rel_err:.2e}", flush=True)
+        return False, f"rel_err={rel_err:.3e} > tol={tol:.1e}"
+    print(f"  PASS  {shape.id}  {arch}  {dtype}  rel_err={rel_err:.2e}", flush=True)
     return True, ""
 
 
@@ -898,6 +901,87 @@ class TestDirectConvDgradWgradCorrectness(unittest.TestCase):
         for s in _DW_DGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_dw_dgrad(s)
+
+
+# ---------------------------------------------------------------------------
+# bf16 correctness tests
+# bf16 is supported by cpg=8, cpg=16, cpg=32 (not cpg=4 — no 4x4x4 bf16 atom)
+# and by the scalar dgrad path. gfx950 is required for the 16x16x32 fold_k32
+# atom; 16x16x16 bf16 (non-fold path) works on both gfx942 and gfx950.
+# ---------------------------------------------------------------------------
+
+# Subset of _SHAPES with cpg values that support bf16.
+_BF16_FWD_SHAPES: List[_Shape] = [s for s in _SHAPES if s.cpg in (8, 16, 32)]
+
+# Dgrad shapes that support bf16 (scalar FMA dgrad handles all cpg/kpg).
+_BF16_DGRAD_SHAPES: List[_Shape] = list(_DGRAD_SHAPES)
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+class TestDirectConvBf16Correctness(unittest.TestCase):
+    """Correctness tests for direct conv with bf16 I/O tensors.
+
+    Uses the same harness as ``TestDirectConvCorrectness`` but with
+    ``dtype="bf16"`` and a looser tolerance (``_TOL_BF16``).  cpg=4 is
+    excluded because there is no ``mfma_f32_4x4x4_bf16`` atom on CDNA.
+    """
+
+    def _run_fwd(self, shape: _Shape) -> None:
+        passed, reason = _run_grouped_one(GPU_ARCH, shape, dtype="bf16")
+        if reason.startswith("skip"):
+            self.skipTest(reason)
+        self.assertTrue(
+            passed,
+            f"FAIL bf16 fwd {shape.id} on {GPU_ARCH}: {reason}",
+        )
+
+    def test_bf16_cpg8(self):
+        for s in _BF16_FWD_SHAPES:
+            if s.cpg == 8:
+                with self.subTest(shape=s.id):
+                    self._run_fwd(s)
+
+    def test_bf16_cpg16(self):
+        for s in _BF16_FWD_SHAPES:
+            if s.cpg == 16:
+                with self.subTest(shape=s.id):
+                    self._run_fwd(s)
+
+    def test_bf16_cpg32(self):
+        for s in _BF16_FWD_SHAPES:
+            if s.cpg == 32:
+                with self.subTest(shape=s.id):
+                    self._run_fwd(s)
+
+    def _run_dgrad(self, shape: _Shape) -> None:
+        passed, reason = _run_dgrad_one(GPU_ARCH, shape, dtype="bf16")
+        if reason.startswith("skip"):
+            self.skipTest(reason)
+        self.assertTrue(
+            passed,
+            f"FAIL bf16 dgrad {shape.id} on {GPU_ARCH}: {reason}",
+        )
+
+    def test_bf16_dgrad(self):
+        for s in _BF16_DGRAD_SHAPES:
+            with self.subTest(shape=s.id):
+                self._run_dgrad(s)
+
+
+class TestDirectConvValidation(unittest.TestCase):
+    """Validation-only tests that do not require a GPU."""
+
+    def test_cpg4_bf16_rejected(self):
+        """cpg=4 + bf16 must raise ValueError (no mfma_f32_4x4x4_bf16 on CDNA)."""
+        from kernels.common.conv_direct_grouped import (
+            DirectConv4cSpec,
+            DirectConvProblem,
+        )
+
+        p = DirectConvProblem(N=1, H=8, W=8, groups=16, cpg=4, kpg=4, dtype="bf16")
+        spec = DirectConv4cSpec(problem=p)
+        with self.assertRaises(ValueError):
+            spec.validate()
 
 
 if __name__ == "__main__":

@@ -354,6 +354,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         # so the grid must be multi-dimensional.
         grid = ["TilesX", "TilesY", "Batch"]
 
+    # Workspace is left unset here and derived in
+    # Solution._assignCustomKernelParameters, which sees the logic file's
+    # ProblemType rather than the advisory copy in custom.config.
     return {
         "name": kernelName,
         "args": args,

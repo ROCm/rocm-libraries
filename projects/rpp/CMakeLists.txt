@@ -262,7 +262,7 @@ if("${BACKEND}" STREQUAL "HIP")
         endif()
         include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
-        set(OPTIONAL_GPU_TARGETS "gfx1250")
+        set(OPTIONAL_GPU_TARGETS "gfx1250;gfx1250-strict")
         if(HAS_ROCM_CHECK_TARGET_IDS)
             rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
         else() # if we don't have rocm_check_target_ids, just assume the targets are available

@@ -53,7 +53,7 @@ struct WmmaHideBudgetBarrierInfo {
 /// window. Non-positive values disable throttle-shaped distribution and fall
 /// back to the existing even distribution.
 struct DsLoadBudgetConfig {
-    int dsReadPerWmma = 0;
+    int dsReadPerCap = 0;
     int dsReadQueueDepth = 0;
     int dsReadThrottleLatency = 0;
     double dsReadThrottleTransitionFactor = 1.0;

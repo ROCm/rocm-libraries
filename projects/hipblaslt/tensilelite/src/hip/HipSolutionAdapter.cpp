@@ -34,10 +34,6 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
-//@TODO add alternative for windows
-#ifndef _WIN32
-#include <glob.h>
-#endif
 #include <regex>
 
 namespace TensileLite

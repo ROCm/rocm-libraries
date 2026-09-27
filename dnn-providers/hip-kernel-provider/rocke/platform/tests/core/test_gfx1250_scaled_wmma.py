@@ -10,6 +10,7 @@ from unittest import mock
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
+from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -118,9 +119,11 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         with mock.patch.object(catalog, "by_op_id", return_value=atom):
             spec = gfx1250_scaled_wmma(atom.op_id)
         self.assertEqual(spec.matrix_formats, (0, 1))
-        self.assertEqual(spec.matrix_llvm_types, ("<16 x i32>", "<8 x i32>"))
-        self.assertTrue(spec.intrinsic.endswith("v16i32.v8i32"))
-        self.assertIn("wmma.scale.block32", spec.declaration_key)
+        signature = ScaledWmmaLLVM(spec)
+        self.assertEqual(signature.matrix_types, ("<16 x i32>", "<8 x i32>"))
+        self.assertEqual(signature.scale_type, "i32")
+        self.assertTrue(signature.intrinsic.endswith("v16i32.v8i32"))
+        self.assertIn("wmma.scale.block32", signature.declaration_key)
 
     def test_matrix_formats_share_intrinsic_declarations(self):
         b = IRBuilder("shared_scaled_wmma_declarations")

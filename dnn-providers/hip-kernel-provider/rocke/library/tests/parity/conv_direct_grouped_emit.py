@@ -195,6 +195,166 @@ def _spec(idx: int):
             DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
             "gfx950",
         )
+    if idx == 17:
+        # 16c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16
+        p = DirectConvProblem(
+            N=32,
+            H=200,
+            W=200,
+            groups=16,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "16c",
+            DirectConv16cSpec(problem=p, block_groups=8, fold_k32=False),
+            "gfx950",
+        )
+    if idx == 18:
+        # 8c bf16: exercises bf16 I/O, bf16 load/store taps, mfma_f32_16x16x16_bf16
+        p = DirectConvProblem(
+            N=32,
+            H=200,
+            W=200,
+            groups=16,
+            cpg=8,
+            kpg=8,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "8c",
+            DirectConv8cSpec(problem=p, block_q=16, block_groups=8, double_buffer=True),
+            "gfx950",
+        )
+    if idx == 19:
+        # dgrad bf16: exercises bf16 I/O on the scalar-FMA grouped dgrad path
+        p = DirectConvProblem(
+            N=2,
+            H=8,
+            W=8,
+            groups=8,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "dgrad",
+            DirectConvDgradSpec(problem=p, block_q=16, block_groups=8),
+            "gfx950",
+        )
+    if idx == 20:
+        # 16c bf16 with fold_k32=True: pins the non-default fold_k32 path under bf16
+        p = DirectConvProblem(
+            N=32,
+            H=200,
+            W=200,
+            groups=16,
+            cpg=16,
+            kpg=16,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "16c",
+            DirectConv16cSpec(problem=p, block_groups=8, fold_k32=True),
+            "gfx950",
+        )
+    if idx == 21:
+        # 32c bf16: exercises bf16 I/O on the 32c MFMA path
+        p = DirectConvProblem(
+            N=32,
+            H=200,
+            W=200,
+            groups=32,
+            cpg=32,
+            kpg=32,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "32c",
+            DirectConv32cSpec(problem=p, block_groups=8),
+            "gfx950",
+        )
+    if idx == 22:
+        # depthwise forward bf16: exercises bf16 I/O on the scalar-FMA depthwise path
+        p = DirectConvProblem(
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            cpg=1,
+            kpg=1,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "dw",
+            DirectDepthwiseSpec(problem=p, block_w=8, block_waves=1),
+            "gfx950",
+        )
+    if idx == 23:
+        # depthwise spatial bf16: exercises bf16 I/O on the small-group spatial path
+        p = DirectConvProblem(
+            N=2,
+            H=14,
+            W=14,
+            groups=16,
+            cpg=1,
+            kpg=1,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "spatial",
+            DirectDepthwiseSpatialSpec(problem=p, block_waves=1),
+            "gfx950",
+        )
+    if idx == 24:
+        # depthwise dgrad bf16: exercises bf16 I/O on the scalar-FMA depthwise dgrad path
+        p = DirectConvProblem(
+            N=2,
+            H=14,
+            W=14,
+            groups=64,
+            cpg=1,
+            kpg=1,
+            KH=3,
+            KW=3,
+            PAD=1,
+            stride=1,
+            dtype="bf16",
+        )
+        return (
+            "dw_dgrad",
+            DirectDepthwiseDgradSpec(problem=p, block_w=8, block_waves=1),
+            "gfx950",
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

@@ -113,11 +113,12 @@
 // knobs via SchedulingKnobHeuristics before DAG scheduling / cluster-barrier
 // insertion (user value wins; degenerate main-loop IR falls back to today's
 // static HW/CDNA5/Rule3 defaults). See SchedulingKnobHeuristics.hpp.
-#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)       \
-    X(DsReadThrottleTransitionFactor, double, 1.0) \
-    X(DsReadThrottleTransitionEntries, int, 0)     \
-    X(DsReadThrottleLatency, int, -1)              \
-    X(DsReadPerWmma, int, -1)                      \
+#define MODULE_OPTIONS_WITH_DEFAULTS_LIST(X)                          \
+    X(DsReadThrottleTransitionFactor, double, 1.0)                    \
+    X(DsReadThrottleTransitionEntries, int, 0)                        \
+    X(DsReadThrottleLatency, int, -1)                                 \
+    X(DsReadPerCap, int, -1)                                          \
+    X(DsReadPerWmma, int, -1) /* deprecated alias for DsReadPerCap */ \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)
 
 namespace stinkytofu {

@@ -49,6 +49,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
 PYROOT = ROCKE / "python"  # holds rocke
@@ -532,8 +534,10 @@ ELEM_CONFIGS: List[ElemCfg] = [
     ElemCfg("mul_f16_128k", 2048 * 64, "mul", "f16"),
     ElemCfg("max_f16_128k", 2048 * 64, "max", "f16"),
     ElemCfg("relu_f16_128k", 2048 * 64, "relu", "f16"),
+    ElemCfg("tanh_f16_128k", 2048 * 64, "tanh", "f16"),
     ElemCfg("add_bf16_128k", 2048 * 64, "add", "bf16"),
     ElemCfg("silu_bf16_128k", 2048 * 64, "silu", "bf16"),
+    ElemCfg("tanh_bf16_128k", 2048 * 64, "tanh", "bf16"),
 ]
 
 # map spec dtype -> TOL-table key
@@ -618,12 +622,34 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
 
     td = _torch_dtype(torch, tol_key)
     torch.manual_seed(0xC0FFEE)
+    input_device = "cpu" if cfg.op == "tanh" else "cuda"
     A = (
-        torch.randint(-4, 5, (cfg.n,), device="cuda", dtype=torch.int32).to(
+        torch.randint(-4, 5, (cfg.n,), device=input_device, dtype=torch.int32).to(
             torch.float32
         )
         * 0.5
     ).to(td)
+    if cfg.op == "tanh":
+        edge_values = torch.tensor(
+            [
+                -float("inf"),
+                -100.0,
+                -10.0,
+                -1.0,
+                -0.0,
+                0.0,
+                1.0,
+                10.0,
+                100.0,
+                float("inf"),
+                float("nan"),
+            ],
+            device="cpu",
+            dtype=torch.float32,
+        ).to(td)
+        A[: edge_values.numel()] = edge_values
+        reference = _torch_elementwise_ref(torch, cfg.op, A, None)
+        A = A.to(device="cuda")
     is_binary = spec.is_binary()
     B = None
     if is_binary:
@@ -633,9 +659,13 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
             )
             * 0.5
         ).to(td)
-    C = torch.zeros((cfg.n,), device="cuda", dtype=td)
+    C = torch.empty((cfg.n,), device="cuda", dtype=td)
 
-    ref_f32 = _torch_elementwise_ref(torch, cfg.op, A, B if is_binary else None)
+    ref_f32 = (
+        reference
+        if cfg.op == "tanh"
+        else _torch_elementwise_ref(torch, cfg.op, A, B if is_binary else None)
+    )
 
     grid = elementwise_grid(cfg.n, spec)
     block = (spec.block_size, 1, 1)
@@ -656,13 +686,173 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
         res.detail = f"launch raised: {e}"
         return res
 
-    max_abs, max_rel, margin = _compare(torch, C, ref_f32, tol)
+    compare_actual = C
+    compare_reference = ref_f32
+    if cfg.op == "tanh":
+        compare_actual = C.cpu()
+        actual_nan = torch.isnan(compare_actual)
+        reference_nan = torch.isnan(ref_f32)
+        if not torch.equal(actual_nan, reference_nan):
+            res.status = "DRIFT"
+            res.detail = "tanh NaN classification mismatch"
+            return res
+        zero_mask = ref_f32 == 0
+        if not torch.equal(
+            torch.signbit(compare_actual[zero_mask]),
+            torch.signbit(ref_f32[zero_mask]),
+        ):
+            res.status = "DRIFT"
+            res.detail = "tanh signed-zero mismatch"
+            return res
+        compare_actual = compare_actual[~reference_nan]
+        compare_reference = ref_f32[~reference_nan]
+
+    max_abs, max_rel, margin = _compare(torch, compare_actual, compare_reference, tol)
     res.max_abs_diff = max_abs
     res.max_rel_diff = max_rel
     res.margin = margin
     res.status = "GREEN" if margin <= 0.0 and math.isfinite(margin) else "DRIFT"
     res.detail = (
         f"op={cfg.op} grid={grid} block={block} "
+        f"max_abs={max_abs:.3e} max_rel={max_rel:.3e} margin={margin:.3e}"
+    )
+    return res
+
+
+# ---------------------------------------------------------------------
+# Direct f32 tanh lane (ElementwiseSpec exposes only f16/bf16 I/O)
+# ---------------------------------------------------------------------
+def _build_tanh_f32_kernel(block_size: int = 64):
+    from rocke.core.ir import F32, I32, IRBuilder, PtrType
+
+    b = IRBuilder("tanh_f32_direct")
+    b.kernel.attrs["max_workgroup_size"] = block_size
+    A = b.param("A", PtrType(F32, "global"), readonly=True, align=4)
+    C = b.param("C", PtrType(F32, "global"), writeonly=True, align=4)
+    N = b.param("N", I32)
+    idx = b.add(b.mul(b.block_id_x(), b.const_i32(block_size)), b.thread_id_x())
+    with b.scf_if(b.cmp_lt(idx, N)):
+        x = b.global_load_f32(A, idx)
+        b.global_store(C, idx, b.tanh(x), align=4)
+    return b.kernel
+
+
+def run_tanh_f32_direct(arch: str = "gfx950") -> NumericResult:
+    """Build and launch a direct f32 tanh kernel, including tiny bit checks."""
+    import torch
+
+    from rocke.helpers import SignatureBuilder
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+    input_values = np.array(
+        [
+            -np.inf,
+            -10.0,
+            -1.0,
+            -0.0,
+            0.0,
+            1.0,
+            10.0,
+            np.inf,
+            np.nan,
+            np.nextafter(np.float32(0.625), np.float32(0.0)),
+            np.float32(0.625),
+            np.nextafter(np.float32(0.625), np.float32(np.inf)),
+            -np.nextafter(np.float32(0.625), np.float32(0.0)),
+            -np.float32(0.625),
+            -np.nextafter(np.float32(0.625), np.float32(np.inf)),
+            np.float32(2.0**-27),
+            -np.float32(2.0**-27),
+            np.float32(2.0**-26),
+            -np.float32(2.0**-26),
+            np.finfo(np.float32).tiny,
+            -np.finfo(np.float32).tiny,
+            np.nextafter(np.float32(0.0), np.float32(1.0)),
+            -np.nextafter(np.float32(0.0), np.float32(1.0)),
+        ],
+        dtype=np.float32,
+    )
+    n = int(input_values.size)
+    block_size = 64
+    tol = TOL["fp32"]
+    res = NumericResult(
+        family="elementwise",
+        name="tanh_f32_direct",
+        status="GREEN",
+        dtype="fp32",
+        shape=(n,),
+        rtol=tol.rtol,
+        atol=tol.atol,
+    )
+
+    try:
+        art = compile_kernel(_build_tanh_f32_kernel(block_size), arch=arch)
+    except Exception as e:  # noqa: BLE001
+        res.status = "BUILD_FAIL"
+        res.detail = f"build/compile raised: {e}"
+        return res
+    res.extra["kernel_name"] = art.kernel_name
+    res.extra["hsaco_bytes"] = art.hsaco_bytes
+
+    host_input = torch.from_numpy(input_values.copy())
+    device_input = host_input.to(device="cuda")
+    device_output = torch.empty_like(device_input)
+    reference = torch.from_numpy(np.tanh(input_values))
+    signature = (
+        SignatureBuilder().ptr("A", "f32").ptr("C", "f32").scalar("N", "i32").build()
+    )
+    grid = ((n + block_size - 1) // block_size, 1, 1)
+    block = (block_size, 1, 1)
+    try:
+        launcher = KernelLauncher(
+            hsaco=art.hsaco, kernel_name=art.kernel_name, signature=signature
+        )
+        launcher(
+            {"A": device_input, "C": device_output, "N": n},
+            config=LaunchConfig(grid=grid, block=block, fence=True),
+        )
+        torch.cuda.synchronize()
+    except Exception as e:  # noqa: BLE001
+        res.status = "LAUNCH_FAIL"
+        res.detail = f"launch raised: {e}"
+        return res
+
+    host_output = device_output.cpu()
+    actual_nan = torch.isnan(host_output)
+    reference_nan = torch.isnan(reference)
+    if not torch.equal(actual_nan, reference_nan):
+        res.status = "DRIFT"
+        res.detail = "direct f32 tanh NaN classification mismatch"
+        return res
+
+    input_bits = input_values.view(np.uint32)
+    zero_indices = np.flatnonzero((input_bits & np.uint32(0x7FFFFFFF)) == 0)
+    if not torch.equal(
+        torch.signbit(host_output[zero_indices.tolist()]),
+        torch.signbit(host_input[zero_indices.tolist()]),
+    ):
+        res.status = "DRIFT"
+        res.detail = "direct f32 tanh signed-zero mismatch"
+        return res
+
+    tiny_indices = np.arange(n - 8, n)
+    output_bits = host_output.numpy().view(np.uint32)
+    if not np.array_equal(output_bits[tiny_indices], input_bits[tiny_indices]):
+        res.status = "DRIFT"
+        res.detail = "direct f32 tanh tiny-value bit mismatch"
+        return res
+
+    finite = ~reference_nan
+    max_abs, max_rel, margin = _compare(
+        torch, host_output[finite], reference[finite], tol
+    )
+    res.max_abs_diff = max_abs
+    res.max_rel_diff = max_rel
+    res.margin = margin
+    res.status = "GREEN" if margin <= 0.0 and math.isfinite(margin) else "DRIFT"
+    res.detail = (
+        f"grid={grid} block={block} tiny_bits=exact "
         f"max_abs={max_abs:.3e} max_rel={max_rel:.3e} margin={margin:.3e}"
     )
     return res
@@ -968,6 +1158,8 @@ def run_all(arch: str = "gfx950", only: str = "") -> List[NumericResult]:
     for cfg in ELEM_CONFIGS:
         if want("elementwise", cfg.name):
             results.append(run_elementwise_config(cfg, arch=arch))
+    if want("elementwise", "tanh_f32_direct"):
+        results.append(run_tanh_f32_direct(arch=arch))
     for cfg in ROW_CONFIGS:
         if want(cfg.family, cfg.name):
             results.append(run_row_config(cfg, arch=arch))

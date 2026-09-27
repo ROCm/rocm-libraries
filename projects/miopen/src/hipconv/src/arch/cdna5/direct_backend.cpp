@@ -2,9 +2,9 @@
 
 #include <array>
 
-using hipconv::Conv2dParams;
 using hipconv::ConvAlgorithm;
 using hipconv::ConvKernelSpan;
+using hipconv::ConvParams;
 
 // Symbols defined by autoshard
 extern const ConvKernelSpan direct_cdna5_kernels;
@@ -12,7 +12,7 @@ extern const ConvKernelSpan direct_cdna5_kernels;
 namespace
 {
 
-bool is_applicable(const Conv2dParams& par)
+bool is_applicable(const ConvParams& par)
 {
     return par.dilation_h == 1 && par.dilation_w == 1;
 }

@@ -47,6 +47,10 @@ int main(int argc, char** argv) noexcept
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
+        parser.add_argument("--validator")
+            .help("Where outputs are compared: 'auto' (default; the host, where golden "
+                  "data is loaded), 'cpu', or 'gpu'. Can also be set via "
+                  "HIPDNN_TEST_VALIDATOR env var.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -107,6 +111,21 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        std::optional<hipdnn_integration_tests::ValidatorDevice> validator;
+        if(parser.is_used("--validator"))
+        {
+            try
+            {
+                validator = hipdnn_integration_tests::parseValidatorDevice(
+                    parser.get<std::string>("--validator"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+        }
+
         std::vector<char*> gtestArgv;
         gtestArgv.reserve(remainingArgs.size() + 2);
         gtestArgv.push_back(argv[0]);
@@ -125,6 +144,7 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.configPath = std::move(configPath);
+        opts.validatorDevice = validator;
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         if(runCpu)

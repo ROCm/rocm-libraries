@@ -1829,6 +1829,19 @@ class Solution(collections.abc.Mapping):
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
     state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
 
+    # Nothing else computes a handwritten kernel's workspace, and the host reads
+    # the decision off the CustomKernel block alone (requiredWorkspaceSize only
+    # consults sizeMapping for generated kernels).  A non-atomic Stream-K kernel
+    # that declares none would launch against a zero-byte buffer and fault on its
+    # first partial-tile store.  Derive it from the accumulation mode chosen
+    # above, sized like assignDerivedParameters' computeBytes.  custom.config's
+    # own ProblemType is advisory -- LibraryIO overwrites it with the logic
+    # file's -- so read the type from state.  An explicit declaration wins.
+    if ck.get("workspaceType", "None") == "None" \
+       and state["_GlobalAccumulation"] == 'PartialsBuffer':
+      ck["workspaceType"]          = "StreamKWithReduction"
+      ck["workspaceSizePerElemC"]  = int(state["ProblemType"]["ComputeDataType"].numBytes())
+
     state["_WorkspaceSizePerElemC"] = ck.get("workspaceSizePerElemC", 0)
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
@@ -1867,6 +1880,19 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    if state.get("StreamK", 0) and state["ProblemType"].get("OutputAmaxD", False):
+      reject(state, printRejectionReason,
+             "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
+             "final-output tile per workgroup, not persistent or partial StreamK tiles")
+      return
+    if state["ProblemType"].get("OutputAmaxD", False):
+      if state.get("GlobalSplitU", 1) != 1:
+        reject(state, printRejectionReason,
+               "OutputAmaxD requires GlobalSplitU=1: split-reduction helpers do not reduce amax")
+        return
+      # The amax workspace/counter indexes dense output tiles within one batch.
+      # Publish the corresponding runtime predicate, including for explicit YAML.
+      state["BatchSizeEqual"] = 1
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None

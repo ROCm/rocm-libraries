@@ -89,7 +89,10 @@ from pprint import pprint
 
 
 def _needsPreLoopLocalReadDrain(kernel, numItersPLR, preLoopLocalReadDrainEmitted):
-  return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"] and kernel["ForceUnrollSubIter"]
+  # CMS schedules the loop body independently of the prologue. Any effective
+  # local prefetch therefore needs an explicit drain unless an earlier path
+  # already emitted one; ForceUnrollSubIter does not change that dependency.
+  return bool(numItersPLR and kernel["UseCustomMainLoopSchedule"]
               and not preLoopLocalReadDrainEmitted)
 
 

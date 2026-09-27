@@ -17,6 +17,7 @@
 
 #include "common/PlatformUtils.hpp"
 #include "harness/TestSettings.hpp"
+#include "harness/ValidationSite.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -110,6 +111,24 @@ inline std::optional<VerificationMode>
     return std::nullopt;
 }
 
+// Resolve the requested validator: CLI value wins, then HIPDNN_TEST_VALIDATOR, then
+// nullopt (AUTO). Kept separate from TestConfig::initialize() so the precedence logic is
+// independently testable.
+inline std::optional<ValidatorDevice>
+    resolveValidatorDevice(std::optional<ValidatorDevice> cliValue)
+{
+    if(cliValue.has_value())
+    {
+        return cliValue;
+    }
+    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VALIDATOR");
+    if(!envVal.empty())
+    {
+        return parseValidatorDevice(envVal);
+    }
+    return std::nullopt;
+}
+
 // Resolve golden data dir: CLI value wins, then env var, then nullopt.
 inline std::optional<std::filesystem::path>
     resolveGoldenDataDir(std::optional<std::filesystem::path> cliValue)
@@ -137,6 +156,7 @@ struct TestConfigOptions
     bool allowBundles = true;
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
+    std::optional<ValidatorDevice> validatorDevice;
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
@@ -233,6 +253,7 @@ public:
 
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
+        instance._validatorDevice = resolveValidatorDevice(opts.validatorDevice);
         instance._captureDir = std::move(opts.captureDir);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
@@ -428,6 +449,14 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    // Where comparisons run. Resolved once at init: CLI flag > HIPDNN_TEST_VALIDATOR
+    // env var > AUTO default (follow the reference).
+    ValidatorDevice getValidatorDevice() const
+    {
+        throwIfNotInitialized();
+        return _validatorDevice.value_or(ValidatorDevice::AUTO);
+    }
+
     bool enforceSupportClaims() const
     {
         throwIfNotInitialized();
@@ -474,6 +503,7 @@ private:
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
+    std::optional<ValidatorDevice> _validatorDevice;
     std::optional<std::filesystem::path> _captureDir;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;

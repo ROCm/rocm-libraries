@@ -243,6 +243,8 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem) -> dict:
         use_early_v_schedule=_enable_early_v_schedule(problem),
         use_fast_paged_kv_desc=(
             combo_no_sw
+            and problem.dtype
+            == "bf16"  # fast descriptor is bf16-only (spec validator enforces)
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8

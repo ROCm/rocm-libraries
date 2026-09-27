@@ -25,6 +25,12 @@ hipconv_autoshard(ARCH         cdna4
                   CONFIG_TABLE depthwise/depthwise_1d_toeplitz/config_table.h
                   KERNEL       depthwise/depthwise_1d_toeplitz/kernel.h
                   NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
+hipconv_autoshard(ARCH         cdna4
+                  NAMESPACE    depthwise_wgrad_hankel
+                  KERNEL_CLASS Depthwise_Wgrad_Hankel_ConvKernel
+                  CONFIG_TABLE depthwise/depthwise_wgrad_hankel/config_table.h
+                  KERNEL       depthwise/depthwise_wgrad_hankel/kernel.h
+                  NUM_SHARDS   ${HIPCONV_NUM_SHARDS})
 if(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ)
     target_compile_definitions(hipconv_arch_cdna4 PRIVATE HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ)
     hipconv_autoshard(ARCH         cdna4

@@ -676,6 +676,7 @@ RppStatus hip_exec_tensor_binary_bitwise_generic_tensor(
                            handle.GetStream(), srcPtr1, srcPtr2, d_src1BroadcastStrides,
                            d_src2BroadcastStrides, d_src1BeginOffsets, d_src2BeginOffsets, dstPtr,
                            d_dstBroadcastStrides, d_dstBroadcastDims, op);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (dstDim == 2) {
         // NHW
         int globalThreads_x = dstGenericDescPtr->dims[2];
@@ -690,6 +691,7 @@ RppStatus hip_exec_tensor_binary_bitwise_generic_tensor(
                            handle.GetStream(), srcPtr1, srcPtr2, d_src1BroadcastStrides,
                            d_src2BroadcastStrides, d_src1BeginOffsets, d_src2BeginOffsets, dstPtr,
                            d_dstBroadcastStrides, d_dstBroadcastDims, op);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (dstDim == 3) {
         // NDHW
         int globalThreads_x = dstGenericDescPtr->dims[3];
@@ -710,6 +712,7 @@ RppStatus hip_exec_tensor_binary_bitwise_generic_tensor(
                 src2BeginOffsets[batchCount], dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
                 d_dstBroadcastStrides + batchCount * RPPT_MAX_DIMS,
                 d_dstBroadcastDims + batchCount * RPPT_MAX_DIMS, op);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     } else {
         // interpret the input as 1D tensor
@@ -726,6 +729,7 @@ RppStatus hip_exec_tensor_binary_bitwise_generic_tensor(
                            d_src2BroadcastStrides, d_src1BeginOffsets, d_src2BeginOffsets,
                            dstGenericDescPtr->numDims - 1, dstPtr, d_dstBroadcastStrides,
                            d_dstBroadcastDims, op);
+        HIP_CHECK_LAUNCH_RETURN();
     }
 
     return RPP_SUCCESS;
@@ -753,6 +757,7 @@ RppStatus hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
                            handle.GetStream(), srcPtr1, srcPtr2, dstPtr,
                            dstGenericDescPtr->strides[0], roiTensor1, roiTensor2, op);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (numDims == 2) {
         // NHW
         int globalThreads_x = (dstGenericDescPtr->dims[2] + 7) >> 3;
@@ -767,6 +772,7 @@ RppStatus hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                            handle.GetStream(), srcPtr1, srcPtr2, dstPtr,
                            make_uint2(dstGenericDescPtr->strides[0], dstGenericDescPtr->strides[1]),
                            roiTensor1, roiTensor2, op);
+        HIP_CHECK_LAUNCH_RETURN();
     } else if (numDims == 3) {
         // NDHW
         int globalThreads_x = (dstGenericDescPtr->dims[3] + 7) >> 3;
@@ -785,6 +791,7 @@ RppStatus hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                 dstPtr + (batchCount * dstGenericDescPtr->strides[0]),
                 make_uint2(dstGenericDescPtr->strides[1], dstGenericDescPtr->strides[2]),
                 &roiTensor1[batchCount * 6], &roiTensor2[batchCount * 6], op);
+            HIP_CHECK_LAUNCH_RETURN();
         }
     } else {
         // interpret the input as 1D tensor
@@ -800,6 +807,7 @@ RppStatus hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                            handle.GetStream(), srcPtr1, srcPtr2, srcGenericDescPtr1->dims + 1,
                            srcGenericDescPtr1->numDims - 1, dstPtr, dstGenericDescPtr->strides,
                            roiTensor1, roiTensor2, op);
+        HIP_CHECK_LAUNCH_RETURN();
     }
 
     return RPP_SUCCESS;
@@ -816,37 +824,37 @@ RppStatus tensor_binary_bitwise_op_dispatch_gpu_tensor(
     if (broadcastMode == RPP_BROADCAST_ENABLE) {
         switch (tensorOp) {
             case RPP_TENSOR_OP_AND:
-                hip_exec_tensor_binary_bitwise_generic_tensor(
+                RPP_RETURN_IF_ERROR(hip_exec_tensor_binary_bitwise_generic_tensor(
                     srcPtr1, srcPtr2, srcPtr1GenericDescPtr, srcPtr2GenericDescPtr, dstPtr,
-                    dstGenericDescPtr, BitwiseAnd(), srcPtr1roiTensor, srcPtr2roiTensor, handle);
+                    dstGenericDescPtr, BitwiseAnd(), srcPtr1roiTensor, srcPtr2roiTensor, handle));
                 break;
             case RPP_TENSOR_OP_OR:
-                hip_exec_tensor_binary_bitwise_generic_tensor(
+                RPP_RETURN_IF_ERROR(hip_exec_tensor_binary_bitwise_generic_tensor(
                     srcPtr1, srcPtr2, srcPtr1GenericDescPtr, srcPtr2GenericDescPtr, dstPtr,
-                    dstGenericDescPtr, BitwiseOr(), srcPtr1roiTensor, srcPtr2roiTensor, handle);
+                    dstGenericDescPtr, BitwiseOr(), srcPtr1roiTensor, srcPtr2roiTensor, handle));
                 break;
             case RPP_TENSOR_OP_XOR:
-                hip_exec_tensor_binary_bitwise_generic_tensor(
+                RPP_RETURN_IF_ERROR(hip_exec_tensor_binary_bitwise_generic_tensor(
                     srcPtr1, srcPtr2, srcPtr1GenericDescPtr, srcPtr2GenericDescPtr, dstPtr,
-                    dstGenericDescPtr, BitwiseXor(), srcPtr1roiTensor, srcPtr2roiTensor, handle);
+                    dstGenericDescPtr, BitwiseXor(), srcPtr1roiTensor, srcPtr2roiTensor, handle));
                 break;
         }
     } else {
         switch (tensorOp) {
             case RPP_TENSOR_OP_AND:
-                hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
+                RPP_RETURN_IF_ERROR(hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                     srcPtr1, srcPtr2, srcPtr1GenericDescPtr, srcPtr2GenericDescPtr, dstPtr,
-                    dstGenericDescPtr, BitwiseAnd(), srcPtr1roiTensor, srcPtr2roiTensor, handle);
+                    dstGenericDescPtr, BitwiseAnd(), srcPtr1roiTensor, srcPtr2roiTensor, handle));
                 break;
             case RPP_TENSOR_OP_OR:
-                hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
+                RPP_RETURN_IF_ERROR(hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                     srcPtr1, srcPtr2, srcPtr1GenericDescPtr, srcPtr2GenericDescPtr, dstPtr,
-                    dstGenericDescPtr, BitwiseOr(), srcPtr1roiTensor, srcPtr2roiTensor, handle);
+                    dstGenericDescPtr, BitwiseOr(), srcPtr1roiTensor, srcPtr2roiTensor, handle));
                 break;
             case RPP_TENSOR_OP_XOR:
-                hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
+                RPP_RETURN_IF_ERROR(hip_exec_tensor_non_broadcast_binary_bitwise_generic_tensor(
                     srcPtr1, srcPtr2, srcPtr1GenericDescPtr, srcPtr2GenericDescPtr, dstPtr,
-                    dstGenericDescPtr, BitwiseXor(), srcPtr1roiTensor, srcPtr2roiTensor, handle);
+                    dstGenericDescPtr, BitwiseXor(), srcPtr1roiTensor, srcPtr2roiTensor, handle));
                 break;
         }
     }

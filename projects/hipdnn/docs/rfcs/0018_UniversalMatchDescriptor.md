@@ -752,7 +752,7 @@ for cases it no longer serves. The option is provided with that risk stated.
 ## 13. Testing and Performance
 
 The split introduces no new testing strategy. It slots into hipDNN's existing tiers
-(`docs/Testing.md`, `docs/testing/TestingStrategy.md`) as RFC 0017 §14.1 requires. A
+([`docs/TESTING.md`](../TESTING.md), [`docs/testing/TESTING_STRATEGY.md`](../testing/TESTING_STRATEGY.md)) as RFC 0017 §14.1 requires. A
 descriptor-backed kernel runs through the generic engine as an ordinary engine, and it produces the
 same graphs everything else consumes. The plugin-agnostic integration harness
 ([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) therefore validates it against the CPU reference

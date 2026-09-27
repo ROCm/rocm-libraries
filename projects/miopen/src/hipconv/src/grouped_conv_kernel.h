@@ -1,7 +1,7 @@
 #pragma once
 
 #include "conv_kernel.h"
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 #include <cstdint>
 
@@ -17,7 +17,7 @@ public:
 
     hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Grouped; }
 
-    bool is_applicable(const hipconv::Conv2dParams& par) const override
+    bool is_applicable(const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
 
@@ -53,7 +53,7 @@ public:
             return false;
         // Buffer load instructions use 32-bit offsets and the buffer descriptor's
         // NUM_RECORDS field is 32 bits. Reject tensors >= 4 GB.
-        Conv2dSize sz(par);
+        ConvSize sz(par);
         if(sz.input_bytes() > INT32_MAX)
             return false;
         if(par.direction == Direction::Fprop && sz.output_bytes() > INT32_MAX)
@@ -64,7 +64,7 @@ public:
     }
 
     // A valid grouped config is almost certainly the fastest kernel.
-    float get_weighted_throughput_index(const hipconv::Conv2dParams& /*par*/) const override
+    float get_weighted_throughput_index(const hipconv::ConvParams& /*par*/) const override
     {
         return 1.0f;
     }
@@ -82,7 +82,7 @@ public:
 
     hipconv::Algorithm algorithm() const override { return hipconv::Algorithm::Grouped; }
 
-    bool is_applicable(const hipconv::Conv2dParams& par) const override
+    bool is_applicable(const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
 
@@ -120,7 +120,7 @@ public:
             return false;
         // Buffer load instructions use 32-bit offsets and the buffer descriptor's
         // NUM_RECORDS field is 32 bits. Reject tensors >= 4 GB.
-        Conv2dSize sz(par);
+        ConvSize sz(par);
         if(sz.input_bytes() > INT32_MAX)
             return false;
         if(sz.output_grad_bytes() > INT32_MAX)
@@ -129,7 +129,7 @@ public:
     }
 
     // A valid grouped wgrad config is almost certainly the fastest kernel.
-    float get_weighted_throughput_index(const hipconv::Conv2dParams& /*par*/) const override
+    float get_weighted_throughput_index(const hipconv::ConvParams& /*par*/) const override
     {
         return 1.0f;
     }

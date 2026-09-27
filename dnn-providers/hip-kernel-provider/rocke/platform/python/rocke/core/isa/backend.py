@@ -21,7 +21,7 @@ encoders emit) fails loudly here instead of silently truncating a partial wait
 into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
-This module imports only from ``core/arch`` at module load; the shared LLVM
+This module imports from ``core/arch`` at module load; the shared LLVM
 constants are pulled from ``core/lower_llvm`` lazily inside methods to avoid an
 import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 """
@@ -32,6 +32,7 @@ from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
 from ..arch.wmma_scale import gfx1250_scaled_wmma
+from .wmma_scale import ScaledWmmaLLVM
 
 
 class ISABackend:
@@ -623,9 +624,10 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
         # Declarations describe physical signatures, independently of matrix encodings.
-        decl_key = spec.declaration_key
-        intrinsic = spec.intrinsic
-        scale_ty = spec.scales.llvm_type
+        signature = ScaledWmmaLLVM(spec)
+        decl_key = signature.declaration_key
+        intrinsic = signature.intrinsic
+        scale_ty = signature.scale_type
         fmt0, fmt1 = spec.matrix_formats
         a, b, c, a_scale, b_scale = op.operands
         if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
@@ -636,8 +638,8 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
-            f"i32 {fmt0}, {spec.matrix_llvm_types[0]} {lowerer._operand(a)}, "
-            f"i32 {fmt1}, {spec.matrix_llvm_types[1]} {lowerer._operand(b)}, "
+            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
+            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
             f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
             f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "

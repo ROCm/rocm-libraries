@@ -80,10 +80,10 @@ class DepthwiseResult:
 # ---------------------------------------------------------------------------
 
 _MIOPEN_DTYPE_MAP = {
-    "conv": "fp32",
+    "conv": "fp32",  # rejected — fp32 not supported
     "convfp16": "fp16",
     "convbfp16": "bf16",
-    "convint8": "fp16",  # int8 not supported; fall back to fp16 and warn
+    "convint8": "int8",  # rejected — int8 not supported
 }
 
 
@@ -117,10 +117,14 @@ def parse_miopen_cmd_direct(cmd: str):
             f"(expected one of: {list(_MIOPEN_DTYPE_MAP)})"
         )
     dtype = _MIOPEN_DTYPE_MAP[driver_kw]
+    if dtype == "fp32":
+        raise ValueError(
+            f"fp32 ({driver_kw!r}) is not supported by this benchmark; "
+            f"use convfp16 or convbfp16"
+        )
     if driver_kw == "convint8":
-        print(
-            "[warn] convint8 is not supported by this benchmark; treating as fp16",
-            file=sys.stderr,
+        raise ValueError(
+            "convint8 is not supported by this benchmark; " "use convfp16 or convbfp16"
         )
 
     sub = argparse.ArgumentParser(add_help=False)
@@ -200,6 +204,7 @@ def parse_miopen_cmd_direct(cmd: str):
         KW=miopen_args.X,
         PAD=miopen_args.pH,
         stride=sH,
+        dtype=dtype if dtype in ("fp16", "bf16") else "fp16",
     )
     return problem, dtype, miopen_args.forw
 
@@ -349,12 +354,17 @@ class _DirectConvProblemAdapter:
 
 
 def _print_results(
-    results: List[Result], top_n_arg: int, arch: str, p, show_verify: bool
+    results: List[Result],
+    top_n_arg: int,
+    arch: str,
+    p,
+    show_verify: bool,
+    dtype: str = "fp16",
 ):
     top_n = min(top_n_arg, len(results))
     width = 100 if show_verify else 88
     print(f"\n{'='*width}")
-    print(f"Top {top_n} configurations for {arch} fp16 {p.short()}")
+    print(f"Top {top_n} configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*width}")
     hdr = (
         f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  config"
@@ -380,12 +390,17 @@ def _print_results(
 
 
 def _print_depthwise_results(
-    results: "List[DepthwiseResult]", top_n_arg: int, arch: str, p, show_verify: bool
+    results: "List[DepthwiseResult]",
+    top_n_arg: int,
+    arch: str,
+    p,
+    show_verify: bool,
+    dtype: str = "fp16",
 ):
     top_n = min(top_n_arg, len(results))
     width = 96 if show_verify else 84
     print(f"\n{'='*width}")
-    print(f"Top {top_n} depthwise configurations for {arch} fp16 {p.short()}")
+    print(f"Top {top_n} depthwise configurations for {arch} {dtype} {p.short()}")
     print(f"{'='*width}")
     hdr = (
         f"{'rank':>4}  {'TFLOPS':>7}  {'ms':>8}  {'GBps':>7}  {'verify':>6}  config"
@@ -419,6 +434,7 @@ def _run_depthwise_sweep(
     *,
     args,
     problem,
+    dtype: str = "fp16",
     arch: str,
     compile_kernel,
     jobs: int,
@@ -451,13 +467,14 @@ def _run_depthwise_sweep(
     _use_spatial = p.groups < _wave_size
 
     torch.manual_seed(42)
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=torch.float16).uniform_(-1.0, 1.0)
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
+    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    B_t = torch.empty(p.total_k, p.KH, p.KW, 1, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
-    sig = conv_args_signature("fp16")
+    sig = conv_args_signature(dtype)
 
     # For the spatial layout block_w is derived from block_waves internally,
     # so sweeping block_w would produce duplicate kernels; use a dummy value.
@@ -476,7 +493,7 @@ def _run_depthwise_sweep(
         )
 
     print(
-        f"Sweeping {len(combos)} depthwise combinations for {arch} fp16 {p.short()} ...",
+        f"Sweeping {len(combos)} depthwise combinations for {arch} {dtype} {p.short()} ...",
         flush=True,
     )
 
@@ -637,7 +654,7 @@ def _run_depthwise_sweep(
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
-    _print_depthwise_results(results, args.top, arch, p, args.verify)
+    _print_depthwise_results(results, args.top, arch, p, args.verify, dtype=dtype)
     return 0, results
 
 
@@ -645,6 +662,7 @@ def _run_sweep(
     *,
     args,
     problem,
+    dtype: str = "fp16",
     arch: str,
     compile_kernel,
     jobs: int,
@@ -668,15 +686,16 @@ def _run_sweep(
     p = problem
 
     torch.manual_seed(42)
-    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16).uniform_(-1.0, 1.0)
-    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float16).uniform_(
+    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    A_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype).uniform_(-1.0, 1.0)
+    B_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
-    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16)
+    D_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype)
 
     bytes_xfer = float(A_t.nbytes + B_t.nbytes + D_t.nbytes)
     flop = float(p.flops)
-    sig = conv_args_signature("fp16")
+    sig = conv_args_signature(dtype)
 
     combos = list(itertools.product(_BLOCK_Q, _BLOCK_GROUPS, _DOUBLE_BUFFER))
 
@@ -690,7 +709,7 @@ def _run_sweep(
         )
 
     print(
-        f"Sweeping {len(combos)} combinations for {arch} fp16 {p.short()} "
+        f"Sweeping {len(combos)} combinations for {arch} {dtype} {p.short()} "
         f"(cpg={p.cpg}) ...",
         flush=True,
     )
@@ -840,7 +859,7 @@ def _run_sweep(
         return 1, []
 
     results.sort(key=lambda r: r.tflops, reverse=True)
-    _print_results(results, args.top, arch, p, args.verify)
+    _print_results(results, args.top, arch, p, args.verify, dtype=dtype)
     return 0, results
 
 
@@ -853,6 +872,7 @@ def _run_dgrad_sweep(
     *,
     args,
     problem,
+    dtype: str = "fp16",
     arch: str,
     compile_kernel,
     jobs: int,
@@ -886,17 +906,18 @@ def _run_dgrad_sweep(
     p = problem
 
     torch.manual_seed(42)
-    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=torch.float16).uniform_(
+    _torch_dtype = torch.bfloat16 if dtype == "bf16" else torch.float16
+    dY_t = torch.empty(p.N, p.Ho, p.Wo, p.total_k, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
-    W_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=torch.float16).uniform_(
+    W_t = torch.empty(p.total_k, p.KH, p.KW, p.cpg, dtype=_torch_dtype).uniform_(
         -1.0, 1.0
     )
-    dX_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=torch.float16)
+    dX_t = torch.empty(p.N, p.H, p.W, p.total_c, dtype=_torch_dtype)
 
     bytes_xfer = float(dY_t.nbytes + W_t.nbytes + dX_t.nbytes)
     flop = float(p.flops)
-    sig = conv_args_signature("fp16")
+    sig = conv_args_signature(dtype)
 
     is_depthwise = p.cpg == 1
 
@@ -910,7 +931,7 @@ def _run_dgrad_sweep(
 
         combos_dw = list(itertools.product(_DW_BLOCK_W, _DW_BLOCK_WAVES))
         print(
-            f"Sweeping {len(combos_dw)} depthwise dgrad combinations for {arch} fp16 "
+            f"Sweeping {len(combos_dw)} depthwise dgrad combinations for {arch} {dtype} "
             f"{p.short()} (stride={p.stride}) ...",
             flush=True,
         )
@@ -956,7 +977,7 @@ def _run_dgrad_sweep(
             valid_bgs = [bg for bg in _BLOCK_GROUPS if p.groups % bg == 0]
             combos = list(itertools.product(_BLOCK_Q, valid_bgs))
             print(
-                f"Sweeping {len(combos)} MFMA dgrad combinations for {arch} fp16 {p.short()} "
+                f"Sweeping {len(combos)} MFMA dgrad combinations for {arch} {dtype} {p.short()} "
                 f"(cpg={p.cpg}, kpg={p.kpg}) ...",
                 flush=True,
             )
@@ -1046,7 +1067,7 @@ def _run_dgrad_sweep(
             _DGRAD_BLOCK_Q = (4, 8, 16, 32)
             combos = list(itertools.product(_DGRAD_BLOCK_Q, valid_bgs))
             print(
-                f"Sweeping {len(combos)} scalar-FMA dgrad combinations for {arch} fp16 {p.short()} "
+                f"Sweeping {len(combos)} scalar-FMA dgrad combinations for {arch} {dtype} {p.short()} "
                 f"(cpg={p.cpg}, kpg={p.kpg}, stride={p.stride}) ...",
                 flush=True,
             )
@@ -1552,6 +1573,12 @@ def main() -> int:
         default=1,
         help="number of conv groups; C and K must each be divisible by groups (default: 1)",
     )
+    conv.add_argument(
+        "--dtype",
+        choices=("fp16", "bf16"),
+        default="fp16",
+        help="I/O data type when using shape flags (default: fp16; ignored when using --miopen-cmd/--miopen-file)",
+    )
 
     args = parser.parse_args()
 
@@ -1663,8 +1690,9 @@ def main() -> int:
             KW=args.X,
             PAD=args.pH,
             stride=args.sH,
+            dtype=args.dtype,
         )
-        cases = [(problem, "fp16", args.direction)]
+        cases = [(problem, args.dtype, args.direction)]
 
     _common = dict(
         args=args,
@@ -1691,11 +1719,11 @@ def main() -> int:
 
         cpg = problem.cpg
         if direction == "dgrad":
-            rc, _ = _run_dgrad_sweep(problem=problem, **_common)
+            rc, _ = _run_dgrad_sweep(problem=problem, dtype=dtype, **_common)
         elif cpg == 1:
-            rc, _ = _run_depthwise_sweep(problem=problem, **_common)
+            rc, _ = _run_depthwise_sweep(problem=problem, dtype=dtype, **_common)
         else:
-            rc, _ = _run_sweep(problem=problem, **_common)
+            rc, _ = _run_sweep(problem=problem, dtype=dtype, **_common)
         all_rc = all_rc or rc
 
     return all_rc

@@ -16,9 +16,11 @@ import unittest
 from dataclasses import replace
 
 from dispatch.attention import (
+    AttentionMaskType,
     AttentionRequest,
     attention_candidates,
     dense_spec_for_request as routed_dense_spec_for_request,
+    registered_attention_combos,
 )
 from dispatch.attention.gfx950 import dense_spec_for_request
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
@@ -28,6 +30,7 @@ from kernels.gfx950.attention_dense import (
     GFX950_DENSE_LAYOUTS,
     Gfx950AttentionDenseSpec,
     attention_dense_grid,
+    build_attention_dense,
     supports_attention_dense,
 )
 
@@ -69,6 +72,51 @@ class TestDenseSpecArchRouter(unittest.TestCase):
     def test_rejects_arch_without_dense_factory(self):
         with self.assertRaisesRegex(ValueError, "no spec factory"):
             routed_dense_spec_for_request(_gfx950_dense_req(arch="gfx1250"))
+
+
+class TestDenseWavesPerEuWiring(unittest.TestCase):
+    def test_default_policy_and_explicit_override(self):
+        default = dense_spec_for_request(_gfx950_dense_req())
+        overridden = dense_spec_for_request(_gfx950_dense_req(dense_waves_per_eu=4))
+        self.assertEqual(default.waves_per_eu, 2)
+        self.assertEqual(overridden.waves_per_eu, 4)
+        self.assertNotIn("wpe", default.kernel_name())
+        self.assertIn("wpe4", overridden.kernel_name())
+        self.assertNotEqual(default.kernel_name(), overridden.kernel_name())
+        self.assertEqual(
+            build_attention_dense(overridden, arch="gfx950").attrs["waves_per_eu"],
+            4,
+        )
+
+    def test_invalid_override_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "dense_waves_per_eu"):
+            dense_spec_for_request(_gfx950_dense_req(dense_waves_per_eu=9))
+
+    def _swept_waves(self, level: str, *, pin: int = 0) -> set[int]:
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            dense_persistent="off",
+            dense_tile="default",
+            dense_wide_lds_dma="off",
+            dense_waves_per_eu=pin,
+        )
+        return {
+            spec.waves_per_eu
+            for _candidate, spec in registered_attention_combos(
+                req,
+                candidate_prefix="attention_gfx950_dense_grid_default",
+                sweep_level=level,
+            )
+        }
+
+    def test_production_and_full_sweeps_expand_wpe(self):
+        self.assertEqual(self._swept_waves("production"), {2, 4})
+        self.assertEqual(self._swept_waves("full"), {1, 2, 3, 4})
+
+    def test_explicit_override_pins_sweep(self):
+        self.assertEqual(self._swept_waves("production", pin=3), {3})
+        self.assertEqual(self._swept_waves("full", pin=3), {3})
 
 
 class TestDenseGqaPairWiring(unittest.TestCase):
@@ -240,6 +288,97 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         self.assertEqual(spec.resolved_persist_decode, "qb_major")
         self.assertTrue(spec.wide_lds_dma)
         self.assertNotIn("gqapair", spec.kernel_name())
+
+
+class TestDenseBottomRightWiring(unittest.TestCase):
+    @staticmethod
+    def _moving_req(mask_type, **kw):
+        base = dict(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=12288,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            mask_type=mask_type,
+        )
+        base.update(kw)
+        return _gfx950_dense_req(**base)
+
+    def test_aligned_and_ragged_moving_masks_force_nonpersistent_narrow_dma(self):
+        shapes = (
+            ("aligned", 8192, 12288, False),
+            ("ragged", 8180, 12270, True),
+        )
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            for name, sq, sk, ragged in shapes:
+                with self.subTest(mask_type=mask_type, shape=name):
+                    spec = dense_spec_for_request(
+                        self._moving_req(
+                            mask_type,
+                            seqlen_q=sq,
+                            seqlen_k=sk,
+                            dense_persistent="auto",
+                        )
+                    )
+                    self.assertTrue(spec.causal)
+                    self.assertTrue(spec.causal_bottom_right)
+                    self.assertEqual(spec.ragged, ragged)
+                    self.assertFalse(spec.persistent)
+                    self.assertFalse(spec.wide_lds_dma)
+                    self.assertIn("br", spec.kernel_name().split("_"))
+                    self.assertNotIn("persist", spec.kernel_name())
+                    self.assertNotIn("wdma", spec.kernel_name())
+
+    def test_explicit_persistent_on_rejects_moving_bottom_right(self):
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            with self.subTest(mask_type=mask_type):
+                with self.assertRaisesRegex(ValueError, "bottom-right"):
+                    dense_spec_for_request(
+                        self._moving_req(mask_type, dense_persistent="on")
+                    )
+
+    def test_explicit_persistent_off_stays_off_for_moving_bottom_right(self):
+        for mask_type in (AttentionMaskType.BOTTOM_RIGHT_CAUSAL, 2):
+            with self.subTest(mask_type=mask_type):
+                spec = dense_spec_for_request(
+                    self._moving_req(mask_type, dense_persistent="off")
+                )
+                self.assertFalse(spec.persistent)
+                self.assertFalse(spec.wide_lds_dma)
+                self.assertTrue(spec.causal_bottom_right)
+
+    def test_equal_length_bottom_right_preserves_gqa_pair_and_wide_dma(self):
+        common = dict(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_persistent="auto",
+        )
+        mask_pairs = (
+            (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
+            (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
+        )
+        for top_left, bottom_right in mask_pairs:
+            with self.subTest(top_left=top_left, bottom_right=bottom_right):
+                top_left_spec = dense_spec_for_request(
+                    _gfx950_dense_req(mask_type=top_left, **common)
+                )
+                bottom_right_spec = dense_spec_for_request(
+                    _gfx950_dense_req(mask_type=bottom_right, **common)
+                )
+                self.assertEqual(bottom_right_spec, top_left_spec)
+                self.assertFalse(bottom_right_spec.causal_bottom_right)
+                self.assertTrue(bottom_right_spec.persistent)
+                self.assertEqual(bottom_right_spec.resolved_persist_decode, "gqa_pair")
+                self.assertTrue(bottom_right_spec.wide_lds_dma)
 
 
 class TestDenseGeometrySpec(unittest.TestCase):
@@ -419,32 +558,42 @@ class TestDenseCapabilitySlidingWindow(unittest.TestCase):
         self.assertIn("causal", candidate.capability.supports_features)
 
     def test_dispatch_selects_dense_for_sinks_request(self):
-        """Dispatch selects dense candidate for sinks requests."""
-        req = _gfx950_dense_req(use_sinks=True)
-
-        # Find which candidates admit this request
-        candidates = [c for c in attention_candidates() if c.admits(req)[0]]
-
-        # Verify dense is among them
-        dense = next(
-            (c for c in candidates if c.name == "attention_gfx950_dense"), None
+        """A non-wide-DMA dense variant admits sinks; production widedma does not."""
+        req = _gfx950_dense_req(
+            use_sinks=True,
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
         )
-        self.assertIsNotNone(dense, "Dense candidate should admit sinks requests")
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertTrue(names, "A gfx950 dense variant should admit sinks requests")
+        self.assertNotIn("attention_gfx950_dense", names)
+        self.assertIn("attention_gfx950_dense_persist_default", names)
 
     def test_dispatch_selects_dense_for_sliding_window_request(self):
-        """Dispatch selects dense candidate for sliding_window requests (AICK-1933)."""
-        req = _gfx950_dense_req(sliding_window=256)
-
-        # Find which candidates admit this request
-        candidates = [c for c in attention_candidates() if c.admits(req)[0]]
-
-        # Verify dense is among them
-        dense = next(
-            (c for c in candidates if c.name == "attention_gfx950_dense"), None
+        """A non-wide-DMA dense variant admits SWA; production widedma does not."""
+        req = _gfx950_dense_req(
+            sliding_window=256,
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
         )
-        self.assertIsNotNone(
-            dense, "Dense candidate should admit sliding_window requests"
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertTrue(
+            names, "A gfx950 dense variant should admit sliding_window requests"
         )
+        self.assertNotIn("attention_gfx950_dense", names)
+        self.assertIn("attention_gfx950_dense_persist_default", names)
 
 
 class TestSWASinkComposition(unittest.TestCase):
@@ -744,6 +893,136 @@ class TestSinksValidation(unittest.TestCase):
             )
 
         self.assertEqual(str(cm.exception), "sinks must be a CUDA tensor")
+
+
+class TestGfx950DenseVariants(unittest.TestCase):
+    """One registered candidate per frozen (tile x persist x wide-DMA) combo."""
+
+    def test_six_dense_candidates_are_registered(self):
+        from dispatch.attention.gfx950 import GFX950_DENSE_VARIANTS
+
+        names = [c.name for c in attention_candidates()]
+        expected = [v.candidate_name for v in GFX950_DENSE_VARIANTS]
+        self.assertEqual(len(expected), 6)
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertIn(name, names)
+
+    def test_d128_admits_all_six_dense_variants(self):
+        from dispatch.attention.gfx950 import GFX950_DENSE_VARIANTS
+
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=2048,
+            seqlen_k=2048,
+        )
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertEqual(names, {v.candidate_name for v in GFX950_DENSE_VARIANTS})
+
+    def test_d64_refuses_wide_dma_variants(self):
+        req = _gfx950_dense_req()
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertIn("attention_gfx950_dense_grid_default", names)
+        self.assertNotIn("attention_gfx950_dense", names)
+        self.assertNotIn("attention_gfx950_dense_persist_widedma_bm128", names)
+
+    def test_dense_tile_bm128_pin_filters_and_selects_block_m(self):
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+            dense_tile="bm128",
+        )
+        names = {
+            c.name
+            for c in attention_candidates()
+            if c.algorithm == "attention_dense" and c.admits(req)[0]
+        }
+        self.assertEqual(
+            names,
+            {
+                "attention_gfx950_dense_grid_bm128",
+                "attention_gfx950_dense_persist_bm128",
+                "attention_gfx950_dense_persist_widedma_bm128",
+            },
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.block_m, 128)
+        self.assertTrue(spec.persistent)
+        self.assertTrue(spec.wide_lds_dma)
+
+    def test_unpinned_llama3_8b_s8192_is_persist_widedma_default(self):
+        req = _gfx950_dense_req(
+            batch=1,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertEqual(spec.block_m, 256)
+        self.assertTrue(spec.persistent)
+        self.assertTrue(spec.wide_lds_dma)
+        self.assertEqual(spec.resolved_persist_decode, "gqa_pair")
+        from dispatch.attention import dispatch_attention
+
+        result = dispatch_attention(req)
+        self.assertEqual(result.candidate.name, "attention_gfx950_dense")
+
+    def test_registered_combos_include_dense_not_unified_2d(self):
+        from dispatch.attention import registered_attention_combos
+
+        req = _gfx950_dense_req(
+            hdim_q=128,
+            hdim_v=128,
+            nhead_q=32,
+            nhead_k=8,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            algorithm="auto",
+        )
+        names = {
+            c.name for c, _spec in registered_attention_combos(req, tuning_sample=2)
+        }
+        self.assertIn("attention_gfx950_dense", names)
+        self.assertIn("attention_gfx950_dense_grid_bm128", names)
+        self.assertNotIn("attention_unified_2d", names)
+
+    def test_d256_combos_exclude_dense_and_routing_labels(self):
+        from dispatch.attention import registered_attention_combos
+
+        req = _gfx950_dense_req(
+            hdim_q=256,
+            hdim_v=256,
+            nhead_q=16,
+            nhead_k=2,
+            seqlen_q=2048,
+            seqlen_k=2048,
+            dtype="bf16",
+            algorithm="auto",
+        )
+        combos = registered_attention_combos(req, tuning_sample=2)
+        names = {c.name for c, _spec in combos}
+        self.assertNotIn("attention_gfx950_d256", names)
+        self.assertFalse(
+            any(c.algorithm == "attention_dense" for c, _spec in combos),
+            names,
+        )
 
 
 if __name__ == "__main__":

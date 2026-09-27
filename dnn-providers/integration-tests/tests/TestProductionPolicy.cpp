@@ -44,6 +44,7 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
     const HarnessPolicy policy = productionPolicy(TensorPlacement::DEVICE);
 
     EXPECT_EQ(policy.mode, TestConfig::get().getVerificationMode());
+    EXPECT_EQ(policy.validator, TestConfig::get().getValidatorDevice());
     EXPECT_EQ(policy.enforceSupportClaims, TestConfig::get().enforceSupportClaims());
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
