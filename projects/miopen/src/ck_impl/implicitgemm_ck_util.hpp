@@ -1073,8 +1073,11 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         problem.GetAlphaBetaCase() == DEFAULT && problem.GetAlpha().GetAsFloat() == 1.0f &&
         problem.GetBeta().GetAsFloat() == 0.0f;
 
+    // Only gfx1250 has measured 3D output-copy elision; other devices retain
+    // their existing staging even when the selected CK invoker defines E.
     const bool selected_output_complete =
         (!problem.IsDirectionForward() || PlainFwdSetOutput) &&
+        (!problem.Is3d() || ctx.GetStream().GetDeviceName() == "gfx1250") &&
         SelectedNCHWCKOutputIsFullyDefined(problem, id_string, split_k);
 
     result.invoker_factory = [kernel_id_                = kernel_id,

@@ -42,6 +42,7 @@
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -491,10 +492,12 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
                                                const std::string& selected_id,
                                                std::optional<int> split_k)
 {
-    if(!problem.Is2d() || !problem.IsLayoutDefault() ||
+    if((!problem.Is2d() && !problem.Is3d()) || !problem.IsLayoutDefault() ||
        problem.GetConv().mode != miopenConvolution ||
-       problem.GetConv().trans_output_pads.size() != 2 ||
-       problem.GetConv().trans_output_pads[0] != 0 || problem.GetConv().trans_output_pads[1] != 0 ||
+       problem.GetConv().trans_output_pads.size() != problem.GetSpatialDims() ||
+       std::any_of(problem.GetConv().trans_output_pads.begin(),
+                   problem.GetConv().trans_output_pads.end(),
+                   [](int pad) { return pad != 0; }) ||
        (!problem.IsFp16() && !problem.IsBfp16()) || problem.HasNonPackedTensors() ||
        problem.GetGroupCount() == 0 || problem.GetAlphaBetaCase() != DEFAULT)
         return false;
@@ -510,6 +513,18 @@ inline bool SelectedNCHWCKOutputIsFullyDefined(const miopen::conv::ProblemDescri
         return selected_id.size() >= end.size() &&
                selected_id.compare(selected_id.size() - end.size(), end.size(), end) == 0;
     };
+    if(problem.Is3d())
+    {
+        // The registered 3D default XDL-v1 backward-data instances have no D tensor.
+        // Their bare IDs use CK's implicit split-1 argument and clear the full
+        // packed E before the residue GEMMs. Other directions, explicit splits,
+        // fused instances and v3 have no selected 3D proof here.
+        return problem.GetDirection() == miopen::conv::Direction::BackwardData && !split_k &&
+               starts_with("DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<") &&
+               (selected_id.find(", Default,") != std::string::npos ||
+                selected_id.find(", Filter1x1Stride1Pad0,") != std::string::npos) &&
+               ends_with(">");
+    }
 
     if(problem.IsDirectionForward())
     {
