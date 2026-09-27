@@ -601,3 +601,13 @@ Tests:
              amazon0312,
              Chebyshev4,
              sme3Dc]
+
+# AISPARSE-675: large single-bucket csrgemm that computes rows past the 32-bit
+# block-index wrap (2^32 / WFSIZE = 536,870,912). Needs tens of GB of host and
+# device memory, so it is nightly and memory-guarded (auto-skips on smaller cards).
+- name: csrgemm_extra
+  category: nightly
+  hardware: [gfx908, gfx90a]
+  function: csrgemm_extra
+  host_memory_gb: 40
+  device_memory_gb: 30
