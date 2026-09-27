@@ -68,25 +68,11 @@ else()
   )
 endif()
 
-set(hipsolver_f90_source
-  hipsolver_module.f90
-)
-
-if(BUILD_FORTRAN_BINDINGS)
-  # Create hipSOLVER Fortran module
-  add_library(hipsolver_fortran ${hipsolver_f90_source})
-  rocm_set_soversion(hipsolver_fortran ${hipsolver_SOVERSION})
-  if(EXPORT_FORTRAN_BINDINGS)
-    rocm_install(TARGETS hipsolver_fortran)
-  else()
-    # Install the shared object without adding it to the
-    # hipsolver-targets export set, so find_package(hipsolver)
-    # does not reference roc::hipsolver_fortran.
-    install(TARGETS hipsolver_fortran
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            COMPONENT runtime)
-  endif()
-endif()
+# The Fortran binding is no longer built here. hipsolver_module.f90, the
+# hand-written one, is removed; the binding is generated from the C headers
+# above and built by ../../fortran, which exports roc::hipsolver_fortran. Both
+# carried the same target name, so building both would have aborted the
+# configure with a duplicate-target error.
 
 add_library(hipsolver
   ${hipsolver_source}
@@ -274,37 +260,16 @@ else()
   )
 endif()
 
-if(BUILD_FORTRAN_MODULE)
-  # Exclude include folder for ASAN package
-  if(NOT ENABLE_ASAN_PACKAGING)
-    # Force installation of .f90 module files
-    install(FILES "hipsolver_module.f90"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipsolver")
-  endif()
-endif()
+# The rule that shipped hipsolver_module.f90 into include/hipsolver, and the
+# backward-compatibility symlinks to it, are gone with the source. The generated
+# binding installs its source as share/hipsolver/fortran/hipsolver.F90 and its
+# compiled artifacts under include/fortran/<compiler>; see ../../fortran.
 
 if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
   rocm_install(
     DIRECTORY
        "${PROJECT_BINARY_DIR}/hipsolver"
         DESTINATION ".")
-
-  if(NOT WIN32)
-
-    # Create SymLink for Fortran Object Module for backward compatibility
-    rocm_install(
-      CODE "
-        set(PREFIX \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX})
-	set(INPUT_FILE \${PREFIX}/include/hipsolver/hipsolver_module.f90)
-        set(SYMLINK_LOCATIONS \${PREFIX}/hipsolver/include \${PREFIX}/include)
-        foreach(LOCATION IN LISTS SYMLINK_LOCATIONS)
-          file(MAKE_DIRECTORY \${LOCATION})
-          execute_process(COMMAND ln -sfr \${INPUT_FILE} \${LOCATION})
-          message(STATUS \"Created symlink in \${LOCATION} to \${INPUT_FILE}.\")
-        endforeach()
-        "
-    )
-  endif() # NOT WIN32
   message(STATUS "Backward Compatible Sym Link Created for include directories")
 endif()
 

@@ -11,9 +11,31 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
   * getrfBatched
     * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, and hipsolverZgetrfBatched_bufferSize
     * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, and hipsolverZgetrfBatched
+* Generated Fortran bindings, as a single self-contained `hipsolver` module (`use hipsolver`,
+  link `roc::hipsolver_fortran`). Built by default when a Fortran compiler is available;
+  controlled by `BUILD_FORTRAN_BINDINGS`, with `BUILD_FORTRAN_TESTS` and the tri-state
+  `FORTRAN_ARRAY_INTERFACES`. Found with `find_package(hipsolver-fortran)`, installed per
+  compiler under `lib/fortran/<compiler>` and `include/fortran/<compiler>`, with the generated
+  source alongside in `share/hipsolver/fortran`.
 
 ### Changed
+
+* The Fortran binding is now generated from the hipSOLVER headers instead of hand-written.
+  The module keeps the name `hipsolver`, so `use hipsolver` is unchanged, but the separate
+  `hipsolver_enums` module is gone: its constants are part of `hipsolver`. Code that said
+  `use hipsolver_enums` should say `use hipsolver`. Rather than a shared library plus a
+  `.f90` source to compile yourself, a static archive and a `.mod` are installed; link
+  `roc::hipsolver_fortran`.
+
 ### Removed
+
+* Removed the hand-written Fortran binding `library/src/hipsolver_module.f90`, along with the
+  rule that installed it into `include/hipsolver` and the backward-compatibility symlinks to
+  it. It was deprecated in hipSOLVER 2.3.0 (ROCm 6.3.0). The generated `hipsolver` module
+  replaces it.
+* Removed the `EXPORT_FORTRAN_BINDINGS` CMake option, which only chose whether the removed
+  shared `hipsolver_fortran` library joined the `hipsolver-targets` export set. The generated
+  binding has an export set and a config package of its own.
 ### Optimized
 ### Resolved issues
 ### Known issues
