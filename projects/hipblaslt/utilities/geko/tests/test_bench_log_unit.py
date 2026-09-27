@@ -26,6 +26,8 @@ def _row(**overrides):
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
         "call_count": 1,
     }
     row.update(overrides)
@@ -120,6 +122,21 @@ def test_update_sets_iters_from_latency() -> None:
     assert out[0]["compute_type"] == "c_f32_r"
 
 
+def test_update_defaults_missing_scale_columns_to_zero() -> None:
+    row = _row()
+    del row["scaleA"]
+    del row["scaleB"]
+    out = blog.update([row])[0]
+    assert out[0]["scaleA"] == 0
+    assert out[0]["scaleB"] == 0
+
+
+def test_update_keeps_existing_scale_columns() -> None:
+    out = blog.update([_row(scaleA=3, scaleB=3)])[0]
+    assert out[0]["scaleA"] == 3
+    assert out[0]["scaleB"] == 3
+
+
 def test_update_from_path_returns_output_file_and_writes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     p = tmp_path / "in.yaml"
     p.write_text("[]\n")
@@ -150,6 +167,8 @@ def test_verify_output_true_and_false_paths(monkeypatch: pytest.MonkeyPatch, tmp
                 "c_type": "f16_r",
                 "d_type": "f16_r",
                 "compute_type": "c_f32_r",
+                "scaleA": 1,
+                "scaleB": 1,
             }
         ]
     )
@@ -306,6 +325,8 @@ def test_summarize_keep_thr_positive_uses_standard_benchmark(
                     "c_type": "f16_r",
                     "d_type": "f16_r",
                     "compute_type": "c_f32_r",
+                    "scaleA": 1,
+                    "scaleB": 1,
                     "us": 1.0,
                 }
             ]
@@ -353,6 +374,8 @@ def test_summarize_keep_thr_positive_uses_bench_run_path(monkeypatch: pytest.Mon
                     "c_type": "f16_r",
                     "d_type": "f16_r",
                     "compute_type": "c_f32_r",
+                    "scaleA": 1,
+                    "scaleB": 1,
                     "us": 2.0,
                 }
             ]

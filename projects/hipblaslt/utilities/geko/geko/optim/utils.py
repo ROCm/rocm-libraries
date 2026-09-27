@@ -18,6 +18,7 @@ Functions:
     list_optimization_configs: Find optimization configuration files.
     clean_failed_builds: Remove incomplete optimization artifacts.
     estimate_workload: Estimates the workload of an optimization job.
+    _gpu_targets_from_configs: Read ArchitectureName from tuning YAML configs.
 """
 
 import shutil
@@ -26,7 +27,7 @@ import math
 import yaml
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 
 try:
@@ -43,7 +44,8 @@ __all__ = [
     "get_failed_optimizations",
     "get_build_state",
     "get_checkpoint_file",
-    "estimate_workload"
+    "estimate_workload",
+    "_gpu_targets_from_configs",
 ]
 
 
@@ -129,6 +131,20 @@ def list_optimization_configs(tuning_dir: str | Path) -> List[str]:
             continue
         configs.append(str(f))
     return configs
+
+
+def _gpu_targets_from_configs(config_paths: Sequence[str | Path]) -> str | None:
+    """Read ArchitectureName from the first tuning YAML, if present."""
+    for cfg_path in config_paths:
+        try:
+            with Path(cfg_path).open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            arch = (data.get("LibraryLogic") or {}).get("ArchitectureName")
+            if arch:
+                return str(arch)
+        except (OSError, yaml.YAMLError, TypeError, AttributeError):
+            continue
+    return None
 
 
 def get_failed_optimizations(tuning_dir: str | Path) -> List[str]:

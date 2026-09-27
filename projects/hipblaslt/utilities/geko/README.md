@@ -389,7 +389,7 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 |------|-------------|
 | `--workload-log PATH` | hipBLASLt GEMM log YAML (typically captured with `HIPBLASLT_LOG_MASK=64`). |
 | `--list PATH` | Generator tuning YAML. See [Specifying GEMMs via a Tuning List (`--list`)](#specifying-gemms-via-a-tuning-list---list) and [`geko/config_generator/config.yaml`](geko/config_generator/config.yaml). |
-| `--inline M N batch K DataType DestDataType ComputeDataType transA transB` | Single GEMM on the command line, e.g. `--inline 1024 1024 1 1024 B B S N T`. `transA`/`transB` must each be `N` or `T`. |
+| `--inline M N batch K DataType DestDataType ComputeDataType transA transB` | Single GEMM on the command line, e.g. `--inline 1024 1024 1 1024 B B S N T`. `transA`/`transB` must each be `N` or `T`. Optional 10th arg `MX` enables Microscaling mode (F4/F8 only) and requires `--arch`. |
 
 ### Common options (apply to all modes)
 | Flag | Default | Description |
@@ -428,6 +428,8 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 - `--workload-log` and `--list` paths must exist.
 - `--inline` requires integer M, N, batch, K and `transA`/`transB` ∈ {`N`, `T`}.
 - `--arch` is required with `--tune`.
+- `--arch` is also required whenever `--inline ... MX` is used (needed to resolve the correct MX scale value).
+- `MX: True` (or an MX-only data type such as F4) combined with an ARCH that doesn't support Microscaling (e.g. the gfx942 family) raises an error.
 
 ---
 

@@ -22,21 +22,37 @@ else:
     JOBLIB_BACKEND = "multiprocessing"
     JOBLIB_N_JOBS_OVERRIDE = None
 
+# When set, disables the stdout suppression around `valid_fn` calls in
+# sample_chunk, so prints/logging from the validation function are visible.
+# Useful for debugging a `valid` callable during GA sampling.
+DUCTILE_LOG_VALIDATION = bool(os.environ.get("DUCTILE_LOG_VALIDATION"))
+
 
 class MaxIterationsReached(Exception):
     pass
 
 
+@contextlib.contextmanager
+def _validation_stdout():
+    """Suppress stdout during GA validation sampling, unless DUCTILE_LOG_VALIDATION is set."""
+    if DUCTILE_LOG_VALIDATION:
+        yield
+        return
+    with open(os.devnull, "w") as devnull:
+        with contextlib.redirect_stdout(devnull):
+            yield
+
+
 def sample_chunk(valid_fn, p, sizes, chunk_size, seed):
     rng = np.random.default_rng(seed)
     valid_inds = []
-    with open(os.devnull, "w") as devnull:
-        with contextlib.redirect_stdout(devnull):
-            for _ in range(chunk_size):
-                ind = Individual({k: rng.choice(s, p=p.get(k, None)) for k, s in sizes.items()})
-                if valid_fn(ind):
-                    valid_inds.append(ind)
+    with _validation_stdout():
+        for _ in range(chunk_size):
+            ind = Individual({k: rng.choice(s, p=p.get(k, None)) for k, s in sizes.items()})
+            if valid_fn(ind):
+                valid_inds.append(ind)
     return valid_inds
+
 
 class SearchSpace:
     def __init__(self,

@@ -56,12 +56,15 @@ def run(
     client_path = None
     if write_shell_scripts:
         client_path = build_tensilelite_client(
-            hipblaslt_path, config.get("BUILD_DIR", None)
+            hipblaslt_path, 
+            config.get("BUILD_DIR", None), 
+            gpu_targets=config.get("ARCH")
         )
 
     for gp in config["GemmProblems"]:
         _config = copy.deepcopy(config)
         _config["GemmProblem"] = gp
+        _config["MX"] = gp.mx
         _run_per_gemm_type(
             _config,
             hipblaslt_path,
@@ -104,8 +107,25 @@ def _run_per_gemm_type(
     size_list = gp.sizes
     logger.info(" Total number of sizes: %s", len(size_list))
 
+    csg = ConfigSectionGenerator(config)
+
+    mx_block_values = None
+    if csg._problem_type.get("MXBlockA") and csg._problem_type.get("MXBlockB"):
+        mx_block_values = (csg._problem_type["MXBlockA"], csg._problem_type["MXBlockB"])
+
+    subtile_enabled = config.get("search_space") == "subtile"
+
+    if mx_block_values is not None and not subtile_enabled:
+        logger.warning("MX enabled, but subtile mode is not active. Enabling subtile search space.")
+        subtile_enabled = True
+
     # --- Create MI designer, optimization params, and post-processor ---
-    mi_designer = MIDesign(mi_finder_log_path, config)
+    mi_designer = MIDesign(
+        mi_finder_log_path,
+        config,
+        mx_block_values=mx_block_values,
+        subtile_enabled=subtile_enabled,
+    )
     opt_params = get_optimization_params(config)
     post_processor = get_post_processor(config)
 
@@ -136,7 +156,9 @@ def _run_per_gemm_type(
 
     if write_shell_scripts and client_path is None:
         client_path = build_tensilelite_client(
-            hipblaslt_path, config.get("BUILD_DIR", None)
+            hipblaslt_path, 
+            config.get("BUILD_DIR", None), 
+            gpu_targets=config.get("ARCH")
         )
 
     csg = ConfigSectionGenerator(config)

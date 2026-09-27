@@ -32,6 +32,8 @@ def _bench_rows() -> list[dict]:
         "c_type": "f16_r",
         "d_type": "f16_r",
         "compute_type": "c_f32_r",
+        "scaleA": 1,
+        "scaleB": 1,
     }
     rows = []
     for m in (16, 32):

@@ -102,7 +102,7 @@ def test_registry_and_fork_generator_paths(monkeypatch: pytest.MonkeyPatch) -> N
     assert get_post_processor(c4) is None
 
     class _MI:
-        def generate_for_size(self, _size):
+        def generate_for_size(self, _size, **_kwargs):
             return [{"MatrixInstruction": ForkParameter(name="MatrixInstruction", values=[1, 2, 3])}]
 
     class _OPT:
@@ -195,8 +195,8 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(cg, "build_tensilelite_client", lambda *_a, **_k: tmp_path / "client")
 
     gt = GemmType.from_tensile("N", "N", "H", "H", "S")
-    gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]]})()
-    gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]]})()
+    gp0 = type("GP", (), {"gemm_type": gt, "sizes": [[16, 16, 1, 16]], "mx": False})()
+    gp1 = type("GP", (), {"gemm_type": gt, "sizes": [[32, 32, 1, 32]], "mx": False})()
 
     calls = []
     monkeypatch.setattr(cg, "_run_per_gemm_type", lambda conf, *_a, **_k: calls.append(conf["GemmProblem"]))
@@ -259,7 +259,7 @@ def test_config_generator_orchestrators(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
     class _CSG2:
         def __init__(self, _cfg):
-            pass
+            self._problem_type = {}
 
         def build_config(self, entry, **_k):
             return {"entry": entry.nkernels}
