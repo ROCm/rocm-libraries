@@ -9005,6 +9005,20 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("SrdSync", 4, 4)
       module.add(RegSet("s", "sgprSrdSync", self.sgprs["SrdSync"]))
 
+    # Dedicated CLS SGPRs (do not reuse WorkGroup2 / ArgType; they are still live).
+    # CLSm0Base = M0 src offset; CLSLoopCounter = countdown. Allocated here, with the
+    # other post-loop SGPRs, rather than in globalWriteElementBatch: defineSgpr re-pins
+    # every freeSgprVarPool entry, which fails once the store phase has handed those
+    # slots out as temps.
+    if kernel["CompactLoopStore"]:
+      self.defineSgpr("CLSm0Base", 1)
+      module.add(RegSet("s", "sgprCLSm0Base", self.sgprs["CLSm0Base"]))
+      self.defineSgpr("CLSLoopCounter", 1)
+      module.add(RegSet("s", "sgprCLSLoopCounter", self.sgprs["CLSLoopCounter"]))
+      if self.states.useGateResidual:
+        module.add(self.defineSgpr("CLSGateRowInc", 1))
+        module.add(RegSet("s", "sgprCLSGateRowInc", self.sgprs["CLSGateRowInc"]))
+
     # Load kernel args end
     ########################################
 
@@ -16898,13 +16912,14 @@ class KernelWriterAssembly(KernelWriter):
     # Not used for atomic / StoreRemap / subtile.
     if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["EnableMatrixInstruction"] \
         and not atomic and not kernel["StoreRemapVectorWidth"] and not kernel.get("UseSubtileImpl") \
-        and ss.numVgprsPerElement > 0:
+        and ss.numVgprsPerElement > 0 \
+        and not GlobalWriteBatchWriter.clsEpilogVectorLoopUnsafe(kernel, ss.factorDim):
       maxNIter = GlobalWriteBatchWriter.clsMaxNIter(kernel)
       nElem = len(element)
       if maxNIter > 1 and nElem % maxNIter == 0:
         # TODO: `if _naturalIter` is always true; use `<= 1` to skip already-looping kernels.
         naturalNumBatches = max(1, ceilDivide(nElem, numElementsPerBatch))
-        _, _naturalIter, _ = GlobalWriteBatchWriter.computeCLSLayout(kernel, naturalNumBatches, numElementsPerBatch, gwvw)
+        _, _naturalIter, _ = GlobalWriteBatchWriter.computeCLSLayout(kernel, naturalNumBatches, numElementsPerBatch, gwvw, factorDim=ss.factorDim)
         # if _naturalIter <= 1:
         if _naturalIter:
           elemsPerNGroup = nElem // maxNIter
@@ -16980,14 +16995,6 @@ class KernelWriterAssembly(KernelWriter):
                               betaIdx, fdIdx, vectorDataTypes, factorDims, hasMultipleGlobalWriteModes=False):
     factorDim = factorDims[fdIdx]
     edgeModule.add(writeLabel)
-
-    # Dedicated CLS SGPRs (do not reuse WorkGroup2 / ArgType; they are still live).
-    # CLSm0Base = M0 src offset; CLSLoopCounter = countdown.
-    if kernel["CompactLoopStore"]:
-      edgeModule.add(self.defineSgpr("CLSm0Base", 1))
-      edgeModule.add(self.defineSgpr("CLSLoopCounter", 1))
-      if self.states.useGateResidual:
-        edgeModule.add(self.defineSgpr("CLSGateRowInc", 1))
 
     # for storeRemap edge case, non-beta still can enable vector stores
     gwvw = vectorWidth
@@ -17117,7 +17124,7 @@ class KernelWriterAssembly(KernelWriter):
         # Emit one CLS body; the runtime loop re-runs it. Non-CLS: all batches.
         if kernel["CompactLoopStore"]:
           # Same divisibility as iterCount, or trailing batches are never stored.
-          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches, numElementsPerBatch, gwvw)
+          numBatchesCLS = GlobalWriteBatchWriter.computeBatchesPerCLSBody(kernel, numBatches, numElementsPerBatch, gwvw, factorDim=factorDim)
         else:
           numBatchesCLS = numBatches
 
@@ -17265,13 +17272,6 @@ class KernelWriterAssembly(KernelWriter):
     # Add actLoopEndLabel if needed
     if len(actLoopLabelModules) > 1:
       edgeModule.add(actLoopEndLabel)
-
-    # Free dedicated CLS SGPRs after all batches / activation branches.
-    if kernel["CompactLoopStore"]:
-      if self.states.useGateResidual:
-        edgeModule.add(self.undefineSgpr("CLSGateRowInc"))
-      edgeModule.add(self.undefineSgpr("CLSLoopCounter"))
-      edgeModule.add(self.undefineSgpr("CLSm0Base"))
 
     if len(factorDims) == 1:
       isDeferredReturn = "Deferred" in endLabel.getLabelName()

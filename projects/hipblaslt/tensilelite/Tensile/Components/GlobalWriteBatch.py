@@ -361,6 +361,34 @@ class GlobalWriteBatchWriter:
     return 1
 
   @staticmethod
+  def clsEpilogVectorLoopUnsafe(kernel, factorDim) -> bool:
+    """
+    True when an epilogue vector read is indexed along the CLS loop's own
+    iteration dimension (free1/N), so the loop cannot be formed.
+
+    The bias / scaleAlphaVec LDS reads are emitted once, with the immediate
+    offsets of the FIRST iteration (AddrCalculation.biasOffset /
+    scaleAlphaVecOffset). Those immediates are coordOffset1-derived for
+    factorDim == 1, and scaleB is coordOffset1-derived regardless, while the
+    loop only advances SrdD and M0. Re-running such a body would re-read the
+    first N group's vector for every iteration (see AsmAddressCalculation).
+    factorDim == 0 is safe: coordOffset0 is fully unrolled inside one body.
+
+    Only a bias READ takes that immediate path. A Gradient kernel WRITES a bias
+    vector instead (KernelWriter sets states.useBias = WRITE) and addresses it
+    through coutRowPtrBias, which emitRowPtrAdvance steps once per CLS iteration
+    exactly like coutRowPtrD -- so it does not block the loop.
+    """
+    if not kernel.get("CompactLoopStore", False):
+      return False
+    if kernel["ProblemType"].get("UseScaleAB", "") == "Vector":
+      return True
+    biasRead = (kernel["ProblemType"].get("UseBias", 0)
+                and not kernel["ProblemType"].get("Gradient", False))
+    return factorDim == 1 and (biasRead or
+                               kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+
+  @staticmethod
   def alignNEPBForCLS(kernel, nElem, numElementsPerBatch, gwvw, edge):
     """
     Shrink NEPB to the largest N-group divisor that still fits the existing VGPR budget.
@@ -385,7 +413,7 @@ class GlobalWriteBatchWriter:
     return numElementsPerBatch
 
   @staticmethod
-  def computeCLSLayout(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, forceNoCompact: bool = False, flatWorkspaceWalk: bool = False):
+  def computeCLSLayout(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, forceNoCompact: bool = False, flatWorkspaceWalk: bool = False, factorDim: int = 0):
     """Single source of truth for the CLS loop layout math.
 
     Returns (batchesPerCLSBody, iterCount, m0Step).
@@ -420,6 +448,11 @@ class GlobalWriteBatchWriter:
 
     # forceNoCompact / single batch: no loop.
     if forceNoCompact or numBatches <= 1:
+      return numBatches, 1, m0Step
+
+    # An epilogue vector indexed along free1/N cannot be re-read by the loop.
+    # flatWorkspaceWalk stores raw accumulators, so it reads no such vector.
+    if not flatWorkspaceWalk and GlobalWriteBatchWriter.clsEpilogVectorLoopUnsafe(kernel, factorDim):
       return numBatches, 1, m0Step
 
     # (A) Only the outermost N tile loops. flatWorkspaceWalk: linear WS soffset, ignore clsMaxNIter.
@@ -466,22 +499,22 @@ class GlobalWriteBatchWriter:
     return numBatches, 1, m0Step
 
   @staticmethod
-  def computeBatchesPerCLSBody(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw)[0]
+  def computeBatchesPerCLSBody(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, factorDim: int = 0) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw, factorDim=factorDim)[0]
 
   def _computeBatchesPerCLSBody(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)[0]
+    return self._computeCLSLayout()[0]
 
   @staticmethod
-  def computeCLSIterCount(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None) -> int:
+  def computeCLSIterCount(kernel, numBatches: int, numElementsPerBatch: int = None, gwvw: int = None, factorDim: int = 0) -> int:
     """CLS loop iter count = numBatches / batchesPerCLSBody. Minimum 1."""
-    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw)[1]
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches, numElementsPerBatch, gwvw, factorDim=factorDim)[1]
 
   def _computeCLSIterCount(self) -> int:
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)[1]
+    return self._computeCLSLayout()[1]
 
   def _computeCLSLayout(self):
-    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw)
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches, len(self.batchElements), self.gwvw, factorDim=self.factorDim)
 
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
@@ -1026,8 +1059,12 @@ class GlobalWriteBatchWriter:
       module.addComment2(commentStr)
       self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
       module.add(self.ss._clsLoopLabel)
+      # This overwrites the prologue's m0 for the rest of the kernel and never
+      # restores it. CompactLoopStore is gated on HasMovRelsD2B32 (gfx1250), where
+      # m0 no longer bounds DS addressing, so the epilogue's bias / scaleAlphaVec
+      # ds_load inside this loop body are unaffected.
       module.add(SMovB32(dst=mgpr(0), src=sgpr("CLSm0Base"),
-          comment="LDS clamp at sgpr(CLSm0Base)"))
+          comment="CLS M0[9:0] = acc src offset for v_movrelsd_2_b32"))
       # M0 step from computeCLSLayout (src VGPR stride of the CLS iter dim).
       _, _, cls_m0_step = self._computeCLSLayout()
       module.add(SAddU32(dst=sgpr("CLSm0Base"), src0=sgpr("CLSm0Base"), src1=cls_m0_step,
