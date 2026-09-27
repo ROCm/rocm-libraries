@@ -737,6 +737,138 @@ TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
 }
 #endif
 
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+// The split-KV sink seed has to undo the scale_s the kernel divides out of the
+// sink value, and how much it has to put back depends on whether the score path
+// already folded scale_s in. Soft cap does fold it in, via LogitsTransform, so
+// it needs the same seed as bias and alibi rather than the plain-path seed.
+// Getting that wrong only shows up when a sink and a soft cap are used at once
+// on a split, which no other case here does.
+class SplitKvSinkSoftCap
+    : public TestWithParam<std::tuple<std::tuple<int, int>, int, float, std::string>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkSoftCap);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKvSinkSoftCap,
+                         Combine(SplitKVHDimValues,
+                                 Values(1, 3),      // num_splits
+                                 Values(0.f, 30.f), // logits_soft_cap
+                                 Values("0", "b")));
+
+TEST_P(SplitKvSinkSoftCap, DataTypeConfig)
+{
+    auto [hdims, num_splits, soft_cap, mask_str] = GetParam();
+    auto [hdim_q, hdim_v]                        = hdims;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        2,  // batch
+        2,  // nhead
+        -1, // nhead_k
+        {256},
+        {1024},
+        hdim_q,
+        hdim_v,
+        0,     // seqlen_knew
+        {-1},  // seqlen_qpads
+        {-1},  // seqlen_kpads
+        {},    // q_eff
+        {},    // kv_eff
+        0,     // rotary_dim
+        true,  // i_perm
+        false, // o_perm
+        0,     // scale_s
+        soft_cap,
+        def_is_v_rowmajor,
+        def_lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale_str,
+        true, // is_rotary_interleaved
+        num_splits,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation, without which this checks nothing
+        1, // init_sink
+        0, // pack_gqa
+        stream_config);
+    CHECK_RESULT(result);
+}
+
+// Query rows past seqlen_k have no ordinary KV work, so every split takes the
+// early exit. The sink still belongs in their softmax denominator, and only
+// split 0 is left to publish it, so a wrong ownership gate leaves the final
+// LSE at -inf. Needs a mask sink prefix and a scalar sink at once, and it is
+// invisible unless the LSE is checked.
+class SplitKvSinkEmptyRange
+    : public TestWithParam<std::tuple<std::tuple<int, int>, int, std::string>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKvSinkEmptyRange);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKvSinkEmptyRange,
+                         Combine(SplitKVHDimValues,
+                                 Values(1, 4),                   // num_splits
+                                 Values("t:0,0,1", "t:0,0,0"))); // mask sink prefix
+
+TEST_P(SplitKvSinkEmptyRange, DataTypeConfig)
+{
+    auto [hdims, num_splits, mask_str] = GetParam();
+    auto [hdim_q, hdim_v]              = hdims;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        1,     // batch
+        4,     // nhead
+        -1,    // nhead_k
+        {128}, // seqlen_qs, longer than seqlen_ks so the last tile has no KV work
+        {64},  // seqlen_ks
+        hdim_q,
+        hdim_v,
+        0,    // seqlen_knew
+        {-1}, // seqlen_qpads
+        {-1}, // seqlen_kpads
+        {},   // q_eff
+        {},   // kv_eff
+        0,    // rotary_dim
+        true, // i_perm
+        true, // o_perm
+        0,    // scale_s
+        0,    // logits_soft_cap
+        def_is_v_rowmajor,
+        true,  // lse, the whole point of this case
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        qscale_str,
+        true, // is_rotary_interleaved
+        num_splits,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation, without which this checks nothing
+        1, // init_sink
+        0, // pack_gqa
+        stream_config);
+    CHECK_RESULT(result);
+}
+#endif // CK_TILE_FMHA_FWD_SPLITKV_API
+
 #if CK_TILE_FMHA_FWD_PAGEDKV_API
 TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
 {
