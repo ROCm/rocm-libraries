@@ -65,6 +65,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMetadata: [-1]
         - LDSTrInst: [False]
         - TDMInst: [3]
+        - TDMSplit: [False, True]
         - StaggerU: [0]
         - ScheduleIterAlg: [0, 4]
         - PrefetchGlobalRead: [2]
