@@ -251,7 +251,7 @@ def _make_candidate(
         ),
         _supports=support,
         select_spec=select,
-        signature=lambda _spec: gemm_args_signature(),
+        signature=lambda _spec: gemm_args_signature(dtype="bf16"),
         grid=_grid,
         block=lambda spec: (int(spec.block_size), 1, 1),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
