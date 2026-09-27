@@ -42,28 +42,31 @@ namespace rocsparse
                             T                    beta,
                             rocsparse_index_base idx_base)
     {
-        I idx = hipThreadIdx_x + BLOCKSIZE * hipBlockIdx_x;
+        // Compute the total number of scalar entries in 64-bit to avoid a signed
+        // 32-bit overflow of block_dim * mb (see AISPARSE-659).
+        const int64_t nentries = (bsr_mask_ptr == nullptr)
+                                     ? static_cast<int64_t>(block_dim) * mb
+                                     : static_cast<int64_t>(block_dim) * size_of_mask;
 
-        // Do not run out of bounds
-        if(bsr_mask_ptr == nullptr)
+        // Grid-stride loop so a grid clamped against maxGridSize[0] still covers
+        // the full range.
+        const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
+        for(int64_t idx = static_cast<int64_t>(hipThreadIdx_x)
+                          + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;
+            idx < nentries;
+            idx += stride)
         {
-            if(idx >= block_dim * mb)
+            if(bsr_mask_ptr == nullptr)
             {
-                return;
+                y[idx] *= beta;
             }
-
-            y[idx] *= beta;
-        }
-        else
-        {
-            if(idx >= block_dim * size_of_mask)
+            else
             {
-                return;
+                const int64_t shift
+                    = (static_cast<int64_t>(bsr_mask_ptr[idx / block_dim]) - idx_base) * block_dim;
+
+                y[shift + (idx % block_dim)] *= beta;
             }
-
-            I shift = (bsr_mask_ptr[idx / block_dim] - idx_base) * block_dim;
-
-            y[shift + (idx % block_dim)] *= beta;
         }
     }
 
@@ -77,30 +80,34 @@ namespace rocsparse
                             const T*             beta,
                             rocsparse_index_base idx_base)
     {
-        I idx = hipThreadIdx_x + BLOCKSIZE * hipBlockIdx_x;
-
         if(*beta != static_cast<T>(1))
         {
-            // Do not run out of bounds
-            if(bsr_mask_ptr == nullptr)
+            // Compute the total number of scalar entries in 64-bit to avoid a
+            // signed 32-bit overflow of block_dim * mb (see AISPARSE-659).
+            const int64_t nentries = (bsr_mask_ptr == nullptr)
+                                         ? static_cast<int64_t>(block_dim) * mb
+                                         : static_cast<int64_t>(block_dim) * size_of_mask;
+
+            // Grid-stride loop so a grid clamped against maxGridSize[0] still
+            // covers the full range.
+            const int64_t stride = static_cast<int64_t>(BLOCKSIZE) * hipGridDim_x;
+            for(int64_t idx = static_cast<int64_t>(hipThreadIdx_x)
+                              + static_cast<int64_t>(BLOCKSIZE) * hipBlockIdx_x;
+                idx < nentries;
+                idx += stride)
             {
-                if(idx >= block_dim * mb)
+                if(bsr_mask_ptr == nullptr)
                 {
-                    return;
+                    y[idx] *= (*beta);
                 }
-
-                y[idx] *= (*beta);
-            }
-            else
-            {
-                if(idx >= block_dim * size_of_mask)
+                else
                 {
-                    return;
+                    const int64_t shift
+                        = (static_cast<int64_t>(bsr_mask_ptr[idx / block_dim]) - idx_base)
+                          * block_dim;
+
+                    y[shift + (idx % block_dim)] *= (*beta);
                 }
-
-                I shift = (bsr_mask_ptr[idx / block_dim] - idx_base) * block_dim;
-
-                y[shift + (idx % block_dim)] *= (*beta);
             }
         }
     }

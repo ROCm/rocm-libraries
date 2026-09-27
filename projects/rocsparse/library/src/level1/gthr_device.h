@@ -32,9 +32,13 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void
         gthr_device(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(idx < nnz)
+        // Cast to I before the multiply so the index arithmetic does not wrap in
+        // 32-bit when nnz exceeds the range of unsigned int, and grid-stride so
+        // every element is gathered even when grid.x is clamped below the ideal
+        // block count.
+        const I stride = static_cast<I>(hipGridDim_x) * BLOCKSIZE;
+        for(I idx = static_cast<I>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; idx < nnz;
+            idx += stride)
         {
             x_val[idx] = y[x_ind[idx] - idx_base];
         }
@@ -43,6 +47,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gthr_kernel(I                    nnz,
+                     int64_t              batch_count,
                      const T*             y,
                      int64_t              y_stride,
                      T*                   x_val,
@@ -50,8 +55,16 @@ namespace rocsparse
                      const I*             x_ind,
                      rocsparse_index_base idx_base)
     {
-        uint32_t batch_index = hipBlockIdx_y;
-        gthr_device<BLOCKSIZE, I, T>(
-            nnz, y + batch_index * y_stride, x_val + batch_index * x_val_stride, x_ind, idx_base);
+        // Grid-stride over the batch axis so batch_count is not limited by the
+        // 65,535 grid.y hardware cap.
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            gthr_device<BLOCKSIZE, I, T>(nnz,
+                                         y + batch_index * y_stride,
+                                         x_val + batch_index * x_val_stride,
+                                         x_ind,
+                                         idx_base);
+        }
     }
 }
