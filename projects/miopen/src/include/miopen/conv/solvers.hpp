@@ -4195,7 +4195,9 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     {
     }
 
-    void DefaultKernelFromList(const ExecutionContext& ctx);
+    MIOPEN_INTERNALS_EXPORT void
+    DefaultKernelFromList(const ExecutionContext& ctx,
+                          const miopen::conv::ProblemDescription& problem);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);

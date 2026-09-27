@@ -310,7 +310,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::InitValidKernels(
 }
 
 void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(
-    const ExecutionContext& ctx)
+    const ExecutionContext& ctx, const ProblemDescription& problem)
 {
     const auto dev_name = ctx.GetStream().GetDeviceName();
     const bool is_gfx11 = StartsWith(dev_name, "gfx11");
@@ -320,19 +320,25 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::DefaultKernelFromList(
     if(is_gfx11 || is_gfx12)
         ranked_p = &ranked_gemm_grp_wrw_navi;
 
-    const auto ranked_1st_applicable = *ranked_p;
+    const auto& loader          = CkImplLibLoader::Get(dev_name);
+    const bool is_deterministic = problem.GetConv().attribute.deterministic;
 
-    for(const auto& kernel : ranked_1st_applicable)
+    for(const auto& [kernel_str, requested_split_k] : *ranked_p)
     {
-        const auto& kernel_str = std::get<0>(kernel);
-        const auto& it         = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
-        if(it != valid_kernels.end())
-        {
-            index     = it - valid_kernels.begin();
-            split_k   = 1;
-            kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
-            return;
-        }
+        const auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_str);
+        if(it == valid_kernels.end())
+            continue;
+
+        const int candidate_split_k = is_deterministic ? 1 : requested_split_k;
+        const auto candidate_id     = kernel_str + "+" + std::to_string(candidate_split_k);
+        if(!loader.IsArgsSupported(
+               CKSolverType::GrpConvWrw, problem, candidate_id, problem.GetInDataType(), use_tf32))
+            continue;
+
+        index     = it - valid_kernels.begin();
+        split_k   = candidate_split_k;
+        kernel_id = candidate_id;
+        return;
     }
 }
 
@@ -387,7 +393,7 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
     if(!valid_kernels.empty())
     {
         if(!env::disabled(MIOPEN_DEBUG_CK_DEFAULT_KERNELS))
-            DefaultKernelFromList(ctx);
+            DefaultKernelFromList(ctx, problem);
         state.SetResult(index, split_k, k2DWrwSolverConfig.uses_split_k);
     }
 

@@ -2,6 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "unit_conv_solver_group_xdlops.hpp"
+#include <gtest/group_conv.hpp>
+#include <miopen/conv/problem_description.hpp>
+#include <miopen/execution_context.hpp>
+#include <miopen/handle.hpp>
+#include <miopen/solver/ck_impl_lib_loader.hpp>
+
+#include <algorithm>
+#include <string>
 
 namespace {
 
@@ -142,6 +150,83 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDeterministicApplicabilit
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops{});
 };
+
+TEST(GPU_GroupWrwRankedSelection_FP16, ValidatesRequestedSplitAndPreservesFallback)
+{
+    miopen::Handle handle;
+    miopen::ExecutionContext ctx(&handle);
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(handle.GetDeviceName());
+    ASSERT_TRUE(loader.IsLoaded()) << "Grouped-convolution CK plugin is unavailable";
+
+    // Probe one non-unit hint from each existing ranking. These IDs are exact CK type names;
+    // an absent instance must not be substituted with another kernel.
+    const auto& arch = handle.GetDeviceName();
+    std::string type;
+    int requested_split = 0;
+    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)
+    {
+        type            = "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmMultipleD_Wmma_"
+                          "CShuffleV3<MNKPadding, CRR> BlkSize: 256, BlkTile: 128x32x128, WaveTile: "
+                          "16x16, WaveMap: 1x2, VmemReadVec: 1x1, BlkGemmPipelineScheduler: Intrawave, "
+                          "BlkGemmPipelineVersion: v1, BlkGemmPipelinePrefetchStages: 1>";
+        requested_split = 32;
+    }
+    else if(arch.rfind("gfx9", 0) == 0)
+    {
+        type            = "DeviceGroupedConvBwdWeight_Explicit_Xdl<DeviceBatchedGemmXdlUniversal<"
+                          "Default, CRR> BlkSize: 128, BlkTile: 64x16x64, WaveTile: 16x16, WaveMap: "
+                          "2x1, VmemReadVec: 8x2, BlkGemmPipelineScheduler: Interwave, "
+                          "BlkGemmPipelineVersion: v2, BlkGemmPipelinePrefetchStages: 2>";
+        requested_split = 4;
+    }
+    else
+        GTEST_SKIP() << "No grouped WRW ranking for this architecture";
+
+    group_conv::GroupConvTestConfig<2u> conv{1, 1, 64, 96, {8, 8}, {1, 1}, {0, 0}, {1, 1}, {1, 1}};
+    const auto x_desc = miopen::TensorDescriptor(miopenHalf, miopenTensorNHWC, conv.GetInput());
+    const auto w_desc = miopen::TensorDescriptor(miopenHalf, miopenTensorNHWC, conv.GetWeights());
+    auto conv_desc    = conv.GetConv();
+    const auto y_desc = conv_desc.GetForwardOutputTensor(x_desc, w_desc, miopenHalf);
+    const auto make_problem = [&] {
+        return miopen::conv::ProblemDescription(
+            y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardWeights);
+    };
+    auto problem = make_problem();
+
+    const auto valid_kernels = loader.FillValidKernels(
+        miopen::solver::CKSolverType::GrpConvWrw, problem, miopenHalf, false);
+    if(std::find(valid_kernels.begin(), valid_kernels.end(), type) == valid_kernels.end())
+        GTEST_SKIP() << "Ranked CK instance is not present for this problem";
+
+    using Config = miopen::solver::conv::PerformanceConfigHipImplicitGemmGroupWrwXdlops;
+    Config config;
+    config.valid_kernels    = {type};
+    config.kernel_id        = type + "+1";
+    const auto requested_id = type + "+" + std::to_string(requested_split);
+    const bool supported    = loader.IsArgsSupported(
+        miopen::solver::CKSolverType::GrpConvWrw, problem, requested_id, miopenHalf, false);
+    config.DefaultKernelFromList(ctx, problem);
+    EXPECT_EQ(config.split_k, supported ? requested_split : 1);
+    EXPECT_EQ(config.kernel_id, supported ? requested_id : type + "+1");
+
+    // Determinism overrides the hint, but still requires CK support for the exact ID.
+    conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
+    problem = make_problem();
+    config.DefaultKernelFromList(ctx, problem);
+    EXPECT_EQ(config.split_k, 1);
+    EXPECT_EQ(config.kernel_id, type + "+1");
+
+    // A stale DB/type name is not an alias for any current ranked kernel.
+    Config invalid;
+    invalid.valid_kernels = {"obsolete_group_wrw_kernel"};
+    invalid.kernel_id     = "obsolete_group_wrw_kernel+1";
+    invalid.DefaultKernelFromList(ctx, problem);
+    EXPECT_EQ(invalid.index, 0);
+    EXPECT_EQ(invalid.split_k, 1);
+    EXPECT_EQ(invalid.kernel_id, "obsolete_group_wrw_kernel+1");
+    EXPECT_FALSE(loader.IsArgsSupported(
+        miopen::solver::CKSolverType::GrpConvWrw, problem, invalid.kernel_id, miopenHalf, false));
+}
 
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(
