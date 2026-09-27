@@ -55,12 +55,15 @@ namespace rocsparse
                                                       rocsparse_diag_type  diag_type,
                                                       bool                 is_host_mode);
 
-    rocsparse_status csrsv_launch_kernel_find(rocsparse::csrsv_launch_kernel_t* spmm_function_,
-                                              uint32_t                          A,
-                                              uint32_t                          B,
-                                              bool                              C,
-                                              rocsparse_indextype               i_type_,
-                                              rocsparse_indextype               j_type_,
-                                              rocsparse_datatype                a_type_);
+    rocsparse_status csrsv_launch_kernel_find(rocsparse::csrsv_launch_kernel_t* p_kernel_launch_,
+                                              uint32_t                          blocksize,
+                                              uint32_t                          wfsize,
+                                              bool                              sleep,
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                              bool conjugate,
+#endif
+                                              rocsparse_indextype i_type_,
+                                              rocsparse_indextype j_type_,
+                                              rocsparse_datatype  a_type_);
 
 }
