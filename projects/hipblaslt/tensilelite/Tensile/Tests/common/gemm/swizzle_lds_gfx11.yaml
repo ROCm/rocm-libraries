@@ -1,0 +1,191 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1200, skip-gfx1201, skip-gfx1250] # gfx11 WMMA only
+
+# Swizzled tensors staged through LDS instead of DirectToVgpr. The lane assignment
+# is swizzle-native -- lane L takes row L%MI_{M|N} and k-group L/MI_{M|N} -- so a
+# wave's global read is one contiguous run and the local write address follows the
+# same mapping.
+#
+# MT 64x128 with MIWaveGroup [2,2] is used throughout: the workgroup's waves have to
+# tile the LSC x LSP load exactly once (mBlocks * LSC/kChunk == numWaves).
+#
+# K stays a multiple of 32 with AssertSummationElementMultiple pinning DepthU, as in
+# swizzle_gfx11.yaml.
+#
+# Batch count is 1 everywhere. Batched swizzle is broken independently of this
+# feature -- [256, 256, 2, 256] also fails on the DirectToVgpr path -- so it is left
+# out here rather than encoding a known failure.
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 1
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 1073741824
+  DataInitTypeA: 21
+  DataInitTypeB: 21
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  BoundsCheck: 0
+  SyncsPerBenchmark: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # BBS TN SWIZZLED_A, LDS-staged
+  # Carries the corner cases: a K of exactly one DepthU, partial tiles in both free
+  # dimensions, and an M that is not a multiple of MI_M so the pre-tiled buffer is
+  # row-padded and the kernel has to ignore the padding.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorA: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  2, 4,  2, 2] # MT = 64x128
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [32, 4, 1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprA: [False]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # whole tiles
+          - Exact: [64, 64, 1, 32]      # K is exactly one DepthU
+          - Exact: [80, 96, 1, 64]      # partial tiles, M a multiple of MI_M only
+          - Exact: [48, 40, 1, 96]      # narrow M, partial N
+          - Exact: [24, 32, 1, 32]      # M not a multiple of MI_M: padded pre-tile
+          - Exact: [17, 33, 1, 32]      # odd M and N
+          - Exact: [128, 1024, 1, 512]  # many main-loop iterations
+
+  ########################################
+  # BBS TN SWIZZLED_B, LDS-staged
+  # The mirror image: the mode picks MatrixInstN and MIWaveGroup[1] instead, so the
+  # tile-dim half of the address mapping is exercised on the other operand.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  2, 4,  2, 2] # MT = 64x128
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [32, 4, 1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprB: [False]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [80, 96, 1, 64]
+          - Exact: [17, 33, 1, 32]
+          - Exact: [64, 64, 1, 32]
+
+  ########################################
+  # HHS TN SWIZZLED_A, LDS-staged
+  # fp16 shares bf16's swizzle geometry (laneSize 8, loadsPerLane 2) but a different
+  # MacDataType path through the epilogue.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorA: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,  2, 4,  2, 2] # MT = 64x128
+        - WavefrontSize: [32]
+        - WorkGroup:
+          - [32, 4, 1]
+        - AssertSummationElementMultiple: [32]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [1]
+        - ScheduleIterAlg: [3]
+        - 1LDSBuffer: [1]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [16]
+        - DirectToVgprA: [False]
+        - UseSgprForGRO: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [80, 96, 1, 64]
+          - Exact: [17, 33, 1, 32]
+          - Exact: [64, 64, 1, 32]
