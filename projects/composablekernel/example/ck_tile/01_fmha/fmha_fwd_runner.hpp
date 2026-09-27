@@ -731,7 +731,22 @@ fwd_result fmha_fwd_run(mode_enum mode,
     const int nhead_ratio = nhead / nhead_k;
     int pack_gqa_nhead    = nhead;
     int pack_gqa_seqlen_q = shape_seqlen_q;
-    if(pack_gqa && nhead_ratio > 1 && mask.type == mask_enum::no_mask &&
+    // Pack-GQA folds the GQA query heads into seqlen_q (nhead -> nhead_k,
+    // seqlen_q -> nhead_ratio * seqlen_q), but the block mask is generated and indexed
+    // in the *unpacked* (nhead, seqlen_q) geometry: the kernel derives its mask row from
+    // the q-tile index and nhead_stride_block_mask. Under packing the q-tile index space
+    // grows by nhead_ratio, so tiles past the original count read the wrong mask row and
+    // the extra query blocks come back all-zero. Keep the two features mutually exclusive
+    // until the mask is made packing-aware.
+    const bool has_block_mask =
+        ck_tile::parse_block_mask_config(block_mask_str).pattern != ck_tile::BlockMaskPattern::None;
+    if(pack_gqa && has_block_mask && nhead_ratio > 1)
+    {
+        std::cerr << "pack_gqa is not supported together with block sparsity. ignoring the "
+                     "'pack_gqa' option"
+                  << std::endl;
+    }
+    if(pack_gqa && !has_block_mask && nhead_ratio > 1 && mask.type == mask_enum::no_mask &&
        bias.type == bias_enum::no_bias && i_perm && o_perm && mode == mode_enum::batch &&
        q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
        qscale.type != quant_scale_enum::mx)
