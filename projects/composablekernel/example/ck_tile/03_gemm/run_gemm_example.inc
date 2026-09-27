@@ -225,7 +225,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                                   const BLayout b_layout                  = BLayout{},
                                   [[maybe_unused]] const CLayout c_layout = CLayout{})
 {
-    // Use GemmTypeConfig to get actual data types for tensor operations
+
     using TypeConfig   = GemmTypeConfig<ADataType_, BDataType_, CDataType_>;
     using ADataTypeBuf = typename TypeConfig::ADataType;
     using BDataTypeBuf = typename TypeConfig::BDataType;
@@ -307,7 +307,7 @@ int run_gemm_example_with_layouts(ck_tile::ArgParser& arg_parser,
                 return ck_tile::shuffle_b_v0<GemmConfig>(b_k_n);
             }
         }();
-        // shuffled buffer B for device implementation
+
         if constexpr(std::is_same_v<BDataTypeBuf, ck_tile::pk_int4_t>)
         {
             ck_tile::permute_vectors_i4x4_b(b_shuffle_host);

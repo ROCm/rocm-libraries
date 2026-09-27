@@ -69,7 +69,16 @@ float batched_gemm(const ck_tile::BatchedGemmHostArgs& args, const ck_tile::stre
                                                                  ALayout,
                                                                  BLayout,
                                                                  CLayout,
-                                                                 TransposeC>;
+                                                                 TransposeC,
+                                                                 /*UseStructuredSparsity=*/false,
+                                                                 /*UsePersistentKernel=*/false,
+                                                                 /*NumWaveGroups=*/1,
+                                                                 /*Preshuffle=*/false,
+                                                                 /*VectorSize=*/16,
+                                                                 ck_tile::DataCachePrefetchKind::None,
+                                                                 ck_tile::DataCachePrefetchKind::None,
+                                                                 /*Async=*/false,
+                                                                 GemmConfig::LargeTensors>;
     constexpr auto scheduler  = GemmConfig::Scheduler;
 
     using UniversalGemmProblem =
