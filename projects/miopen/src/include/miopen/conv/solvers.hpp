@@ -4628,6 +4628,22 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #pragma clang diagnostic pop
 #endif
 
+/// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.
+struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvDirectDepthwiseFwd2D>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 {
