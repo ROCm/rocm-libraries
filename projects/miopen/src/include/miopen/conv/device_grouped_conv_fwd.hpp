@@ -87,15 +87,20 @@ struct GridwiseGroupedConv2DFwd
     static constexpr index_t GetAlignedPackW()
     {
         constexpr index_t packed_w = W / ScalarPerVector;
-        // This solver targets specific conv shapes whose tiles are always of the form 7*(2^n) x
-        // 7*(2^n) (e.g., 7×7, 14×14, 28×28). Splitting the wavefront into an 8x8 simplifies
-        // addressing, padding, and indexing, whereas 9x7 would require extra logic.
+        // A packed row must fit in one wavefront.
+        static_assert(packed_w > 0 && packed_w <= WaveSize,
+                      "Tile_W / InVectorWidth must be in [1, WaveSize]");
+        // Tiles of the form 7*(2^n) (e.g., 7x7, 14x14, 28x28) pack to 7 lanes per row; rounding up
+        // to 8 simplifies addressing, padding, and indexing, whereas 9x7 would require extra logic.
         if constexpr(packed_w == 7)
         {
             return 8;
         }
         else
         {
+            // Round up so a whole number of rows fills the wavefront. Not a power of two for every
+            // packed_w, but load_data_from_global static_asserts that, so a bad tile width fails
+            // to compile.
             return WaveSize / (WaveSize / packed_w);
         }
     }
@@ -167,6 +172,15 @@ struct GridwiseGroupedConv2DFwd
 
     static constexpr index_t TileIn_Stride =
         math::integer_least_multiple(TileIn_Max_W, InVectorWidth);
+
+    // run_conv_fwd() walks LDS as InShareVector: it steps rows by
+    // TileIn_Stride / InVectorWidth_Internal and starts each subtile at x * SubTileW * Stride_W.
+    // Non-exact multiples truncate the row step and misalign the vector loads.
+    static_assert(TileIn_Stride % InVectorWidth_Internal == 0,
+                  "LDS row stride must be a multiple of InVectorWidth_Internal");
+    static_assert((SubTileW * Stride_W) % InVectorWidth_Internal == 0,
+                  "SubTileW * Stride_W must be a multiple of InVectorWidth_Internal");
+
     static constexpr bool CheckSubTileRange =
         (TileOut_H % SubTileH != 0 || TileOut_W % SubTileW != 0);
 
@@ -467,11 +481,13 @@ struct GridwiseGroupedConv2DFwd
                                   Number<Tile_H>{},
                                   TileIn_Stride);
             }
-            if constexpr(TileIn_Stride - Tile_H - Pad_W > 0)
+            // Right padding spans Pad_W + Tile_W up to the row stride, for each of the Tile_H
+            // rows. Same as Tile_H on square tiles, wrong on non-square ones.
+            if constexpr(TileIn_Stride - Tile_W - Pad_W > 0)
             {
-                constexpr auto Pad_Right = TileIn_Stride - Tile_H - Pad_W;
+                constexpr auto Pad_Right = TileIn_Stride - Tile_W - Pad_W;
                 init_array_pading(share_in + ShareMemInTileSize * i + TopPadingSize + Pad_W +
-                                      Tile_H,
+                                      Tile_W,
                                   Number<Pad_Right>{},
                                   Number<Tile_H>{},
                                   TileIn_Stride);
