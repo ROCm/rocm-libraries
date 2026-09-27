@@ -14,6 +14,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # where the superbuild CI lane points the production source root.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/Gfx950ConvFwdNative.cpp
 )
 
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the
