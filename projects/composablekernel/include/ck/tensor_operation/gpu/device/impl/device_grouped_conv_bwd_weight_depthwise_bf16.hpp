@@ -23,9 +23,9 @@ namespace ck {
 namespace tensor_operation {
 namespace device {
 
-// A CTA owns eight adjacent groups and one filter point. At G=256/450/512,
-// 3x3 produces 288/513/576 CTAs. The other 32 lanes partition the reduction;
-// with admitted R<=512, each lane performs at most 16 serial products.
+// A CTA owns eight adjacent groups and one filter point. Admitted G>=128
+// yields at least 144 CTAs for 3x3 filters. The other 32 lanes partition
+// the reduction; with R<=min(G,512), each lane performs at most 16 products.
 struct DepthwiseBwdWeightBf16Params
 {
     const bhalf_t* in;
@@ -134,7 +134,7 @@ struct DeviceGroupedConvBwdWeightDepthwiseBf16 final
                ol[i] > MaxIndex)
                 return false;
         }
-        if(il[0] < 256 || il[0] != ol[0] || il[0] != wl[0] || il[1] != ol[1] || il[2] != 1 ||
+        if(il[0] < 128 || il[0] != ol[0] || il[0] != wl[0] || il[1] != ol[1] || il[2] != 1 ||
            wl[1] != 1 || wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3)
             return false;
 

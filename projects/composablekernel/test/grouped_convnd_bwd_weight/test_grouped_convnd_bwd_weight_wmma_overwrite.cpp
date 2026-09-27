@@ -318,8 +318,21 @@ const ck::utils::conv::ConvParam odd_channels{
 const ck::utils::conv::ConvParam odd_channels_3d{
     3, 2, 1, 5, 3, {1, 1, 1}, {2, 3, 6}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}};
 
-// G256/450/512 generate 288/513/576 filter CTAs respectively. R<=G and
-// R<=512 keeps each of the 32 reduction lanes at 16 terms or fewer.
+// G>=128 gives at least 144 filter CTAs. R<=min(G,512) limits each
+// reduction lane to at most 16 terms; the G127 and R>G controls stay excluded.
+const ck::utils::conv::ConvParam depthwise_g127_r121{
+    2, 127, 1, 1, 1, {3, 3}, {11, 11}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g128_r121{
+    2, 128, 1, 1, 1, {3, 3}, {11, 11}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g128_r128{
+    2, 128, 2, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+const ck::utils::conv::ConvParam depthwise_g128_r144{
+    2, 128, 1, 1, 1, {3, 3}, {12, 12}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
+// Packed-layout analogues of the G176/N1 and G240/N4 3x3 stride-2 corpus shapes.
+const ck::utils::conv::ConvParam depthwise_g176_r169{
+    2, 176, 1, 1, 1, {3, 3}, {28, 28}, {2, 2}, {1, 1}, {0, 0}, {0, 0}};
+const ck::utils::conv::ConvParam depthwise_g240_r196{
+    2, 240, 4, 1, 1, {3, 3}, {14, 14}, {2, 2}, {1, 1}, {1, 1}, {1, 1}};
 const ck::utils::conv::ConvParam depthwise_g256_r256{
     2, 256, 4, 1, 1, {3, 3}, {8, 8}, {1, 1}, {1, 1}, {1, 1}, {1, 1}};
 const ck::utils::conv::ConvParam depthwise_g256_asym_r256{
@@ -338,6 +351,12 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16DepthwiseShortReduction)
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only depthwise candidate";
 #ifdef CK_ENABLE_BF16
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g127_r121, Candidate::Depthwise, 1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r121, Candidate::Depthwise, 1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r128, Candidate::Depthwise, 1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g128_r144, Candidate::Depthwise, 1, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g176_r169, Candidate::Depthwise, 1, true);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g240_r196, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_asym_r256, Candidate::Depthwise, 1, true);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g450_tail_r256, Candidate::Depthwise, -1, true);
@@ -346,6 +365,7 @@ TEST(TestGroupedConvndBwdWeightWmmaOverwrite, Bf16DepthwiseShortReduction)
     CheckCandidate<2, ck::bhalf_t>(depthwise_g512_r640, Candidate::Depthwise, -1, false);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, 2, false);
     CheckCandidate<2, ck::bhalf_t>(depthwise_g256_r256, Candidate::Depthwise, -2, false);
+    CheckCandidate<2, ck::bhalf_t>(depthwise_g176_r169, Candidate::Depthwise, 2, false);
 #else
     GTEST_SKIP() << "BF16 instances disabled";
 #endif
