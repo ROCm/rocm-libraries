@@ -315,6 +315,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(BS) laqr0_iteration_kernel(const I n,
                               status, statusT);
 }
 
+/** HSEQR_COPY_BAND_KERNEL copies the entries (i, j) of the m-by-m matrix A with i <= j + d
+    to B (grid = dim3(ceil(m / BS2), ceil(m / BS2)), block = dim3(BS2, BS2)). **/
+template <typename T, typename I>
+ROCSOLVER_KERNEL void
+    hseqr_copy_band_kernel(const I m, const I d, const T* A, const I lda, T* B, const I ldb)
+{
+    const I i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const I j = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
+    if(i < m && j < m && i <= j + d)
+        B[idx2D(i, j, ldb)] = A[idx2D(i, j, lda)];
+}
+
 /** LAQR0_CORE4_KERNEL completes an iteration deferred by laqr0_iteration_kernel because
     of a large deflation window (see laqr0_core4_block). **/
 template <int BS, typename T, typename I>
@@ -860,6 +872,10 @@ I hseqr_multishift(rocblas_handle handle,
             const I nve = n - kdu - kwv + 1;
             T* U = h(ku, 1);
             T* Vbuf = dstatusT + LAQR0_STATUS_SCALAR_SIZE;
+            // (the compact copy of the window of a chunk, after the two slots of Vbuf of the
+            // largest sweep, as in rocsolver_hseqr_getMemorySize)
+            const size_t nbmax = nsmax / 2;
+            T* Wwin = Vbuf + 2 * size_t(3 * nbmax) * 3 * (nbmax + 1);
 
             // clear trash
             if(ktop + 2 <= kbot)
@@ -890,12 +906,47 @@ I hseqr_multishift(rocblas_handle handle,
                 // the side stream must be done with this slot of Vbuf (chunk-2)
                 if(accum && chunk >= 2)
                     HIP_CHECK(hipStreamWaitEvent(stream, side.ubuilt[slot], 0));
-                ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>),
-                                        dim3(accum ? ngroups : 1), dim3(HSEQR_CHASE_BLOCKSIZE), 0,
-                                        stream, wantt, wantz, accum, n, ktop, kbot, nbmps, incol,
-                                        W + (ks - 1), H, ldh, iloz, ihiz, Z, ldz, U, ldh, Vb, dbar);
                 if(!accum)
+                {
+                    ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>), dim3(1),
+                                            dim3(HSEQR_CHASE_BLOCKSIZE), 0, stream, wantt, wantz,
+                                            accum, n, ktop, kbot, nbmps, incol, W + (ks - 1), H,
+                                            ldh, iloz, ihiz, Z, ldz, U, ldh, Vb, dbar);
                     continue;
+                }
+
+                // With accum, the chunk kernel works on a compact copy of the part of H that
+                // it reads, H(r0:r1, r0:r1) (with ldw = kdu+8): with the leading dimension of
+                // a large H, the columns of the window span so much memory that most of its
+                // accesses miss the address translation caches (on MI300X, the time per step
+                // doubles when they span more than about 64 MB). It only reads and writes
+                // entries (i, j) with i <= j + 3 (the Hessenberg part and the bulges), and
+                // writes only within H(lo:r1, lo:r1), so only that band is copied in and back:
+                // the entries further below are the workspace of the off-window products,
+                // which the side stream may be using for the previous chunk (the entries of
+                // the band that the previous chunk updates are finished before; see below).
+                const I lo = std::max(ktop, incol);
+                const I r0 = std::max(I(1), lo - 3);
+                const I r1 = std::min(n, incol + kdu + 1);
+                const I ldw = kdu + 8;
+                {
+                    const I mw = r1 - r0 + 1;
+                    ROCSOLVER_LAUNCH_KERNEL(
+                        (hseqr_copy_band_kernel<T>), dim3((mw - 1) / BS2 + 1, (mw - 1) / BS2 + 1),
+                        dim3(BS2, BS2), 0, stream, mw, I(3), (const T*)h(r0, r0), ldh, Wwin, ldw);
+                }
+                T* Hc = Wwin - (r0 - 1) - size_t(r0 - 1) * ldw;
+                ROCSOLVER_LAUNCH_KERNEL((laqr5_chunk_kernel<HSEQR_CHASE_BLOCKSIZE, T>),
+                                        dim3(ngroups > 1 ? ngroups : 1), dim3(HSEQR_CHASE_BLOCKSIZE),
+                                        0, stream, wantt, wantz, accum, n, ktop, kbot, nbmps, incol,
+                                        W + (ks - 1), Hc, ldw, iloz, ihiz, Z, ldz, U, ldh, Vb, dbar);
+                {
+                    const I mw = r1 - lo + 1;
+                    ROCSOLVER_LAUNCH_KERNEL(
+                        (hseqr_copy_band_kernel<T>), dim3((mw - 1) / BS2 + 1, (mw - 1) / BS2 + 1),
+                        dim3(BS2, BS2), 0, stream, mw, I(3),
+                        (const T*)(Wwin + idx2D(lo - r0, lo - r0, ldw)), ldw, h(lo, lo), ldh);
+                }
                 HIP_CHECK(hipEventRecord(side.chased[slot], stream));
 
                 // left update of the columns of the next chunk's window (after the far
@@ -1000,8 +1051,10 @@ void rocsolver_hseqr_getMemorySize(const I n, const I batch_count, size_t* size_
         I nsmax = std::min((n + 6) / 9, I(HSEQR_MAX_SHIFTS));
         nsmax = std::max(I(2), nsmax - nsmax % 2);
         const I nbmps = nsmax / 2;
-        *size_workT
-            = sizeof(T) * (LAQR0_STATUS_SCALAR_SIZE + 2 * size_t(3 * nbmps) * 3 * (nbmps + 1));
+        // (and the compact copy of the window of a chunk, see hseqr_multishift)
+        const size_t ldw = 6 * nbmps + 5;
+        *size_workT = sizeof(T)
+            * (LAQR0_STATUS_SCALAR_SIZE + 2 * size_t(3 * nbmps) * 3 * (nbmps + 1) + ldw * ldw);
     }
 }
 
