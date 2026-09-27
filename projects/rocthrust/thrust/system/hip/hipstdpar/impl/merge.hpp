@@ -45,6 +45,7 @@
 
 #  include <algorithm>
 #  include <execution>
+#  include <type_traits>
 #  include <utility>
 
 #  include "hipstd.hpp"
@@ -82,7 +83,29 @@ inline O merge(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
+  using r_t = ::std::decay_t<R>;
+
+  if constexpr (::std::is_trivially_destructible_v<r_t>)
+  {
+    return ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::std::move(r));
+  }
+  else
+  {
+    ::hipstd::detail::device_callable_guard<r_t> guard(::std::move(r));
+    O result;
+    try
+    {
+      result = ::thrust::merge(::thrust::device, f0, l0, f1, l1, fo, ::hipstd::detail::callable_proxy<r_t>{guard.get()});
+    }
+    catch (...)
+    {
+      (void) ::hipDeviceSynchronize();
+      throw;
+    }
+    ::thrust::hip_rocprim::throw_on_error(::hipDeviceSynchronize(), "hipstdpar merge: failed to synchronize");
+    guard.destroy_and_free();
+    return result;
+  }
 }
 
 template <
