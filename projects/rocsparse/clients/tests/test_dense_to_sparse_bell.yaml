@@ -131,3 +131,11 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   order: [rocsparse_order_row]
 
+- name: dense_to_sparse_bell_extra
+  category: nightly
+  function: dense_to_sparse_bell_extra
+  indextype: *i32
+  precision: *single_only_precisions
+  host_memory_gb: 2
+  device_memory_gb: 44
+
