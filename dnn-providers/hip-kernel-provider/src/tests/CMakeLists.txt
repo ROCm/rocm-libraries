@@ -39,14 +39,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # hkp_verify_embedded_sources() compares this list against the staged descriptors.
     set(_ingestor_kernel_dir
         "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/unit/pointwise/kernels")
+    # The pointwise_model pack authors its own kernel beside its own descriptors. A packed
+    # root is validated whole: hkp_verify_embedded_sources() resolves a descriptor's authored
+    # location from the pack registry and requires the embedded source to come from inside
+    # that root, so this pack cannot share the unit set's file -- nor its key, which already
+    # belongs to another descriptor.
+    # The STAGED copy, not the authored one: hkp_verify_embedded_sources() resolves this
+    # pack's authored location through the pack registry, which names the staging root, and
+    # requires the embedded file to have come from inside it. HkpPackaging.cmake puts the
+    # kernel there at configure time, before this directory is added.
+    set(_model_kernel_dir "${HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR}/kernels")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_tests
         FILES "${_ingestor_kernel_dir}/PointwiseAdd.cpp"
               "${_ingestor_kernel_dir}/PointwiseMul.cpp"
               "${_ingestor_kernel_dir}/PointwiseSub.cpp"
+              "${_model_kernel_dir}/PointwiseModelAdd.cpp"
         KEYS kernels/PointwiseAdd.cpp
              kernels/PointwiseMul.cpp
              kernels/PointwiseSub.cpp
+             kernels/PointwiseModelAdd.cpp
     )
 endif()
 embed_kernel_sources(
@@ -108,6 +120,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # the binary is running instead of reaching back into the tree that configured it -- an
     # installed run would otherwise find nothing, enumerate nothing, and pass.
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        # The staged tree TestShippedDescriptorSets walks. It was HIPDNN_DESCRIPTOR_BUILD_DIR
+        # before descriptor packaging replaced the staging variables, and that tree held the
+        # descriptors this branch shipped -- which develop moved under test_descriptors/ and
+        # left the production root dormant by default. The unit root is the one this binary
+        # stages, so pointing anywhere else makes every case here vacuous, which is the exact
+        # failure the first test in that file exists to catch.
+        HIPDNN_TEST_DESCRIPTOR_DIR="${HIPKERNELPROVIDER_UNIT_BUILD_DIR}"
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
@@ -150,7 +169,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
     # against a directory that does not exist yet, and they skip rather than fail.
     # Each descriptor set has its own staging target. Name each one individually.
-    foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared)
+    foreach(_hkp_set hkp_packaging_unit hkp_packaging_unit_shared
+                     hkp_packaging_${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
+                     hkp_pointwise_model_artifact)
         if(TARGET ${_hkp_set})
             add_dependencies(hip_kernel_provider_tests ${_hkp_set})
         endif()
@@ -162,7 +183,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     hkp_verify_embedded_sources(
         TARGET hip_kernel_provider_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_UNIT_BUILD_DIR}
-        PACK_NAMES unit unit_shared
+        # pointwise_model is packed into this root too. Its kernel is the same embedded
+        # PointwiseAdd.cpp the unit set uses, which is why it is staged here rather than
+        # beside the integration descriptors: an embedded_source descriptor needs a binary
+        # that carries the source, and only this one does.
+        PACK_NAMES unit unit_shared ${HIPKERNELPROVIDER_POINTWISE_MODEL_SET}
     )
 
     # One census entry per architecture the `unit` pack was wired for, each running this

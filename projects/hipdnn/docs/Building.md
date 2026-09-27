@@ -243,7 +243,7 @@ The ROCm SDK is published as Python wheels on a nightly index. Installing into a
 
 2. Install the SDK, selecting your GPU architecture with the `device-<arch>` extra (replace `gfx942`):
    ```bash
-   pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel,device-gfx942]"
+   pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ "rocm[libraries,devel,device-gfx942]"
    ```
    The `libraries` and `devel` extras provide the ROCm libraries, headers, CMake configuration, and compiler needed to build hipDNN; `device-<arch>` provides the device code for your GPU. This installs the latest nightly; see [RELEASES.md](https://github.com/ROCm/TheRock/blob/main/RELEASES.md) to pin a specific version or for other extras.
 
@@ -262,7 +262,7 @@ Run the `python -m rocm_sdk` commands with the same Python you installed the whe
 
 ### Tarballs
 
-Tarballs are published as nightly builds (dated versions, like the wheels) at `https://nightly.repo.amd.com/rocm/core/tarball/`. Filenames follow `therock-dist-<platform>-<group>-<version>.tar.gz`, where:
+Tarballs are published as nightly builds (dated versions, like the wheels) at `https://rocm.nightlies.amd.com/tarball-multi-arch/`. Filenames follow `therock-dist-<platform>-<group>-<version>.tar.gz`, where:
 
 - `<platform>` is `linux` or `windows`.
 - `<group>` is either `multiarch` (all supported architectures) or a specific GPU family (for example `gfx110X-all`). If in doubt or just getting started, `multiarch` is the recommended safe choice.
@@ -430,9 +430,9 @@ This is a dependency-acquisition policy, not a sealed Python environment or a gl
 ### comgr compilation cache (build speed)
 
 Every rocKE kernel packed by the hip-kernel-provider is lowered in-process through
-`libamd_comgr`, which keeps an on-disk cache of its compilation results. Where that cache
-lives dominates descriptor-packaging build time, above worker count and above whether the
-cache is warm.
+`libamd_comgr`, which keeps an on-disk cache of its compilation results. **Where that cache
+lives is the single largest factor in descriptor-packaging build time** — larger than the
+worker count, and larger than whether the cache is warm.
 
 > [!IMPORTANT]
 > The default location is **`~/.cache/comgr`**. If your home directory is on a network
@@ -445,7 +445,18 @@ cache is warm.
 export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache
 ```
 
-On a network home the cache costs more than it saves.
+Measured on one machine packing a 2,711-kernel gfx942 descriptor set with 32 workers, varying
+only the cache location and whether it was already populated:
+
+| Cache location | State | Wall time |
+|---|---|---|
+| Local (tmpfs) | Populated | **13 s** |
+| Local (tmpfs) | Empty | 47 s |
+| Network home (`~/.cache/comgr`) | Populated | 597 s |
+
+A *cold* cache on local storage beat a *warm* cache on the network home by more than 10x, so
+on a network home the cache costs more than it saves. The numbers are illustrative of the
+ratio, not a benchmark of any particular machine.
 
 Related variables, both read by comgr itself rather than by hipDNN:
 
@@ -454,7 +465,9 @@ Related variables, both read by comgr itself rather than by hipDNN:
 | `AMD_COMGR_CACHE_DIR` | Cache location. Defaults to `~/.cache/comgr`. |
 | `AMD_COMGR_CACHE` | Set to `0` to disable caching entirely. Unset means **enabled**. |
 
-Disabling the cache is a diagnostic, not a fix: every build then pays full compilation cost. A cache on local disk is per-machine and per-container, so a fresh CI runner or rebuilt container starts cold.
+Disabling the cache is a diagnostic, not a fix: it makes every build pay full compilation
+cost. Relocating it is what you want. Note that a cache on local disk is also per-machine and
+per-container, so a fresh CI runner or a rebuilt container always starts cold.
 
 The other lever is the packer's worker count. A CMake-driven build fixes it per packaging root through the `PACK_JOBS` argument at each `hkp_wire_pack_target()` call site, not through the `HKP_PACK_JOBS` environment variable, which reaches only a direct `hkp_pack` run. The [descriptor-packaging README](../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md) gives the per-root values.
 
@@ -810,7 +823,7 @@ gfx1103
 
 Install the ROCm SDK from the nightly wheel index, selecting your architecture with the `device-<arch>` extra (replace `gfx1103` with the architecture reported above), then expand the development tree:
 ```cmd
-pip install --index-url https://nightly.repo.amd.com/rocm/whl-next/ "rocm[libraries,devel,device-gfx1103]"
+pip install --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ "rocm[libraries,devel,device-gfx1103]"
 python -m rocm_sdk init
 ```
 The `libraries` and `devel` extras provide the ROCm libraries, headers, CMake configuration, and compiler needed to build hipDNN; `device-<arch>` provides the device code for your GPU. Re-run `python -m rocm_sdk init` if you later add or change a `device-*` wheel. To pin a specific dated build instead of the latest nightly, see [Python wheels](#python-wheels-recommended) under Obtaining ROCm.

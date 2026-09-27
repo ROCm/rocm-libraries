@@ -7,9 +7,11 @@
 #include <cstdint>
 #include <memory>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -84,6 +86,45 @@ public:
                             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
+
+    /// Optional matched-catalog enumeration. A successful empty page means no
+    /// candidates in scope; engines without this capability must decline explicitly.
+    /// Output is EngineDetails with candidate_page, freed like ordinary details.
+    virtual void
+        enumerateCandidates(THandle&,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&,
+                            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&,
+                            uint64_t,
+                            uint64_t,
+                            hipdnnPluginConstData_t&) const
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                    "Engine does not support matched-catalog enumeration");
+    }
+
+    /**
+     * @brief Describes or evaluates an optional calibrated throughput prediction.
+     *
+     * Absence of a model is independent of engine applicability. Legacy engines
+     * return UNAVAILABLE; CONFIGURATION estimates must identify the exact plan.
+     */
+    virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPrediction(THandle&,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph&,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&,
+                      hipdnnEnginePredictionKind_t kind,
+                      bool /*evaluate*/) const
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        EnginePredictionT prediction;
+        prediction.engine_id = id();
+        prediction.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
+                              ? PredictionKind::CONFIGURATION
+                              : PredictionKind::ENGINE;
+        prediction.status = PredictionStatus::UNAVAILABLE;
+        prediction.reason = "Engine does not provide throughput predictions";
+        return prediction;
+    }
 
     /**
      * @brief Returns the maximum workspace size required for the given graph.

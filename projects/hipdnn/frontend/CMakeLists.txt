@@ -89,7 +89,7 @@ endforeach()
 unset(_hipdnn_fe_target)
 
 # Direct-link target: link the backend library (plus data_sdk).
-target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_backend)
+target_link_libraries(hipdnn_frontend INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_backend)
 
 # Backend headers pull in HIP headers, so the dynamic target needs hip::host too.
 # (The installed package Config gets HIP transitively via hipdnn_data_sdk's
@@ -104,7 +104,7 @@ endif()
 # never link libhipdnn_backend. The genexes resolve against the imported
 # hipdnn_backend target (provided by find_dependency in the package Config) at the
 # consumer's configure time.
-target_link_libraries(hipdnn_frontend_dynamic INTERFACE hipdnn_data_sdk hip::host)
+target_link_libraries(hipdnn_frontend_dynamic INTERFACE hipdnn_data_sdk hipdnn_flatbuffers_sdk hip::host)
 target_include_directories(hipdnn_frontend_dynamic INTERFACE
     $<TARGET_PROPERTY:hipdnn_backend,INTERFACE_INCLUDE_DIRECTORIES>
 )

@@ -1,0 +1,766 @@
+{
+  "schema_version": "1.0",
+  "operation": "sdpa_fwd",
+  "display_name": "Scaled Dot-Product Attention Forward",
+  "description": "Multi-head attention forward. Q is [batch, heads, seqlen_q, head_dim]; K and V share seqlen_k.",
+  "parameters": {
+    "batch": {
+      "type": "int64"
+    },
+    "heads": {
+      "type": "int64"
+    },
+    "heads_kv": {
+      "type": "int64",
+      "description": "KV head count. Equal to heads is MHA, 1 is MQA, anything between is GQA.",
+      "common_values": [
+        1,
+        2,
+        4,
+        8
+      ]
+    },
+    "seqlen_q": {
+      "type": "int64"
+    },
+    "seqlen_k": {
+      "type": "int64"
+    },
+    "head_dim": {
+      "type": "int64"
+    },
+    "is_causal": {
+      "type": "bool",
+      "description": "Decode is always causal (RFC 0019.13 \u00a712.3)"
+    },
+    "alignment": {
+      "type": "enum",
+      "values": [
+        "top_left",
+        "bottom_right"
+      ],
+      "description": "Which corner the causal diagonal is anchored at. Only a distinct problem where the mask is causal and seqlen_q < seqlen_k; the constraint below pins it to top_left everywhere else, so the sweep does not spend half its budget measuring each shape twice. An engine that serves one anchor and refuses the other is removed from a comparison by the corpus rather than by a measurement, which is why this is a declared axis rather than a fixed choice."
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp16",
+        "bf16"
+      ]
+    },
+    "generate_stats": {
+      "type": "bool",
+      "description": "The training forward: also write the softmax statistics (logsumexp) the backward pass consumes."
+    }
+  },
+  "stratification_axis": "arithmetic_intensity",
+  "regimes": {
+    "batch": {
+      "parameter": "batch",
+      "buckets": [
+        1,
+        4,
+        16,
+        64,
+        256
+      ]
+    },
+    "heads": {
+      "parameter": "heads",
+      "buckets": [
+        1,
+        8,
+        16,
+        32,
+        96
+      ]
+    },
+    "seqlen_q": {
+      "parameter": "seqlen_q",
+      "buckets": [
+        1,
+        128,
+        512,
+        2048,
+        8192
+      ]
+    },
+    "seqlen_k": {
+      "parameter": "seqlen_k",
+      "buckets": [
+        128,
+        512,
+        2048,
+        8192,
+        32768
+      ]
+    },
+    "head_dim": {
+      "parameter": "head_dim",
+      "buckets": [
+        64,
+        128,
+        256
+      ]
+    }
+  },
+  "// regime_label": [
+    "The populations a corpus is reported per, as RFC 0019.13 \u00a711.2's regret table needs them.",
+    "Phase: decode is one query token against a cache and is memory bound on that cache;",
+    "prefill is the whole prompt at once and is compute bound on the score matrix. They are the",
+    "same operation and entirely different problems, which is why they are anchored as separate",
+    "archetypes rather than as one range over seqlen_q. Cross attention (more queries than keys)",
+    "draws its two sequences from different tensors, so it varies independently of the rest --",
+    "the constraint above excludes it today, and the clause stays so that lifting the constraint",
+    "does not silently file cross-attention under 'append'.",
+    "Grouping (mha/gqa/mqa) is the third facet: how many query heads share one KV head decides",
+    "how much of the KV cache a wavefront re-reads, which is the whole difference between a",
+    "decode that is bandwidth bound and one that is not. It is a label rather than a bucket",
+    "because what matters is heads_kv relative to heads, not its magnitude."
+  ],
+  "regime_label": [
+    {
+      "name": "phase",
+      "labels": [
+        {
+          "label": "decode",
+          "when": {
+            "==": [
+              "$q.seqlen_q",
+              1
+            ]
+          }
+        },
+        {
+          "label": "cross",
+          "when": {
+            ">": [
+              "$q.seqlen_q",
+              "$q.seqlen_k"
+            ]
+          }
+        },
+        {
+          "label": "prefill",
+          "when": {
+            "==": [
+              "$q.seqlen_q",
+              "$q.seqlen_k"
+            ]
+          }
+        }
+      ],
+      "otherwise": "append"
+    },
+    {
+      "name": "context",
+      "labels": [
+        {
+          "label": "short",
+          "when": {
+            "<=": [
+              "$q.seqlen_k",
+              2048
+            ]
+          }
+        }
+      ],
+      "otherwise": "long"
+    },
+    {
+      "name": "grouping",
+      "labels": [
+        {
+          "label": "mha",
+          "when": {
+            "==": [
+              "$q.heads_kv",
+              "$q.heads"
+            ]
+          }
+        },
+        {
+          "label": "mqa",
+          "when": {
+            "==": [
+              "$q.heads_kv",
+              1
+            ]
+          }
+        }
+      ],
+      "otherwise": "gqa"
+    }
+  ],
+  "constraints": [
+    {
+      "<=": [
+        "$q.seqlen_q",
+        "$q.seqlen_k"
+      ]
+    },
+    {
+      "<=": [
+        "$q.heads_kv",
+        "$q.heads"
+      ]
+    },
+    {
+      "divisible": [
+        "$q.heads",
+        "$q.heads_kv"
+      ]
+    },
+    {
+      "or": [
+        {
+          "and": [
+            {
+              "==": [
+                "$q.is_causal",
+                true
+              ]
+            },
+            {
+              "<": [
+                "$q.seqlen_q",
+                "$q.seqlen_k"
+              ]
+            }
+          ]
+        },
+        {
+          "==": [
+            "$q.alignment",
+            "top_left"
+          ]
+        }
+      ]
+    }
+  ],
+  "// kernel_catalog": [
+    "How a descriptor pack's metadata reads back as a point. The pack names its fields whatever",
+    "the kernel author named them; this is the only place those spellings appear, so a new pack",
+    "vocabulary is a declaration edit rather than a code change. A descriptor missing any mapped",
+    "field carries no geometry and contributes nothing -- which is how pointwise_add and the",
+    "shipped tiled_attention are excluded without naming them anywhere.",
+    "A pack value with no entry under `enums` is skipped and counted, never guessed: a pack in",
+    "fp8 read as bf16 would produce a corpus of graphs the engine does not serve, labelled as",
+    "ones it does.",
+    "`constants` answers for a parameter the pack vocabulary has no field for at all. These",
+    "packs record `causal` without recording which corner the diagonal is anchored at, because",
+    "every kernel in them anchors it top-left; saying so here is what lets the builder resolve",
+    "an argument no descriptor supplies. A parameter mapped under `metadata` is refused here,",
+    "so a constant can never overwrite what a descriptor actually said."
+  ],
+  "kernel_catalog": {
+    "metadata": {
+      "batch": "batch",
+      "heads": "num_query_heads",
+      "heads_kv": "num_kv_heads",
+      "seqlen_q": "seqlen_q",
+      "seqlen_k": "seqlen_kv",
+      "head_dim": "head_size",
+      "is_causal": "causal",
+      "dtype": "dtype"
+    },
+    "enums": {
+      "dtype": {
+        "BF16": "bf16",
+        "FP16": "fp16"
+      }
+    },
+    "constants": {
+      "alignment": "top_left",
+      "generate_stats": false
+    }
+  },
+  "graph_builder": {
+    "function": "sdpaForward",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "qDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "qStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_q",
+                  "$q.heads"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "kDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads_kv",
+          "$q.seqlen_k",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "kStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_k",
+                  "$q.heads_kv"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads_kv",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "vDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads_kv",
+          "$q.seqlen_k",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "vStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_k",
+                  "$q.heads_kv"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads_kv",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "oDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          "$q.head_dim"
+        ]
+      },
+      {
+        "name": "oStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.seqlen_q",
+                  "$q.heads"
+                ]
+              },
+              "$q.head_dim"
+            ]
+          },
+          "$q.head_dim",
+          {
+            "*": [
+              "$q.heads",
+              "$q.head_dim"
+            ]
+          },
+          1
+        ]
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      },
+      {
+        "name": "computeDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "intermediateDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "attnScale",
+        "kind": "expr",
+        "value": {
+          "rsqrt": [
+            "$q.head_dim"
+          ]
+        }
+      },
+      {
+        "name": "causalMask",
+        "kind": "direct",
+        "source": "$q.is_causal"
+      },
+      {
+        "name": "diagonalAlignment",
+        "kind": "direct",
+        "source": "$q.alignment"
+      },
+      {
+        "name": "generateStats",
+        "kind": "direct",
+        "source": "$q.generate_stats"
+      },
+      {
+        "name": "statsDims",
+        "kind": "expr",
+        "value": [
+          "$q.batch",
+          "$q.heads",
+          "$q.seqlen_q",
+          1
+        ]
+      },
+      {
+        "name": "statsStrides",
+        "kind": "strides_of",
+        "of": "statsDims"
+      },
+      {
+        "name": "statsDataType",
+        "kind": "constant",
+        "constant": "float"
+      }
+    ],
+    "// types": "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder refuses outright ('Compute data type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The training forward's softmax statistics are fp32.",
+    "// layout": "BSHD: dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles and the retired Python bundler wrote them. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph, and a live-engine corpus for rocKE comes out empty. AITER serves BSHD too, so this keeps both engines in the contest.",
+    "// scale": "attnScale is stated, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so omitting it empties a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry."
+  },
+  "archetypes": [
+    {
+      "name": "llama3_8b_decode",
+      "source": "RFC 0019.13 \u00a712.3",
+      "note": "one query token against the whole KV cache",
+      "values": {
+        "batch": [
+          1,
+          8,
+          16,
+          32,
+          64,
+          128,
+          256
+        ],
+        "heads": [
+          32
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          512,
+          2048,
+          8192,
+          32768
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "llama3_8b_prefill",
+      "source": "RFC 0019.13 \u00a712.3",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "heads": [
+          32
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          512,
+          2048,
+          8192
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "llama3_70b_gqa",
+      "note": "grouped-query attention: 64 query heads sharing 8 KV heads",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          64
+        ],
+        "heads_kv": [
+          8
+        ],
+        "seqlen_q": [
+          1,
+          512,
+          2048
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "gpt3_175b_prefill",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          96
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          2048,
+          4096
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "bert_base_encoder",
+      "note": "bidirectional: an encoder is the uncausal case",
+      "values": {
+        "batch": [
+          8,
+          32,
+          128
+        ],
+        "heads": [
+          12,
+          16
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          128,
+          512
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64
+        ],
+        "is_causal": [
+          false
+        ]
+      }
+    },
+    {
+      "name": "vit_encoder",
+      "note": "patch tokens plus a class token",
+      "values": {
+        "batch": [
+          8,
+          32,
+          64
+        ],
+        "heads": [
+          12,
+          16
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          197,
+          577
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64
+        ],
+        "is_causal": [
+          false
+        ]
+      }
+    },
+    {
+      "name": "long_context",
+      "values": {
+        "batch": [
+          1,
+          4,
+          16
+        ],
+        "heads": [
+          32,
+          96
+        ],
+        "heads_kv": [
+          8,
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          8192,
+          16384,
+          32768
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          64,
+          128
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "batch": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "heads": {
+      "kind": "values",
+      "values": [
+        8,
+        12,
+        16,
+        24,
+        32,
+        40,
+        64,
+        96,
+        128
+      ]
+    },
+    "seqlen_q": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        0.75,
+        1,
+        1.5,
+        2
+      ]
+    },
+    "seqlen_k": {
+      "kind": "mirror",
+      "of": "seqlen_q",
+      "ratios": [
+        1,
+        1,
+        2,
+        4,
+        16
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  },
+  "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
+  "// neighbourhood": "head_dim is absent on purpose: it takes one of a few values fixed by the model architecture, and an interpolated 96 or 112 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, which keeps the declared seqlen_q <= seqlen_k relation satisfied by construction rather than by rejection.",
+  "// mixture": "Same shares as conv_fwd; see the note there."
+}

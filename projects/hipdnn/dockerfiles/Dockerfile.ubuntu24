@@ -467,6 +467,31 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # quietly unexercised instead of erroring.
 RUN python3 -m pip install --break-system-packages pre-commit 'msgpack>=1.0.0' 'zstandard>=0.20.0' pytest
 
+# uhd_gen's training dependencies (RFC 0019 §13).
+#
+# projects/hipdnn/tools/CMakeLists.txt registers uhd_gen's suite with CTest only when
+# pytest is importable, and warns and skips registration otherwise. Without these the
+# warning fires and the tests silently do not exist -- including in CI, so the
+# cross-language features_hash contract they pin against the C++ FeatureExtractor goes
+# unchecked. The suite guards each case with importorskip, so a partial set degrades to
+# skips rather than errors.
+#
+# Installed from the tool's own metadata rather than a copied list, which would be free to
+# drift from pyproject.toml -- as a hand-written one already did, omitting pandas and
+# scikit-learn. `[dev]` adds pytest, which is what the CTest registration probes for.
+# The `uhd_gen/dataset` subpackage's are installed beside them: it is the step that turns a
+# collected sweep into the Parquet dataset uhd_gen trains from, so an image that can train but
+# not publish cannot actually run the pipeline. It keeps its own requirements.txt because it
+# runs without the training stack, and that is where the Parquet engine is declared -- pandas
+# ships none of its own, and without pyarrow the gap surfaces as an ImportError deep inside
+# to_parquet after the sweep has already been paid for.
+COPY projects/hipdnn/tools/uhd_gen/pyproject.toml /tmp/uhd_gen/pyproject.toml
+COPY projects/hipdnn/tools/uhd_gen/requirements.txt /tmp/uhd_gen/requirements.txt
+COPY projects/hipdnn/tools/uhd_gen/dataset/requirements.txt /tmp/uhd_gen/dataset/requirements.txt
+RUN python3 -m pip install --break-system-packages --no-cache-dir \
+        -r /tmp/uhd_gen/requirements.txt -r /tmp/uhd_gen/dataset/requirements.txt pytest \
+    && rm -rf /tmp/uhd_gen
+
 # Create mount point for /opt/rocm (will be empty unless mounted or built upon)
 RUN mkdir -p /opt/rocm
 

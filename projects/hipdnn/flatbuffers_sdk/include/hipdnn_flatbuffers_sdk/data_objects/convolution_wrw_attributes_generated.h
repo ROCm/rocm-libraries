@@ -35,6 +35,8 @@ struct ConvolutionWrwAttributesT : public ::flatbuffers::NativeTable {
   std::vector<int64_t> stride{};
   std::vector<int64_t> dilation{};
   hipdnn_flatbuffers_sdk::data_objects::ConvMode conv_mode = hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET;
+  std::string umd_flops{};
+  std::string umd_bytes{};
 };
 
 struct ConvolutionWrwAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -48,7 +50,9 @@ struct ConvolutionWrwAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_POST_PADDING = 12,
     VT_STRIDE = 14,
     VT_DILATION = 16,
-    VT_CONV_MODE = 18
+    VT_CONV_MODE = 18,
+    VT_UMD_FLOPS = 20,
+    VT_UMD_BYTES = 22
   };
   int64_t x_tensor_uid() const {
     return GetField<int64_t>(VT_X_TENSOR_UID, 0);
@@ -98,6 +102,18 @@ struct ConvolutionWrwAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   bool mutate_conv_mode(hipdnn_flatbuffers_sdk::data_objects::ConvMode _conv_mode = static_cast<hipdnn_flatbuffers_sdk::data_objects::ConvMode>(0)) {
     return SetField<int8_t>(VT_CONV_MODE, static_cast<int8_t>(_conv_mode), 0);
   }
+  const ::flatbuffers::String *umd_flops() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_UMD_FLOPS);
+  }
+  ::flatbuffers::String *mutable_umd_flops() {
+    return GetPointer<::flatbuffers::String *>(VT_UMD_FLOPS);
+  }
+  const ::flatbuffers::String *umd_bytes() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_UMD_BYTES);
+  }
+  ::flatbuffers::String *mutable_umd_bytes() {
+    return GetPointer<::flatbuffers::String *>(VT_UMD_BYTES);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_X_TENSOR_UID, 8) &&
@@ -112,6 +128,10 @@ struct ConvolutionWrwAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            VerifyOffset(verifier, VT_DILATION) &&
            verifier.VerifyVector(dilation()) &&
            VerifyField<int8_t>(verifier, VT_CONV_MODE, 1) &&
+           VerifyOffset(verifier, VT_UMD_FLOPS) &&
+           verifier.VerifyString(umd_flops()) &&
+           VerifyOffset(verifier, VT_UMD_BYTES) &&
+           verifier.VerifyString(umd_bytes()) &&
            verifier.EndTable();
   }
   ConvolutionWrwAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -147,6 +167,12 @@ struct ConvolutionWrwAttributesBuilder {
   void add_conv_mode(hipdnn_flatbuffers_sdk::data_objects::ConvMode conv_mode) {
     fbb_.AddElement<int8_t>(ConvolutionWrwAttributes::VT_CONV_MODE, static_cast<int8_t>(conv_mode), 0);
   }
+  void add_umd_flops(::flatbuffers::Offset<::flatbuffers::String> umd_flops) {
+    fbb_.AddOffset(ConvolutionWrwAttributes::VT_UMD_FLOPS, umd_flops);
+  }
+  void add_umd_bytes(::flatbuffers::Offset<::flatbuffers::String> umd_bytes) {
+    fbb_.AddOffset(ConvolutionWrwAttributes::VT_UMD_BYTES, umd_bytes);
+  }
   explicit ConvolutionWrwAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -167,11 +193,15 @@ inline ::flatbuffers::Offset<ConvolutionWrwAttributes> CreateConvolutionWrwAttri
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> post_padding = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> stride = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> dilation = 0,
-    hipdnn_flatbuffers_sdk::data_objects::ConvMode conv_mode = hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET) {
+    hipdnn_flatbuffers_sdk::data_objects::ConvMode conv_mode = hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET,
+    ::flatbuffers::Offset<::flatbuffers::String> umd_flops = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> umd_bytes = 0) {
   ConvolutionWrwAttributesBuilder builder_(_fbb);
   builder_.add_dw_tensor_uid(dw_tensor_uid);
   builder_.add_dy_tensor_uid(dy_tensor_uid);
   builder_.add_x_tensor_uid(x_tensor_uid);
+  builder_.add_umd_bytes(umd_bytes);
+  builder_.add_umd_flops(umd_flops);
   builder_.add_dilation(dilation);
   builder_.add_stride(stride);
   builder_.add_post_padding(post_padding);
@@ -189,11 +219,15 @@ inline ::flatbuffers::Offset<ConvolutionWrwAttributes> CreateConvolutionWrwAttri
     const std::vector<int64_t> *post_padding = nullptr,
     const std::vector<int64_t> *stride = nullptr,
     const std::vector<int64_t> *dilation = nullptr,
-    hipdnn_flatbuffers_sdk::data_objects::ConvMode conv_mode = hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET) {
+    hipdnn_flatbuffers_sdk::data_objects::ConvMode conv_mode = hipdnn_flatbuffers_sdk::data_objects::ConvMode::UNSET,
+    const char *umd_flops = nullptr,
+    const char *umd_bytes = nullptr) {
   auto pre_padding__ = pre_padding ? _fbb.CreateVector<int64_t>(*pre_padding) : 0;
   auto post_padding__ = post_padding ? _fbb.CreateVector<int64_t>(*post_padding) : 0;
   auto stride__ = stride ? _fbb.CreateVector<int64_t>(*stride) : 0;
   auto dilation__ = dilation ? _fbb.CreateVector<int64_t>(*dilation) : 0;
+  auto umd_flops__ = umd_flops ? _fbb.CreateString(umd_flops) : 0;
+  auto umd_bytes__ = umd_bytes ? _fbb.CreateString(umd_bytes) : 0;
   return hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionWrwAttributes(
       _fbb,
       x_tensor_uid,
@@ -203,7 +237,9 @@ inline ::flatbuffers::Offset<ConvolutionWrwAttributes> CreateConvolutionWrwAttri
       post_padding__,
       stride__,
       dilation__,
-      conv_mode);
+      conv_mode,
+      umd_flops__,
+      umd_bytes__);
 }
 
 ::flatbuffers::Offset<ConvolutionWrwAttributes> CreateConvolutionWrwAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const ConvolutionWrwAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -218,7 +254,9 @@ inline bool operator==(const ConvolutionWrwAttributesT &lhs, const ConvolutionWr
       (lhs.post_padding == rhs.post_padding) &&
       (lhs.stride == rhs.stride) &&
       (lhs.dilation == rhs.dilation) &&
-      (lhs.conv_mode == rhs.conv_mode);
+      (lhs.conv_mode == rhs.conv_mode) &&
+      (lhs.umd_flops == rhs.umd_flops) &&
+      (lhs.umd_bytes == rhs.umd_bytes);
 }
 
 inline bool operator!=(const ConvolutionWrwAttributesT &lhs, const ConvolutionWrwAttributesT &rhs) {
@@ -243,6 +281,8 @@ inline void ConvolutionWrwAttributes::UnPackTo(ConvolutionWrwAttributesT *_o, co
   { auto _e = stride(); if (_e) { _o->stride.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->stride[_i] = _e->Get(_i); } } else { _o->stride.resize(0); } }
   { auto _e = dilation(); if (_e) { _o->dilation.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->dilation[_i] = _e->Get(_i); } } else { _o->dilation.resize(0); } }
   { auto _e = conv_mode(); _o->conv_mode = _e; }
+  { auto _e = umd_flops(); if (_e) _o->umd_flops = _e->str(); }
+  { auto _e = umd_bytes(); if (_e) _o->umd_bytes = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<ConvolutionWrwAttributes> ConvolutionWrwAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ConvolutionWrwAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -261,6 +301,8 @@ inline ::flatbuffers::Offset<ConvolutionWrwAttributes> CreateConvolutionWrwAttri
   auto _stride = _o->stride.size() ? _fbb.CreateVector(_o->stride) : 0;
   auto _dilation = _o->dilation.size() ? _fbb.CreateVector(_o->dilation) : 0;
   auto _conv_mode = _o->conv_mode;
+  auto _umd_flops = _o->umd_flops.empty() ? 0 : _fbb.CreateString(_o->umd_flops);
+  auto _umd_bytes = _o->umd_bytes.empty() ? 0 : _fbb.CreateString(_o->umd_bytes);
   return hipdnn_flatbuffers_sdk::data_objects::CreateConvolutionWrwAttributes(
       _fbb,
       _x_tensor_uid,
@@ -270,7 +312,9 @@ inline ::flatbuffers::Offset<ConvolutionWrwAttributes> CreateConvolutionWrwAttri
       _post_padding,
       _stride,
       _dilation,
-      _conv_mode);
+      _conv_mode,
+      _umd_flops,
+      _umd_bytes);
 }
 
 }  // namespace data_objects

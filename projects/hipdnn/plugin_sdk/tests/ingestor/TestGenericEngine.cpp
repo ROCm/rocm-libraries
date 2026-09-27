@@ -254,6 +254,133 @@ TEST(TestIngestorGenericEngine, InitializeExecutionContextDelegatesToThePlanBuil
     EXPECT_TRUE(context.hasPlan());
 }
 
+TEST(TestIngestorGenericEngine, BrokenEngineModelDoesNotRemoveGraphApplicability)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    auto descriptor = makeEngineWithKnobs({BLOCK_SIZE});
+    HeuristicDescriptor model;
+    model.id = testId(0xA4);
+    model.name = "invalid kernel-dependent L1 model";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = "missing.l1.scorer";
+    model.featuresSignature = {"$kernel.block_size"};
+    model.score = {"tflops", true, "identity"};
+    model.engineName = descriptor.name;
+    model.role = "predict_engine_tflops";
+    model.arch = "default";
+    model.trainedAgainstJson
+        = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+           {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+           {"umd", nlohmann::json::array()}};
+    const StubEngine engine(std::move(descriptor),
+                            makeStubStateManager(),
+                            resolver,
+                            {{"default", model}},
+                            {},
+                            "selector-test");
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x67));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+    const auto described
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, false);
+    EXPECT_EQ(nlohmann::json::parse(described.features_json).at("device.cu_count"), 304);
+    EXPECT_FALSE(nlohmann::json::parse(described.features_json).contains("graph.flops"));
+    const auto evaluated
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(evaluated.status, PredictionStatus::INVALID);
+    EXPECT_TRUE(engine.isApplicable(handle, graph));
+}
+
+enum class ConfigurationCatalog
+{
+    SINGLETON,
+    DISTINCT_KNOBS,
+    AMBIGUOUS_KNOBS
+};
+
+class TestIngestorConfigurationPrediction : public ::testing::TestWithParam<ConfigurationCatalog>
+{
+};
+
+TEST_P(TestIngestorConfigurationPrediction, ReturnsOnlyUniquelyAddressableConfigurations)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
+    if(GetParam() != ConfigurationCatalog::SINGLETON)
+    {
+        // Distinct metadata tuples may still share every exposed integer knob.
+        pack.kernels.push_back(
+            makeTestKernel(testId(0x65),
+                           "other_kernel",
+                           GetParam() == ConfigurationCatalog::DISTINCT_KNOBS ? 128 : 64,
+                           GetParam() == ConfigurationCatalog::AMBIGUOUS_KNOBS ? "HALF" : "FLOAT"));
+    }
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = SCORE_SYMBOL;
+    model.score = {"tflops", true, "identity"};
+    auto ranker = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE});
+    ASSERT_NE(ranker, nullptr);
+    auto manager = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL);
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x68));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+    const auto prediction
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    if(GetParam() == ConfigurationCatalog::AMBIGUOUS_KNOBS)
+    {
+        EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+        EXPECT_EQ(prediction.engine_config, nullptr);
+        return;
+    }
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE);
+    const auto expectedBlockSize = GetParam() == ConfigurationCatalog::SINGLETON ? 64 : 128;
+    EXPECT_DOUBLE_EQ(prediction.tflops, expectedBlockSize);
+    ASSERT_NE(prediction.engine_config, nullptr);
+    flatbuffers::FlatBufferBuilder serialized;
+    serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper selected(
+        serialized.GetBufferPointer(), serialized.GetSize());
+    EXPECT_EQ(engine.getMaxWorkspaceSize(handle, graph, selected), expectedBlockSize);
+    hipdnnPluginConstData_t details{};
+    engine.enumerateCandidates(handle, graph, selected, 0, 10, details);
+    const auto* candidates = GetEngineDetails(details.ptr)->candidate_page();
+    ASSERT_NE(candidates, nullptr);
+    EXPECT_EQ(candidates->total_count(), 1U);
+    ASSERT_EQ(candidates->candidates()->size(), 1U);
+    EXPECT_EQ(candidates->candidates()->Get(0)->id()->str(),
+              toString(testId(GetParam() == ConfigurationCatalog::SINGLETON ? 0x64 : 0x65)));
+}
+
+INSTANTIATE_TEST_SUITE_P(KnobTuples,
+                         TestIngestorConfigurationPrediction,
+                         ::testing::Values(ConfigurationCatalog::SINGLETON,
+                                           ConfigurationCatalog::DISTINCT_KNOBS,
+                                           ConfigurationCatalog::AMBIGUOUS_KNOBS));
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

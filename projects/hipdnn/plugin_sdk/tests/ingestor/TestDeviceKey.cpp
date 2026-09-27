@@ -3,6 +3,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <set>
+#include <string>
+
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ingestor/DeviceKey.hpp>
@@ -30,11 +33,55 @@ DeviceProperties propertiesFor(std::string arch, int warpSize = 64, int computeU
 TEST(TestIngestorDeviceKey, TheHashedFieldSetIsPinnedAtCompileTime)
 {
     const auto properties = propertiesFor("gfx942");
-    const auto& [gcnArchName, warpSize, multiProcessorCount] = properties;
+    const auto& [gcnArchName,
+                 warpSize,
+                 multiProcessorCount,
+                 totalGlobalMem,
+                 memoryBusWidth,
+                 memoryClockRate,
+                 sharedMemPerBlock]
+        = properties;
 
     EXPECT_EQ(gcnArchName, "gfx942");
     EXPECT_EQ(warpSize, 64);
     EXPECT_EQ(multiProcessorCount, 304);
+    EXPECT_EQ(totalGlobalMem, 0U);
+    EXPECT_EQ(memoryBusWidth, 0);
+    EXPECT_EQ(memoryClockRate, 0);
+    EXPECT_EQ(sharedMemPerBlock, 0U);
+}
+
+TEST(TestIngestorDeviceKey, TwoBoardsOfOneArchSharingCuCountStillGetDifferentKeys)
+{
+    // The case that motivated widening the struct. One arch spans several boards, and
+    // boards exist that carry the same compute-unit count and different memory. Keyed
+    // on arch, warp size and CUs alone these two collide, and a ranking benchmarked on
+    // the smaller-bandwidth card is served to the faster one as if it had been measured
+    // there -- silently, because a cache hit looks exactly like a correct answer.
+    auto slower = propertiesFor("gfx942");
+    slower.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    slower.memoryBusWidth = 8192;
+    slower.memoryClockRate = 2600000;
+
+    auto faster = propertiesFor("gfx942");
+    faster.totalGlobalMem = 256ULL * 1024 * 1024 * 1024;
+    faster.memoryBusWidth = 8192;
+    faster.memoryClockRate = 3000000;
+
+    ASSERT_EQ(slower.multiProcessorCount, faster.multiProcessorCount)
+        << "the fixture must model the collision it is testing";
+    EXPECT_NE(DeviceKey{slower}, DeviceKey{faster});
+    EXPECT_NE(DeviceKey{slower}.hash(), DeviceKey{faster}.hash());
+}
+
+TEST(TestIngestorDeviceKey, LdsSizeDiscriminates)
+{
+    auto small = propertiesFor("gfx942");
+    small.sharedMemPerBlock = 64 * 1024;
+    auto large = propertiesFor("gfx942");
+    large.sharedMemPerBlock = 160 * 1024;
+
+    EXPECT_NE(DeviceKey{small}, DeviceKey{large});
 }
 
 TEST(TestIngestorDeviceKey, IdenticalPropertiesCompareEqual)
@@ -143,6 +190,68 @@ INSTANTIATE_TEST_SUITE_P(,
                              }
                          });
 
+
+// ---- the $device.* vocabulary ------------------------------------------------------
+//
+// One arch spans several boards and a UHD is arch-keyed, so a gfx942 model is trained on
+// a corpus merged from MI300X, MI325X and MI308X. Two things read the device facts and
+// they have to agree: FeatureExtractor binds them at scoring time, and the benchmark
+// recorder writes them as `device.*` columns into that corpus. A name in one and not the
+// other is a feature trained on a column the runtime cannot produce, or a binding no
+// corpus ever held -- neither throws, and both yield a model that is quietly wrong.
+
+TEST(TestIngestorDeviceVocabulary, EveryNameIsBoundExactlyOnce)
+{
+    auto properties = propertiesFor("gfx942");
+    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;
+    properties.sharedMemPerBlock = 64 * 1024;
+
+    std::set<std::string> names;
+    for(const auto& entry : deviceFeatureValues(properties))
+    {
+        EXPECT_TRUE(names.insert(entry.first).second)
+            << entry.first << " is emitted twice; one of them silently wins";
+    }
+
+    // Both spellings of the CU count, because signatures exist against each.
+    EXPECT_EQ(names.count("cu_count"), 1U);
+    EXPECT_EQ(names.count("multi_processor_count"), 1U);
+    // The fields that separate boards of one arch.
+    EXPECT_EQ(names.count("total_global_mem"), 1U);
+    EXPECT_EQ(names.count("memory_bus_width"), 1U);
+    EXPECT_EQ(names.count("memory_clock_rate"), 1U);
+    EXPECT_EQ(names.count("peak_memory_bandwidth"), 1U);
+    EXPECT_EQ(names.count("lds_size"), 1U);
+    // Never the arch: it selects which UHD runs, so a model splitting on it would be
+    // splitting on the thing that chose it (RFC 0019 3.1).
+    EXPECT_EQ(names.count("arch"), 0U);
+    EXPECT_EQ(names.count("gcn_arch_name"), 0U);
+}
+
+TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsDerivedFromClockAndWidth)
+{
+    auto properties = propertiesFor("gfx942");
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;  // kHz
+
+    // 2 (DDR) * 2.6e9 Hz * 1024 bytes.
+    EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 2.0 * 2600000.0 * 1000.0 * 1024.0);
+}
+
+TEST(TestIngestorDeviceVocabulary, PeakBandwidthIsZeroRatherThanWrongWhenUnresolved)
+{
+    // hipGetDeviceProperties leaves 0 on fields it cannot answer. Multiplying those out
+    // would report a device with zero bandwidth as though it were measured, so the
+    // derived value stays 0 and a signature reading it sees the same "unknown" the
+    // inputs carry.
+    auto properties = propertiesFor("gfx942");
+    EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 0.0);
+
+    properties.memoryBusWidth = 8192;
+    EXPECT_DOUBLE_EQ(peakMemoryBandwidth(properties), 0.0) << "clock still unresolved";
+}
 } // namespace
 } // namespace hipdnn_plugin_sdk::ingestor::testing
 

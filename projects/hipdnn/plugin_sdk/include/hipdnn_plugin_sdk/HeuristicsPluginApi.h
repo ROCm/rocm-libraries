@@ -83,6 +83,31 @@ typedef struct hipdnnHeuristicHandle_opaque* hipdnnHeuristicHandle_t;
  */
 typedef struct hipdnnHeuristicPolicyDescriptor_opaque* hipdnnHeuristicPolicyDescriptor_t;
 
+/**
+ * @brief Scoped host services for prediction-aware policies (ABI version 1).
+ *
+ * The table, context, callback, and returned EnginePrediction FlatBuffers are
+ * borrowed and valid only during hipdnnHeuristicPolicyFinalizeWithHost.
+ * A plugin MUST NOT retain them, invoke callbacks asynchronously, or free host
+ * buffers. Copy any configuration needed after finalize before returning.
+ * Calls are synchronous on the finalize thread. Only input candidate engine IDs
+ * may be queried. Scores are calibrated physical TFLOPS, not ordering keys.
+ *
+ * Check version and struct_size before accessing callback fields. Future versions
+ * may append fields; a larger struct_size with version 1 remains compatible.
+ */
+typedef struct
+{
+    uint32_t version; ///< Host services version; currently 1.
+    size_t struct_size; ///< Size in bytes of this table.
+    void* context; ///< Opaque borrowed callback context.
+    hipdnnPluginStatus_t (*get_prediction)(
+        void* context,
+        int64_t engine_id,
+        hipdnnEnginePredictionKind_t kind,
+        hipdnnPluginConstData_t* prediction); ///< Borrow a verified EnginePrediction.
+} hipdnnHeuristicHostCallbacks_t;
+
 /** @} */ // End of HeuristicPluginDataTypes group
 
 /**
@@ -327,6 +352,34 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int32_t* out_applied);
 
 /**
+ * @brief Optional synchronous finalize with scoped host prediction services.
+ *
+ * Introduced in heuristic ABI 0.1.0. A host uses this instead of Finalize when
+ * exported. Legacy plugins need not implement it. A null host means predictions
+ * are unavailable; prediction-only policies decline with out_applied=0.
+ * Neither host services nor prediction buffers may escape this call.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnHeuristicPolicyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t desc,
+                                          const hipdnnHeuristicHostCallbacks_t* host,
+                                          int32_t* out_applied);
+
+/**
+ * @brief Optional exact EngineConfig retrieval for a returned engine ID.
+ *
+ * Introduced in heuristic ABI 0.1.0. Valid after successful finalize. The buffer
+ * is owned by the policy descriptor until its next mutation or destruction;
+ * the host verifies and copies it before another plugin call. NOT_APPLICABLE
+ * means this policy has no config for the engine (legacy ID-only behavior).
+ * Config engine_id MUST match a returned input engine. A configuration-level
+ * prediction must preserve every scored knob setting, not rerank later.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnHeuristicPolicyGetEngineConfig(hipdnnHeuristicPolicyDescriptor_t desc,
+                                         int64_t engine_id,
+                                         hipdnnPluginConstData_t* engine_config);
+
+/**
  * @brief Retrieves the sorted engine IDs after successful finalize.
  *
  * Valid only after Finalize returned with out_applied == 1.
@@ -362,6 +415,45 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnHeuristicPolicyGetSortedEngineIds(hipdnnHeuristicPolicyDescriptor_t desc,
                                             int64_t* engine_ids,
                                             size_t* num_engines);
+
+/**
+ * @brief Retrieves the selection trace for observability (RFC 0019 §13).
+ *
+ * Returns diagnostic information about the most recent selection for a given engine.
+ * Valid only after Finalize has been called. If Finalize declined (out_applied == 0),
+ * trace may be absent or partial.
+ *
+ * The trace is returned as a JSON string owned by the plugin. The string remains valid
+ * until the next Finalize call on this descriptor or the descriptor is destroyed.
+ *
+ * Trace JSON schema (all fields optional, present when available):
+ * {
+ *   "uhd_id": string,              // UHD identifier
+ *   "model_version": string,       // Model version/hash
+ *   "training_arches": [string],   // Architectures the model was trained on
+ *   "adapter_type": string,        // "tree_data", "static_order", "onnx", etc.
+ *   "used_model": bool,            // true if model scored, false if fallback
+ *   "fallback_reason": string,     // present if used_model == false
+ *   "arch_was_trained": bool,      // false if device arch not in training set
+ *   "device_arch": string,         // Device architecture
+ *   "features_hash_model": string, // Hash from model artifact
+ *   "features_hash_config": string,// Hash from UHD config
+ *   "features_hash_match": bool    // true if hashes match
+ * }
+ *
+ * @param[in] desc The policy descriptor.
+ * @param[in] engine_id The engine ID to retrieve trace for.
+ * @param[out] trace_json Pointer to receive JSON string pointer (plugin-owned, read-only).
+ *
+ * @return HIPDNN_PLUGIN_STATUS_SUCCESS if trace is available,
+ *         HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED if descriptor not finalized,
+ *         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE if engine has no trace,
+ *         error code on other failures.
+ */
+HIPDNN_PLUGIN_NODISCARD HIPDNN_HEURISTIC_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnHeuristicPolicyGetTrace(hipdnnHeuristicPolicyDescriptor_t desc,
+                                  int64_t engine_id,
+                                  const char** trace_json);
 
 /** @} */ // End of HeuristicPolicySelection group
 

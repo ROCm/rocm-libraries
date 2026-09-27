@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -15,8 +16,11 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -102,6 +106,18 @@ public:
         std::unique_ptr<IPlan<THandle>> plan;
         DescriptorId packId{};
         DescriptorId dispatchId{};
+        /// The feature values of the (problem, kernel) pair this candidate measures,
+        /// merged flat into its log record so an exporter can name a CSV column after
+        /// every key it finds. Flat rather than nested because the keys already carry
+        /// their UHD namespace (`q.<name>`, `kernel.<name>`) and every envelope key is
+        /// dotless, so the two sets cannot collide and no consumer has to flatten.
+        ///
+        /// Handed in, never derived: extracting features needs the graph match and the
+        /// kernel descriptor, and this class deliberately knows about neither (see
+        /// @c benchmarkId below). An empty object leaves the record byte-identical to
+        /// what it was before features existed, which is what a test double or a direct
+        /// construction gets.
+        nlohmann::json features = nlohmann::json::object();
     };
 
     /// Times one execute() of a candidate, returning its elapsed milliseconds or nullopt
@@ -119,13 +135,33 @@ public:
     /// @param timer Overrides the default HIP-event timer. Only ever called from the
     ///        sampling sweep, which holds _mutex, so it need not be thread-safe.
     /// @throws HipdnnPluginException(INTERNAL_ERROR) if @p candidates is empty.
+    /// @param benchmarkId Opaque identity for the problem being benchmarked, echoed on
+    ///        every per-candidate log record so an exporter can group the rows of one
+    ///        sweep. Opaque on purpose: this class knows nothing about graphs, and the
+    ///        caller already holds the key that identifies one. Empty means unidentified,
+    ///        which is what a test double or a direct construction gets.
+    /// @param deviceIdentity Opaque identity for the device the sweep ran on, echoed the
+    ///        same way. Opaque for the same reason as @p benchmarkId, and threaded from
+    ///        the same caller: this class must not learn to read `DeviceProperties`, or a
+    ///        second notion of "which GPU" would exist that can disagree with the winner
+    ///        cache's. Present because the problem a row belongs to is (graph, device),
+    ///        not graph alone -- the winner cache keys on both. Without it a corpus merged
+    ///        across machines collapses rows that belong to different problems, and the
+    ///        RFC 0019.13 §11.2 oracle `v*(p)` becomes a minimum taken across devices, so
+    ///        every regret figure derived from it is understated. Empty means
+    ///        unidentified and omits the field entirely, leaving the record byte-identical
+    ///        to what a test double or a direct construction produced before.
     BenchmarkPlan(std::vector<Candidate> candidates,
                   const THandle& handle,
                   Timer timer = {},
-                  RecordRankingFn recordRanking = {})
+                  RecordRankingFn recordRanking = {},
+                  std::string benchmarkId = {},
+                  std::string deviceIdentity = {})
         : _candidates(std::move(candidates))
         , _timer(timer ? std::move(timer) : makeHipEventTimer())
         , _recordRanking(std::move(recordRanking))
+        , _benchmarkId(std::move(benchmarkId))
+        , _deviceIdentity(std::move(deviceIdentity))
     {
         if(_candidates.empty())
         {
@@ -241,15 +277,16 @@ private:
 
         for(size_t index = 0; index < _candidates.size(); ++index)
         {
-            const auto timeMs
+            const auto timing
                 = sampleCandidate(index, handle, deviceBuffers, numDeviceBuffers, workspace);
-            if(!timeMs.has_value())
+            if(!timing.has_value())
             {
                 // Omitted, never appended with a sentinel time: a candidate that failed to
-                // time must never be served ahead of the normal ranked path.
+                // time must never be served ahead of the normal ranked path. The log
+                // sampleCandidate() emitted is the only record that it was tried at all.
                 continue;
             }
-            ranked.emplace_back(*timeMs, index);
+            ranked.emplace_back(timing->robustMeanMs, index);
         }
 
         // stable_sort, not sort: ties must resolve to the lowest candidate index. A plain
@@ -293,19 +330,37 @@ private:
         return best;
     }
 
-    /// The representative time of BENCHMARK_ITERATIONS timed executes, after
-    /// BENCHMARK_WARMUP_RUNS untimed ones. Returns nullopt if the candidate threw or could
-    /// not be timed; both score the candidate unusable rather than throwing out of
-    /// resolveChosen().
+protected:
+    /// One candidate's sampled timings.
     ///
-    /// Samples are reduced with robustMean() rather than by taking the fastest: a kernel
-    /// that is usually slower but occasionally lucky would win on its best sample and then
-    /// serve its typical time on every dispatch the cached ranking covers.
-    std::optional<double> sampleCandidate(size_t index,
-                                          const THandle& handle,
-                                          const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                          uint32_t numDeviceBuffers,
-                                          void* workspace) const
+    /// `robustMeanMs` alone decides the ranking, as it always has. The other four exist
+    /// because the samples that produce it are the training signal a UHD is fitted to
+    /// (RFC 0019.13 §8.3), and reducing them to one number before anything can read them
+    /// throws that signal away one line before it leaves the function.
+    struct CandidateTiming
+    {
+        double robustMeanMs = 0.0;
+        double minMs = 0.0;
+        double avgMs = 0.0;
+        double stddevMs = 0.0;
+        int iterations = 0;
+    };
+
+    /// The timings of BENCHMARK_ITERATIONS timed executes, after BENCHMARK_WARMUP_RUNS
+    /// untimed ones. Returns nullopt if the candidate threw or could not be timed; both
+    /// score the candidate unusable rather than throwing out of resolveChosen().
+    ///
+    /// Ranking reduces the samples with robustMean() rather than by taking the fastest: a
+    /// kernel that is usually slower but occasionally lucky would win on its best sample
+    /// and then serve its typical time on every dispatch the cached ranking covers.
+    ///
+    /// Every outcome is logged here rather than by the caller, because this is the only
+    /// frame that knows which of the three failures occurred.
+    std::optional<CandidateTiming> sampleCandidate(size_t index,
+                                                   const THandle& handle,
+                                                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                   uint32_t numDeviceBuffers,
+                                                   void* workspace) const
     {
         const auto& candidate = _candidates[index];
         try
@@ -326,17 +381,22 @@ private:
                     HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                            << toString(candidate.kernelId)
                                            << "' failed to time a launch; scored unusable");
+                    logCandidateFailure(candidate, "launch-not-timed");
                     return std::nullopt;
                 }
                 samples.push_back(*sampleMs);
             }
-            return hipdnn_data_sdk::utilities::detail::robustMean(samples);
+
+            const auto timing = summarize(samples);
+            logCandidateTiming(candidate, timing);
+            return timing;
         }
         catch(const std::exception& error)
         {
             HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                    << toString(candidate.kernelId)
                                    << "' threw and is scored unusable: " << error.what());
+            logCandidateFailure(candidate, error.what());
             return std::nullopt;
         }
         catch(...)
@@ -349,13 +409,123 @@ private:
             HIPDNN_PLUGIN_LOG_WARN("ingestor: benchmarking candidate '"
                                    << toString(candidate.kernelId)
                                    << "' threw a non-standard exception and is scored unusable");
+            logCandidateFailure(candidate, "non-standard-exception");
             return std::nullopt;
         }
+    }
+
+    /// min / mean / population stddev / count, alongside the ranking statistic.
+    ///
+    /// Population rather than sample stddev: these are every iteration that ran, not a
+    /// draw from a larger set, so there is no Bessel correction to make.
+    static CandidateTiming summarize(const std::vector<double>& samples)
+    {
+        CandidateTiming timing;
+        timing.iterations = static_cast<int>(samples.size());
+        timing.robustMeanMs = hipdnn_data_sdk::utilities::detail::robustMean(samples);
+        timing.minMs = *std::min_element(samples.begin(), samples.end());
+
+        double total = 0.0;
+        for(const double sample : samples)
+        {
+            total += sample;
+        }
+        timing.avgMs = total / static_cast<double>(samples.size());
+
+        double squaredError = 0.0;
+        for(const double sample : samples)
+        {
+            const double error = sample - timing.avgMs;
+            squaredError += error * error;
+        }
+        timing.stddevMs = std::sqrt(squaredError / static_cast<double>(samples.size()));
+
+        return timing;
+    }
+
+    /// One JSON object per timed candidate, at INFO.
+    ///
+    /// JSON rather than the surrounding prose because this record is read by a tool, not
+    /// a person: it is the per-kernel measurement a UHD is trained on, and the winner is
+    /// the only row the cache keeps. A losing kernel's time appears here or nowhere.
+    ///
+    /// At INFO deliberately. The plugin SDK's TRACE macro is byte-identical to its INFO
+    /// one -- same guard, same sink -- so there is no quieter level to hide in, and the
+    /// guard short-circuits before the object is built, so a default run (log level off)
+    /// pays nothing.
+    void logCandidateTiming(const Candidate& candidate, const CandidateTiming& timing) const
+    {
+        if(!HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
+        {
+            return;
+        }
+        auto record = candidateRecord(candidate);
+        record["status"] = "ok";
+        record["min_ms"] = timing.minMs;
+        record["avg_ms"] = timing.avgMs;
+        record["stddev_ms"] = timing.stddevMs;
+        record["robust_mean_ms"] = timing.robustMeanMs;
+        record["iters"] = timing.iterations;
+        HIPDNN_PLUGIN_LOG_INFO(record.dump());
+    }
+
+    /// The same record for a candidate that could not be measured.
+    ///
+    /// Emitted rather than skipped: RFC 0019.13 §8.3 wants an `is_valid=False` row with a
+    /// reason, and the winner cache deliberately drops failed candidates so a broken
+    /// kernel can never be served from it. The log is therefore the only place a failure
+    /// is recorded at all.
+    void logCandidateFailure(const Candidate& candidate, const std::string& reason) const
+    {
+        if(!HIPDNN_PLUGIN_LOG_IS_INFO_ENABLED())
+        {
+            return;
+        }
+        auto record = candidateRecord(candidate);
+        record["status"] = "failed";
+        record["reason"] = reason;
+        HIPDNN_PLUGIN_LOG_INFO(record.dump());
+    }
+
+    /// The fields every candidate record carries, however it ended, plus whatever
+    /// features the candidate was handed.
+    ///
+    /// `event` is the grep handle an exporter selects on; `benchmark` and `device`
+    /// together group the rows of one problem, since a process can benchmark several
+    /// graphs and the lines interleave, and a corpus can be merged from several machines.
+    /// Both halves are needed because the winner cache keys on both: the same graph on
+    /// two GPUs is two problems with two different best kernels, and grouping on
+    /// `benchmark` alone would let RFC 0019.13 §11.2's oracle be a minimum taken across
+    /// devices -- wrong in the flattering direction, and silently so.
+    ///
+    /// `device` is omitted rather than emitted empty when unidentified, so a test double
+    /// or a direct construction produces exactly the record it produced before this field
+    /// existed, and an exporter can tell "no device identity" from "the empty device".
+    ///
+    /// The features go in first and the envelope over the top, so the envelope always
+    /// wins: a payload that somehow carried a `kernel` key would otherwise overwrite the
+    /// row's identity, and the row would be attributed to the wrong kernel in the corpus
+    /// rather than merely carrying a bad column.
+    nlohmann::json candidateRecord(const Candidate& candidate) const
+    {
+        nlohmann::json record = candidate.features;
+        record["event"] = "ingestor.benchmark.candidate";
+        record["benchmark"] = _benchmarkId;
+        if(!_deviceIdentity.empty())
+        {
+            record["device"] = _deviceIdentity;
+        }
+        record["kernel"] = toString(candidate.kernelId);
+        record["pack"] = toString(candidate.packId);
+        record["dispatch"] = toString(candidate.dispatchId);
+        return record;
     }
 
     std::vector<Candidate> _candidates;
     Timer _timer;
     RecordRankingFn _recordRanking;
+    std::string _benchmarkId;
+    std::string _deviceIdentity;
     size_t _workspaceBytes = 0;
     mutable std::atomic<size_t> _chosen{NOT_RESOLVED};
     mutable std::mutex _mutex;

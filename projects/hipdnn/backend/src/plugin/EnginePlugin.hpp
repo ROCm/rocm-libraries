@@ -63,6 +63,20 @@ public:
                                   int64_t engineId,
                                   const hipdnnPluginConstData_t* opGraph,
                                   hipdnnPluginConstData_t* engineDetails) const;
+    virtual void enumerateCandidates(hipdnnEnginePluginHandle_t handle,
+                                     const hipdnnPluginConstData_t* engineConfig,
+                                     const hipdnnPluginConstData_t* opGraph,
+                                     uint64_t offset,
+                                     uint64_t limit,
+                                     hipdnnPluginConstData_t* engineDetails) const;
+    /// Returns false when the optional prediction capability is unavailable.
+    /// Successful output follows the engine-details allocation/lifetime protocol.
+    virtual bool getPrediction(hipdnnEnginePluginHandle_t handle,
+                               const hipdnnPluginConstData_t* engineConfig,
+                               const hipdnnPluginConstData_t* opGraph,
+                               hipdnnEnginePredictionKind_t kind,
+                               bool evaluate,
+                               hipdnnPluginConstData_t* prediction) const;
     virtual size_t getWorkspaceSize(hipdnnEnginePluginHandle_t handle,
                                     const hipdnnPluginConstData_t* engineConfig,
                                     const hipdnnPluginConstData_t* opGraph) const;
@@ -158,6 +172,20 @@ private:
                                                   int64_t,
                                                   const hipdnnPluginConstData_t*,
                                                   hipdnnPluginConstData_t*);
+    hipdnnPluginStatus_t (*_funcEnumerateCandidates)(hipdnnEnginePluginHandle_t,
+                                                     const hipdnnPluginConstData_t*,
+                                                     const hipdnnPluginConstData_t*,
+                                                     uint64_t,
+                                                     uint64_t,
+                                                     hipdnnPluginConstData_t*)
+        = nullptr;
+    hipdnnPluginStatus_t (*_funcGetPrediction)(hipdnnEnginePluginHandle_t,
+                                               const hipdnnPluginConstData_t*,
+                                               const hipdnnPluginConstData_t*,
+                                               hipdnnEnginePredictionKind_t,
+                                               int32_t,
+                                               hipdnnPluginConstData_t*)
+        = nullptr;
     hipdnnPluginStatus_t (*_funcDestroyEngineDetails)(hipdnnEnginePluginHandle_t,
                                                       hipdnnPluginConstData_t*);
     hipdnnPluginStatus_t (*_funcGetWorkspaceSize)(hipdnnEnginePluginHandle_t,

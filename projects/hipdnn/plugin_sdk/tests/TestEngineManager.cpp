@@ -220,3 +220,25 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);
 }
+
+TEST(TestEngineManager, NonEnumerableEngineDeclinesWithoutLosingNormalExecutionSupport)
+{
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048));
+    TestHandle handle;
+    const NiceMock<MockGraph> graph;
+    const NiceMock<MockEngineConfig> config;
+    ON_CALL(config, engineId()).WillByDefault(Return(1));
+    hipdnnPluginConstData_t page{};
+    try
+    {
+        manager.enumerateCandidates(handle, graph, config, 0, 10, page);
+        FAIL() << "Non-enumerable engine must decline explicitly";
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+    }
+    EXPECT_EQ(manager.getApplicableEngineIds(handle, graph), std::vector<int64_t>{1});
+    EXPECT_EQ(manager.getMaxWorkspaceSize(handle, graph, config), 2048U);
+}

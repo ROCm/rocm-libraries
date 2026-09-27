@@ -27,6 +27,7 @@
 #include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
 #include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_data_sdk/version.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -60,16 +61,17 @@ constexpr const char* WINNER_LINE_FORMAT_FIELD = "v";
 /// version) appended to an otherwise valid shard is skipped instead of parsed.
 constexpr int WINNER_LINE_FORMAT_VERSION = 1;
 
-/// True if @p arch is usable verbatim as a path component: a non-empty run of ASCII
+/// True if @p component is usable verbatim as a path component: a non-empty run of ASCII
 /// letters, digits, '_' and '-'.
 ///
 /// Every base target id stripArchFeatures() can produce is of that form -- `gfx942`,
-/// `gfx90a`, `gfx1151`, the LLVM generic `gfx9-4-generic`. The check is a whitelist, so
-/// a separator, a dot, a colon, a control byte or a non-ASCII byte all fail it, which is
-/// what keeps a driver-supplied string inside the cache tree.
-inline bool isPlainArchComponent(std::string_view arch)
+/// `gfx90a`, `gfx1151`, the LLVM generic `gfx9-4-generic` -- and so is every descriptor id,
+/// which is UUID text. The check is a whitelist, so a separator, a dot, a colon, a control
+/// byte or a non-ASCII byte all fail it, which is what keeps a driver-supplied or
+/// author-supplied string inside the cache tree.
+inline bool isPlainPathComponent(std::string_view component)
 {
-    return !arch.empty() && std::all_of(arch.begin(), arch.end(), [](char c) {
+    return !component.empty() && std::all_of(component.begin(), component.end(), [](char c) {
         const auto byte = static_cast<unsigned char>(c);
         return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z')
                || (byte >= '0' && byte <= '9') || c == '_' || c == '-';
@@ -102,8 +104,50 @@ inline std::string_view winnerCacheVersion()
     return HIPDNN_DATA_SDK_VERSION_STRING;
 }
 
-/// Where @p engineName's shard for @p gcnArchName lives:
-/// `cacheRoot()/ingestor-winners/<version>/<sanitized-engine>/<base-arch>/winners.jsonl`.
+/// Everything a persisted ranking's validity depends on that the `(graph, device)` entry
+/// key does not already carry.
+///
+/// RFC 0019 §9.2: "the UHD identity has to be in the path, because nothing else survives a
+/// restart. The moment rankings outlive the process, [the in-process argument] evaporates
+/// -- generation counters are process-local, and a restart happily reads entries written by
+/// a model that has since been replaced."
+///
+/// Every member carries a default initializer so a caller can name only what it has --
+/// `EngineIdentity{name}` for an engine with no UHD -- without tripping
+/// -Wmissing-field-initializers, which this build treats as an error.
+struct EngineIdentity
+{
+    /// `EngineDescriptor::name`. Empty disables the on-disk cache entirely.
+    std::string name = {};
+
+    /// `EngineDescriptor::revision`, the descriptor set's authored semantic revision. The
+    /// same value `CatalogKey` carries, so an in-memory entry and an on-disk one are
+    /// separated by the same event.
+    hipdnn_data_sdk::utilities::Version version{};
+
+    /// The catalog-ranking UHD's descriptor id; empty when the engine ships no UHD and
+    /// ranks on priority then id.
+    std::string uhdId = {};
+
+    /// A content hash over every model this engine can resolve, NOT over the UHD document's
+    /// declared version. §9.2: "Hash the content, don't trust the id or a version field. A
+    /// regenerated model normally keeps the same UHD id ... and a hand-maintained version can
+    /// be forgotten."
+    ///
+    /// Empty when nothing hashable was declared, which is the case for a native scorer: its
+    /// "model" is code compiled into the provider, and the only thing that versions it is the
+    /// build, which the data-SDK version component already at the head of the path carries.
+    std::string modelHash = {};
+};
+
+/// Where @p engine's shard for @p gcnArchName lives:
+/// `cacheRoot()/ingestor-winners/<data-sdk version>/<sanitized-engine>/<uhd id>/
+///  <engine revision>-<model hash>/<base-arch>/winners.jsonl`.
+///
+/// The last three components are RFC 0019 §9.2's "directory per heuristic build" with the
+/// engine revision folded in, and they are what makes invalidation a directory delete rather
+/// than an entry-by-entry staleness check: a new model or a new engine revision writes under
+/// a new directory, and the old one is simply unreachable.
 ///
 /// The arch component is the stripped base target id VERBATIM: a user has to be able to
 /// find and delete one arch's cache by eye, so `gfx942` must read as `gfx942`. It is
@@ -111,12 +155,23 @@ inline std::string_view winnerCacheVersion()
 /// readability, and the arch has nothing to disambiguate, being drawn from a small set of
 /// known-good identifiers. An arch that is not a plain component is a driver anomaly:
 /// decline the disk cache rather than reshape the string into something that reads like a
-/// different arch.
+/// different arch. The UHD id is treated the same way and for the same reason -- it is UUID
+/// text, already a plain component.
+///
+/// The model hash is truncated to its first 16 hex digits. It is an invalidation token, not
+/// an integrity check (the adapters verify the artifact against its full declared checksum
+/// when they load it), and 64 bits of it keeps the component short enough that a deep cache
+/// root does not push the shard past a filesystem's path limit.
+///
+/// The device is NOT keyed on the HIP ordinal anywhere in this path or in `WinnerKey`,
+/// per §9.2: "Device 0 is a different GPU on a different machine, and can be a different GPU
+/// after a reboot." Arch selects the shard; `DeviceKey` carries warpSize and
+/// multiProcessorCount inside it.
 ///
 /// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, or if
 ///     @p gcnArchName does not strip to a plain component; callers must fall back to
 ///     in-memory-only behavior. Never throws.
-inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
+inline std::filesystem::path winnerCacheShardPath(const EngineIdentity& engine,
                                                   std::string_view gcnArchName)
 {
     const auto root = hipdnn_data_sdk::utilities::cacheRoot();
@@ -126,24 +181,34 @@ inline std::filesystem::path winnerCacheShardPath(std::string_view engineName,
     }
 
     const auto arch = stripArchFeatures(gcnArchName);
-    if(!detail::isPlainArchComponent(arch))
+    if(!detail::isPlainPathComponent(arch))
     {
         return {};
     }
 
+    // "no-uhd" and "unhashed" are distinct directories, not a shared default: an engine that
+    // gains a UHD must not inherit the rankings measured while it had none, since those were
+    // produced by a different selection path over the same candidates.
+    const std::string uhdComponent
+        = detail::isPlainPathComponent(engine.uhdId) ? engine.uhdId : "no-uhd";
+    const std::string buildComponent
+        = engine.version.str() + "-"
+          + (detail::isPlainPathComponent(engine.modelHash) ? engine.modelHash.substr(0, 16)
+                                                            : "unhashed");
+
     return root / "ingestor-winners" / std::string(winnerCacheVersion())
-           / hipdnn_data_sdk::utilities::sanitizeForPath(engineName) / std::string(arch)
-           / "winners.jsonl";
+           / hipdnn_data_sdk::utilities::sanitizeForPath(engine.name) / uhdComponent
+           / buildComponent / std::string(arch) / "winners.jsonl";
 }
 
-/// Opens (creating if absent) the shard for @p engineName / @p gcnArchName, creating its
+/// Opens (creating if absent) the shard for @p engine / @p gcnArchName, creating its
 /// parent directory tree first. Fails soft: an unusable cache root or a
 /// directory-creation error both report `LineStoreStatus::OPEN_FAILED` rather than throwing.
 inline std::pair<std::optional<hipdnn_data_sdk::utilities::LineStoreShard>,
                  hipdnn_data_sdk::utilities::LineStoreStatus>
-    openWinnerCacheShard(std::string_view engineName, std::string_view gcnArchName)
+    openWinnerCacheShard(const EngineIdentity& engine, std::string_view gcnArchName)
 {
-    const auto path = winnerCacheShardPath(engineName, gcnArchName);
+    const auto path = winnerCacheShardPath(engine, gcnArchName);
     if(path.empty())
     {
         return {std::nullopt, hipdnn_data_sdk::utilities::LineStoreStatus::OPEN_FAILED};

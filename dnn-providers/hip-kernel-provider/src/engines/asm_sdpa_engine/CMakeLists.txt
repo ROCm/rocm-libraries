@@ -85,6 +85,60 @@ target_compile_definitions(hip_kernel_provider_impl PRIVATE
     AITER_ASM_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
 )
 
+# ============================================================================
+# Forward selector revision
+# ============================================================================
+# An L1 model for this engine predicts the throughput of its FORWARD dispatch, and the
+# loader refuses a model whose recorded `selector_revision` is not the one the provider
+# reports. So the revision has to name exactly what changes those measurements, and
+# nothing else -- it is the expiry rule for every shipped AITER model.
+#
+# Two ways to get it wrong, both measured on this branch:
+#
+#   * too wide -- the provider version. `0.2.0 -> 0.2.1` for a fix that cannot touch this
+#     engine expires both shipped models, and the only symptom is UNAVAILABLE on every
+#     engine-selection query. A git hash is the same failure per commit: it names the
+#     build, which is not the claim.
+#   * too narrow -- a hand-bumped string. It expires nothing when the kernels change,
+#     which is the silent direction: a stale L1 estimate changes which ENGINE runs.
+#
+# So it is derived: the vendored forward kernels this engine dispatches, the CSVs that
+# describe them (codegen reads these, so a config change with identical binaries still
+# counts), and the forward dispatch sources. A backward-only kernel drop leaves it alone,
+# because a backward kernel cannot move a forward throughput number.
+set(HKP_ASM_SDPA_FWD_INPUTS "")
+foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
+    file(GLOB_RECURSE _arch_fwd
+        "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/fmha_v3_fwd/*")
+    list(APPEND HKP_ASM_SDPA_FWD_INPUTS ${_arch_fwd})
+endforeach()
+list(APPEND HKP_ASM_SDPA_FWD_INPUTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlan.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlan.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdParams.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdLaunchParams.hpp")
+# Sorted, and hashed per file rather than over a concatenation: GLOB order is filesystem
+# order, so an unsorted digest would differ between two checkouts of identical content and
+# expire every model for nothing.
+list(SORT HKP_ASM_SDPA_FWD_INPUTS)
+set(_fwd_digest "")
+foreach(_input IN LISTS HKP_ASM_SDPA_FWD_INPUTS)
+    if(EXISTS "${_input}" AND NOT IS_DIRECTORY "${_input}")
+        file(SHA256 "${_input}" _one)
+        get_filename_component(_name "${_input}" NAME)
+        string(APPEND _fwd_digest "${_name}:${_one}\n")
+    endif()
+endforeach()
+string(SHA256 _fwd_revision "${_fwd_digest}")
+string(SUBSTRING "${_fwd_revision}" 0 16 _fwd_revision)
+target_compile_definitions(hip_kernel_provider_impl PRIVATE
+    HKP_ASM_SDPA_FWD_REVISION="${_fwd_revision}")
+message(STATUS "hip-kernel-provider: asm_sdpa forward selector revision ${_fwd_revision}")
+
 # Copy ASM kernel binaries to build directory for local testing
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/
      DESTINATION ${CMAKE_BINARY_DIR}/hip_kernel_provider/asm_kernels

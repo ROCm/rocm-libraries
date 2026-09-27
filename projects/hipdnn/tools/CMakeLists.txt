@@ -1,12 +1,101 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+add_subdirectory(bench)
+
+# corpus_gen builds the UHD training corpora. It was once gated on HIPDNN_ENABLE_KERNEL_INGESTOR
+# because its JsonLogic evaluator lived under plugin_sdk's `ingestor/`, which preprocesses to
+# nothing when that option is OFF. The evaluator is now
+# `plugin_sdk/heuristics/uhd/DescriptorExpression.hpp` -- unconditional, like the rest of common
+# UHD prediction -- so the gate only kept corpus building out of a default build.
+add_subdirectory(corpus_gen)
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
+    target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
+    target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)
+    install(TARGETS hipdnn_uhd_features RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
 add_executable(hipdnn_list_engines ListEngines.cpp)
 # hipdnn_data_sdk supplies the canonical engine-ID hex rendering (formatEngineIdHex). It is a
 # header-only INTERFACE target, and hipdnn_backend links it privately, so the tool names it here.
 target_link_libraries(hipdnn_list_engines PRIVATE hipdnn_backend hipdnn_data_sdk)
 target_compile_definitions(hipdnn_list_engines PRIVATE HIPDNN_BACKEND_COMPILATION)
 install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Register the uhd_gen converter's Python tests with CTest so CI actually runs them.
+# These pin the cross-language features_hash contract against the C++ FeatureExtractor;
+# without this registration nothing executes them and the two sides drift silently.
+# The suite self-skips (pytest.importorskip) when lightgbm/flatbuffers/numpy are
+# absent, so environments without the training dependencies report skips, not failures.
+# Registered unconditionally, matching how this project adds its other test
+# directories (cmake/Tests.cmake calls enable_testing(); there is no BUILD_TESTING gate).
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    # Probe for pytest rather than discovering its absence as a test failure:
+    # `python -m pytest` exits 1 when the module is missing, which is
+    # indistinguishable from a genuine test failure.
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import pytest"
+        RESULT_VARIABLE UHD_GEN_PYTEST_PROBE
+        OUTPUT_QUIET ERROR_QUIET)
+    if(UHD_GEN_PYTEST_PROBE EQUAL 0)
+        add_test(
+            NAME uhd_gen_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        # pytest exits 5 when it collects nothing, which is what the suite's
+        # importorskip guards produce when lightgbm/flatbuffers/numpy are absent.
+        set_tests_properties(uhd_gen_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+        if(TARGET hipdnn_uhd_features)
+            set_tests_properties(uhd_gen_tests PROPERTIES
+                ENVIRONMENT "HIPDNN_UHD_FEATURE_EVALUATOR=$<TARGET_FILE:hipdnn_uhd_features>")
+        endif()
+
+        # uhd_gen/dataset derives RFC 0019.13 §8.3's tflops and gbs from the flops and bytes
+        # the engine published beside each problem. Registered beside uhd_gen's suite and for
+        # the same reason: a misread count does not raise, it yields a plausible rate, and
+        # every model trained on that corpus ranks by a number wrong by a constant nobody sees.
+        #
+        # Its own add_test even though it is now a subpackage, because the suite above names
+        # uhd_gen/tests and so would not collect it -- and because this one needs no ML
+        # dependencies. It is arithmetic over a declaration and a row, and it stays runnable
+        # on a machine that collects corpora without training on them.
+        add_test(
+            NAME uhd_gen_dataset_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                    ${CMAKE_CURRENT_SOURCE_DIR}/uhd_gen/dataset/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(uhd_gen_dataset_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+
+        # mine_shapes.py assembles the model pool -- the shapes anyone actually asks for --
+        # and hands it to hipdnn_corpus_gen as a q.* CSV. Registered here because its
+        # failures are all silent ones: a publisher's spelling that falls out of
+        # SHAPE_COLUMNS mines as zero rows, a guessed mask puts a differently-masked
+        # problem in the corpus under the row's name, and a narrowing on the way to the
+        # CSV shrinks the pool without shrinking what the corpus claims to be. This suite
+        # held none of that until the Python corpus assembler was retired and its coverage
+        # moved here; unregistered, it would have stopped being run at the same moment it
+        # became the only place that behaviour is pinned. Offline and GPU-free, and it
+        # needs no ML dependencies.
+        add_test(
+            NAME ingestor_generator_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                    ${CMAKE_CURRENT_SOURCE_DIR}/IngestorGenerator/tests
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+        set_tests_properties(ingestor_generator_tests PROPERTIES SKIP_RETURN_CODE 5 LABELS "unit")
+
+    else()
+        message(WARNING
+                "uhd_gen tests NOT registered: pytest is not importable by "
+                "${Python3_EXECUTABLE}. These pin the features_hash contract between "
+                "tools/uhd_gen and the C++ FeatureExtractor; install pytest (plus "
+                "lightgbm, flatbuffers, numpy) so they run.")
+    endif()
+else()
+    message(WARNING "uhd_gen tests NOT registered: no Python3 interpreter found")
+endif()
 
 # Smoke test: run the tool against a real, loadable engine plugin and assert it prints that plugin's
 # own engine name rather than a hexadecimal fallback.

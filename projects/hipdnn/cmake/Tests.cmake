@@ -308,6 +308,25 @@ endfunction() # finalize_test_targets
 #   WORKING_DIR - Working directory for test execution
 # ~~~
 function(add_hipdnn_test TARGET WORKING_DIR)
+    # ROCm ships its own googletest at /opt/rocm/include/gtest, and hip::host puts that
+    # directory on the include path. A target receiving it *before* the fetched googletest
+    # compiles against ROCm's headers while linking the fetched archive, whose
+    # MakeAndRegisterTestInfo has a different signature -- an undefined symbol at link time,
+    # in some test targets and not others depending on dependency ordering.
+    #
+    # Per target rather than per directory: a library translation unit has no business seeing
+    # googletest's headers. Both gtest and gmock, since pinning one leaves the other coming
+    # from /opt/rocm, and that mismatched pair does not compile.
+    foreach(_hipdnn_gtest_target GTest::gtest GTest::gmock)
+        if(TARGET ${_hipdnn_gtest_target})
+            get_target_property(_hipdnn_gtest_includes ${_hipdnn_gtest_target}
+                                INTERFACE_INCLUDE_DIRECTORIES)
+            if(_hipdnn_gtest_includes)
+                target_include_directories(${TARGET} BEFORE PRIVATE ${_hipdnn_gtest_includes})
+            endif()
+        endif()
+    endforeach()
+
     set(TARGET_EXE ${TARGET})
 
     # Add executable suffix if needed (e.g., .exe on Windows)

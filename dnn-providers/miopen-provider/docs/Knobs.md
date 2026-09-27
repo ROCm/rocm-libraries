@@ -65,6 +65,9 @@ When **disabled** (default):
 - First execution is fast
 - May not use the optimal kernel for your specific configuration
 
+Disabling benchmarking does not guarantee independence from tuning results.
+The process-wide benchmarking override retains its normal precedence over this knob.
+
 When **enabled**:
 - MIOpen benchmarks multiple solver candidates
 - First execution is significantly slower (seconds to minutes)

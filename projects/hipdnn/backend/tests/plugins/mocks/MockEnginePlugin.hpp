@@ -39,6 +39,15 @@ public:
                  const hipdnnPluginConstData_t* opGraph,
                  hipdnnPluginConstData_t* engineDetails),
                 (const));
+    MOCK_METHOD(bool,
+                getPrediction,
+                (hipdnnEnginePluginHandle_t handle,
+                 const hipdnnPluginConstData_t* engineConfig,
+                 const hipdnnPluginConstData_t* opGraph,
+                 hipdnnEnginePredictionKind_t kind,
+                 bool evaluate,
+                 hipdnnPluginConstData_t* prediction),
+                (const, override));
     MOCK_METHOD(void,
                 destroyEngineDetails,
                 (hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* engineDetails),

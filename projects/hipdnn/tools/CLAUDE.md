@@ -1,0 +1,266 @@
+# Generating SDPA heuristics (L1 and L2) — operator runbook
+
+You are driving `hipdnn_corpus_gen` and `uhd_gen` to produce the two models an engine needs, on
+real hardware, and to prove they load. Read this whole file before submitting anything: the
+expensive failures below all *succeed* for an hour first and then throw the work away.
+
+Run everything from `projects/hipdnn/tools`. That is the working directory both tools
+assume: `uhd_gen` resolves its in-tree inputs relative to it, and the paths below are
+written relative to it.
+
+## The two models, and why the order is fixed
+
+| role | question it answers | who has one |
+|---|---|---|
+| `sort_kernel_catalog` (L2) | which of MY candidate kernels is fastest for this graph | an engine that enumerates a catalog |
+| `predict_engine_tflops` (L1) | how fast will I run this graph, in TFLOPS | every engine, including ones with no catalog |
+
+**Always L2 first, then L1, in that order and ideally in one job.** An immediate run
+executes whatever the installed catalog ranker picked, so L1's labels describe the selector
+that ships. Training L1 against an uninstalled L2 measures a selector nobody will run.
+
+L1 is the only score compared *across* engines. That is why it is calibrated TFLOPS, why a
+stale one is refused rather than de-rated, and why its errors matter more than L2's.
+
+## Step 0 — find out what the engines can actually serve
+
+Do this before building a corpus. An engine that cannot serve a facet contributes nothing
+but declines, and a corpus of declines looks exactly like a broken pipeline.
+
+```bash
+# AITER ships a tiny table. gfx942: 4 kernels (bf16, hd128/hd192->128, mask 0 and 2).
+# gfx950: 2 kernels, both mask 0 -- NO causal kernel at all.
+cat ../../../dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/asm/asm_kernels/gfx950/fmha_v3_fwd/fmha_fwd.csv
+# rocKE dense packs declare their geometries; count the facets you care about:
+python3 -c "import json,collections,sys; kdp=json.load(open(sys.argv[1]));
+md=[k['metadata'] for k in kdp['kernelDescriptors']];
+[print(f, collections.Counter(str(m.get(f)) for m in md).most_common(6)) for f in ('dtype','head_size','causal')]" \
+  ../../../dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE/gfx950_attention_dense/gfx950_attention_dense.kdp.json
+```
+
+Then confirm on hardware with `uhd_gen/reproduce/engine_matrix.sbatch`, which lists the
+engines a build registers and asks each for a prediction on every graph. It costs ~25
+minutes and has caught four separate defects that would each have wasted a full sweep.
+
+## Step 1 — build the corpus (for an engine, on a GPU, deterministic)
+
+A corpus is generated **for an engine**. Every candidate problem is offered to it, so what
+comes out is what that engine serves — which is why `--engine-name` is required and why this
+step needs a GPU node with the provider staged.
+
+```bash
+# One tool for every operation that ships an *.opmeta.json declaration.
+cmake --build <build> --target hipdnn_corpus_gen_tool
+<build>/bin/hipdnn_corpus_gen --operations corpus_gen/operations \
+    --engine-name hipkernel:Gfx950AttentionDense \
+    --plugin-dir <build>/lib/hipdnn_plugins/engines \
+    --output /tmp/corpus --count 10000 --seed 0 \
+    [--operation sdpa_fwd] \
+    [--kdp-root <a pack directory>] \
+    [--model-shapes <mined q.* csv>]
+```
+
+Output: `<output>/graphs/<name>.fb` (file stem == the manifest row's `name`, which is what
+scoring joins on), `manifest.json`, `manifest.csv`, `commands.txt`, `<op>.problems.csv`. An
+engine name no loaded plugin registered is refused (exit 1) with the list of engines that
+are loaded, rather than producing an empty corpus.
+
+- **Do not reach for `--without-engine` as the normal path.** It generates with no engine and
+  no GPU, and what it yields is every problem the *declarations* express — a superset of what
+  any engine serves. It exists for the case where a provider genuinely cannot be staged, it
+  prints a warning, and it stamps `engine_verified: false` plus a `warning` into the manifest
+  so the corpus carries its own provenance.
+- The reason the engine is not optional: an engine trained on a corpus it mostly declines is
+  **biased, not merely small**. Declines correlate with `head_dim`, `dtype`, `is_causal` and
+  sequence length — the same axes performance varies along — so the survivors of a
+  benchmarking run are a selection, not a sample, and nothing downstream reports the skew.
+  AITER's first gfx950 L1 was trained this way, on the 68 graphs it could serve out of a
+  1000-graph corpus drawn from rocKE's geometries, and under-predicted by -285 TFLOPS.
+  Rebuilt against what AITER actually serves: -80 TFLOPS, and engine selection went from
+  78.9% to 94.2% correct.
+- The GPU cost is small and is *not* the argument for filtering up front. A problem the
+  engine declines fails at plan time, before any dispatch or timed iteration, so a
+  mostly-dead corpus wastes little wall clock. What it wastes is the corpus.
+
+- Same seed and same in-tree inputs reproduce the same graphs byte for byte. `benchmark`
+  ids are content-derived, so rows join across runs and machines.
+- The corpus does not know which model Step 2 will train, and does not need to. One
+  corpus serves both roles: a pack contributes every geometry its kernels are compiled
+  for, and which of those carry a real choice is decided from the *measurements* by
+  `uhd_gen.catalog.candidate_density`, which drops single-candidate problems from every
+  ranking metric and refuses a wholly deterministic catalog. There is no candidate floor
+  here — pack density is an upper bound on what the matcher offers at runtime, never a
+  count of it, and no single floor fits a pack that runs 1 to 6 kernels deep.
+- `--count` is met unless it physically cannot be. Pack and model shapes are checked first;
+  the search then grows only the combinations the engine serves, toward what those left
+  short, and returns nothing the lists already hold. Fewer is returned only when every
+  served combination saturates (the search stops finding new points) -- exit 0, with the
+  reason -- and any other shortfall exits 3. On gfx942, 10000 for AITER takes ~35 s and
+  rocKE returns all 664 of its pack's shapes in ~12 s: its kernels match exact geometries,
+  so nothing outside the pack exists to find. `0`, the default, takes what one pass finds.
+- `corpus_gen/operations/engines.json` records engines whose coverage is exactly their pack
+  (`"coverage": "pack"`, with the reason). For those, `--kdp-root` is required, no search is
+  run, and a count above the pack's size is reported as the engine's whole coverage (exit 0).
+  An engine is listed only on evidence -- its matcher's code plus a served-shape check --
+  because an entry stops the search. Nothing in the engine interface states this yet.
+- Every run prints its engine-query cost, e.g. `per query: build 8 us, load 32 us, ask 178
+  us`. Applicability is a yes/no question; if `ask` is in the milliseconds, something in the
+  provider's `isApplicable` path is doing real work per query and every corpus pays for it.
+- `--max-bytes` (default 256 MiB) bounds the *search* only, which proposes extents up to
+  `--ceiling` on every axis. Pack and model shapes are real workloads and are exempt.
+- `--kdp-root` is a **source, not a filter**: it populates the kernel pool (0.60 of the
+  default shares) with one arch pack's geometries, proposing where that engine plausibly has
+  kernels. It proposes; `--engine-name` admits. That pairing is the point — the declared
+  space is vast and an engine's serving region is a thin slice of it, so sweeping blind and
+  letting the oracle reject burns the per-combination quotas. Used *without* an engine the
+  pack becomes an unverified filter, because a pack records what was built, not what the
+  matcher accepts.
+- `--model-shapes` reads a CSV of `q.<parameter>` columns -- what
+  `IngestorGenerator/tools/mine_shapes.py` emits with `--out-query-csv` from a model
+  catalog, a graph corpus or a directory a publisher handed over (`--shape-dir`).
+- `--keep q.<parameter>=<value>` gates all three sources through one predicate. Clauses on
+  different parameters conjoin; the same parameter repeated widens it, so
+  `--keep q.head_dim=64 --keep q.head_dim=128` means either. A clause naming a parameter no
+  declaration declares is refused rather than ignored. With `--engine-name` these are a
+  convenience — the engine is already deciding applicability, so use them only to carve out a
+  deliberate slice. Without one they are the *whole* of your narrowing and nothing verifies
+  them; that is the failure mode `--without-engine` warns about.
+- The manifest records the filter, what each source lost, and the regime of every graph.
+
+## Step 2 — collect and train
+
+```bash
+sbatch --constraint=GFX950 --gres=gpu:1 --time=08:00:00 \
+    --container-image=docker://rocm/dev-ubuntu-24.04:7.14.0-full --container-writable \
+    --container-remap-root --container-mounts=$HOME:/exchange \
+    --export=ALL,UHD_GRAPHS=/exchange/corpus,UHD_ENGINE=hipkernel:Gfx950AttentionDense,UHD_ROLES=l2+l1,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-dense \
+    uhd_gen/reproduce/generate.sbatch
+```
+
+An engine with no catalog (AITER, MIOpen) takes `UHD_ROLES=l1` alone.
+
+What the job prints, in order, and what each number means:
+
+| line | read it as |
+|---|---|
+| `engine: <name> 0x… -> <id>` | the engine registered; a missing one means descriptors were not staged |
+| `admitted N of M` | **this** sets the wall clock, not the corpus size |
+| `L2 generate rc=0 in Ns` | collection + training + promotion all succeeded |
+| `L1 generate rc=0 in Ns` | same, against the L2 that was just installed |
+
+Artifacts land in `UHD_KEEP`: `l1/corpus.csv` (one measured row per graph),
+`l1/model/heuristic.uhd.json` + `model.bin`, `l1/model/eval_report.json`, `declined.txt`.
+
+## Step 3 — verify the model the way the runtime will
+
+```bash
+sbatch … --export=ALL,UHD_CORPUS=/exchange/corpus,UHD_ARCH=gfx950,\
+"UHD_MODELS=rocKE=/exchange/out-dense/l1/model:hipkernel:Gfx950AttentionDense;AITER=/exchange/out-aiter/l1/model:ASM_SDPA_ENGINE",\
+UHD_KEEP=/exchange/bakeoff uhd_gen/reproduce/bakeoff.sbatch
+```
+
+Installs every model into one runtime and asks each engine to predict every graph. Join
+`predictions.json` against the measured `corpus.csv` files: for each graph both engines
+serve, does the higher prediction belong to the engine that measured faster? That agreement
+rate is what L1 is for. Absolute error is secondary — a model biased low everywhere still
+picks correctly.
+
+`compare_engines.py` does the measured half (coverage, per-regime winners, margins).
+
+## Failure modes — exact strings, causes, fixes
+
+Every one of these was hit on a real run and cost between 20 minutes and two hours.
+
+| symptom | cause | fix |
+|---|---|---|
+| 2 engines register instead of 10 | descriptors are staged by `add_custom_target(... ALL)` rules; a `--target <list>` build skips them | build everything: `cmake --build "$BUILD" -j` |
+| every engine declines every graph, same message | the graph pins something an engine refuses, e.g. `mma_core_mode` | run one query with `HIPDNN_LOG_LEVEL=info` and read the builder's own line (`[SdpaFwdPlanBuilder::isApplicable] …`) |
+| one engine serves 0, others fine | facet mismatch (dtype, head dim, causal anchor) | compare the corpus facets against that engine's kernel table (Step 0) |
+| `failed to load kernel module from /opt/rocm/...co` | AITER resolves its catalog from the install path when unset | `export HIPDNN_AITER_ASM_DIR=<build>/…/asm_kernels` (the dir holding the arch subdirs) |
+| `full-graph graph.flops must be a positive finite number` | causal cross attention: the declared FLOP count goes non-positive | rebuild the corpus with current `hipdnn_corpus_gen`, which refuses those shapes |
+| `L1 generate rc=1` seconds after "LAYER 1" begins | `UHD_ROLES=l2,l1` — sbatch's `--export` splits on commas | use `UHD_ROLES=l2+l1` |
+| `expected one UED for --engine 'X', found 0` | promoting an opaque engine's model as if it had a role map | current `uhd_gen` installs it by declared UUID; check the model's `id` equals the UUID in the provider header |
+| engine answers but `scored 0` predictions | the model's `trained_against.selector_revision` is not what the provider reports | all models in one bake-off must come from builds reporting the same revision |
+| job builds an unexpected commit | compute sites resolve `github.com` to mirrors that lag the login node | `git bundle create delta.bundle <base>..HEAD`, stage it, pass `UHD_BUNDLE=/exchange/delta.bundle` |
+| `Repository lacks these prerequisite commits` | a bundle applies relative to a base, and a `--depth 1` clone has no ancestors | clone `--depth 200` (all scripts here do) |
+| `held-out corpus has no evaluable candidate ranking` | the eval slice happened to land on single-candidate problems, though the corpus as a whole ranks | collect more contested problems, or give the engine a knob its `kernel_match` does NOT pin; see the flyDSL catalog below |
+| `deterministic catalog: all N problem(s) … had exactly one candidate` | the matcher pins every distinguishing field, so kernel identity is a total function of the problem and `scoreKernel` is inert | not a corpus defect and no knob will fix it at this catalog: train `--role predict_engine_tflops`. The collected stage is preserved and is exactly the labels L1 needs |
+| `NOTE: <pack> contributed no geometry` during Step 1 | every geometry the pack carries was dropped by the dtype table | the note names the value; add it to the declaration's `kernel_catalog.enums`. A pack whose descriptors carry no geometry at all (`pointwise_add`, the shipped `tiled_attention`) is silent, because no flag admits it |
+| `Engine '<name>' is not registered by any loaded plugin` (exit 1) | misspelled name, or `--plugin-dir` does not hold the provider | the message lists every loaded engine; copy the name from it |
+| `SHORT: N of M requested problems` then exit 3 | the search stopped at its budget limit while still finding problems | raise `--budget`; the SHORT lines name the combination |
+| `Ambiguous enrolled knob tuple for candidates X and Y` | two candidates differ only in something not declared as an int KMD field | declare the distinguishing knob; `generate.py` exposes every int field automatically |
+| `incoming UHD id … is already installed; refusing duplicate identity` | an opaque engine's model is bound BY its UUID, and the tree already ships one | intended: replace the shipped document, do not promote a second copy |
+| an engine answers but its predictions are unchanged after a retrain | the promotion above was refused, so the runtime is still using the shipped model | check the promote lines in the bake-off log before trusting a comparison |
+
+## Giving an engine a catalog worth ranking
+
+An engine whose `kernel_match` pins every distinguishing field has exactly one applicable
+kernel per graph, and L2 correctly refuses to train. The fix is not a bigger corpus; it is
+more kernels per functional tuple, differing only in things the match does not look at.
+
+flyDSL is the worked example (`flydsl_poc_scratch/flydsl_build/build_flydsl_variants.py`,
+on `users/jascampb/uhd-integration-test-branch` -- the POC tree is not on this branch):
+its 21 shipped kernels became 240 by crossing `waves_per_eu` x `stagger` x `lazy_rescale`,
+each declared as an **int** metadata field so enumeration can address it. Two rules:
+
+1. **A knob must not change the ABI.** Verify every emitted binary still reports the same
+   kernarg size and entry point before collecting against it — a kernel with a different
+   signature is not ranked, it is launched with garbage. `num_kv_splits` fails this test.
+2. **Measure what the ranker is worth before believing it.** Compare the trained model's
+   top-1 regret against always taking the shipped default configuration. If the default
+   wins, the knobs are noise at this measurement precision and the honest answer is L1 only.
+
+## Train an engine on what it can serve
+
+The corpus that trains an engine and the corpus that compares engines are not the same
+corpus, and confusing them is expensive. AITER's gfx950 kernels are unmasked, while a
+general SDPA corpus is roughly 90% causal, so a 900-graph draw yielded 106 usable
+measurements -- a model with a -285.7 TFLOPS bias that lost contests it should have won.
+
+Built with `--keep q.dtype=bf16 --keep q.head_dim=128 --keep q.is_causal=false`, 1687 graphs
+were admitted out of 1687,
+and the same engine's median relative error fell from 0.366 to 0.040 with no bias left. The
+selector built on it went from 78.9% to 94.2% correct on an unchanged comparison corpus.
+
+Two rules follow:
+
+1. **Filter the training corpus to the engine's own facets.** Read its kernel table first
+   (Step 0); every draw outside it is a decline, not a data point.
+2. **Hold the comparison graphs out by construction.** Remove them from the training corpus
+   before collecting -- `benchmark` ids are content-derived, so the check is a set
+   difference -- rather than trusting a random split to keep them apart.
+
+## Invariants — do not break these
+
+1. **An opaque engine's model `id` IS its binding.** AITER and MIOpen own no descriptor
+   set; they look up a UUID declared in provider code (`AsmSdpaEngine.hpp`). A model with a
+   minted UUID installs cleanly and is never read. Set the declared one.
+2. **`selector_revision` names a provider release, not a build.** It is compared for
+   equality and a mismatch is refused. If you find yourself regenerating models after an
+   unrelated commit, the revision string has regained a git hash — fix the string, not the
+   models.
+3. **Never publish a model that scored nothing.** Non-positive predicted TFLOPS are
+   reported as declines (`metrics.unscored_rows`) because the runtime treats them as
+   INVALID and falls back to static ordering; a model where *every* row declines must fail.
+4. **No measured performance numbers in the repository.** Models and methodology, yes;
+   CSVs, eval reports and TFLOPS figures in committed docs, no.
+5. **A corpus must not decide the contest.** Anything pinned in the graph document that an
+   engine refuses (`mma_core_mode`, a single causal anchor) silently removes that engine
+   before any measurement happens.
+
+## When you are done
+
+Promote into the source tree and commit the artifacts only:
+
+```bash
+python3 -m uhd_gen promote --model-dir <out>/l2/model \
+    --descriptor-tree ../../../dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors \
+    --engine hipkernel:Gfx950AttentionDense --role sort_kernel_catalog --arch gfx950 --dry-run
+```
+
+Drop `--dry-run` once the plan reads correctly. For an engine with no UED, the same command
+writes the document under `heuristics/<engine>/<role>/<arch>/`; that path must also be
+staged by CMake or the loader never sees it (see `HIPDNN_ASM_SDPA_DESCRIPTOR_FILES`).
+
+Then re-run `engine_matrix.sbatch` against the committed branch: the models are proven when
+the engines report `available` with TFLOPS instead of `unavailable`.

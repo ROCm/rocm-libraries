@@ -19,7 +19,12 @@ add_library(hipdnn_plugin_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_plugin_sdk)
 
-target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk)
+# CMAKE_DL_LIBS because CustomLibraryAdapter.hpp calls dlopen/dlsym/dlclose (RFC 0019 §7.2's
+# escape hatch). A header-only target has to propagate what its headers use: this links today
+# only because glibc 2.34+ folds libdl into libc and the current consumers happen to link it
+# themselves, neither of which is a guarantee.
+target_link_libraries(hipdnn_plugin_sdk
+    INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk ${CMAKE_DL_LIBS})
 
 # The ingestor headers are wholly inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, and they
 # are installed whenever it is set. Carrying the definition on the exported target is what
@@ -29,16 +34,14 @@ target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_
 # installed hipdnn_plugin_sdkTargets.cmake, so in-tree and out-of-tree consumers agree.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hipdnn_plugin_sdk INTERFACE HIPDNN_ENABLE_KERNEL_INGESTOR)
-
-    # DescriptorLoader.hpp includes <nlohmann/json.hpp> directly. Today that only compiles
-    # because flatbuffers_sdk happens to add the includes transitively, and only
-    # conditionally (HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB can turn it off); this target
-    # needs its own dependency rather than relying on a sibling's implementation detail.
-    if(NOT TARGET nlohmann_json::nlohmann_json)
-        hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
-    endif()
-    hipdnn_add_dependency_includes(hipdnn_plugin_sdk nlohmann_json::nlohmann_json)
 endif()
+
+# Common UHD prediction is available without the ingestor and directly consumes JSON,
+# including when the FlatBuffers SDK's optional JSON helpers are disabled.
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+endif()
+hipdnn_add_dependency_includes(hipdnn_plugin_sdk nlohmann_json::nlohmann_json)
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 

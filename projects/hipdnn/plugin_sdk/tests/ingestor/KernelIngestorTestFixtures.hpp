@@ -29,7 +29,7 @@
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "flatbuffer_utilities/ContentCarryingTestGraph.hpp"
@@ -160,6 +160,14 @@ inline DeviceProperties testDeviceProperties()
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    // Non-zero memory facts, so a corpus row emitted through this fixture carries the
+    // `device.*` columns a merged multi-board sweep depends on, rather than a set of
+    // zeroes that would satisfy an "is the column present" check while proving nothing.
+    properties.multiProcessorCount = 304;
+    properties.totalGlobalMem = 192ULL * 1024 * 1024 * 1024;
+    properties.memoryBusWidth = 8192;
+    properties.memoryClockRate = 2600000;
+    properties.sharedMemPerBlock = 64 * 1024;
     return properties;
 }
 
@@ -669,10 +677,14 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
-/// The same engine as makeStateManager(), but carrying @p engineName so its on-disk
-/// winner-cache shard resolves. makeStateManager() leaves the name empty, which
+/// The same engine as makeStateManager(), but carrying @p engine so its on-disk
+/// winner-cache shard resolves. makeStateManager() leaves the identity empty, which
 /// disables the disk cache, so every test that does not opt in stays in-memory only.
-inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+/// @param winnerCacheCapacity Lets a test reach the eviction bound without recording the
+///        thousands of rankings the production default holds.
+inline std::unique_ptr<StateManager> makeIdentifiedStateManager(
+    EngineIdentity engine,
+    size_t winnerCacheCapacity = StateManager::DEFAULT_WINNER_CACHE_CAPACITY)
 {
     std::vector<MatchDescriptor> matchers{
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
@@ -688,7 +700,16 @@ inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& en
         "test.graph",
         "engine 'test fixture'",
         StateManager::DEFAULT_CATALOG_CACHE_CAPACITY,
-        engineName);
+        std::move(engine),
+        winnerCacheCapacity);
+}
+
+/// An engine identified by name alone: no revision, no UHD, no model hash. Every shard
+/// test that predates the identity in the path uses this, and pairs with
+/// `winnerCacheShardPath({engineName}, ...)` naming the same default identity.
+inline std::unique_ptr<StateManager> makeNamedStateManager(const std::string& engineName)
+{
+    return makeIdentifiedStateManager(EngineIdentity{engineName});
 }
 
 /// Installs @p handler under @p symbol for the object's lifetime, replacing

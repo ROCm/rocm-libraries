@@ -17,7 +17,7 @@
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/NativeRegistry.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
@@ -219,7 +219,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreSymbol)
 {
     ASSERT_TRUE(_set->heuristic.has_value());
-    EXPECT_EQ(_set->heuristic->payload, "{{ config.score_symbol | cpp_escape }}");
+    EXPECT_EQ(_set->heuristic->nativeSymbol, "{{ config.score_symbol | cpp_escape }}");
     EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
 }
 {% else %}

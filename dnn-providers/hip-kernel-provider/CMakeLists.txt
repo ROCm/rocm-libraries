@@ -353,6 +353,26 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_TEST_SET_SHARED "shared")
     set(HIPKERNELPROVIDER_TEST_SET_ARCHIVE_FIXTURE "archive_fixture")
 
+    # pointwise_model is authored in part and generated in part, so unlike every set above
+    # its source root is assembled in the build tree rather than read from the source tree.
+    # Its heuristic is a trained artifact: uhd_model_gen emits the .uhd.json and the model
+    # together so `features_hash` cannot drift between them, and a committed descriptor
+    # would be free to disagree with the model it names.
+    #
+    # The generated half cannot be written into the packed output, because a pack wipes its
+    # OUT_ROOT and refills it from SOURCE_ROOT -- anything placed there is removed by the
+    # next pack. Assembling a source root first keeps this an ordinary pack rather than a
+    # second staging mechanism beside the packer.
+    #
+    # The authored JSONs stay where they were rather than moving under test_descriptors/:
+    # this set is not authored-whole, so a folder there would invite being wired directly,
+    # which would pack the descriptors without the model they name.
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_SET "pointwise_model")
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_AUTHORED_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/integration_tests/kernel_ingestor_engine/fixtures/pointwise_model")
+    set(HIPKERNELPROVIDER_POINTWISE_MODEL_STAGE_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/hkp-pointwise-model-source")
+
     # The same binary-to-plugin-directory offset, extended to the test descriptor trees.
     file(RELATIVE_PATH HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR
          "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}"
@@ -455,6 +475,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
     endif()
+    # Produces the pointwise_model pack's .uhd.json and its model artifact. Ahead of
+    # descriptor-packaging because that is where the pack is wired, and the staging rules
+    # there name this target -- a dependency cannot be added to a target that does not yet
+    # exist.
+    add_subdirectory(tools/uhd_model_gen)
     add_subdirectory(descriptor-packaging)
 endif()
 
@@ -584,3 +609,70 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
     endif()
 endif()
+
+# ============================================================================
+# ASM SDPA engine heuristics
+# ============================================================================
+# AITER owns no descriptor set: it binds its L1 model by a UUID declared in provider code
+# (AsmSdpaEngine.hpp, RFC 0019 §4.1 / Open Question 7), and the loader resolves that UUID
+# out of the catalog it already walks. So the model has no pack to travel in -- it is a
+# loose UHD that must reach the same production tree the ingestor's packs deliver into, or
+# the engine reports UNAVAILABLE with a model sitting in the source tree unread.
+#
+# Gated on the ingestor because that is what creates and walks that tree; the model itself
+# has nothing to do with the ingestor, and moves the day another loader roots it.
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/asm_sdpa_engine/descriptors")
+    # Explicit, like every other descriptor list here: one list feeds staging and install,
+    # so the two cannot disagree about what ships.
+    set(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES
+        predict_engine_tflops/gfx942/asm_sdpa_engine_tflops.uhd.json
+        predict_engine_tflops/gfx942/asm_sdpa_engine_tflops.bin
+        predict_engine_tflops/gfx950/asm_sdpa_engine_tflops.uhd.json
+        predict_engine_tflops/gfx950/asm_sdpa_engine_tflops.bin
+    )
+    set(_asm_sdpa_staged)
+    foreach(_descriptor IN LISTS HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES)
+        add_custom_command(
+            OUTPUT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+                    "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}"
+            DEPENDS "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+            COMMENT "Staging asm_sdpa heuristic ${_descriptor}"
+            VERBATIM
+        )
+        list(APPEND _asm_sdpa_staged
+             "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/asm_sdpa/${_descriptor}")
+    endforeach()
+    add_custom_target(asm_sdpa_engine_descriptors ALL DEPENDS ${_asm_sdpa_staged}
+                      COMMENT "Staging asm_sdpa engine heuristics")
+
+    if(TARGET hkp_packaging_product)
+        # The production pack wipes its OUT_ROOT -- this very directory -- and refills it
+        # from its own source root. A copy that landed first would be deleted and the
+        # engine would find no model. Ordered on the TARGET rather than on its stamp file,
+        # for the reason hkp_pointwise_model_artifact records: depending on the stamp
+        # copies that rule, and the whole chain behind it, into this target's build.make
+        # as well, and make runs a rule it finds in two files twice at once.
+        add_dependencies(asm_sdpa_engine_descriptors hkp_packaging_product)
+    endif()
+
+    # arch_content/ installs wholesale exactly when the production packer is wired, and
+    # that rule picks these staged copies up with everything else. With production
+    # packaging dormant there is no such rule and these files still have to ship, so they
+    # install from the source tree in that case only -- one rule delivers each file either
+    # way, and the installed tree stays a copy of the build tree.
+    if(NOT TARGET hkp_packaging_product)
+        foreach(_descriptor IN LISTS HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_FILES)
+            get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+            install(
+                FILES "${HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
+                DESTINATION
+                    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/asm_sdpa/${_descriptor_subdir}"
+            )
+        endforeach()
+    endif()
+endif()
+
