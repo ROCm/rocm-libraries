@@ -75,7 +75,7 @@ jobs:
           cmake -S "$RUNNER_TEMP/msgpack-cxx-7.0.0" -B "$RUNNER_TEMP/msgpack-build" -DMSGPACK_USE_BOOST=OFF -DMSGPACK_BUILD_TESTS=OFF
           cmake --install "$RUNNER_TEMP/msgpack-build"
           curl -fsSL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz | tar xz -C "$RUNNER_TEMP"
-          cmake -S "$RUNNER_TEMP/googletest-1.15.2" -B "$RUNNER_TEMP/gtest-build" -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON
+          cmake -S "$RUNNER_TEMP/googletest-1.15.2" -B "$RUNNER_TEMP/gtest-build" -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build "$RUNNER_TEMP/gtest-build" --parallel --target install
 
       - name: System build deps (zlib, python headers)
