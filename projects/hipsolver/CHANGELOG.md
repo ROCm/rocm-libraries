@@ -11,6 +11,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
   * getrfBatched
     * hipsolverSgetrfBatched_bufferSize, hipsolverDgetrfBatched_bufferSize, hipsolverCgetrfBatched_bufferSize, and hipsolverZgetrfBatched_bufferSize
     * hipsolverSgetrfBatched, hipsolverDgetrfBatched, hipsolverCgetrfBatched, and hipsolverZgetrfBatched
+  * getriBatched
+    * hipsolverXgetriBatched_bufferSize
+    * hipsolverXgetriBatched
 
 ### Changed
 ### Removed

@@ -23,6 +23,7 @@
 
 #include "../include/lapack_host_reference.hpp"
 #include "hipsolver.h"
+#include <vector>
 
 /*!\file
  * \brief provide template functions interfaces to BLAS and LAPACK interfaces, it is
@@ -863,6 +864,23 @@ void sgetrf_(int* m, int* n, float* A, int* lda, int* ipiv, int* info);
 void dgetrf_(int* m, int* n, double* A, int* lda, int* ipiv, int* info);
 void cgetrf_(int* m, int* n, hipsolverComplex* A, int* lda, int* ipiv, int* info);
 void zgetrf_(int* m, int* n, hipsolverDoubleComplex* A, int* lda, int* ipiv, int* info);
+
+void sgetri_(int* n, float* A, int* lda, int* ipiv, float* work, int* lwork, int* info);
+void dgetri_(int* n, double* A, int* lda, int* ipiv, double* work, int* lwork, int* info);
+void cgetri_(int*              n,
+             hipsolverComplex* A,
+             int*              lda,
+             int*              ipiv,
+             hipsolverComplex* work,
+             int*              lwork,
+             int*              info);
+void zgetri_(int*                    n,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             int*                    ipiv,
+             hipsolverDoubleComplex* work,
+             int*                    lwork,
+             int*                    info);
 
 void sgetrs_(
     char* trans, int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
@@ -2850,6 +2868,38 @@ void cpu_getrf<hipsolverDoubleComplex>(
     int m, int n, hipsolverDoubleComplex* A, int lda, int* ipiv, int* info)
 {
     zgetrf_(&m, &n, A, &lda, ipiv, info);
+}
+
+// getri
+template <>
+void cpu_getri<float>(int n, float* A, int lda, int* ipiv, float* work, int lwork, int* info)
+{
+    sgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_getri<double>(int n, double* A, int lda, int* ipiv, double* work, int lwork, int* info)
+{
+    dgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_getri<hipsolverComplex>(
+    int n, hipsolverComplex* A, int lda, int* ipiv, hipsolverComplex* work, int lwork, int* info)
+{
+    cgetri_(&n, A, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void cpu_getri<hipsolverDoubleComplex>(int                     n,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       int*                    ipiv,
+                                       hipsolverDoubleComplex* work,
+                                       int                     lwork,
+                                       int*                    info)
+{
+    zgetri_(&n, A, &lda, ipiv, work, &lwork, info);
 }
 
 // getrs
