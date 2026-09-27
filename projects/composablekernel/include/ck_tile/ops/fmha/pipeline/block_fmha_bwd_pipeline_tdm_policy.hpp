@@ -43,15 +43,17 @@ namespace ck_tile {
 //     v_permlane16_swap_b32 and stores through MakeQGradStoreBlockDistribution,
 //     which describes the folded layout: one row, 32 columns, 128 B.
 
-// Policy for the bwd pipeline that keeps the dK and dV accumulators in LDS
-// instead of registers.
+// Policy for the bwd pipeline that moves its operands global->LDS with TDM and
+// reads them back with ds_load_tr.
 //
-// Why: the two fp32 accumulators are kN0*headdim floats each, i.e.
-// kN0*headdim/kBlockSize VGPRs per lane -- at kN0=64, headdim=128 that is 64
-// apiece, enough to push the kernel from 2 waves/SIMD down to 1. LDS is nearly
-// free here, so the accumulators are the one large thing that can move.
+// It still carries LDS descriptors for the dK and dV accumulators: each is
+// kN0*headdim floats, i.e. kN0*headdim/kBlockSize VGPRs per lane, which at
+// kN0=64, headdim=128 is 64 apiece -- enough to cost a wave of occupancy. Both
+// are register resident in the shipped configurations, with V evicted to LDS to
+// pay for them, so these descriptors serve the tiles that fall below the kM0
+// floor.
 //
-// Everything else is inherited unchanged; this policy only adds the two
+// Everything else is inherited unchanged; this policy adds the operand and
 // accumulator descriptors and re-does the smem budget.
 struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
 {

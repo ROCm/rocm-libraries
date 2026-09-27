@@ -51,16 +51,18 @@ namespace ck_tile {
 // Same algorithm as BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP, moved onto TDM for
 // the global->LDS transfers and ds_load_tr for the transposed reads.
 //
-// An accumulator is kN0*headdim floats, live across the whole Q loop, costing
+// Each accumulator is kN0*headdim floats live across the whole Q loop, costing
 // kN0*headdim/kBlockSize VGPRs -- enough at headdim 128 to drop the kernel from
-// 2 waves/SIMD to 1. dK therefore lives in LDS (otherwise mostly idle) and each
-// accumulation becomes load -> gemm -> store, so its register tile is live only
-// around its own gemm. dV stays in registers above the kM0 floor, paid for by
-// evicting V to LDS; see kDVInReg / kVNonResident.
+// 2 waves/SIMD to 1. The pipeline originally parked both in LDS to buy that
+// occupancy back; both have since returned to registers, and what pays for them
+// is evicting V to LDS instead. dK is register resident unconditionally, dV
+// above the kM0 floor -- see kDVInReg / kVNonResident. Below that floor dV
+// falls back to LDS, where each accumulation becomes load -> gemm -> store so
+// the register tile is live only around its own gemm.
 //
-// No LDS atomics are needed: gemm_1/gemm_3 distribute C with MWarp warps
-// splitting M (=kN0) disjointly and NWarp=1, so every LDS element has exactly
-// one owning thread and a plain read-modify-write is race free.
+// That LDS fallback needs no atomics: gemm_1/gemm_3 distribute C with MWarp
+// warps splitting M (=kN0) disjointly and NWarp=1, so every LDS element has
+// exactly one owning thread and a plain read-modify-write is race free.
 template <typename Problem, typename Policy = BlockFmhaBwdPipelineTdmPolicy>
 struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
 {
@@ -285,7 +287,8 @@ struct BlockFmhaBwdDQDKDVPipelineTdmKRKTR
         constexpr auto gemm_3 = Policy::template GetSGradTQTBlockGemm<Problem>();
         constexpr auto gemm_4 = Policy::template GetSGradKTBlockGemm<Problem>();
 
-        // VGrad & KGrad accumulators, in LDS.
+        // LDS fallbacks for the dV (and, below the kM0 floor, dK) accumulator.
+        // Reserved whether or not this instance keeps them in registers.
         //
         // These sit after every staged region rather than inside the max() over
         // phases, because they are live for the whole Q loop while K/V/Q/dO/dS
