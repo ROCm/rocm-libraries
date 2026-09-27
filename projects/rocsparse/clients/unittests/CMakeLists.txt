@@ -194,6 +194,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- Blocked-ELL SpMM grid.y clamp + column-panel stride [AISPARSE-667] ---
+  # Appended at the end (distinct anchor) so this leaf does not conflict with the
+  # sibling large-grid branches. Drives rocsparse_spmm through the public API;
+  # no compile-in library TUs needed.
+  unit_test_internal_level3_bellmm.cpp
 )
 
 # Host building-block library translation units under test by the
