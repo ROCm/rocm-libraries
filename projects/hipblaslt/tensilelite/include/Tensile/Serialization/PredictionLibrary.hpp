@@ -134,6 +134,9 @@ namespace TensileLite
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
+                                .cluster_dim               = {solution->sizeMapping.clusterDim.x,
+                                                              solution->sizeMapping.clusterDim.y,
+                                                              solution->sizeMapping.clusterDim.z},
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
