@@ -253,6 +253,8 @@ ROCSOLVER_KERNEL void unit_forward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -313,6 +315,8 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
         }
 
         // Shared memory is not overwritten until the next iteration's first substitution barrier.
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -376,6 +380,8 @@ ROCSOLVER_KERNEL void nonunit_forward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -439,6 +445,8 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -520,6 +528,8 @@ ROCSOLVER_KERNEL void unit_backward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -578,6 +588,8 @@ ROCSOLVER_KERNEL void conj_unit_backward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -641,6 +653,8 @@ ROCSOLVER_KERNEL void nonunit_backward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
@@ -704,6 +718,8 @@ ROCSOLVER_KERNEL void conj_nonunit_backward_substitution_kernel(const I nx,
             // move results back to global
             B[idb] = c;
         }
+
+        __syncthreads();
     } // end for bid
 }
 
