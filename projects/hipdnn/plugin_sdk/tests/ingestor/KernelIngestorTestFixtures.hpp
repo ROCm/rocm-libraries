@@ -160,6 +160,8 @@ inline DeviceProperties testDeviceProperties()
     DeviceProperties properties;
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
+    properties.multiProcessorCount = 48;
+    properties.ldsSize = 65536;
     return properties;
 }
 
@@ -274,9 +276,16 @@ struct TestHandle
 class TestDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
+    explicit TestDeviceResolver(DeviceProperties properties = testDeviceProperties(),
+                                DeviceId deviceId = 0)
+        : _properties(std::move(properties))
+        , _deviceId(deviceId)
+    {
+    }
+
     DeviceId deviceId(const TestHandle& /*handle*/) const override
     {
-        return 0;
+        return _deviceId;
     }
 
     const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
@@ -285,7 +294,8 @@ public:
     }
 
 private:
-    DeviceProperties _properties = testDeviceProperties();
+    DeviceProperties _properties;
+    DeviceId _deviceId;
 };
 
 inline DescriptorId testId(uint8_t seed)

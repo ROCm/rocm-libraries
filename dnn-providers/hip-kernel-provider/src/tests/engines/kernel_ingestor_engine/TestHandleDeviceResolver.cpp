@@ -4,6 +4,11 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <array>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -27,29 +32,47 @@ namespace
 
 using hip_kernel_provider::kernel_ingestor_engine::HandleDeviceResolver;
 
-/// Answers every query, so a test can grow the cache past a rehash without real devices.
+hipDeviceProp_t validHipProperties()
+{
+    hipDeviceProp_t properties{};
+    constexpr const char* ARCH = "gfx000";
+    std::memcpy(properties.gcnArchName, ARCH, std::strlen(ARCH) + 1);
+    properties.warpSize = 64;
+    properties.multiProcessorCount = 48;
+    properties.sharedMemPerBlock = 65536;
+    return properties;
+}
+
+/// Supplies test device properties and counts queries without a GPU.
 class FakeQueryResolver : public HandleDeviceResolver
 {
 public:
-    /// warpSize is set from the id so a caller can tell entries apart.
-    hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
+    hipDeviceProp_t properties = validHipProperties();
+    hipError_t status = hipSuccess;
+    bool distinguishDevices = false;
+    bool omitLds = false;
+    mutable std::atomic<int> queryCount{0};
+
+    hipError_t queryDeviceProperties(hipDeviceProp_t* result,
                                      hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
     {
-        *properties = hipDeviceProp_t{};
-        properties->warpSize = static_cast<int>(deviceId);
-        return hipSuccess;
-    }
-};
+        queryCount.fetch_add(1, std::memory_order_relaxed);
+        if(status != hipSuccess)
+        {
+            return status;
+        }
 
-/// Fails every property query, to drive the refusal path.
-class FailingQueryResolver : public HandleDeviceResolver
-{
-public:
-    hipError_t
-        queryDeviceProperties(hipDeviceProp_t* /*properties*/,
-                              hipdnn_plugin_sdk::ingestor::DeviceId /*deviceId*/) const override
-    {
-        return hipErrorInvalidDevice;
+        const auto unwrittenLds = result->sharedMemPerBlock;
+        *result = properties;
+        if(omitLds)
+        {
+            result->sharedMemPerBlock = unwrittenLds;
+        }
+        else if(distinguishDevices)
+        {
+            result->sharedMemPerBlock += static_cast<size_t>(deviceId);
+        }
+        return hipSuccess;
     }
 };
 
@@ -240,26 +263,48 @@ TEST(TestHandleDeviceResolver, RejectsANegativeStreamOrdinalReportedAsSuccess)
 
 // deviceProperties(): cache hit vs miss, and the growth-safety invariant
 
-TEST(TestHandleDeviceResolver, CachesDevicePropertiesAcrossCalls)
+TEST(TestGpuHandleDeviceResolver, CachesCompletePropertiesFromTheCurrentDevice)
 {
     SKIP_IF_NO_DEVICES();
 
     const HandleDeviceResolver resolver;
+    const Handle handle;
+    const auto deviceId = resolver.deviceId(handle);
+    ASSERT_NE(deviceId, hipdnn_plugin_sdk::ingestor::NO_DEVICE);
 
-    // A hit returns the same address: the reference is stable for the resolver's lifetime.
-    const auto& first = resolver.deviceProperties(0);
-    const auto& second = resolver.deviceProperties(0);
+    hipDeviceProp_t reported{};
+    ASSERT_EQ(hipGetDeviceProperties(&reported, deviceId), hipSuccess);
+    const auto& first = resolver.deviceProperties(deviceId);
+    const auto& second = resolver.deviceProperties(deviceId);
 
     EXPECT_EQ(&first, &second);
-    EXPECT_EQ(first.warpSize, second.warpSize);
+    EXPECT_EQ(first.gcnArchName, reported.gcnArchName);
+    EXPECT_EQ(first.warpSize, reported.warpSize);
+    EXPECT_EQ(first.multiProcessorCount, reported.multiProcessorCount);
+    ASSERT_LE(reported.sharedMemPerBlock,
+              static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+    EXPECT_EQ(first.ldsSize, static_cast<int64_t>(reported.sharedMemPerBlock));
+}
+
+TEST(TestHandleDeviceResolver, CachesSuccessfulQueriesWithoutRepublishingProperties)
+{
+    FakeQueryResolver resolver;
+    const auto& first = resolver.deviceProperties(7);
+
+    // A cache hit must not query HIP again.
+    resolver.status = hipErrorInvalidDevice;
+    resolver.properties.sharedMemPerBlock = 32768;
+    const auto& second = resolver.deviceProperties(7);
+
+    EXPECT_EQ(&first, &second);
+    EXPECT_EQ(first.ldsSize, 65536);
+    EXPECT_EQ(resolver.queryCount.load(), 1);
 }
 
 TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 {
-    // std::unordered_map keeps node handles stable across rehash. Uses FakeQueryResolver
-    // since deviceProperties() does not cache failed queries.
-    const FakeQueryResolver resolver;
-
+    FakeQueryResolver resolver;
+    resolver.distinguishDevices = true;
     const auto& firstInserted = resolver.deviceProperties(1000);
 
     for(int deviceId = 1001; deviceId < 1064; ++deviceId)
@@ -269,26 +314,134 @@ TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 
     const auto& sameEntryAfterGrowth = resolver.deviceProperties(1000);
     EXPECT_EQ(&firstInserted, &sameEntryAfterGrowth);
-    EXPECT_EQ(sameEntryAfterGrowth.warpSize, 1000);
+    EXPECT_EQ(firstInserted.ldsSize, 65536 + 1000);
+    EXPECT_EQ(resolver.queryCount.load(), 64);
 }
 
-TEST(TestHandleDeviceResolver, RefusesAndDoesNotCacheAFailedPropertyQuery)
+TEST(TestHandleDeviceResolver, RetriesFailedQueriesAndCachesTheFirstSuccess)
 {
-    // Not cached: this cache is never invalidated, so a false answer would persist.
-    const FailingQueryResolver resolver;
+    FakeQueryResolver resolver;
+    resolver.status = hipErrorInvalidDevice;
+    EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_EQ(resolver.queryCount.load(), 2);
 
+    resolver.status = hipSuccess;
+    const auto& recovered = resolver.deviceProperties(7);
+    EXPECT_EQ(recovered.ldsSize, 65536);
+    EXPECT_EQ(&resolver.deviceProperties(7), &recovered);
+    EXPECT_EQ(resolver.queryCount.load(), 3);
+}
+
+TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
+{
+    struct InvalidFacts
+    {
+        const char* name;
+        const char* arch;
+        int warpSize;
+        int multiProcessorCount;
+        uint64_t ldsSize;
+    };
+    const std::array<InvalidFacts, 6> cases = {{
+        {"missing identity", "", 64, 48, 65536},
+        {"zero warp", "gfx000", 0, 48, 65536},
+        {"negative warp", "gfx000", -1, 48, 65536},
+        {"zero count", "gfx000", 64, 0, 65536},
+        {"negative count", "gfx000", 64, -1, 65536},
+        {"capacity outside signed Int64", "gfx000", 64, 48, uint64_t{1} << 63},
+    }};
+    for(const auto& invalid : cases)
+    {
+        SCOPED_TRACE(invalid.name);
+        FakeQueryResolver resolver;
+        std::memcpy(resolver.properties.gcnArchName, invalid.arch, std::strlen(invalid.arch) + 1);
+        resolver.properties.warpSize = invalid.warpSize;
+        resolver.properties.multiProcessorCount = invalid.multiProcessorCount;
+        resolver.properties.sharedMemPerBlock = invalid.ldsSize;
+
+        EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+        EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
+                     hipdnn_plugin_sdk::HipdnnPluginException);
+        EXPECT_EQ(resolver.queryCount.load(), 2);
+
+        resolver.properties = validHipProperties();
+        const auto& recovered = resolver.deviceProperties(7);
+        EXPECT_EQ(recovered.ldsSize, 65536);
+        EXPECT_EQ(&resolver.deviceProperties(7), &recovered);
+        EXPECT_EQ(resolver.queryCount.load(), 3);
+    }
+}
+
+TEST(TestHandleDeviceResolver, RejectsUnterminatedIdentityAndRetries)
+{
+    FakeQueryResolver resolver;
+    std::memset(resolver.properties.gcnArchName, 'x', sizeof(resolver.properties.gcnArchName));
     EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+
+    resolver.properties = validHipProperties();
+    EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, "gfx000");
+    EXPECT_EQ(resolver.queryCount.load(), 2);
+}
+
+TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
+{
+    // The terminator search spans the whole buffer, so an identity reaching its last byte
+    // is complete rather than truncated.
+    FakeQueryResolver resolver;
+    const auto archBufferSize = sizeof(resolver.properties.gcnArchName);
+    std::memset(resolver.properties.gcnArchName, 'x', archBufferSize);
+    resolver.properties.gcnArchName[archBufferSize - 1] = '\0';
+
+    EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, std::string(archBufferSize - 1, 'x'));
+}
+
+TEST(TestHandleDeviceResolver, RejectsUnwrittenLdsWithoutLosingReportedZero)
+{
+    FakeQueryResolver resolver;
+    resolver.omitLds = true;
     EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+
+    resolver.omitLds = false;
+    resolver.properties.sharedMemPerBlock = 0;
+    const auto& resolved = resolver.deviceProperties(7);
+    EXPECT_EQ(resolved.ldsSize, 0);
+    EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
+    EXPECT_EQ(resolver.queryCount.load(), 2);
+}
+
+TEST(TestHandleDeviceResolver, AcceptsMaximumSignedLdsCapacity)
+{
+    FakeQueryResolver resolver;
+    resolver.properties.sharedMemPerBlock = std::numeric_limits<int64_t>::max();
+    const auto& resolved = resolver.deviceProperties(7);
+    EXPECT_EQ(resolved.ldsSize, std::numeric_limits<int64_t>::max());
+    EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
+    EXPECT_EQ(resolver.queryCount.load(), 1);
+}
+
+TEST(TestHandleDeviceResolver, NoDeviceStaysUnresolvedWithoutQueryingHip)
+{
+    const FakeQueryResolver resolver;
+    const auto& unresolved = resolver.deviceProperties(hipdnn_plugin_sdk::ingestor::NO_DEVICE);
+    EXPECT_TRUE(unresolved.gcnArchName.empty());
+    EXPECT_EQ(unresolved.warpSize, 0);
+    EXPECT_EQ(unresolved.multiProcessorCount, 0);
+    EXPECT_EQ(unresolved.ldsSize, -1);
+    EXPECT_EQ(&resolver.deviceProperties(hipdnn_plugin_sdk::ingestor::NO_DEVICE), &unresolved);
+    EXPECT_EQ(resolver.queryCount.load(), 0);
 }
 
 TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
 {
-    // Mutex-guarded; many threads on a small id set maximize a race's chance to corrupt
-    // the map. FakeQueryResolver encodes the device id in warpSize so a torn or
-    // cross-wired entry is observable.
-    const FakeQueryResolver resolver;
+    // Use different capacities to detect results from the wrong device.
+    FakeQueryResolver resolver;
+    resolver.distinguishDevices = true;
     std::atomic<int> mismatches{0};
 
     std::vector<std::thread> threads;
@@ -299,7 +452,9 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
             const auto deviceId = (t % 4) + 2000;
             for(int i = 0; i < 200; ++i)
             {
-                if(resolver.deviceProperties(deviceId).warpSize != deviceId)
+                const auto& properties = resolver.deviceProperties(deviceId);
+                if(properties.ldsSize != 65536 + deviceId || properties.warpSize != 64
+                   || properties.multiProcessorCount != 48 || properties.gcnArchName != "gfx000")
                 {
                     mismatches.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -314,8 +469,7 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
     EXPECT_EQ(mismatches.load(std::memory_order_relaxed), 0)
         << "a concurrent lookup returned another device's properties";
 
-    static_cast<void>(hipGetLastError());
-    static_cast<void>(hipExtGetLastError());
+    EXPECT_EQ(resolver.queryCount.load(), 4);
 }
 
 } // namespace

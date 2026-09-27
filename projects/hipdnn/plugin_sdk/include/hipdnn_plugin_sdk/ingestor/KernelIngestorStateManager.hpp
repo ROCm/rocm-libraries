@@ -208,10 +208,10 @@ public:
     Catalog sortedCatalog(const MatchContext& context) const
     {
         // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
-        // device ordinal, not arch, so without this an unresolved-arch context would
-        // cache an empty catalog under the SAME key a later, resolved call for this
+        // device ordinal, not the device facts, so without this an unresolved context
+        // would cache an empty catalog under the SAME key a later, resolved call for this
         // device reuses -- permanently hiding that device's real catalog.
-        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        if(context.deviceId == NO_DEVICE || !isResolved(context.deviceProperties))
         {
             return catalogFor(context);
         }
@@ -282,6 +282,16 @@ public:
             return;
         }
 
+        if(!isResolved(key.device.properties()))
+        {
+            // A persisted record for an unresolved device is rejected on read, so writing
+            // one would append an unreadable line on every fresh miss. Lookups for such a
+            // key never succeed either, so an in-memory entry would be unreachable.
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
+                                   "because its device facts are unresolved");
+            return;
+        }
+
         WinnerRecord adopted = writeBackToShard(key, record, cause);
 
         const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
@@ -307,6 +317,13 @@ public:
     /// lock across the read.
     std::optional<WinnerRecord> winnerFor(const WinnerKey& key) const
     {
+        if(!isResolved(key.device.properties()))
+        {
+            // recordWinner() never stores these, and reading the shard would only
+            // create it.
+            return std::nullopt;
+        }
+
         {
             const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
             const auto found = _winnerCache.find(key);
@@ -535,11 +552,11 @@ private:
         // Pack pruning and matchers both read the device, so nothing below can be
         // answered without one. Checked here rather than in every provider's matchers,
         // where an omission is invisible.
-        if(context.deviceId == NO_DEVICE || context.deviceProperties.gcnArchName.empty())
+        if(context.deviceId == NO_DEVICE || !isResolved(context.deviceProperties))
         {
             const auto* reason = context.deviceId == NO_DEVICE
                                      ? "no device resolved"
-                                     : "resolved device reports no gcnArchName";
+                                     : "resolved device reports incomplete device facts";
             HIPDNN_PLUGIN_LOG_INFO("ingestor: " << reason << "; no kernel applies");
             return Catalog{};
         }

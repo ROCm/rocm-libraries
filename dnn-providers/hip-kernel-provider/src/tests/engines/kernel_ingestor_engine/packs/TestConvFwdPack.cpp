@@ -604,12 +604,11 @@ TEST(TestConvFwdDispatch, LoadsTheModuleOnceAcrossTwoDispatches)
     ASSERT_NO_FATAL_FAILURE(hip_kernel_provider::testing::readPackedKernelSource(
         packed, PACKED_UKD_DESCRIPTOR, source));
 
-    // Built from the stripped arch rather than currentDeviceProperties(), which keeps the
-    // feature flags hipGetDeviceProperties reports ("gfx1152:xnack-"). The packer names
-    // shards with the bare arch, so the archive lookup has to be asked in that spelling.
-    hipdnn_plugin_sdk::ingestor::DeviceProperties deviceProperties;
+    // hipGetDeviceProperties reports the arch with its feature flags ("gfx1152:xnack-"),
+    // while the packer names its shards with the bare arch. Override the resolved name
+    // with the stripped spelling so the archive lookup asks for a shard that exists.
+    auto deviceProperties = currentDeviceProperties();
     deviceProperties.gcnArchName = arch;
-    deviceProperties.warpSize = properties.warpSize;
 
     const GraphFixture fixture(buildConvFwdGraph(data_objects::DataType::HALF), deviceProperties);
     const auto bound = matchesGraph(CONV_FWD, fixture.context());

@@ -15,9 +15,11 @@
 #include <clocale>
 #include <cmath>
 #include <cstdint>
+#include <future>
 #include <limits>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include <hipdnn_plugin_sdk/ingestor/jsonexpr/Value.hpp>
 
@@ -64,6 +66,85 @@ TEST(TestJsonValue, KindPredicatesPartitionTheAlternatives)
     // rule compares exactly against a data source's integer.
     EXPECT_TRUE(V(7).isInt());
     EXPECT_EQ(V(7).asInt(), 7);
+}
+
+TEST(TestJsonValue, ArrayCopiesAreIsolatedFromInputAndReassignment)
+{
+    V::Array nested{V(2), V("nested")};
+    V::Array input{V(1), V(nested)};
+    V original(input);
+    V copied = original;
+    V assigned(V::Array{V("old")});
+    assigned = original;
+
+    nested[0] = V(99);
+    input[1] = V(100);
+    input.clear();
+    original = V(false);
+
+    const V expected(V::Array{V(1), V(V::Array{V(2), V("nested")})});
+    EXPECT_EQ(copied, expected);
+    EXPECT_EQ(assigned, expected);
+
+    copied = V(V::Array{V("replacement")});
+    EXPECT_EQ(copied, V(V::Array{V("replacement")}));
+    EXPECT_EQ(assigned, expected);
+}
+
+TEST(TestJsonValue, ArrayMovesLeaveReusableNullSourcesAndPreserveOtherOwners)
+{
+    const V expected(V::Array{V(1), V(V::Array{V(2), V("nested")})});
+    V source = expected;
+    // A moved-from Value is safe to inspect and must be null.
+    V moved(std::move(source));
+    EXPECT_EQ(moved, expected);
+    EXPECT_TRUE(source.isNull()); // NOLINT(bugprone-use-after-move)
+
+    source = V(V::Array{V("reused")});
+    EXPECT_EQ(source, V(V::Array{V("reused")}));
+    EXPECT_EQ(moved, expected);
+
+    V target(V::Array{V("old")});
+    const V oldTarget = target;
+    target = std::move(moved);
+    EXPECT_EQ(target, expected);
+    EXPECT_TRUE(moved.isNull()); // NOLINT(bugprone-use-after-move)
+    EXPECT_EQ(oldTarget, V(V::Array{V("old")}));
+
+    moved = V(7);
+    EXPECT_EQ(moved, V(7));
+    V& self = target;
+    target = std::move(self);
+    EXPECT_EQ(target, expected);
+}
+
+TEST(TestJsonValue, ConcurrentArrayCopiesRetainTheirValues)
+{
+    const V expected(V::Array{V(V::Array{V(4), V("nested")}), V()});
+    const V original(V::Array{V(V::Array{V(4), V("nested")}), V()});
+    // Futures wait for readers before expected is destroyed, even on failure.
+    std::array<std::future<bool>, 4> readers;
+    for(auto& reader : readers)
+    {
+        reader = std::async(std::launch::async, [original, &expected] {
+            for(int i = 0; i < 128; ++i)
+            {
+                V copied = original;
+                V assigned;
+                assigned = copied;
+                copied = V(i);
+                if(assigned != expected || !assigned.containsUnresolved())
+                {
+                    return false;
+                }
+            }
+            return original == expected;
+        });
+    }
+    for(auto& reader : readers)
+    {
+        EXPECT_TRUE(reader.get());
+    }
 }
 
 TEST(TestJsonValue, NumberFoldsAnExactlyIntegralDoubleToAnInteger)
@@ -267,10 +348,11 @@ TEST(TestJsonValue, EqualityIsStrictAcrossKinds)
     EXPECT_NE(V(""), V());
 
     // Two nulls are equal *here*, because operator== is plain variant
-    // equality. The decline lives one layer up: OpNode::eval gates on
-    // containsUnresolved, so `==` never sees an unresolved operand and a rule
-    // comparing two absent paths yields null rather than true. The rule-level
-    // behaviour is pinned in TestJsonExpression.NullPropagation.
+    // equality for nulls. The decline lives one layer up: OpNode::eval gates
+    // on containsUnresolved, so `==` never sees an unresolved operand and a
+    // rule comparing two absent paths yields null rather than true. The
+    // rule-level behaviour is pinned in
+    // TestJsonExpression.NullPropagatesThroughEveryOtherOperator.
     EXPECT_EQ(V(), V());
     EXPECT_TRUE(V().containsUnresolved());
 
@@ -278,6 +360,29 @@ TEST(TestJsonValue, EqualityIsStrictAcrossKinds)
     EXPECT_EQ(V(V::Array{V(1), V("a")}), V(V::Array{V(1), V("a")}));
     EXPECT_NE(V(V::Array{V(1)}), V(V::Array{V(1), V(2)}));
     EXPECT_NE(V(V::Array{V(1)}), V(V::Array{V("1")}));
+}
+
+TEST(TestJsonValue, IndependentArraysCompareNestedNumbersExactlyAndNullsEqually)
+{
+    const std::int64_t big = (std::int64_t{1} << 60) + 1;
+    const V integers(V::Array{V(V::Array{V(4), V(big)}), V()});
+    const V exact(V::Array{V(V::Array{V(4.0), V(big)}), V()});
+    const V rounded(V::Array{V(V::Array{V(4.0), V(static_cast<double>(big))}), V()});
+
+    EXPECT_EQ(integers, exact);
+    EXPECT_EQ(exact, integers);
+    EXPECT_NE(integers, rounded);
+    EXPECT_NE(rounded, integers);
+    EXPECT_TRUE(exact.containsUnresolved());
+}
+
+TEST(TestJsonValue, SharedArraysContainingNaNAreStillUnequal)
+{
+    V value(V::Array{V(V::Array{V(std::numeric_limits<double>::quiet_NaN())})});
+    const V copied = value;
+    EXPECT_NE(value, copied);
+    value = V();
+    EXPECT_NE(copied, copied);
 }
 
 // ---------------------------------------------------------------------------

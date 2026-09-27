@@ -25,6 +25,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
@@ -162,26 +163,20 @@ inline double scoreKernel(const PackSymbols& pack,
 /// A fixed, warp-64 device, for CPU-only matcher tests that never compile or launch.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
 {
-    hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
-    properties.gcnArchName = "gfx000";
-    properties.warpSize = 64;
-    return properties;
+    return {"gfx000", 64, 48, 65536};
 }
 
-/// The real current device's properties, queried once; zeroed if no device is current.
+/// The current device's validated facts.
+///
+/// Returns unresolved values when no device is current. Throws
+/// hipdnn_plugin_sdk::HipdnnPluginException when a device is current but the HIP query
+/// fails or reports an invalid fact, so a caller running on a device is asserting that
+/// device works.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
-    hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
-    hipDeviceProp_t properties{};
-    int deviceId = 0;
-    if(hipGetDevice(&deviceId) == hipSuccess
-       && hipGetDeviceProperties(&properties, deviceId) == hipSuccess)
-    {
-        resolved.gcnArchName = properties.gcnArchName;
-        resolved.warpSize = properties.warpSize;
-        resolved.multiProcessorCount = properties.multiProcessorCount;
-    }
-    return resolved;
+    const HandleDeviceResolver resolver;
+    const Handle handle;
+    return resolver.deviceProperties(resolver.deviceId(handle));
 }
 
 /// Wraps a built graph buffer so a test reads it the way an engine does.

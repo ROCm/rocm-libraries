@@ -45,6 +45,7 @@ test_categories:
       - "hipdnn_frontend_tests"
       - "hipdnn_test_sdk_tests"
       - "hipdnn_plugin_sdk_tests"
+      - "hipdnn_plugin_sdk_allocation_tests"
 
   integration:
     description: "Current hipDNN integration-check coverage"

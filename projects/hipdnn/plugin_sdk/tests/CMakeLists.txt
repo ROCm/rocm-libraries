@@ -71,6 +71,23 @@ target_include_directories(hipdnn_plugin_sdk_tests PRIVATE
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
 
+# TestJsonValueAllocations.cpp replaces the global operator new to count allocations.
+# That replacement applies to the whole executable and disables AddressSanitizer's
+# new/delete mismatch checks there, so it gets its own binary instead of joining
+# hipdnn_plugin_sdk_tests above.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    add_executable(hipdnn_plugin_sdk_allocation_tests ingestor/TestJsonValueAllocations.cpp)
+    target_compile_options(hipdnn_plugin_sdk_allocation_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
+    target_link_libraries(
+        hipdnn_plugin_sdk_allocation_tests
+        GTest::gtest
+        GTest::gtest_main
+        hipdnn_plugin_sdk
+    )
+    clang_tidy_check(hipdnn_plugin_sdk_allocation_tests)
+    add_hipdnn_test(hipdnn_plugin_sdk_allocation_tests ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
 # Cross-process coverage: one process writes a winner record, a SECOND process reads it
 # back. Two ctest invocations of the same binary, sequenced with
 # FIXTURES_SETUP/FIXTURES_REQUIRED, following the shape hipdnn/cmake/Tests.cmake's

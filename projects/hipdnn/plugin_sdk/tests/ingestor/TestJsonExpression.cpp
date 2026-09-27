@@ -53,6 +53,28 @@ TEST(TestJsonExpression, Literals)
     EXPECT_EQ(eval(json::array({1, 2, 3})), V(V::Array{V(1), V(2), V(3)}));
 }
 
+TEST(TestJsonExpression, ArrayResultsOutliveRulesExpressionsAndSources)
+{
+    V result;
+    {
+        json document{{"payload", json::array({7, "kept"})}};
+        const jexpr::JsonDataSource source{document};
+        json rule = json::array({json::array({1, 2}), "$payload"});
+        const auto expression = jexpr::compile<jexpr::JsonDataSource>(rule);
+
+        rule = nullptr;
+        document.clear();
+        result = expression(source);
+
+        const jexpr::JsonDataSource nextSource{json{{"payload", json::array({8, "later"})}}};
+        EXPECT_EQ(expression(nextSource),
+                  V(V::Array{V(V::Array{V(1), V(2)}), V(V::Array{V(8), V("later")})}));
+    }
+
+    EXPECT_EQ(result, V(V::Array{V(V::Array{V(1), V(2)}), V(V::Array{V(7), V("kept")})}));
+    EXPECT_FALSE(result.containsUnresolved());
+}
+
 TEST(TestJsonExpression, VarOperatorRejected)
 {
     // `var` is not an operator; a variable is always a sigil-prefixed string.
@@ -892,6 +914,25 @@ TEST(TestJsonExpression, DeeplyNestedRulesAreRejectedNotFatal)
               V(41 + static_cast<std::int64_t>(jexpr::MAX_EXPRESSION_DEPTH) - 1));
     // One past the limit: an error, not a crash.
     EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH + 1)),
+                 jexpr::JsonExpressionCompileError);
+
+    // Unlike the scalar chain above, array literals build nested Values.
+    // Depth starts at zero and uses MAX_EXPRESSION_DEPTH, not MAX_VALUE_DEPTH.
+    json nestedArray = 1;
+    for(std::size_t i = 0; i < jexpr::MAX_EXPRESSION_DEPTH; ++i)
+    {
+        nestedArray = json::array({nestedArray});
+    }
+    const V arrayResult = eval(nestedArray);
+    const V* leaf = &arrayResult;
+    for(std::size_t i = 0; i < jexpr::MAX_EXPRESSION_DEPTH; ++i)
+    {
+        ASSERT_TRUE(leaf->isArray());
+        ASSERT_EQ(leaf->asArray().size(), 1U);
+        leaf = &leaf->asArray().front();
+    }
+    EXPECT_EQ(*leaf, V(1));
+    EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(json::array({nestedArray})),
                  jexpr::JsonExpressionCompileError);
 
     // The alias pre-pass runs before lowering and recurses too, so it must
