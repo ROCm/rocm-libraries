@@ -51,42 +51,6 @@
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
-bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHandle_t& handle)
-{
-    char git_version[128];
-    hipblasLtGetGitRevision(handle, &git_version[0]);
-    static std::string cached_firstline;
-    static std::string cached_path;
-    static bool        cached = false;
-    std::string        firstline;
-
-    if(!cached || cached_path != override.file_path)
-    {
-        std::ifstream file_read(override.file_path);
-        std::getline(file_read, firstline);
-        cached_firstline = firstline;
-        cached_path      = override.file_path;
-        cached           = true;
-    }
-    else
-    {
-        firstline = cached_firstline;
-    }
-
-    std::string header = "Git Version: ";
-    size_t      pos    = firstline.find(header);
-    if(pos != std::string::npos)
-    {
-        std::string file_version = firstline.substr(pos + header.length());
-        if(file_version == git_version)
-            return true;
-    }
-
-    override.env_mode = false;
-
-    return false;
-}
-
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 {
     switch(status)
@@ -1170,18 +1134,6 @@ try
         return fused_status;
     }
 #endif
-
-    OverrideSingleton& override = OverrideSingleton::getInstance();
-    if(override.env_mode)
-    {
-        bool override_success = override_path_compare_git_version(override, handle);
-        if(override_success)
-            log_info(__func__, "HIPBLASLT_TUNING_OVERRIDE_FILE is the correct setting.");
-        else
-            log_error(
-                __func__,
-                "The hipBLASLt git version and the override file git version are not the same.");
-    }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,
