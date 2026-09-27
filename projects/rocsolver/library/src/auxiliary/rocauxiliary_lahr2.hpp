@@ -123,13 +123,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
         for(int j = idc; j < n1; j += totalthsc)
         {
             // A1 * x1
-            ac += A1[i + j * lda1] * x1[j];
+            ac += A1[i + j * size_t(lda1)] * x1[j];
         }
 
         for(int j = idc; j < n2; j += totalthsc)
         {
             // A2 * x2
-            ac -= A2[i + j * lda2] * x2[j];
+            ac -= A2[i + j * size_t(lda2)] * x2[j];
         }
 
         acs[tidr + tidc * DIM_X] = ac;
