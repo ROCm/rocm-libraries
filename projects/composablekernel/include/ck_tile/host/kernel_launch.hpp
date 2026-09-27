@@ -141,7 +141,10 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
 // overload of make_kernel: Cluster launch version of make_kernel
 //
 #if CK_TILE_ENABLE_CLUSTER_LAUNCH
-template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU, typename KernelImpl, typename... Args>
+template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU,
+          typename Attr     = void,
+          typename KernelImpl,
+          typename... Args>
 CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
                               dim3 cluster_dim,
                               dim3 grid_dim,
@@ -149,7 +152,12 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
                               std::size_t lds_byte,
                               Args... args)
 {
-    const auto kernel = kentry<MinBlockPerCu, KernelImpl, Args...>;
+    const auto kernel = []() {
+        if constexpr(std::is_void_v<Attr>)
+            return kentry<MinBlockPerCu, KernelImpl, Args...>;
+        else
+            return kentry<Attr, MinBlockPerCu, KernelImpl, Args...>;
+    }();
     return [=](const stream_config& s) {
         // Set cluster dimensions as launch attributes
         hipLaunchConfig_t config{};
