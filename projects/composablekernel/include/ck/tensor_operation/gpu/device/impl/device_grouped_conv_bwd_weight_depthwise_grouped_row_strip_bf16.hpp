@@ -45,15 +45,18 @@ struct DepthwiseGroupedRowStripBf16Argument : BaseArgument,
                                               DepthwiseGroupedRowStripBf16Params
 {
     bool valid             = false;
+    index_t filter_stride  = 0;
     size_t workspace_bytes = 0;
 };
 
 // Each CTA owns one eight-row output strip and sixteen adjacent groups. The
 // 16 reduction lanes visit five 16-column waves; every valid output contributes
 // once to each of its nine filter weights, including masked edge taps.
+template <index_t ConvStride>
 __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16(
     DepthwiseGroupedRowStripBf16Params a)
 {
+    static_assert(ConvStride == 1 || ConvStride == 2);
     constexpr index_t GroupLanes     = 16;
     constexpr index_t ReductionLanes = 16;
     constexpr index_t FilterSize     = 3;
@@ -87,14 +90,14 @@ __global__ void kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf1
 #pragma unroll
                 for(index_t fy = 0; fy < FilterSize; ++fy)
                 {
-                    const long_index_t hi = 2 * ho + fy - 1;
+                    const long_index_t hi = ConvStride * ho + fy - 1;
                     if(hi >= 0 && hi < a.in_h)
                     {
                         const long_index_t in_row = ((n * a.in_h + hi) * a.in_w) * a.groups + group;
 #pragma unroll
                         for(index_t fx = 0; fx < FilterSize; ++fx)
                         {
-                            const long_index_t wi = 2 * wo + fx - 1;
+                            const long_index_t wi = ConvStride * wo + fx - 1;
                             if(wi >= 0 && wi < a.in_w)
                                 accum[fy * FilterSize + fx] +=
                                     type_convert<float>(a.in[in_row + wi * a.groups]) * dy;
@@ -216,17 +219,17 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
         }
         // Exact packed NHWGC/NHWGK, GKYXC with singleton C and K.
         const long_index_t g = il[0];
-        if(g < 192 || g > 256 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[1] > 42 ||
+        if(g < 192 || g > 512 || ol[0] != g || wl[0] != g || il[1] != ol[1] || il[1] > 42 ||
            il[2] != 1 || wl[1] != 1 || wl[2] != 1 || ol[2] != 1 || wl[3] != 3 || wl[4] != 3 ||
-           ol[3] > 60 || ol[4] > 80 || (il[3] - 1) / 2 + 1 != ol[3] || (il[4] - 1) / 2 + 1 != ol[4])
+           ol[3] > 60 || ol[4] > 80)
             return false;
-        if(fs[0] != 2 || fs[1] != 2 || fd[0] != 1 || fd[1] != 1 || lp[0] != 1 || lp[1] != 1 ||
-           rp[0] < 0 || rp[0] > 1 || rp[1] < 0 || rp[1] > 1)
+        if((fs[0] != 1 && fs[0] != 2) || fs[0] != fs[1] || fd[0] != 1 || fd[1] != 1 || lp[0] != 1 ||
+           lp[1] != 1 || rp[0] < 0 || rp[0] > 1 || rp[1] < 0 || rp[1] > 1)
             return false;
         // MIOpen canonicalizes redundant right padding to zero on even extents.
         // Admit either descriptor only when it describes the supplied output extent.
-        if(il[3] + 1 + rp[0] < 3 || il[4] + 1 + rp[1] < 3 || (il[3] + rp[0] - 2) / 2 + 1 != ol[3] ||
-           (il[4] + rp[1] - 2) / 2 + 1 != ol[4])
+        if(il[3] + 1 + rp[0] < 3 || il[4] + 1 + rp[1] < 3 ||
+           (il[3] + rp[0] - 2) / fs[0] + 1 != ol[3] || (il[4] + rp[1] - 2) / fs[1] + 1 != ol[4])
             return false;
 
         long_index_t image_rows, r;
@@ -283,13 +286,14 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
                                                       const std::array<Index, 2>& rp,
                                                       index_t split)
     {
-        auto a      = std::make_unique<Argument>();
-        a->in       = static_cast<const bhalf_t*>(in);
-        a->wei      = static_cast<bhalf_t*>(wei);
-        a->out      = static_cast<const bhalf_t*>(out);
-        a->partial  = nullptr;
-        a->k_batch_ = (split == -1 || split == 0) ? 1 : split;
-        a->valid    = Validate(il, is, wl, ws, ol, os, fs, fd, lp, rp, split, *a);
+        auto a           = std::make_unique<Argument>();
+        a->in            = static_cast<const bhalf_t*>(in);
+        a->wei           = static_cast<bhalf_t*>(wei);
+        a->out           = static_cast<const bhalf_t*>(out);
+        a->partial       = nullptr;
+        a->k_batch_      = (split == -1 || split == 0) ? 1 : split;
+        a->valid         = Validate(il, is, wl, ws, ol, os, fs, fd, lp, rp, split, *a);
+        a->filter_stride = a->valid ? static_cast<index_t>(fs[0]) : 0;
         return a;
     }
 
@@ -345,16 +349,26 @@ struct DeviceGroupedConvBwdWeightDepthwiseGroupedRowStripBf16 final
                 throw std::runtime_error(
                     "Unsupported BF16 depthwise grouped row-strip WRW argument or scratch");
 
-            auto params          = static_cast<const DepthwiseGroupedRowStripBf16Params&>(*a);
-            params.partial       = static_cast<float*>(a->p_workspace_);
-            const auto stage1_ms = launch_and_time_kernel(
-                stream,
-                kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16,
-                dim3(static_cast<uint32_t>(a->partial_splits),
-                     static_cast<uint32_t>((a->groups - 1) / 16 + 1)),
-                dim3(256),
-                0,
-                params);
+            auto params    = static_cast<const DepthwiseGroupedRowStripBf16Params&>(*a);
+            params.partial = static_cast<float*>(a->p_workspace_);
+            const dim3 stage1_grid(static_cast<uint32_t>(a->partial_splits),
+                                   static_cast<uint32_t>((a->groups - 1) / 16 + 1));
+            const auto stage1_ms =
+                a->filter_stride == 1
+                    ? launch_and_time_kernel(
+                          stream,
+                          kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16<1>,
+                          stage1_grid,
+                          dim3(256),
+                          0,
+                          params)
+                    : launch_and_time_kernel(
+                          stream,
+                          kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_bf16<2>,
+                          stage1_grid,
+                          dim3(256),
+                          0,
+                          params);
             const auto stage2_ms = launch_and_time_kernel(
                 stream,
                 kernel_grouped_conv2d_bwd_weight_depthwise_grouped_row_strip_finalize_bf16,

@@ -379,7 +379,8 @@ ck_impl_fwd_get_solution(const miopen::ExecutionContext* ctx,
                                                  false,
                                                  DeviceOpGFwdPtrs<T, TCompute>,
                                                  CKArgs,
-                                                 miopen::conv::DataInvokeParams>(
+                                                 miopen::conv::DataInvokeParams,
+                                                 true>(
                     *ctx, *problem, std::string(kernel_id));
             },
             [&](auto data_type_val, auto compute_type_val) {

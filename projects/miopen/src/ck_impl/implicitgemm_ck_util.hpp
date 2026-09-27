@@ -992,7 +992,8 @@ template <bool ZeroOutputs,
           typename Input1TposeOp,
           typename Input2TposeOp,
           typename OutputTposeOp,
-          bool NativeForwardWorkspace = false>
+          bool NativeForwardWorkspace = false,
+          bool PlainFwdSetOutput = false>
 ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const miopen::conv::ProblemDescription& problem,
                                     const std::string& kernel_id,
@@ -1001,6 +1002,9 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                                     const OutputTposeOp& output_op)
 {
     assert(problem.IsLayoutDefault());
+    static_assert(!PlainFwdSetOutput ||
+                  (NativeForwardWorkspace && !ZeroOutputs &&
+                   std::is_same_v<CastType, miopen::conv::DataInvokeParams>));
 
     ConvSolution result;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -1076,6 +1080,22 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
         _input2_tr_inst.IsSkippable() && _output_tr_inst.IsSkippable() &&
         _output_init_tr_inst.IsSkippable();
 
+    // Plain 2D BF16 WMMA-v3 and XDL-WMMA-ported FWD use Set for every logical
+    // output element. Other CK families retain the output-init transpose.
+    const bool eligible_output_init_elision =
+        PlainFwdSetOutput && problem.IsDirectionForward() && problem.Is2d() &&
+        problem.IsLayoutDefault() && problem.GetConv().mode == miopenConvolution &&
+        problem.GetConv().trans_output_pads.size() == 2 &&
+        problem.GetConv().trans_output_pads[0] == 0 &&
+        problem.GetConv().trans_output_pads[1] == 0 && problem.IsBfp16() &&
+        !problem.HasNonPackedTensors() && problem.GetGroupCount() == 1 &&
+        problem.GetOutHeight() >= 64 && problem.GetOutWidth() >= 64 &&
+        problem.GetAlphaBetaCase() == DEFAULT &&
+        problem.GetAlpha().GetAsFloat() == 1.0f &&
+        problem.GetBeta().GetAsFloat() == 0.0f &&
+        (id_string.rfind("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<", 0) == 0 ||
+         id_string.rfind("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<", 0) == 0);
+
     result.invoker_factory = [kernel_id_           = kernel_id,
                               split_k_             = split_k,
                               ck_args_             = std::move(ck_args),
@@ -1085,6 +1105,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                               output_tr_inst_      = std::move(_output_tr_inst),
                               output_init_tr_inst_ = std::move(_output_init_tr_inst),
                               borrowable_shape_    = borrowable_shape,
+                              eligible_output_init_elision_ = eligible_output_init_elision,
                               x_desc_ =
                                   problem.IsDirectionForward() ? problem.GetIn() : problem.GetOut(),
                               w_desc_ = problem.GetWeights(),
@@ -1103,6 +1124,7 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 output_tr_inst2      = std::move(output_tr_inst_),
                 output_init_tr_inst2 = std::move(output_init_tr_inst_),
                 borrowable_shape2    = borrowable_shape_,
+                eligible_output_init_elision2 = eligible_output_init_elision_,
                 x_desc2              = std::move(x_desc_),
                 w_desc2              = std::move(w_desc_),
                 y_desc2              = std::move(y_desc_),
@@ -1110,6 +1132,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 workspace_size2      = workspace_size_](
                    const Handle& handle, const AnyInvokeParams& primitive_parameters) mutable {
             handle.ResetKernelTime();
+            (void)borrowable_shape2;
+            (void)workspace_size2;
 
             const auto& data_ctx = primitive_parameters.CastTo<CastType>();
             Data_t workspace_ptr = GetWorkspacePointer<CastType>(data_ctx);
@@ -1150,6 +1174,20 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                         conv_tensors, x_desc2, w_desc2, y_desc2, workspace_ptr, workspace_size2);
             }
 
+            bool skip_output_init = eligible_output_init_elision2;
+            if constexpr(PlainFwdSetOutput)
+            {
+                skip_output_init = skip_output_init &&
+                                   data_ctx.alpha.GetAsFloat() == 1.0f &&
+                                   data_ctx.beta.GetAsFloat() == 0.0f &&
+                                   data_ctx.workSpaceSize >= workspace_size2 &&
+                                   internal::CanBorrowNCHWOperands(conv_tensors,
+                                                                   x_desc2,
+                                                                   w_desc2,
+                                                                   y_desc2,
+                                                                   workspace_ptr,
+                                                                   workspace_size2);
+            }
             if(!borrow)
             {
                 input1_tr_inst2.AssignBuffer(handle, workspace_ptr);
@@ -1163,7 +1201,8 @@ ConvSolution InitInvokerFactoryNCHW(const ExecutionContext& ctx,
                 // ConvertFrom automatically keeps kernel time and accumulates.
                 input1_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
                 input2_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
-                output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
+                if(!skip_output_init)
+                    output_init_tr_inst2.ConvertFrom(handle, kernels, conv_tensors);
             }
             elapsed = handle.IsProfilingEnabled() ? handle.GetKernelTime() : 0.0f;
             if constexpr(ZeroOutputs)
@@ -1394,6 +1433,7 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
                                      std::decay_t<decltype(*sh_conv_ptr2)>,
                                      CKArgsType,
                                      CastType>(sh_conv_ptr2, ck_args2, data_ctx, split_k2);
+                (void)ck_ws_size2;
                 if constexpr(NativeForwardWorkspace)
                 {
                     const auto actual_size = sh_conv_ptr2->GetWorkSpaceSize(argument_ptr.get());
@@ -1450,7 +1490,12 @@ ConvSolution InitInvokerFactoryNHWC(const ExecutionContext&,
     }
 }
 
-template <int ND, bool ZeroOutputs, typename DeviceOpType, typename CKArgsType, typename CastType>
+template <int ND,
+          bool ZeroOutputs,
+          typename DeviceOpType,
+          typename CKArgsType,
+          typename CastType,
+          bool PlainFwdSetOutput = false>
 ConvSolution InitInvokerFactoryFwdNCHW(const ExecutionContext& ctx,
                                        const miopen::conv::ProblemDescription& problem,
                                        const std::string& kernel_id)
@@ -1469,7 +1514,8 @@ ConvSolution InitInvokerFactoryFwdNCHW(const ExecutionContext& ctx,
                                   Input2,
                                   Output,
                                   (ND == 2 &&
-                                   std::is_same_v<CastType, miopen::conv::DataInvokeParams>)>(
+                                   std::is_same_v<CastType, miopen::conv::DataInvokeParams>),
+                                  PlainFwdSetOutput>(
         ctx, problem, kernel_id, Input1{}, Input2{}, Output{});
 }
 

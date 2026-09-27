@@ -458,6 +458,180 @@ TEST(GPU_CkImplLoader_BF16, NchwPointwiseBorrowAndStagedForward)
     run(spatial, false, true);
 }
 
+TEST(GPU_CkImplLoader_BF16, NchwWmmaV3FullOverwriteAndAliasFallback)
+{
+    const auto device_name = GetCurrentDeviceName();
+    if(device_name.find("gfx1250") != 0)
+        GTEST_SKIP() << "BF16 WMMA grouped forward candidates target gfx1250";
+    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
+    if(!loader.IsLoaded())
+    {
+        if(MIOPEN_CK_LIB_PATH)
+            FAIL() << "Explicit CK plugin could not load for " << device_name;
+        GTEST_SKIP() << "CK grouped conv library not installed";
+    }
+
+    constexpr std::size_t SpatialExtent = 65;
+    const miopen::TensorDescriptor x_desc(
+        miopenBFloat16, miopenTensorNCHW, {2, 24, SpatialExtent, SpatialExtent});
+    const miopen::TensorDescriptor w_desc(miopenBFloat16, miopenTensorNCHW, {24, 24, 3, 3});
+    const miopen::ConvolutionDescriptor conv({1, 1}, {1, 1}, {1, 1}, {0, 0}, 1);
+    const auto y_desc = conv.GetForwardOutputTensor(x_desc, w_desc, miopenBFloat16);
+    auto problem      = miopen::conv::ProblemDescription{
+        x_desc, w_desc, y_desc, conv, miopen::conv::Direction::Forward};
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
+
+    const auto kernels =
+        loader.FillValidKernels(CKSolverType::GrpConvFwd, problem, miopenBFloat16, false);
+    const auto wmma_v3 = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
+        return id.find("DeviceGroupedConvFwdMultipleABD_Wmma_CShuffle_V3<") == 0;
+    });
+    const auto xdl_ported = std::find_if(kernels.begin(), kernels.end(), [](const auto& id) {
+        return id.find("DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_WmmaPorted<") == 0;
+    });
+    ASSERT_NE(wmma_v3, kernels.end()) << "No supported BF16 WMMA-v3 candidate for " << device_name;
+    ASSERT_NE(xdl_ported, kernels.end())
+        << "No supported BF16 XDL-WMMA-ported candidate for " << device_name;
+
+    const auto run_selected = [&](const auto& selected) {
+    const auto solution = loader.GetSolution(CKSolverType::GrpConvFwd, ctx, problem, selected, false);
+    ASSERT_EQ(solution.status, miopenStatusSuccess);
+    ASSERT_TRUE(solution.invoker_factory);
+
+    const miopen::TensorDescriptor nhwc_x(
+        miopenBFloat16, miopenTensorNHWC, {2, 24, SpatialExtent, SpatialExtent});
+    const miopen::TensorDescriptor nhwc_w(miopenBFloat16, miopenTensorNHWC, {24, 24, 3, 3});
+    const auto nhwc_y = conv.GetForwardOutputTensor(nhwc_x, nhwc_w, miopenBFloat16);
+    auto native        = miopen::conv::ProblemDescription{
+        nhwc_x, nhwc_w, nhwc_y, conv, miopen::conv::Direction::Forward};
+    native.SetupFloats(ctx);
+    native.SetupComputeType(ctx);
+    const auto native_solution =
+        loader.GetSolution(CKSolverType::GrpConvFwd, ctx, native, selected, false);
+    ASSERT_EQ(native_solution.status, miopenStatusSuccess);
+    EXPECT_EQ(solution.workspace_sz,
+              miopen::solver::GetWorkspaceSizeLayoutTransformConv(problem,
+                                                                  native_solution.workspace_sz));
+    Workspace scratch(solution.workspace_sz);
+    ASSERT_NE(scratch.ptr(), nullptr);
+    const auto invoker =
+        handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+
+    const auto xs = x_desc.GetStrides();
+    const auto ws = w_desc.GetStrides();
+    const auto ys = y_desc.GetStrides();
+    std::vector<bfloat16> x(x_desc.GetElementSize());
+    for(std::size_t n = 0; n < 2; ++n)
+        for(std::size_t c = 0; c < 24; ++c)
+            for(std::size_t h = 0; h < SpatialExtent; ++h)
+                for(std::size_t col = 0; col < SpatialExtent; ++col)
+                    x[n * xs[0] + c * xs[1] + h * xs[2] + col * xs[3]] =
+                        bfloat16{static_cast<float>(static_cast<int>((n * 3 + c * 2 + h * 3 + col) %
+                                                                      5) -
+                                                    2)};
+    std::vector<bfloat16> weights(w_desc.GetElementSize());
+    auto x_dev = handle.Write(x);
+    auto w_dev = handle.Write(weights);
+    auto y_dev = handle.Write(std::vector<bfloat16>(y_desc.GetElementSize(), bfloat16{0.0f}));
+
+    const auto check_output = [&](const auto& output, const auto& expected, int pass) {
+        const auto actual = handle.Read<bfloat16>(output, y_desc.GetElementSize());
+        for(std::size_t n = 0; n < 2; ++n)
+            for(std::size_t k = 0; k < 24; ++k)
+                for(std::size_t h = 0; h < SpatialExtent; ++h)
+                    for(std::size_t col = 0; col < SpatialExtent; ++col)
+                    {
+                        const auto index = n * ys[0] + k * ys[1] + h * ys[2] + col * ys[3];
+                        if(static_cast<float>(actual[index]) !=
+                           static_cast<float>(expected[index]))
+                        {
+                            ADD_FAILURE() << "selected=" << selected << " pass=" << pass
+                                          << " n=" << n << " k=" << k << " h=" << h
+                                          << " w=" << col << " actual="
+                                          << static_cast<float>(actual[index]) << " expected="
+                                          << static_cast<float>(expected[index]);
+                            return;
+                        }
+                    }
+    };
+
+    std::vector<bfloat16> expected(y_desc.GetElementSize());
+    for(int pass : {0, 1})
+    {
+        // Use the same device pointers but different signed weights, dirty output and scratch.
+        for(std::size_t k = 0; k < 24; ++k)
+            for(std::size_t c = 0; c < 24; ++c)
+                for(std::size_t r = 0; r < 3; ++r)
+                    for(std::size_t s = 0; s < 3; ++s)
+                        weights[k * ws[0] + c * ws[1] + r * ws[2] + s * ws[3]] =
+                            bfloat16{static_cast<float>((pass == 0 ? 1 : -1) *
+                                                        (static_cast<int>((k * 3 + c + r * 2 +
+                                                                           s * 3 + pass * 2) %
+                                                                          7) -
+                                                         3))};
+        for(std::size_t n = 0; n < 2; ++n)
+            for(std::size_t k = 0; k < 24; ++k)
+                for(std::size_t h = 0; h < SpatialExtent; ++h)
+                    for(std::size_t col = 0; col < SpatialExtent; ++col)
+                    {
+                        int sum = 0;
+                        for(std::size_t c = 0; c < 24; ++c)
+                            for(int r = 0; r < 3; ++r)
+                                for(int s = 0; s < 3; ++s)
+                                {
+                                    const int ih = static_cast<int>(h) + r - 1;
+                                    const int iw = static_cast<int>(col) + s - 1;
+                                    if(ih >= 0 && ih < static_cast<int>(SpatialExtent) &&
+                                       iw >= 0 && iw < static_cast<int>(SpatialExtent))
+                                    {
+                                        const auto xi = n * xs[0] + c * xs[1] +
+                                                        static_cast<std::size_t>(ih) * xs[2] +
+                                                        static_cast<std::size_t>(iw) * xs[3];
+                                        const auto wi = k * ws[0] + c * ws[1] +
+                                                        static_cast<std::size_t>(r) * ws[2] +
+                                                        static_cast<std::size_t>(s) * ws[3];
+                                        sum += static_cast<int>(static_cast<float>(x[xi])) *
+                                               static_cast<int>(static_cast<float>(weights[wi]));
+                                    }
+                                }
+                        expected[n * ys[0] + k * ys[1] + h * ys[2] + col * ys[3]] =
+                            bfloat16{static_cast<float>(sum)};
+                    }
+
+        handle.WriteTo(weights.data(), w_dev, w_desc.GetNumBytes());
+        const std::vector<bfloat16> poisoned(y_desc.GetElementSize(),
+                                              bfloat16{pass == 0 ? 37.0f : -47.0f});
+        handle.WriteTo(poisoned.data(), y_dev, y_desc.GetNumBytes());
+        ASSERT_EQ(hipMemset(scratch.ptr(), pass == 0 ? 0xa5 : 0x5a, scratch.size()), hipSuccess);
+        const miopen::ConvFwdTensors tensors{
+            x_desc, x_dev.get(), w_desc, w_dev.get(), y_desc, y_dev.get()};
+        invoker(handle,
+                miopen::conv::DataInvokeParams{tensors, scratch.ptr(), scratch.size(), false});
+        handle.Finish();
+        check_output(y_dev, expected, pass);
+        EXPECT_EQ(handle.Read<bfloat16>(x_dev, x_desc.GetElementSize()), x);
+        EXPECT_EQ(handle.Read<bfloat16>(w_dev, w_desc.GetElementSize()), weights);
+    }
+
+    // Identical x/y pointers require the conservative staged fallback, unlike disjoint buffers.
+    auto alias_dev = handle.Write(x);
+    ASSERT_EQ(hipMemset(scratch.ptr(), 0x3c, scratch.size()), hipSuccess);
+    const miopen::ConvFwdTensors alias_tensors{
+        x_desc, alias_dev.get(), w_desc, w_dev.get(), y_desc, alias_dev.get()};
+    invoker(handle,
+            miopen::conv::DataInvokeParams{alias_tensors, scratch.ptr(), scratch.size(), false});
+    handle.Finish();
+    check_output(alias_dev, expected, 2);
+    EXPECT_EQ(handle.Read<bfloat16>(w_dev, w_desc.GetElementSize()), weights);
+    };
+
+    run_selected(*wmma_v3);
+    run_selected(*xdl_ported);
+}
+
 TEST(GPU_CkImplLoader_BF16, NchwPointwiseBackwardBorrowAndFallback)
 {
     const auto device_name = GetCurrentDeviceName();

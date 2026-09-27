@@ -42,9 +42,10 @@ struct Shape
     int g;
     int h;
     int w;
+    int stride = 2;
 
-    int OutH() const { return (h + 1) / 2; }
-    int OutW() const { return (w + 1) / 2; }
+    int OutH() const { return (h - 1) / stride + 1; }
+    int OutW() const { return (w - 1) / stride + 1; }
     int Strips() const { return (OutH() + 7) / 8; }
 };
 
@@ -52,8 +53,8 @@ template <typename Index>
 struct Problem
 {
     std::array<Index, 5> in_lengths, in_strides, wei_lengths, wei_strides, out_lengths, out_strides;
-    std::array<Index, 2> filter_strides{2, 2}, filter_dilations{1, 1}, left_pads{1, 1},
-        right_pads{1, 1};
+    std::array<Index, 2> filter_strides;
+    std::array<Index, 2> filter_dilations{1, 1}, left_pads{1, 1}, right_pads{1, 1};
 
     explicit Problem(Shape shape)
         : in_lengths{shape.g, shape.n, 1, shape.h, shape.w},
@@ -61,7 +62,8 @@ struct Problem
           wei_lengths{shape.g, 1, 1, 3, 3},
           wei_strides{9, 9, 1, 3, 1},
           out_lengths{shape.g, shape.n, 1, shape.OutH(), shape.OutW()},
-          out_strides{1, shape.OutH() * shape.OutW() * shape.g, 1, shape.OutW() * shape.g, shape.g}
+          out_strides{1, shape.OutH() * shape.OutW() * shape.g, 1, shape.OutW() * shape.g, shape.g},
+          filter_strides{shape.stride, shape.stride}
     {
     }
 
@@ -130,12 +132,12 @@ Reference ComputeReference(Shape shape,
                 {
                     for(int ho = 0; ho < shape.OutH(); ++ho)
                     {
-                        const int hi = 2 * ho + fy - 1;
+                        const int hi = shape.stride * ho + fy - 1;
                         if(hi < 0 || hi >= shape.h)
                             continue;
                         for(int wo = 0; wo < shape.OutW(); ++wo)
                         {
-                            const int wi = 2 * wo + fx - 1;
+                            const int wi = shape.stride * wo + fx - 1;
                             if(wi < 0 || wi >= shape.w)
                                 continue;
                             const double x = ck::type_convert<float>(
@@ -259,10 +261,12 @@ void CheckShape(Shape shape)
         const auto reference = ComputeReference(shape, x_nchw, dy_nchw);
         ASSERT_EQ(reference.partials.size(),
                   static_cast<std::size_t>(shape.n) * shape.Strips() * weight_count);
+        const auto tail_group = shape.g - 1;
         const auto tail_center =
-            (static_cast<std::size_t>(shape.n) * shape.Strips() - 1) * weight_count + 192 * 9 + 4;
+            (static_cast<std::size_t>(shape.n) * shape.Strips() - 1) * weight_count +
+            tail_group * 9 + 4;
         ASSERT_GT(reference.partial_magnitudes[tail_center], 0);
-        EXPECT_GT(reference.weight_magnitudes[192 * 9 + 4], 0);
+        EXPECT_GT(reference.weight_magnitudes[tail_group * 9 + 4], 0);
         if(repetition == 1)
             EXPECT_NE(reference.weights, old_weights) << "the second call must change input";
         old_weights = reference.weights;
@@ -372,6 +376,10 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
     wrong_stride.filter_strides[1] = 1;
     EXPECT_FALSE(
         op.IsSupportedArgument(wrong_stride.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    auto unsupported_stride           = problem;
+    unsupported_stride.filter_strides = {3, 3};
+    EXPECT_FALSE(op.IsSupportedArgument(
+        unsupported_stride.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
     auto wrong_pad          = problem;
     wrong_pad.right_pads[0] = 0;
     EXPECT_FALSE(
@@ -384,13 +392,13 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
     huge.out_lengths[3] = std::numeric_limits<ck::long_index_t>::max();
     EXPECT_FALSE(op.IsSupportedArgument(huge.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
 
-    for(int groups : {191, 257})
+    for(int groups : {191, 513})
     {
         const Problem<ck::index_t> out_of_range(Shape{2, groups, 13, 131});
         EXPECT_FALSE(op.IsSupportedArgument(
             out_of_range.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
     }
-    for(int groups : {192, 256})
+    for(int groups : {192, 256, 257, 512})
     {
         const Shape boundary{2, groups, 13, 131};
         const Problem<ck::index_t> supported(boundary);
@@ -411,6 +419,36 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, DryQueriesAndAdmission)
     auto adjusted_arg          = adjusted_target.MakeArgument(op, nullptr, nullptr, nullptr, 1);
     ASSERT_TRUE(op.IsSupportedArgument(adjusted_arg.get()));
     EXPECT_EQ(op.GetWorkSpaceSize(adjusted_arg.get()), 2322432u);
+    for(const Shape stride_one_shape : {Shape{42, 256, 60, 80, 1}, Shape{42, 512, 30, 40, 1}})
+    {
+        const Problem<ck::index_t> stride_one(stride_one_shape);
+        const Problem<ck::long_index_t> long_stride_one(stride_one_shape);
+        ASSERT_EQ(WorkspaceBytes(stride_one_shape), 3096576u);
+        for(const ck::index_t split : {-1, 0, 1})
+        {
+            auto dry = stride_one.MakeArgument(op, nullptr, nullptr, nullptr, split);
+            ASSERT_TRUE(op.IsSupportedArgument(dry.get()))
+                << "groups=" << stride_one_shape.g << " split=" << split;
+            EXPECT_EQ(op.GetWorkSpaceSize(dry.get()), 3096576u);
+            op.SetWorkSpacePointer(dry.get(), dry_workspace.data());
+            EXPECT_THROW(op.MakeInvokerPointer()->Run(dry.get(), StreamConfig{nullptr, false}),
+                         std::runtime_error);
+
+            auto long_dry = long_stride_one.MakeArgument(op, nullptr, nullptr, nullptr, split);
+            ASSERT_TRUE(op.IsSupportedArgument(long_dry.get()))
+                << "long groups=" << stride_one_shape.g << " split=" << split;
+            EXPECT_EQ(op.GetWorkSpaceSize(long_dry.get()), 3096576u);
+            op.SetWorkSpacePointer(long_dry.get(), dry_workspace.data());
+        }
+        auto missing_height_pad          = stride_one;
+        missing_height_pad.right_pads[0] = 0;
+        EXPECT_FALSE(op.IsSupportedArgument(
+            missing_height_pad.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+        auto missing_width_pad          = stride_one;
+        missing_width_pad.right_pads[1] = 0;
+        EXPECT_FALSE(op.IsSupportedArgument(
+            missing_width_pad.MakeArgument(op, nullptr, nullptr, nullptr, 1).get()));
+    }
 }
 
 TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, NchwSerialReferenceAndWorkspaceOwnership)
@@ -418,9 +456,12 @@ TEST(TestGroupedConvndBwdWeightGroupedRowStripBf16, NchwSerialReferenceAndWorksp
     if(!ck::is_gfx125_supported())
         GTEST_SKIP() << "gfx1250-only candidate";
 
-    CheckShape({2, 193, 13, 131}); // one strip, odd width and the ninth group-lane tail
-    CheckShape({5, 193, 25, 17});  // two strips per image, short width and row tails
-    CheckShape({7, 193, 1, 159});  // both outer filter rows are empty for every split
+    CheckShape({2, 193, 13, 131});   // one strip, odd width and the ninth group-lane tail
+    CheckShape({5, 193, 25, 17});    // two strips per image, short width and row tails
+    CheckShape({7, 193, 1, 159});    // both outer filter rows are empty for every split
+    CheckShape({3, 257, 25, 17, 1}); // group tail, four strips with one row in the last
+    CheckShape({2, 512, 13, 39, 1}); // upper group bound and a five-row strip tail
+    CheckShape({7, 193, 1, 79, 1});  // empty outer filter rows at stride one
 }
 
 } // namespace
