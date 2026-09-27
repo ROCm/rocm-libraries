@@ -59,6 +59,16 @@ analyze_hsaco, analyze_llvm_ir, compare_variant_reports
 parse_isa, parse_resources
 ```
 
+## Keeping arithmetic operations separate
+
+`IRBuilder.optimization_barrier(value)` returns the same scalar value and type
+and prevents the compiler from combining operations across that value. Use
+the returned value when an intermediate result must round before the next
+operation. The C API is `rocke_b_optimization_barrier(builder, value)`.
+
+See [the value-barrier guide](../primitives/intrinsics_and_primitives.md#keeping-operations-separate)
+for examples, supported types, and the difference from `sched_barrier`.
+
 ## `from rocke.helpers import ...` (extras not in top-level)
 
 ```text

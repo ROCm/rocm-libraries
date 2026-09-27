@@ -693,6 +693,39 @@ rocke_value_t* rocke_b_register_p_from_qk_c(rocke_ir_builder_t* b,
 /*  inline asm                                                           */
 /* ===================================================================== */
 
+rocke_value_t* rocke_b_optimization_barrier(rocke_ir_builder_t* b, rocke_value_t* value)
+{
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!value || !value->type || value->type->kind != ROCKE_TYPE_SCALAR
+       || value->type->scalar < ROCKE_SCALAR_I1 || value->type->scalar >= ROCKE_SCALAR__COUNT)
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "optimization_barrier requires a numeric scalar or i1");
+    }
+    if(value->type->scalar == ROCKE_SCALAR_I1 || value->type->scalar == ROCKE_SCALAR_I8
+       || value->type->scalar == ROCKE_SCALAR_FP8E4M3
+       || value->type->scalar == ROCKE_SCALAR_BF8E5M2)
+    {
+        bool encoded_float = value->type->scalar == ROCKE_SCALAR_FP8E4M3
+                             || value->type->scalar == ROCKE_SCALAR_BF8E5M2;
+        rocke_value_t* raw = encoded_float ? rocke_b_bitcast(b, value, rocke_i8()) : value;
+        rocke_value_t* wide = rocke_b_zext(b, raw, rocke_i32());
+        rocke_value_t* opaque = rocke_b_optimization_barrier(b, wide);
+        rocke_value_t* narrow = rocke_b_trunc(b, opaque, raw->type);
+        return encoded_float ? rocke_b_bitcast(b, narrow, value->type) : narrow;
+    }
+    rocke_inline_asm_opts_t opts = {};
+    opts.sideeffect_set = true;
+    opts.sideeffect = false;
+    rocke_value_t* operands[] = {value};
+    const rocke_type_t* types[] = {value->type};
+    rocke_op_t* op = rocke_b_inline_asm(b, "", "=v,0", operands, 1, types, 1, &opts);
+    return op ? op->results[0] : NULL;
+}
+
 rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                                const char* asm_template,
                                const char* constraints,

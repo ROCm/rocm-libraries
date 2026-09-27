@@ -2062,6 +2062,31 @@ class IRBuilder:
     def mfma_f32_32x32x16_bf8(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_32x32x16_bf8", a, b, c)
 
+    def optimization_barrier(self, value: Value) -> Value:
+        """Preserve a scalar value while hiding its definition from consumers.
+
+        Use the returned value to prevent arithmetic contraction/reassociation
+        across this dependency, e.g. ``fadd(optimization_barrier(fmul(a,b)),c)``.
+        This preserves an intermediate rounding boundary; it does not disable
+        optimization within the producer or consumer expression.
+
+        Supports numeric scalars and i1 predicates. AMDGPU uses an empty
+        tied-VGPR asm: no instruction is emitted by the barrier itself, but it
+        can require register moves and prevent profitable instruction combines.
+        It has no memory/thread ordering or side effects; unused results may
+        be eliminated. Pointers and vectors are rejected; apply it to extracted
+        vector elements when needed.
+        """
+        if value.type in (I1, I8, FP8E4M3, BF8E5M2):
+            # Lane predicates and byte values cannot directly tie a VGPR.
+            raw = value if value.type in (I1, I8) else self.bitcast(value, I8)
+            wide = self.optimization_barrier(self.zext(raw, I32))
+            narrow = self.trunc(wide, raw.type)
+            return narrow if raw is value else self.bitcast(narrow, value.type)
+        if value.type not in (I8, I16, I32, I64, BF16, F16, F32, FP8E4M3, BF8E5M2):
+            raise ValueError("optimization_barrier requires a numeric scalar or i1")
+        return self.inline_asm("", "=v,0", [value], value.type, sideeffect=False)
+
     def inline_asm(
         self,
         template: str,
