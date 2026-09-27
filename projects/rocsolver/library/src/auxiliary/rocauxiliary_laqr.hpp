@@ -653,9 +653,8 @@ __device__ void hqr_laqr1(const int nn, const T* H, const I ldh, const T s1, con
 /** LAQR5_GRID_BARRIER synchronizes the G thread-blocks of a grid (all of them resident),
     and makes the global memory writes of each one visible to the others. bar points to
     two counters (arrivals and generation); the arrivals counter must be 0 initially, and
-    it is 0 again after each barrier. With wait = false, the thread-block only arrives
-    (its writes are visible to the others when they leave the barrier), and goes on. **/
-__device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G, const bool wait = true)
+    it is 0 again after each barrier. **/
+__device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G)
 {
     __syncthreads();
     if(hipThreadIdx_x == 0)
@@ -670,13 +669,12 @@ __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G, const
             __threadfence();
             atomicAdd(gen, 1u);
         }
-        else if(wait)
+        else
         {
             while(__hip_atomic_load(gen, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) == g0)
                 __builtin_amdgcn_s_sleep(1);
         }
-        if(wait)
-            __threadfence();
+        __threadfence();
     }
     __syncthreads();
 }
@@ -706,16 +704,19 @@ __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G, const
  *    nbmps+1 reflections.
  *
  *    With accum, the chunk may be chased by G > 1 thread-blocks (w = 0:G-1; bar
- *    are the counters of two laqr5_grid_barrier). Thread-block 0 generates the
+ *    are the counters of a laqr5_grid_barrier). Thread-block 0 generates the
  *    reflections of each step (stored in Vbuf, from which the others read them),
  *    multiplies the columns k+1:k+6 of each bulge by them from the left, and the
  *    rows k:k+3 from the right: these contain all the entries that the deflation
  *    checks, the fill-in of the last rows and the reflections of the next step use,
  *    and they depend on no other part of the multiplications. The others multiply
- *    the columns to the right from the left, then the rows above from the right.
- *    Thus there are two grid barriers per step: after the reflections are generated,
- *    and between the multiplications from the left and from the right, where
- *    thread-block 0 does not wait.
+ *    the columns to the right from the left, then the rows above from the right. Of
+ *    the latter, the rows k'+1:k'+3 of an upper bulge m' <= m-2 in the columns k+1:k+3
+ *    of bulge m form a 3-by-3 block that only the reflections of m' (from the left) and
+ *    of m (from the right) touch: one thread applies both. Thread-block 0 also
+ *    multiplies the rows k-2:k-1 of bulge m-1 from the right (it multiplied them from
+ *    the left), and the rows above the first bulge are only multiplied from the right.
+ *    Thus there is one grid barrier per step, after the reflections are generated.
  * ===========================================================================
  */
 template <int BS, typename T, typename I>
@@ -941,6 +942,28 @@ __device__ void laqr5_chunk_block(const bool wantt,
             }
         }
 
+        // apply the reflection of bulge m (2-by-2 if m == m22) from the right to the
+        // pair or triplet of columns starting at column c of the matrix A
+        auto apply_right = [&](const I m, T& a1, T& a2, T& a3) {
+            const T v1 = vv(1, m);
+            const T v2 = vv(2, m);
+            if(m == m22 && bmp22)
+            {
+                T refsum = v1 * (a1 + v2 * a2);
+                a1 = a1 - refsum;
+                a2 = a2 - refsum * conj(v2);
+            }
+            else
+            {
+                const T v3 = vv(3, m);
+                T refsum = v1 * (a1 + v2 * a2 + v3 * a3);
+                a1 = a1 - refsum;
+                a2 = a2 - refsum * conj(v2);
+                a3 = a3 - refsum * conj(v3);
+            }
+        };
+        const I jtop = accum ? std::max(ktop, incol) : (wantt ? I(1) : ktop);
+
         // 2. multiply H by reflections from the left. The bulges act on disjoint rows, so
         //    all the (bulge, column) pairs are independent; they are distributed among the
         //    threads with the bulge index running fastest (the rows k+1:k+3 of consecutive
@@ -972,7 +995,8 @@ __device__ void laqr5_chunk_block(const bool wantt,
             };
 
             // (with G > 1, thread-block 0 updates the columns k+1:k+6 of each bulge, and
-            // the others the columns to their right)
+            // the others the columns to their right, together with most of the rows above
+            // each bulge from the right; see laqr5_chunk_block)
             if(nb > 0 && ncols > 0 && G == 1)
             {
                 for(I idx = tid; idx < nb * ncols; idx += BS)
@@ -988,86 +1012,111 @@ __device__ void laqr5_chunk_block(const bool wantt,
                         apply_left(m, j);
                 }
             }
-            else if(nb > 0 && ncols > 0)
+            else if(nb > 0 && G > 1 && !lead)
             {
-                for(I idx = (w - 1) * BS + tid; idx < nb * ncols; idx += (G - 1) * BS)
+                // work items (distributed together, so that each thread has few):
+                // (a) the 3-by-3 blocks of the bulges m1 <= m-2 (rows k1+1:k1+3) and m
+                //     (columns k+1:k+3), from the left by bulge m1, then from the right by
+                //     bulge m (nb*nb items, the others skipped);
+                // (b) the rows jtop:k(mtop) above the first bulge, from the right only;
+                // (c) the columns to the right of the last bulge, from the left only
+                const I kf = krcol + 3 * (mtop - 1);
+                const I nfree = std::max(std::min(kbot, kf) - jtop + 1, I(0));
+                const I jt0 = std::max(krcol + 3 * (mlast - 1) + 4, j0);
+                const I nt = std::max(jbot - jt0 + 1, I(0));
+                const I na = nb * nb;
+                const I nf = nb * nfree;
+                for(I idx = (w - 1) * BS + tid; idx < na + nf + nb * nt; idx += (G - 1) * BS)
                 {
-                    const I m = mtop + idx % nb;
-                    const I j = j0 + idx / nb;
-                    if(j >= krcol + 3 * (m - 1) + 7)
-                        apply_left(m, j);
+                    if(idx < na)
+                    {
+                        const I m1 = mtop + idx % nb;
+                        const I m = mtop + idx / nb;
+                        if(m1 > m - 2)
+                            continue;
+                        const I k1 = krcol + 3 * (m1 - 1);
+                        const I k = krcol + 3 * (m - 1);
+                        // (the 2-by-2 bulge m22 has two columns; its third, kbot+1, is not
+                        // touched. The loops have constant bounds, so that a stays in
+                        // registers)
+                        const bool c3 = !(m == m22 && bmp22);
+                        T a[3][3] = {};
+                        for(int r = 0; r < 3; r++)
+                            for(int c = 0; c < 3; c++)
+                                if(c < 2 || c3)
+                                    a[r][c] = h(k1 + 1 + r, k + 1 + c);
+                        const T u1 = conj(vv(1, m1));
+                        const T u2 = vv(2, m1);
+                        const T u3 = vv(3, m1);
+                        for(int c = 0; c < 3; c++)
+                        {
+                            if(k + 1 + c < j0 || k + 1 + c > jbot)
+                                continue;
+                            T refsum = u1 * (a[0][c] + conj(u2) * a[1][c] + conj(u3) * a[2][c]);
+                            a[0][c] = a[0][c] - refsum;
+                            a[1][c] = a[1][c] - refsum * u2;
+                            a[2][c] = a[2][c] - refsum * u3;
+                        }
+                        if(vv(1, m) != T(0))
+                            for(int r = 0; r < 3; r++)
+                                if(k1 + 1 + r >= jtop && k1 + 1 + r <= kbot)
+                                    apply_right(m, a[r][0], a[r][1], a[r][2]);
+                        for(int r = 0; r < 3; r++)
+                            for(int c = 0; c < 3; c++)
+                                if(c < 2 || c3)
+                                    h(k1 + 1 + r, k + 1 + c) = a[r][c];
+                    }
+                    else if(idx < na + nf)
+                    {
+                        const I m = mtop + (idx - na) / nfree;
+                        const I r = jtop + (idx - na) % nfree;
+                        const I k = krcol + 3 * (m - 1);
+                        if(vv(1, m) == T(0) || r > k - 1)
+                            continue;
+                        T a3dummy = T(0);
+                        T& a3 = (m == m22 && bmp22) ? a3dummy : h(r, k + 3);
+                        apply_right(m, h(r, k + 1), h(r, k + 2), a3);
+                    }
+                    else
+                    {
+                        const I m = mtop + (idx - na - nf) % nb;
+                        const I j = jt0 + (idx - na - nf) / nb;
+                        if(j >= krcol + 3 * (m - 1) + 7)
+                            apply_left(m, j);
+                    }
                 }
             }
         }
 
-        // (thread-block 0 needs no entry updated by the others until the next step, so it
-        // does not wait here)
-        if(G > 1)
-            laqr5_grid_barrier(bar + 2, G, !lead);
-        else
-            __syncthreads();
+        // (with G > 1, the multiplications from the right of each thread-block only use
+        // entries that the same thread-block multiplied from the left)
+        __syncthreads();
 
         // 3. multiply H by reflections from the right (and, without accum, Z; with accum
         //    they were stored in Vbuf). Delay filling in the last row until the vigilant deflation check
         //    is complete. The bulges act on disjoint columns, so all the (bulge, row) pairs
         //    are independent and are distributed among the threads.
-        const I jtop = accum ? std::max(ktop, incol) : (wantt ? I(1) : ktop);
         {
-            // apply the reflection of bulge m (2-by-2 if m == m22) from the right to the
-            // pair or triplet of columns starting at column c of the matrix A
-            auto apply_right = [&](const I m, T& a1, T& a2, T& a3) {
-                const T v1 = vv(1, m);
-                const T v2 = vv(2, m);
-                if(m == m22 && bmp22)
-                {
-                    T refsum = v1 * (a1 + v2 * a2);
-                    a1 = a1 - refsum;
-                    a2 = a2 - refsum * conj(v2);
-                }
-                else
-                {
-                    const T v3 = vv(3, m);
-                    T refsum = v1 * (a1 + v2 * a2 + v3 * a3);
-                    a1 = a1 - refsum;
-                    a2 = a2 - refsum * conj(v2);
-                    a3 = a3 - refsum * conj(v3);
-                }
-            };
-
             // H: rows jtop:min(kbot,k+3) of each bulge (the range of the last bulge is the
             // longest; shorter ranges skip the extra rows). With G > 1, thread-block 0
-            // updates rows max(jtop,k):min(kbot,k+3), and the others rows jtop:k-1.
+            // updates rows max(jtop,k-2):min(kbot,k+3) (k:k+3 for the first bulge), and the
+            // others the rows above them, in step 2.
             if(nb > 0 && G > 1 && lead)
             {
-                for(I idx = tid; idx < nb * 4; idx += BS)
+                for(I idx = tid; idx < nb * 6; idx += BS)
                 {
-                    const I m = mtop + idx / 4;
+                    const I m = mtop + idx / 6;
                     const I k = krcol + 3 * (m - 1);
-                    const I j = k + idx % 4;
-                    if(vv(1, m) == T(0) || j < jtop || j > std::min(kbot, k + 3))
+                    const I j = k - 2 + idx % 6;
+                    if(vv(1, m) == T(0) || j < jtop || j > std::min(kbot, k + 3)
+                       || (m == mtop && j < k))
                         continue;
                     T a3dummy = T(0);
                     T& a3 = (m == m22 && bmp22) ? a3dummy : h(j, k + 3);
                     apply_right(m, h(j, k + 1), h(j, k + 2), a3);
                 }
             }
-            else if(nb > 0 && G > 1)
-            {
-                const I kmax = krcol + 3 * (mlast - 1);
-                const I nrows = std::min(kbot, kmax - 1) - jtop + 1;
-                for(I idx = (w - 1) * BS + tid; idx < nb * nrows; idx += (G - 1) * BS)
-                {
-                    const I m = mtop + idx / nrows;
-                    const I j = jtop + idx % nrows;
-                    const I k = krcol + 3 * (m - 1);
-                    if(vv(1, m) == T(0) || j > std::min(kbot, k - 1))
-                        continue;
-                    T a3dummy = T(0);
-                    T& a3 = (m == m22 && bmp22) ? a3dummy : h(j, k + 3);
-                    apply_right(m, h(j, k + 1), h(j, k + 2), a3);
-                }
-            }
-            else if(nb > 0)
+            else if(nb > 0 && G == 1)
             {
                 const I kmax = krcol + 3 * (mlast - 1);
                 const I nrows = std::min(kbot, kmax + 3) - jtop + 1;
@@ -1222,7 +1271,7 @@ __device__ void laqr5_build_u_block(const I ktop,
     {
         const I i = r0 + e % nr;
         const I j = 1 + e / nr;
-        U[(i - 1) + (j - 1) * ldu] = t(i, j);
+        U[idx2D(i - 1, j - 1, ldu)] = t(i, j);
     }
 }
 
@@ -1247,8 +1296,11 @@ __device__ void laqr5_left_apply_block(const I n,
     const I tid = hipThreadIdx_x;
     const I kdu = 6 * nbmps - 3;
     const I ldvb = 3 * (nbmps + 1);
-    const I r0 = std::max(incol + 1, I(1));
-    const I r1 = std::min(incol + kdu, n);
+    // (the reflections act on rows ktop:kbot; the rows below kbot may be the workspace of
+    // the products with U of the same chunk, which run concurrently on the side stream, so
+    // they must not be written, even with unchanged values)
+    const I r0 = std::max(incol + 1, ktop);
+    const I r1 = std::min(incol + kdu, kbot);
     auto c = [&](const I r) -> T& { return col[r - incol - 1]; };
 
     for(I r = r0 + tid; r <= r1; r += BS)
