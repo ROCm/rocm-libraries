@@ -174,11 +174,6 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDe
 
         Rpp32f gamma = gammaTensor[batchCount];
 
-        Rpp32f gammaLUT[256];
-        for (int i = 0; i < 256; i++) {
-            gammaLUT[i] = (Rpp32f)pow((((Rpp32f)i) * ONE_OVER_255), gamma);
-        }
-
         Rpp32f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -208,9 +203,9 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDe
 
                 int vectorLoopCount = 0;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[0] * 255))];
-                    *dstPtrTempG = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[1] * 255))];
-                    *dstPtrTempB = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[2] * 255))];
+                    *dstPtrTempR = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[0], gamma));
+                    *dstPtrTempG = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[1], gamma));
+                    *dstPtrTempB = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[2], gamma));
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -243,9 +238,9 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDe
 
                 int vectorLoopCount = 0;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempR * 255))];
-                    dstPtrTemp[1] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempG * 255))];
-                    dstPtrTemp[2] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempB * 255))];
+                    dstPtrTemp[0] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempR, gamma));
+                    dstPtrTemp[1] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempG, gamma));
+                    dstPtrTemp[2] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempB, gamma));
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -274,7 +269,7 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDe
 
                     int vectorLoopCount = 0;
                     for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTemp * 255))];
+                        *dstPtrTemp = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTemp, gamma));
 
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -309,11 +304,6 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDe
 
         Rpp32f gamma = gammaTensor[batchCount];
 
-        Rpp32f gammaLUT[256];
-        for (int i = 0; i < 256; i++) {
-            gammaLUT[i] = (Rpp32f)pow((((Rpp32f)i) * ONE_OVER_255), gamma);
-        }
-
         Rpp16f *srcPtrImage, *dstPtrImage;
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
@@ -343,9 +333,12 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDe
 
                 int vectorLoopCount = 0;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                    *dstPtrTempR = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[0] * 255))];
-                    *dstPtrTempG = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[1] * 255))];
-                    *dstPtrTempB = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[2] * 255))];
+                    *dstPtrTempR =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[0], gamma));
+                    *dstPtrTempG =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[1], gamma));
+                    *dstPtrTempB =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[2], gamma));
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -378,9 +371,12 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDe
 
                 int vectorLoopCount = 0;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    dstPtrTemp[0] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempR * 255))];
-                    dstPtrTemp[1] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempG * 255))];
-                    dstPtrTemp[2] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempB * 255))];
+                    dstPtrTemp[0] =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempR), gamma));
+                    dstPtrTemp[1] =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempG), gamma));
+                    dstPtrTemp[2] =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempB), gamma));
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -409,7 +405,8 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDe
 
                     int vectorLoopCount = 0;
                     for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                        *dstPtrTemp = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTemp * 255))];
+                        *dstPtrTemp =
+                            (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTemp), gamma));
 
                         srcPtrTemp++;
                         dstPtrTemp++;
