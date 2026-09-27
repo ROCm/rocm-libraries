@@ -29,8 +29,6 @@
  */
 
 #pragma once
-#ifndef _ROCBLASLT_TYPES_H_
-#define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
 #ifdef __cplusplus
@@ -756,5 +754,3 @@ namespace rocblaslt
         void* amaxD         = nullptr;
     };
 } // End of namespace rocblaslt
-
-#endif /* _ROCBLASLT_TYPES_H_ */

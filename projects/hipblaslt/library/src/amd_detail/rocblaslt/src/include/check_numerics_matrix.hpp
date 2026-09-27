@@ -30,8 +30,6 @@
  */
 
 #pragma once
-#ifndef HIPBLASLT_CHECK_NUMERICS_MATRIX_HPP
-#define HIPBLASLT_CHECK_NUMERICS_MATRIX_HPP
 
 #include "auxiliary.hpp"
 #include "handle.h"
@@ -445,5 +443,3 @@ inline uint32_t hipblaslt_check_numerics_drain_handle(rocblaslt_handle handle)
         static_cast<void>(hipSetDevice(prev_device));
     return result;
 }
-
-#endif // HIPBLASLT_CHECK_NUMERICS_MATRIX_HPP
