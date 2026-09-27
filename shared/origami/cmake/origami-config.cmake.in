@@ -4,6 +4,8 @@
 include(CMakeFindDependencyMacro)
 find_dependency(hip REQUIRED)
 
+set(ORIGAMI_ENABLE_NN @ORIGAMI_ENABLE_NN@)
+
 include("${CMAKE_CURRENT_LIST_DIR}/origami-targets.cmake")
 
 block(SCOPE_FOR VARIABLES)

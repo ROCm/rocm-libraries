@@ -534,20 +534,19 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       REQUIRE(identical_ai_configs[0].mt.m ==
               results_m_equals_n[0].config.mt.m);  // If M == N, prefer tiles with larger MT_M
 
-      // Test 5: Test with different heuristics_variance values
-      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0", 1);
-      // Read back and parse
+      // Test 5: Test with different heuristics_variance values.
+      // Restore the previous env (Catch2 randomizes test order; leaving 1.0 set
+      // makes later rank_configs treat ~2% latency gaps as AI ties).
+      ScopedEnvVar variance_env("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0");
       double env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 0.0
 
-      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "-1.0", 1);
-      // Read back and parse
+      variance_env.set("-1.0");
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 0.01);  // Return default value 0.01 when
                                  // ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to -1.0
 
-      portable_setenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "1.0", 1);
-      // Read back and parse
+      variance_env.set("1.0");
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
     }
@@ -1345,6 +1344,11 @@ TEST_CASE("Origami: num_cus changes selected config", "[origami]") {
   // Verified to hold on every architecture in test_architectures.
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - CU budget flips ranked winner") {
+      // This assertion is about timestep scaling, not AI tie-breaking. Pin
+      // variance to 0 so a leaked ANALYTICAL_GEMM_HEURISTICS_VARIANCE cannot
+      // re-sort 256x128 vs 192x192 (~2% full-CU latency gap) by intensity.
+      ScopedEnvVar variance_env("ANALYTICAL_GEMM_HEURISTICS_VARIANCE", "0.0");
+
       auto       hardware = make_hardware(gpu_arch);
       const auto mi = hardware.get_recommended_matrix_instruction(origami::data_type_t::BFloat16);
 

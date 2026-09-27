@@ -329,7 +329,16 @@ NB_MODULE(origami, m) {
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
   m.def("select_staggerU", &origami::select_staggerU, "Select best staggerU parameters");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+  m.def("rank_configs",
+        static_cast<std::vector<origami::prediction_result_t> (*)(const origami::problem_t&,
+                                                                 const origami::hardware_t&,
+                                                                 const std::vector<origami::config_t>&,
+                                                                 origami::model_t)>(&origami::rank_configs),
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("configs"),
+        nanobind::arg("model") = origami::model_t::gemm,
+        "Rank configurations by performance");
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
