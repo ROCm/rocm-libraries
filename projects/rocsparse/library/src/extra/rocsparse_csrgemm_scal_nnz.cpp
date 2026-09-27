@@ -126,16 +126,17 @@ rocsparse_status rocsparse::csrgemm_scal_nnz_core(rocsparse_handle          hand
 
         // Copy row pointers
 #define CSRGEMM_DIM 1024
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrgemm_copy<CSRGEMM_DIM>),
-                                           dim3(m / CSRGEMM_DIM + 1),
-                                           dim3(CSRGEMM_DIM),
-                                           0,
-                                           stream,
-                                           m + 1,
-                                           csr_row_ptr_D,
-                                           csr_row_ptr_C,
-                                           descr_D->base,
-                                           descr_C->base);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_copy<CSRGEMM_DIM>),
+            rocsparse::csrgemm_scal_copy_blocks<CSRGEMM_DIM>(handle, m + 1),
+            dim3(CSRGEMM_DIM),
+            0,
+            stream,
+            m + 1,
+            csr_row_ptr_D,
+            csr_row_ptr_C,
+            descr_D->base,
+            descr_C->base);
 #undef CSRGEMM_DIM
     }
     else
