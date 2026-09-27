@@ -1,0 +1,80 @@
+---
+include: rocblas_common.yaml
+
+# Regression for the missing negative-increment chunk compensation in
+# rocblas_internal_rot_launcher_64. copy, swap, rotm and dot's multi-block path
+# all pass
+#
+#   offset + (inc < 0 ? -inc * (n_64 - n - n_base) : n_base * inc)
+#
+# to the 32-bit launcher, which walks a negative increment from the end of each
+# chunk. rot passed only n_base * inc, so for a negative increment chunk k
+# addressed [-kC, -kC + C - 1]: chunk 0 touched the wrong elements and every
+# later chunk lay entirely below the buffer. rot writes both operands, so this
+# was an out-of-bounds write.
+#
+# Only the increment signs are data. The magnitude is fixed at 1 in the C++ so
+# each operand costs n elements rather than n * |inc|, and n is fixed at 2^31 --
+# the smallest value above c_ILP64_i32_max, which is the threshold below which
+# the launcher returns through a single 32-bit call and never chunks. 2^31 is
+# also exactly 8 * c_i64_grid_X_chunk, so the overrun stops at 7 chunks; 2^31 + 1
+# would add a ninth chunk and deepen it by another 2^28 elements.
+#
+# The fix corrects two lines, offset_x and offset_y, so all four sign
+# combinations are covered: neither negative (a control), each alone, and both.
+# Testing only one would leave half the fix unverified and a later edit could
+# break the uncovered line silently.
+#
+# Memory. Each operand with a negative increment carries 7 * c_i64_grid_X_chunk
+# guarded elements below it -- exactly the union of the out-of-bounds chunk
+# ranges -- and one chunk above, which bounds the most plausible wrong fix. The
+# overrun is then reported as a guard trip instead of faulting, and a fault would
+# abort the process and take every later test in the binary with it. That is
+# 24 GiB for one negative increment and 32 GiB for two, hence nightly; the
+# all-positive control needs no guard and is 16 GiB. The test skips rather than
+# fails where the device cannot supply it.
+
+Tests:
+# Control. With both increments positive the offsets reduce to n_base * inc,
+# which the pre-fix code already computed correctly, so this row passes before
+# the fix as well as after it. Its job is to catch a fix that changes the
+# positive-increment path while correcting the negative one -- the expression is
+# a single conditional covering both, so that is a live possibility.
+#
+# It is also the cheapest row, since neither operand needs a guard region, so it
+# is the last to be skipped for want of memory and the most likely to run on a
+# small device.
+- name: rot_ilp64_chunk_control_positive
+  category: nightly
+  arguments:
+    - { incx: 1, incy: 1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+- name: rot_ilp64_chunk_neg_incx
+  category: nightly
+  arguments:
+    - { incx: -1, incy: 1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+- name: rot_ilp64_chunk_neg_incy
+  category: nightly
+  arguments:
+    - { incx: 1, incy: -1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+
+# Largest footprint, so the first to skip on a smaller device. It is not the
+# only row for that reason.
+- name: rot_ilp64_chunk_neg_both
+  category: nightly
+  arguments:
+    - { incx: -1, incy: -1 }
+  function:
+    - rot_ilp64_negative_inc_chunk: *single_precision
+  os_flags: [ LINUX ]
+...

@@ -58,6 +58,7 @@ set(rocblas_no_tensile_test_source
     blas1/iamaxmin_gtest.cpp
     blas1/nrm2_gtest.cpp
     blas1/rot_gtest.cpp
+    blas1/rot_ilp64_chunk_gtest.cpp
     blas1/scal_gtest.cpp
     blas1/swap_gtest.cpp
     # blas1_ex
