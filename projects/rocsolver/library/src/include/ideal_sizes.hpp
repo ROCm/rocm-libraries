@@ -270,6 +270,27 @@
 #define GEHRD_GEHD2_SWITCHSIZE 512
 #endif
 
+/*! \brief Determines when LAHR2 splits the product of each column with the trailing
+    matrix (the memory-bound part of GEHRD) over the columns of the matrix.
+
+    \details With m >= LAHR2_SPLIT_MIN_ROWS rows, the product is computed by
+    about LAHR2_SPLIT_BLOCKS_PER_CU thread-blocks per compute unit, splitting the
+    columns into at most LAHR2_MAX_SPLIT chunks (and at most the number of columns
+    of the block still to be computed, whose storage holds the partial sums), so that
+    the compute units stay busy when m is small compared with their number. Measured on
+    MI300X, the split raises the bandwidth from 3.0-3.5 to 3.7-4.0 TB/s for m between
+    10000 and 20000; for smaller m it gains little, and the extra kernel launch per column
+    makes it slower overall. */
+#ifndef LAHR2_SPLIT_MIN_ROWS
+#define LAHR2_SPLIT_MIN_ROWS 8000
+#endif
+#ifndef LAHR2_SPLIT_BLOCKS_PER_CU
+#define LAHR2_SPLIT_BLOCKS_PER_CU 4
+#endif
+#ifndef LAHR2_MAX_SPLIT
+#define LAHR2_MAX_SPLIT 64
+#endif
+
 /***************** gebal **********************************************
 *******************************************************************************/
 /*! \brief Determines the number of threads of the thread-block that balances
