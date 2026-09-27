@@ -7,10 +7,11 @@ add_library(hipblaslt-clients-common STATIC)
 target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
+    SYSTEM PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
-    PRIVATE
+    SYSTEM PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
@@ -21,6 +22,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
             ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include
             ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include
             ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include
+        SYSTEM PUBLIC
             ${PROJECT_SOURCE_DIR}/tensilelite/rocisa
             ${PROJECT_SOURCE_DIR}/../../shared/origami/include
     )
