@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@703336a7482c9ce323cd3608f34cbd2124820600 # 2026-09-24
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@1260b02f1e54b1bf54f225fb00b6efc581c238ce # 2026-09-24
     with:
       build_variant: "asan"
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
@@ -64,7 +64,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@703336a7482c9ce323cd3608f34cbd2124820600 # 2026-09-24
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@1260b02f1e54b1bf54f225fb00b6efc581c238ce # 2026-09-24
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: "ROCm/TheRock"
           ref: 703336a7482c9ce323cd3608f34cbd2124820600 # 2026-09-24
