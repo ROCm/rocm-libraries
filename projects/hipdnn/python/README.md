@@ -135,6 +135,66 @@ python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 The wheel package uses a `src/` layout, so running pytest from
 `frontend_wheel_package/` does not accidentally import the source package.
 
+## DLPack Interoperability
+
+`Graph.execute()`, `Graph.execute_plan_at_index()`, `Graph.autotune()`, and
+`Graph.autotune_exhaustive_sweep()` take a `variant_pack` keyed by tensor UID
+or by `Tensor`. Each value, and `workspace`, may be one of these kinds, checked
+in this order:
+
+1. An `int` pointer.
+2. A `hipdnn.DeviceBuffer`.
+3. An object with a `data_ptr()` method (for example a PyTorch tensor).
+4. An object that implements `__dlpack__` in host (`cpu`), ROCm (`rocm`), or
+   pinned host (`rocm_host`) memory. The bindings use the DLPack data pointer
+   plus its byte offset.
+
+No data is copied. The caller must keep each object alive until the HIP work
+completes. The bindings call `__dlpack__(copy=False)`, so a producer that can
+export only a copy raises its own error instead of returning memory that nothing
+keeps alive. Errors raised by `__dlpack__` reach the caller unchanged.
+
+`Graph.tensor_like(obj, name="")` also accepts a `__dlpack__` producer. It
+copies the dims and the element strides (row-major when the producer reports
+none) and maps the data type. A host (`cpu`) producer becomes a
+runtime pass-by-value tensor: pass a host tensor for it in the variant pack of
+each execute call. Runtime pass-by-value tensors need an engine plugin that
+reports plugin API 1.2.0 or later. Sub-byte types follow the DLPack
+definition (`lanes=1`); packed exports such as `torch.float4_e2m1fn_x2`
+(`lanes=2`) raise `ValueError`.
+
+```python
+x = torch.randn(8, 16, device="cuda")
+scale = np.full((1, 1), 0.5, np.float32)
+x_t = graph.tensor_like(x, "x")
+scale_t = graph.tensor_like(scale, "scale")  # runtime pass-by-value
+# ... build the graph and plans with x_t and scale_t, producing y_t ...
+graph.execute(handle, {x_t: x, scale_t: scale, y_t: y}, workspace)
+```
+
+For a compile-time constant (plugin API 1.0.0), call `set_value` on the tensor
+instead. It bakes the value into the graph and clears the runtime flag.
+`set_value(value, data_type=None)` supports `FLOAT`, `DOUBLE`, `HALF`,
+`BFLOAT16`, `UINT8`, `INT32`, `INT64`, and `BOOLEAN`. Without `data_type`, it
+keeps the tensor's data type, or infers `BOOLEAN`, `INT64`, or `FLOAT` from a
+Python `bool`, `int`, or `float`. It resets dims and strides to `[1]`, so the
+tensor must have one element.
+
+```python
+scale_t = graph.tensor_like(scale, "scale").set_value(0.5)  # FLOAT constant
+eps_t = hipdnn.Tensor().set_value(1e-5, hipdnn.DataType.DOUBLE)
+```
+
+Code ported from `cudnn.pygraph` needs these changes, because the method
+signatures follow the hipDNN C++ API:
+
+- `execute` and `execute_plan_at_index` take the handle first:
+  `execute(handle, variant_pack, workspace)`, not
+  `execute(tensor_dict, workspace, handle)`.
+- Variant-pack keys cannot be tensor name strings.
+- `tensor_like` has no `is_virtual` argument; call `set_is_virtual(True)` on the
+  result instead.
+
 ## Running the Samples
 
 Sample scripts are source-tree utilities and are not included in the wheel.

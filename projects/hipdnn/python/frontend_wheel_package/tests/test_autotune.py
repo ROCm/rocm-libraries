@@ -12,8 +12,6 @@ get_estimated_max_workspace_size -> autotune`` against the test stub engine.
 
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -956,48 +954,6 @@ class TestAutotuneGpu:
         assert name_graph.deselect_engines([configs[0].engine_name]) is name_graph
 
 
-# Child-process probes, in probes/.
-#
-# The session's conftest pins test_good_plugin in ABSOLUTE mode, and that engine
-# declares no knobs and cannot prime, so knob and priming behaviour needs another
-# plugin. hipdnnSetEnginePluginPaths_ext refuses to re-pin while a handle is
-# alive and would change the engine set every later test sees, so each probe
-# runs in its own interpreter and loads exactly one plugin file: the engine set
-# is then fixed, and plugins added to the test directory later cannot perturb
-# these results. probes/ holds scripts, not test modules; pytest does not
-# collect them, and importing one would perform that very re-pin.
-_PROBE_DIR = Path(__file__).parent / "probes"
-
-
-def _run_plugin_probe(probe, plugin, reason):
-    """Run probes/`probe` in a child process against exactly one test plugin.
-
-    `plugin` is the plugin file name; the child loads it in ABSOLUTE mode, so the
-    engine set is exactly that plugin's. Returns the JSON report the child
-    prints, and fails the calling test with the child's stderr if it exits
-    non-zero.
-    """
-    stub = helpers.stub_engine_path()
-    if stub is None:
-        pytest.skip("no test plugin directory known")
-    plugin_path = Path(stub).parent / plugin
-    if not plugin_path.is_file():
-        pytest.skip(f"{plugin_path} not installed; {reason}")
-
-    env = dict(os.environ)
-    env["HIPDNN_TEST_PROBE_PLUGIN"] = str(plugin_path)
-    env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
-    completed = subprocess.run(
-        [sys.executable, str(_PROBE_DIR / probe)],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    return json.loads(completed.stdout.strip().splitlines()[-1])
-
-
 def _autotune_plugin():
     return (
         "test_autotune_plugin.dll" if os.name == "nt" else "libtest_autotune_plugin.so"
@@ -1019,7 +975,7 @@ def _constraint_plugin():
 @pytest.mark.gpu
 def test_exhaustive_priming_policies():
     """EXHAUSTIVE priming runs, and the failure policy decides abort vs. unprimed."""
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "priming.py", _autotune_plugin(), "no engine supports exhaustive priming"
     )
 
@@ -1049,7 +1005,7 @@ def test_exhaustive_priming_policies():
 @pytest.mark.gpu
 def test_knob_constraints_describe_legal_values():
     """Knob.constraint exposes the ranges a sweep axis can be generated from."""
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "constraints.py", _constraint_plugin(), "no engine declares constrained knobs"
     )
 
@@ -1093,7 +1049,7 @@ def test_knob_settings_end_to_end():
     that the bindings pass the settings through at all, which a rejection of an
     illegal value demonstrates.
     """
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "knob_settings.py", _knobs_plugin(), "no engine declares knobs"
     )
 
@@ -1133,7 +1089,7 @@ def test_knob_settings_end_to_end():
 @pytest.mark.gpu
 def test_engine_sweep_expands_cartesian_product():
     """add_engine_sweep() benchmarks every combination of its knob axes."""
-    report = _run_plugin_probe(
+    report = helpers.run_plugin_probe(
         "sweep.py", _knobs_plugin(), "no engine declares two constrained knobs"
     )
 
