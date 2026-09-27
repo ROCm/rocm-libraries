@@ -1,0 +1,162 @@
+# Config package for the hipSPARSE Fortran bindings.
+#
+#   find_package(hipsparse-fortran REQUIRED)
+#   target_link_libraries(my_app PRIVATE roc::hipsparse_fortran)
+#
+# The bindings ship as one static archive and one .mod set PER FORTRAN COMPILER,
+# because a .mod is not portable across compilers or even across versions of the
+# same compiler. This package therefore checks that the consumer is building with
+# the compiler the bindings were installed for, and fails with a named diagnostic
+# rather than letting the build hit an unreadable .mod much later.
+
+@PACKAGE_INIT@
+
+set(HIPSPARSE_FORTRAN_COMPILER_DIR "@HIPSPARSE_FORTRAN_COMPILER_DIR@")
+
+# A consumer asks "is a hipSPARSE Fortran binding available here?" through
+# hipsparse_FORTRAN_FOUND, which is set whether this package is reached directly
+# by find_package(hipsparse-fortran) or through an OPTIONAL include from
+# hipsparse-config.cmake. It stays FALSE on every early return below.
+set(hipsparse_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(hipsparse-fortran_FOUND FALSE)
+  # One argument, not several. set() with multiple arguments builds a LIST, and
+  # find_package renders a list with a semicolon at every element boundary, so a
+  # message split across lines for readability comes out as
+  # "... find_package: ;add Fortran to ...". string(CONCAT) keeps the source
+  # readable and the rendered text clean.
+  string(CONCAT hipsparse-fortran_NOT_FOUND_MESSAGE
+      "The hipSPARSE Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+# Compare on the compiler EXECUTABLE name, which is what the install layout is
+# keyed on (include/fortran/<compiler>, lib/fortran/<compiler>): CMake's compiler
+# ID would say "LLVMFlang" where the user and the directory both say "amdflang".
+# Taking the basename of CMAKE_Fortran_COMPILER instead would reject a perfectly
+# good consumer that reaches gfortran through mpif90 or gfortran-13.
+#
+# This block MUST mirror the mapping in projects/hipsparse/fortran/CMakeLists.txt
+# exactly: it recomputes, for the compiler the CONSUMER is using, the same
+# directory name the bindings were installed under. The two cannot share code --
+# this file runs in a consumer's build, long after ours is gone -- so they are
+# kept in step by hand. Get it wrong and the check never matches: the package
+# then rejects every consumer with a message claiming a compiler mismatch that
+# does not exist.
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(_hipsparse_fc "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")     # Flang, LLVMFlang
+  set(_hipsparse_fc "amdflang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+  set(_hipsparse_fc "ftn")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+  set(_hipsparse_fc "ifx")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(_hipsparse_fc "ifort")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  set(_hipsparse_fc "nvfortran")
+else()
+  get_filename_component(_hipsparse_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+  string(TOLOWER "${_hipsparse_fc}" _hipsparse_fc)
+endif()
+
+function(_hipsparse_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+# Which per-compiler directory to use.
+#
+# The recorded HIPSPARSE_FORTRAN_COMPILER_DIR is the compiler the package was
+# built with, and it is only a default. A prefix can hold artifacts for several
+# compilers at once, since installing the bindings twice writes
+# include/fortran/gfortran and include/fortran/amdflang side by side, but the
+# config package is written once, so the recorded value names whichever install
+# ran last. Trusting it blindly rejects a consumer whose .mod is present.
+#
+# So prefer the consumer's OWN compiler when its artifacts are installed here,
+# and fall back to the recorded directory when they are not.
+set(_hipsparse_dir "")
+if(EXISTS "${PACKAGE_PREFIX_DIR}/include/fortran/${_hipsparse_fc}/hipsparse.mod")
+  set(_hipsparse_dir "${_hipsparse_fc}")
+else()
+  _hipsparse_dir_matches("${HIPSPARSE_FORTRAN_COMPILER_DIR}" "${_hipsparse_fc}" _hipsparse_ok)
+  if(_hipsparse_ok)
+    set(_hipsparse_dir "${HIPSPARSE_FORTRAN_COMPILER_DIR}")
+  endif()
+endif()
+
+if(NOT _hipsparse_dir)
+  # Name what IS installed, so the reader can see whether they need to rebuild
+  # or merely point at an existing directory.
+  file(GLOB _hipsparse_avail RELATIVE "${PACKAGE_PREFIX_DIR}/include/fortran"
+       "${PACKAGE_PREFIX_DIR}/include/fortran/*")
+  set(hipsparse-fortran_FOUND FALSE)
+  string(CONCAT hipsparse-fortran_NOT_FOUND_MESSAGE
+      "This project builds with ${_hipsparse_fc}, but no hipsparse.mod for it "
+      "is installed under ${PACKAGE_PREFIX_DIR}/include/fortran. Available: "
+      "${_hipsparse_avail}. A Fortran .mod cannot be shared across compilers; "
+      "rebuild the bindings with ${_hipsparse_fc}, or set "
+      "HIPSPARSE_FORTRAN_COMPILER_DIR to the directory to use.")
+  return()
+endif()
+
+# When the bindings were built against the hipSPARSE C library, the imported
+# roc::hipsparse_fortran names roc::hipsparse in its link interface, so that
+# target has to exist BEFORE the targets file is read -- otherwise CMake stops
+# with "the link interface of target roc::hipsparse_fortran contains:
+# roc::hipsparse but the target was not found", which reads like a packaging bug
+# rather than a missing find_package in the consumer. A binding built without the
+# C library (a standalone build with no ROCm on CMAKE_PREFIX_PATH) has no such
+# reference, and demanding the package here would be a dependency the artifact
+# does not have.
+#
+# hipsparse-config.cmake does find_dependency(hip), and hip-config.cmake reaches
+# FindThreads, which hard-errors unless C or CXX is enabled. A Fortran-only
+# consumer has neither, so C is enabled here. Enabling a language from a config
+# package is unusual, and it is done deliberately: the alternative is making
+# every Fortran consumer of these bindings write enable_language(C) for a reason
+# that has nothing to do with their code.
+if(@HIPSPARSE_FORTRAN_NEEDS_C_PACKAGE@)
+  if(NOT TARGET roc::hipsparse)
+    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+      enable_language(C)
+    endif()
+    include(CMakeFindDependencyMacro)
+    find_dependency(hipsparse)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipsparse-fortran-targets.cmake")
+
+# The targets file hardcodes the directory the package was BUILT with. When the
+# consumer's compiler resolved to a different one above, repoint the imported
+# target at it, otherwise the .mod found and the archive linked would disagree.
+if(NOT _hipsparse_dir STREQUAL "${HIPSPARSE_FORTRAN_COMPILER_DIR}")
+  set_target_properties(roc::hipsparse_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/include/fortran/${_hipsparse_dir}")
+  get_target_property(_hipsparse_cfgs roc::hipsparse_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_hipsparse_c IN LISTS _hipsparse_cfgs)
+    set_target_properties(roc::hipsparse_fortran PROPERTIES
+      IMPORTED_LOCATION_${_hipsparse_c}
+        "${PACKAGE_PREFIX_DIR}/lib/fortran/${_hipsparse_dir}/libhipsparse_fortran.a")
+  endforeach()
+endif()
+
+set(hipsparse_FORTRAN_FOUND TRUE)
+
+check_required_components(hipsparse-fortran)
