@@ -112,7 +112,7 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - ExpandPointerSwap: [false]
         # - LocalReadVectorWidth: [4, 8]
-        # - NumElementsPerBatchStore: [0, 16]
+        - NumElementsPerBatchStore: [0, 2]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
