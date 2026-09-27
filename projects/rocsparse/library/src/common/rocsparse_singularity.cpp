@@ -27,7 +27,26 @@
 
 namespace rocsparse
 {
-
+    //
+    // AISPARSE-700. Both kernels below took the batch index as
+    //     const auto tid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+    // which `auto` deduces as unsigned int, so it wrapped at 2^32 batch entries even
+    // though batch_count is int64_t and the device-pointer-mode launch sized grid.x
+    // from the full count. The index is now int64_t and both kernels grid-stride, so
+    // a grid.x clamped against the device limit still covers the whole batch. The
+    // loop bound depends only on hipBlockIdx_x, hipGridDim_x, BLOCKSIZE and
+    // batch_count, all block uniform (AISPARSE-666 idiom).
+    //
+    // The host-pointer-mode path in singularity_get_async already chunks the batch
+    // through the handle buffer and only ever launches a chunk at a time, so it was
+    // never exposed; it is left untouched. The chunking loop is NOT reused for the
+    // device path: it exists solely to stage results through the handle buffer, which
+    // a device-pointer destination does not need.
+    //
+    // For any batch_count below 2^32 -- i.e. everything reachable -- each block runs
+    // exactly one iteration with base == hipBlockIdx_x * BLOCKSIZE, so the element a
+    // thread handles is bit-for-bit the one it handled before.
+    //
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void markers2singularity(int64_t batch_count,
@@ -42,37 +61,41 @@ namespace rocsparse
         const I* __restrict__ symbolic = reinterpret_cast<const I* __restrict__>(symbolic_);
         const I* __restrict__ exact    = reinterpret_cast<const I* __restrict__>(exact_);
         const I* __restrict__ near     = reinterpret_cast<const I* __restrict__>(near_);
-        const auto tid                 = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-        if(tid < batch_count)
+        for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE; base < batch_count;
+            base += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            auto singularity = rocsparse_singularity_none;
-            auto value       = mx;
-
-            if((symbolic != nullptr) && (symbolic[0] != mx))
+            const int64_t tid = base + hipThreadIdx_x;
+            if(tid < batch_count)
             {
-                singularity = rocsparse_singularity_symbolic;
-                value       = symbolic[0];
-            }
+                auto singularity = rocsparse_singularity_none;
+                auto value       = mx;
 
-            if(exact != nullptr)
-            {
-                if(exact[tid] < value)
+                if((symbolic != nullptr) && (symbolic[0] != mx))
                 {
-                    singularity = rocsparse_singularity_numeric_exact;
-                    value       = exact[tid];
+                    singularity = rocsparse_singularity_symbolic;
+                    value       = symbolic[0];
                 }
-            }
 
-            if(near != nullptr)
-            {
-                if(near[tid] < value)
+                if(exact != nullptr)
                 {
-                    singularity = rocsparse_singularity_numeric_near;
-                    value       = near[tid];
+                    if(exact[tid] < value)
+                    {
+                        singularity = rocsparse_singularity_numeric_exact;
+                        value       = exact[tid];
+                    }
                 }
-            }
 
-            s[tid] = singularity;
+                if(near != nullptr)
+                {
+                    if(near[tid] < value)
+                    {
+                        singularity = rocsparse_singularity_numeric_near;
+                        value       = near[tid];
+                    }
+                }
+
+                s[tid] = singularity;
+            }
         }
     }
 
@@ -89,17 +112,21 @@ namespace rocsparse
         const I* __restrict__ symbolic = reinterpret_cast<const I* __restrict__>(symbolic_);
         const I* __restrict__ exact    = reinterpret_cast<const I* __restrict__>(exact_);
         const I* __restrict__ near     = reinterpret_cast<const I* __restrict__>(near_);
-        const auto tid                 = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-        if(tid < batch_count)
+        for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE; base < batch_count;
+            base += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            auto value = mx;
-            if(symbolic != nullptr)
-                value = symbolic[0];
-            if(exact != nullptr)
-                value = std::min(value, exact[tid]);
-            if(near != nullptr)
-                value = std::min(value, near[tid]);
-            s[tid] = (value != mx) ? value : -1;
+            const int64_t tid = base + hipThreadIdx_x;
+            if(tid < batch_count)
+            {
+                auto value = mx;
+                if(symbolic != nullptr)
+                    value = symbolic[0];
+                if(exact != nullptr)
+                    value = std::min(value, exact[tid]);
+                if(near != nullptr)
+                    value = std::min(value, near[tid]);
+                s[tid] = (value != mx) ? value : -1;
+            }
         }
     }
 
@@ -114,6 +141,7 @@ namespace rocsparse
                                                   void*                  data_,
                                                   size_t                 buffer_size_in_bytes,
                                                   void*                  buffer,
+                                                  int64_t                max_grid_size_x,
                                                   hipStream_t            stream)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -207,8 +235,18 @@ namespace rocsparse
 
         case rocsparse_pointer_mode_device:
         {
+            // Clamp grid.x against the device limit; batch_count is int64_t, and the
+            // kernels above grid-stride over whatever the clamp drops. Computed here
+            // rather than through a shared helper because AISPARSE-696 (PR #11512)
+            // has not merged and rocsparse_common.h/.hpp are a live conflict zone
+            // (AISPARSE-677/678/696); once it lands this is
+            //   rocsparse::get_grid_size(
+            //       rocsparse::ceil_div(batch_count, s_blocksize), max_grid_size_x);
+            const int64_t grid_x
+                = std::min<int64_t>((batch_count - 1) / s_blocksize + 1, max_grid_size_x);
+
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((kernel),
-                                               dim3((batch_count - 1) / s_blocksize + 1),
+                                               dim3(grid_x),
                                                dim3(s_blocksize),
                                                0,
                                                stream,
@@ -300,6 +338,7 @@ namespace rocsparse
                                              position,
                                              handle->buffer_size,
                                              handle->buffer,
+                                             handle->properties.maxGridSize[0],
                                              handle->stream));
         return rocsparse_status_success;
     }
@@ -380,6 +419,7 @@ namespace rocsparse
                                              singularity,
                                              handle->buffer_size,
                                              handle->buffer,
+                                             handle->properties.maxGridSize[0],
                                              handle->stream));
         return rocsparse_status_success;
     }
