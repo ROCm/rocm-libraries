@@ -130,10 +130,26 @@ namespace TensileLite
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a             = solution->sizeMapping.cacheHintA(),
                                 .cache_hints_b             = solution->sizeMapping.cacheHintB(),
+                                .cache_hints_d             = solution->sizeMapping.NonTemporalD,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                                 .stream_k                  = solution->sizeMapping.streamK,
                                 .index                     = local_index,
+                                .grvw_a                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwA),
+                                .grvw_b                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwB),
+                                .gwvw_d                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.gwvwD),
+                                .backend                   = origami::tensile_params_t{
+                                    .local_split_u        = solution->sizeMapping.LocalSplitU,
+                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
+                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                    .wave_group_m         = solution->sizeMapping.waveGroup[0],
+                                    .wave_group_n         = solution->sizeMapping.waveGroup[1],
+                                    .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
+                                    .source_swap          = solution->sizeMapping.SourceSwap,
+                                },
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);

@@ -274,3 +274,123 @@ TEST_CASE("Origami streamk: compute_total_latency differs for stream_k=0 vs 5",
   REQUIRE(latency0 < std::numeric_limits<double>::max());
   REQUIRE(latency5 < std::numeric_limits<double>::max());
 }
+
+TEST_CASE("Origami streamk: grid_k_split_aware partial-tile correction", "[streamk]") {
+  // Verifies that grid_k_split_aware returns the correct grid (SK or DP) for
+  // shapes where the partial-tile/DP-efficiency correction logic determines the
+  // outcome.  These cases were identified during the WorkStealing investigation.
+  //
+  //   ipt      = iters_per_tile = floor(K / MT_K)
+  //   DP_eff   = tiles / (ceil(tiles/cu_count) * cu_count)
+  //
+  // Helper: build a problem+config from (tiles, ipt, cu_count, batch) and call
+  // grid_k_split_aware.  MT_K=32; K = ipt*32 so floor(K/MT_K) == ipt exactly.
+  // M=16, N=16*tiles/batch gives exactly `tiles` output tiles for batch==1 and
+  // tiles/batch tiles-per-batch for batched shapes.  cu_budget=0 (no cap).
+
+  auto run = [](size_t tiles, size_t ipt, size_t cu_count, size_t batch = 1) {
+    constexpr size_t MT_M = 16, MT_N = 16, MT_K = 32;
+    const size_t K = std::max<size_t>(ipt, 1) * MT_K;
+    auto p = make_problem(MT_M, MT_N * tiles / batch, K,
+                          origami::transpose_t::T, origami::transpose_t::N, batch);
+    auto c = make_config(MT_M, MT_N, MT_K);
+    c.workspace_size            = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+    p.num_cus = cu_count;
+    return origami::streamk::select_grid_size(p, make_hardware(950), c,
+                                              origami::grid_selection_t::k_split_aware);
+  };
+
+  // ---- Group A: ipt == 1 (tile-streaming, no K-split) --------------------
+  // Force DP when tiles in [2*cu_count, 32*cu_count): L2 N-locality wins.
+
+  // [16, 884736, 32] and tile 16x512x32: tiles=1728, ipt=1.
+  // SK (224 WGs) was ~2× slower than DP (1728 WGs) due to L2 pollution.
+  REQUIRE(run(1728, 1, 224) == 1728);
+
+  // [12, 33554432, 32] and tile 16x448x32: tiles=74899, ipt=1.
+  // tiles=74899 ~334 waves >> 32×cu cap → DP grid too large; SK tile-streaming
+  // (sequential B-panel reuse) wins.  Measured: forcing DP +462µs slower.
+  REQUIRE(run(74899, 1, 224) == 224);
+
+  // tiles=400, ipt=1: tiles < 2*cu_count=448 → keep SK.
+  // Few tiles per WG; SK setup amortization beats a shallow DP wave.
+  REQUIRE(run(400, 1, 224) == 224);
+
+  // ---- Group B: batched shapes → always keep SK (cross-tile A/B reuse) -----
+  // DYNAMIC_GRID=4 sweep confirmed: batched tiny GEMMs (e.g. tf32 N,N,8192,32,25,25)
+  // see no improvement from k_split_aware grid — the SK grid is not the issue.
+  // The batch>1 gate correctly preserves SK tile-streaming for A/B L1/L2 reuse.
+
+  // [16, 96, 32] batch=9216 and tile 16x128x32: tiles=9216, ipt=1.
+  // Batched: SK preserves cross-tile A/B reuse across the batch dimension.
+  REQUIRE(run(9216, 1, 224, 9216) == 224);
+
+  // Batched K-splitting shape: batch=4096, tiles=384, ipt=4.
+  // batch>1 gate fires before DP_eff check → always keep SK.
+  REQUIRE(run(384, 4, 224, 4096) == 224);
+
+  // ---- Group C: ipt > 1, DP_eff < 80% → keep SK -------------------------
+  // tiles barely above cu_count: DP last wave too thin, SK utilization wins.
+
+  // [4096, 4096, 4096] and tile 256x256x32: tiles=256, ipt=128.
+  // DP_eff = 256 / (ceil(256/224)*224) = 256/448 = 57% < 80% → SK preserved.
+  REQUIRE(run(256, 128, 224) == 224);
+
+  // [2048, 8192, 5640] and tile 256x256x32: tiles=256, ipt=176. DP_eff=57%.
+  // Same low-efficiency regime; SK avoids the thin last DP wave.
+  REQUIRE(run(256, 176, 224) == 224);
+
+  // ---- Group D: ipt > 1, DP_eff >= 80%, partial tiles → force DP ---------
+  // Confirmed by DYNAMIC_GRID=4 sweep: grid_k_split_aware returns tiles for
+  // all these shapes, recovering to base latency.
+
+  // [160, 107005, 160] and tile 160x256x32: tiles=419, ipt=5, DP_eff=93%.
+  // floor(419*5/224)=9, 9%5=4 → partial tile → DP.
+  // Measured: SK 44µs, DP 30µs (L2 hit rate 40% vs 73%).
+  REQUIRE(run(419, 5, 224) == 419);
+
+  // [160, 73390, 320] and tile 160x192x64: tiles=382, ipt=5, DP_eff=85%.
+  // Measured: SK 36.9µs, DP 26.3µs ≈ base 26.6µs.
+  REQUIRE(run(382, 5, 224) == 382);
+
+  // [160, 73390, 320] and tile 160x192x64: tiles=382, ipt=5, cu_count=256 (gfx950 full).
+  // sk_grid=224 < cu_count=256 → SK leaves 32 CUs idle → force DP.
+  // Measured: DYNAMIC_GRID=4 sweep confirmed recovery to base latency.
+  REQUIRE(run(382, 5, 256) == 382);
+
+  // [160, 73390, 320] and tile 160x192x64: tiles=382, ipt=5, cu_count=224 (cotenant).
+  // DP_eff: 382/448=85% >= 80% → DP.
+  REQUIRE(run(382, 5, 224) == 382);
+
+  // [256, 98304, 128] and tile 256x256x32: tiles=384, ipt=4, DP_eff=85.7%.
+  // Measured: SK 65µs, DP 47.8µs ≈ base 46.9µs.
+  REQUIRE(run(384, 4, 224) == 384);
+
+  // [2048, 9216, 1480] and tile 256x192x64: tiles=384, ipt=23, DP_eff=85.7%.
+  // Measured: SK 98.1µs, DP 78.8µs ≈ base 78.3µs.
+  REQUIRE(run(384, 23, 224) == 384);
+
+  // [128, 98304, 256] and tile 128x256x32: tiles=384, ipt=8, DP_eff=85.7%.
+  // Measured: SK 48.6µs, DP 40.5µs ≈ base 40.9µs.
+  REQUIRE(run(384, 8, 224) == 384);
+
+  // [9984, 2048, 32768] and tile 192x256x64: tiles=416, ipt=512, DP_eff=92%.
+  // floor(416*512/224)=951, 951%512=439 → partial tile → DP.
+  // Measured: keeping SK here regresses 1.5x (SK 1857µs vs DP 1235µs).
+  REQUIRE(run(416, 512, 224) == 416);
+
+  // ---- Group E: DP_eff < 80% → keep SK (tiles barely above cu_count) ------
+
+  // tiles=300, ipt=5: DP_eff = 300/(2*224)=67% < 80% → SK preserved.
+  REQUIRE(run(300, 5, 224) < 300);
+
+  // ---- Edge cases ---------------------------------------------------------
+
+  // ipt=0: degenerate K (no full K-tiles), no-op → keep whatever grid was found.
+  REQUIRE(run(419, 0, 224) == 224);
+
+  // [4352, 128, 8192] and tile 256x128x32: tiles=17 < cu_count=224.
+  // tiles < cu_count → K-split branch: grid > tiles (multiple K-splits launched).
+  REQUIRE(run(17, 256, 224) > 17);
+}

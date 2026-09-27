@@ -271,7 +271,15 @@ TEST(StreamKLaunchSummaryTest, Sk5OffResolvesStaticSk3)
     ContractionSolution solution;
     initStreamKSolution(solution, 5);
 
-    auto problem = makeGemmProblem(4096, 4224, 64);
+    // Geometry choice matters: the k_split_aware grid selector (skDynamicGrid == 6,
+    // AMDGPU's default) now collapses the grid to the tile count -- i.e. plain DP,
+    // no partials -- whenever DP already fills the CUs efficiently or a tile is a
+    // single k-iteration (see correct_sk_grid_for_partial_tiles in streamk.cpp).
+    // To exercise the "SK5-OFF static path reserves a partial-tile workspace"
+    // intent we need a geometry that KEEPS StreamK partials: depthU=64 with K=512
+    // gives 8 iters/tile, and 2048x2176 -> 272 tiles over 256 CUs underfills DP
+    // (2 waves, the 2nd nearly idle), so the selector keeps a sub-tile-count grid.
+    auto problem = makeGemmProblem(2048, 2176, 512);
     problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     problem.setParams().setStreamKTileSchedulingMode(0); // OFF (static, smCountTarget=0)
 
@@ -281,12 +289,56 @@ TEST(StreamKLaunchSummaryTest, Sk5OffResolvesStaticSk3)
     EXPECT_FALSE(d.effectiveDynamic);
     EXPECT_FALSE(d.isDynamic) << "SK5-OFF must take the static (SK3) sub-path";
     EXPECT_EQ(d.numQueues, 8u); // baked count still reported (informational)
+    // The grid must stay below the tile count, otherwise there are no partials and
+    // the workspace sizing check below would silently assert nothing.
+    ASSERT_NE(d.tiles % d.skGrid, 0u)
+        << "geometry must produce partial tiles (grid < tiles) for this scenario";
     // SK3-static: no per-XCD work-queue region in the workspace it reserves.
     ASSERT_TRUE(d.workspaceAllocated)
         << "scenario must actually reserve a workspace, otherwise the sizing check below "
            "would silently assert nothing";
     EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.skGrid))
         << "static SK3 workspace = partialTileSize(grid), no work-queue region";
+}
+
+// ---------------------------------------------------------------------------
+// SK5 OFF on an efficient-DP geometry: the k_split_aware selector correctly
+// declines StreamK and returns the tile count (plain data-parallel). With a
+// single k-iteration per tile (depthU == K) there is no K to split, and with
+// 1056 tiles over 256 CUs DP already fills the CUs, so grid == tiles: no
+// partials, no workspace. This is NOT the forced/fallback dpOnly source -- the
+// grid simply equals the tile count -- so dpOnly stays false.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, Sk5OffEfficientDpCollapsesToTileGrid)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, 5);
+
+    // 4096x4224 -> 1056 tiles; depthU 64 == K -> 1 iter/tile. k_split_aware
+    // collapses the grid to tiles (DP) for this efficient-DP, single-iter shape.
+    auto problem = makeGemmProblem(4096, 4224, 64);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    problem.setParams().setStreamKTileSchedulingMode(0); // OFF (static, smCountTarget=0)
+
+    auto d = solution.computeStreamKDecisions(problem, env.device);
+
+    // Mode resolution is unchanged: SK5-OFF still takes the static (SK3) sub-path.
+    EXPECT_EQ(d.streamKMode, 5);
+    EXPECT_FALSE(d.effectiveDynamic);
+    EXPECT_FALSE(d.isDynamic) << "SK5-OFF must take the static (SK3) sub-path";
+    EXPECT_EQ(d.numQueues, 8u);
+    // Grid collapsed to the tile count -> plain DP, no partials, no workspace.
+    EXPECT_EQ(d.skGrid, d.tiles) << "efficient-DP single-iter shape collapses to grid == tiles";
+    EXPECT_EQ(d.tiles % d.skGrid, 0u);
+    EXPECT_EQ(d.skTiles, 0u);
+    EXPECT_FALSE(d.partialsPresent);
+    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
+    EXPECT_FALSE(d.workspaceAllocated);
+    // Reached DP by the grid equalling tiles, not by a force flag or a runtime
+    // workspace fallback, so dpOnly is not asserted here.
+    EXPECT_FALSE(d.forceDPOnly);
+    EXPECT_FALSE(d.workspaceDPFallbackFired);
 }
 
 // ---------------------------------------------------------------------------
