@@ -39,6 +39,7 @@
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
+#include "rocblaslt_synchronizer.hpp"
 #include "tensile_host.hpp"
 
 #include <hipblaslt/hipblaslt-opt-in-features.h>
@@ -3458,14 +3459,9 @@ static void bindFlagRegion(const RocblasltContractionProblem&      prob,
                            const TensileLite::ContractionSolution& solution,
                            TensileLite::ContractionInputs&         inputs)
 {
-    const bool readsFlags = prob.streamKFlags != nullptr && solution.sizeMapping.streamK > 0
-                            && solution.sizeMapping.streamKAtomic == 0
-                            // outputAmaxD hands the same pointer to the amax counter,
-                            // which would then land on top of flag zero. Leave those on
-                            // the GSU region: no better than before for that
-                            // combination, but no worse.
-                            && !solution.problemType.outputAmaxD;
-    inputs.Synchronizer = readsFlags ? prob.streamKFlags : prob.Synchronizer;
+    rocblaslt::bindSynchronizer(inputs,
+                               rocblaslt::readsStreamKFlags(solution) ? prob.streamKFlags : nullptr,
+                               prob.Synchronizer);
 }
 
 /******************************************************************************
@@ -3945,22 +3941,13 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // back on the shared GSU region: `data->inputs` survives across
             // initialize() calls, so a Stream-K binding left in place would send
             // an MBSK reduction into the small Stream-K region.
-            void* region = nullptr;
-            if(solution->sizeMapping.streamK > 0 && solution->sizeMapping.streamKAtomic == 0
-               && !solution->problemType.outputAmaxD)
+            if(auto s = rocblaslt::bindSynchronizerForStream(
+                   *handle, rocblaslt::readsStreamKFlags(*solution), stream, 0, data->inputs);
+               s != rocblaslt_status_success)
             {
-                if(rocblaslt_status s = handle->streamKFlagsForStream(stream, 0, &region);
-                   s != rocblaslt_status_success)
-                {
-                    log_error(__func__,
-                              "no Stream-K flag region left: this handle has already handed "
-                              "one to c_syncSkStreamSlots distinct streams");
-                    return s;
-                }
+                log_error(__func__, "no Stream-K flag region left for this stream");
+                return s;
             }
-            // A handle with no Stream-K buffer hands back no region and has no
-            // isolation to offer; the shared region is all there is.
-            data->inputs.Synchronizer = region != nullptr ? region : handle->gsuFlagsForProblem(0);
 
             data->kernels = solution->solve(data->problem, data->inputs, *hardware);
         }
@@ -4046,38 +4033,15 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             // region with every other stream. Every other solution is put back
             // on the GSU region its own problem index owns, for the reason the
             // single-GEMM branch above assigns unconditionally.
-            const bool readsFlags = solution->sizeMapping.streamK > 0
-                                    && solution->sizeMapping.streamKAtomic == 0
-                                    && !solution->problemType.outputAmaxD;
-            // A group is one kernel launch, so two of its problems sharing a
-            // region would let one clear a flag the other is spinning on. Past
-            // c_syncSkSlotsPerStream there is no region left to give them, so
-            // the call is refused rather than wrapped onto slot 0.
-            if(readsFlags
-               && data->inputs.grouped.size() > _rocblaslt_handle::c_syncSkSlotsPerStream)
+            if(auto s = rocblaslt::bindGroupedSynchronizers(
+                   *handle, rocblaslt::readsStreamKFlags(*solution), stream, data->inputs.grouped);
+               s != rocblaslt_status_success)
             {
                 log_error(__func__,
-                          "a Stream-K solution cannot run a grouped GEMM wider than "
-                          "c_syncSkSlotsPerStream problems: the problems past it have no "
-                          "flag region of their own");
-                return rocblaslt_status_invalid_value;
-            }
-            for(size_t i = 0; i < data->inputs.grouped.size(); i++)
-            {
-                void* region = nullptr;
-                if(readsFlags)
-                {
-                    if(rocblaslt_status s = handle->streamKFlagsForStream(stream, i, &region);
-                       s != rocblaslt_status_success)
-                    {
-                        log_error(__func__,
-                                  "no Stream-K flag region left: this handle has already "
-                                  "handed one to c_syncSkStreamSlots distinct streams");
-                        return s;
-                    }
-                }
-                data->inputs.grouped[i].Synchronizer
-                    = region != nullptr ? region : handle->gsuFlagsForProblem(i);
+                          s == rocblaslt_status_invalid_value
+                              ? "a Stream-K group exceeds c_syncSkSlotsPerStream problems"
+                              : "no Stream-K flag region left for this stream");
+                return s;
             }
 
             data->useUserArgs = useUserArgs;

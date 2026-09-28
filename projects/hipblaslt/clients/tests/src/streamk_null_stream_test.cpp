@@ -14,8 +14,8 @@
 // are all taken -- so the number of distinct streams a handle serves before its
 // first refusal counts the blocks that handle has spent. Two handles are
 // counted: one handed nothing but fresh explicit streams, one handed a
-// null-stream matmul first. That matmul has to cost exactly one block, so the
-// second count has to come out one lower. Before the fix it cost nothing and the
+// null-stream matmul first. Repeated null-stream calls must cost exactly one
+// block, so the second count has to come out one lower. Before the fix it cost nothing and the
 // two counts were equal.
 //
 // The claim is unconditional, so no Stream-K solution is needed and the shape
@@ -172,6 +172,10 @@ namespace
             << "the null stream was refused by a handle with every flag block still free";
         ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
+        // Repeating the null stream must reuse its block.
+        ASSERT_EQ(afterNullStream.matmul(nullptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+
         const Count withoutNullStream = countStreamsServed(reference);
         const Count withNullStream    = countStreamsServed(afterNullStream);
 
@@ -191,6 +195,22 @@ namespace
                "keys on nullptr, which the claim loop reads as an unclaimed block, so the block "
                "it was handed stays free for the next stream to take and the two end up sharing "
                "one flag region";
+
+        // Keep alias coverage on a separate handle: on the broken library an
+        // explicit hipStreamLegacy call claims a block and would hide the fact
+        // that the preceding nullptr calls failed to claim one.
+        Handle aliases;
+        setUp(aliases);
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        ASSERT_EQ(aliases.matmul(nullptr), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
+        ASSERT_EQ(aliases.matmul(hipStreamLegacy), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipStreamSynchronize(hipStreamLegacy), hipSuccess);
+        const Count withAliases = countStreamsServed(aliases);
+        EXPECT_EQ(withAliases.refusal, HIPBLAS_STATUS_INTERNAL_ERROR);
+        EXPECT_EQ(withAliases.served, withNullStream.served)
+            << "nullptr and hipStreamLegacy must share one flag block";
 
         EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
