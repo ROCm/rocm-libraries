@@ -54,7 +54,7 @@ import os
 import pytest
 
 from config_harness import emit_kernels_from_config
-from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
