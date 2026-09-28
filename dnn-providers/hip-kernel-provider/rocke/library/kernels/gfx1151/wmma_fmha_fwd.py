@@ -112,6 +112,8 @@ class WmmaFmhaFwdSpec:
     use_sinks: bool = False
     use_alibi: bool = False
     use_qq_bias: bool = False
+    layout: str = "dense"  # "dense" | "ragged" | "paged"
+    page_block_size: int = 0
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16", "bf16"):
@@ -130,6 +132,13 @@ class WmmaFmhaFwdSpec:
             raise ValueError("bottom-right alignment requires causal masking")
         if self.sliding_window < 0 or (self.sliding_window and self.mask_mode != "causal"):
             raise ValueError("sliding-window attention requires a nonnegative width and causal masking")
+        if self.layout not in ("dense", "ragged", "paged"):
+            raise ValueError(f"unsupported attention layout {self.layout!r}")
+        if self.layout == "paged":
+            if self.page_block_size <= 0 or self.page_block_size & (self.page_block_size - 1):
+                raise ValueError("paged attention requires a positive power-of-two page size")
+        elif self.page_block_size:
+            raise ValueError("page_block_size is only valid for paged attention")
         if self.num_kv_heads and self.num_query_heads % self.num_kv_heads != 0:
             raise ValueError(
                 "num_query_heads must be a multiple of num_kv_heads for GQA "
@@ -160,8 +169,11 @@ class WmmaFmhaFwdSpec:
             "causal_br" if self.causal_bottom_right else self.mask_mode,
             "vlds" if self.v_lds_stage else "vgather",
             f"sw{self.sliding_window}" if self.sliding_window else "",
+            self.layout if self.layout != "dense" else "",
+            f"bs{self.page_block_size}" if self.layout == "paged" else "",
             flags={
-                "qtail": self.query_tail, "kvtail": self.kv_tail,
+                "qtail": self.query_tail or self.layout != "dense",
+                "kvtail": self.kv_tail or self.layout != "dense",
                 "softcap": self.use_softcap, "sinks": self.use_sinks,
                 "alibi": self.use_alibi, "qqbias": self.use_qq_bias,
             },
@@ -205,10 +217,10 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
 def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     """Kernel ABI (shared between build + grid helpers).
 
-    Dense self-attention layout: Q/K/V/O are ``[seqlen, num_heads, head_size]``
-    row-major within a batch; the batch axis is the grid Z dim and is folded in
-    via ``seqlen`` * the batch index. Strides are passed explicitly so the same
-    kernel serves both MHA and GQA (kv_head stride differs).
+    Dense Q/K/V/O use token/head strides and per-batch row shifts. Packed
+    layouts append prefix sums or paged-KV metadata after enabled score
+    arguments; their logical lengths are loaded per sequence on the device.
+    K/V page strides are explicit and head elements are contiguous.
     """
     elem = BF16 if spec.dtype == "bf16" else F16
     Q = b.param("Q", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
@@ -261,6 +273,24 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
         params["qq_bias_rows"] = b.param("qq_bias_rows", I32)
         params["qq_bias_cols"] = b.param("qq_bias_cols", I32)
         params["qq_bias_stride"] = b.param("qq_bias_stride", I32)
+    if spec.layout != "dense":
+        params["cu_seqlens_q"] = b.param(
+            "cu_seqlens_q", PtrType(I32, "global"), readonly=True, align=4,
+        )
+        if spec.layout == "ragged":
+            params["cu_seqlens_k"] = b.param(
+                "cu_seqlens_k", PtrType(I32, "global"), readonly=True, align=4,
+            )
+        else:
+            params["seqused_k"] = b.param(
+                "seqused_k", PtrType(I32, "global"), readonly=True, align=4,
+            )
+            params["block_table"] = b.param(
+                "block_table", PtrType(I32, "global"), readonly=True, align=4,
+            )
+            params["block_table_stride"] = b.param("block_table_stride", I32)
+            params["stride_k_block"] = b.param("stride_k_block", I32)
+            params["stride_v_block"] = b.param("stride_v_block", I32)
     return params
 
 
@@ -317,6 +347,33 @@ def _window_tiles(b, width, query_start, query_length, key_length, context, tile
     return start, stop
 
 
+def _paged_rows(b, spec, params, batch, kv_head):
+    page_log2 = b.const_i32(spec.page_block_size.bit_length() - 1)
+    page_mask = b.const_i32(spec.page_block_size - 1)
+    table_row = b.mul(batch, params["block_table_stride"])
+
+    def rows(stride_block, stride_token, stride_head):
+        head_offset = b.mul(kv_head, stride_head)
+
+        def row(b, token):
+            logical_block = b.lshr(token, page_log2)
+            page_token = b.land(token, page_mask)
+            physical_block = b.global_load_i32(
+                params["block_table"], b.add(table_row, logical_block),
+            )
+            return b.add(
+                b.add(b.mul(physical_block, stride_block), b.mul(page_token, stride_token)),
+                head_offset,
+            )
+
+        return row
+
+    return (
+        rows(params["stride_k_block"], params["stride_k_token"], params["stride_k_head"]),
+        rows(params["stride_v_block"], params["stride_v_token"], params["stride_v_head"]),
+    )
+
+
 def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelDef:
     """Build the gfx1151 WMMA FMHA forward ``KernelDef``.
 
@@ -370,21 +427,43 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     # index by stride_{q,o}_token internally, so Q/O only need the row offset;
     # K/V take an additive element offset.
     q_row0 = b.mul(q_tile, c16)  # first Q row of this tile
-    batch_row_q = b.mul(batch, seqlen_q)  # batch shift in Q rows
-    batch_off_k = b.mul(b.mul(batch, seqlen_k), p["stride_k_token"])
-    batch_off_v = b.mul(b.mul(batch, seqlen_k), p["stride_v_token"])
+    if spec.layout == "dense":
+        batch_row_q = b.mul(batch, seqlen_q)  # batch shift in Q rows
+        batch_off_k = b.mul(b.mul(batch, seqlen_k), p["stride_k_token"])
+        batch_off_v = b.mul(b.mul(batch, seqlen_k), p["stride_v_token"])
+    else:
+        next_batch = b.add(batch, b.const_i32(1))
+        batch_row_q = b.global_load_i32(p["cu_seqlens_q"], batch)
+        q_end = b.global_load_i32(p["cu_seqlens_q"], next_batch)
+        seqlen_q = b.sub(q_end, batch_row_q)
+        # Grid X covers the longest sequence; empty/excess query tiles exit
+        # uniformly before any Q/K/V or page-table access.
+        with b.scf_if(b.cmp_ge(q_row0, seqlen_q)):
+            b.ret()
+        if spec.layout == "ragged":
+            k_start = b.global_load_i32(p["cu_seqlens_k"], batch)
+            k_end = b.global_load_i32(p["cu_seqlens_k"], next_batch)
+            seqlen_k = b.sub(k_end, k_start)
+            batch_off_k = b.mul(k_start, p["stride_k_token"])
+            batch_off_v = b.mul(k_start, p["stride_v_token"])
+        else:
+            seqlen_k = b.global_load_i32(p["seqused_k"], batch)
+            batch_off_k = batch_off_v = b.const_i32(0)
     q_global = b.add(q_row0, batch_row_q)
     context = b.sub(seqlen_k, seqlen_q) if spec.causal_bottom_right else b.const_i32(0)
     strict = (
         spec.causal_bottom_right or spec.dtype == "bf16" or spec.kv_tail
         or spec.sliding_window or spec.use_softcap or spec.use_sinks
-        or spec.use_alibi or spec.use_qq_bias
+        or spec.use_alibi or spec.use_qq_bias or spec.layout != "dense"
     )
     masked = b.const_f32(float("-inf")) if strict else None
     score_transform, sink = _score_features(b, spec, p, head, context)
     tile_start, tile_stop = _window_tiles(
         b, spec.sliding_window, q_row0, seqlen_q, seqlen_k, context, c16,
     )
+    k_row, v_row = (None, None)
+    if spec.layout == "paged":
+        k_row, v_row = _paged_rows(b, spec, p, batch, kv_head)
 
     mfma_attention_fwd_inner_body(
         b,
@@ -418,19 +497,21 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         v_token_offset_elems=batch_off_v,
         wmma_v_lds_stage=spec.v_lds_stage,
         arch=arch,
-        wmma_seqlen_q=seqlen_q if spec.query_tail else None,
-        wmma_kv_tail=spec.kv_tail,
+        wmma_seqlen_q=seqlen_q if spec.query_tail or spec.layout != "dense" else None,
+        wmma_kv_tail=spec.kv_tail or spec.layout != "dense",
         extra_score_transform=score_transform,
         sink_log2=sink,
         k_tile_start=tile_start,
         k_tile_stop=tile_stop,
+        k_row_base_fn=k_row,
+        v_row_base_fn=v_row,
     )
     b.ret()
     return b.kernel
 
 
 def wmma_fmha_fwd_grid(spec: WmmaFmhaFwdSpec, *, seqlen_q: int, batch: int):
-    """Cover all query tiles; partial tiles require the query-tail specialization."""
-    if not spec.query_tail and seqlen_q % _BLOCK_M != 0:
+    """Cover the maximum query length; packed layouts always bound partial tiles."""
+    if spec.layout == "dense" and not spec.query_tail and seqlen_q % _BLOCK_M != 0:
         raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {_BLOCK_M}")
     return ((seqlen_q + _BLOCK_M - 1) // _BLOCK_M, spec.num_query_heads, batch)

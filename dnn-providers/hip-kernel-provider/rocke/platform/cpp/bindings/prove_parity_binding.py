@@ -679,7 +679,16 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (2, dict(use_softcap=True, use_alibi=True)),
         (8, dict(use_softcap=True, use_alibi=True)),
     )
-    return configs + [dict(configs[index], **flags) for index, flags in features]
+    configs += [dict(configs[index], **flags) for index, flags in features]
+    layouts = (
+        (0, 0), (7, 0), (12, 0), (15, 0), (16, 0), (39, 0),
+        (0, 16), (7, 64), (12, 16), (15, 32), (16, 32), (17, 64),
+        (26, 64), (33, 32), (38, 16), (39, 64),
+    )
+    return configs + [
+        dict(configs[index], layout="paged" if page else "ragged", page_block_size=page)
+        for index, page in layouts
+    ]
 
 
 def cfgs_attention_unified():

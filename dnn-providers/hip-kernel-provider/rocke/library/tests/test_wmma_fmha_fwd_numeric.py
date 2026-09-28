@@ -242,3 +242,97 @@ def test_qq_bias_bounds_compose_with_window():
     )
     expected = np.broadcast_to(np.array([1.75, 2.5, 3.5], np.float32)[None, :, None, None], (1, 3, 1, 64))
     np.testing.assert_allclose(_run_score_case(case, inputs), expected, atol=1e-3, rtol=0)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@pytest.mark.parametrize("layout", ["ragged", "paged"])
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("v_staging", [False, True])
+def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_staging):
+    if dtype == "bf16":
+        pytest.importorskip("ml_dtypes")
+    from benchmarks.gfx1151.attention.benchmark_sdpa import DeviceBuffers
+    from benchmarks.gfx1151.attention.cases import SdpaCase, make_inputs, reference
+    from kernels.gfx1151.wmma_fmha_fwd import (
+        WmmaFmhaFwdSpec, build_wmma_fmha_fwd, wmma_fmha_fwd_grid,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.packing import pack_args
+
+    case = SdpaCase(
+        "packed_boundaries", "boundary", dtype, 5, 0, 0, 4, 2, 64,
+        layout=layout, mask="causal_bottomright", block_size=16 if layout == "paged" else 0,
+        q_lengths=(0, 17, 1, 3, 0), k_lengths=(9, 19, 1, 0, 0), seed=27,
+    )
+    inputs = make_inputs(case)
+    expected = reference(case, inputs)
+    if layout == "paged":
+        used = np.zeros(inputs.k.shape[:2], dtype=bool)
+        for sequence, length in enumerate(case.k_lengths):
+            for token in range(length):
+                used[inputs.block_table[sequence, token // case.block_size], token % case.block_size] = True
+        inputs.k[~used] = np.nan
+        inputs.v[~used] = np.nan
+    else:
+        # The first sequence has keys but no queries. No other sequence may
+        # use that storage, even through an invalid query tile.
+        inputs.k[:case.k_lengths[0]] = np.nan
+        inputs.v[:case.k_lengths[0]] = np.nan
+
+    rt = Runtime()
+    buffers = DeviceBuffers(rt, inputs)
+    module = None
+    guard = 64
+    count = inputs.q.size
+    rt.free(buffers.ptrs.pop("rocke_out"))
+    output = np.full(count + 2 * guard, 37, dtype=inputs.q.dtype)
+    output[guard:guard + count] = np.nan
+    buffers.add("rocke_out", output)
+    try:
+        spec = WmmaFmhaFwdSpec(
+            head_size=64, num_query_heads=4, num_kv_heads=2, dtype=dtype,
+            layout=layout, page_block_size=case.block_size, v_lds_stage=v_staging,
+            mask_mode="causal", causal_bottom_right=True,
+        )
+        kernel = build_wmma_fmha_fwd(spec)
+        artifact = compile_kernel(kernel, arch="gfx1151", backend="python")
+        module = rt.load_module(artifact.hsaco)
+        values = {
+            "Q": buffers.ptrs["q"], "K": buffers.ptrs["k"], "V": buffers.ptrs["v"],
+            "O": buffers.ptrs["rocke_out"] + guard * output.itemsize,
+            "scale_log2": case.scale * math.log2(math.e),
+            "seqlen_q": max(case.q_lengths), "seqlen_k": max(case.k_lengths),
+            "cu_seqlens_q": buffers.ptrs["cu_seqlens_q"],
+        }
+        for name, array in (("q", inputs.q), ("k", inputs.k), ("v", inputs.v), ("o", inputs.q)):
+            values[f"stride_{name}_token"] = array.strides[-3] // array.itemsize
+            values[f"stride_{name}_head"] = array.strides[-2] // array.itemsize
+        if layout == "ragged":
+            values["cu_seqlens_k"] = buffers.ptrs["cu_seqlens_k"]
+        else:
+            values.update(
+                seqused_k=buffers.ptrs["seqused_k"], block_table=buffers.ptrs["block_table"],
+                block_table_stride=inputs.block_table.shape[1],
+                stride_k_block=inputs.k.strides[0] // inputs.k.itemsize,
+                stride_v_block=inputs.v.strides[0] // inputs.v.itemsize,
+            )
+        signature = [{"name": param.name, "type": param.type.name} for param in kernel.params]
+        rt.launch(
+            module.get_function(artifact.kernel_name),
+            wmma_fmha_fwd_grid(spec, seqlen_q=max(case.q_lengths), batch=case.batch),
+            (spec.block_size, 1, 1), pack_args(signature, values),
+        )
+        rt.sync()
+        actual = buffers.read_output("rocke_out")
+        np.testing.assert_array_equal(actual[:guard], np.full(guard, 37, np.float32))
+        np.testing.assert_array_equal(actual[-guard:], np.full(guard, 37, np.float32))
+        actual = actual[guard:guard + count].reshape(inputs.q.shape)
+        np.testing.assert_allclose(actual, expected, atol=case.atol, rtol=0, equal_nan=False)
+        np.testing.assert_array_equal(actual[-3:], np.zeros((3, 4, 64), np.float32))
+    finally:
+        rt.sync()
+        if module is not None:
+            module.unload()
+        buffers.close()

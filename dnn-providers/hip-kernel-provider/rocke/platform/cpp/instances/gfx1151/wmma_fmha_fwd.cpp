@@ -17,6 +17,7 @@
 
 #include "rocke/instance_gfx1151_wmma_fmha_fwd.h"
 
+#include <bit>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,6 +50,17 @@ static const char* wmma_dtype(const rocke_wmma_fmha_fwd_spec_t* spec)
     if(strcmp(spec->dtype, "bf16") == 0)
         return "bf16";
     return NULL;
+}
+
+static bool wmma_valid_layout(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    if(spec == NULL || spec->layout == NULL)
+        return false;
+    if(strcmp(spec->layout, "paged") == 0)
+        return spec->page_block_size > 0
+               && (spec->page_block_size & (spec->page_block_size - 1)) == 0;
+    return (strcmp(spec->layout, "dense") == 0 || strcmp(spec->layout, "ragged") == 0)
+           && spec->page_block_size == 0;
 }
 
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
@@ -92,6 +104,8 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.use_sinks = false;
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.layout = "dense";
+    s.page_block_size = 0;
     return s;
 }
 
@@ -107,11 +121,11 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 {
     const char* name;
     const char* mask;
-    char h[32], hq[32], hk[32], window[32];
-    const char* parts[8];
+    char h[32], hq[32], hk[32], window[32], page[32];
+    const char* parts[10];
     const char* dtype = wmma_dtype(spec);
 
-    if(spec == NULL || out == NULL || dtype == NULL)
+    if(spec == NULL || out == NULL || dtype == NULL || !wmma_valid_layout(spec))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -140,9 +154,17 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
         snprintf(window, sizeof(window), "sw%d", spec->sliding_window);
         parts[num_parts++] = window;
     }
+    const bool packed = strcmp(spec->layout, "dense") != 0;
+    if(packed)
+        parts[num_parts++] = spec->layout;
+    if(strcmp(spec->layout, "paged") == 0)
+    {
+        snprintf(page, sizeof(page), "bs%d", spec->page_block_size);
+        parts[num_parts++] = page;
+    }
     const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias"};
-    const int flag_on[] = {spec->query_tail, spec->kv_tail, spec->use_softcap,
-                          spec->use_sinks, spec->use_alibi, spec->use_qq_bias};
+    const int flag_on[] = {spec->query_tail || packed, spec->kv_tail || packed,
+                          spec->use_softcap, spec->use_sinks, spec->use_alibi, spec->use_qq_bias};
     return rocke_kernel_name_join(name, parts, num_parts, flag_names, flag_on, 6, out, out_cap, NULL);
 }
 
@@ -199,6 +221,11 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
        || (spec->sliding_window > 0 && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL))
     {
         wmma_set_reason(reason, reason_cap, "sliding-window attention requires a nonnegative width and causal masking");
+        return false;
+    }
+    if(!wmma_valid_layout(spec))
+    {
+        wmma_set_reason(reason, reason_cap, "layout must be dense/ragged with page size zero, or paged with a positive power-of-two page size");
         return false;
     }
 
@@ -357,6 +384,22 @@ static void wmma_declare_params(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd
             (void)rocke_b_param(b, "qq_bias_stride", rocke_i32(), NULL);
         }
     }
+    if(strcmp(spec->layout, "dense") != 0)
+    {
+        const rocke_type_t* ptr_i32 = rocke_ptr_type(b, rocke_i32(), "global");
+        opts.align = 4;
+        (void)rocke_b_param(b, "cu_seqlens_q", ptr_i32, &opts);
+        if(strcmp(spec->layout, "ragged") == 0)
+            (void)rocke_b_param(b, "cu_seqlens_k", ptr_i32, &opts);
+        else
+        {
+            (void)rocke_b_param(b, "seqused_k", ptr_i32, &opts);
+            (void)rocke_b_param(b, "block_table", ptr_i32, &opts);
+            (void)rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
+            (void)rocke_b_param(b, "stride_k_block", rocke_i32(), NULL);
+            (void)rocke_b_param(b, "stride_v_block", rocke_i32(), NULL);
+        }
+    }
 }
 
 struct wmma_score_context
@@ -399,6 +442,29 @@ static rocke_value_t* wmma_score_transform(
         score = rocke_b_fadd(b, score, rocke_b_fmul(b, bias, c->log2e));
     }
     return score;
+}
+
+struct wmma_paged_row_context
+{
+    rocke_value_t* block_table;
+    rocke_value_t* table_row;
+    rocke_value_t* page_log2;
+    rocke_value_t* page_mask;
+    rocke_value_t* stride_block;
+    rocke_value_t* stride_token;
+    rocke_value_t* head_offset;
+};
+
+static rocke_value_t* wmma_paged_row(rocke_ir_builder_t* b, rocke_value_t* token, void* user)
+{
+    const auto* c = static_cast<const wmma_paged_row_context*>(user);
+    rocke_value_t* logical_block = rocke_b_lshr(b, token, c->page_log2);
+    rocke_value_t* page_token = rocke_b_land(b, token, c->page_mask);
+    rocke_value_t* physical_block = rocke_b_global_load_i32(
+        b, c->block_table, rocke_b_add(b, c->table_row, logical_block), 4);
+    rocke_value_t* block_offset = rocke_b_mul(b, physical_block, c->stride_block);
+    rocke_value_t* token_offset = rocke_b_mul(b, page_token, c->stride_token);
+    return rocke_b_add(b, rocke_b_add(b, block_offset, token_offset), c->head_offset);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -474,11 +540,41 @@ static rocke_status_t
 
     /* per-batch shifts (Python op order). */
     q_row0 = rocke_b_mul(b, q_tile, c16); /* first Q row of this tile      */
-    batch_row_q = rocke_b_mul(b, batch, seqlen_q); /* batch shift in Q rows         */
-    batch_off_k
-        = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_k_token"));
-    batch_off_v
-        = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_v_token"));
+    const bool packed = strcmp(spec->layout, "dense") != 0;
+    if(!packed)
+    {
+        batch_row_q = rocke_b_mul(b, batch, seqlen_q);
+        batch_off_k
+            = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_k_token"));
+        batch_off_v
+            = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_v_token"));
+    }
+    else
+    {
+        rocke_value_t* next_batch = rocke_b_add(b, batch, rocke_b_const_i32(b, 1));
+        rocke_value_t* cu_q = rocke_b_get_param(b, "cu_seqlens_q");
+        batch_row_q = rocke_b_global_load_i32(b, cu_q, batch, 4);
+        rocke_value_t* q_end = rocke_b_global_load_i32(b, cu_q, next_batch, 4);
+        seqlen_q = rocke_b_sub(b, q_end, batch_row_q);
+        rocke_if_t guard = rocke_b_scf_if(b, rocke_b_cmp_ge(b, q_row0, seqlen_q));
+        rocke_b_region_enter(b, guard.then_region);
+        rocke_b_ret(b);
+        rocke_b_region_leave(b);
+        if(strcmp(spec->layout, "ragged") == 0)
+        {
+            rocke_value_t* cu_k = rocke_b_get_param(b, "cu_seqlens_k");
+            rocke_value_t* k_start = rocke_b_global_load_i32(b, cu_k, batch, 4);
+            rocke_value_t* k_end = rocke_b_global_load_i32(b, cu_k, next_batch, 4);
+            seqlen_k = rocke_b_sub(b, k_end, k_start);
+            batch_off_k = rocke_b_mul(b, k_start, rocke_b_get_param(b, "stride_k_token"));
+            batch_off_v = rocke_b_mul(b, k_start, rocke_b_get_param(b, "stride_v_token"));
+        }
+        else
+        {
+            seqlen_k = rocke_b_global_load_i32(b, rocke_b_get_param(b, "seqused_k"), batch, 4);
+            batch_off_k = batch_off_v = rocke_b_const_i32(b, 0);
+        }
+    }
 
     /* mfma_attention_fwd_inner_body(...) with the WMMA v-LDS staging flag. */
     memset(&p, 0, sizeof(p));
@@ -512,7 +608,7 @@ static rocke_status_t
     const bool score_features = spec->use_softcap || spec->use_alibi || spec->use_qq_bias;
     const bool strict = spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0
                         || spec->kv_tail || spec->sliding_window > 0
-                        || score_features || spec->use_sinks;
+                        || score_features || spec->use_sinks || packed;
     p.mask_neg_inf = strict ? rocke_b_const_f32(b, -INFINITY) : NULL;
     wmma_score_context features{};
     features.context = p.causal_ctx_offset;
@@ -567,12 +663,31 @@ static rocke_status_t
         p.k_tile_start = rocke_b_div(b, lower, c16);
         p.k_tile_stop = rocke_b_div(b, rocke_b_add(b, upper, last), c16);
     }
+    wmma_paged_row_context paged_k{}, paged_v{};
+    if(strcmp(spec->layout, "paged") == 0)
+    {
+        rocke_value_t* page_log2 = rocke_b_const_i32(
+            b, std::countr_zero(static_cast<unsigned int>(spec->page_block_size)));
+        rocke_value_t* page_mask = rocke_b_const_i32(b, spec->page_block_size - 1);
+        rocke_value_t* table_row = rocke_b_mul(b, batch, rocke_b_get_param(b, "block_table_stride"));
+        rocke_value_t* table = rocke_b_get_param(b, "block_table");
+        paged_k = {table, table_row, page_log2, page_mask,
+                   rocke_b_get_param(b, "stride_k_block"), p.stride_k_token,
+                   rocke_b_mul(b, kv_head, p.stride_k_head)};
+        paged_v = {table, table_row, page_log2, page_mask,
+                   rocke_b_get_param(b, "stride_v_block"), p.stride_v_token,
+                   rocke_b_mul(b, kv_head, p.stride_v_head)};
+        p.k_row_base_fn = wmma_paged_row;
+        p.k_row_base_user = &paged_k;
+        p.v_row_base_fn = wmma_paged_row;
+        p.v_row_base_user = &paged_v;
+    }
     p.k_token_offset_elems = batch_off_k;
     p.v_token_offset_elems = batch_off_v;
     p.wmma_v_lds_stage = spec->v_lds_stage;
     p.arch = arch;
-    p.wmma_seqlen_q = spec->query_tail ? seqlen_q : NULL;
-    p.wmma_kv_tail = spec->kv_tail;
+    p.wmma_seqlen_q = spec->query_tail || packed ? seqlen_q : NULL;
+    p.wmma_kv_tail = spec->kv_tail || packed;
 
     (void)rocke_mfma_attention_fwd_inner_body(b, &p);
 
@@ -628,12 +743,12 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
                                         int batch,
                                         int out[3])
 {
-    if(spec == NULL || out == NULL)
+    if(spec == NULL || out == NULL || !wmma_valid_layout(spec))
     {
         return ROCKE_ERR_VALUE;
     }
-    /* if seqlen_q % BLOCK_M != 0: raise ValueError(...) */
-    if(!spec->query_tail && seqlen_q % ROCKE_WMMA_FMHA_FWD_BLOCK_M != 0)
+    if(strcmp(spec->layout, "dense") == 0 && !spec->query_tail
+       && seqlen_q % ROCKE_WMMA_FMHA_FWD_BLOCK_M != 0)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -654,7 +769,7 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
                                              size_t* out_count)
 {
     if(spec == NULL || arena == NULL || out_items == NULL || out_count == NULL
-       || wmma_dtype(spec) == NULL)
+       || wmma_dtype(spec) == NULL || !wmma_valid_layout(spec))
         return ROCKE_ERR_VALUE;
     rocke_ir_builder_t b;
     rocke_status_t status = rocke_ir_builder_init(&b, "rocke_wmma_fmha_fwd_sig_probe");

@@ -24,23 +24,25 @@ class RockeKernels:
     def prepare(self, case, buffers):
         # These gates describe the existing adapter, not hardware limitations.
         # Unsupported rows remain mandatory in the frozen coverage corpus.
-        if case.layout != "dense":
-            raise UnsupportedCase("gfx1151 has no paged/packed attention adapter")
         if case.dtype not in ("fp16", "bf16") or case.kv_dtype:
             raise UnsupportedCase("WMMA adapter requires matching fp16/bf16 Q/K/V storage")
+        max_q = max(case.q_lengths, default=case.seqlen_q)
+        max_k = max(case.k_lengths, default=case.seqlen_k)
         spec = WmmaFmhaFwdSpec(
             head_size=case.head_dim, num_query_heads=case.heads_q,
             num_kv_heads=case.heads_kv,
             mask_mode="none" if case.mask == "none" else "causal",
             dtype=case.dtype,
             causal_bottom_right=case.mask == "causal_bottomright",
-            query_tail=case.seqlen_q % 16 != 0,
-            kv_tail=case.seqlen_k % 16 != 0,
+            query_tail=max_q % 16 != 0,
+            kv_tail=max_k % 16 != 0,
             sliding_window=case.window,
             use_softcap=case.softcap > 0,
             use_sinks=case.sinks,
             use_alibi=case.alibi,
             use_qq_bias=case.qq_bias,
+            layout=case.layout,
+            page_block_size=case.block_size,
         )
         key = spec.kernel_name()
         if key not in self.cache:
@@ -56,7 +58,7 @@ class RockeKernels:
         values = {
             "Q": buffers.ptrs["q"], "K": buffers.ptrs["k"], "V": buffers.ptrs["v"],
             "O": buffers.ptrs["rocke_out"], "scale_log2": case.scale * math.log2(math.e),
-            "seqlen_q": case.seqlen_q, "seqlen_k": case.seqlen_k,
+            "seqlen_q": max_q, "seqlen_k": max_k,
             "stride_q_token": q.strides[-3] // q.itemsize,
             "stride_q_head": q.strides[-2] // q.itemsize,
             "stride_k_token": k.strides[-3] // k.itemsize,
@@ -79,8 +81,21 @@ class RockeKernels:
                 qq_bias_rows=bias.shape[0], qq_bias_cols=bias.shape[1],
                 qq_bias_stride=bias.strides[0] // bias.itemsize,
             )
+        if spec.layout != "dense":
+            values["cu_seqlens_q"] = buffers.ptrs["cu_seqlens_q"]
+            if spec.layout == "ragged":
+                values["cu_seqlens_k"] = buffers.ptrs["cu_seqlens_k"]
+            else:
+                table = buffers.arrays["block_table"]
+                values.update(
+                    seqused_k=buffers.ptrs["seqused_k"],
+                    block_table=buffers.ptrs["block_table"],
+                    block_table_stride=table.strides[0] // table.itemsize,
+                    stride_k_block=k.strides[0] // k.itemsize,
+                    stride_v_block=v.strides[0] // v.itemsize,
+                )
         packed = pack_args(signature, values)
-        grid = wmma_fmha_fwd_grid(spec, seqlen_q=case.seqlen_q, batch=case.batch)
+        grid = wmma_fmha_fwd_grid(spec, seqlen_q=max_q, batch=case.batch)
 
         def launch(stream):
             self.rt.launch(fn, grid, (spec.block_size, 1, 1), packed,

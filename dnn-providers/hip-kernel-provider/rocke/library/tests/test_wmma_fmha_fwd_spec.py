@@ -87,6 +87,32 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
 
+    def test_layout_page_size_contract(self):
+        for layout, page in (
+            ("unknown", 0), ("dense", 16), ("ragged", 16),
+            ("paged", 0), ("paged", -16), ("paged", 3),
+        ):
+            with self.subTest(layout=layout, page=page), self.assertRaises(ValueError):
+                WmmaFmhaFwdSpec(
+                    head_size=64, num_query_heads=4, layout=layout, page_block_size=page,
+                )
+
+    def test_packed_grids_cover_longest_sequence(self):
+        for layout, page in (("ragged", 0), ("paged", 16)):
+            spec = WmmaFmhaFwdSpec(
+                head_size=64, num_query_heads=4, layout=layout, page_block_size=page,
+            )
+            for length, tiles in ((1, 1), (16, 1), (17, 2)):
+                with self.subTest(layout=layout, length=length):
+                    self.assertEqual(wmma_fmha_fwd_grid(spec, seqlen_q=length, batch=3), (tiles, 4, 3))
+
+    def test_layout_cache_keys_separate_addressing(self):
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
+        variants = [base, replace(base, layout="ragged")]
+        variants += [replace(base, layout="paged", page_block_size=page) for page in (16, 32, 64)]
+        for left, right in combinations(variants, 2):
+            self.assertNotEqual(left.kernel_name(), right.kernel_name())
+
 
 if __name__ == "__main__":
     unittest.main()

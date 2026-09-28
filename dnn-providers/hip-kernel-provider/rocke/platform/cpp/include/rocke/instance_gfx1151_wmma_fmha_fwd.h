@@ -65,8 +65,10 @@ extern "C" {
  *   causal_bottom_right : shift the causal diagonal by Sk-Sq; requires CAUSAL.
  *   query_tail/kv_tail : independent partial-tile specializations; default false.
  *   use_softcap/use_sinks/use_alibi/use_qq_bias : optional runtime score inputs.
+ *   layout           : dense, ragged (packed Q/K/V), or paged (packed Q).
+ *   page_block_size  : positive power of two for paged; zero otherwise.
  *
- * dtype is referenced as-is; keep it alive while using the spec. */
+ * dtype and layout are referenced as-is; keep them alive while using the spec. */
 typedef struct rocke_wmma_fmha_fwd_spec
 {
     int head_size;
@@ -84,6 +86,8 @@ typedef struct rocke_wmma_fmha_fwd_spec
     bool use_sinks;
     bool use_alibi;
     bool use_qq_bias;
+    const char* layout; /* "dense" default; "ragged" or "paged" use packed Q */
+    int page_block_size; /* positive power of two for paged; zero otherwise */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -125,16 +129,16 @@ rocke_kernel_def_t* rocke_build_wmma_fmha_fwd(rocke_ir_builder_t* b,
 
 /* wmma_fmha_fwd_grid(spec, seqlen_q, batch) ->
  * (ceil(seqlen_q / BLOCK_M), num_query_heads, batch). Writes three axes to out.
- * Without query_tail, a non-multiple of BLOCK_M is rejected and out is left
- * unchanged. Native callers must select tail flags for the true runtime lengths. */
+ * Dense mode without query_tail rejects a non-multiple of BLOCK_M without
+ * modifying out. Packed modes always bound tails; pass the maximum query length. */
 rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
                                         int seqlen_q,
                                         int batch,
                                         int out[3]);
 
 /* The specialized kernel ABI signature: Q/K/V/O, scale, lengths and strides,
- * followed by enabled feature arguments. Names and type strings are owned by
- * `arena` and remain valid after the internal probe builder is freed.
+ * followed by enabled score arguments and layout metadata. Names and type strings
+ * are owned by `arena` and remain valid after the internal probe builder is freed.
  * Failure leaves the output pointers untouched. */
 rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* spec,
                                              rocke_arena_t* arena,

@@ -51,7 +51,7 @@ FP16 kernel-cache names remain unchanged; BF16 has distinct names, preventing
 cross-dtype cache collisions. Both causal and noncausal paths and the optional
 V-LDS staging path support the dtype selection. Aligned query/KV tiles remain
 the default specialization; the independent tail flags below handle partial
-tiles. Packed and paged layouts are not implied by dense-tail support.
+tiles. Packed and paged inputs use the explicit layout selection below.
 
 The C `rocke_wmma_fmha_fwd_spec_t` now includes `dtype`, initialized to `"fp16"`
 by `rocke_wmma_fmha_fwd_spec_default()`. Native callers must rebuild against
@@ -113,6 +113,35 @@ and its I32 row count, column count, and element row stride. Disabled features
 add no arguments. Use the actual `KernelDef.params` or native signature API,
 and the standard kernarg packer, rather than packing mixed pointers/scalars
 without alignment. Native signatures own their names/types in the caller arena.
+
+### Packed variable lengths and paged KV
+
+`layout="ragged"` reads packed Q/O `[total_q,Hq,D]` and K/V
+`[total_k,Hkv,D]`, with I32 `cu_seqlens_q` and `cu_seqlens_k` prefix sums.
+`layout="paged"` keeps packed Q/O and reads K/V caches
+`[num_pages,page_block_size,Hkv,D]` through an I32 `block_table`; per-sequence
+KV lengths come from I32 `seqused_k`. Page size is a positive power of two.
+The block table need not be identity, contiguous, or sequence-ordered.
+
+Pass the maximum query length to `wmma_fmha_fwd_grid` and the sequence count
+as `batch`. Each workgroup loads its sequence's real lengths on the device;
+query tiles beyond that sequence return before touching Q/K/V. Both packed
+layouts always enable query and KV tail bounds, independently of the dense
+specialization flags. Empty-KV sequences produce zero output. Bottom-right
+alignment, windows, and score features use per-sequence logical positions,
+not packed offsets or physical page numbers.
+
+Layout metadata follows the enabled score arguments in the ABI. Ragged adds
+`cu_seqlens_q`, `cu_seqlens_k`. Paged adds `cu_seqlens_q`, `seqused_k`,
+`block_table`, `block_table_stride`, `stride_k_block`, `stride_v_block`.
+All strides are in their pointer's element units; page strides are separate
+from token/head strides. K/V head elements remain contiguous. No host
+densification or input/output padding is required.
+
+The native spec and pybind conversion mirror these fields. Existing dense
+configurations retain their ABI and emitted code. Numeric regressions cover
+empty query/KV sequences, mixed lengths, shuffled pages, poisoned padding,
+output guards, both dtypes, and both V-staging choices.
 
 The sections below are a historical campaign, not results for this comparator.
 

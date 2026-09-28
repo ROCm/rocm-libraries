@@ -3263,12 +3263,15 @@ rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<st
     s.use_sinks = dict_bool(d, "use_sinks", s.use_sinks);
     s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
     {
         std::string v;
         if(dict_str(d, "mask_mode", v))
             s.mask_mode = parse_fmha_mask(v);
         if(dict_str(d, "dtype", v))
             s.dtype = keep(v);
+        if(dict_str(d, "layout", v))
+            s.layout = keep(v);
         if(dict_str(d, "name", v))
             s.name = keep(v);
     }
