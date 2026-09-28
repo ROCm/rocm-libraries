@@ -18,7 +18,7 @@ from dispatch.attention import (
 )
 from dispatch.attention.bindings import bind_dense_attention_torch
 from dispatch.attention.common import AttentionTuningSpec, _problem
-from dispatch.attention.gfx942 import _dense_spec as _dense_spec_gfx942
+from dispatch.attention.gfx942_dense import _dense_spec as _dense_spec_gfx942
 from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 from dispatch.attention.tuning_common import (
     AttentionGeometryVariant,

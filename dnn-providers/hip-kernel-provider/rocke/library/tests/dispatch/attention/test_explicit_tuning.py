@@ -188,7 +188,7 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
 
 class TestAttentionTuningRegistry(unittest.TestCase):
     def test_tuning_candidates_are_arch_specific_and_opt_in(self):
-        from dispatch.attention.gfx942_tuning import GFX942_TUNING_VARIANTS
+        from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
         from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
 
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]

@@ -94,7 +94,7 @@ def _spec(
     dtype, d, hq, hkv, persistent, *, causal=True, batch=1, sq=512, sliding_window=0
 ):
     """The SHIPPED gfx942 dense spec for a cohort row, built through the dispatch
-    factory (``dispatch.attention.gfx942._dense_spec``) rather than hand-rolled.
+    factory (``dispatch.attention.gfx942_dense._dense_spec``) rather than hand-rolled.
 
     Hand-rolling the spec silently pins every tuned lever to the shared (gfx950)
     dataclass default, so the lane would assert on configs that do not ship. The
@@ -120,7 +120,7 @@ def _spec(
     # Imported lazily, mirroring the golden sibling: keeps module import (and hence
     # CPU collection of this gpu-marked file) independent of the dispatch package.
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx942_dense import _dense_spec
 
     return _dense_spec(
         AttentionRequest(

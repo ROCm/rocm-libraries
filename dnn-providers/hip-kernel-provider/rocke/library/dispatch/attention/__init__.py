@@ -33,7 +33,14 @@ from rocke.dispatch.core import (
     stable_json_hash,
 )
 
-from . import generic, gfx942, gfx942_tuning, gfx950_dense, gfx950_unified, gfx1250
+from . import (
+    generic,
+    gfx942_dense,
+    gfx942_unified,
+    gfx950_dense,
+    gfx950_unified,
+    gfx1250,
+)
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_DIM_VOCABULARY,
@@ -64,16 +71,16 @@ ATTENTION_EXECUTION_REGISTRY = CandidateRegistry(
     require_torch_binding=True,
 )
 generic.register(ATTENTION_ROUTE_REGISTRY)
-gfx942.register_route(ATTENTION_ROUTE_REGISTRY)
+gfx942_dense.register_route(ATTENTION_ROUTE_REGISTRY)
+gfx942_unified.register_route(ATTENTION_ROUTE_REGISTRY)
 gfx950_dense.register_route(ATTENTION_ROUTE_REGISTRY)
 gfx950_unified.register_route(ATTENTION_ROUTE_REGISTRY)
 gfx1250.register(ATTENTION_ROUTE_REGISTRY)
-gfx942_tuning.register(ATTENTION_ROUTE_REGISTRY)
-gfx942.register_execution(ATTENTION_EXECUTION_REGISTRY)
-gfx950_dense.register_route(ATTENTION_EXECUTION_REGISTRY)
+gfx942_dense.register_route(ATTENTION_EXECUTION_REGISTRY)
+gfx942_unified.register_execution(ATTENTION_EXECUTION_REGISTRY)
+gfx950_dense.register_execution(ATTENTION_EXECUTION_REGISTRY)
 gfx950_unified.register_execution(ATTENTION_EXECUTION_REGISTRY)
 gfx1250.register(ATTENTION_EXECUTION_REGISTRY)
-gfx942_tuning.register(ATTENTION_EXECUTION_REGISTRY)
 # Compatibility alias: production auto-dispatch and candidate listing.
 ATTENTION_REGISTRY = ATTENTION_ROUTE_REGISTRY
 
@@ -232,7 +239,7 @@ def dense_spec_for_request(req: AttentionRequest):
         raise ValueError(f"unsupported attention dense arch {arch!r}") from exc
 
     factories = {
-        "gfx942": gfx942.dense_spec_for_request,
+        "gfx942": gfx942_dense.dense_spec_for_request,
         "gfx950": gfx950_dense.dense_spec_for_request,
     }
     try:

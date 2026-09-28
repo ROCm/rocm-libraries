@@ -1190,7 +1190,8 @@ library/dispatch/                         # library-owned kernels
     __init__.py        # request type, registry assembly, dispatch entry points
     common.py          # shared request validation, problem adapter, features
     generic.py         # multi-arch unified_2d / unified_3d (explicit arch list)
-    gfx942.py          # dense_pipe, tiled_2d/3d specializations
+    gfx942_dense.py    # attention_dense (geometry swept by its knob space)
+    gfx942_unified.py  # dense_pipe, unified tuning catalog
     gfx950_dense.py    # attention_dense variants + dense ranker
     gfx950_unified.py  # d256 prefill, unified tuning catalog
     gfx1250.py         # wmma_attention_fwd, tiled_2d/3d specializations
@@ -1222,10 +1223,10 @@ def register(registry: CandidateRegistry) -> None:
 
 ```python
 # library/dispatch/attention/__init__.py
-from . import generic, gfx942, gfx950_dense, gfx950_unified, gfx1250
+from . import generic, gfx942_dense, gfx942_unified, gfx950_dense, gfx950_unified, gfx1250
 
 ATTENTION_REGISTRY = CandidateRegistry("attention_unified")
-for _module in (generic, gfx942, gfx950_dense, gfx950_unified, gfx1250):
+for _module in (generic, gfx942_dense, gfx942_unified, gfx950_dense, gfx950_unified, gfx1250):
     _module.register(ATTENTION_REGISTRY)
 ```
 
@@ -1370,7 +1371,7 @@ engine owns its own tuning — the "per-engine" half of the design.
 `build_unified_attention_2d_tiled(spec, arch=)`.
 
 ```python
-# library/dispatch/attention/gfx942.py
+# library/dispatch/attention/gfx942_unified.py
 """gfx942 attention candidates (CDNA3, wave64, narrow 16x16x16 MFMA)."""
 
 from dataclasses import replace

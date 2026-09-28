@@ -45,7 +45,7 @@ reference; one run on a 304-CU gfx942 part. Every cell is a **ratio**, so per
 `AGENTS.md` the absolute throughputs stay in the protected results page.
 
 Both arms run the config that actually **ships**: dense builds its spec through the
-production dispatch factory (`dispatch/attention/gfx942.py::_dense_spec`, so the
+production dispatch factory (`dispatch/attention/gfx942_dense.py::_dense_spec`, so the
 measured binary carries the shipped `waves_per_eu` / `d64_kpad` / persistent
 decision), and the baseline takes `wide4`, `narrow` or `narrow_d64` as
 `attention_tiled_2d` selects for that shape.

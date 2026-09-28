@@ -1,44 +1,35 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx942 attention candidates (CDNA3, wave64).
+"""gfx942 dense attention candidate (CDNA3, wave64).
 
-Two families live here and they do not share an MFMA atom: the unified
-``dense_pipe`` flash path runs on the narrow 16x16x16 atom, while the standalone
-``attention_dense`` prefill kernel runs on 32x32x8 (CDNA3 has no 32x32x16 fp16/bf16
-atom, so it doubles the K loop). See ``builders/gfx942/attention/prefill/README.md``
-for why the dense kernel is a per-gfx module rather than an arch branch in the
+The standalone ``attention_dense`` prefill kernel runs on the 32x32x8 atom (CDNA3
+has no 32x32x16 fp16/bf16 atom, so it doubles the K loop), unlike the unified
+``dense_pipe`` flash path on the narrow 16x16x16 atom, which lives in
+:mod:`.gfx942_unified`. See ``builders/gfx942/attention/prefill/README.md`` for
+why the dense kernel is a per-gfx module rather than an arch branch in the
 gfx950 body.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Tuple
 
-from kernels.common.attention_unified import supports_native_unified_attention
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
     KernelCandidate,
     OperatorRequest,
-    ShapeRange,
 )
 
 from .common import (
     ATTENTION_ABI_VERSION,
-    ATTENTION_FEATURES,
-    UNIFIED_BLOCK_SIZES,
-    UNIFIED_HEAD_SIZES,
     AttentionMaskType,
     AttentionRequest,
-    AttentionSpec,
     FAMILY,
     _parse_attention_mask_type,
-    _problem,
     _request_errors,
     _resolve_dense_waves_per_eu,
-    _selector_matches,
 )
 
 # block_n (KV tile) the dense candidate ships; 64 is the resource-efficient peak
@@ -51,89 +42,6 @@ _DENSE_BLOCK_N = 64
 # field at that shared default, so an explicit request value is still respected.
 _GFX942_NUM_PERSISTENT = 304
 _SHARED_NUM_PERSISTENT_DEFAULT = 256
-
-
-def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
-    """Fast gfx942 fp16 prefill kernel — transposed-x8 flash with ring-sliced K.
-
-    Registered at priority 5 so it outranks the generic unified_2d candidate
-    (priority 10) whenever both would match the same gfx942 fp16 2D problem.
-    The registry sorts ascending (lower = higher precedence).
-    Callers can also force this path explicitly via algorithm="dense_pipe".
-
-    GEOMETRY OWNERSHIP: this engine owns the per-engine spec builder
-    ``builders.common.attention_spec_builder._spec_gfx942_fp16_flash`` -- the
-    GEMM-style ``spec_fn`` for this cohort. Geometry lives in the builder layer
-    (not here): the dispatcher's identity stays ``(path, head_size, block_size)``
-    and its C++ parity contract is unchanged. Both this candidate and the
-    ``_tiled_spec_from_problem`` cascade route the cohort through that one
-    function (single source).
-    """
-    spec_id = "gfx942_dense_pipe"
-    name = "attention_gfx942_dense_pipe"
-
-    def support(req: OperatorRequest) -> Tuple[bool, str]:
-        errors = _request_errors(req)
-        if errors:
-            return False, "; ".join(errors)
-        assert isinstance(req, AttentionRequest)
-        ok, why = _selector_matches(req, candidate)
-        if not ok:
-            return False, why
-        problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem, arch=req.arch)
-        if not ok:
-            return False, why
-        if problem.select_path() != "2d":
-            return False, "problem routes to 3D, not 2D"
-        from kernels.common.attention_unified import _enable_gfx942_fp16_flash
-
-        if not _enable_gfx942_fp16_flash(problem):
-            return False, "gfx942 fp16 flash not eligible for this shape"
-        return True, "ok"
-
-    def select(req: OperatorRequest) -> AttentionSpec:
-        ok, why = candidate.admits(req)
-        if not ok:
-            raise ValueError(f"{name} does not support request: {why}")
-        assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
-        return AttentionSpec(
-            path="2d",
-            head_size=problem.head_size,
-            block_size=problem.block_size,
-            dtype=problem.dtype,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            name="rocke_attention_gfx942_dense_pipe",
-        )
-
-    candidate = KernelCandidate(
-        name=name,
-        family=FAMILY,
-        algorithm="dense_pipe",
-        spec_id=spec_id,
-        abi_version=ATTENTION_ABI_VERSION,
-        priority=5,
-        capability=Capability(
-            arches=("gfx942",),
-            dtypes=("fp16",),
-            shapes=(
-                ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
-                ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
-            ),
-            # ``_enable_gfx942_fp16_flash`` is the real narrowing; fp8 is
-            # unsupported, but the unified body already shifts causal masking.
-            supports_features=ATTENTION_FEATURES - {"fp8"},
-        ),
-        _supports=support,
-        select_spec=select,
-        signature=lambda _spec: (),
-        grid=lambda spec, req: (0, 0, 0),
-        block=lambda spec: (0, 0, 0),
-        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
-    )
-    return candidate
 
 
 def _dense_spec(req: OperatorRequest):
@@ -325,18 +233,34 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
 
         return bind_dense_attention_torch(request, spec, tensors, **kwargs)
 
+    def _tuning_kwargs(req: AttentionRequest) -> dict:
+        from kernels.gfx942.attention_dense import supports_attention_dense
+
+        from .tuning_common import dense_pinned_axes
+
+        return dict(
+            arch="gfx942",
+            supports=supports_attention_dense,
+            wpe_pinned=int(req.dense_waves_per_eu) != 0,
+            pinned_axes=dense_pinned_axes(req),
+        )
+
     def sweep(req: OperatorRequest):
         if not candidate.admits(req)[0]:
             return ()
-        spec = select(req)
         assert isinstance(req, AttentionRequest)
-        if int(req.dense_waves_per_eu) != 0:
-            return (spec,)
-        from .tuning_common import dense_waves_per_eu_sweep_values
+        from .tuning_common import iter_dense_tuning_specs
 
-        return tuple(
-            replace(spec, waves_per_eu=waves_per_eu)
-            for waves_per_eu in dense_waves_per_eu_sweep_values(spec.waves_per_eu)
+        return iter_dense_tuning_specs(select(req), **_tuning_kwargs(req))
+
+    def sample(req: OperatorRequest, n: int, seed: int):
+        if not candidate.admits(req)[0]:
+            return ()
+        assert isinstance(req, AttentionRequest)
+        from .tuning_common import sample_dense_tuning_specs
+
+        return sample_dense_tuning_specs(
+            select(req), n, seed, salt=name, **_tuning_kwargs(req)
         )
 
     candidate = KernelCandidate(
@@ -362,6 +286,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         grid=grid,
         block=block,
         sweep_space=sweep,
+        sample_space=sample,
         build=build,
         bind_torch=bind_torch,
     )
@@ -369,11 +294,6 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
 
 
 def register_route(registry: CandidateRegistry) -> None:
-    registry.register(_make_gfx942_attention_dense_candidate())
-    registry.register(_make_gfx942_dense_pipe_candidate())
-
-
-def register_execution(registry: CandidateRegistry) -> None:
     registry.register(_make_gfx942_attention_dense_candidate())
 
 

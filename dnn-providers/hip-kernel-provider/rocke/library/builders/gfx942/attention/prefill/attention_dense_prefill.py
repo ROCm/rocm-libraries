@@ -16,7 +16,7 @@ THE SPEC COMES FROM DISPATCH, NOT FROM THIS FILE
 ------------------------------------------------
 Both harnesses (this one and the benchmark) used to HAND-BUILD an
 ``AttentionDenseSpec`` from CLI defaults. That is a silent-staleness machine: the
-tuning that actually ships lives in ``dispatch.attention.gfx942._dense_spec``
+tuning that actually ships lives in ``dispatch.attention.gfx942_dense._dense_spec``
 (per-config ``waves_per_eu``, the 304-CTA persistent grid, the auto persistent
 decision, the ragged path), and a hardcoded CLI default freezes whatever that
 policy happened to be on the day the flag was written. A harness that measures a

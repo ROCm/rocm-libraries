@@ -1339,7 +1339,7 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
-    The tune lives in gfx942's OWN ``_dense_spec`` (``dispatch/attention/gfx942.py``),
+    The tune lives in gfx942's OWN ``_dense_spec`` (``dispatch/attention/gfx942_dense.py``),
     so the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched
     path (``dense_spec_for_request`` -> ``run_attention_dense_torch``). gfx950 has a
     separate factory in its own arch module which MUST keep the spec default
@@ -1348,7 +1348,7 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     the guard is that they stayed different in the intended direction only.
     """
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx942_dense import _dense_spec
     from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 
     # The gfx942 tune is an OVERRIDE relative to the shared spec's default; if that
@@ -1461,7 +1461,7 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
     let the two drift. gfx950's own factory is exercised alongside to pin that this
     branch changed nothing for it."""
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx942_dense import _dense_spec
     from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 
     # Pin the shared default: every assertion below is relative to it, so a silent
@@ -1775,7 +1775,7 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
     stays off for small Sq. Explicit on/off are honored; gfx950 keeps its 256 default
     and is otherwise untouched."""
     from dispatch.attention import AttentionRequest
-    from dispatch.attention.gfx942 import _dense_spec
+    from dispatch.attention.gfx942_dense import _dense_spec
     from dispatch.attention.gfx950_dense import _dense_spec as _dense_spec_gfx950
 
     def _req(sq, arch, persist="auto"):
