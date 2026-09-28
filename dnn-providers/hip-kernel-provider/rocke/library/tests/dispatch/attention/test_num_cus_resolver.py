@@ -246,8 +246,12 @@ def test_segments_bounded_after_bump():
         )
         assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
 
-        q120 = au._num_segments(_prob(120, nq=32, nk=8, D=128, kv=8192, batch=4), "gfx942")
-        q304 = au._num_segments(_prob(304, nq=32, nk=8, D=128, kv=8192, batch=4), "gfx942")
+        q120 = au._num_segments(
+            _prob(120, nq=32, nk=8, D=128, kv=8192, batch=4), "gfx942"
+        )
+        q304 = au._num_segments(
+            _prob(304, nq=32, nk=8, D=128, kv=8192, batch=4), "gfx942"
+        )
         assert q120 == q304, f"q>1 clamp must hold: {q120} -> {q304}"
     finally:
         au._RESOLVED_ATTENTION_ARCH = None
