@@ -118,25 +118,26 @@ jobs:
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       ROCM_SYSTEMS_REF: 1f44cb5afa5e6dec03d57609e5dfba43d4f31c3c
     steps:
-      - name: Require SYS_PTRACE on the build runner
+      - name: Require docker with SYS_PTRACE
         run: |
           set -euo pipefail
-          cap=$(awk '/CapEff/ {print $2}' /proc/self/status)
-          echo "CapEff ${cap}"
+          echo "host CapEff $(awk '/CapEff/ {print $2}' /proc/self/status)"
           id
-          uname -a
-          cat /etc/os-release || true
+          sudo -n true
+          docker info >/dev/null
+          cap=$(docker run --rm --cap-add=SYS_PTRACE --security-opt seccomp=unconfined ubuntu:24.04 awk '/CapEff/ {print $2}' /proc/self/status)
+          echo "container CapEff ${cap}"
           python3 - "$cap" << 'PY'
           import sys
           cap = int(sys.argv[1], 16)
           if cap & (1 << 19) == 0:
-              sys.exit("build runner has no CAP_SYS_PTRACE; rocJITsu cannot interpose")
+              sys.exit("docker run did not grant CAP_SYS_PTRACE")
           PY
 
       - name: Install build tools
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get update
+          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential ca-certificates cmake curl git ninja-build pkg-config python3
 
       - name: Checkout rocm-libraries
@@ -185,69 +186,35 @@ jobs:
       - name: Confirm the simulated agent is gfx942
         run: |
           set -euo pipefail
-          export ROCM_PATH="$ROCM_ROOT"
-          export PATH="$ROCM_ROOT/bin:$PATH"
-          export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           mkdir -p parity
-          cfg_dir="rocm-systems/emulation/rocjitsu/configs"
-          launcher="rj-build/tools/rocjitsu/rocjitsu"
-          echo "CapEff $(awk '/CapEff/ {print $2}' /proc/self/status)"
-          "$launcher" --version || true
-          ldd rj-build/librocjitsu.so || true
-          printf '%s\n' \
-            '#include <stdio.h>' \
-            '__attribute__((constructor)) static void init(void) { fprintf(stderr, "PRELOAD_OK\n"); }' \
-            > /tmp/preload_check.c
-          gcc -shared -fPIC -o /tmp/libpreload_check.so /tmp/preload_check.c
-          if ! LD_PRELOAD=/tmp/libpreload_check.so /bin/true 2>&1 | grep -q PRELOAD_OK; then
-            echo "LD_PRELOAD constructors do not run in this container" >&2
-            exit 1
-          fi
-          pick=""
-          try_mode() {
-            local name="$1"
-            local config="$2"
-            shift 2
-            "$@" --config "$config" -- "$ROCM_ROOT/bin/rocminfo" > "parity/rocminfo-${name}.txt" 2>&1 || true
-            if grep -q gfx942 "parity/rocminfo-${name}.txt"; then
-              pick="$name"
-              cp "parity/rocminfo-${name}.txt" parity/rocminfo.txt
-              echo "ROCJITSU_CONFIG=$config" >> "$GITHUB_ENV"
-              return 0
-            fi
-            return 1
-          }
-          # Non-kmd local mode is what the rocJITsu corpus job uses on a CPU
-          # scale set. The kmd daemon is what the feasibility spike used.
-          if try_mode hsa "$cfg_dir/gfx942_cdna3.json" "$launcher"; then
-            echo "ROCJITSU_DAEMON=0" >> "$GITHUB_ENV"
-          elif try_mode kmd-daemon "$cfg_dir/gfx942_cdna3_kmd.json" "$launcher" --daemon; then
-            echo "ROCJITSU_DAEMON=1" >> "$GITHUB_ENV"
-          elif try_mode kmd-local "$cfg_dir/gfx942_cdna3_kmd.json" "$launcher"; then
-            echo "ROCJITSU_DAEMON=0" >> "$GITHUB_ENV"
-          else
-            echo "rocminfo did not report gfx942" >&2
-            grep -E "librocjitsu|ERROR:|ROCk|daemon did not|could not find|PRELOAD" parity/rocminfo-*.txt >&2 || true
-            exit 1
-          fi
-          echo "selected rocminfo mode: $pick"
+          docker run --rm \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -v "${ROCM_ROOT}:/rocm" \
+            -w /work \
+            -e ROCM_PATH=/rocm \
+            -e LD_LIBRARY_PATH=/rocm/lib \
+            ubuntu:24.04 \
+            /work/rj-build/tools/rocjitsu/rocjitsu --daemon \
+            --config /work/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json \
+            -- /rocm/bin/rocminfo > parity/rocminfo.txt 2>&1
+          grep -q gfx942 parity/rocminfo.txt
 
       - name: Run the hipRAND filter under rocJITsu
         run: |
           set -euo pipefail
-          args=(--config "$ROCJITSU_CONFIG")
-          if [[ "${ROCJITSU_DAEMON}" == "1" ]]; then
-            args+=(--daemon)
-          fi
-          python3 .github/scripts/ci_parity_runner.py \
-            "${args[@]}" \
-            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
-            --rocm-root "$ROCM_ROOT" \
-            --rocm-version "$ROCM_VERSION" \
-            --runner-label "$BUILD_RUNS_ON" \
-            --binary "$ROCM_ROOT/bin/test_hiprand_api" \
-            --gtest-filter "$GTEST_FILTER" \
-            --out parity/emu.json
+          docker run --rm \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -v "${ROCM_ROOT}:/rocm" \
+            -w /work \
+            -e ROCM_PATH=/rocm \
+            -e LD_LIBRARY_PATH=/rocm/lib \
+            ubuntu:24.04 \
+            bash -lc 'apt-get update && apt-get install -y --no-install-recommends python3 && python3 /work/.github/scripts/ci_parity_runner.py --daemon --rocjitsu /work/rj-build/tools/rocjitsu/rocjitsu --config /work/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json --rocm-root /rocm --rocm-version "$0" --runner-label "$1" --binary /rocm/bin/test_hiprand_api --gtest-filter "$2" --out /work/parity/emu.json' \
+            "$ROCM_VERSION" "$BUILD_RUNS_ON" "$GTEST_FILTER"
 
       - name: Diff against the hardware baseline
         if: always()
