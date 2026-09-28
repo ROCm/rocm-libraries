@@ -1,19 +1,31 @@
 # KernelFromAnywhere discovery and implemented contract
 
-**The infrastructure is already in this checkout as Gemm-From-Anywhere (GFA) V1.** This is not a guessed synonym: the original [PR #9304](https://github.com/ROCm/rocm-libraries/pull/9304) explicitly links the design page [Hipblaslt-kernel-from-anywhere](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1403547193/Hipblaslt-kernel-from-anywhere). The page itself was not fetched; the public PR and current source establish the connection. [Re-land PR #11155](https://github.com/ROCm/rocm-libraries/pull/11155) merged September 18, 2026 as `1833a352c1029aab2c976692894584b5b5294c09`; a read-only ancestry check confirms that commit is included in inspected/published HEAD `bf27d85949b56da1452d376e45044e9b873f68b4`.
+KernelFromAnywhere (KFA) is the common-metadata direction for just-in-time (JIT)
+generation. General matrix multiplication (GEMM) is the current operation profile;
+other operation profiles remain proposed. This note uses API for application
+programming interface and ABI for application binary interface.
 
-The authoritative current guide is [CustomKernels/README.md](https://github.com/ROCm/rocm-libraries/blob/bf27d85949b56da1452d376e45044e9b873f68b4/projects/hipblaslt/tensilelite/Tensile/CustomKernels/README.md). PR #9304 defines V1 as the metadata format, generic Tensile-host argument dispatch, and checked-in demos from external sources. It explicitly defers full production kernel sets, hipKittens, and **JIT generation** to later milestones. Thus the proposed JIT synergy advances an anticipated follow-up, while the current source is not a standalone universal KFA runtime.
+**September 25, 2026 update:** the problem/solution, rocRoller, and selection sections
+below reflect checkout `e5219e3bbf86d13af31e3a955e46f337be0e77c7`. Earlier discovery
+anchors retain their explicitly recorded revision; they are not new runtime evidence.
+The [discussion draft](confluence-roadmap-draft.md) summarizes the design alternatives.
+Convergence means the same versioned metadata schema and execution semantics across
+producers, not identical symbols, layouts, or tuning values.
+
+**The infrastructure is already in this checkout as Gemm-From-Anywhere (GFA) V1.** This is not a guessed synonym: the original [pull request (PR) #9304](https://github.com/ROCm/rocm-libraries/pull/9304) explicitly links the design page [Hipblaslt-kernel-from-anywhere](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1403547193/Hipblaslt-kernel-from-anywhere). The page itself was not fetched; the public PR and current source establish the connection. [Re-land PR #11155](https://github.com/ROCm/rocm-libraries/pull/11155) merged September 18, 2026 as `1833a352c1029aab2c976692894584b5b5294c09`; a read-only ancestry check confirms that commit is included in inspected/published HEAD `bf27d85949b56da1452d376e45044e9b873f68b4`.
+
+The current guide is [CustomKernels/README.md](../tensilelite/Tensile/CustomKernels/README.md). PR #9304 defines V1 as the metadata format, generic Tensile-host argument dispatch, and checked-in demos from external sources. It explicitly defers full production kernel sets, hipKittens, and **JIT generation** to later milestones. Thus the proposed JIT synergy advances an anticipated follow-up, while the current source is not a standalone universal KFA runtime.
 
 ## Intended lifecycle and reusable seams
 
-1. A backend produces AMD GPU assembly (`.s`), with an entry point and normal `.amdgpu_metadata`. GFA's checked-in origin directories are `tensile`, `aiter`, `ck`, `rocroller`, `wave`, and `triton`. Directories are organizational, not runtime backend registration.
-2. Embed a top-level **`custom.config` YAML mapping inside that metadata section**, carrying the higher-level Tensile-side interface and provenance. `Tensile.AddCustomConfig` can mechanically extract it from a benchmark YAML and inject it into the assembly. `--dry-run` previews it; a provenance-only injection is insufficient to make an external kernel usable. The tool refuses duplicate custom.config insertion. This is source preparation, not an automatic decoder for arbitrary precompiled binaries.
+1. A backend produces AMD graphics processing unit (GPU) assembly (`.s`), with an entry point and normal `.amdgpu_metadata`. GFA's checked-in origin directories are `tensile`, `aiter`, `ck`, `rocroller`, `wave`, and `triton`. Directories are organizational, not runtime backend registration.
+2. Embed a top-level **`custom.config` YAML (YAML Ain't Markup Language) mapping inside that metadata section**, carrying the higher-level Tensile-side interface and provenance. `Tensile.AddCustomConfig` can mechanically extract it from a benchmark YAML and inject it into the assembly. `--dry-run` previews it; a provenance-only injection is insufficient to make an external kernel usable. The tool refuses duplicate custom.config insertion. This is source preparation, not an automatic decoder for arbitrary precompiled binaries.
 3. A logic-file solution or benchmark `CustomKernel`/`CustomKernels` request resolves the assembly by name. `CustomKernels.getCustomKernelConfig` reads it, validates recognized parameters, forces assembly language and the selected kernel name, and supplies the CustomKernel mapping. `BenchmarkProblems._getCustomKernelSolutionObj` constructs **one Solution without benchmarking**, making it a concrete future singleton-ingestion seam. The broader enumeration helper warning-skips bad custom metadata; a JIT adapter should preserve fail-closed request behavior instead.
 4. Existing generator/build machinery reads the custom source, assembles/links normal code objects, and serializes the Tensile solution library. Existing selection and device-library loading then find the appropriate solution/code object. Runtime `generateCustomCall` binds its declared argument semantics from the concrete GEMM request. Built-in solve logic still owns applicable helper sequence, workspace and scheduling behavior.
 
 Source anchors (all under `projects/hipblaslt/tensilelite`): `Tensile/CustomKernels.py:135,187,368`; `Tensile/AddCustomConfig.py:78,207,344`; `Tensile/BenchmarkProblems.py:306,359`; `Tensile/LibraryIO.py:743`; `Tensile/KernelWriterAssembly.py:172,185`; `Tensile/Toolchain/Assembly.py:86`; `src/ContractionSolution.cpp:2783`.
 
-Do not confuse the separate `Tensile/backends/base.py` BackendFactory with an external-codegen registry: it selects optimization strategies (Tensile enumeration or Ductile GA), whose interface drives candidate/benchmark loops. Ductile explicitly does not honor build-only requests (`ductile_backend.py:192`). It is not the requested non-benchmarking external JIT interface.
+Do not confuse the separate `Tensile/backends/base.py` BackendFactory with an external-codegen registry: it selects optimization strategies (Tensile enumeration or Ductile genetic algorithms), whose interface drives candidate/benchmark loops. Ductile explicitly does not honor build-only requests (`ductile_backend.py:192`). It is not the requested non-benchmarking external JIT interface.
 
 ## Metadata contract: what is actually described
 
@@ -32,21 +44,23 @@ The C++ shape is `include/Tensile/ContractionSolution.hpp:58–228`: semantic ex
 
 External metadata must contain `Source.Origin`, `Version`, a `Features` mapping, `InternalSupportParams.KernArgsVersion`, `ProblemType`, `MatrixInstruction`, and a `CustomKernel` mapping with `args`, `macrotile`, `threads`, `grid` (`CustomKernels.py:493–520`). Tensile-generated sources need only KernArgsVersion because consuming logic/test YAML supplies additional solution state. The metadata validator mostly checks presence and mapping shape; it is not a complete proof that a binary matches its declared argument ABI.
 
-For generated kernels lacking an explicit CustomKernel mapping, `_buildCustomKernelFromMetadata` at292 reads the **first** `amdhsa.kernels` entry, infers known argument-name semantics, derives tile/grid defaults, and may reorder universal-argument headers. Unknown arg names raise an actionable error requesting an explicit mapping. This inference does not generically interpret all possible backend ABIs or arbitrary multi-entry code objects. Explicit external mappings can select a symbol in a file containing multiple kernels; the CK example includes many compiled symbols but explicitly names its selected GEMM.
+For generated kernels lacking an explicit CustomKernel mapping, `_buildCustomKernelFromMetadata` at292 reads the **first** `amdhsa.kernels` entry, infers known argument-name semantics, derives tile/grid defaults, and may reorder universal-argument headers. Unknown arg names raise an actionable error requesting an explicit mapping. This inference does not generically interpret all possible backend ABIs or arbitrary multi-entry code objects. Explicit external mappings can select a symbol in a file containing multiple kernels; the Composable Kernel (CK) example includes many compiled symbols but explicitly names its selected GEMM.
 
 ## Layout, launch and multi-kernel limits
 
-The current contract is **GEMM-specific and AMD/HIP-specific**, using the existing Tensile runtime. It is not a portable backend-neutral dispatch ABI or independent module/lifetime API.
+The current contract is **GEMM-specific and AMD/HIP-specific**, using the existing Tensile runtime. HIP is the Heterogeneous-compute Interface for Portability. This is not a portable backend-neutral dispatch ABI or independent module/lifetime API.
 
-- Physical layout requires accurate ProblemType plus per-argument semantics and support predicates. Packed FP4 examples distinguish byte leading strides (`StrideA0Bytes`/`StrideB0Bytes`), packed K (`SizeSumDiv2`), scale strides and fixed unit strides. Those adapters must agree with actual tensor/scale storage.
-- The documented Triton integration rewrites dynamic LDS to a static group segment because the current custom-call launcher uses `sharedMemBytes=0`. Unused Triton scratch pointers are explicitly represented by trailing padding. A backend requiring dynamic LDS or live scratch allocation cannot simply copy the demo metadata.
-- Target ISA/wavefront/architecture and valid problem sizes remain enforced through assembler, Solution state, predicates and the normal device runtime, rather than a new GFA device negotiation layer. Checked-in demos target gfx942/gfx950; no new gfx1250/Windows coverage is established by this exploration.
-- A CustomKernel record describes a main GEMM entry and recognized workspace modes. There is no arbitrary helper-kernel DAG, per-stage workspace-lifetime graph, or backend-owned host callback encoded in it. Existing Tensile solve can still produce needed pre/post kernels for supported modes. Preserve its full sequence, all-symbol preflight, storage ownership and stream/synchronizer behavior when composing with JIT.
+- Physical layout requires accurate ProblemType plus per-argument semantics and support predicates. Packed 4-bit floating-point (FP4) examples distinguish byte leading strides (`StrideA0Bytes`/`StrideB0Bytes`), packed K (`SizeSumDiv2`), scale strides and fixed unit strides. Those adapters must agree with actual tensor/scale storage.
+- The documented Triton integration rewrites dynamic local data share (LDS) to a static group segment because the current custom-call launcher uses `sharedMemBytes=0`. Unused Triton scratch pointers are explicitly represented by trailing padding. A backend requiring dynamic LDS or live scratch allocation cannot simply copy the demo metadata.
+- Target instruction set architecture (ISA), wavefront and valid problem sizes remain enforced through assembler, Solution state, predicates and the normal device runtime, rather than a new GFA device negotiation layer. Checked-in demos target gfx942/gfx950; no new gfx1250/Windows coverage is established by this exploration.
+- A CustomKernel record describes a main GEMM entry and recognized workspace modes. There is no arbitrary helper-kernel directed acyclic graph (DAG), per-stage workspace-lifetime graph, or backend-owned host callback encoded in it. Existing Tensile solve can still produce needed pre/post kernels for supported modes. Preserve its full sequence, all-symbol preflight, storage ownership and stream/synchronizer behavior when composing with JIT.
 - Runtime code deliberately keeps Tensile-generated kernels on their established generated call path; external/handwritten kernels use the generic custom call. The host mapping documents the specific guard and scheduling/layout reasons. A universal metadata-based replacement would be a broader change requiring separate evidence.
 
 ## Actual examples and validation status
 
-Current checked-in test inputs (all FP32 compute) are:
+Current checked-in test inputs use 32-bit floating-point (FP32) computation. Data
+formats below include 16-bit floating point (FP16), `bfloat16` (BF16),
+and microscaled 4-bit floating point (MXFP4):
 
 | Test YAML under `Tensile/Tests/custom/` | Current data/output | Target |
 |---|---|---|
@@ -60,22 +74,22 @@ Current checked-in test inputs (all FP32 compute) are:
 
 These are concrete integration fixtures, not proof that every operation/layout from each source backend is supported. The original PR narrative calls its CK demo BF16, but the current authoritative YAML says DataType/DestDataType `h` (FP16); this note follows current source. The PR reports historical local test success; no tests were rerun for this read-only exploration.
 
-Reusable tests cover AddCustomConfig injection, strict/non-strict metadata CLI behavior, malformed/absent metadata, parameter/predicate propagation, semantic inference, source discovery, and logic-file round trips: `test_CustomKernelMetadata.py`, `test_custom_kernel_cli.py`, `test_library_io_custom_kernel.py`, `test_custom_kernel_host.py`, `test_custom_kernel_occupancy.py`. `Tensile.ValidateMetadata --strict` is available as a failing gate; non-strict mode warns with successful exit. Build-time `ValidateMetadata` is off by default and warns while continuing. A bounded search found no direct invocation in the inspected `.github`/tox/CMake files, so availability/recommendation must not be presented as proven required CI enforcement.
+Reusable tests cover AddCustomConfig injection, strict/non-strict metadata command-line interface (CLI) behavior, malformed/absent metadata, parameter/predicate propagation, semantic inference, source discovery, and logic-file round trips: `test_CustomKernelMetadata.py`, `test_custom_kernel_cli.py`, `test_library_io_custom_kernel.py`, `test_custom_kernel_host.py`, `test_custom_kernel_occupancy.py`. `Tensile.ValidateMetadata --strict` is available as a failing gate; non-strict mode warns with successful exit. Build-time `ValidateMetadata` is off by default and warns while continuing. A bounded search found no direct invocation in the inspected `.github`/tox/CMake files, so availability/recommendation must not be presented as proven required continuous-integration (CI) enforcement.
 
 ## Producer-first convergence: current recommendation
 
 **The earlier external-singleton-ingestion-first recommendation is superseded by the user's direction. KFA metadata is the target common kernel encoding, and TensileLite production must emit a complete compatible representation before both origins share the same argument/launch path.** Keep existing ingestion facts above as implementation evidence; do not introduce a competing opaque runtime to avoid the KFA contract.
 
-Generated Tensile kernels already populate a `CustomKernel` record in `KernelWriter._getKernelSource:12444–12474`. `_registerKernelArgs:12302` records ordered typed semantics, and the record includes symbol, tile, threads and grid. `Contractions.Solution.FromOriginalState:940–1007` serializes it together with **ProblemType, SizeMapping, hardware/problem/task predicates and InternalArgsSupport**. Those surrounding fields are still essential executable metadata. `SingleSolution._build:409–425` constructs the existing `MasterSolutionLibrary.BenchmarkingLibrary`, applies names and writes its normal YAML/MessagePack library. This is already partial convergence at the producer and library levels. `TensileCreateLibrary/Run.py:262–273,341–351` explicitly carries the generated CustomKernel mapping from worker results back onto original/serialized solutions. However, assembly emission in `rocisa/rocisa/include/code.hpp:1524–1526` currently embeds only `custom.config.InternalSupportParams.KernArgsVersion`; the complete semantic description lives in solution state/library, not in self-contained generated assembly. Producer convergence must close that packaging gap too.
+Generated Tensile kernels already populate a `CustomKernel` record in `KernelWriter._getKernelSource:12444–12474`. `_registerKernelArgs:12302` records ordered typed semantics, and the record includes symbol, tile, threads and grid. `Contractions.Solution.FromOriginalState:940–1007` serializes it together with **ProblemType, SizeMapping, hardware/problem/task predicates and InternalArgsSupport**. Those surrounding fields are still essential executable metadata. `SingleSolution._build:409–425` constructs the existing `MasterSolutionLibrary.BenchmarkingLibrary`, applies names and writes its normal YAML/MessagePack library. This is already partial convergence at the producer and library levels. `TensileCreateLibrary/Run.py:262–273,341–351` explicitly carries the generated CustomKernel mapping from worker results back onto original/serialized solutions. However, assembly emission in `rocisa/rocisa/include/code.hpp:1524–1526` currently embeds only `InternalSupportParams.KernArgsVersion` within `custom.config`; normal kernel ABI metadata is also present. The complete semantic description lives in solution state/library, not in self-contained generated assembly. Producer convergence must close that packaging gap too.
 
 It is not complete equivalence. Concrete source gaps are:
 
 | Concern | Existing generated behavior | Required common-contract work |
 |---|---|---|
-| Packed argument completeness | `Signature.py:445–452` and `generateSingleCall:2751–2756` append four 64-bit D/C/A/B batch offsets. `_registerKernelArgs` omits them; the current CustomArgSemantic enum has no corresponding fields. Optional fused-A2A tail at Signature:457–467 is also absent. | Derive signature and semantic layout from one authoritative description, including exact order, sizes, offsets/alignment, optional tails and pointer-array semantics. Unsupported profiles must reject explicitly. |
+| Packed argument completeness | `Signature.py:445–452` and `generateSingleCall:2751–2756` append four 64-bit D/C/A/B batch offsets. `_registerKernelArgs` omits them; the current CustomArgSemantic enum has no corresponding fields. Optional fused all-to-all tail at Signature:457–467 is also absent. | Derive signature and semantic layout from one authoritative description, including exact order, sizes, offsets/alignment, optional tails and pointer-array semantics. Unsupported profiles must reject explicitly. |
 | Workspace and helpers | Generated CustomKernel currently hard-codes `workspaceType=None`, zero per-element sizes and `generated=True`; `requiredWorkspaceSize:5400` deliberately recovers real policy from SizeMapping. `solve:4850–5030` inserts beta-only, conversion and reduction calls. | Preserve complete workspace/synchronizer policy and helper sequence in the common GEMM profile; the existing main-entry record alone cannot replace it. A general DAG is unnecessary for the first supported profiles. |
 | Launch geometry | `generateSingleCall:2600–2680` handles real M/N cluster grids and rounds appropriate grids to cluster multiples; current generic custom dispatch has no equivalent rounding. | Normalize workgroup/grid/cluster and LDS requirements; compare final launch descriptors, including special schedules. |
-| Stream-K semantics | Generated kernels use resolved whole-problem schedules; custom `StreamKWithBatch` explicitly multiplies a per-batch grid by batch count. Runtime gates also distinguish tile counts and dynamic queue/work-stealing support. | Encode a precise schedule profile and preserve device/XCD/synchronizer constraints; do not equate identically named metadata with identical meaning. |
+| Stream-K semantics | Generated kernels use resolved whole-problem schedules; custom `StreamKWithBatch` explicitly multiplies a per-batch grid by batch count. Runtime gates also distinguish tile counts and dynamic queue/work-stealing support. | Encode a precise schedule profile and preserve device/compute-die/synchronizer constraints; do not equate identically named metadata with identical meaning. |
 | Support/selection | ProblemType alone is insufficient. The full Solution also carries hardware/problem/task predicates, size mapping, scale physical layout and internal-argument support. | Make those constraints an explicit, versioned GEMM profile associated with KFA metadata, reusing the existing predicate machinery. Source/Features provenance is not a capability gate. |
 | Grouped and optional modes | Grouped execution uses a distinct existing call path; stochastic seed, debug, packed operands, activation, scaling and adaptive accumulation have profile-specific layout. | Enumerate supported profiles and test exact packing/sequence equivalence for each before switching its runtime dispatch. |
 
@@ -87,7 +101,98 @@ For ordinary installed libraries, KFA custom kernels are ordinary ContractionSol
 
 Current JIT supplies an explicitly chosen singleton instead of searching the installed multi-solution library. `loadGeneratedBundle` (`hipblaslt-jit-tensilelite.cpp:143–204`) reads the private envelope, loads the normal serialized library via `LoadLibraryData`, loads code-object bytes with SolutionAdapter and resolves the primary symbol. `Bundle::support/prepare` (`tensile_host.cpp:6033–6131`) reuses hardware/problem/task/software predicates, required workspace, ConstructTensileProblem, GetTensileInputs, bindFlagRegion and `solution->solve`. It resolves **every** returned helper symbol before publishing a PreparedLaunch; execution calls `adapter->launchKernels`.
 
-Therefore the current JIT PR does not contain a whole second kernel execution engine. KFA convergence can unify the generated/custom descriptor and argument/launch branches, then reduce private artifact translation. It does not remove operation capture, module ownership, complete-bundle preparation, concurrency/device rules, process launch or public API adaptation.
+Therefore the current JIT implementation does not contain a whole second kernel execution engine. KFA convergence can unify the generated/custom descriptor and argument/launch branches, then reduce private artifact translation. It does not remove operation capture, module ownership, complete-bundle preparation, concurrency/device rules, process launch or public API adaptation.
+
+## Reusing problem and solution types across producers
+
+The [current request payload](../library/src/amd_detail/hipblaslt-jit-gemm-internal.hpp)
+already embeds `RocblasltContractionProblem`. `GemmRequest` adds the operation tag
+and owns captured alpha/beta values; it does not own application buffers.
+Public `GemmProblemType` describes less than this full payload. Another generator
+does not require a second public GEMM problem model.
+
+The [Tensile base interfaces](../tensilelite/include/Tensile/Tensile.hpp) already
+define `Problem`, `ProblemInputs`, and `Solution`. They are generic but skeletal,
+not complete compilation identities or executable owners. Preserve
+`ContractionProblemGemm` and `ContractionSolution` for their existing GEMM predicates,
+workspace rules, and ordered preparation; assess extensions against missing semantics.
+
+The [private backend interface](../library/src/amd_detail/hipblaslt-jit-backend.hpp)
+keeps `CompiledSolution` context for backend, target, request, workspace, and bundle
+lifetime. The current opaque `Solution` can remain a thin owner around reusable
+operation solutions and modules. The matmul algorithm is an operation-specific token;
+it cannot by itself replace that general ownership. Likewise, `Request` can retain
+the existing operation payload without becoming a backend-specific recipe structure.
+
+For non-GEMM work, first define the operation payload, support checks, argument
+binding, ordered helpers, workspace initialization, and lifetime. Reuse
+`KernelArguments`, `KernelInvocation`, and HIP `SolutionAdapter` where sufficient.
+Shared generic handles do not establish a non-GEMM KFA profile or execution adapter.
+Keep the current `getJitAlgo(device, request, backend, maxWorkspaceBytes, solution,
+diagnostics)` contract while evaluating these internal reuse choices.
+
+## rocRoller: existing integration and proposed KFA adaptation
+
+The current [rocRoller host route](../library/src/amd_detail/rocblaslt/src/rocroller/rocroller_host.cpp)
+derives `KernelType`, obtains Origami-ranked configurations, and checks a handle-owned
+kernel cache. On a miss it calls `RocRollerGemmKernel::generate`; the
+[kernel implementation](../library/src/amd_detail/rocblaslt/src/rocroller/gemm.cpp)
+uses `CommandKernel::generateKernel` and `loadKernel`, then binds `CommandArguments`,
+checks predicates, and calls `launchKernel`. The
+[configuration selector](../library/src/amd_detail/rocblaslt/src/rocroller/solution_selection.cpp)
+and [cache](../library/src/amd_detail/rocblaslt/src/rocroller/solution_cache.cpp)
+are separate responsibilities. This route precedes Tensile solution lookup and
+does not currently pass through generic `getJitAlgo` or the Tensile KFA consumer.
+
+The checked-in [rocRoller KFA fixture](../tensilelite/Tensile/Tests/custom/custom_rr.yaml)
+demonstrates one assembly artifact entering existing custom-kernel ingestion. It
+does not prove automatic KFA export from runtime generation. The rocRoller dispatch
+branch also supports precompiled custom code objects with handwritten argument
+packing; [custom_kernels.cpp](../library/src/amd_detail/rocblaslt/src/rocroller/custom_kernels.cpp)
+includes kernels from other producers, so this route is not evidence of origin.
+
+| TensileLite proposal | rocRoller proposal | Other-generator proposal |
+| --- | --- | --- |
+| Complete generated KFA metadata and use the library-owned consumer for proven profiles. | Export or normalize supported generated artifacts into that same schema and consumer. | Implement the same producer contract; add an operation adapter only for missing operation semantics. |
+
+The contract includes binary/symbol/target compatibility, full argument ABI and
+physical layout, predicates, grid/workgroup/cluster units and dynamic shared memory,
+every ordered helper, workspace and synchronization initialization, lifetime, and
+diagnostics. Preserve rocRoller's `ZeroedBeforeAndAfter` Stream-K scratch contract:
+caller-visible workspace is not the complete synchronization requirement. The
+TensileLite path also obtains handle-owned synchronization state during preparation;
+applications own buffers/workspace and follow existing handle/stream rules.
+
+All three producers should share the library-owned validation and execution
+consumer for each supported profile. Origami ranking remains distinct from code
+generation. rocRoller is disabled in the current local build; this assessment is
+source evidence, not a new runtime or interoperability result.
+
+## Selection and the optional fallback library
+
+The current [library construction](../tensilelite/Tensile/SolutionLibrary.py)
+normally orders Equality, Range, Prediction, GridBased, FreeSize, and TruePred
+selectors below hardware/operation/problem predicates. Equality is matching with
+equality distance; Prediction uses Origami to rank existing solutions. Modes and
+available branches affect traversal. Provider-private prediction of new recipes
+is a different task and remains outside the existing-solution ranking contract.
+
+An optional `JustInTime` library type could use the same producer/validation service
+as the explicit API, but only after the complete applicable lookup produces zero
+compatible solutions. This remains an alternative under assessment. In particular,
+[ExactLogicLibrary::findTopSolutions](../tensilelite/include/Tensile/ExactLogicLibrary.hpp)
+accumulates across rows until the requested count: a final JIT row could compile
+to fill top-N despite an already usable result. A leaf also cannot catch an absent
+root library or operation branch, or an earlier return from the rocRoller path.
+
+Before implementation, settle the full lookup boundary, the existing retry from
+reduced-precision to 32-bit computation, compiler/backend context, workspace and
+capability checks, compilation latency, unsupported versus failed outcomes,
+enumeration/index-query behavior, and persistent cache identity/invalidation.
+Current lookup lacks that compilation context. A GEMM-templated library does not
+become operation-independent by adding a type. The explicit API remains useful for
+backend choice, deliberate generation, and prewarming; zero-result fallback improves
+coverage but does not seek faster alternatives when an existing solution is usable.
 
 ## Reviewable implementation sequence
 
