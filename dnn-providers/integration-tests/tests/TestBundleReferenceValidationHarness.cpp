@@ -293,6 +293,34 @@ TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
     EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
 }
 
+// A reference may decline by throwing ReferenceCapabilityError instead of returning
+// false. That is the same answer, so a listed gap declined that way must pass too,
+// not fail as an escaped exception.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPasses)
+{
+    const auto gapId = aKnownGpuGapId();
+    if(!gapId.has_value())
+    {
+        GTEST_SKIP() << "knownReferenceGaps() has no GPU entries left — nothing to exercise.";
+    }
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t) -> bool {
+            throw ReferenceCapabilityError("stub: no plan for this shape");
+        });
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleWithId(harness, *gapId);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
 // The self-retiring half, and the reason this is an expected-failure list rather
 // than a skip list: the moment the reference can run a listed graph, the entry is
 // stale and the run goes red until someone deletes it. A skip list would instead

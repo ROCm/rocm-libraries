@@ -250,13 +250,12 @@ std::string formatUncoveredOps(const std::set<std::string>& uncoveredOps)
 
 const std::vector<KnownReferenceGap>& knownReferenceGaps()
 {
-    // Every entry here is a promise to delete it. See ALMIOPEN-2563 item 4: the
-    // GPU Sdpa reference dispatches through a dtype-keyed plan registry
-    // (GpuSdpaFwdSignatureKey.hpp) with no FP8 tuple, and its plan builder rejects
-    // variable sequence lengths outright (GpuSdpaFwdPlan.hpp). Both are being
-    // implemented; until they are, these bundles must fail applicability rather
-    // than vanish, and the run must not be red for a gap we have already written
-    // down.
+    // Every entry here is a promise to delete it. The GPU Sdpa reference
+    // dispatches through a dtype-keyed plan registry (GpuSdpaFwdSignatureKey.hpp)
+    // with no FP8 tuple, and its plan builder rejects variable sequence lengths
+    // outright (GpuSdpaFwdPlan.hpp). Both are being implemented; until they are,
+    // these bundles must fail applicability rather than vanish, and the run must
+    // not be red for a gap we have already written down.
     //
     // Note the CPU reference already handles fp8 (CPU SdpaFwdPlan registers
     // FP8_E4M3 -> BFLOAT16), so none of the fp8 entries below apply to it. It

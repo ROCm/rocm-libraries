@@ -86,9 +86,25 @@ void BundleReferenceValidationHarness::TestBody()
     // building a variant pack for a graph the reference will decline is wasted work.
     if(const auto* gap = findKnownReferenceGap(_referenceType, _bundleId); gap != nullptr)
     {
-        IReferenceGraphExecutor& gapExecutor = referenceExecutor();
-        const bool applicable
-            = gapExecutor.isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+        // Declining by throwing ReferenceCapabilityError is the same answer as
+        // returning false, so both satisfy the entry. Any other exception is a
+        // broken reference or bundle, and says which gap entry it happened under.
+        bool applicable = false;
+        try
+        {
+            applicable = referenceExecutor().isApplicable(_bundle->graphBuffer.data(),
+                                                          _bundle->graphBuffer.size());
+        }
+        catch(const ReferenceCapabilityError&)
+        {
+            applicable = false;
+        }
+        catch(const std::exception& e)
+        {
+            FAIL() << referenceLabel(_referenceType) << " errored checking applicability of "
+                   << _bundleId << " (listed in knownReferenceGaps() as: " << gap->reason
+                   << "): " << e.what() << "\n  bundle: " << _bundlePath;
+        }
 
         // Inverted on purpose. The entry says this reference cannot run this graph;
         // if it can now, the entry is stale and the bundle should be validated for

@@ -13,9 +13,11 @@
 # "Standard"/"Comprehensive"/"Full"; framework unit tests carry no tier prefix
 # and are caught by the quick catch-all (everything not Standard/Comprehensive/
 # Full). hipdnn_golden_data_tests names its tests after the bundle's path, so
-# their tier prefix is the lowercase data directory: "standard_" (quick-tier
-# bundles start "quick_" and fall into the catch-all). The PascalCase
-# "Standard*" patterns are the legacy hand-written convention and stay alongside.
+# their tier prefix is the lowercase data directory: "standard_", "comprehensive_"
+# or "full_" (quick-tier bundles start "quick_" and fall into the catch-all).
+# GTest filters are case-sensitive, so every tier is excluded from the catch-all
+# in both spellings; miss one and that tier's bundles run in the quick lanes.
+# The PascalCase patterns are the legacy hand-written convention.
 # The external hipdnn_integration_tests bundle binary is categorized by each
 # provider's test_categories_integration.yaml, not this file.
 #
@@ -34,7 +36,9 @@ test_categories:
       - "Standard*"
       - "standard_*"
       - "Comprehensive*"
+      - "comprehensive_*"
       - "Full*"
+      - "full_*"
     labels:
       - "quick"
       - "standard"
@@ -64,6 +68,7 @@ test_categories:
   #   description: "Comprehensive-tier GPU reference cases"
   #   test_patterns:
   #     - "Comprehensive*"
+  #     - "comprehensive_*"
   #   exclude:
   #     - "*DISABLED*"
   #   labels:
@@ -75,6 +80,7 @@ test_categories:
   #   description: "Full-tier GPU reference cases"
   #   test_patterns:
   #     - "Full*"
+  #     - "full_*"
   #   exclude:
   #     - "*DISABLED*"
   #   labels:
@@ -90,7 +96,9 @@ test_categories:
       - "Standard*"
       - "standard_*"
       - "Comprehensive*"
+      - "comprehensive_*"
       - "Full*"
+      - "full_*"
     labels:
       - "ffm-quick"
       - "ffm-full"

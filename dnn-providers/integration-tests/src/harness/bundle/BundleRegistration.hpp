@@ -31,6 +31,37 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+// What one reference lane did with one loaded bundle. REGISTERED and
+// UNCOVERED_ON_COST put a test under the bundle's name; the other three do not.
+// That difference is what bundlesNoLaneAccountsFor() checks across lanes.
+enum class ReferenceLaneVerdict
+{
+    NO_GOLDEN_OUTPUTS, ///< Nothing to validate.
+    OUTSIDE_OP_SET, ///< The reference does not implement every op in the graph.
+    EXCLUDED_ON_COST, ///< Too costly here; a GPU lane runs this session.
+    UNCOVERED_ON_COST, ///< Too costly here and no GPU lane runs: a skipping test stands in.
+    REGISTERED, ///< A validation test is registered (known-gap tests included).
+};
+
+inline const char* toString(ReferenceLaneVerdict verdict)
+{
+    switch(verdict)
+    {
+    case ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS:
+        return "carries no golden outputs";
+    case ReferenceLaneVerdict::OUTSIDE_OP_SET:
+        return "outside its supported-op set";
+    case ReferenceLaneVerdict::EXCLUDED_ON_COST:
+        return "excluded on cost (see referenceShapeIsAffordable)";
+    case ReferenceLaneVerdict::UNCOVERED_ON_COST:
+        return "excluded on cost, registered as a skipping test";
+    case ReferenceLaneVerdict::REGISTERED:
+        return "registered";
+    default:
+        return "unknown";
+    }
+}
+
 namespace detail
 {
 
@@ -256,37 +287,6 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
     }
 }
 
-// What one reference lane did with one loaded bundle. REGISTERED and
-// UNCOVERED_ON_COST put a test under the bundle's name; the other three do not.
-// That difference is what bundlesNoLaneAccountsFor() checks across lanes.
-enum class ReferenceLaneVerdict
-{
-    NO_GOLDEN_OUTPUTS, ///< Nothing to validate.
-    OUTSIDE_OP_SET, ///< The reference does not implement every op in the graph.
-    EXCLUDED_ON_COST, ///< Too costly here; a GPU lane runs this session.
-    UNCOVERED_ON_COST, ///< Too costly here and no GPU lane runs: a skipping test stands in.
-    REGISTERED, ///< A validation test is registered (known-gap tests included).
-};
-
-inline const char* toString(ReferenceLaneVerdict verdict)
-{
-    switch(verdict)
-    {
-    case ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS:
-        return "carries no golden outputs";
-    case ReferenceLaneVerdict::OUTSIDE_OP_SET:
-        return "outside its supported-op set";
-    case ReferenceLaneVerdict::EXCLUDED_ON_COST:
-        return "excluded on cost (see referenceShapeIsAffordable)";
-    case ReferenceLaneVerdict::UNCOVERED_ON_COST:
-        return "excluded on cost, registered as a skipping test";
-    case ReferenceLaneVerdict::REGISTERED:
-        return "registered";
-    default:
-        return "unknown";
-    }
-}
-
 // The per-bundle decision behind registerReferenceValidationTests(). Split out so
 // it registers nothing and reaches no executor.
 //
@@ -369,29 +369,44 @@ inline std::vector<size_t>
     return unaccounted;
 }
 
-// Registers a failing test for every golden-bearing bundle no lane accounted for,
+// The failing test owed to every golden-bearing bundle no lane accounted for,
 // under the bundle's own name so the tier prefix (and with it the ctest category)
-// is kept.
-inline void registerUnaccountedGoldenBundles(const std::vector<LoadedBundle>& bundles,
-                                             const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
-                                             const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
+// is kept. A FailedLoad, not a skip: nothing validated data we ship, and that
+// must turn the run red. Split from the registration so it can be tested --
+// ::testing::RegisterTest cannot run once RUN_ALL_TESTS() has started.
+inline std::vector<FailedLoad>
+    unaccountedGoldenBundleFailures(const std::vector<LoadedBundle>& bundles,
+                                    const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
+                                    const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
 {
     if(bundles.size() != cpuVerdicts.size())
     {
         throw std::invalid_argument(
-            "registerUnaccountedGoldenBundles: verdicts do not match the bundles");
+            "unaccountedGoldenBundleFailures: verdicts do not match the bundles");
     }
 
+    std::vector<FailedLoad> failures;
     for(const size_t index : bundlesNoLaneAccountsFor(cpuVerdicts, gpuVerdicts))
     {
         const auto& bundle = bundles[index];
-        registerFailedBundleLoad(
+        failures.push_back(FailedLoad{
             bundle.suiteName + "_Unvalidated",
             bundle.testName,
             std::string("This bundle carries golden data, but no reference lane registered a test "
                         "for it, so nothing validated it. CpuRef: ")
                 + toString(cpuVerdicts[index]) + "; GpuRef: " + toString(gpuVerdicts[index])
-                + ".\n  bundle: " + bundle.jsonPath.string());
+                + ".\n  bundle: " + bundle.jsonPath.string()});
+    }
+    return failures;
+}
+
+inline void registerUnaccountedGoldenBundles(const std::vector<LoadedBundle>& bundles,
+                                             const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
+                                             const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
+{
+    for(const auto& failure : unaccountedGoldenBundleFailures(bundles, cpuVerdicts, gpuVerdicts))
+    {
+        registerFailedBundleLoad(failure.suiteName, failure.testName, failure.message);
     }
 }
 
@@ -901,7 +916,7 @@ inline std::optional<std::vector<detail::LoadedBundle>> loadGoldenDataBundles()
 /// `gpuLaneWillRun` is the caller's answer to "will a GPU reference lane actually
 /// execute this session" -- selected by --reference and backed by a device. It
 /// decides what the CPU lane's cost exclusion means, not whether it applies.
-inline std::vector<detail::ReferenceLaneVerdict>
+inline std::vector<ReferenceLaneVerdict>
     registerGoldenDataValidationTests(const std::vector<detail::LoadedBundle>& bundles,
                                       ReferenceExecutorType referenceType,
                                       bool gpuLaneWillRun)
@@ -911,10 +926,10 @@ inline std::vector<detail::ReferenceLaneVerdict>
 
 /// Fails every golden-bearing bundle that neither lane registered a test for.
 /// Call after both lanes have registered, with the verdicts each returned.
-inline void registerUnvalidatedGoldenDataFailures(
-    const std::vector<detail::LoadedBundle>& bundles,
-    const std::vector<detail::ReferenceLaneVerdict>& cpuVerdicts,
-    const std::vector<detail::ReferenceLaneVerdict>& gpuVerdicts)
+inline void
+    registerUnvalidatedGoldenDataFailures(const std::vector<detail::LoadedBundle>& bundles,
+                                          const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
+                                          const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
 {
     detail::registerUnaccountedGoldenBundles(bundles, cpuVerdicts, gpuVerdicts);
 }

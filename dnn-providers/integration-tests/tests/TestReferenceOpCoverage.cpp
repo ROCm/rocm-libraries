@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <set>
 #include <string>
 #include <utility>
@@ -16,6 +17,8 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <nlohmann/json.hpp>
 
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/bundle/ReferenceOpCoverage.hpp"
 
 using hipdnn_integration_tests::ReferenceExecutorType;
@@ -362,6 +365,88 @@ TEST(TestReferenceOpCoverage, NonSdpaGraphsAreNeverGated)
                                            "standard_BatchnormFwdInference_x.Large",
                                            graph.data(),
                                            graph.size()));
+}
+
+// ---------------------------------------------------------------------------
+// Per-lane verdict
+// ---------------------------------------------------------------------------
+
+// The decision each lane makes per bundle, and the one the cross-lane check trusts.
+// The cost-excluded rows are the ones that matter: EXCLUDED_ON_COST registers
+// nothing and is ignored by the cross-lane check, so handing it out on a run with
+// no GPU lane drops the bundle silently. UNCOVERED_ON_COST is what that run must get.
+TEST(TestReferenceLaneVerdict, EachBundleGetsTheVerdictItsLaneEarns)
+{
+    using hipdnn_integration_tests::bundle::IntegrationTestBundle;
+    using hipdnn_integration_tests::bundle::ReferenceLaneVerdict;
+    using hipdnn_integration_tests::bundle::detail::referenceLaneVerdict;
+
+    struct Row
+    {
+        const char* label;
+        flatbuffers::DetachedBuffer graph;
+        bool hasGoldenOutputs;
+        const char* bundleId;
+        ReferenceExecutorType reference;
+        bool gpuLaneWillRun;
+        ReferenceLaneVerdict expected;
+    };
+
+    std::array<Row, 6> rows{{
+        {"no golden outputs",
+         buildSdpaGraph(256),
+         false,
+         "quick_SdpaFwd_x.Small",
+         ReferenceExecutorType::CPU,
+         true,
+         ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS},
+        {"op outside the reference's set",
+         buildBatchnormGraph(),
+         true,
+         "quick_BatchnormFwdInference_x.Small",
+         ReferenceExecutorType::GPU,
+         true,
+         ReferenceLaneVerdict::OUTSIDE_OP_SET},
+        {"too costly, another lane covers it",
+         buildSdpaGraph(8192),
+         true,
+         "quick_SdpaFwd_x.Small",
+         ReferenceExecutorType::CPU,
+         true,
+         ReferenceLaneVerdict::EXCLUDED_ON_COST},
+        {"too costly, no other lane runs",
+         buildSdpaGraph(8192),
+         true,
+         "quick_SdpaFwd_x.Small",
+         ReferenceExecutorType::CPU,
+         false,
+         ReferenceLaneVerdict::UNCOVERED_ON_COST},
+        {"affordable",
+         buildSdpaGraph(256),
+         true,
+         "quick_SdpaFwd_x.Small",
+         ReferenceExecutorType::CPU,
+         false,
+         ReferenceLaneVerdict::REGISTERED},
+        {"the cost gate is CPU-only",
+         buildSdpaGraph(8192),
+         true,
+         "standard_SdpaFwd_x.Medium",
+         ReferenceExecutorType::GPU,
+         false,
+         ReferenceLaneVerdict::REGISTERED},
+    }};
+
+    for(auto& row : rows)
+    {
+        SCOPED_TRACE(row.label);
+        IntegrationTestBundle bundle;
+        bundle.graphBuffer = std::move(row.graph);
+        bundle.hasGoldenOutputs = row.hasGoldenOutputs;
+
+        EXPECT_EQ(referenceLaneVerdict(bundle, row.bundleId, row.reference, row.gpuLaneWillRun),
+                  row.expected);
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)

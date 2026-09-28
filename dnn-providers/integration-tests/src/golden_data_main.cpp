@@ -17,7 +17,6 @@
 
 #include <argparse.hpp>
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -153,16 +152,16 @@ int main(int argc, char** argv) noexcept
         // bundles it drops, so it has to know whether that lane really runs.
         // --reference already answers half of it; the other half is the device,
         // because the GPU harness SKIP_IF_NO_DEVICES()s in SetUp() and a registered
-        // suite that skips covers nothing.
-        int deviceCount = 0;
-        const auto deviceStatus = hipGetDeviceCount(&deviceCount);
-        const bool gpuLaneWillRun = runGpu && deviceStatus == hipSuccess && deviceCount > 0;
+        // suite that skips covers nothing. Short-circuited so --reference cpu does
+        // not probe for a device.
+        const bool gpuLaneWillRun
+            = runGpu && !hipdnn_integration_tests::bundle::noHipDevicesAvailable();
 
         // Discovered and loaded once, then handed to each lane. The tree is ~5700
         // bundles of which ~50 carry golden data, so this is the bulk of the
         // binary's startup; doing it per lane paid it twice and registered every
         // failing-load test twice under the same name.
-        using hipdnn_integration_tests::bundle::detail::ReferenceLaneVerdict;
+        using hipdnn_integration_tests::bundle::ReferenceLaneVerdict;
         std::vector<ReferenceLaneVerdict> cpuVerdicts;
         std::vector<ReferenceLaneVerdict> gpuVerdicts;
         const auto bundles = hipdnn_integration_tests::bundle::loadGoldenDataBundles();
