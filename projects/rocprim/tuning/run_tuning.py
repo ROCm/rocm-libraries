@@ -85,6 +85,12 @@ def get_available_algorithms() -> List[str]:
         "device_select_unique_by_key",
         "device_select_flag",
         "device_select_predicate",
+        "device_select_unique",
+        "device_find_first_of",
+        "device_run_length_encode",
+        "device_run_length_encode_non_trivial",
+        "device_topk_air",
+        "device_segmented_topk_air"
         "device_select_unique"
         "device_select_unique",
         "device_radix_sort_onesweep",
