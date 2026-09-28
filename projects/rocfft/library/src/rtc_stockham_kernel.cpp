@@ -277,10 +277,8 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs = make_launch_args();
 
     // twiddles
-    if((data.node->scheme == CS_KERNEL_STOCKHAM_PP
-        && get_root_transform_type(data.node) != rocfft_transform_type_real_inverse)
-       || (data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC
-           && get_root_transform_type(data.node) == rocfft_transform_type_real_inverse))
+    if(data.node->scheme == CS_KERNEL_STOCKHAM_PP
+       || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
     {
         kargs.append_ptr(data.node->twiddles_pp);
         kargs.append_ptr(data.node->twiddles_off_dim);

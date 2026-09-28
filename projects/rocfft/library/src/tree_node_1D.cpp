@@ -963,22 +963,19 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 
 bool StockhamPP1DNode::CreateDeviceResources()
 {
-    if(GetRootPlanTransformType() != rocfft_transform_type_real_inverse)
-    {
-        twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
 
-        // Create twiddle tables for partial pass along ppOffDim
-        std::tie(twiddles_off_dim, twiddles_off_dim_size)
-            = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
-                                  GetTwiddleTableLengthLimit(),
-                                  precision,
-                                  deviceProp,
-                                  0,
-                                  twd_attach_halfN,
-                                  kernelFactorsPP);
-        std::tie(twiddles_pp, twiddles_pp_size)
-            = Repo::GetTwiddlesPP(length[ppOffDim], precision, deviceProp);
-    }
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(length[ppOffDim], precision, deviceProp);
 
     return LeafNode::CreateDeviceResources();
 }
@@ -1188,22 +1185,21 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 
 bool SBCCPPNode::CreateDeviceResources()
 {
-    if(GetRootPlanTransformType() == rocfft_transform_type_real_inverse)
-    {
-        twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
 
-        // Create twiddle tables for partial pass along ppOffDim
-        std::tie(twiddles_off_dim, twiddles_off_dim_size)
-            = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
-                                  GetTwiddleTableLengthLimit(),
-                                  precision,
-                                  deviceProp,
-                                  0,
-                                  twd_attach_halfN,
-                                  kernelFactorsPP);
-        std::tie(twiddles_pp, twiddles_pp_size)
-            = Repo::GetTwiddlesPP(length[ppOffDim], precision, deviceProp);
-    }
+    // Create twiddle tables for partial pass along ppOffDim
+    std::tie(twiddles_off_dim, twiddles_off_dim_size)
+        = Repo::GetTwiddles1D(product(kernelFactorsPP.begin(), kernelFactorsPP.end()),
+                              GetTwiddleTableLengthLimit(),
+                              precision,
+                              deviceProp,
+                              0,
+                              twd_attach_halfN,
+                              kernelFactorsPP);
+    // this node's length is rotated so that its own transform dimension comes
+    // first, which shifts ppOffDim (a plan dimension) one slot to the right
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(length[(ppOffDim + 1) % length.size()], precision, deviceProp);
 
     return LeafNode::CreateDeviceResources();
 }

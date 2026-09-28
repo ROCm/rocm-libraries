@@ -51,6 +51,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         transforms_per_block *= max_factor_pp;
         workgroup_size *= max_factor_pp;
 
+        // c2r runs the SBCC first, so that is the kernel doing steps 1/2
+        runs_steps_1_2 = transform_type_pp == rocfft_transform_type_real_inverse;
+
         switch(params.off_dim)
         {
         case 0:
@@ -58,8 +61,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
                 "StockhamPartialPassKernelCC:: partial-passes along x not currently supported");
             break;
         case 1:
-            num_blocks_per_batch = (params.parent_length[1] - 1) / transforms_per_block + 1;
-            num_blocks_per_batch *= params.parent_length[2];
+            num_blocks_per_batch
+                = (params.parent_length[1] - 1) / transforms_per_block_unscaled + 1;
+            num_blocks_per_batch *= params.parent_length[off_dim_index] / pp_factors_prod;
             break;
         case 2:
             throw std::runtime_error(
@@ -105,6 +109,12 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
     unsigned int launcher_transforms_per_block() override
     {
         return transforms_per_block / max_factor_pp;
+    }
+
+    // blocks are arranged as tiles along dim1 within each off-dimension group
+    Expression pp_twiddle_row_index() override
+    {
+        return block_idx_pp / num_of_tiles;
     }
 
     // Call generator as many times as needed.
@@ -245,15 +255,25 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         stmts += Declaration{thread_lds, thread_id / transforms_per_block_unscaled};
         stmts += Declaration{tid_hor_lds, thread_id % transforms_per_block_unscaled};
 
+        // steps 1/2 gathers the off-dimension with a stride of
+        // pp_factors_other_prod, steps 3/4 gathers consecutive points
+        unsigned int pp_gather_stride = runs_steps_1_2 ? pp_factors_other_prod : 1;
+
         stmts += Declaration(tid_hor_pp,
                              thread_id % transforms_per_block_unscaled
-                                 + lengths[1] * (thread % pp_factors_prod));
+                                 + lengths[1] * pp_gather_stride * (thread % pp_factors_prod));
         stmts += Declaration(thread_pp, thread_id / (transforms_per_block));
 
-        stmts += Declaration(
-            offset_pp,
-            offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1])
-                + batch * stride[dim]);
+        Expression offset_pp_value = offset + batch * stride[dim];
+        if(!runs_steps_1_2)
+        {
+            // steps 3/4 covers pp_factors_prod consecutive off-dimension points
+            // per block, so the block base has to be scaled up to match
+            offset_pp_value
+                = offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1])
+                  + batch * stride[dim];
+        }
+        stmts += Declaration(offset_pp, offset_pp_value);
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_unscaled
@@ -397,10 +417,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         for(unsigned int i = 0; i < length / stripmine_h; ++i)
             tmp_stmts += StoreGlobal{
                 buf,
-                (transform_type_pp == rocfft_transform_type_real_inverse)
-                    ? Expression{offset_tile_wbuf(i)}
-                    : CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                               {offset_tile_wbuf(i)}},
+                CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
+                         {offset_tile_wbuf(i)}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -699,25 +717,16 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
     ArgumentList global_arguments() override
     {
-        if(transform_type_pp != rocfft_transform_type_real_inverse)
-        {
-            // insert large twiddles
-            ArgumentList arglist = StockhamKernel::global_arguments();
-            arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
-            return arglist;
-        }
-        else
-        {
-            auto arglist = ArgumentList{twiddles_pp, twiddles_off_dim};
+        auto arglist = ArgumentList{twiddles_pp, twiddles_off_dim};
 
-            auto arguments_base = StockhamKernel::global_arguments();
-            for(const auto& arg : arguments_base.arguments)
-                arglist.append(arg);
+        auto arguments_base = StockhamKernel::global_arguments();
+        for(const auto& arg : arguments_base.arguments)
+            arglist.append(arg);
 
-            arglist.arguments.insert(arglist.arguments.begin() + 3, large_twiddles);
+        // insert large twiddles
+        arglist.arguments.insert(arglist.arguments.begin() + 3, large_twiddles);
 
-            return arglist;
-        }
+        return arglist;
     }
 
     Function generate_global_function() override
@@ -766,7 +775,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         body += loadlds;
 
-        if(transform_type_pp != rocfft_transform_type_real_inverse)
+        if(!runs_steps_1_2)
             body += generate_partial_pass_steps_3_4();
 
         body += LineBreak{};
@@ -820,7 +829,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         body += postStore;
 
-        if(transform_type_pp == rocfft_transform_type_real_inverse)
+        if(runs_steps_1_2)
             body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};

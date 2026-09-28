@@ -2087,8 +2087,13 @@ void Real3DPPNode::AssignParams_internal()
             xyPlan->inStride = inStride;
             xyPlan->iDist    = iDist;
 
-            xyPlan->outStride = inStride;
-            xyPlan->oDist     = iDist;
+            // xy plan writes real data, but as a complex-length transform
+            xyPlan->outStride = outStride;
+            for(unsigned int i = 1; i < xyPlan->outStride.size(); ++i)
+            {
+                xyPlan->outStride[i] /= 2;
+            }
+            xyPlan->oDist = oDist / 2;
 
             xyPlan->AssignParams();
         }

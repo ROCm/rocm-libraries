@@ -43,13 +43,12 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
                                          const StockhamPartialPassParams& params)
         : StockhamPartialPassKernel(specs, params, LDSColumnPattern::NON_INTERLEAVED)
     {
-        length_off_dim = params.parent_length[params.off_dim];
+        // r2c runs the SBRR first, so that is the kernel doing steps 1/2
+        runs_steps_1_2 = transform_type_pp != rocfft_transform_type_real_inverse;
 
         R.size = Expression{std::max(
             nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
     }
-
-    unsigned int length_off_dim;
 
     std::string tiling_name() override
     {
@@ -96,10 +95,9 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
                         block_id * transforms_per_block + thread_id / threads_per_transform};
         stmts += Assign{remaining, transform};
         stmts += Assign{remaining_pp,
-                        length_off_dim * Parens(transform / length_off_dim)
-                            + Parens(transform % length_off_dim) / transforms_per_block
-                            + Parens(transform * (length_off_dim / transforms_per_block))
-                                  % length_off_dim};
+                        length_pp * Parens(transform / length_pp)
+                            + Parens(transform % length_pp) / transforms_per_block
+                            + Parens(transform * (length_pp / transforms_per_block)) % length_pp};
 
         stmts += For{d,
                      1,
@@ -240,8 +238,9 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
                 "use the last thread of each transform to load one more element per row"};
             stmts_c2real_pre += If{
                 thread == threads_per_transform - 1,
-                {Assign{lds_complex[offset_lds + thread + (height - 1) * width + 1],
-                        LoadGlobal{buf, offset + (thread + (height - 1) * width + 1) * stride0}}}};
+                {Assign{
+                    lds_complex[offset_lds + thread + (height - 1) * width + 1],
+                    LoadGlobal{buf, offset_pp + (thread + (height - 1) * width + 1) * stride0}}}};
             if(ebtype == EmbeddedType::C2Real_PRE)
                 stmts += stmts_c2real_pre;
         }
@@ -312,20 +311,13 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
 
     ArgumentList global_arguments() override
     {
-        if(transform_type_pp != rocfft_transform_type_real_inverse)
-        {
-            auto arguments = ArgumentList{twiddles_pp, twiddles_off_dim};
+        auto arguments = ArgumentList{twiddles_pp, twiddles_off_dim};
 
-            auto arguments_base = StockhamKernel::global_arguments();
-            for(const auto& arg : arguments_base.arguments)
-                arguments.append(arg);
+        auto arguments_base = StockhamKernel::global_arguments();
+        for(const auto& arg : arguments_base.arguments)
+            arguments.append(arg);
 
-            return arguments;
-        }
-        else
-        {
-            return StockhamKernel::global_arguments();
-        }
+        return arguments;
     }
 
     Function generate_global_function() override
@@ -371,9 +363,6 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
         loadlds += CommentLines{"load global into lds"};
         loadlds += load_from_global(false);
         loadlds += LineBreak{};
-        // handle even-length real to complex pre-process in lds before transform
-        if(ebtype == EmbeddedType::C2Real_PRE)
-            loadlds += real_trans_pre_post();
 
         if(!direct_to_from_reg)
         {
@@ -389,8 +378,14 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
             body += Else{loadlds};
         }
 
-        if(transform_type_pp == rocfft_transform_type_real_inverse)
+        if(!runs_steps_1_2)
             body += generate_partial_pass_steps_3_4();
+
+        // handle even-length real to complex pre-process in lds before transform.
+        // it conjugates across the row, so it cannot run until the off-dimension
+        // pass has completed.
+        if(ebtype == EmbeddedType::C2Real_PRE)
+            body += real_trans_pre_post();
 
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
@@ -449,7 +444,7 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
             body += real_trans_pre_post();
         }
 
-        if(transform_type_pp != rocfft_transform_type_real_inverse)
+        if(runs_steps_1_2)
             body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
