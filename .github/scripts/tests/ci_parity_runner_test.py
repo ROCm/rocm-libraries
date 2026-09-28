@@ -131,6 +131,10 @@ class QuickLabelTest(unittest.TestCase):
             rocjitsu = root / "rocjitsu"
             rocjitsu.write_text(
                 "#!/bin/sh\n"
+                "if [ -n \"${GTEST_FILTER+x}\" ]; then\n"
+                "  echo \"GTEST_FILTER is set: [$GTEST_FILTER]\"\n"
+                "  exit 1\n"
+                "fi\n"
                 "echo '[ RUN      ] hiprand_32/hiprand_api_32.hiprand_generate_test/0'\n"
                 "echo '[       OK ] hiprand_32/hiprand_api_32.hiprand_generate_test/0 (12 ms)'\n",
                 encoding="utf-8",
@@ -150,7 +154,7 @@ class QuickLabelTest(unittest.TestCase):
                     "^quick$",
                     "",
                     30,
-                    os.environ.copy(),
+                    {**os.environ, "GTEST_FILTER": ""},
                     False,
                     Path("parity"),
                 )
