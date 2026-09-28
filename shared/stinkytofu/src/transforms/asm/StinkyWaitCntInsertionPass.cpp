@@ -23,6 +23,7 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -133,6 +134,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitCntData d;
             d.dlcnt = spec.dsCount;
             w->addModifier<SWaitCntData>(d);
+            addProvenanceComment(*w, spec.sources[CK_DS]);
         }
         if (spec.loadCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_loadcnt, arch), anchor);
@@ -140,6 +142,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitCntData d;
             d.vlcnt = spec.loadCount;
             w->addModifier<SWaitCntData>(d);
+            addProvenanceComment(*w, spec.sources[CK_Load]);
         }
         if (spec.kmCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_kmcnt, arch), anchor);
@@ -147,6 +150,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitCntData d;
             d.kmcnt = spec.kmCount;
             w->addModifier<SWaitCntData>(d);
+            addProvenanceComment(*w, spec.sources[CK_KM]);
         }
         if (spec.tensorCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w =
@@ -161,6 +165,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             if (!spec.tensorTokens.empty()) {
                 w->addModifier<MemTokenData>(MemTokenData{spec.tensorTokens});
             }
+            addProvenanceComment(*w, spec.sources[CK_Tensor]);
         }
         if (spec.asyncCount != WaitCountSpec::kUnused) {
             StinkyInstruction* w = builder.create(getMCIDByUOp(GFX::s_wait_asynccnt, arch), anchor);
@@ -168,7 +173,35 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             SWaitAsyncCntData d;
             d.asynccnt = spec.asyncCount;
             w->addModifier<SWaitAsyncCntData>(d);
+            addProvenanceComment(*w, spec.sources[CK_Async]);
         }
+    }
+
+    void addProvenanceComment(StinkyInstruction& wait, const std::vector<WaitSource>& sources) {
+        if (sources.empty()) return;
+
+        std::string comment = "drains ";
+        for (size_t i = 0; i < sources.size(); ++i) {
+            if (i > 0) comment += "; ";
+            const WaitSource& source = sources[i];
+            comment += "token LDS" + std::to_string(source.token) + " from ";
+            comment += source.predecessor == "local" ? "local" : "^" + source.predecessor;
+            if (source.tripsBack < 0) continue;
+
+            comment += " (frame ";
+            if (source.tripAgeSaturated) {
+                comment += "k-(" + std::to_string(source.tripsBack) + "+)";
+            } else if (source.tripsBack == 0) {
+                comment += "k";
+            } else {
+                comment += "k-" + std::to_string(source.tripsBack);
+            }
+            if (source.ringSlot >= 0) {
+                comment += ", ring slot " + std::to_string(source.ringSlot);
+            }
+            comment += ")";
+        }
+        wait.addModifier<CommentData>(CommentData{comment});
     }
 
     void removePHIs(PassContext& passCtx, const std::vector<BasicBlock*>& rpo) {

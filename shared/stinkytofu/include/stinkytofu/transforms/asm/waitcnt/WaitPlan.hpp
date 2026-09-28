@@ -27,6 +27,9 @@
 // per-consumer waits) and may then be rewritten by WaitPlanOptimizers
 // (e.g. ShallowPredPromotion) before the emit phase materialises the IR.
 
+#include <array>
+#include <cstddef>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -36,11 +39,24 @@ struct StinkyInstruction;
 
 namespace waitcnt {
 
+/// One logical LDS token retired by a generated wait, together with the direct
+/// CFG predecessor through which that token reached the wait.
+struct WaitSource {
+    int token = 0;
+    int tripsBack = -1;  // -1 when the bounded queue lost the exact age
+    bool tripAgeSaturated = false;
+    int ringSlot = -1;  // -1 when token-to-ring mapping is ambiguous
+    std::string predecessor;
+
+    bool operator==(const WaitSource&) const = default;
+};
+
 /// One immediate per hardware counter that the emit phase will turn into an
 /// s_wait_dscnt / s_wait_loadcnt / s_wait_kmcnt / s_wait_tensorcnt before the
 /// anchor. A field of kUnused means "do not emit a wait for this counter".
 struct WaitCountSpec {
     static constexpr int kUnused = -1;
+    static constexpr size_t kCounterCount = 5;
 
     int dsCount = kUnused;      // dlcnt -> s_wait_dscnt
     int loadCount = kUnused;    // vlcnt -> s_wait_loadcnt
@@ -53,6 +69,11 @@ struct WaitCountSpec {
     // later passes (e.g. TDMLoadWaveSyncPass) can identify the drained wait group.
     // Empty when tensorCount is kUnused or no drained load carries a token.
     std::vector<int> tensorTokens;
+
+    // Sorted-unique operations retired by each counter wait. Populated from
+    // the live queues after all plan optimizations, so emitted comments describe
+    // the final wait rather than the conservative pre-optimization plan.
+    std::array<std::vector<WaitSource>, kCounterCount> sources;
 
     bool isValid() const {
         return dsCount != kUnused || loadCount != kUnused || kmCount != kUnused ||

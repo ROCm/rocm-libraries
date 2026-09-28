@@ -1,0 +1,21 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --emit-asm --preserve-comments
+#
+# The previous trip's phase-0 read now occupies ring slot 2. The generated
+# dscnt comment exposes both facts at the protecting barrier.
+#
+# CHECK: s_wait_dscnt 1
+# CHECK-SAME: drains token LDS0 from ^loop (frame k-1, ring slot 2)
+
+st.func @waitcnt_insertion_lds_ring_war_comments() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,0], advances = [] } }
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,3], advances = [] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0) { mod.lds_ring = { accesses = [], advances = [0,1] } }
+  Successors: ^loop, ^exit
+^exit:
+}

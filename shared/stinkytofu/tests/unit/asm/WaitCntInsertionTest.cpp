@@ -921,6 +921,12 @@ st.func @test_loop_carried_memtoken_header_enabled() {
         << "Conservative mode should iterate CK_Tensor through loop-carried token state";
     EXPECT_EQ(tensorWait->tlcnt, 0);
     EXPECT_EQ(countTensorWaitCnt(loopHeader), 1);
+
+    auto waits = getAllTensorWaitCnts(loopHeader);
+    ASSERT_EQ(waits.size(), 1);
+    const CommentData* comment = waits.front().inst->getModifier<CommentData>();
+    ASSERT_NE(comment, nullptr);
+    EXPECT_EQ(comment->comment, "drains token LDS0 from ^loop_tail (frame k-1)");
 }
 
 /**
@@ -1155,6 +1161,12 @@ st.func @test_lds_war_tensor_load() {
     EXPECT_EQ(countWaitCnt(entryBB), 1)
         << "Exactly one waitcnt should be inserted (before tensor_load_to_lds)";
     EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+
+    auto waits = getAllWaitCnts(entryBB);
+    ASSERT_EQ(waits.size(), 1);
+    const CommentData* comment = waits.front().inst->getModifier<CommentData>();
+    ASSERT_NE(comment, nullptr);
+    EXPECT_EQ(comment->comment, "drains token LDS0 from local (frame k)");
 }
 
 /**

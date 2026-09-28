@@ -118,12 +118,17 @@ int waitToDrain(CounterKind c, int countFrom);
 ///
 /// `frameDeltas[i]` is the issuing frame minus the current frame for
 /// LdsRingData::accesses[i], reduced modulo that access's ring.
+/// `tripsBack` is the exact number of loop back-edges crossed, retained only
+/// for diagnostics; it does not participate in ring-alias decisions.
 struct QueuedOp {
     StinkyInstruction* op = nullptr;
     std::vector<int> frameDeltas;
+    unsigned tripsBack = 0;
+    bool tripAgeSaturated = false;
 
     bool operator==(const QueuedOp& other) const {
-        return op == other.op && frameDeltas == other.frameDeltas;
+        return op == other.op && frameDeltas == other.frameDeltas &&
+               tripsBack == other.tripsBack && tripAgeSaturated == other.tripAgeSaturated;
     }
 };
 

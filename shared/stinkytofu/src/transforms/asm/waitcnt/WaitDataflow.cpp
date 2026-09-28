@@ -41,6 +41,7 @@ namespace {
 // wait immediate.
 constexpr size_t kMaxInFlight = 64;
 constexpr int kMaxWaitCount = static_cast<int>(kMaxInFlight) - 1;
+constexpr unsigned kMaxProvenanceTripsBack = static_cast<unsigned>(kMaxInFlight);
 
 int clampWaitCount(int w) {
     return std::min(w, kMaxWaitCount);
@@ -138,6 +139,8 @@ CounterKind classifyMemOp(const StinkyInstruction& inst) {
 // waitReconstruction() entry. This tripwire fires if one is added without a
 // look at the other two.
 static_assert(CK_Count == 5, "adding a CounterKind means revisiting waitReconstruction()");
+static_assert(CK_Count == WaitCountSpec::kCounterCount,
+              "WaitCountSpec::sources must match CounterKind");
 
 WaitReconstruction waitReconstruction(const StinkyInstruction& inst) {
     switch (inst.getUnifiedOpcode()) {
@@ -235,26 +238,76 @@ bool ringAliases(const QueuedOp& producer, size_t producerIndex, const LdsRingAc
            positiveModulo(consumer.gdelta, consumer.ring);
 }
 
-// Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
-// of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
-// queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
-// W is a min across predecessor queues, at a CFG merge this union is a conservative
-// superset of what any single path drains. Drained ops without MemTokenData
-// contribute nothing (no token to add).
-std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount) {
-    std::vector<int> out;
-    if (tensorCount < 0) return out;
-    for (const auto& q : state.queues[CK_Tensor]) {
-        const int qsize = static_cast<int>(q.ops.size());
-        const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
-        for (int idx = 0; idx < drainedEnd; ++idx) {
-            StinkyInstruction* op = q.ops[idx].op;
-            if (op == nullptr) continue;
-            const auto* mt = op->getModifier<MemTokenData>();
-            if (mt == nullptr) continue;
-            out.insert(out.end(), mt->tokens.begin(), mt->tokens.end());
+int unambiguousRingSlot(const QueuedOp& queued, size_t tokenCount) {
+    if (queued.op == nullptr || tokenCount != 1) return -1;
+    const auto* ring = queued.op->getModifier<LdsRingData>();
+    if (ring == nullptr || ring->accesses.empty() ||
+        queued.frameDeltas.size() != ring->accesses.size()) {
+        return -1;
+    }
+
+    int commonRing = -1;
+    int commonSlot = -1;
+    for (size_t i = 0; i < ring->accesses.size(); ++i) {
+        const LdsRingAccess& access = ring->accesses[i];
+        if (access.ring <= 0) return -1;
+        const int slot = positiveModulo(queued.frameDeltas[i] + access.gdelta, access.ring);
+        if (commonRing < 0) {
+            commonRing = access.ring;
+            commonSlot = slot;
+        } else if (access.ring != commonRing || slot != commonSlot) {
+            return -1;
         }
     }
+    return commonSlot;
+}
+
+// A wait of W keeps the W newest operations in flight and retires the older
+// prefix. Record each drained LDS token and the CFG predecessor that supplied
+// it after plan optimization, so loop-carried sources remain distinguishable.
+std::vector<WaitSource> drainedWaitSources(const DataflowState& state, CounterKind counter,
+                                           int waitCount) {
+    std::vector<WaitSource> out;
+    if (waitCount < 0) return out;
+
+    for (const auto& q : state.queues[counter]) {
+        const std::string predecessor = q.pred == nullptr ? "local" : q.pred->getLabel();
+        auto append = [&](StinkyInstruction* op, const QueuedOp* queued) {
+            if (op == nullptr) return;
+            const auto* tokens = op->getModifier<MemTokenData>();
+            if (tokens == nullptr) return;
+            const int tripsBack = queued == nullptr ? -1 : static_cast<int>(queued->tripsBack);
+            const bool ageSaturated = queued != nullptr && queued->tripAgeSaturated;
+            const int ringSlot =
+                queued == nullptr ? -1 : unambiguousRingSlot(*queued, tokens->tokens.size());
+            for (int token : tokens->tokens) {
+                out.push_back({token, tripsBack, ageSaturated, ringSlot, predecessor});
+            }
+        };
+        for (StinkyInstruction* op : q.saturatedOps) append(op, nullptr);
+        const int qsize = static_cast<int>(q.ops.size());
+        const int drainedEnd = std::max(0, qsize - waitCount);
+        for (int idx = 0; idx < drainedEnd; ++idx) {
+            append(q.ops[idx].op, &q.ops[idx]);
+        }
+    }
+
+    std::sort(out.begin(), out.end(), [](const WaitSource& a, const WaitSource& b) {
+        if (a.token != b.token) return a.token < b.token;
+        if (a.tripsBack != b.tripsBack) return a.tripsBack < b.tripsBack;
+        if (a.tripAgeSaturated != b.tripAgeSaturated)
+            return a.tripAgeSaturated < b.tripAgeSaturated;
+        if (a.ringSlot != b.ringSlot) return a.ringSlot < b.ringSlot;
+        return a.predecessor < b.predecessor;
+    });
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+std::vector<int> waitSourceTokens(const std::vector<WaitSource>& sources) {
+    std::vector<int> out;
+    out.reserve(sources.size());
+    for (const WaitSource& source : sources) out.push_back(source.token);
     std::sort(out.begin(), out.end());
     out.erase(std::unique(out.begin(), out.end()), out.end());
     return out;
@@ -350,6 +403,7 @@ DataflowState WaitDataflow::mergeFromPredecessors(
                 edgeRing = inst->getModifier<LdsRingData>();
             }
         }
+        const bool backEdge = isBackEdge(p, &bb);
         for (int c = 0; c < CK_Count; ++c) {
             for (const auto& predQ : predState.queues[c]) {
                 PerPredQueue q;
@@ -357,7 +411,17 @@ DataflowState WaitDataflow::mergeFromPredecessors(
                 q.ops = predQ.ops;
                 q.saturatedOps = predQ.saturatedOps;
                 q.ringSaturated = predQ.ringSaturated;
-                if (edgeRing != nullptr && !edgeRing->advances.empty() && isBackEdge(p, &bb)) {
+                if (backEdge) {
+                    for (QueuedOp& queued : q.ops) {
+                        if (queued.tripAgeSaturated) continue;
+                        if (queued.tripsBack < kMaxProvenanceTripsBack) {
+                            ++queued.tripsBack;
+                        } else {
+                            queued.tripAgeSaturated = true;
+                        }
+                    }
+                }
+                if (edgeRing != nullptr && !edgeRing->advances.empty() && backEdge) {
                     for (QueuedOp& queued : q.ops) {
                         const auto* opRing =
                             queued.op == nullptr ? nullptr : queued.op->getModifier<LdsRingData>();
@@ -627,8 +691,8 @@ bool appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     bool saturated = false;
     for (auto& q : qs) {
         const auto* ring = op->getModifier<LdsRingData>();
-        q.ops.push_back(
-            QueuedOp{op, std::vector<int>(ring == nullptr ? 0 : ring->accesses.size(), 0)});
+        q.ops.push_back(QueuedOp{
+            op, std::vector<int>(ring == nullptr ? 0 : ring->accesses.size(), 0), 0, false});
         while (q.ops.size() > kMaxInFlight) {
             q.saturatedOps.insert(q.ops.front().op);
             if (q.ops.front().op != nullptr &&
@@ -1238,13 +1302,15 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 // else the freshly recomputed requirement.
                 WaitCountSpec applySpec = mergePlanAndComputed(optimizerPlan, inst, computed, emit);
 
-                // Capture the drained tensor-token union from the LIVE (pre-trim)
-                // queues, so the emitted s_wait_tensorcnt can carry it. This is the
-                // final anchor set (finalizePlan overwrites plan.anchorWaits below),
-                // and the queues here are exactly those the wait drains.
-                if (applySpec.tensorCount != WaitCountSpec::kUnused) {
-                    applySpec.tensorTokens = drainedTensorTokens(state, applySpec.tensorCount);
+                // Capture provenance from the LIVE queues before trimming. These
+                // are exactly the operations each final counter wait retires.
+                for (int c = 0; c < CK_Count; ++c) {
+                    int w = getCounterField(applySpec, static_cast<CounterKind>(c));
+                    if (w == WaitCountSpec::kUnused) continue;
+                    applySpec.sources[c] =
+                        drainedWaitSources(state, static_cast<CounterKind>(c), w);
                 }
+                applySpec.tensorTokens = waitSourceTokens(applySpec.sources[CK_Tensor]);
 
                 for (int c = 0; c < CK_Count; ++c) {
                     int w = getCounterField(applySpec, static_cast<CounterKind>(c));
@@ -1281,6 +1347,20 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
     }
     if (!converged) {
         std::cerr << "[WaitDataflow] finalizePlan iteration cap " << iterationCap << " hit\n";
+    }
+
+    // Tail drains execute at predecessor exit. Their source state is the final
+    // pre-drain exit queue; adjustedEntry applies the drain in each successor.
+    for (TailDrain& drain : plan.tailDrains) {
+        auto exit = finalExit.find(drain.predBB);
+        if (exit == finalExit.end()) continue;
+        for (int c = 0; c < CK_Count; ++c) {
+            int w = getCounterField(drain.spec, static_cast<CounterKind>(c));
+            if (w == WaitCountSpec::kUnused) continue;
+            drain.spec.sources[c] =
+                drainedWaitSources(exit->second, static_cast<CounterKind>(c), w);
+        }
+        drain.spec.tensorTokens = waitSourceTokens(drain.spec.sources[CK_Tensor]);
     }
 
     plan.anchorWaits = std::move(newAnchors);
