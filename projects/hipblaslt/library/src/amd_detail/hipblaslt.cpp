@@ -1534,8 +1534,7 @@ catch(...)
 
 size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
                                        hipblasLtMatmulDesc_t matmulDesc,
-                                       hipblasOperation_t    opA,
-                                       hipblasOperation_t    opB,
+                                       hipDataType           computeInputType,
                                        int64_t               m,
                                        int64_t               n,
                                        int64_t               k,
@@ -1543,26 +1542,24 @@ size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
 try
 {
     if(m < 0 || n < 0 || k < 0) return 0;
+    /* Only FP64/FP32 emulation is supported; reject any other input type. */
+    if(computeInputType != HIP_R_64F && computeInputType != HIP_R_32F) return 0;
     /* batch_count != 1: emulation only supports non-batched GEMMs for now.
      * Return 0 so callers can detect the unsupported configuration.
      * Reserved for future batched support. */
     if(batch_count != 1) return 0;
     /* Resolve emulation settings via the canonical decision function.
      * Reads from matmulDesc (if non-null) then falls back to env vars.
-     * Checks FP64 first, then FP32 — the workspace formula is type-independent
-     * (depends only on m, n, k, and num_moduli), so the first applicable type
-     * returns the correct size for either data type.
-     * Returns 0 when no type has emulation enabled or the device is unsupported. */
+     * Returns 0 when emulation is disabled for this type or the device is
+     * unsupported. */
     const auto* h    = reinterpret_cast<const _rocblaslt_handle*>(handle);
     const auto* desc = reinterpret_cast<const _rocblaslt_matmul_desc*>(matmulDesc);
-    for(hipDataType t : {HIP_R_64F, HIP_R_32F})
-    {
-        const FixedPointEmulationDecision d =
-            fixedPointEmulationDecision(h, desc, t, opA, opB, m, n, k, 1, ~size_t{0});
-        if(d.status != rocblaslt_status_success || !d.apply) continue;
-        return fixedPointEmulationWorkspaceSize(h, t, opA, opB, m, n, k, d);
-    }
-    return 0;
+    const hipblasOperation_t opA = desc ? desc->op_A : HIPBLAS_OP_N;
+    const hipblasOperation_t opB = desc ? desc->op_B : HIPBLAS_OP_N;
+    const FixedPointEmulationDecision d = fixedPointEmulationDecision(
+        h, desc, computeInputType, opA, opB, m, n, k, 1, ~size_t{0});
+    if(d.status != rocblaslt_status_success || !d.apply) return 0;
+    return fixedPointEmulationWorkspaceSize(h, computeInputType, opA, opB, m, n, k, d);
 }
 catch(...)
 {

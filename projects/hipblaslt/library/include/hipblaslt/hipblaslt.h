@@ -1478,20 +1478,34 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
  *  \details
  *  Returns the number of bytes needed in the workspace buffer that must be
  *  passed to \ref hipblasLtMatmul when emulation is active.  The size depends
- *  on the matrix dimensions (always uses S_MAX=20 moduli for the workspace
- *  layout, since ADP mode is always active).
+ *  on the matrix dimensions and on the input precision: the workspace layout
+ *  always covers the maximum number of CRT moduli for the requested precision
+ *  (20 moduli for ``HIP_R_64F``, 12 moduli for ``HIP_R_32F``), since ADP
+ *  (dynamic-precision) mode is always active.  Because FP64 and FP32 use a
+ *  different number of moduli, the returned size differs between the two, so
+ *  the input precision must be supplied explicitly via \p computeInputType.
+ *
+ *  The transpose modes for A and B are read from \p matmulDesc
+ *  (``HIPBLASLT_MATMUL_DESC_TRANSA`` / ``HIPBLASLT_MATMUL_DESC_TRANSB``); they
+ *  do not need to be passed separately.  When \p matmulDesc is NULL both
+ *  transposes default to ``HIPBLAS_OP_N``.
  *
  *  Pass the return value to \ref hipblasLtMatmulPreferenceSetAttribute as
  *  \c HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES to guarantee that the
  *  heuristic selects a compatible algorithm, and allocate at least this many
  *  bytes for the workspace pointer supplied to \ref hipblasLtMatmul.
  *
- *  @param[in]  handle     hipBLASLt handle (provides device selection).
- *  @param[in]  matmulDesc Matmul descriptor carrying emulation settings
- *                         (reads ``HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT`` attrs).
- *                         May be NULL to use env-var / built-in defaults.
- *  @param[in]  opA        Transpose mode for matrix A.
- *  @param[in]  opB        Transpose mode for matrix B.
+ *  @param[in]  handle           hipBLASLt handle (provides device selection).
+ *  @param[in]  matmulDesc       Matmul descriptor carrying emulation settings
+ *                               (reads ``HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT``
+ *                               and ``HIPBLASLT_MATMUL_DESC_TRANSA`` /
+ *                               ``HIPBLASLT_MATMUL_DESC_TRANSB``).  May be NULL
+ *                               to use env-var / built-in defaults and
+ *                               ``HIPBLAS_OP_N`` transposes.
+ *  @param[in]  computeInputType Element precision of the A/B inputs to the
+ *                               emulated GEMM.  Only ``HIP_R_64F`` and
+ *                               ``HIP_R_32F`` are supported; any other value
+ *                               returns 0.
  *  @param[in]  m           Number of rows of op(A) and D.
  *  @param[in]  n           Number of columns of op(B) and D.
  *  @param[in]  k           Shared dimension of op(A) and op(B).
@@ -1500,13 +1514,13 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
  *                          returns 0 (reserved for future batched support).
  *
  *  \retval  Workspace size in bytes, or 0 if emulation is not applicable
- *           (device not supported, emulation disabled, or ``batch_count != 1``).
+ *           (device not supported, emulation disabled, unsupported
+ *           \p computeInputType, or ``batch_count != 1``).
  */
 HIPBLASLT_EXPORT
 size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
                                        hipblasLtMatmulDesc_t matmulDesc,
-                                       hipblasOperation_t    opA,
-                                       hipblasOperation_t    opB,
+                                       hipDataType           computeInputType,
                                        int64_t               m,
                                        int64_t               n,
                                        int64_t               k,

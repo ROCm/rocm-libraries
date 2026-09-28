@@ -102,7 +102,7 @@ Example: enable FP64 emulation eagerly with reduced precision:
 
    // Query workspace and run (batch_count=1; returns 0 for batch_count != 1)
    size_t ws_bytes = hipblasLtEmulationWorkspaceSize(handle, desc,
-                         HIPBLAS_OP_N, HIPBLAS_OP_N, m, n, k, 1);
+                         HIP_R_64F, m, n, k, 1);
    void* workspace;
    hipMalloc(&workspace, ws_bytes);
 
@@ -116,14 +116,17 @@ Workspace
 
 Emulation requires a workspace buffer. Query the required size with
 ``hipblasLtEmulationWorkspaceSize``, which accepts the matmul descriptor so
-that per-call emulation settings are accounted for.  Pass ``batch_count=1``
+that per-call emulation settings (including the transpose modes ``TRANSA`` /
+``TRANSB``) are accounted for.  The input precision is supplied explicitly via
+``computeInputType`` (``HIP_R_64F`` or ``HIP_R_32F``).  Pass ``batch_count=1``
 (the only currently supported value; the function returns 0 for any other value,
 which signals that emulation is not supported for that batch size):
 
 .. code-block:: c
 
    size_t ws_bytes = hipblasLtEmulationWorkspaceSize(handle, matmulDesc,
-                         opA, opB, m, n, k, 1 /* batch_count */);
+                         computeInputType /* HIP_R_64F or HIP_R_32F */,
+                         m, n, k, 1 /* batch_count */);
    void* workspace;
    hipMalloc(&workspace, ws_bytes);
 
