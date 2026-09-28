@@ -221,6 +221,30 @@ TEST(TestConvolutionValidation, ThrowsOnOutputDimValueMismatch)
                  std::invalid_argument);
 }
 
+TEST(TestConvolutionValidation, ThrowsOnBatchMismatch)
+{
+    // wgrad walks the batch of y and reads x at the same batch index.
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({1, 1, 3, 3});
+    const Tensor<float> y({2, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
+TEST(TestConvolutionValidation, ThrowsOnOutputChannelMismatch)
+{
+    // fprop writes one y channel per weight output channel.
+    const Tensor<float> x({1, 1, 4, 4});
+    const Tensor<float> w({2, 1, 3, 3});
+    const Tensor<float> y({1, 1, 2, 2});
+
+    EXPECT_THROW(hipdnn_test_sdk::utilities::validateConvolutionParams(
+                     x, w, y, Vec{1, 1}, Vec{1, 1}, Vec{0, 0}, Vec{0, 0}),
+                 std::invalid_argument);
+}
+
 // ============================================================================
 // TestGpuConvFwdRefValidation — same validation error paths as above, but
 // exercised through the GPU code path (GpuFpReferenceConvolution::fprop).

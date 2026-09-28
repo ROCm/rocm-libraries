@@ -10,6 +10,7 @@
      * CMake
      * Ninja
      * ROCm (for HIP runtime)
+     * GoogleTest including GoogleMock, for the separately built example engine plugin's tests
    - A ROCm-compatible GPU is required to run the samples
 
 2. **Build Samples:** From this `samples` directory:
@@ -18,7 +19,21 @@
    cmake -G Ninja ..
    ninja
    ```
-   - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.
+   - In the [developer image](../dockerfiles/README.md), GoogleTest/GoogleMock and spdlog are installed automatically in `/usr/local`, so no manual dependency download, install, additional prefix, or fetch flag is needed for those packages.
+
+Outside the image, use a complete set of installed packages. From the `samples/build` directory, choose one configuration:
+
+```bash
+# Installed packages only, using absolute paths.
+cmake -G Ninja -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+
+# Alternatively, let the nested example plugin fetch missing GoogleTest.
+cmake -G Ninja -DALLOW_FETCH_DEPS=ON \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies" ..
+```
+
+The combined prefixes must provide the hipDNN frontend, test, plugin, data, and FlatBuffers SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), HIP/HIPRTC, and GoogleTest including GoogleMock. A custom hipDNN install prefix alone is not necessarily sufficient. You can use `GTest_DIR` for an installed GoogleTest package instead of adding its prefix. The `ON` alternative only fetches GoogleTest, not hipDNN, HIP, or other SDK dependencies. This separate samples configure does not inherit the fetch setting from a previous hipDNN build; it forwards its own `ALLOW_FETCH_DEPS` to the nested plugin, including an explicit `OFF`.
 
 The sample executables will be created in the `build` directory.
 

@@ -7,17 +7,21 @@ cmake_minimum_required(VERSION 3.21)
 # why the stand-in must be a GPU hipconv declares.
 set(HIPCONV_BASELINE_GPU gfx942)
 
-# Take the GPU list from GPU_TARGETS, which is what a ROCm consumer sets.
+# Take the GPU list from GPU_TARGETS when nothing has already named the GPUs.
 #
-# Enabling the HIP language is what fills CMAKE_HIP_ARCHITECTURES, from the build
-# machine's own devices, so this has to precede project(). Entries that are not
-# offload targets are dropped: GPU_TARGETS also carries TheRock family names such as
-# gfx94X-dcgpu, and hipconv serves no generic target.
+# GPU_TARGETS is ROCm's GPU list, set by the consumer or filled from amdgpu-arch by
+# find_package(hip) when unset, and MIOpen enables no HIP language, so it names its
+# GPUs this way alone. CMake's HIP language reads CMAKE_HIP_ARCHITECTURES and fills
+# it from the build machine's own devices, so this has to precede project(). A
+# consumer that sets CMAKE_HIP_ARCHITECTURES itself, as TheRock's toolchain does,
+# skips this. Entries naming no offload target are dropped, hipconv serving no
+# generic target. A '-strict' suffix names a specific silicon revision rather than a
+# generic family, so it is kept.
 if(NOT CMAKE_HIP_ARCHITECTURES AND GPU_TARGETS)
     set(_hipconv_gpus "")
     foreach(_hipconv_gpu IN LISTS GPU_TARGETS)
         string(REGEX REPLACE ":.*" "" _hipconv_logical "${_hipconv_gpu}")
-        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+$")
+        if(_hipconv_logical MATCHES "^gfx[0-9a-f]+(-strict)?$")
             list(APPEND _hipconv_gpus "${_hipconv_gpu}")
         else()
             message(STATUS
@@ -87,17 +91,21 @@ endif()
 option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
     "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
 
-# Device LTO costs up to 8x on these kernels.
+option(HIPCONV_LINE_TABLES "Emit DWARF line tables for device code (-gline-tables-only)" OFF)
+if(HIPCONV_LINE_TABLES)
+    string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
+endif()
+
+# Device LTO costs up to 8x on the kernels this library exists to provide.
 #
-# Some clang versions default the AMDGCN LTO mode to full, and the register allocator then
-# spills into the software-pipelined inner loops of the direct, direct_l1 and
-# direct_wgrad families. The code is correct, so it passes CI, but performance is destroyed.
-# ROCm/llvm-project#4434 has the report.
+# Some ROCm clangs default the AMDGCN LTO mode to full, and under that pipeline the
+# register allocator spills into direct_wgrad's software-pipelined row loop. The
+# computation is unchanged and no test can see it. docs/rocm-device-lto-regression.md
+# has the measurements; ROCm/llvm-project#4434 is the upstream report.
 #
-# Set with target_compile_options rather than appended to CMAKE_HIP_FLAGS: a consumer may
-# compile these sources as CXX, and MIOpen does, so HIP flags never reach them. Must
-# precede the arch subdirectories, since hipconv_add_arch_lib reads it.
-option(HIPCONV_OFFLOAD_LTO "Use the compiler's LTO default" OFF)
+# Carried on the targets rather than in CMAKE_HIP_FLAGS because a consumer may compile
+# these sources as CXX -- MIOpen does -- and then the HIP flags never reach them.
+option(HIPCONV_OFFLOAD_LTO "Leave the compiler's device LTO default alone" OFF)
 if(NOT HIPCONV_OFFLOAD_LTO)
     set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
@@ -130,7 +138,7 @@ set(_arch_registry "src/arch_registry.cpp")
 hipconv_make_arch_registry("${_arch_targets}" "${_arch_registry}")
 
 set(_hipconv_srcs
-    src/conv2d_params.cpp
+    src/conv_params.cpp
     src/conv_kernel.cpp
     src/kv_descriptor.cpp
     src/registry.cpp

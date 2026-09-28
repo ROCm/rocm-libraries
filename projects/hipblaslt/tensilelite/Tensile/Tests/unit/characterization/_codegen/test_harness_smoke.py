@@ -3,14 +3,13 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 """Phase G0 smoke test — proves the CPU-only codegen-emit harness works and is
-deterministic, and pins a compact golden digest of the emitted assembly.
+deterministic, and records compact kernel-identity results.
 
 The emit itself is what drives coverage of ``KernelWriterAssembly`` /
 ``KernelWriter``; this single gfx942 kernel already exercises thousands of lines
-of the emitter. We snapshot a *digest* (deterministic kernel name + emit return
-code + line count + sha256 of the canonicalized text) rather than the full
-~200KB of assembly, to keep the golden compact while still catching any change
-in emitted bytes.
+of the emitter. Identity snapshots record kernel selection and status. Tests
+that protect a particular generated behavior assert a focused source pattern
+instead of hashing all compiler-dependent instructions.
 """
 
 import os
@@ -22,7 +21,14 @@ from codegen_harness import (
     canonicalize_asm,
     emit_kernels_from_logic,
 )
-from config_harness import emit_kernels_from_config
+from config_harness import (
+    _select_benchmark_problem,
+    assert_config_emits,
+    benchmark_problem_fingerprint,
+    benchmark_problem_fingerprints,
+    emit_kernels_from_config,
+    golden_digest,
+)
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -80,6 +86,13 @@ def test_emit_is_deterministic():
     assert [t[1] for t in a] == [t[1] for t in b]
 
 
+def test_config_emit_is_deterministic():
+    """Config-driven emits are stable without a throwaway warm-up."""
+    a = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")
+    b = emit_kernels_from_config(_CONFIG, limit=1, arch="gfx950")
+    assert a == b
+
+
 @pytest.mark.parametrize(
     "emit,kwargs",
     [
@@ -118,12 +131,147 @@ def test_canonicalize_neutralizes_random_labels():
     assert canonicalize_asm(canon) == canon  # idempotent
 
 
+def test_config_source_patterns_observe_named_instruction(monkeypatch):
+    results = [
+        (
+            "Cijk_kernel",
+            '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n'
+            "v_cvt_f32_i32 v0, v0\n" + "s_nop 0\n" * 50,
+            0,
+        )
+    ]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    assert_config_emits(
+        "unused.yaml",
+        "gfx942",
+        validate_source=True,
+        required_source_patterns=(("integer-to-float conversion", r"^v_cvt_f32_i32\b"),),
+    )
+
+
+def test_config_source_patterns_reject_missing_instruction(monkeypatch):
+    results = [
+        (
+            "Cijk_kernel",
+            '.amdgcn_target "amdgcn-amd-amdhsa--gfx942"\n'
+            "v_mov_b32 v0, v0\n" + "s_nop 0\n" * 50,
+            0,
+        )
+    ]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    with pytest.raises(AssertionError, match="integer-to-float conversion"):
+        assert_config_emits(
+            "unused.yaml",
+            "gfx942",
+            validate_source=True,
+            required_source_patterns=(("integer-to-float conversion", r"^v_cvt_f32_i32\b"),),
+        )
+
+
+def test_config_emit_smoke_accepts_expected_statuses(monkeypatch):
+    results = [("kernel-ok", "", 0), ("kernel-error", "", -2)]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    assert_config_emits("unused.yaml", "gfx942", expected_statuses={0: 1, -2: 1})
+
+
+def test_config_emit_smoke_rejects_unexpected_error(monkeypatch):
+    results = [("kernel-ok", "", 0), ("kernel-error", "", -2)]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    with pytest.raises(AssertionError, match="emitter statuses"):
+        assert_config_emits("unused.yaml", "gfx942", expected_statuses={0: 2})
+
+
+def test_config_emit_smoke_rejects_wrong_kernel_count(monkeypatch):
+    results = [("kernel-a", "", 0), ("kernel-b", "", 0)]
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", lambda *args, **kwargs: results)
+
+    with pytest.raises(AssertionError, match="emitter statuses"):
+        assert_config_emits("unused.yaml", "gfx942", expected_statuses={0: 1})
+
+
+def test_config_emit_forwards_expected_fork_count(monkeypatch):
+    def emit(*_args, **kwargs):
+        assert kwargs["expected_fork_count"] == 12
+        return [("kernel", "", 0)]
+
+    monkeypatch.setattr("config_harness.emit_kernels_from_config", emit)
+    assert_config_emits(
+        "unused.yaml", "gfx942", expected_fork_count=12, expected_statuses={0: 1}
+    )
+
+
+def test_config_harness_selects_problem_entry():
+    first = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]
+    second = [{"OperationType": "GEMM", "DataType": "H"}, {"ForkParameters": []}]
+
+    assert _select_benchmark_problem([first, second], "config.yaml", 0, None) == first
+    assert _select_benchmark_problem([first, second], "config.yaml", 1, None) == second
+
+
+def test_problem_fingerprint_selection_survives_reordering():
+    first = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]
+    selected = [{"OperationType": "GEMM", "DataType": "H"}, {"ForkParameters": []}]
+    fingerprint = benchmark_problem_fingerprint(selected)
+
+    assert _select_benchmark_problem([first, selected], "config.yaml", 0, fingerprint) == selected
+    assert _select_benchmark_problem([selected, first], "config.yaml", 0, fingerprint) == selected
+
+
+def test_problem_fingerprint_ignores_runtime_problem_sizes():
+    first = [
+        {"OperationType": "GEMM", "DataType": "S"},
+        {
+            "ForkParameters": [{"DepthU": [32]}],
+            "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": [64, 64, 1, 64]}]}],
+        },
+    ]
+    second = [
+        first[0],
+        {
+            "ForkParameters": [{"DepthU": [32]}],
+            "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": [128, 64, 1, 64]}]}],
+        },
+    ]
+
+    assert benchmark_problem_fingerprint(first) == benchmark_problem_fingerprint(second)
+
+
+def test_problem_fingerprint_observes_solution_generation_inputs():
+    first = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": [{"DepthU": [32]}]}]
+    second = [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": [{"DepthU": [64]}]}]
+
+    assert benchmark_problem_fingerprint(first) != benchmark_problem_fingerprint(second)
+
+
+def test_benchmark_problem_fingerprints_lists_indexes(monkeypatch):
+    entries = [
+        [{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}],
+        [{"OperationType": "GEMM", "DataType": "H"}, {"ForkParameters": []}],
+    ]
+    monkeypatch.setattr("config_harness._load_config", lambda _path: {"BenchmarkProblems": entries})
+
+    assert benchmark_problem_fingerprints("config.yaml") == [
+        (0, benchmark_problem_fingerprint(entries[0])),
+        (1, benchmark_problem_fingerprint(entries[1])),
+    ]
+
+
+def test_problem_fingerprint_selection_rejects_missing_group():
+    entries = [[{"OperationType": "GEMM", "DataType": "S"}, {"ForkParameters": []}]]
+    available = benchmark_problem_fingerprint(entries[0])
+
+    with pytest.raises(ValueError, match=rf"does not exist.*{available}"):
+        _select_benchmark_problem(entries, "config.yaml", 0, "not-present")
+
+
 def test_emit_golden_digest(snapshot):
     """Pin the order-invariant golden (kernel identity + emit success).
 
-    The full assembly text is not hashed (it is order-coupled via the emitter's
-    process-global MMA-scheduler state); coverage comes from running the emit.
+    The full assembly text is not hashed; coverage comes from running the emit.
     """
     results = emit_kernels_from_logic(_LOGIC)
-    digests = [{"basename": b, "err": e} for (b, _s, e) in results]
-    assert digests == snapshot
+    assert golden_digest(results) == snapshot
