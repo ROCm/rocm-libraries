@@ -110,7 +110,6 @@ test_categories:
     # the 16 used by the FFM categories assumes one emulator per worker.
     parallel_workers: 4
     pytest_args:
-      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++"
     labels:
