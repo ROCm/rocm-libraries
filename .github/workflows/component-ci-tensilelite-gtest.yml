@@ -88,7 +88,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
             -DTENSILELITE_BUILD_TESTING=ON \
             -DHIPBLASLT_ENABLE_YAML=OFF
-          cmake --build build --parallel --target tensilelite-tests
+          cmake --build build --parallel --target tensilelite-tests cpu-gemm-driver
 
       # No install: the label module (shared/ctest) is TheRock-only and a full
       # install hits the unbuilt rocisa target; run ctest from the build tree.
