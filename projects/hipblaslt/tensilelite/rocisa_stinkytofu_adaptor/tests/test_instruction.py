@@ -57,6 +57,7 @@ from rocisa_stinkytofu_adaptor.container import (  # noqa: E402
     GLOBALModifiers,
     MUBUFModifiers,
     RegisterContainer,
+    VCC,
     SMEMModifiers,
     sgpr,
     vgpr,
@@ -810,6 +811,15 @@ class TestToStinkyRegister(unittest.TestCase):
         reg = _to_stinky_register("0x42")
         self.assertTrue(reg.is_literal_string)
         self.assertEqual(reg.literal_string, "0x42")
+
+    def test_special_reg_names_are_typed(self):
+        # A literal "vcc_lo" prints the same token as a VCC register, but the
+        # size model then charges v_cndmask_b32 as VOP3 (8 bytes) while the
+        # assembler emits e32 (4 bytes).
+        for arg in ("vcc", "vcc_lo", "vcc_hi", "exec", "exec_lo", "scc", VCC()):
+            reg = _to_stinky_register(arg)
+            self.assertTrue(reg.is_register, arg)
+            self.assertFalse(reg.is_literal, arg)
 
     def test_unsupported_type_raises(self):
         with self.assertRaises(TypeError):
@@ -1649,6 +1659,13 @@ class TestVCndMaskB32Construction(unittest.TestCase):
     def test_has_to_stinky_logical(self):
         inst = VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
         self.assertTrue(callable(getattr(inst, "to_stinky_logical", None)))
+
+    @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
+    def test_omitted_src2_lowers(self):
+        # Default src2 is a typed vcc_lo (Register("vcc_lo", 0, 1)), not a
+        # literal string. The constructor raises if that type is unknown.
+        inst = VCndMaskB32(dst=vgpr(0), src0=vgpr(1), src1=vgpr(2))
+        self.assertIn("VCndMaskB32", inst.to_stinky_logical().dump())
 
     @unittest.skipUnless(_STINKY_OK, "stinkytofu binding not built")
     def test_collected_by_module(self):
