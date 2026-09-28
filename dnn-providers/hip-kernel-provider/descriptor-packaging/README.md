@@ -258,13 +258,22 @@ Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
 `-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
 `rocm_kpack`/comgr.
 
-`-m rocke` selects the tests that exercise the rocKE producer or its wheel/comgr
-toolchain; `conftest.py` also attaches it to every test requesting the
-`rocke_available` or `rocke_importable` fixture. With
-`HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the registered ctest entries leave rocKE out
-entirely: they add `and not rocke` to their marker expression and `--ignore` the
-rocKE-only files `hkp_register_tests` lists, so a new rocKE-only test file joins that
-list.
+Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE
+fixtures (`rocke_available`, `rocke_importable`, `rocke_ukd`) and puts the in-tree rocke
+platform and kernels library on `sys.path`. No test outside that directory imports rocke,
+needs its toolchain or packs rocKE descriptors, so a new rocKE test goes there. With
+`HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the registered ctest entries pass
+`--ignore=<tests>/rocke` and never collect it; this runs the suite as that build does:
+
+```bash
+PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
+    python3 -m pytest descriptor-packaging/tests -q \
+        --ignore=descriptor-packaging/tests/rocke
+```
+
+The two `conftest.py` files both import as `conftest`, so neither exports helpers.
+Helpers both sides use live in a plain module (`tests/synthesised_objects.py`) or in the
+shared test module a `tests/rocke/` file extends, which it imports by name.
 
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 
@@ -307,9 +316,10 @@ contract is an input to invariant 1, not a bound on it, since confining the audi
 contract's fields would exit 0 on drift in a third. `--drift-field` narrows it explicitly,
 and in the log, for a field whose two sides speak deliberately different vocabularies.
 
-`tests/test_desk_check_invariants.py` exercises the shipped module. Keep structural
-identity, real packed observations and tampered-evidence checks distinct from native
-registration and numerical tests.
+`tests/test_desk_check_invariants.py` exercises the shipped module, with
+`tests/rocke/test_desk_check_rocke_corpus.py` holding the cases that need rocKE output.
+Keep structural identity, real packed observations and tampered-evidence checks distinct
+from native registration and numerical tests.
 
 ### Embedded-source verification (`tools/hkp_verify_embedded_sources.py`)
 
@@ -336,16 +346,16 @@ verifier pass*. An absent root, an empty root, a root with no `embedded_source`
 descriptor and an absent key table each pass — which is why a pass reports the two counts
 it compared.
 
-### Real-corpus builder-signature guards (`tests/test_hkp_pack_rocke.py`)
+### Real-corpus builder-signature guards (`tests/rocke/test_hkp_pack_rocke.py`)
 
 The real gfx942 `build_*` functions in `rocke/library/kernels/gfx942/` must satisfy
 `_require_spec_arch_signature`'s `(spec, *, arch)` contract. The real-builder cases in
-`tests/test_hkp_pack_rocke.py` and the rejection cases in
-`tests/test_hkp_pack_producer_guards.py` cover complementary paths. Signature acceptance
-alone is not effective-specialization or numerical proof.
+`tests/rocke/test_hkp_pack_rocke.py` and the rejection cases in
+`tests/rocke/test_hkp_pack_producer_guards.py` cover complementary paths. Signature
+acceptance alone is not effective-specialization or numerical proof.
 
 ```bash
 PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
-    python3 -m pytest descriptor-packaging/tests/test_hkp_pack_rocke.py \
-        descriptor-packaging/tests/test_hkp_pack_producer_guards.py -q
+    python3 -m pytest descriptor-packaging/tests/rocke/test_hkp_pack_rocke.py \
+        descriptor-packaging/tests/rocke/test_hkp_pack_producer_guards.py -q
 ```

@@ -19,8 +19,6 @@ from hkp_pack.rocke_compile import (
     build_spec,
 )
 
-pytestmark = pytest.mark.rocke
-
 
 @dataclasses.dataclass
 class _Spec:

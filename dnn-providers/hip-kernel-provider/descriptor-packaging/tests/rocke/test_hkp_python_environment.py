@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = [pytest.mark.quick, pytest.mark.rocke]
-PKG = Path(__file__).resolve().parent.parent
+pytestmark = pytest.mark.quick
+PKG = Path(__file__).resolve().parents[2]
 MODULE = PKG / "cmake" / "HkpPackaging.cmake"
 
 # Executed both outside packaging (parent inventory) and by the pack consumer.

@@ -1387,13 +1387,12 @@ endfunction()
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
 #
-#   rocKE tests are registered only when HIPKERNELPROVIDER_ENABLE_ROCKE is ON, since
-#   with it OFF the build makes no rocKE toolchain for them to exercise, and a
-#   registered test that skips reads as coverage it is not. ON runs every test, and
-#   a rocKE fixture fails rather than skips on a missing toolchain. OFF keeps them
-#   out of both entries at collection: the files that exist only to exercise rocKE
-#   are passed as --ignore, and rocKE tests inside shared files are deselected by
-#   their `rocke` marker. A new rocKE-only test file joins _rocke_only_files.
+#   Every rocKE test lives under tests/rocke/, which carries its own conftest; a
+#   new rocKE test goes there and nowhere else. With HIPKERNELPROVIDER_ENABLE_ROCKE
+#   OFF the build makes no rocKE toolchain for those tests to exercise, and a
+#   registered test that skips reads as coverage it is not, so both entries pass
+#   --ignore for that directory and never collect it. ON runs every test, and a
+#   rocKE fixture fails rather than skips on a missing toolchain.
 # ---------------------------------------------------------------------------
 function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
@@ -1439,31 +1438,20 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
             "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
     endif()
 
-    set(_quick_expr "quick")
-    set(_standard_expr "not quick")
-    set(_rocke_ignores "")
+    set(_rocke_ignore "")
     if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
-        set(_rocke_only_files
-            test_hkp_pack_producer_guards.py
-            test_hkp_pack_rocke.py
-            test_hkp_python_environment.py
-            test_hkp_wheel_digest.py)
-        foreach(_file IN LISTS _rocke_only_files)
-            list(APPEND _rocke_ignores "--ignore=${HKP_PKG_DIR}/tests/${_file}")
-        endforeach()
-        set(_quick_expr "quick and not rocke")
-        set(_standard_expr "not quick and not rocke")
+        set(_rocke_ignore "--ignore=${HKP_PKG_DIR}/tests/rocke")
     endif()
 
     add_test(NAME hip-kernel-provider-hkp-pack-quick
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "${_quick_expr}" -v
-                     ${_rocke_ignores})
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v
+                     ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
     add_test(NAME hip-kernel-provider-hkp-pack
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "${_standard_expr}" -v
-                     ${_rocke_ignores})
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v
+                     ${_rocke_ignore})
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 

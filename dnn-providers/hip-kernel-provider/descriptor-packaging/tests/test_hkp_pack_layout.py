@@ -7,8 +7,10 @@ installed trees. Producer selection is per-UKD on `kernel_source.kind`, never
 per-folder.
 
 The invariants this file holds: whole-set id validation, descriptor-relative
-hip source resolution, hip+rocKE coexistence in one kpack, and the comgr
-diagnostic.
+hip source resolution, path-preserving output, per-arch atomicity, toolchain
+provenance, and the refusal of rocKE descriptors by a build without rocKE. The
+rocKE producer's half of the layout (hip+rocKE coexistence in one kpack, the
+example tree's rocKE subtree) is held in `tests/rocke/test_hkp_pack_layout_rocke.py`.
 """
 
 import hashlib
@@ -353,56 +355,29 @@ def test_flat_layout_keys_on_source_alone(empty_arch_fixture):
     )
 
 
-# --- C. Mixed hip+rocke integration (comgr-gated) ---------------------------
-def test_mixed_hip_rocke_one_kpack_per_arch(
-    tmp_path, main_fixture, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+# --- C. Child folders sharing one arch's output (real compile) --------------
+def test_same_filename_in_two_folders_both_ship(
+    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
 ):
-    # Two child folders under ONE root -> one kpack per arch holding BOTH kinds.
-    # Producer selection is per-UKD on kernel_source.kind.
+    """The packed half of the same-filename case: loading keeps both, and so must
+    writing the shard. An output keyed on filename alone writes one folder's
+    descriptors over the other's and ships a single set without error.
+    """
     root = tmp_path / "root"
-    _nest(root, "hip/pointwise", main_fixture)
-    _nest(root, "rocKE/attention", rocke_fixture)
+    _nest(root, "hip/a", empty_arch_fixture)
+    b = _nest(root, "hip/b", empty_arch_fixture)
+    _rename_ids(b, "solo", "solob")
+    for src in sorted(b.glob("solob.*")):
+        src.rename(b / src.name.replace("solob.", "solo.", 1))
 
-    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ROCKE_ARCH])
-    out = tmp_path / "out" / ROCKE_ARCH
-    kpack_path = out / "kpack" / f"hip_kernel_provider_{ROCKE_ARCH}.kpack"
-    assert kpack_path.exists()
-    kpack = _load_kpack(rocm_kpack_dir)
-    archive = kpack.PackedKernelArchive.read(kpack_path)
+    _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
 
-    # Gather every shipped UKD across both producers' descriptors, anywhere in
-    # the nested output tree.
-    kinds = {}
-    for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
-            if isinstance(ukd, str):
-                continue
-            ks = ukd["kernel_source"]
-            if ks["kind"] != "kpack":
-                continue
-            prov = ukd["provenance"]
-            kinds.setdefault(prov["origin_kind"], []).append((ks, prov))
-
-    # Kind is asserted via provenance.origin_kind, NOT the filename (the kpack
-    # name is a fixed group constant regardless of content).
-    assert "hip" in kinds and "rocke" in kinds
-
-    # Per-kind provenance isolation: hip carries {source,entry,build}; rocke
-    # carries {source,builder,spec} side by side.
-    for ks, prov in kinds["hip"]:
-        assert set(("source", "entry", "build")).issubset(prov)
-        assert "builder" not in prov and "spec" not in prov
-    for ks, prov in kinds["rocke"]:
-        assert set(("source", "builder", "spec")).issubset(prov)
-        assert "entry" not in prov and "build" not in prov
-
-    # Symbol-in-bytes + sha256 for each shipped UKD's own blob.
-    for kind_ukds in kinds.values():
-        for ks, _prov in kind_ukds:
-            blob = archive.get_kernel(ks["toc_key"], ROCKE_ARCH)
-            assert blob is not None
-            assert hashlib.sha256(blob).hexdigest() == ks["sha256"]
-            assert ks["symbol"].encode("ascii") in blob
+    out = tmp_path / "out" / ARCH
+    authored = sorted(p.name for p in empty_arch_fixture.glob("solo.*.json"))
+    for name in authored:
+        shipped = [out / "hip" / sub / name for sub in ("a", "b")]
+        assert all(p.is_file() for p in shipped), name
+        assert len({_read(p)["id"] for p in shipped}) == 2, name
 
 
 def test_non_hkp_failure_still_leaves_no_partial_tree(
@@ -584,24 +559,38 @@ def test_failure_names_every_failed_arch(
 EXAMPLE_ROOT = Path(__file__).resolve().parent.parent / "examples" / "descriptors"
 
 
-def test_example_tree_packs_both_producers(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
-):
-    """The in-repo example tree must actually drive both producers end to end.
+@pytest.mark.quick
+def test_example_tree_is_self_consistent():
+    """Load-time validation of the committed tree, no toolchain required.
 
-    This is the only thing in the repository that exercises the production path,
-    which is how a silent-empty install and a silent descriptor drop both
-    survived unnoticed. Packing the real committed tree -- not a fixture -- is
-    what keeps it honest: if the example rots, this fails.
+    Catches a broken example on any box, including one with no toolchain, so
+    the tree cannot rot silently between full runs.
     """
-    results = run_pipeline(
-        source_root=EXAMPLE_ROOT,
-        arches=[ARCH],
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-    )
+    flat = load_flat_input(EXAMPLE_ROOT)
+
+    ids = [d.id for d in flat.descriptors]
+    assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
+    # Every KDP committed to the tree loads, from the folder it was authored in.
+    rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
+    on_disk = {
+        p.parent.relative_to(EXAMPLE_ROOT).as_posix()
+        for p in EXAMPLE_ROOT.rglob("*.kdp.json")
+    }
+    assert rel_dirs == on_disk
+    assert "hip/pointwise_add" in rel_dirs
+
+
+def test_example_hip_tree_packs_end_to_end(tmp_path, hipcc, rocm_kpack_dir):
+    """The example tree's hip subtree must drive the hip producer end to end.
+
+    Packing the real committed tree -- not a fixture -- is what keeps it honest:
+    if the example rots, this fails. The subtree is packed from a copy nested at
+    its authored subpath, since the whole tree also holds rocKE descriptors.
+    """
+    root = tmp_path / "root"
+    shutil.copytree(EXAMPLE_ROOT / "hip", root / "hip")
+
+    results = _run(root, tmp_path, hipcc, rocm_kpack_dir, [ARCH])
     assert not results[ARCH].skipped
 
     out = tmp_path / "out" / ARCH
@@ -609,73 +598,43 @@ def test_example_tree_packs_both_producers(
     assert kpack.is_file()
     assert kpack.stat().st_size > 0, "an empty kpack is finding 3.9 reappearing"
 
-    # Authored subpaths are preserved verbatim into the shipped tree.
-    assert (out / "hip" / "pointwise_add" / "pointwise_add.kdp.json").is_file()
-    assert (
-        out / "rocKE" / "gfx942_tiled_attention" / "tiled_attention.kdp.json"
-    ).is_file()
+    # Every authored descriptor ships at its authored subpath, the two UMDs the
+    # folder carries included.
+    authored = {
+        p.relative_to(EXAMPLE_ROOT).as_posix()
+        for p in (EXAMPLE_ROOT / "hip").rglob("*.json")
+    }
+    shipped = {p.relative_to(out).as_posix() for p in out.rglob("*.json")}
+    assert authored <= shipped
 
-    # Both producers contributed, asserted via provenance rather than filename.
-    kinds = set()
-    for kdp in out.rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
-            if isinstance(ukd, str):
-                continue
-            kinds.add(ukd["provenance"]["origin_kind"])
-    assert kinds == {"hip", "rocke"}
-
-
-def test_example_tree_keeps_both_shared_filenames(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
-):
-    """The example tree deliberately reuses `shared.umd.json` across its two
-    child folders. A flat packer drops one silently; path preservation keeps
-    both.
-    """
-    run_pipeline(
-        source_root=EXAMPLE_ROOT,
-        arches=[ARCH],
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-    )
-
-    shared = sorted((tmp_path / "out" / ARCH).rglob("shared.umd.json"))
-    assert len(shared) == 2, "both same-named descriptors must survive"
-    assert len({_read(p)["id"] for p in shared}) == 2
-
-
-@pytest.mark.quick
-def test_example_tree_is_self_consistent():
-    """Load-time validation of the committed tree, no toolchain required.
-
-    Catches a broken example on any box, including one with neither hipcc nor
-    comgr, so the tree cannot rot silently between full runs.
-    """
-    flat = load_flat_input(EXAMPLE_ROOT)
-
-    ids = [d.id for d in flat.descriptors]
-    assert len(ids) == len(set(ids)), "duplicate descriptor ids in the example"
-    rel_dirs = {d.rel_dir.as_posix() for d in flat.kdps()}
-    assert rel_dirs == {"hip/pointwise_add", "rocKE/gfx942_tiled_attention"}
+    kinds = {
+        ukd["provenance"]["origin_kind"]
+        for kdp in out.rglob("*.kdp.json")
+        for ukd in _read(kdp)["kernelDescriptors"]
+        if not isinstance(ukd, str)
+    }
+    assert kinds == {"hip"}
 
 
 # --- F. Toolchain provenance ------------------------------------------------
-def test_provenance_records_the_toolchain_that_built_each_kernel(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+def test_provenance_records_the_hipcc_that_built_each_kernel(
+    tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    """Authored fields say what was asked for; these say what answered.
+    """Authored fields say what was asked for; this says what answered.
 
-    Without them two builds of byte-identical descriptors are indistinguishable
-    after the fact, even though a hipcc, comgr, or rocKE wheel change may be the
-    whole difference between them.
+    Without it two builds of byte-identical descriptors are indistinguishable
+    after the fact, even though a hipcc change may be the whole difference
+    between them. The wheel stamp is supplied so a rocKE field could appear: a
+    hip kernel must carry the hipcc record and nothing from the rocKE toolchain
+    or the rocKE provenance shape.
     """
+    from hkp_pack import toolchain
+
     stamp = tmp_path / "wheels.sha256"
     stamp.write_text("deadbeefcafe\n", encoding="utf-8")
 
     run_pipeline(
-        source_root=EXAMPLE_ROOT,
+        source_root=main_fixture,
         arches=[ARCH],
         out_root=tmp_path / "out",
         hipcc=hipcc,
@@ -684,24 +643,28 @@ def test_provenance_records_the_toolchain_that_built_each_kernel(
         rocke_wheel_stamp=stamp,
     )
 
-    by_kind = {}
-    for kdp in (tmp_path / "out" / ARCH).rglob("*.kdp.json"):
-        for ukd in _read(kdp)["kernelDescriptors"]:
-            if isinstance(ukd, str):
-                continue
-            by_kind[ukd["provenance"]["origin_kind"]] = ukd["provenance"]
-
-    # hip records the compiler that ran.
-    assert "hipcc_version" in by_kind["hip"]
-    # rocke records the comgr that was actually LOADED (not merely requested --
-    # rocke falls through an unloadable override silently) and the wheel digest
-    # the build keyed its staleness on.
-    assert by_kind["rocke"]["rocke_wheel_sha256"] == "deadbeefcafe"
-    assert by_kind["rocke"]["comgr_path"]
-
-    # Producer-specific fields must not bleed across.
-    assert "hipcc_version" not in by_kind["rocke"]
-    assert "comgr_path" not in by_kind["hip"]
+    expected = toolchain.hipcc_version(hipcc)
+    assert expected, "the hipcc under test reports no version to record"
+    out = tmp_path / "out" / ARCH
+    shipped = [
+        ukd
+        for kdp in out.rglob("*.kdp.json")
+        for ukd in _read(kdp)["kernelDescriptors"]
+        if not isinstance(ukd, str)
+    ] + [_read(p) for p in out.rglob("*.ukd.json")]
+    assert shipped
+    for ukd in shipped:
+        prov = ukd["provenance"]
+        assert prov["origin_kind"] == "hip"
+        assert prov["hipcc_version"] == expected, ukd["id"]
+        leaked = {
+            "comgr_path",
+            "comgr_rocm_version",
+            "rocke_wheel_sha256",
+            "builder",
+            "spec",
+        } & set(prov)
+        assert not leaked, f"{ukd['id']} carries rocKE provenance {sorted(leaked)}"
 
 
 @pytest.mark.quick
