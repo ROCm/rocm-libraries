@@ -38,11 +38,13 @@
 // and z the limit is a work-group count, and maxGridSize reports it. On x the
 // limit is a work-item count, and no device property exposes it.
 //
-// The kernel dispatch packet stores each grid extent as a 32-bit count of
-// work-items rather than of work-groups [1][2], so the work-group count is
-// grid_size_x / workgroup_size_x and it is grid.x * blockDim.x that must fit
-// in 32 bits. The largest grid.x that runs every block is
-// (2^32 - 1) / blockDim.x:
+// The kernel dispatch packet stores all three grid extents as 32-bit counts of
+// work-items rather than of work-groups [1][2]. On y and z that never binds:
+// the per-axis work-group limit in maxGridSize[1] and [2] (65535) caps them at
+// 65535 * 1024 work-items at most, far below 2^32. On x the device reports no
+// usable work-group limit, so the work-item count is what binds: grid.x *
+// blockDim.x must fit in 32 bits, and the largest grid.x that runs every block
+// is (2^32 - 1) / blockDim.x:
 //
 //     blockDim.x       64      128      256      512     1024
 //     max grid.x 67108863 33554431 16777215  8388607  4194303
