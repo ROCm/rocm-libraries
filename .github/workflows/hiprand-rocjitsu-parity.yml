@@ -38,8 +38,11 @@ permissions:
   contents: read
 
 concurrency:
+  # Do not cancel an in-progress parity run. Label bots (for example
+  # therock-pr-bot adding "Not ready to Review") emit another pull_request
+  # labeled event, and cancel-in-progress was killing the CPU job at startup.
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   gate:
@@ -103,6 +106,10 @@ jobs:
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ${{ needs.gate.outputs.build_runs_on }}
     timeout-minutes: 180
+    # This runner's container hook invokes steps with dash. pipefail is a bash option.
+    defaults:
+      run:
+        shell: bash
     container:
       image: ubuntu:24.04
     env:
