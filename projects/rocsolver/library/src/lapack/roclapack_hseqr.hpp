@@ -519,6 +519,56 @@ struct hseqr_workT_layout
     }
 };
 
+/** HSEQR_HOST_SCHUR computes the Schur form of the n-by-n window T (and the Schur vectors,
+    accumulated in V = I) on the host, for the aggressive early deflation of the hybrid mode
+    (lahqr_block with BS = 1), and returns its info. The library is built for the baseline
+    x86-64 instruction set; on x86-64 hosts, the routine is also compiled for x86-64-v3 (AVX2,
+    FMA) and x86-64-v4 (AVX-512) and the best version that the processor supports is used
+    (flatten inlines lahqr_block into each version, so that it is compiled for its
+    instruction set; the versions are distinct functions, so their code is never mixed). **/
+template <typename T, typename I>
+__attribute__((flatten)) I hseqr_host_schur_base(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
+{
+    I s_ired[2][1];
+    int ibuf = 0;
+    return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf);
+}
+
+#if defined(__x86_64__) && !defined(__HIP_DEVICE_COMPILE__)
+template <typename T, typename I>
+__attribute__((target("arch=x86-64-v3"), flatten))
+I hseqr_host_schur_v3(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
+{
+    I s_ired[2][1];
+    int ibuf = 0;
+    return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf);
+}
+
+template <typename T, typename I>
+__attribute__((target("arch=x86-64-v4"), flatten))
+I hseqr_host_schur_v4(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
+{
+    I s_ired[2][1];
+    int ibuf = 0;
+    return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf);
+}
+#endif
+
+template <typename T, typename I>
+I hseqr_host_schur(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
+{
+#if defined(__x86_64__) && !defined(__HIP_DEVICE_COMPILE__)
+    static const int level = __builtin_cpu_supports("x86-64-v4") ? 4
+        : __builtin_cpu_supports("x86-64-v3")                    ? 3
+                                                                 : 0;
+    if(level == 4)
+        return hseqr_host_schur_v4(n, Tw, ldt, W, V, ldv);
+    if(level == 3)
+        return hseqr_host_schur_v3(n, Tw, ldt, W, V, ldv);
+#endif
+    return hseqr_host_schur_base(n, Tw, ldt, W, V, ldv);
+}
+
 /** HSEQR_AED_WINDOW_CAP returns the cap of the (initial) deflation window for an active
     block of order nh: HSEQR_AED_WINDOW_MAX (0: no cap), raised for large blocks. The
     number of shifts per sweep is capped likewise, and the number of steps of the chase
@@ -748,7 +798,8 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 T spike;
                 aed_core_block<1>(n, jw, stT[LAQR0_SPIKE_IN], hT.data(), jw, hV.data(), jw,
                                   hwork.data(), hWsh.data(), ns, nd, update, spike, s_ired, s_sred,
-                                  ibuf, sbuf);
+                                  ibuf, sbuf, (T*)nullptr, (I*)nullptr, (T*)nullptr,
+                                  (T(*)[3]) nullptr, &hseqr_host_schur<T, I>);
                 st[LAQR0_LS] = ns;
                 st[LAQR0_LD] = nd;
                 st[LAQR0_UPDATE] = update ? 1 : 0;

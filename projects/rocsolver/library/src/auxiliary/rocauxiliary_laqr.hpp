@@ -420,7 +420,8 @@ __device__ I laqr4_block(const I n,
     On the device it is executed by all the threads of a thread-block of BS threads;
     on the host, with BS = 1. On the device, lds_ws (shared memory of HQR_LDS_WS_SIZE
     entries, if given, with BS >= HQR_LDS_NMAX) is used for the Schur form of windows of
-    at most HQR_LDS_NMAX entries (lahqr_lds_block). With MULTISHIFT (on the device, with st4, stT4 and sV4, the
+    at most HQR_LDS_NMAX entries (lahqr_lds_block). On the host, host_schur (if given) computes
+    the Schur form of the window in place of lahqr_block (see hseqr_host_schur). With MULTISHIFT (on the device, with st4, stT4 and sV4, the
     status arrays and the reflections of laqr4_block in shared memory), windows with
     jw > LAQR4_NMIN are reduced to Schur form by laqr4_block (the multishift QR
     algorithm, as LAPACK ZLAQR3 calls ZLAQR4), whose own deflation windows use this
@@ -447,7 +448,8 @@ __host__ __device__ void aed_core_block(const I n,
                                         T* lds_ws = nullptr,
                                         I* st4 = nullptr,
                                         T* stT4 = nullptr,
-                                        T (*sV4)[3] = nullptr)
+                                        T (*sV4)[3] = nullptr,
+                                        I (*host_schur)(I, T*, I, T*, T*, I) = nullptr)
 {
     using S = decltype(std::real(T{}));
 
@@ -489,7 +491,9 @@ __host__ __device__ void aed_core_block(const I n,
         infqr = lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired,
                                 ibuf);
 #else
-    infqr = lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired, ibuf);
+    infqr = host_schur
+        ? host_schur(jw, Tw, ldt, Wsh, V, ldv)
+        : lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired, ibuf);
 #endif
     hqr_sync();
 
