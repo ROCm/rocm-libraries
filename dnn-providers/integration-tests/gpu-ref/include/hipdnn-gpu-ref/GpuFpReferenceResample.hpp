@@ -88,12 +88,19 @@ public:
         }
 
         // Validate index tensor
-        if(resampleMode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+        if(index != nullptr)
         {
-            if(index == nullptr || index->dims() != y.dims() || index->strides() != y.strides())
+            if(resampleMode != hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
             {
-                throw std::runtime_error("Resample forward requires an index tensor matching the "
-                                         "output tensor for MAXPOOL resample mode.");
+                throw std::invalid_argument("Resample forward supports index tensor output only "
+                                            "for MAXPOOL resample mode.");
+            }
+
+            if(index->dims() != y.dims() || index->strides() != y.strides())
+            {
+                throw std::invalid_argument(
+                    "Resample forward requires the index tensor dims and strides to match the "
+                    "output tensor.");
             }
         }
 
@@ -130,18 +137,19 @@ private:
     // --- Validators ---
 
     template <typename T>
-    using isSupportedFpType = std::disjunction<std::is_same<T, double>,
-                                               std::is_same<T, float>,
-                                               std::is_same<T, hipdnn_data_sdk::types::half>,
-                                               std::is_same<T, hipdnn_data_sdk::types::bfloat16>>;
+    static constexpr bool IS_SUPPORTED_FP_TYPE_V
+        = std::disjunction_v<std::is_same<T, double>,
+                             std::is_same<T, float>,
+                             std::is_same<T, hipdnn_data_sdk::types::half>,
+                             std::is_same<T, hipdnn_data_sdk::types::bfloat16>>;
 
     template <typename InputDataType,
               typename OutputDataType,
               typename ComputeDataType,
               typename IndexDataType>
     static constexpr bool IS_SUPPORTED_DATA_TYPE
-        = isSupportedFpType<InputDataType>::value && isSupportedFpType<OutputDataType>::value
-          && isSupportedFpType<ComputeDataType>::value && std::is_same_v<IndexDataType, int32_t>;
+        = IS_SUPPORTED_FP_TYPE_V<InputDataType> && IS_SUPPORTED_FP_TYPE_V<OutputDataType>
+          && IS_SUPPORTED_FP_TYPE_V<ComputeDataType> && std::is_same_v<IndexDataType, int32_t>;
 
     template <typename InputDataType, typename OutputDataType>
     static void validateInput(const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
@@ -168,8 +176,11 @@ private:
 
         // Validate IO tensor layouts
         using hipdnn_data_sdk::utilities::TensorLayout;
-        const std::pair<const std::vector<int64_t>&, const std::vector<int64_t>&> ioTensors[]
-            = {{inputDims, inputStrides}, {outputDims, outputStrides}};
+        const std::array ioTensors{
+            std::pair<const std::vector<int64_t>&, const std::vector<int64_t>&>{inputDims,
+                                                                                inputStrides},
+            std::pair<const std::vector<int64_t>&, const std::vector<int64_t>&>{outputDims,
+                                                                                outputStrides}};
         for(const auto& [dims, strides] : ioTensors)
         {
             const auto nDims = dims.size();
@@ -187,6 +198,20 @@ private:
                                                 + channelFirst.name + " or " + channelLast.name
                                                 + " layout.");
                 }
+            }
+        }
+
+        if(!hipdnn_data_sdk::utilities::isLayoutAgnostic(inputDims)
+           && !hipdnn_data_sdk::utilities::isLayoutAgnostic(outputDims))
+        {
+            const auto inputStrideOrder
+                = hipdnn_data_sdk::utilities::extractStrideOrder(inputStrides);
+            const auto outputStrideOrder
+                = hipdnn_data_sdk::utilities::extractStrideOrder(outputStrides);
+            if(inputStrideOrder != outputStrideOrder)
+            {
+                throw std::invalid_argument(
+                    "Resample requires IO tensors to have consistent layouts.");
             }
         }
 

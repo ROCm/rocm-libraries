@@ -148,7 +148,7 @@ extern "C" __global__ void ResampleFwdRef(ResampleFwdArgs args)
                     candidateIndex = flattenSpatialIndex(inD, inH, inW, xSpatial[1], xSpatial[2]);
                     ++validCount;
                 }
-                else if constexpr(paddingMode == PaddingMode::PAD_NEG_INF
+                else if constexpr(paddingMode == PaddingMode::NEG_INF_PAD
                                   && resampleMode == ResampleMode::MAXPOOL)
                 {
                     continue;
