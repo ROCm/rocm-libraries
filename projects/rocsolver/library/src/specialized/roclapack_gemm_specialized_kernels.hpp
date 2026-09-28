@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "lapack_host_functions.hpp"
 #include "rocblas.hpp"
 #include "roclapack_gemm_device_functions.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -44,49 +45,63 @@ ROCSOLVER_KERNEL void gemm_kernel(const I m,
                                   const I n,
                                   const I k,
                                   V alpha,
-                                  bool conjA,
+                                  bool const conjA,
                                   U1 AA,
-                                  rocblas_stride shiftA,
-                                  I inca,
-                                  I lda,
-                                  rocblas_stride strideA,
-                                  bool conjB,
+                                  rocblas_stride const shiftA,
+                                  I const inca,
+                                  I const lda,
+                                  rocblas_stride const strideA,
+                                  bool const conjB,
                                   U2 BB,
-                                  rocblas_stride shiftB,
-                                  I incb,
-                                  I ldb,
-                                  rocblas_stride strideB,
+                                  rocblas_stride const shiftB,
+                                  I const incb,
+                                  I const ldb,
+                                  rocblas_stride const strideB,
                                   V beta,
                                   U3 CC,
-                                  rocblas_stride shiftC,
-                                  I incc,
-                                  I ldc,
-                                  rocblas_stride strideC)
+                                  rocblas_stride const shiftC,
+                                  I const incc,
+                                  I const ldc,
+                                  rocblas_stride const strideC,
+                                  I const batch_count)
 {
-    // indices
-    I bid = hipBlockIdx_z;
-    I i = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
-    I j = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + hipThreadIdx_y;
+    // batch indices
 
-    // batch instance
-    T a = load_scalar(alpha, bid, 0);
-    T b = load_scalar(beta, bid, 0);
-    T* A = load_ptr_batch(AA, bid, shiftA, strideA);
-    T* B = load_ptr_batch(BB, bid, shiftB, strideB);
-    T* C = load_ptr_batch(CC, bid, shiftC, strideC);
+    I const bid_start = hipBlockIdx_z;
+    I const bid_inc = hipGridDim_z;
 
-    // gemm function
-    T temp = 0;
-    if(i < m && j < n)
+    I const i_start = hipBlockIdx_x * static_cast<I>(hipBlockDim_x) + hipThreadIdx_x;
+    I const i_inc = hipBlockDim_x * hipGridDim_x;
+
+    I const j_start = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + hipThreadIdx_y;
+    I const j_inc = hipBlockDim_y * hipGridDim_y;
+
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {
-        for(I idx = 0; idx < k; idx++)
+        // batch instance
+        T const a = load_scalar(alpha, bid, 0);
+        T const b = load_scalar(beta, bid, 0);
+        T const* const A = load_ptr_batch(AA, bid, shiftA, strideA);
+        T const* const B = load_ptr_batch(BB, bid, shiftB, strideB);
+        T* const C = load_ptr_batch(CC, bid, shiftC, strideC);
+
+        for(I j = j_start; j < n; j += j_inc)
         {
-            const auto Aval = conjA ? conj(A[i * inca + idx * lda]) : A[i * inca + idx * lda];
-            const auto Bval = conjB ? conj(B[idx * incb + j * ldb]) : B[idx * incb + j * ldb];
-            temp += Aval * Bval;
+            for(I i = i_start; i < m; i += i_inc)
+            {
+                // gemm function
+                T temp = 0;
+                for(I idx = 0; idx < k; idx++)
+                {
+                    const auto Aval = conjA ? conj(A[i * inca + idx * lda]) : A[i * inca + idx * lda];
+                    const auto Bval = conjB ? conj(B[idx * incb + j * ldb]) : B[idx * incb + j * ldb];
+                    temp += Aval * Bval;
+                }
+                C[i * incc + j * ldc] = a * temp + b * C[i * incc + j * ldc];
+            }
         }
-        C[i * incc + j * ldc] = a * temp + b * C[i * incc + j * ldc];
-    }
+
+    } // end for bid
 }
 
 #if ROCSOLVER_MFMA_ENABLED
@@ -117,43 +132,48 @@ ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
                                        rocblas_stride shiftC,
                                        I incc,
                                        I ldc,
-                                       rocblas_stride strideC)
+                                       rocblas_stride strideC,
+                                       I const batch_count)
 {
-    const I bid_x = blockIdx.x;
-    const I bid_y = blockIdx.y;
+    I const bid_start = hipBlockIdx_z;
+    I const bid_inc = hipGridDim_z;
 
-    const I numWaves_x = blockDim.x / warpSize;
-    const I numWaves_y = blockDim.y;
-
-    const I wid_x = threadIdx.x / warpSize;
-    const I wid_y = threadIdx.y;
-
-    const I block_row = 16 * (numWaves_x * bid_x + wid_x);
-    const I block_col = 16 * (numWaves_y * bid_y + wid_y);
-
-    if(block_row >= m || block_col >= n)
+    for(I batch_id = bid_start; batch_id < batch_count; batch_id += bid_inc)
     {
-        return;
-    }
+        const I bid_x = blockIdx.x;
+        const I bid_y = blockIdx.y;
 
-    const I m_bar = (block_row + 16) <= m ? 16 : m % 16;
-    const I n_bar = (block_col + 16) <= n ? 16 : n % 16;
+        const I numWaves_x = blockDim.x / warpSize;
+        const I numWaves_y = blockDim.y;
 
-    I batch_id = hipBlockIdx_z;
+        const I wid_x = threadIdx.x / warpSize;
+        const I wid_y = threadIdx.y;
 
-    // batch instance
-    T a = load_scalar(alpha, batch_id, 0);
-    T b = load_scalar(beta, batch_id, 0);
-    T* A = load_ptr_batch(AA, batch_id, shiftA, strideA);
-    T* B = load_ptr_batch(BB, batch_id, shiftB, strideB);
-    T* C = load_ptr_batch(CC, batch_id, shiftC, strideC);
+        const I block_row = 16 * (numWaves_x * bid_x + wid_x);
+        const I block_col = 16 * (numWaves_y * bid_y + wid_y);
 
-    A += block_row * (transA == rocblas_operation_none ? inca : lda);
-    B += block_col * (transB == rocblas_operation_none ? ldb : incb);
+        if(block_row >= m || block_col >= n)
+        {
+            return;
+        }
 
-    // C(bid_x,bid_y) += A(bid_x,:) * B(:,bid_y)
-    gemm_16x16xp(transA, transB, m_bar, n_bar, p, a, A, inca, lda, B, incb, ldb, b,
-                 C + (block_col * ldc + block_row * incc), incc, ldc);
+        const I m_bar = (block_row + 16) <= m ? 16 : m % 16;
+        const I n_bar = (block_col + 16) <= n ? 16 : n % 16;
+
+        // batch instance
+        T a = load_scalar(alpha, batch_id, 0);
+        T b = load_scalar(beta, batch_id, 0);
+        T* A = load_ptr_batch(AA, batch_id, shiftA, strideA);
+        T* B = load_ptr_batch(BB, batch_id, shiftB, strideB);
+        T* C = load_ptr_batch(CC, batch_id, shiftC, strideC);
+
+        A += block_row * (transA == rocblas_operation_none ? inca : lda);
+        B += block_col * (transB == rocblas_operation_none ? ldb : incb);
+
+        // C(bid_x,bid_y) += A(bid_x,:) * B(:,bid_y)
+        gemm_16x16xp(transA, transB, m_bar, n_bar, p, a, A, inca, lda, B, incb, ldb, b,
+                     C + (block_col * ldc + block_row * incc), incc, ldc);
+    } // end for batch_id
 }
 
 #else // ROCSOLVER_MFMA_ENABLED
@@ -179,7 +199,8 @@ ROCSOLVER_KERNEL void mfma_gemm_kernel(rocblas_operation transA,
                                        rocblas_stride shiftC,
                                        I incc,
                                        I ldc,
-                                       rocblas_stride strideC)
+                                       rocblas_stride strideC,
+                                       I const batch_count)
 {
 }
 #endif // ROCSOLVER_MFMA_ENABLED
@@ -252,19 +273,25 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
         const I numWarpsY = 4;
         const I blocksx = (m + (numWarpsX * 16 - 1)) / (numWarpsX * 16);
         const I blocksy = (n + (numWarpsY * 16 - 1)) / (numWarpsY * 16);
-        dim3 grid(blocksx, blocksy, batch_count);
+
+        I const max_blocks = get_nblocks_yz(handle);
+
+        // ---------------------------------
+        // TODO: handle  the case blocksy > 64 * 1024
+        // ---------------------------------
+        dim3 grid(blocksx, blocksy, std::min(max_blocks, batch_count));
         dim3 threads(numWarpsX * warpSize, numWarpsY, 1);
         if(pmode == rocblas_pointer_mode_device)
         {
             ROCSOLVER_LAUNCH_KERNEL((mfma_gemm_kernel<T>), grid, threads, 0, stream, transA, transB,
                                     m, n, k, alpha, A, shiftA, inca, lda, strideA, B, shiftB, incb,
-                                    ldb, strideB, beta, C, shiftC, incc, ldc, strideC);
+                                    ldb, strideB, beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
         else
         {
             ROCSOLVER_LAUNCH_KERNEL((mfma_gemm_kernel<T>), grid, threads, 0, stream, transA, transB,
                                     m, n, k, *alpha, A, shiftA, inca, lda, strideA, B, shiftB, incb,
-                                    ldb, strideB, *beta, C, shiftC, incc, ldc, strideC);
+                                    ldb, strideB, *beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
     }
     else
@@ -291,19 +318,22 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
         // launch specialized kernel
         I blocksx = (m - 1) / BS2 + 1;
         I blocksy = (n - 1) / BS2 + 1;
-        dim3 grid(blocksx, blocksy, batch_count);
+
+        I const max_blocks = get_nblocks_yz(handle);
+
+        dim3 grid(blocksx, std::min(max_blocks, blocksy), std::min(max_blocks, batch_count));
         dim3 threads(BS2, BS2, 1);
         if(pmode == rocblas_pointer_mode_device)
         {
             ROCSOLVER_LAUNCH_KERNEL((gemm_kernel<T>), grid, threads, 0, stream, m, n, k, alpha,
                                     conjA, A, shiftA, lda1, lda2, strideA, conjB, B, shiftB, ldb1,
-                                    ldb2, strideB, beta, C, shiftC, incc, ldc, strideC);
+                                    ldb2, strideB, beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
         else
         {
             ROCSOLVER_LAUNCH_KERNEL((gemm_kernel<T>), grid, threads, 0, stream, m, n, k, *alpha,
                                     conjA, A, shiftA, lda1, lda2, strideA, conjB, B, shiftB, ldb1,
-                                    ldb2, strideB, *beta, C, shiftC, incc, ldc, strideC);
+                                    ldb2, strideB, *beta, C, shiftC, incc, ldc, strideC, batch_count);
         }
     }
 
