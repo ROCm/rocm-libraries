@@ -679,7 +679,7 @@ rocsparse_status rocsparse::coosort_buffer_size(rocsparse_handle            hand
 
     const int64_t nnz = target->nnz;
 
-    size_t sort_buffer_size = 0;
+    size_t sort_buffer_size = std::numeric_limits<std::size_t>::max();
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoosort_buffer_size(handle,
                                                               target->rows,
                                                               target->cols,
@@ -712,7 +712,7 @@ rocsparse_status rocsparse::coosort(rocsparse_handle            handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    size_t required_buffer_size;
+    size_t required_buffer_size = std::numeric_limits<std::size_t>::max();
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::coosort_buffer_size(handle, alg, dir, source, target, &required_buffer_size));
     if(buffer_size_in_bytes < required_buffer_size)
