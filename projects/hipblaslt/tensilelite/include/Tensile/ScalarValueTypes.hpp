@@ -61,8 +61,8 @@ namespace TensileLite
         Count
     };
 
-    TENSILELITEHOST_EXPORT std::string   ToString(ScalarValue d);
-    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::string ToString(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::string TypeAbbrev(ScalarValue d);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, ScalarValue const& t);
     TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ScalarValue& t);
 
@@ -72,9 +72,9 @@ namespace TensileLite
  */
     struct ScalarValueTypeInfo
     {
-        static ScalarValueTypeInfo const& Get(int index);
-        static ScalarValueTypeInfo const& Get(ScalarValue t);
-        static ScalarValueTypeInfo const& Get(std::string const& str);
+        TENSILELITEHOST_EXPORT static ScalarValueTypeInfo const& Get(int index);
+        TENSILELITEHOST_EXPORT static ScalarValueTypeInfo const& Get(ScalarValue t);
+        TENSILELITEHOST_EXPORT static ScalarValueTypeInfo const& Get(std::string const& str);
 
         ScalarValue m_value;
         std::string name;
@@ -189,4 +189,3 @@ namespace std
         }
     };
 } // namespace std
-
