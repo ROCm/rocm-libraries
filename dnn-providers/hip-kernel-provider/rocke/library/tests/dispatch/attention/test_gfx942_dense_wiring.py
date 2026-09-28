@@ -8,10 +8,11 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
     every other attention candidate
   - ``spec_id`` is an equivalent opt-in door
   - routing on gfx942, and rejection of every out-of-scope request
-  - ``dense_persistent``: 'auto' resolves to off (accepted), explicit 'on' is rejected
-    rather than silently downgraded
-  - the dispatched ``kernel_name_override`` is batch-unique and matches what
-    ``build_attention_dense`` actually emits
+  - ``dense_persistent``: 'auto' turns the persistent grid on once there is enough
+    work; an explicit 'on' is accepted
+  - non-persistent gfx942 dense reads ``batch`` / ``seqlen_q`` / ``seqlen_kv`` as
+    runtime kernel params, so those fields drop out of ``kernel_name()`` and the
+    dispatched signature includes them. The persistent grid still bakes batch.
 
 The priority-3 tests are the load-bearing ones: the arm sorts ahead of every other
 candidate, so the opt-in check is the ONLY thing keeping a correctness-first P0 kernel
@@ -28,6 +29,7 @@ from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
     dispatch_attention,
+    registered_attention_combos,
 )
 
 # gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
@@ -112,8 +114,11 @@ class TestGfx942DenseOptIn(unittest.TestCase):
         with _Gfx942Arch():
             r = dispatch_attention(_req())
             self.assertEqual(r.candidate.name, _NAME)
-            self.assertEqual(r.spec.path, "2d")
-            self.assertEqual(r.spec.name, "rocke_attention_dense_gfx942")
+            from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+
+            self.assertIsInstance(r.spec, Gfx942AttentionDenseSpec)
+            self.assertIn("gfx942", r.spec.kernel_name())
+            self.assertNotEqual(r.grid, (0, 0, 0))
 
 
 class TestGfx942DenseSupportGates(unittest.TestCase):
@@ -252,16 +257,82 @@ class TestGfx942DensePersistent(unittest.TestCase):
             self.assertTrue(_dense_spec(req).persistent)
 
 
+class TestGfx942DenseWavesPerEu(unittest.TestCase):
+    def test_shipped_policy_and_explicit_override(self):
+        self.assertEqual(_dense_spec(_req()).waves_per_eu, 2)
+        self.assertEqual(
+            _dense_spec(_req(hdim_q=64, hdim_v=64)).waves_per_eu,
+            4,
+        )
+        overridden = _dense_spec(_req(dense_waves_per_eu=3))
+        self.assertEqual(overridden.waves_per_eu, 3)
+        self.assertIn("wpe3", overridden.kernel_name())
+        self.assertEqual(
+            build_attention_dense(overridden, arch="gfx942").attrs["waves_per_eu"],
+            3,
+        )
+
+    def test_invalid_override_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "dense_waves_per_eu"):
+            _dense_spec(_req(dense_waves_per_eu=9))
+
+    def _swept_waves(self, level: str, *, pin: int = 0) -> set[int]:
+        return {
+            spec.waves_per_eu
+            for _candidate, spec in registered_attention_combos(
+                _req(dense_waves_per_eu=pin),
+                candidate_prefix=_NAME,
+                sweep_level=level,
+            )
+        }
+
+    def test_production_and_full_sweeps_expand_wpe(self):
+        self.assertEqual(self._swept_waves("production"), {2, 4})
+        self.assertEqual(self._swept_waves("full"), {1, 2, 3, 4})
+
+    def test_explicit_override_pins_sweep(self):
+        self.assertEqual(self._swept_waves("production", pin=3), {3})
+        self.assertEqual(self._swept_waves("full", pin=3), {3})
+
+
 class TestGfx942DenseSpecIdentity(unittest.TestCase):
-    def test_kernel_name_override_is_batch_unique(self):
-        """The kernel bakes batch into the buffer extents; the dispatched identity
-        must disambiguate it or a name-keyed cache serves the B=1 binary."""
+    def test_kernel_name_follows_the_runtime_shape_contract(self):
+        """Non-persistent gfx942 dense takes batch and both seqlens as kernel
+        params, so one name covers every batch. The persistent grid still bakes
+        batch into the symbol, and the dispatched signature matches that split."""
+        from kernels.gfx942.attention_dense import attention_dense_signature
+
         with _Gfx942Arch():
-            names = {
-                dispatch_attention(_req(batch=b)).spec.kernel_name_override
+            runtime = [
+                dispatch_attention(_req(batch=b, dense_persistent="off")).spec
                 for b in (1, 2, 4)
-            }
-            self.assertEqual(len(names), 3, names)
+            ]
+            self.assertTrue(all(s.runtime_shape for s in runtime))
+            self.assertEqual(len({s.kernel_name() for s in runtime}), 1)
+            self.assertNotRegex(runtime[0].kernel_name(), r"_b\d+")
+            names = [p["name"] for p in attention_dense_signature(runtime[0])]
+            self.assertEqual(
+                names,
+                [
+                    "q_ptr",
+                    "k_ptr",
+                    "v_ptr",
+                    "o_ptr",
+                    "scale",
+                    "batch",
+                    "seqlen_q",
+                    "seqlen_kv",
+                ],
+            )
+
+            baked = [
+                dispatch_attention(_req(batch=b, dense_persistent="on")).spec
+                for b in (1, 2, 4)
+            ]
+            self.assertTrue(all(not s.runtime_shape for s in baked))
+            self.assertEqual(len({s.kernel_name() for s in baked}), 3)
+            baked_names = [p["name"] for p in attention_dense_signature(baked[0])]
+            self.assertEqual(baked_names, ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"])
 
     def test_support_implies_the_dispatched_spec_builds(self):
         """The dispatch-level half of the supports/build contract: the spec the
@@ -272,7 +343,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
             self.assertTrue(_candidate().admits(req)[0])
             spec = _dense_spec(req)
             kd = build_attention_dense(spec, arch="gfx942")
-            self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name_override)
+            self.assertEqual(kd.name, dispatch_attention(req).spec.kernel_name())
 
 
 class TestGfx942SlidingWindow(unittest.TestCase):

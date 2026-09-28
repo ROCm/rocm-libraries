@@ -1881,13 +1881,6 @@ namespace TensileLite
         return numWorkGroupsX * numWorkGroupsY * numWorkGroupsZ;
     }
 
-    inline double calculateGranularity(
-        uint32_t m, uint32_t n, uint32_t mt0, uint32_t mt1, uint32_t gsu, uint32_t cuCount)
-    {
-        return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
-               / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
-    }
-
     std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {

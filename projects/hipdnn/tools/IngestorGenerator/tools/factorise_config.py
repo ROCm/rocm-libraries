@@ -20,7 +20,6 @@ the policy's answer under `resolved`.
 from __future__ import annotations
 
 import argparse
-import gzip
 import re
 import sys
 from collections import OrderedDict
@@ -34,14 +33,6 @@ _NAME_BINDABLE_SUFFIX = "md_"
 
 class FactoriseError(RuntimeError):
     """The input could not be factorised without changing what it generates."""
-
-
-def _load(path: Path) -> dict:
-    import yaml
-
-    opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt") as handle:
-        return yaml.safe_load(handle)
 
 
 def _flatten(config: dict) -> list:
@@ -660,10 +651,13 @@ def main(argv=None) -> int:
             pair.split("=", 1) for pair in pairs.split(",") if pair
         )
 
-    try:
-        import yaml
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from codegen.config_loader import read_yaml  # noqa: PLC0415
 
-        original = _load(Path(args.config))
+    import yaml
+
+    try:
+        original = read_yaml(Path(args.config))
         compact = factorise(
             original,
             [k.strip() for k in args.knobs.split(",") if k.strip()],
@@ -672,7 +666,7 @@ def main(argv=None) -> int:
         _round_trip(original, compact)
         text = dump(compact)
         Path(args.out).write_text(text)
-    except FactoriseError as exc:
+    except (FactoriseError, yaml.YAMLError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
