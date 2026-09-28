@@ -17966,14 +17966,17 @@ class KernelWriterAssembly(KernelWriter):
         # Fold<->ring composition (TENSILE_PLSIN_FOLD_RING): the ring quad is the store-
         # shadow double-buffer, so the fold pre-packs batchA into it one pair-iteration
         # early (its converts land in the shadow) and the second pair blends the two live
-        # quads without re-packing batchA. Needs the one ring quad, so gate it on the same
-        # block-sched-tile budget as the paired ring.
+        # quads without re-packing batchA. Needs the one extra ring quad, so the fold
+        # floor is 2. The unfolded ring keeps blk-sched's floor of 1.
         _foldRing = (isSubtileFold and col128Base < 0 and permForRing
                      and plsinBlockSchedTile(kernel)
                      and plsinDebugEnv("TENSILE_PLSIN_FOLD_RING", "0") != "0")
-        if (kernel.get("UseSubtileImpl") and not isSubtileFold and col128Base < 0
-            and plsinBlockSchedTile(kernel) and permForRing) or _foldRing:
-          pairQuads = max(2, int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2")))
+        _storeQuads = int(plsinDebugEnv("TENSILE_PLSIN_STORE_QUADS", "2"))
+        if _foldRing:
+          pairQuads = max(2, _storeQuads)
+        elif (kernel.get("UseSubtileImpl") and not isSubtileFold and col128Base < 0
+              and plsinBlockSchedTile(kernel) and permForRing):
+          pairQuads = max(1, _storeQuads)
         cvtAlign    = 2 if kernel.get("UseSubtileImpl") else 1
         cvtVgpr = self.vgprPool.checkOutAligned(numCvtVgprs, cvtAlign, tag="globalWriteElements_cvtVgpr")
         # Slot 0 of the ring is the cvt block's own quad, which the paired store already
