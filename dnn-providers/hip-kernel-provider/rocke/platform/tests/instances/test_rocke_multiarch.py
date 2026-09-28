@@ -714,9 +714,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         from rocke.core.lower_llvm import (
             LLVM_FLAVOR_LLVM23,
             _datalayout_for_flavor,
-            _detect_llvm_flavor,
-            _flavor_for_rocm,
-            _system_rocm_version,
+            _flavor_for_llvm,
         )
         from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
 
@@ -728,17 +726,19 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             attrs={},
         )
 
-        # Validate the constant for the flavor of the REFERENCE toolchain -- the
-        # `hipcc` on PATH (the system /opt/rocm) that emits the IR below. That can
-        # be a DIFFERENT LLVM vintage than the comgr lib `_detect_llvm_flavor()`
-        # resolves at runtime (e.g. a torch-bundled comgr 7.2/llvm22 alongside a
-        # system hipcc 7.0/llvm20). We can only statically validate the constant
-        # whose toolchain is actually present; the comgr flavor is exercised
-        # dynamically by every GPU compile (a wrong datalayout aborts codegen).
-        sys_ver = _system_rocm_version()
-        detected_flavor = (
-            _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
+        # This reference is hipcc on PATH, which may differ from loaded COMGR.
+        # Query that executable rather than assigning /opt/rocm's package
+        # metadata to an unrelated compiler selected by an environment module.
+        import re
+        import subprocess
+
+        version = subprocess.run(
+            ["hipcc", "--version"], capture_output=True, text=True, timeout=30
         )
+        match = re.search(r"clang version (\d+)", version.stdout + version.stderr)
+        if version.returncode or not match:
+            self.skipTest("cannot determine reference hipcc's LLVM version")
+        detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
         if detected_flavor == LLVM_FLAVOR_LLVM23:
             # Drift proven on LLVM 23 (ROCm 7.13+): its datalayout is the llvm22

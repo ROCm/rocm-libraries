@@ -14,7 +14,7 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = C++ engine (auto-falls back to Python if `rocke_engine` isn't built); `python` = native lowerer; `both` = run both and assert byte-identical (the differential check). |
-| `ROCKE_LLVM_FLAVOR` | `llvm22` \| `llvm20` \| `llvm23` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-resolves from the **comgr lib that will actually load** (torch-bundled comgr 7.2 → `llvm22`; else `/opt/rocm` version, mapped ROCm `>= 7.13` → `llvm23`, `>= 7.2` → `llvm22`, else `llvm20`; default `llvm22`). `llvm23` (ROCm 7.13+) emits the same bytes as `llvm22` today — same datalayout, same declares — so it is a vintage label, not a third IR shape. **`llvm22` (ROCm 7.2) is the production backend and it MATERIALLY AFFECTS PERF** — MFMA scheduling and register allocation differ from `llvm20`, and some kernels (notably attention prefill bodies) that look register-bound / AGPR-spilled / occupancy-collapsed on `llvm20` are clean 2-WG/CU and far faster on `llvm22`. **Always benchmark on `llvm22`.** Import torch (or otherwise load comgr 7.2) FIRST so the right comgr is selected; forcing `llvm22` while the loaded comgr is 7.0/7.1 is rejected with a clean error (not a silent wrong-backend run). |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (auto) | Override the emitted LLVM IR flavor. AUTO loads COMGR, queries its compiler, and maps LLVM <=20 to `llvm20`, 21/22 to `llvm22`, and >=23 to `llvm23`. If no compiler can be queried, offline emission retains the `llvm22` default. An override selects emission; it does not change or bypass validation against the loaded compiler. |
 | `ROCKE_CPP_STRICT` | `1` (unset) | Make `cpp` backend **raise** instead of silently falling back to Python when `rocke_engine` is unavailable. |
 | `ROCKE_DEBUG` | `1` (unset) | Verbose engine diagnostics during build/lowering. |
 | `ROCKE_DEBUG_LOC` | `1` (unset) | Record the Python call stack behind every op while the kernel builds, and lower it to DWARF inlining scopes, so an ATT trace maps instructions back to the source that authored them. Off by default for two reasons: it costs a stack walk per op (material on sweeps that build thousands of kernels), and populating `op.loc` **changes the emitted `.ll` bytes**, so the byte-identity gate and the IR goldens run without it. The added metadata does not change the generated ISA, so a trace captured with it on is still representative. `IRBuilder(capture_loc=True)` is the per-builder equivalent. Set it on the process that **builds** the kernel, not on the compiler; [`capture_wavescope_trace.py`](../optimization/utilities/tools/wavescope/capture_wavescope_trace.py) does that and the rest of the capture in one command. The same DWARF is what lets `rocgdb` name the authoring line behind a memory fault — see [`../development/debugging_rocgdb.md`](../development/debugging_rocgdb.md). |
@@ -107,3 +107,35 @@ are diagnostics that intentionally change emission. None affect the default buil
 For an unlisted variable, check its reader and documentation before assuming its
 default or stability. It may be an internal experimental knob or a setting owned
 by an external library or tool.
+
+### Compiler detection and provenance
+
+Automatic flavor selection queries the COMGR library that will compile the
+kernel. It uses `LLVMGetVersion` from that handle or its loaded dependencies.
+When LLVM symbols are hidden, it preprocesses Clang's built-in version macros
+through the same COMGR. The latter is needed for static LLVM builds (see
+[COMGR_STATIC_LLVM](https://github.com/ROCm/llvm-project/commit/772c38832056cb31d9fcbfdbe6c799af97f22d7f)).
+Neither path launches a compiler executable or reads a ROCm release file.
+Both are host-only queries and require no GPU.
+
+Python exposes `rocke.runtime.comgr.loaded_compiler_info()`. Its immutable
+`CompilerInfo` records `llvm_version`, `source`, `requested_comgr`, `comgr_path`,
+and `query_library_path`; `describe()` formats those fields for diagnostics.
+The paths are reported by the dynamic loader. A missing path remains unknown,
+while `requested_comgr` preserves the original loader input. The native C API
+exposes the same evidence through `rocke_loaded_compiler_info()` in
+`rocke/lower_llvm.h`. A null result means COMGR could not be loaded; a result
+without a version means the loaded compiler could not be queried. No release
+metadata is substituted in either case.
+
+Both engines retain the successfully loaded library and query result for the
+process lifetime. Configure library selection before the first automatic
+lowering or compilation. Python-driven C++ lowering passes the Python-resolved
+flavor explicitly. Standalone C++ AUTO uses its native COMGR discovery path.
+`ROCKE_LLVM_FLAVOR` and explicit API flavors support offline emission without
+loading COMGR. The runtime's p8-generation guard still checks against detected
+compiler evidence when compiling, even if emission used an override.
+
+The detected LLVM version selects a baseline flavor; it does not prove that
+all builds of that version share an exact DataLayout or intrinsic catalog.
+Toolchain-specific compilation and drift tests remain necessary.

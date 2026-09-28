@@ -36,25 +36,23 @@ from rocke.portable_ir.src.recording_builder import record_kernel
 # still has to be the one the shipping path uses, or the precise check (SSA names,
 # which HSACO comparison cannot see) is validating a different LLVM generation
 # from the one that produces the artifact. So: resolve from the installed comgr
-# when there is one, and fall back to the historical default when there is not,
+# when there is one, and fall back to the offline default when there is not,
 # which keeps the driver usable on a machine with no ROCm at all.
-_FALLBACK_FLAVOR = "llvm20"
+_FALLBACK_FLAVOR = "llvm22"
 FLAVOR = os.environ.get("ROCKE_LLVM_FLAVOR", "auto")
 ARCHES = os.environ.get("ARCHES", "gfx942,gfx950").split(",")
 
 
 def _auto_flavor() -> Tuple[str, str]:
     """-> (flavor, where it came from), the second for the log line."""
-    try:
-        from rocke.core.lower_llvm import _flavor_for_rocm
-        from rocke.runtime.comgr import resolved_lib_rocm_version
+    from rocke.core.lower_llvm import _flavor_for_llvm
+    from rocke.runtime.comgr import loaded_compiler_info
 
-        ver = resolved_lib_rocm_version()
-        if ver:
-            return _flavor_for_rocm(*ver), f"ROCm {'.'.join(map(str, ver))} comgr"
-    except Exception:  # noqa: BLE001 - no comgr is a normal state here
-        pass
-    return _FALLBACK_FLAVOR, "default, no comgr found"
+    info = loaded_compiler_info()
+    if info is not None and info.llvm_version is not None:
+        return _flavor_for_llvm(info.llvm_version[0]), info.describe()
+    reason = info.describe() if info is not None else "COMGR unavailable"
+    return _FALLBACK_FLAVOR, f"offline default; {reason}"
 
 
 def _kernels():
