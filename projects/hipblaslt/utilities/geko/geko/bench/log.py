@@ -14,6 +14,7 @@ Key functions:
     summarize: Analyze logs and filter by contribution thresholds.
     benchmark: Generate and run benchmarks from log configurations.
     update: Modify benchmark configurations with timing parameters.
+    realign_rows: Reorder benchmark results to match original row order.
 """
 
 import yaml
@@ -191,6 +192,76 @@ def verify_output(latency_file: str | Path, bench_file: str | Path) -> bool:
         pass
 
     return False
+
+
+# Extra fields (beyond GEMM_LOG_FIELDS) that hipblaslt-bench echoes back in its
+# raw output under the same names used in bench yaml rows/LOG_FIELDS. Ordered
+# by how likely they are to distinguish otherwise-identical GEMM shapes.
+_EXTRA_MATCH_FIELDS = (
+    "alpha",
+    "beta",
+    "scaleA",
+    "scaleB",
+    "scaleC",
+    "scaleD",
+    "swizzleA",
+    "swizzleB",
+    "scaleAlpha_vector",
+    "gradient",
+    "use_e",
+    "bias_vector",
+    "bias_source",
+    "scale_type",
+    "bias_type",
+    "aux_type",
+)
+
+
+def realign_rows(rows: List[dict], df: pd.DataFrame) -> pd.DataFrame:
+    """Reorder benchmark results to match the original row order.
+
+    Multi-device runs complete chunks out of order, so a dataframe (from the
+    concatenated output) may not be in the same order as ``rows``. This
+    realigns them via a merge keyed on GEMM_LOG_FIELDS, progressively adding
+    extra fields (beta, bias, scale, etc.) only when needed to disambiguate
+    rows that share identical GEMM_LOG_FIELDS but differ in other bench
+    parameters.
+
+    Args:
+        rows (List[dict]): Original bench rows (LOG_FIELDS convention, M/N/K uppercase).
+        df (pd.DataFrame): Benchmark results (GEMM_FIELDS convention, m/n/k lowercase).
+
+    Returns:
+        pd.DataFrame: df reordered/merged to match rows, one row per entry in rows.
+
+    Raises:
+        ValueError: If rows cannot be uniquely matched even after using all
+            available disambiguating fields.
+    """
+    df = df.rename(columns={"m": "M", "n": "N", "k": "K"})
+    df["compute_type"] = df["compute_type"].apply(update_compute_type)
+    df_rows = pd.DataFrame(rows)
+
+    key = list(GEMM_LOG_FIELDS)
+    ambiguous = df_rows.duplicated(subset=key, keep=False)
+    for extra in _EXTRA_MATCH_FIELDS:
+        if not ambiguous.any():
+            break
+        if extra not in df_rows.columns or extra not in df.columns:
+            continue
+        candidate_key = key + [extra]
+        candidate_ambiguous = df_rows.duplicated(subset=candidate_key, keep=False)
+        if candidate_ambiguous.sum() < ambiguous.sum():
+            key = candidate_key
+            ambiguous = candidate_ambiguous
+
+    if ambiguous.any():
+        raise ValueError(
+            f"Bench rows contain duplicate GEMM shapes/types that cannot be "
+            f"disambiguated even using {key}; cannot uniquely realign probe "
+            f"results to the original row order."
+        )
+    return df_rows.merge(df, on=key, how="left")
 
 
 def update(

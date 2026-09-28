@@ -115,10 +115,7 @@ namespace TensileLite
                 auto rv = solutions.at(index);
 
                 Task task(hardware, problem, *rv);
-                bool predicateMatch
-                    = (*rv->hardwarePredicate)(hardware)
-                      && softwarePredicate(
-                          SolutionLibrarySearchType::DEFAULT, task, hardware, *rv, problem);
+                bool predicateMatch = selectionPredicate(task, hardware, *rv, problem);
                 if(debug)
                 {
                     PredicateDebugger::printHeader(
@@ -152,12 +149,7 @@ namespace TensileLite
                 {
                     Task task(hardware, problem, *(row.second));
                     bool predicateMatch
-                        = (*row.second->hardwarePredicate)(hardware)
-                          && softwarePredicate(SolutionLibrarySearchType::DEFAULT,
-                                               task,
-                                               hardware,
-                                               *(row.second),
-                                               problem);
+                        = selectionPredicate(task, hardware, *(row.second), problem);
 
                     if(debug)
                     {
@@ -244,12 +236,14 @@ namespace TensileLite
                             Task task(hardware, problem, *(row.second));
                             problem.setWorkspaceSizeGroupedGemm(ws);
                             problem.setGroupedGemmCount(problems.size());
-                            problem.setGroupedGemm(true);
-                            if(!softwarePredicate(searchType,
-                                                  task,
-                                                  hardware,
-                                                  *(row.second),
-                                                  problem))
+                            // setGroupedGemm(true) re-aims GroupedGemmEqual,
+                            // SynchronizerSizeCheck and the free-size-B clause on
+                            // this local copy, so it is USO-gated like the widened
+                            // predicate. Task holds a reference to problem, so the
+                            // mutation is visible to taskPredicate either way.
+                            if(problem.getParams().uniformSummationOrder())
+                                problem.setGroupedGemm(true);
+                            if(!selectionPredicate(task, hardware, *(row.second), problem))
                                 useSolution = false;
                         }
                     }

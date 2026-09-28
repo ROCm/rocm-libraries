@@ -17,6 +17,7 @@
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
+#include "../tests/common/PointwiseCommon.hpp"
 #include "../tests/common/TestWorkarounds.hpp"
 
 using namespace hipdnn_frontend;
@@ -634,6 +635,154 @@ protected:
     }
 };
 
+// ============================================================================
+// Unary Activation Determinism Test
+// ============================================================================
+// No SKIP_IF_WINDOWS/SKIP_IF_ASAN here (unlike the conv fixtures above):
+// those guard rocBLAS/Tensile/CK GEMM-library issues that don't apply to
+// miopenActivationForward's plain elementwise kernels.
+
+template <typename DataType>
+class DeterministicUnaryActivation
+    : public DeterministicTestBase<test_activation_common::ActivTestCase>
+{
+protected:
+    void runDeterminismTest()
+    {
+        const auto& testCase
+            = DeterministicTestBase<test_activation_common::ActivTestCase>::GetParam();
+
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
+        const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+        Graph graphObj;
+        graphObj.set_name("DeterministicUnaryActivationTest");
+        graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
+
+        auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        auto xTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("x", dims, generateStrides(dims)));
+
+        PointwiseAttributes pwAttrs;
+        pwAttrs.set_mode(sdkToFrontendPointwiseMode(testCase.mode));
+        if(testCase.reluLowerClip.has_value())
+        {
+            pwAttrs.set_relu_lower_clip(testCase.reluLowerClip.value());
+        }
+        if(testCase.reluUpperClip.has_value())
+        {
+            pwAttrs.set_relu_upper_clip(testCase.reluUpperClip.value());
+        }
+        if(testCase.reluLowerClipSlope.has_value())
+        {
+            pwAttrs.set_relu_lower_clip_slope(testCase.reluLowerClipSlope.value());
+        }
+
+        auto yTensorAttr = graphObj.pointwise(xTensorAttr, pwAttrs);
+        yTensorAttr->set_output(true);
+
+        auto result = graphObj.build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        GraphTensorBundle bundle1;
+        GraphTensorBundle bundle2;
+        populateBundleFromGraph(graphObj, bundle1);
+        populateBundleFromGraph(graphObj, bundle2);
+        randomizeBundle(bundle1, seed);
+        randomizeBundle(bundle2, seed);
+
+        int64_t workspaceSize;
+        result = graphObj.get_workspace_size(workspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
+
+        auto variantPack1 = bundle1.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack1, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        auto variantPack2 = bundle2.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack2, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        assertBundleOutputsMatch(bundle1, bundle2, yTensorAttr->get_uid(), _stream);
+    }
+};
+
+using IntegrationGpuDeterministicUnaryActivationFp32 = DeterministicUnaryActivation<float>;
+using IntegrationGpuDeterministicUnaryActivationFp16 = DeterministicUnaryActivation<half>;
+
+// ============================================================================
+// Binary Pointwise Determinism Test
+// ============================================================================
+// No SKIP_IF_WINDOWS/SKIP_IF_ASAN here either, for the same reason as unary
+// activation above: miopenOpTensor is a plain elementwise kernel, not a
+// rocBLAS/Tensile/CK GEMM path.
+
+template <typename DataType>
+class DeterministicBinaryPointwise : public DeterministicTestBase<pointwise_common::ModeCase>
+{
+protected:
+    void runDeterminismTest()
+    {
+        const auto& testCase = DeterministicTestBase<pointwise_common::ModeCase>::GetParam();
+
+        const std::vector<int64_t> dims = {2, 4, 8, 8};
+        const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+        Graph graphObj;
+        graphObj.set_name("DeterministicBinaryPointwiseTest");
+        graphObj.set_preferred_engine_id_ext(MIOPEN_ENGINE_DETERMINISTIC_NAME);
+
+        auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        auto xTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("x", dims, generateStrides(dims)));
+        auto yTensorAttr = std::make_shared<TensorAttributes>(
+            makeTensorAttributes("y", dims, generateStrides(dims)));
+
+        PointwiseAttributes pwAttrs;
+        pwAttrs.set_mode(sdkToFrontendPointwiseMode(testCase.mode));
+
+        auto outTensorAttr = graphObj.pointwise(xTensorAttr, yTensorAttr, pwAttrs);
+        outTensorAttr->set_output(true);
+
+        auto result = graphObj.build(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        GraphTensorBundle bundle1;
+        GraphTensorBundle bundle2;
+        populateBundleFromGraph(graphObj, bundle1);
+        populateBundleFromGraph(graphObj, bundle2);
+        randomizeBundle(bundle1, seed);
+        randomizeBundle(bundle2, seed);
+
+        int64_t workspaceSize;
+        result = graphObj.get_workspace_size(workspaceSize);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        const Workspace workspace(static_cast<size_t>(workspaceSize));
+
+        auto variantPack1 = bundle1.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack1, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        auto variantPack2 = bundle2.toDeviceVariantPack();
+        result = graphObj.execute(_handle, variantPack2, workspace.get());
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        assertBundleOutputsMatch(bundle1, bundle2, outTensorAttr->get_uid(), _stream);
+    }
+};
+
+using IntegrationGpuDeterministicBinaryPointwiseFp32 = DeterministicBinaryPointwise<float>;
+using IntegrationGpuDeterministicBinaryPointwiseFp16 = DeterministicBinaryPointwise<half>;
+
 } // namespace
 
 // ============================================================================
@@ -1024,3 +1173,49 @@ TEST_P(IntegrationGpuDeterministicBnNoSolver, NoSolverAvailable)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuDeterministicBnNoSolver,
                          testing::ValuesIn(getDeterministicBnTestCases()));
+
+// ============================================================================
+// Unary Activation Determinism Tests
+// ============================================================================
+
+TEST_P(IntegrationGpuDeterministicUnaryActivationFp32, Determinism)
+{
+    runDeterminismTest();
+}
+
+TEST_P(IntegrationGpuDeterministicUnaryActivationFp16, Determinism)
+{
+    runDeterminismTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuDeterministicUnaryActivationFp32,
+    testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases()));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuDeterministicUnaryActivationFp16,
+    testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases()));
+
+// ============================================================================
+// Binary Pointwise Determinism Tests
+// ============================================================================
+
+TEST_P(IntegrationGpuDeterministicBinaryPointwiseFp32, Determinism)
+{
+    runDeterminismTest();
+}
+
+TEST_P(IntegrationGpuDeterministicBinaryPointwiseFp16, Determinism)
+{
+    runDeterminismTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuDeterministicBinaryPointwiseFp32,
+                         testing::ValuesIn(pointwise_common::getBinaryModeCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuDeterministicBinaryPointwiseFp16,
+                         testing::ValuesIn(pointwise_common::getBinaryModeCases()));

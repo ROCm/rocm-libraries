@@ -8,6 +8,8 @@
 using hipdnn_integration_tests::applyTomlToleranceOverride;
 using hipdnn_integration_tests::checkTomlSkip;
 using hipdnn_integration_tests::currentTestName;
+using hipdnn_integration_tests::findTomlRmsThreshold;
+using hipdnn_integration_tests::gradingForTensor;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -45,6 +47,11 @@ TEST(TestTomlGuards, ApplyTomlToleranceOverrideReturnsFalseForEmptyName)
     EXPECT_FLOAT_EQ(rtol, 1.0f);
 }
 
+TEST(TestTomlGuards, FindTomlRmsThresholdReturnsNulloptForEmptyName)
+{
+    EXPECT_EQ(findTomlRmsThreshold("", "LayernormBackward_0::DSCALE"), std::nullopt);
+}
+
 // ---------------------------------------------------------------------------
 // checkTomlSkip / applyTomlToleranceOverride — no TOML loaded
 //
@@ -65,6 +72,26 @@ TEST(TestTomlGuards, ApplyTomlToleranceOverrideReturnsFalseWhenNoSettings)
     EXPECT_FALSE(applyTomlToleranceOverride("SomeTest.Name", atol, rtol));
     EXPECT_FLOAT_EQ(atol, 1.0f);
     EXPECT_FLOAT_EQ(rtol, 1.0f);
+}
+
+// The default is allclose, and it is the absence of a matching [[validator_overrides]]
+// entry that expresses it — no config, no RMS threshold, on either harness.
+TEST(TestTomlGuards, FindTomlRmsThresholdReturnsNulloptWhenNoSettings)
+{
+    EXPECT_EQ(findTomlRmsThreshold("SomeTest.Name", "LayernormBackward_0::DSCALE"), std::nullopt);
+}
+
+// Both harnesses grade every output tensor through gradingForTensor, so the no-config
+// answer is the contract the whole suite runs under: the caller's own tolerance, graded
+// by allclose.
+TEST(TestTomlGuards, GradingForTensorKeepsTheCallersToleranceWhenNoSettings)
+{
+    const auto grading
+        = gradingForTensor("SomeTest.Name", "LayernormBackward_0::DSCALE", 1e-3f, 2e-3f);
+
+    EXPECT_EQ(grading.kind, hipdnn_integration_tests::bundle::ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 1e-3f);
+    EXPECT_FLOAT_EQ(grading.rtol, 2e-3f);
 }
 
 // NOLINTEND(readability-identifier-naming)

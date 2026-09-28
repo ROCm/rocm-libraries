@@ -12,6 +12,8 @@
  * rocke_i_attrs, rocke_i_set_err, rocke_i_live, ...) lives in bucket 0 (ir_core.c);
  * this file only calls it via ir_internal.h.
  */
+#include <string.h>
+
 #include "rocke/ir_internal.h"
 
 /* ------------------------------------------------------------ arith constants */
@@ -454,6 +456,22 @@ rocke_value_t* rocke_b_rsqrt(rocke_ir_builder_t* b, rocke_value_t* a)
 
 rocke_value_t* rocke_b_tanh(rocke_ir_builder_t* b, rocke_value_t* a)
 {
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!a)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "tanh NULL operand");
+    }
+    if(!a->type || !a->type->name || strcmp(a->type->name, "f32") != 0)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "math.tanh requires f32 operand, got %s",
+                                               (a->type && a->type->name) ? a->type->name
+                                                                          : "(null)");
+    }
     return rocke_i_unop(b, ROCKE_OP_MATH_TANH, a, "tanh");
 }
 

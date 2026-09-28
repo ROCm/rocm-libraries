@@ -21,6 +21,7 @@ import unittest
 
 from dispatch.grouped_convolution import (
     ConvGroupedRequest,
+    _block,
     _problem,
     conv_grouped_candidates,
     dispatch_conv_grouped,
@@ -73,6 +74,8 @@ def _expected_grid(req, spec):
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
             arch=spec.arch,
+            groups=p.groups,
+            block_size=_block(spec)[0],
         ).split_k
     return (gx, gy, p.groups * split_k)
 
@@ -186,7 +189,7 @@ class TestTwoStageGridShape(unittest.TestCase):
     def test_stage2_grid_z_is_groups(self):
         # Stage 2 (workspace-reduce) uses grid z = groups: block_id_z is the
         # group index, one CTA per group covering wg_M x wg_N output elements.
-        from rocke.instances.common.conv_wgrad_workspace_reduce import (
+        from kernels.common.conv_wgrad_workspace_reduce import (
             WgradReduceSpec,
             wgrad_reduce_grid,
         )
@@ -306,7 +309,7 @@ class TestGroupedDgradDispatch(unittest.TestCase):
         # fallthrough to the forward formula sizes off the wrong extent once
         # groups > 1.
         from dispatch.grouped_convolution import _vec_size_c
-        from rocke.instances.common.conv_implicit_gemm_dgrad import DgradConvSpec
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
 
         req = _dgrad(C=48, G=16)
         p = _problem(req)
@@ -358,7 +361,7 @@ class TestGfx1250WgradKOuterReachable(unittest.TestCase):
         # Dispatch must not hand-roll the gate; it must match the one policy
         # function the sweep driver also calls.
         from rocke.core.arch import ArchTarget
-        from rocke.instances.common.conv_implicit_gemm_wgrad import WgradConvSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
         spec = self._spec()
         self.assertEqual(

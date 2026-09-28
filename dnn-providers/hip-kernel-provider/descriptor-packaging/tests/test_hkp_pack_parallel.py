@@ -10,18 +10,21 @@ copies it verbatim into a tree that has never seen this file.
 
 import ast
 import concurrent.futures
+import importlib
 import inspect
 import itertools
 import json
 import os
+import pickle
 import re
 import sys
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from hkp_pack import pipeline
+from hkp_pack import agreement, pipeline, rocke_compile
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
@@ -834,6 +837,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
     with pytest.raises(HkpPackError) as excinfo:
         pipeline._prewarm_variants(
             flat,
@@ -843,6 +847,8 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             tmp_path / "inter",
             variant_co,
             variant_symbol,
+            variant_observations,
+            {},
             log=_silent,
         )
 
@@ -1026,12 +1032,15 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     compile_one = getattr(pipeline, "_compile_one_variant", None)
     assert compile_one is not None, "pipeline._compile_one_variant does not exist"
 
-    vk, co_path, symbol, err = compile_one(job)
+    vk, co_path, symbol, err, observations, origins = compile_one(job)
     assert vk == "VK-FROM-PARENT"
-    assert co_path is None and symbol is None
+    assert co_path is None and symbol is None and observations is None
     assert err.startswith("HkpPackError: ")
     assert "boom" in err
     assert calls == []
+    # A failed variant contributes no producer identity. A partial one would let
+    # the parent observer record a SHA for a compile that produced no artefact.
+    assert origins == {}
 
 
 _STUB_HIPCC_BODY = r"""
@@ -1125,6 +1134,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
 
     variant_co = {}
     variant_symbol = {}
+    variant_observations = {}
     pipeline._prewarm_variants(
         load_flat_input(corpus, log=_silent),
         corpus,
@@ -1133,6 +1143,8 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
         tmp_path / "inter",
         variant_co,
         variant_symbol,
+        variant_observations,
+        {},
         log=_silent,
     )
 
@@ -1262,8 +1274,250 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
         tmp_path / "inter",
         variant_co,
         {},
+        {},
+        {},
         log=_silent,
     )
 
     # The walk, not the prewarm, compiles everything on this path.
     assert variant_co == {}
+
+
+# One stable producing invocation stands behind a whole pack, not behind each
+# variant separately. A pooled variant observes its producer in a worker process,
+# so the property survives only if the worker's observations come back.
+
+_EDITABLE_PKG = "hkp_parallel_editable"
+_EDITABLE_SOURCE = f"{_EDITABLE_PKG}/kernels/editable.py"
+_EDITABLE_BUILDER = "build_editable"
+
+_EDITABLE_MODULE = """
+    import dataclasses
+
+    @dataclasses.dataclass
+    class EditableSpec:
+        tile: int
+
+    def build_editable(spec: EditableSpec, *, arch="gfx942"):
+        return ("kernel", spec, arch)
+"""
+
+
+class _FakeRockeArtifact:
+    def __init__(self, name, data):
+        self.kernel_name = name
+        self.hsaco = data
+
+
+class _FakeComgrError(Exception):
+    pass
+
+
+@pytest.mark.quick
+def test_absorbed_and_observed_identities_share_one_key():
+    """An exported identity lands on the key a direct observation would build. The
+    two reach the observer as different types (a worker's string, an in-process
+    `Path`), and a mismatch files one file twice, letting a genuine SHA
+    disagreement pass as two unrelated producers.
+    """
+    observed = agreement.OriginObserver()
+    observed.identity(pipeline._pack_jobs)
+    exported = observed.exported()
+    assert len(exported) == 1
+
+    merged = agreement.OriginObserver()
+    merged.identity(pipeline._pack_jobs)
+    merged.absorb(exported)
+    assert len(merged.files) == 1
+
+
+@pytest.mark.quick
+def test_absorbing_a_disagreeing_sha_is_refused():
+    """The merge goes through the conflict check, not over it: `dict.update` would
+    take the later SHA and drop the earlier one, the condition this observer exists
+    to report.
+    """
+    merged = agreement.OriginObserver()
+    merged.identity(pipeline._pack_jobs)
+
+    with pytest.raises(HkpPackError, match="producer changed during compilation"):
+        merged.absorb({key: "0" * 64 for key in merged.exported()})
+
+
+@pytest.fixture
+def editable_producer(tmp_path, monkeypatch):
+    """A two-variant rocke corpus whose producer module can be edited mid-pack.
+
+    Both variants name the same defining file, so an edit between their compiles is
+    a disagreement rather than two unrelated observations; their specs differ so
+    they stay two jobs. The comgr entry is stubbed in this process, so the workers
+    run in-process too via `_SerialPool`. Yields (corpus, producer_path).
+    """
+    corpus = tmp_path / "editable-corpus"
+    pkg = corpus / _EDITABLE_PKG / "kernels"
+    pkg.mkdir(parents=True)
+    (corpus / _EDITABLE_PKG / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    producer = pkg / "editable.py"
+    producer.write_text(textwrap.dedent(_EDITABLE_MODULE), encoding="utf-8")
+
+    entries = [
+        _ukd(
+            f"ukd-editable-{tile}",
+            {
+                "kind": "rocke",
+                "source": _EDITABLE_SOURCE,
+                "builder": _EDITABLE_BUILDER,
+                "spec": {"tile": tile},
+            },
+        )
+        for tile in (64, 128)
+    ]
+    _write_json(
+        corpus, "editable.kdp.json", _kdp("kdp-editable", [TARGET_ARCH], entries)
+    )
+
+    monkeypatch.syspath_prepend(str(corpus))
+    importlib.invalidate_caches()
+
+    def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
+        return _FakeRockeArtifact("editable_symbol", b"\x7fELF-stub")
+
+    monkeypatch.setattr(
+        rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
+    )
+
+    try:
+        yield corpus, producer
+    finally:
+        # The module name is fixed while its file lives under a per-test
+        # directory, so a cached entry would hand the next test a producer
+        # whose source file no longer exists.
+        for name in [n for n in sys.modules if n.split(".")[0] == _EDITABLE_PKG]:
+            del sys.modules[name]
+
+
+class _SerialPool:
+    """An in-process pool stand-in running jobs one at a time in order, because the
+    case below turns on one variant compiling before an edit to the producer and
+    the other after it; `between` runs after each result. Jobs and results are
+    pickled across the call as the real boundary does, so an unpicklable origin map
+    cannot pass here and fail a real pack.
+    """
+
+    def __init__(self, between=None):
+        self.between = between
+
+    def map(self, fn, jobs, chunksize=1):
+        def _run():
+            for index, job in enumerate(jobs):
+                if index and self.between is not None:
+                    self.between()
+                result = fn(pickle.loads(pickle.dumps(job)))
+                yield pickle.loads(pickle.dumps(result))
+
+        return _run()
+
+    def shutdown(self, **_kwargs):
+        pass
+
+
+def _serial_pool(monkeypatch, between=None):
+    """Put `_SerialPool` where `_prewarm_variants` builds its pool."""
+    monkeypatch.setattr(
+        pipeline, "ProcessPoolExecutor", lambda **_kwargs: _SerialPool(between)
+    )
+
+
+def _editable_jobs(corpus, out_dir):
+    flat = load_flat_input(corpus, log=_silent)
+    jobs = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)
+    return flat, [replace(job, out_dir=str(out_dir), hipcc="hipcc") for job in jobs]
+
+
+@pytest.mark.quick
+def test_worker_returns_picklable_producer_origins(editable_producer, tmp_path):
+    """A worker hands back the producer identities it observed, in picklable form.
+
+    The one end of the merge the parent cannot reconstruct: an empty map, or one
+    keyed by something that does not pickle, leaves nothing to compare.
+    """
+    corpus, producer = editable_producer
+    _flat, jobs = _editable_jobs(corpus, tmp_path / "inter")
+    assert len(jobs) == 2, "the corpus authors two distinct rocke variants"
+
+    _vk, _co, _symbol, err, _observations, origins = pipeline._compile_one_variant(
+        jobs[0]
+    )
+    assert err is None, err
+
+    assert pickle.loads(pickle.dumps(origins)) == origins
+    assert all(isinstance(key, str) for key in origins), (
+        "a worker's origin map crosses a process boundary; string keys are the "
+        "one spelling both sides build for a file"
+    )
+    # The builder and its spec class both live in the producer module, so its
+    # resolved path is the key the parent's own records of that file land on.
+    assert str(producer.resolve()) in origins
+
+
+@pytest.mark.quick
+def test_pool_rejects_variants_built_by_different_producer_revisions(
+    editable_producer, tmp_path, monkeypatch
+):
+    """Two pooled variants whose producer SHAs disagree fail the pack. The property
+    is cross-variant: each compile is internally consistent, so only an observer
+    spanning the arch sees two revisions of one file. Run through the pool branch,
+    since the serial path shares one observer and could not fail this way.
+    """
+    corpus, producer = editable_producer
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+
+    def _edit_producer():
+        # Appended between two compiles, after the first variant's own stability
+        # check has re-read the file and agreed with itself: an edit inside a
+        # compile would be caught there and prove nothing cross-variant.
+        with producer.open("a", encoding="utf-8") as fh:
+            fh.write("\n# a revision the first variant was not built from\n")
+
+    _serial_pool(monkeypatch, between=_edit_producer)
+
+    with pytest.raises(HkpPackError) as excinfo:
+        pipeline.compile_intermediate(
+            load_flat_input(corpus, log=_silent),
+            corpus,
+            TARGET_ARCH,
+            "hipcc",
+            tmp_path / "inter",
+            log=_silent,
+        )
+
+    message = str(excinfo.value)
+    assert "producer changed during compilation" in message
+    assert str(producer.resolve()) in message
+
+
+@pytest.mark.quick
+def test_pool_accepts_variants_built_by_one_producer_revision(
+    editable_producer, tmp_path, monkeypatch
+):
+    """An unedited producer packs both variants, merge and all: a merge that raised
+    for any two variants sharing a producer would satisfy the rejection test while
+    making every real pack fail.
+    """
+    corpus, producer = editable_producer
+    monkeypatch.setenv("HKP_PACK_JOBS", "2")
+    _serial_pool(monkeypatch)
+
+    inter = pipeline.compile_intermediate(
+        load_flat_input(corpus, log=_silent),
+        corpus,
+        TARGET_ARCH,
+        "hipcc",
+        tmp_path / "inter",
+        log=_silent,
+    )
+
+    assert len(inter.variant_co) == 2
+    assert all(co.is_file() for co in inter.variant_co.values())
+    assert producer.read_text(encoding="utf-8") == textwrap.dedent(_EDITABLE_MODULE)
