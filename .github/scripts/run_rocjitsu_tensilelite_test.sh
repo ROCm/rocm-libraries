@@ -336,6 +336,7 @@ run_tensilelite_tests() {
         -m "${ROCJITSU_GPU_TARGET}" \
         -v -s \
         -n "${PYTEST_WORKERS}" \
+        --client-lock-scope=worker \
         --timeout="${PER_TEST_TIMEOUT}" \
         --junit-xml="${junit_dir}/tensilelite.xml" \
         --prebuilt-client="${TENSILELITE_CLIENT}" \

@@ -42,6 +42,9 @@ def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
     parser.addoption("--prebuilt-client")
+    parser.addoption("--client-lock-scope", choices=("gpu", "worker"), default="gpu",
+        help="Serialize clients per physical GPU (default), or per worker when "
+             "each client process owns an independent emulator instance.")
     parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
@@ -140,14 +143,13 @@ def worker_gpu_id(worker_id):
     return str(worker_num % detectAvailableGpus())
 
 @pytest.fixture(scope="session")
-def worker_lock_path(tmp_path_factory, worker_id, worker_gpu_id):
+def worker_lock_path(tmp_path_factory, worker_id, worker_gpu_id, pytestconfig):
     if not worker_id:
         return None
 
-    # Under FFM each worker gets its own emulator instance, so there is
-    # no GPU contention — give each worker a private lock so client
-    # invocations can run in parallel across workers.
-    if os.environ.get("HSA_MODEL_MEMFILE"):
+    # Independent emulator instances do not contend for a physical GPU.
+    if (os.environ.get("HSA_MODEL_MEMFILE")
+            or pytestconfig.getoption("--client-lock-scope") == "worker"):
         return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
 
     # On real hardware, workers only avoid GPU contention when
@@ -330,4 +332,3 @@ def useGlobalParameters(tensile_args):
             Common.restoreDefaultGlobalParameters()
 
     return gpUpdater
-
