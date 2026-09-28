@@ -114,6 +114,12 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
 set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib:$ORIGIN/../llvm/lib" CACHE STRING "Install RPATH")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE CACHE BOOL "Use link path for RPATH")
 
+# Holds the vendored libnuma/libdrm pulled in as direct DT_NEEDED entries by
+# the static libhsakmt that SDMA links.
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+    list(APPEND CMAKE_INSTALL_RPATH "$ORIGIN/../lib/rocm_sysdeps/lib")
+endif()
+
 mark_as_advanced(CMAKE_SKIP_BUILD_RPATH)
 mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH)
@@ -669,6 +675,18 @@ if(HIPBLASLT_ENABLE_CLIENT)
         DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/performance"
         COMPONENT benchmarks
     )
+
+    if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
+        rocm_install(
+            TARGETS hipblaslt-bench-a2a
+            COMPONENT benchmarks
+        )
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/a2a/hipblaslt-bench-a2a-launch"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            COMPONENT benchmarks
+        )
+    endif()
 
     # Cotenant CU-contention helper: the kernel and its launcher install side by
     # side in bin/ so hipblaslt-cotenant finds the precompiled kernel next to it.
