@@ -23,16 +23,29 @@ Log handling
    not that it passed, so a cell whose gtest FAILED or was SKIPPED in the
    same stream is dropped.  So is a cell whose reached depth is below its
    required depth, or either depth is missing.
+
+Runs
+----
+4. Each RUN argument is one CI run: a job log, or a directory of *.log job
+   logs.  A log with a rejected block contributes nothing, and the exit
+   status is 1.  A cell is claimed when it is kept in at least --min-runs
+   runs and dropped in none; a single drop anywhere vetoes it.
+5. claim_failures and failed_in_use are listed for a human; they are never
+   claims.
+
+Exit status: 0 on success, 1 if any log was rejected, 2 on a usage error.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set
+from pathlib import Path, PurePosixPath
+from typing import Dict, FrozenSet, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
@@ -51,6 +64,7 @@ DROP_NOT_PASSED = "gtest failed or skipped"
 DROP_SHORTFALL = "reached below required"
 DROP_NO_DEPTH = "depth missing or unknown"
 DROP_BAD_PATH = "bundle outside integration-test-bundles/"
+DROP_MIN_RUNS = "kept in fewer than --min-runs runs"
 
 _TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -59,6 +73,7 @@ _SUMMARY_HEADER = re.compile(r"^==== SUPPORT CLAIM SUMMARY \((.+)\) ====$")
 _GTEST_NOT_PASSED = re.compile(r"^\[\s+(?:FAILED|SKIPPED)\s+\] ([^\s,]+\.[^\s,]+)")
 _GTEST_RAN = re.compile(r"^\[==========\] \d+ tests? from \d+ test suites? ran\.")
 _ARCH = re.compile(r"^gfx[0-9a-f]+$")
+_LANE = re.compile(r"^gfx[0-9a-f]+/(?:linux|windows)$")
 
 
 @dataclass
@@ -285,3 +300,282 @@ def block_cells(block: Block) -> BlockCells:
         _with_lane(e, run) for e in _entries(summary, "failed_in_use")
     ]
     return result
+
+
+@dataclass
+class LogReport:
+    path: str
+    blocks: int = 0
+    unique: int = 0
+    lanes: Set[str] = field(default_factory=set)
+    error: Optional[str] = None
+
+    def status(self) -> str:
+        if self.error is not None:
+            return f"REJECTED: {self.error}"
+        if not self.blocks:
+            return "no block"
+        noun = "block" if self.blocks == 1 else "blocks"
+        lanes = " ".join(sorted(self.lanes))
+        return f"{self.blocks} {noun} ({self.unique} unique) {lanes}"
+
+
+@dataclass
+class Harvest:
+    runs: int
+    min_runs: int
+    lane: Optional[str]
+    logs: List[LogReport]
+    claims: List[Cell]
+    drops: Dict[str, Counter]  # lane -> DROP_* reason -> distinct cells
+    claim_failures: List[dict]
+    failed_in_use: List[dict]
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _stream_name(stream: str) -> str:
+    return f"stream {stream}" if stream else "unprefixed stream"
+
+
+def read_log(path: str, text: str) -> Tuple[LogReport, List[BlockCells]]:
+    """The cells of every block in one log, or none if any block is rejected."""
+    report = LogReport(path)
+    blocks = extract_blocks(text, path)
+    cells: List[BlockCells] = []
+    for block in blocks:
+        try:
+            if block.error is not None:
+                raise MalformedSummary(block.error)
+            cells.append(block_cells(block))
+        except MalformedSummary as exc:
+            report.error = f"{_stream_name(block.stream)}: {exc}"
+            return report, []
+        run = block.summary["run"]
+        report.lanes.add(f"{run['arch']}/{run['platform']}")
+    report.blocks = len(blocks)
+    report.unique = len({_canonical([b.summary, sorted(b.not_passed)]) for b in blocks})
+    return report, cells
+
+
+def _entry_lane(entry: dict) -> str:
+    return f"{entry['arch']}/{entry['platform']}"
+
+
+def harvest(
+    runs: Sequence[Sequence[Tuple[str, str]]],
+    min_runs: int = 1,
+    lane: Optional[str] = None,
+) -> Harvest:
+    """Merges runs, each a list of (log path, log text), into claims."""
+    logs: List[LogReport] = []
+    runs_kept: Counter = Counter()  # cell -> runs that kept it
+    vetoed: Dict[Cell, str] = {}
+    failures: Dict[str, dict] = {}
+    in_use: Dict[str, dict] = {}
+
+    for run in runs:
+        kept: Set[Cell] = set()
+        for path, text in run:
+            report, block_list = read_log(path, text)
+            logs.append(report)
+            for cells in block_list:
+                kept |= cells.kept
+                for cell, reason in cells.dropped.items():
+                    vetoed.setdefault(cell, reason)
+                for entry in cells.claim_failures:
+                    failures.setdefault(_canonical(entry), entry)
+                for entry in cells.failed_in_use:
+                    in_use.setdefault(_canonical(entry), entry)
+        runs_kept.update(kept)
+
+    def wanted(cell_lane: str) -> bool:
+        return lane is None or cell_lane == lane
+
+    drops: Dict[str, Counter] = {}
+    for cell, reason in vetoed.items():
+        if wanted(cell.lane):
+            drops.setdefault(cell.lane, Counter())[reason] += 1
+
+    claims: List[Cell] = []
+    for cell, count in runs_kept.items():
+        if cell in vetoed or not wanted(cell.lane):
+            continue
+        if count < min_runs:
+            drops.setdefault(cell.lane, Counter())[DROP_MIN_RUNS] += 1
+        else:
+            claims.append(cell)
+
+    def selected(entries: Dict[str, dict]) -> List[dict]:
+        return [entries[k] for k in sorted(entries) if wanted(_entry_lane(entries[k]))]
+
+    return Harvest(
+        runs=len(runs),
+        min_runs=min_runs,
+        lane=lane,
+        logs=logs,
+        claims=sorted(claims, key=lambda c: (c.lane, c.engine, c.bundle, c.case)),
+        drops=drops,
+        claim_failures=selected(failures),
+        failed_in_use=selected(in_use),
+    )
+
+
+def _cell_json(cell: Cell) -> dict:
+    result = cell._asdict()
+    if not cell.case:
+        del result["case"]
+    return result
+
+
+def _lanes(result: Harvest) -> List[str]:
+    """Every lane seen in an accepted log, or only --lane."""
+    seen = {lane for log in result.logs for lane in log.lanes}
+    seen |= set(result.drops) | {c.lane for c in result.claims}
+    return sorted(seen if result.lane is None else seen & {result.lane})
+
+
+def render_json(result: Harvest) -> str:
+    claims_by_lane = Counter(c.lane for c in result.claims)
+    lanes = _lanes(result)
+    return json.dumps(
+        {
+            "runs": result.runs,
+            "min_runs": result.min_runs,
+            "lane": result.lane,
+            "logs": [
+                {
+                    "path": log.path,
+                    "blocks": log.blocks,
+                    "unique_blocks": log.unique,
+                    "lanes": sorted(log.lanes),
+                    "error": log.error,
+                }
+                for log in result.logs
+            ],
+            "lanes": {
+                lane: {
+                    "claims": claims_by_lane[lane],
+                    "drops": dict(sorted(result.drops.get(lane, {}).items())),
+                }
+                for lane in lanes
+            },
+            "claims": [_cell_json(c) for c in result.claims],
+            "claim_failures": result.claim_failures,
+            "failed_in_use": result.failed_in_use,
+        },
+        indent=2,
+    )
+
+
+def _entry_line(entry: dict) -> str:
+    case = f" [{entry['case']}]" if entry.get("case") else ""
+    verdict = f" {entry['verdict']}:" if entry.get("verdict") else ""
+    return (
+        f"  {_entry_lane(entry)} {entry['engine']} {entry['bundle']}{case}"
+        f"{verdict} {entry.get('reason', '')}".rstrip()
+    )
+
+
+def render_table(result: Harvest) -> str:
+    lane = f"  lane: {result.lane}" if result.lane else ""
+    out = [f"runs: {result.runs}  min-runs: {result.min_runs}{lane}", "", "Logs"]
+    width = max((len(log.path) for log in result.logs), default=0)
+    out += [f"  {log.path:<{width}}  {log.status()}" for log in result.logs]
+
+    out += ["", "Lanes"]
+    claims_by_lane = Counter(c.lane for c in result.claims)
+    lanes = _lanes(result)
+    if not lanes:
+        out.append("  (none)")
+    for name in lanes:
+        drops = ", ".join(
+            f"{n} {reason}" for reason, n in sorted(result.drops.get(name, {}).items())
+        )
+        out.append(
+            f"  {name:<18} {claims_by_lane[name]:>5} claims"
+            + (f"; dropped: {drops}" if drops else "")
+        )
+
+    out += ["", f"Claims ({len(result.claims)})"]
+    out += [
+        f"  {c.lane} {c.engine} {c.bundle}" + (f" [{c.case}]" if c.case else "")
+        for c in result.claims
+    ]
+    for title, entries in (
+        ("Claim failures", result.claim_failures),
+        ("Failed in use", result.failed_in_use),
+    ):
+        out += ["", f"{title} ({len(entries)})"]
+        out += [_entry_line(e) for e in entries]
+    return "\n".join(out)
+
+
+def _lane_arg(text: str) -> str:
+    if not _LANE.match(text):
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not arch/platform, e.g. gfx942/linux"
+        )
+    return text
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a positive integer")
+    return value
+
+
+def _read_run(path: Path) -> List[Tuple[str, str]]:
+    files = sorted(path.glob("*.log")) if path.is_dir() else [path]
+    if not files:
+        raise FileNotFoundError(f"{path}: no *.log files")
+    return [(str(f), f.read_text(encoding="utf-8", errors="replace")) for f in files]
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "runs",
+        nargs="+",
+        metavar="RUN",
+        help="one CI run: a job log, or a directory of *.log job logs",
+    )
+    parser.add_argument(
+        "--min-runs",
+        type=_positive_int,
+        default=1,
+        help="claim a cell only when kept in this many runs (default: 1)",
+    )
+    parser.add_argument(
+        "--lane", type=_lane_arg, help="only this arch/platform, e.g. gfx942/linux"
+    )
+    parser.add_argument("--format", choices=("table", "json"), default="table")
+    args = parser.parse_args(argv)
+
+    if args.min_runs > len(args.runs):
+        print(
+            f"error: --min-runs {args.min_runs} exceeds the {len(args.runs)} runs given",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        runs = [_read_run(Path(p)) for p in args.runs]
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    result = harvest(runs, args.min_runs, args.lane)
+    print(render_json(result) if args.format == "json" else render_table(result))
+    return 1 if any(log.error is not None for log in result.logs) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
