@@ -29,15 +29,6 @@ from rocisa.instruction import (
 
 
 # ---------------------------------------------------------------------------
-# Scale GR offset
-# ---------------------------------------------------------------------------
-
-def emitScaleGROffset(ti, writer, kernel):
-  """Compute per-thread DTL vaddr for scale GR load."""
-  return Module(f"Scale GR Offset ({ti.tc})")  # STUB
-
-
-# ---------------------------------------------------------------------------
 # Scale GR load (DTL)
 # ---------------------------------------------------------------------------
 
@@ -59,15 +50,6 @@ def emitScaleGRLoad(ti, writer, kernel):
              comment=f"scale{tc}: DTL b128 load"))
 
   return module
-
-
-# ---------------------------------------------------------------------------
-# Scale LR offset
-# ---------------------------------------------------------------------------
-
-def emitScaleLROffset(ti, writer, kernel):
-  """Compute per-lane LDS read offset for scale LR."""
-  return Module(f"Scale LR Offset ({ti.tc})")  # STUB
 
 
 # ---------------------------------------------------------------------------

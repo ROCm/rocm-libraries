@@ -120,7 +120,6 @@ from .SubtileLREmit import (
     emitSingleDsRead, emitSubtileDsRead, setExecMask,
 )
 from .SubtileScaleEmit import (
-    emitScaleGROffset, emitScaleLROffset,
     emitScaleGRLoad, emitScaleLRLoad,
     emitScaleGRPtrUpdate, emitScaleGRLDSSwap, emitScaleLRLDSSwap,
     graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
