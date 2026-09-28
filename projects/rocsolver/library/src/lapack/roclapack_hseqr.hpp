@@ -987,7 +987,10 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 HIP_CHECK(hipStreamWaitEvent(side.s1, side.chased[slot], 0));
                 {
                     // (the handle and gemm_copy use the side stream in this block; the main
-                    // stream is restored however the block is left)
+                    // stream is restored however the block is left. rocblas_set_stream does not
+                    // release the device memory of the handle, which holds the workspace, even
+                    // with stream-ordered allocation; its release at the end of the call is
+                    // ordered on the main stream, which waits for the side stream first)
                     struct stream_restore
                     {
                         rocblas_handle handle;

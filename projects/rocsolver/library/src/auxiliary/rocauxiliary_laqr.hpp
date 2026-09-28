@@ -656,6 +656,11 @@ __device__ void hqr_laqr1(const int nn, const T* H, const I ldh, const T s1, con
     it is 0 again after each barrier. **/
 __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G)
 {
+    // (every thread makes its own writes visible at the device level before the
+    // thread-block arrives, as __ockl_grid_sync does: a barrier of the thread-block does not
+    // wait for the global memory writes of the other wavefronts, so the fence of thread 0
+    // alone could miss some of them)
+    __threadfence();
     __syncthreads();
     if(hipThreadIdx_x == 0)
     {
