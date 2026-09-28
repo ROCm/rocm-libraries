@@ -86,10 +86,12 @@ double2 box_muller_double(uint4 v)
     double2                result;
     unsigned long long int v1
         = (unsigned long long int)v.x ^ ((unsigned long long int)v.y << (53 - 32));
-    double                 u = fma(v1, ROCRAND_2POW53_INV_DOUBLE, ROCRAND_2POW53_INV_DOUBLE);
+    double u = fma(static_cast<double>(v1), ROCRAND_2POW53_INV_DOUBLE, ROCRAND_2POW53_INV_DOUBLE);
     unsigned long long int v2
         = (unsigned long long int)v.z ^ ((unsigned long long int)v.w << (53 - 32));
-    double w = fma(v2, ROCRAND_2POW53_INV_DOUBLE * 2.0, ROCRAND_2POW53_INV_DOUBLE * 2.0);
+    double w = fma(static_cast<double>(v2),
+                   ROCRAND_2POW53_INV_DOUBLE * 2.0,
+                   ROCRAND_2POW53_INV_DOUBLE * 2.0);
     double s = sqrt(-2.0 * log(u));
 #ifdef __HIP_DEVICE_COMPILE__
     sincospi(w, &result.x, &result.y);

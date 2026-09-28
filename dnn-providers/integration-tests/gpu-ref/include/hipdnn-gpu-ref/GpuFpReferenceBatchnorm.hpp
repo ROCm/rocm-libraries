@@ -3,12 +3,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipdnn-gpu-ref/ShallowGpuTensor.hpp>
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 #include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
+#include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-
-#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -27,7 +27,7 @@ template <typename XDataType,
           typename MeanVarianceDataType,
           typename YDataType,
           typename ComputeDataType>
-inline std::vector<std::string> buildBatchnormFwdInfDefines()
+inline std::vector<std::string> buildBatchnormFwdDefines()
 {
     std::vector<std::string> defines;
     defines.emplace_back(std::string("-DINPUT_TYPE=") + HipRtcTypeName<XDataType>::VALUE);
@@ -79,11 +79,11 @@ public:
                             YDataType,
                             ComputeDataType>(x, scale, bias, estimatedMean, invVariance, y);
 
-        auto defines = detail::buildBatchnormFwdInfDefines<XDataType,
-                                                           ScaleBiasDataType,
-                                                           MeanVarianceDataType,
-                                                           YDataType,
-                                                           ComputeDataType>();
+        auto defines = detail::buildBatchnormFwdDefines<XDataType,
+                                                        ScaleBiasDataType,
+                                                        MeanVarianceDataType,
+                                                        YDataType,
+                                                        ComputeDataType>();
 
         launchFwdInf(x.memory().deviceData(),
                      x.dims(),
@@ -96,6 +96,115 @@ public:
                      defines);
 
         y.memory().markDeviceModified();
+    }
+
+    template <class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType,
+              class YDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void fwdInferenceWithVariance(
+        hipdnn_data_sdk::utilities::TensorBase<XDataType>& x,
+        hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& estimatedMean,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>& variance,
+        hipdnn_data_sdk::utilities::TensorBase<YDataType>& y,
+        double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)
+    {
+        validateFwdInfInput<XDataType,
+                            ScaleBiasDataType,
+                            MeanVarianceDataType,
+                            YDataType,
+                            ComputeDataType>(x, scale, bias, estimatedMean, variance, y);
+        auto defines = detail::buildBatchnormFwdDefines<XDataType,
+                                                        ScaleBiasDataType,
+                                                        MeanVarianceDataType,
+                                                        YDataType,
+                                                        ComputeDataType>();
+        launchFwdInfWithVar(x.memory().deviceData(),
+                            x.dims(),
+                            x.strides(),
+                            scale.memory().deviceData(),
+                            bias.memory().deviceData(),
+                            estimatedMean.memory().deviceData(),
+                            variance.memory().deviceData(),
+                            y.memory().deviceData(),
+                            epsilon,
+                            defines);
+        y.memory().markDeviceModified();
+    }
+
+    template <class InputDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType = ScaleBiasDataType,
+              class OutputDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void fwdTraining(
+        hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
+        hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
+        double epsilon,
+        double momentum,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariance = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningMean = nullptr,
+        hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningVariance = nullptr)
+    {
+        validateFwdTrainingInput<InputDataType,
+                                 ScaleBiasDataType,
+                                 MeanVarianceDataType,
+                                 OutputDataType,
+                                 ComputeDataType>(input,
+                                                  scale,
+                                                  bias,
+                                                  output,
+                                                  mean,
+                                                  invVariance,
+                                                  prevRunningMean,
+                                                  prevRunningVariance,
+                                                  nextRunningMean,
+                                                  nextRunningVariance);
+        auto defines = detail::buildBatchnormFwdDefines<InputDataType,
+                                                        ScaleBiasDataType,
+                                                        MeanVarianceDataType,
+                                                        OutputDataType,
+                                                        ComputeDataType>();
+        launchFwdTrain(input.memory().deviceData(),
+                       input.dims(),
+                       input.strides(),
+                       scale.memory().deviceData(),
+                       bias.memory().deviceData(),
+                       output.memory().deviceData(),
+                       epsilon,
+                       momentum,
+                       mean ? mean->memory().deviceData() : nullptr,
+                       invVariance ? invVariance->memory().deviceData() : nullptr,
+                       prevRunningMean ? prevRunningMean->memory().deviceData() : nullptr,
+                       prevRunningVariance ? prevRunningVariance->memory().deviceData() : nullptr,
+                       nextRunningMean ? nextRunningMean->memory().deviceData() : nullptr,
+                       nextRunningVariance ? nextRunningVariance->memory().deviceData() : nullptr,
+                       defines);
+        output.memory().markDeviceModified();
+        if(mean != nullptr)
+        {
+            mean->memory().markDeviceModified();
+        }
+        if(invVariance != nullptr)
+        {
+            invVariance->memory().markDeviceModified();
+        }
+        if(nextRunningMean != nullptr)
+        {
+            nextRunningMean->memory().markDeviceModified();
+        }
+        if(nextRunningVariance != nullptr)
+        {
+            nextRunningVariance->memory().markDeviceModified();
+        }
     }
 
 private:
@@ -283,20 +392,98 @@ private:
                       "data types.");
     }
 
-    // --- Helpers ---
-
-    static bool isChannelLastLayout(const std::vector<int64_t>& strides)
+    template <typename InputDataType,
+              typename ScaleBiasDataType,
+              typename MeanVarianceDataType,
+              typename OutputDataType,
+              typename ComputeDataType>
+    static void validateFwdTrainingInput(
+        const hipdnn_data_sdk::utilities::TensorBase<InputDataType>& input,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+        const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& bias,
+        const hipdnn_data_sdk::utilities::TensorBase<OutputDataType>& output,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* mean,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningMean,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* prevRunningVariance,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningMean,
+        const hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>* nextRunningVariance)
     {
-        if(strides.size() < 3)
+        // Check that either all or none of the optional mean/invVariance and running stats are provided
+        const auto requireAllOrNone = [](std::initializer_list<const void*> ptrs,
+                                         const std::string& names) {
+            const auto anyNull
+                = std::any_of(ptrs.begin(), ptrs.end(), [](const void* p) { return p == nullptr; });
+            const auto anySet
+                = std::any_of(ptrs.begin(), ptrs.end(), [](const void* p) { return p != nullptr; });
+            if(anyNull && anySet)
+            {
+                throw std::invalid_argument(std::string("Batchnorm forward training requires ")
+                                            + names + " to be provided together.");
+            }
+        };
+        requireAllOrNone({mean, invVariance}, "mean and invVariance");
+        requireAllOrNone(
+            {prevRunningMean, prevRunningVariance, nextRunningMean, nextRunningVariance},
+            "prevRunningMean, prevRunningVariance, nextRunningMean, and nextRunningVariance");
+
+        // Validate dimensions and layouts
+        const TensorProps inputTensorProps("input", input.dims(), input.strides());
+        TensorProps outputTensorProps("output", output.dims(), output.strides());
+        std::vector<TensorProps> affineTensorProps;
+        affineTensorProps.emplace_back("scale", scale.dims(), scale.strides());
+        affineTensorProps.emplace_back("bias", bias.dims(), bias.strides());
+
+        if(mean != nullptr)
         {
-            throw std::invalid_argument(
-                "Batchnorm forward requires tensor rank to be at least 3 for layout validation.");
+            affineTensorProps.emplace_back("mean", mean->dims(), mean->strides());
+        }
+        if(invVariance != nullptr)
+        {
+            affineTensorProps.emplace_back(
+                "invVariance", invVariance->dims(), invVariance->strides());
+        }
+        if(prevRunningMean != nullptr)
+        {
+            affineTensorProps.emplace_back(
+                "prevRunningMean", prevRunningMean->dims(), prevRunningMean->strides());
+        }
+        if(prevRunningVariance != nullptr)
+        {
+            affineTensorProps.emplace_back(
+                "prevRunningVariance", prevRunningVariance->dims(), prevRunningVariance->strides());
+        }
+        if(nextRunningMean != nullptr)
+        {
+            affineTensorProps.emplace_back(
+                "nextRunningMean", nextRunningMean->dims(), nextRunningMean->strides());
+        }
+        if(nextRunningVariance != nullptr)
+        {
+            affineTensorProps.emplace_back(
+                "nextRunningVariance", nextRunningVariance->dims(), nextRunningVariance->strides());
         }
 
-        const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(strides);
-        return strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NLC.strideOrder
-               || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NHWC.strideOrder
-               || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NDHWC.strideOrder;
+        validateConsistentDimensions(inputTensorProps, outputTensorProps, affineTensorProps);
+        affineTensorProps.push_back(std::move(outputTensorProps));
+        validateConsistentLayouts(inputTensorProps, affineTensorProps);
+
+        // Validate data types
+        static_assert(IS_SUPPORTED_DATA_TYPE<InputDataType>,
+                      "Batchnorm forward training supports only double, float, half, and bfloat16 "
+                      "input data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<OutputDataType>,
+                      "Batchnorm forward training supports only double, float, half, and bfloat16 "
+                      "output data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<ScaleBiasDataType>,
+                      "Batchnorm forward training supports only double, float, half, and bfloat16 "
+                      "scale/bias data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<MeanVarianceDataType>,
+                      "Batchnorm forward training supports only double, float, half, and bfloat16 "
+                      "mean/invVariance data types.");
+        static_assert(IS_SUPPORTED_DATA_TYPE<ComputeDataType>,
+                      "Batchnorm forward training supports only double, float, half, and bfloat16 "
+                      "compute data types.");
     }
 
     // --- Kernel launchers (defined in GpuFpReferenceBatchnorm.cpp) ---
@@ -309,6 +496,33 @@ private:
                              const void* invVarPtr,
                              void* outputPtr,
                              std::vector<std::string>& defines);
+
+    static void launchFwdInfWithVar(const void* inputPtr,
+                                    const std::vector<int64_t>& inputDims,
+                                    const std::vector<int64_t>& inputStrides,
+                                    const void* scalePtr,
+                                    const void* biasPtr,
+                                    const void* estMeanPtr,
+                                    const void* estVarPtr,
+                                    void* outputPtr,
+                                    double epsilon,
+                                    std::vector<std::string>& defines);
+
+    static void launchFwdTrain(const void* inputPtr,
+                               const std::vector<int64_t>& inputDims,
+                               const std::vector<int64_t>& inputStrides,
+                               const void* scalePtr,
+                               const void* biasPtr,
+                               void* outputPtr,
+                               double epsilon,
+                               double momentum,
+                               void* meanPtr,
+                               void* invVariancePtr,
+                               const void* prevRunningMeanPtr,
+                               const void* prevRunningVariancePtr,
+                               void* nextRunningMeanPtr,
+                               void* nextRunningVariancePtr,
+                               std::vector<std::string>& defines);
 };
 
 } // namespace hipdnn_gpu_ref

@@ -160,15 +160,14 @@ protected:
     // (e.g. derived-class indexes populated from actionAfterAdding).
     virtual void actionAfterClearing() {}
 
-    // For cases where tests need to override the default plugin search paths
+    // Allow test overrides, but never let secure execution redirect loading via the environment.
     static std::set<std::filesystem::path>
         getPluginSearchPaths(const char* envVarName,
                              const std::set<std::filesystem::path>& defaultPaths)
     {
-        const auto envPath = hipdnn_data_sdk::utilities::getEnv(envVarName);
+        const auto envPath = hipdnn_data_sdk::utilities::getSecureEnv(envVarName);
         if(!envPath.empty())
         {
-            // Could make this take multiple dirs
             return {std::filesystem::path(envPath)};
         }
         return defaultPaths;
@@ -210,7 +209,15 @@ public:
 
                 resolvedPath = std::filesystem::weakly_canonical(resolvedPath);
 
-                if(std::filesystem::is_directory(resolvedPath))
+                // A directory does not shadow a plugin library that has the same
+                // undecorated name and sits beside it.
+                const auto decoratedPath = detail::decoratedLibraryPath(resolvedPath);
+
+                if(decoratedPath && std::filesystem::is_regular_file(*decoratedPath))
+                {
+                    filesToLoad.insert(*decoratedPath);
+                }
+                else if(std::filesystem::is_directory(resolvedPath))
                 {
                     scanDirectoryForPlugins(resolvedPath, filesToLoad);
                 }
@@ -258,6 +265,28 @@ public:
         else if(!filesToLoad.empty())
         {
             HIPDNN_BACKEND_LOG_INFO("✓ Successfully loaded all {} plugin(s)", filesToLoad.size());
+        }
+        else if(!pathsToProcess.empty())
+        {
+            // Invoked from inside the logging macro, which expands to a level check around its
+            // message argument, so the join runs only when WARN is enabled.
+            const auto joinConfiguredPaths = [&pathsToProcess] {
+                std::string joined;
+                for(const auto& configuredPath : pathsToProcess)
+                {
+                    if(!joined.empty())
+                    {
+                        joined += "; ";
+                    }
+                    joined += configuredPath.string();
+                }
+                return joined;
+            };
+
+            HIPDNN_BACKEND_LOG_WARN("Plugin loading found no plugin libraries in any of the {} "
+                                    "configured plugin path(s): {}",
+                                    pathsToProcess.size(),
+                                    joinConfiguredPaths());
         }
     }
 

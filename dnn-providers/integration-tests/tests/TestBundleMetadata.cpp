@@ -7,11 +7,10 @@
 #include <fstream>
 #include <string>
 
-#include "ScratchDirectory.hpp"
-
 #include "harness/BundleMetadata.hpp"
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 using hipdnn_integration_tests::BundleMetadata;
 using hipdnn_integration_tests::checkArchCompatibility;
@@ -19,6 +18,7 @@ using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
@@ -32,13 +32,13 @@ namespace
 /// The directory name must be unique per process AND per construction, or two test
 /// binaries running concurrently -- ctest -j N, or an install-tree and build-tree run
 /// at once -- collide and the second dies with "ScopedDirectory: Directory already
-/// exists" before reaching an assertion. scratch::makeDir() owns that; see
+/// exists" before reaching an assertion. claimScratchDirectory() owns that; see
 /// ScratchDirectory.hpp.
 class TempBundle
 {
 public:
     explicit TempBundle(const std::string& metaJsonContent = "")
-        : _dir(hipdnn_integration_tests::scratch::makeDir("test_bundle_"))
+        : _dir(claimScratchDirectory("bundle_metadata"))
     {
         // Create a minimal bundle JSON (enough for path derivation)
         std::ofstream bundleFile(_dir.path() / "Bundle.json");

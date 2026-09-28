@@ -60,6 +60,7 @@
 // records (e.g. last-line-wins) is the caller's job.
 
 #include <array>
+#include <cerrno>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -74,13 +75,27 @@
 #include <vector>
 
 #if defined(_WIN32)
+// Only the macro names must not escape this header, not the lean include itself: define both
+// only if the includer has not already, and undefine only what we defined, right after
+// <windows.h>. This cannot restore min/max in a translation unit where <windows.h> was already
+// processed with NOMINMAX set elsewhere -- the undef does not re-run <windows.h>.
 #ifndef NOMINMAX
 #define NOMINMAX
+#define HIPDNN_UNDEF_NOMINMAX
 #endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#define HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#ifdef HIPDNN_UNDEF_NOMINMAX
+#undef NOMINMAX
+#undef HIPDNN_UNDEF_NOMINMAX
+#endif
+#ifdef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef HIPDNN_UNDEF_WIN32_LEAN_AND_MEAN
+#endif
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -148,9 +163,14 @@ inline LineStoreStatus acquireNativeLineStoreLock(NativeLineStoreHandle handle,
     fl.l_whence = SEEK_SET;
     fl.l_start = 0;
     fl.l_len = 0; // whole file
-    if(::fcntl(handle, F_SETLKW, &fl) == -1)
+    while(::fcntl(handle, F_SETLKW, &fl) == -1)
     {
-        return LineStoreStatus::LOCK_FAILED;
+        // A stray signal must not discard a benchmarked ranking; the write loop in
+        // appendRawLineStoreLine() and the read loop in readAllLineStoreBytes() already retry.
+        if(errno != EINTR)
+        {
+            return LineStoreStatus::LOCK_FAILED;
+        }
     }
 #endif
     return LineStoreStatus::OK;
@@ -295,6 +315,10 @@ inline std::optional<LineStoreFileId>
     peekLineStoreFileId(const std::filesystem::path& path) noexcept
 {
 #if defined(_WIN32)
+    // HANDLE is a typedef for void*, so `const HANDLE` is `void* const` -- a const
+    // pointer, which is what is wanted. misc-misplaced-const cannot see through the
+    // typedef and reads it as a misplaced `const void*`.
+    // NOLINTNEXTLINE(misc-misplaced-const)
     const HANDLE probe = CreateFileW(path.wstring().c_str(),
                                      FILE_READ_ATTRIBUTES,
                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -338,8 +362,11 @@ inline NativeLineStoreHandle openLineStoreHandle(const std::filesystem::path& pa
 {
 #if defined(_WIN32)
     return CreateFileW(path.wstring().c_str(),
+                       // FILE_GENERIC_* are SDK macros whose expansions share SYNCHRONIZE,
+                       // so the equivalent operands are in the Windows headers, not here.
+                       // NOLINTNEXTLINE(misc-redundant-expression)
                        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        nullptr,
                        OPEN_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL,
@@ -386,10 +413,12 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
         const auto id = queryLineStoreFileId(handle);
         if(!id)
         {
-            // Nothing has locked through this descriptor, and no registered descriptor
-            // for its file exists -- the registry mutex is held and the lookup above
-            // found none -- so closing it drops no lock.
-            closeLineStoreHandle(handle);
+            // Retaining, not closing: peekLineStoreFileId() may have returned nullopt without
+            // running the lookup at all (rather than running it and finding nothing), so the
+            // file this descriptor names may already be registered and locked elsewhere. On
+            // POSIX, closing any descriptor for a file drops every fcntl lock the process holds
+            // on it, including one another thread is inside. The never-close rule the
+            // `!inserted` branch below already takes is the same trade here.
             return nullptr;
         }
 
@@ -406,18 +435,11 @@ inline LineStoreRegistryEntry* openOrFindLineStoreEntry(const std::filesystem::p
             // per transient stat failure, which is the cheaper of the two defects.
             return position->second.get();
         }
-        // Owned by the registry from here on, which never closes a descriptor. Blanked
-        // only now: emplace() can throw, and until it returns this is still the only
-        // reference to the descriptor the catch block below needs to close.
-        handle = INVALID_LINE_STORE_HANDLE;
+        // Owned by the registry from here on; the registry never closes a descriptor.
         return position->second.get();
     }
     catch(...)
     {
-        if(isValidLineStoreHandle(handle))
-        {
-            closeLineStoreHandle(handle);
-        }
         return nullptr;
     }
 }
@@ -434,8 +456,11 @@ inline NativeLineStoreHandle openExistingLineStoreHandle(const std::filesystem::
 {
 #if defined(_WIN32)
     return CreateFileW(path.wstring().c_str(),
+                       // FILE_GENERIC_* are SDK macros whose expansions share SYNCHRONIZE,
+                       // so the equivalent operands are in the Windows headers, not here.
+                       // NOLINTNEXTLINE(misc-redundant-expression)
                        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                        nullptr,
                        OPEN_EXISTING,
                        FILE_ATTRIBUTE_NORMAL,
@@ -490,10 +515,10 @@ inline LineStoreRegistryEntry* findExistingLineStoreEntry(const std::filesystem:
         const auto id = queryLineStoreFileId(handle);
         if(!id)
         {
-            // Safe to close: the registry mutex is held, the lookup above found no
-            // registered descriptor for this file, and nothing has locked through this
-            // one, so closing it drops no lock.
-            closeLineStoreHandle(handle);
+            // Retaining, not closing: see openOrFindLineStoreEntry() -- peekLineStoreFileId()
+            // may have returned nullopt without running the lookup at all, so the file this
+            // descriptor names may already be registered and locked elsewhere, and on POSIX
+            // closing any descriptor for a file drops every fcntl lock the process holds on it.
             return nullptr;
         }
 
@@ -507,15 +532,11 @@ inline LineStoreRegistryEntry* findExistingLineStoreEntry(const std::filesystem:
             // registered one.
             return position->second.get();
         }
-        handle = INVALID_LINE_STORE_HANDLE;
+        // Owned by the registry from here on; the registry never closes a descriptor.
         return position->second.get();
     }
     catch(...)
     {
-        if(isValidLineStoreHandle(handle))
-        {
-            closeLineStoreHandle(handle);
-        }
         return nullptr;
     }
 }
@@ -605,7 +626,7 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 
     size_t written = 0;
 #if defined(_WIN32)
-    LARGE_INTEGER end{};
+    const LARGE_INTEGER end{};
     if(SetFilePointerEx(handle, end, nullptr, FILE_END) == 0)
     {
         return false;
@@ -654,7 +675,7 @@ inline bool appendRawLineStoreLine(NativeLineStoreHandle handle, std::string_vie
 inline bool truncateLineStoreToEmpty(NativeLineStoreHandle handle) noexcept
 {
 #if defined(_WIN32)
-    LARGE_INTEGER origin{};
+    const LARGE_INTEGER origin{};
     if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
     {
         return false;
@@ -675,7 +696,7 @@ inline std::optional<std::string> readAllLineStoreBytes(NativeLineStoreHandle ha
     std::array<char, 65536> buffer{};
 
 #if defined(_WIN32)
-    LARGE_INTEGER origin{};
+    const LARGE_INTEGER origin{};
     if(SetFilePointerEx(handle, origin, nullptr, FILE_BEGIN) == 0)
     {
         return std::nullopt;

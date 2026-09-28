@@ -6,6 +6,10 @@
 // CacheRoot resolves the single root directory hipDNN's on-disk caches (winner cache,
 // autotune cache, and future consumers) share, one subdirectory per consumer beneath it.
 
+#if defined(_WIN32)
+#include <algorithm>
+#include <cwctype>
+#endif
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/CacheRootDefaults.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -27,6 +31,28 @@ inline bool cacheDisabledByEnv()
     return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes"
            || normalized == "enable" || normalized == "enabled";
 }
+
+#if defined(_WIN32)
+namespace detail
+{
+/// True if @p path still begins with the literal token `%userprofile%`, matched
+/// case-insensitively exactly as expandUserW() matches it, and followed by `/`, `\`, or
+/// end-of-string. expandUserW() replaces a qualifying leading token with USERPROFILE's
+/// value, so a path that still starts with the token means USERPROFILE was unset -- not
+/// that the caller asked for a directory literally named "%userprofile%".
+inline bool startsWithUserProfileToken(const std::wstring& path)
+{
+    static const std::wstring kUserProfileToken = L"%userprofile%";
+    std::wstring lowerPath = path;
+    std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+    return lowerPath.size() >= kUserProfileToken.size()
+           && lowerPath.compare(0, kUserProfileToken.size(), kUserProfileToken) == 0
+           && (lowerPath.size() == kUserProfileToken.size()
+               || path[kUserProfileToken.size()] == L'/'
+               || path[kUserProfileToken.size()] == L'\\');
+}
+} // namespace detail
+#endif
 
 /// Resolves and ensures the existence of hipDNN's shared on-disk cache root directory.
 ///
@@ -73,7 +99,12 @@ inline std::filesystem::path cacheRoot()
     }
 
     const std::wstring expanded = expandUserW(rawPath);
-    if(expanded.empty())
+    // expandUserW() returns its input unchanged when USERPROFILE is unset, so a surviving
+    // leading '~' or '%userprofile%' means the home directory is unknown, not that the
+    // user asked for a directory with that literal name. Creating it would silently make
+    // the cache per-working-directory. Empty is what every caller already treats as "no
+    // disk cache".
+    if(expanded.empty() || expanded.front() == L'~' || detail::startsWithUserProfileToken(expanded))
     {
         return {};
     }
@@ -87,7 +118,11 @@ inline std::filesystem::path cacheRoot()
     }
 
     const std::string expanded = expandUser(rawPath);
-    if(expanded.empty())
+    // expandUser() returns its input unchanged when HOME is unset, so a surviving leading '~' means
+    // the home directory is unknown, not that the user asked for a directory named "~". Creating it
+    // would silently make the cache per-working-directory. Empty is what every caller already
+    // treats as "no disk cache".
+    if(expanded.empty() || expanded.front() == '~')
     {
         return {};
     }

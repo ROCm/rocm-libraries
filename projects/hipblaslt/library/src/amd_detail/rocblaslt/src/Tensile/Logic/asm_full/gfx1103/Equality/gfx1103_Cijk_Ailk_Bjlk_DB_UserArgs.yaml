@@ -114,7 +114,7 @@
     ISA: [11, 0, 3]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 1, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT8x8x8_SN_TT1_1
@@ -284,7 +284,7 @@
     ISA: [11, 0, 3]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 1, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT16x16x8_SN_TT2_2
@@ -454,7 +454,7 @@
     ISA: [11, 0, 3]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 1, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT8x8x16_SN_TT1_1
@@ -624,7 +624,7 @@
     ISA: [11, 0, 3]
     InnerUnroll: 1
     InterleaveAlpha: 0
-    InternalSupportParams: {KernArgsVersion: 1, SupportCustomStaggerU: true, SupportCustomWGM: true,
+    InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true,
       SupportUserGSU: true, UseUniversalArgs: true}
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Ailk_Bjlk_DB_UserArgs_MT16x16x16_SN_TT2_2

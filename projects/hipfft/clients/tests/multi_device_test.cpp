@@ -236,11 +236,8 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({})),
                          accuracy_test::TestName);
-
-// Note: disabled for now due to lack of implementation in hipFFT
-// with rocfft backend (multi-device workspace assignment is not
-// implemented yet)
-INSTANTIATE_TEST_SUITE_P(DISABLED_various_multi_gpu,
+// library-decided splits, with auto-allocation disabled.
+INSTANTIATE_TEST_SUITE_P(various_multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({},
                                                                        fft_auto_allocation_off)),

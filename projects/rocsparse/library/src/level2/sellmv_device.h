@@ -125,7 +125,7 @@ namespace rocsparse
                                                          rocsparse_index_base idx_base)
     {
         const uint32_t tid     = hipThreadIdx_x;
-        const uint32_t sliceid = hipBlockIdx_x;
+        const uint32_t sliceid = hipGridDim_x * hipBlockIdx_y + hipBlockIdx_x;
 
         const J iter = (sell_slice_size - 1) / BLOCKSIZE + 1;
 
@@ -243,7 +243,7 @@ namespace rocsparse
                                                          rocsparse_index_base idx_base)
     {
         const uint32_t tid     = hipThreadIdx_x;
-        const uint32_t sliceid = hipBlockIdx_x;
+        const uint32_t sliceid = hipGridDim_x * hipBlockIdx_y + hipBlockIdx_x;
 
         const J iter = (sell_slice_size - 1) / BLOCKSIZE + 1;
 
