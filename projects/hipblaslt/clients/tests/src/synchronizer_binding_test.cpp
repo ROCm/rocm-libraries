@@ -49,15 +49,13 @@ namespace
         TensileLite::ContractionInputs   inputs;
         TensileLite::ContractionSolution solution;
         setFlagReader(solution);
-        ASSERT_EQ(rocblaslt::bindSynchronizerForStream(
-                      storage, rocblaslt::readsStreamKFlags(solution), nullptr, 0, inputs),
+        ASSERT_EQ(rocblaslt::bindSynchronizers(storage, solution, nullptr, &inputs),
                   rocblaslt_status_success);
         ASSERT_EQ(inputs.Synchronizer, &storage.sk[0]);
 
         // The object API reuses inputs while choosing a non-Stream-K solution.
         solution.sizeMapping.streamK = 0;
-        ASSERT_EQ(rocblaslt::bindSynchronizerForStream(
-                      storage, rocblaslt::readsStreamKFlags(solution), nullptr, 0, inputs),
+        ASSERT_EQ(rocblaslt::bindSynchronizers(storage, solution, nullptr, &inputs),
                   rocblaslt_status_success);
         EXPECT_EQ(inputs.Synchronizer, &storage.gsu[0]);
         EXPECT_EQ(storage.claims, 1u);
@@ -74,8 +72,7 @@ namespace
             solution.sizeMapping.streamKAtomic = amax ? 0 : 1;
             solution.problemType.outputAmaxD   = amax;
             inputs.Synchronizer                = &storage.sk[0];
-            ASSERT_EQ(rocblaslt::bindSynchronizerForStream(
-                          storage, rocblaslt::readsStreamKFlags(solution), nullptr, 0, inputs),
+            ASSERT_EQ(rocblaslt::bindSynchronizers(storage, solution, nullptr, &inputs),
                       rocblaslt_status_success);
             EXPECT_EQ(inputs.Synchronizer, &storage.gsu[0]);
         }
@@ -86,29 +83,38 @@ namespace
     {
         FlagStorage                                 storage;
         std::vector<TensileLite::ContractionInputs> inputs(16);
-        ASSERT_EQ(rocblaslt::bindGroupedSynchronizers(storage, true, nullptr, inputs),
-                  rocblaslt_status_success);
+        TensileLite::ContractionSolution            solution;
+        setFlagReader(solution);
+        ASSERT_EQ(
+            rocblaslt::bindSynchronizers(storage, solution, nullptr, inputs.data(), inputs.size()),
+            rocblaslt_status_success);
         for(size_t i = 0; i < inputs.size(); ++i)
             EXPECT_EQ(inputs[i].Synchronizer, &storage.sk[i]);
 
-        ASSERT_EQ(rocblaslt::bindGroupedSynchronizers(storage, false, nullptr, inputs),
-                  rocblaslt_status_success);
+        solution.sizeMapping.streamK = 0;
+        ASSERT_EQ(
+            rocblaslt::bindSynchronizers(storage, solution, nullptr, inputs.data(), inputs.size()),
+            rocblaslt_status_success);
         for(size_t i = 0; i < inputs.size(); ++i)
             EXPECT_EQ(inputs[i].Synchronizer, &storage.gsu[i]);
 
         // Exactly one beyond capacity must fail before claiming or rebinding.
         inputs.emplace_back();
         inputs.back().Synchronizer = &storage.gsu[0];
-        ASSERT_EQ(rocblaslt::bindGroupedSynchronizers(storage, true, nullptr, inputs),
-                  rocblaslt_status_invalid_value);
+        setFlagReader(solution);
+        ASSERT_EQ(
+            rocblaslt::bindSynchronizers(storage, solution, nullptr, inputs.data(), inputs.size()),
+            rocblaslt_status_invalid_value);
         EXPECT_EQ(storage.claims, 16u);
         for(size_t i = 0; i < 16; ++i)
             EXPECT_EQ(inputs[i].Synchronizer, &storage.gsu[i]);
         EXPECT_EQ(inputs.back().Synchronizer, &storage.gsu[0]);
 
         // A solution that does not read flags remains valid beyond the limit.
-        ASSERT_EQ(rocblaslt::bindGroupedSynchronizers(storage, false, nullptr, inputs),
-                  rocblaslt_status_success);
+        solution.sizeMapping.streamK = 0;
+        ASSERT_EQ(
+            rocblaslt::bindSynchronizers(storage, solution, nullptr, inputs.data(), inputs.size()),
+            rocblaslt_status_success);
         EXPECT_EQ(inputs.back().Synchronizer, nullptr);
     }
 
@@ -116,9 +122,11 @@ namespace
     {
         FlagStorage storage;
         storage.available = false;
+        TensileLite::ContractionSolution solution;
+        setFlagReader(solution);
         TensileLite::ContractionInputs inputs;
         inputs.Synchronizer = &storage.sk[0];
-        ASSERT_EQ(rocblaslt::bindSynchronizerForStream(storage, true, nullptr, 0, inputs),
+        ASSERT_EQ(rocblaslt::bindSynchronizers(storage, solution, nullptr, &inputs),
                   rocblaslt_status_success);
         EXPECT_EQ(inputs.Synchronizer, &storage.gsu[0]);
     }
@@ -127,20 +135,28 @@ namespace
     {
         FlagStorage storage;
         storage.status = rocblaslt_status_internal_error;
+        TensileLite::ContractionSolution solution;
+        setFlagReader(solution);
         TensileLite::ContractionInputs inputs;
         inputs.Synchronizer = &storage.gsu[0];
-        EXPECT_EQ(rocblaslt::bindSynchronizerForStream(storage, true, nullptr, 0, inputs),
+        EXPECT_EQ(rocblaslt::bindSynchronizers(storage, solution, nullptr, &inputs),
                   rocblaslt_status_internal_error);
         EXPECT_EQ(inputs.Synchronizer, &storage.gsu[0]);
     }
 
     TEST(SynchronizerBinding, DirectBindingOverwritesPreviousRegion)
     {
-        int                            sk, gsu;
-        TensileLite::ContractionInputs inputs;
-        rocblaslt::bindSynchronizer(inputs, &sk, &gsu);
+        int                              sk, gsu;
+        TensileLite::ContractionInputs   inputs;
+        TensileLite::ContractionSolution solution;
+        setFlagReader(solution);
+        inputs.Synchronizer = rocblaslt::synchronizerForSolution(solution, &sk, &gsu);
         ASSERT_EQ(inputs.Synchronizer, &sk);
-        rocblaslt::bindSynchronizer(inputs, nullptr, &gsu);
+        solution.sizeMapping.streamK = 0;
+        inputs.Synchronizer          = rocblaslt::synchronizerForSolution(solution, &sk, &gsu);
+        EXPECT_EQ(inputs.Synchronizer, &gsu);
+        setFlagReader(solution);
+        inputs.Synchronizer = rocblaslt::synchronizerForSolution(solution, nullptr, &gsu);
         EXPECT_EQ(inputs.Synchronizer, &gsu);
     }
 }
