@@ -105,6 +105,8 @@ The right traversal depends on the assignment policy — see H5 and the simulati
 | H12 | Past `B = num_xcds` the remaining gap is B-independent | **Wrong.** `hkv_minor` keeps degrading to roughly −9% by B=32. A second, B-scaling term dominates once duplication is spent |
 | H13 | That second term is batch-slab scatter (`hkv_minor` spans all B slabs; the others span `B/num_xcds`) | **Partly.** A `bt`-fastest variant was implemented and measured: exactly neutral at B=1 as predicted, then +1–4% rising with B. So scatter is a real contributor — but it does not close the gap, and `hkv_minor` still trails at B>=8. A third term remains unidentified |
 | H14 | A variant that is not a safe *default* is not worth keeping (the reasoning that deleted `batch_outer` under H6) | **Wrong, and it deleted a useful variant.** `batch_outer` is the digit order `VGQB` — bit-for-bit the same order as `np/hkv_minor`, which ships. The full sweep puts it in the **best shared persistent covering set on both arches**, paired with `BGVQ`. H6's own finding was the selection rule, not a defect: `BGVQ.fold` wins if and only if `Hkv >= num_xcds` (36/36 on gfx942, 34/34 on gfx950, no exceptions) and `VGQB.fold` takes the rest. A sign flip on a shape parameter disqualifies a *default*; it qualifies a *covering-set member*, because that is exactly what the heuristic keys on. Judge a variant against the policy it is meant to serve |
+| H15 | Causal masking breaks one-ACC-per-XCD mappings: blocks of unequal cost desynchronise an XCD's CUs, so it ends up straddling several K/V tensors | **Wrong in effect.** A model of one XCD predicted the property holds exactly without a mask and degrades to ~2 K/V tensors in flight with one. Measured, causal is exactly where Swizzled Head-first *wins* and non-causal where it loses. The desynchronisation is real; whatever it costs is outweighed |
+| H16 | A pair-interleaved traversal (`N-1, 0, N-2, 1, …`, consecutive items summing to `N-1`) balances better than `fold` | **Wrong, by analysis — not measured.** Persistent: grid-stride hands a CTA items `c, c+NP, c+2NP, …`, and `num_persistent` (the CU count) is even on both arches, so each CTA sees one parity only — all-expensive or all-cheap blocks, per-CTA imbalance 1.5–1.7x where `fold` gives 1.0. Balanced only for odd `NP`. Non-persistent: its tail is mid-cost where `rev`'s is the cheapest block. The pairing is right; it needs *adjacent* items, and grid-stride never delivers them |
 
 ## How the two paths differ in behaviour
 
@@ -574,6 +576,295 @@ which is a fact about the space rather than about these variants.
 A methodology note that follows from it: quoting a variant against `qb_major` once the
 auto has moved overstates it several-fold. Re-baseline against `auto`, not against
 whatever the harness hard-coded.
+
+## Further findings from the generalized sweeps
+
+Results that are not a recommendation on their own but constrain any future one.
+All figures are relative to `auto` on the same path unless stated, two passes, both
+architectures.
+
+### Deep persistent sweep: all 72 variants
+
+17 configurations (a batch sweep at 32/8, long sequences to 64K, non-power-of-2
+sequence lengths, and one each of `gqa = 8`, `gqa = 16`, `gcd(Hkv, 8) = 4`, `= 2`,
+MHA) × every permutation and every non-degenerate split variant, both traversals,
+with a harness assertion that no knob other than the ordering fields differs between
+arms.
+
+- **Best and most predictable: `xGyQ.fold` with the B-minor fusion** — +0.5%
+  (gfx942) / −0.1% (gfx950) geomean, the only variant ahead of `auto` on gfx942.
+  Its real distinction is stability: its spread across conditions (batch class,
+  sequence length, geometry) is **3.0 / 1.1 pp**, against **4–8.5 pp** for every
+  permutation. `VBGQ.fold` and `VGBQ.fold` are the least predictable.
+- **`B = 32` is where the headroom is.** More variants beat `auto` there than in any
+  other condition (26 on gfx942), by up to ~9% on gfx950 (`BGQV.fold`). The
+  shipped rule's `B ≥ num_xcds` arm is therefore the one most worth revisiting.
+- **Long sequences flatten everything.** At `S ≥ 16K` the best variant is within
+  ±0.5% of `auto`: once each work item is long, ordering stops mattering.
+- **Non-power-of-2 sequence lengths need no special case** — they behave like their
+  power-of-2 neighbours.
+- **All twelve `Q`-fastest orders lose badly**, −22% to −31% geomean, 0 wins. The
+  next subsection shows why no traversal can fix them.
+
+### Why `Q`-fastest orders cannot be rescued by any traversal
+
+With `Q` as the fastest digit, `wi = blk + NQB·(rest)`, so every run of `NQB`
+consecutive work items contains the block digit `0 … NQB-1` exactly once. A
+traversal is a bijection on that range, so **every run still contains exactly one
+block of each cost**, whatever the traversal. It can only permute costs *within* a
+run, and once many runs are in flight that changes nothing. In a list-scheduling
+simulation the makespan of every `Q`-fastest order is identical under `asc`, `rev`,
+`fold` and pair-interleave, at every shape tried. This is exact, not a heuristic:
+the traversal factor has leverage only when `Q` is slow enough to shape the cost
+profile *across* the dispatch sequence. It is also why the expensive blocks recur
+up to the very end of a `Q`-fastest dispatch, which is the −22…−31%.
+
+### `BVGQ` vs `VBGQ` on the non-persistent path
+
+The two differ only in which of `bt` / `hkv` is fastest, so at `B = 1` they are the
+same kernel — and they measure the same. Above that, `BVGQ.rev` holds flat (within
+~0.8% of `auto` at every batch size) while `VBGQ.rev` degrades steadily, to a gap of
+**~14 pp at `B = 32`** on gfx942 (~5 pp on gfx950). `VBGQ` walks the kv head fastest,
+so consecutive CTAs read *adjacent* K/V addresses — the better locality — and it is
+the worse order. That is the third time in this document locality has predicted the
+wrong ranking.
+
+### `named_xgyq`: the kv-phase split without the generic path
+
+`named_xgyq[_rev]` reproduces `xGyQ` with the V-minor fusion **at every shape**, as a
+3-D grid — `x` fuses `(F % M, hql)` onto one axis, `y` is the phase `F // M`, `z` the
+query block — whose only divisors are the constants `M`, `gqa`, `Hkv`. The batch
+extent never appears, so `runtime_shape` stays on, which the generic `digit_order`
+path cannot do.
+
+- Against `BVGQ.rev` (the shipped class) it **ties on gfx950 and is ~1% behind on
+  gfx942**, winning only at the batch extremes (`B = 1`, `B = 32`) and `Hkv = 4`.
+  It is a correct and cheap handle on the split family, not a faster order.
+- **Without `rev` it is −8% (gfx942) / −4% (gfx950).** On this path the traversal
+  matters more than the mapping.
+- An earlier version of this named order was the permutation `VGBQ`, which equals the
+  split only when `Hkv == num_xcds`. Elsewhere it was measured **up to ~5% slower**
+  than the split, with the gap tracking `gcd(Hkv, num_xcds)`: ~0 at `Hkv = 8`,
+  −0.2% at `Hkv = 4`, −1.4 to −2.9% at `Hkv = 2` / `40`, −4.2% at `Hkv = 10`. That is
+  the cleanest evidence that the split is a genuinely different mapping — and a
+  better one — when `Hkv` does not divide `num_xcds`.
+
+### `runtime_shape` is nearly free
+
+The same mapping measured baked and with `runtime_shape` differs by **~0.5% on
+gfx942 and ~0 on gfx950**; on gfx942 causal shapes the difference shrinks as `S`
+grows. That is
+the case for keeping `runtime_shape` on (one binary per shape family): it costs
+almost nothing at run time. It also means any comparison that puts a baked arm next
+to a runtime-shape arm of the *same* mapping will see them trade "wins" on noise.
+
+### The XCD-fill gate
+
+Any scheme that confines one K/V tensor's work to one XCD needs enough of that work
+to occupy the XCD: `gqa × NQB` work items per `(bt, hkv)` against **38 CUs per XCD
+on gfx942 and 32 on gfx950**.
+
+| shape | `gqa × NQB` | gfx942 (38) | gfx950 (32) |
+|---|---|---|---|
+| 32/8, S=2048 | 32 | **under-fills (0.8x)** | 1.0x |
+| 32/8, S=8192 | 128 | 3.4x | 4.0x |
+| 128/8, S=2048 | 128 | 3.4x | 4.0x |
+| MHA 32/32, S=2048 | 8 | **0.2x** | **0.2x** |
+
+The mainstream shape under-fills a gfx942 XCD, and MHA never fills one. That is a
+plausible reason gfx942 responded worse than gfx950 to every per-XCD confinement
+measured here. It is also why Swizzled Head-first, which confines by *query head*
+rather than by K/V tensor, is the scheme that works for MHA. A second gate is L2
+capacity (see "Where a KV-direction reversal could pay off"): whole-tensor
+residency in one XCD's L2 is only possible up to `S ≈ 8K`.
+
+## Prior art: what other libraries and papers do
+
+A survey, read from source rather than documentation wherever source was
+available, so each row states what the code does. The versions read are pinned:
+AITER `21ae719`, FlyDSL `v0.2.3` (`90a2427`), AOTriton `0.14b` (`b5e8cfb`), and
+FlashAttention `main` (`e9cf2c1`). Mappings are restated in this document's digit
+notation for `Hkv == num_xcds`, where most of them coincide with one of the 24
+permutations.
+
+### Libraries
+
+| library / kernel | assignment | digit order | XCD-aware | query-block traversal |
+|---|---|---|---|---|
+| AITER `unified_attention` (Triton) | one CTA per item, `grid=(Hkv, q_blocks)` | `V` fastest, then `Q`, `B`; the GQA group is packed **inside the tile** | no | ascending |
+| AITER `mha.py`, `flash_attn_triton_amd` | one CTA per item | `VGQB` via `remap_xcd(head, Hq)` | yes | ascending |
+| AOTriton `attn_fwd`, **causal** | **persistent, dynamic**: tiles claimed from an atomic counter, two workgroups per CU | `QGVB` | no | ascending |
+| AOTriton `attn_fwd`, non-causal | one CTA per item, `grid=(Hq, nqb, B)` | `VGQB` via `remap_xcd(head, Hq)` | yes | ascending |
+| FlyDSL (generic and gfx950 paths) | one CTA per item | `GVQB` (`hq_major`) | no | ascending |
+| HipKittens attention forward | one CTA per item, `head = (bx % Hkv)*G + bx / Hkv` | `VGQB` | head swizzle only | ascending |
+| **this kernel** | non-persistent: one CTA per item; persistent: static grid-stride | non-persistent `BVGQ`; persistent B-conditional | through the digit order | **`rev`** (non-persistent), **`fold`** (persistent) |
+
+Three observations follow.
+
+**`VGQB` is the de-facto AMD convention.** AITER's FlashAttention paths, AOTriton's
+non-causal path and HipKittens all reach it, through the same idiom: `remap_xcd`
+applied to the head index, so each XCD owns a contiguous band of heads. It is this
+kernel's `hkv_minor` non-persistent order, and what the NUMA paper below calls
+"Swizzled Block-first".
+
+**No other AMD library reverses the query block for causal attention.** Every
+traversal in the table is ascending. AOTriton handles causal imbalance with a
+*dynamic* work queue instead of by ordering; the `rev` / `fold` traversals here
+have no counterpart elsewhere on this hardware.
+
+**Two ideas this document has not tested.**
+- *GQA packing.* AITER `unified_attention` (and FlashAttention-3's `PackGQA`) puts
+  all `gqa` query heads of one KV head into a single tile, so a K/V tile is reused
+  inside one CTA by construction. That removes the reuse from the cache's hands
+  entirely, which no ordering can do. It changes the tile shape, not the mapping.
+- *Dynamic persistent scheduling.* An atomic work queue is a third assignment
+  policy, between the static grid-stride and the hardware dispatcher measured here.
+  Combined with a longest-first order it would give both the tail behaviour of
+  `rev` and the balance of a queue.
+
+### Papers
+
+- **FlashAttention-3 / -4 tile scheduler** — the closest external analogue to this
+  work. Read in `hopper/tile_scheduler.hpp`: batch outermost; heads split into
+  **sections sized to fit L2** (the section is the number of KV heads whose K/V fits
+  the L2 budget, rounded to a power of two, times `qhead_per_khead`); heads inside a
+  section fastest; the query block **reversed** (longest-processing-time-first);
+  tiles claimed dynamically. In this notation that is `G, V_lo, Q(rev), V_hi, B` —
+  the same fast-half / slow-half cut as the kv-phase split above, but with the cut
+  placed by **L2 capacity** rather than by XCD count. The FA4 paper attributes its
+  larger causal gains to the LPT order, and ablates it against naive ordering.
+  [scheduler source](https://github.com/Dao-AILab/flash-attention/blob/main/hopper/tile_scheduler.hpp),
+  [FA4, arXiv 2603.05451](https://arxiv.org/html/2603.05451v1)
+- **Swizzled Head-first** (arXiv 2511.02132) — confine each "Attention Compute
+  Cluster" (the work sharing one K/V tensor) to one XCD. Reproduced exactly here as
+  the named order `swz_head_first`; for `Hkv == num_xcds` it reduces to the
+  permutation `VQGB`, so it is genuinely new only for MHA. The paper does not state
+  whether its benchmarks are causal. Results are in "Swizzled Head-first,
+  reproduced" below. [arXiv 2511.02132](https://www.alphaxiv.org/overview/2511.02132)
+- **Sawtooth wavefront reordering** (arXiv 2601.16032) — a new axis relative to
+  everything above: not *which* work item runs where, but the **direction of the KV
+  loop inside a work item**, alternated between a CTA's consecutive grid-stride
+  items so the tail it just loaded is reused first. It removes only *capacity*
+  misses, so it cannot help while the swept K/V fits the cache serving it. See the
+  note below on where that threshold sits on this hardware.
+  [arXiv 2601.16032](https://arxiv.org/abs/2601.16032)
+- **HipKittens** (arXiv 2511.08083) — on an 8-XCD part, **L2 and the shared LLC
+  trade off**: maximising per-XCD L2 hits makes the XCDs fetch disjoint data, which
+  duplicates traffic at the LLC. Its chiplet-aware scheduling targets GEMM; its
+  attention kernels use a plain head swizzle. This is a candidate explanation for
+  why the high-locality orders measured here kept losing, and is untested.
+  [arXiv 2511.08083](https://arxiv.org/html/2511.08083v1)
+- **Load balance by splitting the KV dimension** — Stream-K and its attention
+  descendants LeanAttention and FlashInfer (deterministic, host-planned), plus
+  POD-Attention, which co-schedules prefill with decode. These are decode-oriented;
+  for prefill the equivalent lever is the tile scheduler.
+  [Stream-K tutorial](https://research.colfax-intl.com/cutlass-tutorial-persistent-kernels-and-stream-k/),
+  [LeanAttention](https://arxiv.org/abs/2405.10480),
+  [FlashInfer](https://arxiv.org/abs/2501.01005),
+  [POD-Attention](https://arxiv.org/abs/2410.18038)
+- **GEMM ancestors** — Triton's `GROUP_SIZE_M` grouped ordering and CUTLASS's
+  threadblock swizzle / raster order; `remap_xcd` above is the chiplet-era
+  descendant of both.
+
+### Where a KV-direction reversal could pay off
+
+Sawtooth needs the swept K/V to exceed the cache that serves it. K plus V for one
+`(bt, hkv)` is `4·S·D` bytes at 16-bit precision, i.e. `512·S` bytes at `D = 128`.
+There are two levels to exceed:
+
+- **per-XCD L2 (4 MB)**: exceeded above `S ≈ 8K` per KV head. Below that a cyclic
+  sweep is already all hits after its first pass, so reversal buys nothing — which
+  covers every row of the production shape list. A null result there says nothing
+  about the idea.
+- **shared LLC**: the L2 capacity misses of the previous regime land here, so between
+  roughly `S = 16K` and `32K` a reversal only turns LLC hits into L2 hits, a much
+  smaller saving than on a GPU whose L2 is its last cache level. The regime the paper
+  measured — misses reaching DRAM — starts only once **all** the K/V in flight exceeds
+  the LLC, which grows with `B·Hkv` and is reached near `S = 64K` at `B = 1`,
+  `Hkv = 8`. The sweeps in this document barely sample it.
+
+It also needs the **persistent** path, where a CTA runs consecutive items, and those
+items must share a `(bt, hkv)`. That holds for `BVGQ` at `B = 1` and less as batch
+grows. The recommended first step is diagnostic rather than a kernel change: count L2
+and LLC misses per tile against the compulsory count while sweeping `S` from `8K`
+upward. If misses do not outgrow the compulsory count, there is nothing for a
+reversal to remove.
+
+## Swizzled Head-first, reproduced
+
+`swz_head_first` implements Figure 11 of arXiv 2511.02132 exactly, as a 3-D grid:
+
+```
+grid = (M·nqb, Hq/M, B)          M = num_xcds
+hq   = (bx % M)·(Hq/M) + by      qb = bx // M      bt = bz
+```
+
+The only divisor is the constant `M`, so `runtime_shape` stays on. It was checked
+against the published formula work item by work item on every shape of the
+experiment grid below, on both architectures, with no mismatch. Two notes on the
+source: Figure 11 is internally inconsistent about batch (one line makes it the
+fastest digit, another the slowest); the slowest reading is the only one compatible
+with the paper's own intent and is what is implemented. And the paper specifies no
+query-block traversal, so `swz_head_first_rev` adds this kernel's `rev` on top.
+
+**Relation to existing orders.** For `Hkv == num_xcds` it *is* the permutation
+`VQGB`, and also the kv-phase split `xQGy` with the V-minor fusion. It is new only
+where those coincidences fail, i.e. MHA: there it cuts the **query-head index by
+contiguous band**, where the split family cuts the fused `(batch, kv-head)` identity
+by residue, and the two agree on only a small fraction of work items.
+
+**Measured**, non-persistent path forced (the paper's kernel is one CTA per work
+item), 70 shapes per mask — MHA with 8 to 128 heads and GQA with `Hkv = 8`,
+`S ∈ {8K, 32K, 64K}`, `B ∈ {1, 2, 4, 8}`, `D = 128` — two passes, no correctness
+failures. Relative to `auto`:
+
+| | gfx942 | gfx950 |
+|---|---|---|
+| causal, `swz_head_first` | −5.7% geomean | −1.1% |
+| causal, **`swz_head_first_rev`** | **+0.8%** (33/70 wins) | **+3.4%** (45/70 wins) |
+| causal, `swz_head_first_rev`, best cell | +15% | +21% |
+| non-causal, either variant | −2.7% | −2.3% |
+
+**Effect of `_rev`.** It is worth **+6.9% (gfx942) and +4.5% (gfx950)** over the
+paper's own ordering on causal cells, and roughly halves the worst case. On
+non-causal cells the two variants are the same kernel: `rev` is gated on `causal`
+(it is a longest-first heuristic for triangular cost and has nothing to reorder
+when every block costs the same), and they measure within 0.6% of each other,
+i.e. noise. A comparison against the paper's mapping *without* `rev` would
+attribute most of the gap to the mapping when it belongs to the traversal.
+
+**Where it wins.** The gain is monotone in the number of Attention Compute Clusters,
+`B·Hq` for MHA, identically ordered on both architectures: negative at 8–16 ACCs,
+around zero at 32–64, and rising steadily to the best cells at 256–512. For MHA
+causal, selecting it when `B·Hq ≥ 128` improves the mean over all MHA causal cells
+by +2.4% (gfx942) / +3.8% (gfx950), and it is the lowest threshold at which **no**
+affected cell regresses on either architecture. For GQA with `Hkv = 8` the sign
+differs between the architectures (−2.2% / +0.8%): there every XCD already holds
+exactly one kv-head, the ACC count does not grow with `Hq`, and there is nothing to
+spread.
+
+**Pros.**
+- Real, large wins in its regime: causal MHA with many ACCs.
+- Cheap: three integer ops per CTA, a constant divisor, `runtime_shape` preserved.
+- A clean selection rule, `MHA && causal && B·Hq ≥ 128`, with one constant that
+  holds on both architectures.
+
+**Cons.**
+- Needs `Hq % num_xcds == 0`, so some production geometries (`Hq = 28`) cannot use it.
+- Loses on non-causal and on GQA.
+- **Does nothing for the production shape list**, which is all `B = 1` and
+  `S ≤ 8K`. There `B·Hq` is 28–128, the rule never fires, and the nearest measured
+  cells put it 2–4% behind `auto`. It is a serving-shape optimisation — large
+  batch, many heads, long context — not a win for the shapes shipped against.
+- Not a like-for-like reproduction of the paper's numbers. `BLOCK_M` is 256 here
+  against their 128, and it sets `blocks_per_head`, a first-order term of their
+  mapping. Their headline configuration (128 heads at 128K) also exceeds this
+  kernel's 32-bit extents at every batch size, so it was measured up to 64K instead.
+
+It is opt-in; `auto` does not select it. Still open: whether the nearest split order
+(`xQGy`, V-minor) captures the same MHA benefit, which would separate "confine an
+ACC to an XCD" from "cut the head index by contiguous band" specifically. That
+comparison has not yet been measured on both passes.
 
 ## Further investigation
 

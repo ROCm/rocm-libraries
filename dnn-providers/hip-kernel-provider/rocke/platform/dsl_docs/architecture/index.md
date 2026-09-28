@@ -62,7 +62,10 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
   "Resolved" records what that sweep could not see, because the shipped decode's own
   traversal had been pruned from it. Ends with an end-to-end comparison of the branch
   against `develop` over the real LLM shape list, and one negative result (the kv-phase
-  split) kept because it explains why the highest-locality orders lose.
+  split) kept because it explains why the highest-locality orders lose. A prior-art
+  section maps what AITER, AOTriton, FlyDSL and FlashAttention do onto the same digit
+  notation, and notes the two ideas none of the sweeps have tested (GQA packing and a
+  dynamic work queue).
 
 Experiment summaries are historical evidence tied to their stated hardware,
 toolchain, and configuration. They are not current performance promises.

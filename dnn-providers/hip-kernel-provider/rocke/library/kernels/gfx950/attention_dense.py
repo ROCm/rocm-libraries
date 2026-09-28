@@ -136,6 +136,33 @@ _GRID_ORDERS = frozenset({
     # which it reproduces exactly when Hkv == num_xcds, without that path's
     # fused reconstruction and without forcing runtime_shape off.
     "named_xgyq", "named_xgyq_rev",
+    # swz_head_first: the "Swizzled Head-first" mapping of Zhang et al.,
+    # "Optimizing Attention on GPUs by Exploiting GPU Architectural NUMA
+    # Effects" (arXiv 2511.02132), Figure 11, reproduced EXACTLY:
+    #     head  = (w % M)*(Hq/M) + w // (M*nqb)
+    #     block = (w % (M*nqb)) // M                       (M = num_xcds)
+    # Their intent: confine one "Attention Compute Cluster" (the workgroups
+    # sharing one K/V tensor) to one XCD, and spread distinct ACCs over XCDs.
+    #
+    # Re-expressed as a 3-D grid so no runtime division is needed:
+    #     grid = (M*nqb, Hq/M, B),  a = bx % M, blk = bx // M, c = by, bt = bz
+    #     hq = a*(Hq/M) + c
+    # The ONLY divisor is the constant M, so runtime_shape stays ON.
+    #
+    # Structurally this is the same shape as our kv-phase split -- one index
+    # cut into a fast half (picks the XCD) and a slow half (the phase) -- but
+    # it splits the QUERY-HEAD index by CONTIGUOUS BAND where the split family
+    # cuts the fused (batch, kv-head) identity by RESIDUE. For Hkv == num_xcds
+    # the two coincide with the plain permutation VQGB; they diverge for MHA.
+    #
+    # Requires Hq % num_xcds == 0.
+    "swz_head_first",
+    # ...and the same mapping with our reverse query-block traversal layered
+    # on. The paper publishes no traversal (its block index is plain
+    # ascending), and on the non-persistent path `rev` is worth several
+    # percent on its own -- so without this arm, "their mapping vs ours" and
+    # "no traversal vs rev" would be confounded.
+    "swz_head_first_rev",
 })
 
 
@@ -307,6 +334,12 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             # for every permutation and radix set. xcd_partitionable is a
             # PREDICTOR for the heuristic here, not a gate.
 
+        if (self.default_grid_order.startswith("swz_head_first")
+                and self.num_query_heads % KV_SPLIT_MODULUS):
+            raise ValueError(
+                f"swz_head_first needs num_query_heads "
+                f"({self.num_query_heads}) divisible by {KV_SPLIT_MODULUS}"
+            )
         if (self.default_grid_order.startswith("named_xgyq")
                 and (self.batch * self.num_kv_heads) % KV_SPLIT_MODULUS):
             raise ValueError(
@@ -473,6 +506,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 "bt_hkv_minor": "gridbtkv",
                 "bt_hkv_minor_rev": "gridbtkvrev",
                 "named_xgyq": "gridxgyq",
+                "swz_head_first": "gridswzhf",
+                "swz_head_first_rev": "gridswzhfrev",
                 "named_xgyq_rev": "gridxgyqrev",
             }[self.default_grid_order])
         # Tagged here rather than in _persist_decode_name_part because that hook
@@ -732,6 +767,22 @@ def build_attention_dense(
     elif _order == "qb_major":
         qb = b.block_id_x()
         hq = b.block_id_y()
+    elif _order.startswith("swz_head_first"):
+        # Paper Fig.11 as a 3-D grid: x = (a, blk) fused, y = head low, z = bt.
+        _sbx = b.block_id_x()
+        hq = b.add(
+            b.mul(b.mod(_sbx, b.const_i32(KV_SPLIT_MODULUS)),
+                  b.const_i32(Hq // KV_SPLIT_MODULUS)),
+            b.block_id_y(),
+        )
+        _sq = b.div(_sbx, b.const_i32(KV_SPLIT_MODULUS))
+        if _order.endswith("_rev") and causal:
+            # NQB from the RUNTIME seqlen_q: this order keeps runtime_shape ON.
+            _nqbv = b.div(b.add(seqlen_q_p, b.const_i32(BLOCK_M - 1)),
+                          b.const_i32(BLOCK_M))
+            qb = b.sub(b.sub(_nqbv, b.const_i32(1)), _sq)
+        else:
+            qb = _sq
     elif _order.startswith("named_xgyq"):
         # kv-phase split "xGyQ" with the V-minor fusion, as a 3-D grid.
         #   F = bt*Hkv + hkv,  x = F % M,  y = F // M      (M = num_xcds)
@@ -800,6 +851,8 @@ def build_attention_dense(
         bt = _digit_bt
     elif _order.startswith("bt_hkv_minor"):
         bt = b.block_id_x()
+    elif _order.startswith("swz_head_first"):
+        bt = b.block_id_z()
     elif _order.startswith("named_xgyq"):
         bt = _xgyq_bt
     else:
@@ -2650,6 +2703,10 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     if _order.startswith("bt_hkv_minor"):
         # x = batch, y = head axis (kv-head low), z = query block.
         return (spec.batch, spec.num_query_heads, nqb)
+    if _order.startswith("swz_head_first"):
+        # (M*nqb, Hq/M, B) -- see _GRID_ORDERS for the derivation.
+        return (KV_SPLIT_MODULUS * nqb,
+                spec.num_query_heads // KV_SPLIT_MODULUS, spec.batch)
     if _order.startswith("named_xgyq"):
         # kv-phase split "xGyQ" / V-minor as a 3-D grid; see the gfx942 sibling.
         #   x = num_xcds*gqa, y = B*Hkv/num_xcds, z = nqb
