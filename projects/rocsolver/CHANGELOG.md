@@ -3,6 +3,25 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## (Unreleased) rocSOLVER
+
+### Added
+
+* Hessenberg reduction routines
+    * GEHD2
+    * GEHRD
+
+* Support added for the gfx1250-strict architecture.
+
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
 ## rocSOLVER 3.37.0 for ROCm 10.1.0
 
 ### Added

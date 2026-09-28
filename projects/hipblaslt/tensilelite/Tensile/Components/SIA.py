@@ -532,7 +532,7 @@ def _splitTdmLoad(grCode):
 def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     # For TDM+SIA0: defer tensor_load_to_lds to after the LDS swap to avoid writing
     # into the LDS buffer still being read by ds_loads
-    tdmDeferLoad = kernel["enableTDMA"] and kernel["enableTDMB"]
+    tdmDeferLoad = kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["TDMPlusLdsBuf"]
     localWriteEndIter = kernel["LoopIters"] - writer.states.numItersPLR - 1
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
 

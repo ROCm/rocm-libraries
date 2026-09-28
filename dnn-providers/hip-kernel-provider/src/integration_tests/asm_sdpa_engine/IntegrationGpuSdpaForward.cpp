@@ -54,14 +54,42 @@ protected:
                          << " but current device architecture is " << deviceString;
         }
 
-        auto graph = buildSdpaFwdGraph(testCase);
+        const SdpaFwdGraph built = buildSdpaFwdGraph(testCase);
+        const auto& graph = built.graph;
+        const auto& stats = built.stats;
 
         auto validationResult = graph->validate();
         ASSERT_TRUE(validationResult.is_good())
             << "Graph validation failed for config: " << testCase.name << " - "
             << validationResult.get_message();
 
-        // Build the graph first; skip if no engine supports this configuration
+        GraphVerificationContext context(*graph);
+        graph->visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                if(tensorAttr->get_is_virtual())
+                {
+                    continue;
+                }
+                if(tensorAttr == stats)
+                {
+                    // A fully masked causal row has a log-sum-exp of -inf in both the CPU
+                    // reference and the device result.
+                    this->registerValidator(context,
+                                            tensorAttr,
+                                            createAllCloseMatchingInfinitiesValidator(
+                                                frontendToSdkDataType(tensorAttr->get_data_type()),
+                                                tolerance,
+                                                tolerance));
+                }
+                else
+                {
+                    this->registerValidator(context, tensorAttr, tolerance);
+                }
+            }
+        });
+
+        // Build the graph; skip if no engine supports this configuration
         // (e.g. causal mask + stats is not yet supported by the ASM kernels).
         auto buildResult = graph->build(this->_handle);
         if(buildResult.code == ErrorCode::GRAPH_NOT_SUPPORTED)
@@ -70,18 +98,7 @@ protected:
         }
         ASSERT_EQ(buildResult.code, ErrorCode::OK) << buildResult.err_msg;
 
-        // Register output tensor validator
-        graph->visit([&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                if(!tensorAttr->get_is_virtual())
-                {
-                    this->registerValidator(tensorAttr, tolerance);
-                }
-            }
-        });
-
-        this->verifyGraph(*graph, 0);
+        this->verifyBuiltGraph(context, 0);
     }
 
     float _minVal = -1.0;
@@ -176,17 +193,18 @@ protected:
         auto validationResult = graph.validate();
         ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
+        GraphVerificationContext context(graph);
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
             for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
             {
                 if(!tensorAttr->get_is_virtual())
                 {
-                    this->registerValidator(tensorAttr, tolerance);
+                    this->registerValidator(context, tensorAttr, tolerance);
                 }
             }
         });
 
-        this->verifyGraph(graph, 0);
+        this->verifyGraph(context, 0);
     }
 
     float _minVal = -1.0;

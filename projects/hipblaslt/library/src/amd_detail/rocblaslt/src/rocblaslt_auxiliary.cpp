@@ -46,6 +46,7 @@
 #include "handle.h"
 #include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
+#include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocroller_host.hpp"
 #include "tensile_host.hpp"
@@ -531,6 +532,13 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
         setTo1(matmul_descr->compute_type, (void*)problem.alpha_owned.data(), &alphaTmp);
         problem.alpha = alphaTmp;
     }
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_a2a_world     = handle ? handle->device_comm_world : 0;
+    problem.fused_a2a_rank      = handle ? handle->device_comm_rank : 0;
+    problem.fused_a2a_peer_flag = handle ? handle->device_comm_peer_flags : nullptr;
+#endif
 
     return problem;
 }
@@ -1537,6 +1545,23 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                // Stored as a non-owning handle. The stage-level validation lives in the
+                // hipBLASLt C-API layer, which is where the descriptor's contents are visible.
+                if(sizeof(const hipblasLtFusedEpilogueDescriptor*) <= sizeInBytes)
+                {
+                    const hipblasLtFusedEpilogueDescriptor* fused = nullptr;
+                    memcpy(&fused, buf, sizeof(fused));
+                    matmulDesc->fused_epilogue = fused;
+                }
+                else
+                {
+                    log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+#endif
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1884,6 +1909,18 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->uniform_summation_order, sizeof(int32_t));
                 break;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(const hipblasLtFusedEpilogueDescriptor*);
+                if(sizeInBytes < sizeof(const hipblasLtFusedEpilogueDescriptor*))
+                {
+                    log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
+                break;
+#endif
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -2243,6 +2280,24 @@ rocblaslt_status
         }
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            return gate;
+        }
+
+        // No match, not an error: the heuristic reports zero algos.
+        if(fused_a2a_lacks_sdma_queues(prob))
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            *returnAlgoCount = 0;
+            return rocblaslt_status_success;
+        }
+#endif
 
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;
@@ -2668,14 +2723,7 @@ std::string rocblaslt_internal_get_library_arch_name()
     // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
     hipDeviceProp_t deviceProperties{};
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-#if HIP_VERSION >= 307
     const int asicRevision = deviceProperties.asicRevision;
-#else
-    // asicRevision doesn't exist before HIP 3.7. Use -1, not 0: 0 is the v0 marker
-    // and would wrongly pick gfx1250v0. gfx1250 needs ROCm 7+, so this only guards
-    // compilation on older HIP.
-    const int asicRevision = -1;
-#endif
     return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
 }
 
