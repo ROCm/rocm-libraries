@@ -1,0 +1,22 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block target_tparams %}
+    template<class Target, class key_type, class value_type, class size_type>
+{% endblock %}
+
+{% block config_guard scoped %}
+    {{ mk_kv_type_check(type) }}
+{% endblock %}
+
+{% block config_constructor -%}
+    topk_air_config_params{
+        { {{ config.block_size_x }}, {{ config.ipt }} },
+        {{ config.radix_bits }},
+        {{ config.adapt_coeff }},
+        {{ config.limit }}
+    }
+{%- endblock %}
+
+{% block config_base_type -%}
+    topk_air_config_params_base<key_type, value_type, size_type>
+{%- endblock %}

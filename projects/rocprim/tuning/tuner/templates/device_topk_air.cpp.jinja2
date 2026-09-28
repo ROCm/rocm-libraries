@@ -1,0 +1,47 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+    #include "benchmark_device_topk_air.parallel.hpp"
+{% endblock %}
+
+{% block config_constructor -%}
+    rocprim::topk_air_config<
+        {{ config.block_size_x }},
+        {{ config.ipt }},
+        {{ config.radix_bits }},
+        {{ config.adapt_coeff }},
+        {{ config.limit }}
+    >
+{%- endblock %}
+
+{% block benchmark_type %}
+        using benchmark_type = device_topk_air_benchmark<key_type, value_type, config>;
+{% endblock %}
+
+using key_type = {{ key_type }};
+using value_type = {{ value_type }};
+
+{% block primbench_executor %}
+    auto executor = primbench::executor(1, args, settings, primbench::flags::sync);
+{% endblock %}
+
+{% block benchmark_queue %}
+    executor.queue<benchmark_type>(true, true);
+    executor.queue<benchmark_type>(true, false);
+    executor.queue<benchmark_type>(false, true);
+    executor.queue<benchmark_type>(false, false);
+{% endblock %}
+
+{% block get_time %}
+    double log_sum = 0;
+    double n = 0;
+
+    for(const double & x : executor.get_all_bytes_per_second()){
+        log_sum += std::log((1000.0 * primbench::GiB) / x);
+        n++;
+    }
+
+    return std::exp(log_sum / n);
+{% endblock %}
+
+
