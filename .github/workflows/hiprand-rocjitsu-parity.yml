@@ -178,36 +178,59 @@ jobs:
           export PATH="$ROCM_ROOT/bin:$PATH"
           export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           mkdir -p parity
-          cfg="rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json"
+          cfg_dir="rocm-systems/emulation/rocjitsu/configs"
           launcher="rj-build/tools/rocjitsu/rocjitsu"
-          "$launcher" --daemon --config "$cfg" -- "$ROCM_ROOT/bin/rocminfo" > parity/rocminfo-daemon.txt 2>&1 || true
-          "$launcher" --config "$cfg" -- "$ROCM_ROOT/bin/rocminfo" > parity/rocminfo-local.txt 2>&1 || true
-          if grep -q gfx942 parity/rocminfo-daemon.txt; then
-            echo "ROCJITSU_DAEMON=1" >> "$GITHUB_ENV"
-            cp parity/rocminfo-daemon.txt parity/rocminfo.txt
-          elif grep -q gfx942 parity/rocminfo-local.txt; then
-            echo "ROCJITSU_DAEMON=0" >> "$GITHUB_ENV"
-            cp parity/rocminfo-local.txt parity/rocminfo.txt
-          else
-            echo "rocminfo did not report gfx942 in daemon or local mode" >&2
-            echo "----- daemon -----" >&2
-            cat parity/rocminfo-daemon.txt >&2
-            echo "----- local -----" >&2
-            cat parity/rocminfo-local.txt >&2
+          echo "CapEff $(awk '/CapEff/ {print $2}' /proc/self/status)"
+          "$launcher" --version || true
+          ldd rj-build/librocjitsu.so || true
+          printf '%s\n' \
+            '#include <stdio.h>' \
+            '__attribute__((constructor)) static void init(void) { fprintf(stderr, "PRELOAD_OK\n"); }' \
+            > /tmp/preload_check.c
+          gcc -shared -fPIC -o /tmp/libpreload_check.so /tmp/preload_check.c
+          if ! LD_PRELOAD=/tmp/libpreload_check.so /bin/true 2>&1 | grep -q PRELOAD_OK; then
+            echo "LD_PRELOAD constructors do not run in this container" >&2
             exit 1
           fi
+          pick=""
+          try_mode() {
+            local name="$1"
+            local config="$2"
+            shift 2
+            "$@" --config "$config" -- "$ROCM_ROOT/bin/rocminfo" > "parity/rocminfo-${name}.txt" 2>&1 || true
+            if grep -q gfx942 "parity/rocminfo-${name}.txt"; then
+              pick="$name"
+              cp "parity/rocminfo-${name}.txt" parity/rocminfo.txt
+              echo "ROCJITSU_CONFIG=$config" >> "$GITHUB_ENV"
+              return 0
+            fi
+            return 1
+          }
+          # Non-kmd local mode is what the rocJITsu corpus job uses on a CPU
+          # scale set. The kmd daemon is what the feasibility spike used.
+          if try_mode hsa "$cfg_dir/gfx942_cdna3.json" "$launcher"; then
+            echo "ROCJITSU_DAEMON=0" >> "$GITHUB_ENV"
+          elif try_mode kmd-daemon "$cfg_dir/gfx942_cdna3_kmd.json" "$launcher" --daemon; then
+            echo "ROCJITSU_DAEMON=1" >> "$GITHUB_ENV"
+          elif try_mode kmd-local "$cfg_dir/gfx942_cdna3_kmd.json" "$launcher"; then
+            echo "ROCJITSU_DAEMON=0" >> "$GITHUB_ENV"
+          else
+            echo "rocminfo did not report gfx942" >&2
+            grep -E "librocjitsu|ERROR:|ROCk|daemon did not|could not find|PRELOAD" parity/rocminfo-*.txt >&2 || true
+            exit 1
+          fi
+          echo "selected rocminfo mode: $pick"
 
       - name: Run the hipRAND filter under rocJITsu
         run: |
           set -euo pipefail
-          args=()
+          args=(--config "$ROCJITSU_CONFIG")
           if [[ "${ROCJITSU_DAEMON}" == "1" ]]; then
             args+=(--daemon)
           fi
           python3 .github/scripts/ci_parity_runner.py \
             "${args[@]}" \
             --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
-            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json" \
             --rocm-root "$ROCM_ROOT" \
             --rocm-version "$ROCM_VERSION" \
             --runner-label "$BUILD_RUNS_ON" \
