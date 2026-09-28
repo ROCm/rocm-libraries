@@ -118,7 +118,7 @@ if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
 endif()
 
 # rocm-cmake must be included before processing 'GPU_TARGETS'.
-include(dependencies/rocm-cmake)
+include(primlibs/dependencies/rocm-cmake)
 
 # Verify that hipcc compiler is used on ROCM platform
 # TODO: Fix VerifyCompiler for Windows
@@ -149,7 +149,7 @@ if(GPU_TARGETS STREQUAL "all")
   set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
 endif()
 
-include(dependencies/hip)
+include(primlibs/dependencies/hip)
 
 include(cmake/Dependencies.cmake)
 
