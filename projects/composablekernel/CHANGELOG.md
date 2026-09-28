@@ -21,6 +21,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Improved FMHA forward performance for head dimension 128 on gfx11 and gfx12 targets by retuning tile selection.
 * Improved FMHA forward performance on gfx1250 for bf16 and fp16 head dimension 128 by padding the LDS layout in the qr_tdm pipeline.
 * Improved memory coalescing of microscaling (MX) scale loads on gfx1250 by unifying the scale16 layout with scale32.
+* Improved FMHA forward performance for head dimension 128 on gfx950 for small batch-mode problems without a mask by selecting the trload pipeline instead of the 64-row async tile.
 
 ### Changed
 

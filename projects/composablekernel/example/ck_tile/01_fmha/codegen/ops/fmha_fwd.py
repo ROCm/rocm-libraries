@@ -1032,6 +1032,22 @@ class CompatibilityRuleFactoryGfx950(CompatibilityRuleFactoryGfx9):
             ):
                 return False
 
+            # For small grids the kM0=64 qr_async tile is slower than qr_async_trload in batch mode without a mask, so
+            # leave those problems to trload. Keep it where trload is not generated (logits, bias, dropout, skip) and for
+            # masked or group-mode problems, where it is still as fast or faster.
+            if (
+                kernel_ctx.pipeline.tag == "qr_async"
+                and (problem_ctx.hdim, problem_ctx.hdim_v) == (128, 128)
+                and kernel_ctx.tile.F_bm0 == 64
+                and problem_ctx.mode == "batch"
+                and kernel_ctx.pipeline.F_mask in ("no", "s_no")
+                and kernel_ctx.pipeline.F_logits == "f"
+                and kernel_ctx.pipeline.F_bias == "no"
+                and kernel_ctx.pipeline.F_dropout == "f"
+                and kernel_ctx.pipeline.F_skip == "f"
+            ):
+                return False
+
             # only qr_async_trload_v3 use km0=256 & 8-warps
             is_v3_dedicated_tile = (
                 kernel_ctx.tile.F_bm0 == 256
