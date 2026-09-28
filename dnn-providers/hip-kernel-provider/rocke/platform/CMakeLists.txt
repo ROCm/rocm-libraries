@@ -320,7 +320,7 @@ if(ROCKE_INSTALL_TESTS)
     endif()
 
     # Keep the LDS skill CLI under tests/ so TheRock's test artifact includes it.
-    install(FILES
+    install(PROGRAMS
             "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/scripts/predict.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/analysis/lds-bank-conflict-expert")
 
