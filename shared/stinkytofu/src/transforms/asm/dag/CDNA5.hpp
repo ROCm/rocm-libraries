@@ -455,14 +455,17 @@ class CDNA5ReadyQueue : public ReadyQueue {
             getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleTransitionEntries;
         return cfg >= 0 ? cfg : dsReadQueueDepth();
     }
-    // Effective ds issue cost for one wave. The ISA number is single-wave; the
-    // ds issue pipe is shared, so resident waves round-robin it and one wave's
-    // issues are spaced out (see HWModel::Lds::wavesPerDsIssuePipe). Distinct
-    // from dsReadPerCap below, which is a manually tuned ceiling, not a cost.
-    int dsIssueCost(const StinkyInstruction& inst) const {
-        return dsIssueCyclesForWaves(
-            hw_, inst.issueCycles, static_cast<int>(getPassContext().getGemmTileConfig().NumWaves));
-    }
+    // Rule (4) per-window ds_load admission ceiling. The tuned value
+    // (config_.dsReadPerCap / dagFeatures.dsReadPerCap override) is a
+    // single-wave number, and stays the ceiling whenever it is still
+    // physically achievable. When waves share one ds issue pipe
+    // (HWModel::Lds::wavesPerDsIssuePipe), only one contending wave stalls in
+    // any given cycle, so this wave cannot safely count on issuing more than
+    // dsIssueCapSpan() / dsLoadIssueCycles / contendingWaves loads for itself
+    // in that same real window -- take whichever of the two is smaller. Never
+    // below 1. This is the ONLY place wavesPerDsIssuePipe affects scheduling:
+    // it is a capacity constraint on admission, not a per-instruction real
+    // cycle cost.
     int dsReadPerCap() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerCap;
         // INT_MAX is the "unset" sentinel and resolves to the arch default. A
@@ -479,7 +482,15 @@ class CDNA5ReadyQueue : public ReadyQueue {
         // The arch default is static data, so a bad one is a build-time mistake
         // in this file rather than a caller error.
         assert(resolved > 0 && "arch config dsReadPerCap must be positive");
-        return resolved;
+        const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
+        const int contendingWaves = dsIssueCyclesForWaves(hw_, /*issueCycles=*/1, numWaves);
+        if (contendingWaves <= 1) return resolved;
+        // Every ds_load variant on gfx1250 has issueCycles == 1 (see the .def
+        // tables), so this is the representative per-load issue cost, not a
+        // per-instruction lookup.
+        constexpr int kDsLoadIssueCycles = 1;
+        const int windowCap = dsIssueCapSpan() / kDsLoadIssueCycles / contendingWaves;
+        return std::max(1, std::min(resolved, windowCap));
     }
     int tensorLoadWmmaSpace() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.tensorLoadWmmaSpace;
@@ -854,15 +865,19 @@ int CDNA5ReadyQueue::computeValuAdvanceCycles(int issueCycles) const {
 
 // After a picked instruction: advance the co-issue timeline. Barriers use
 // result latency (latencyCycles); VALU/transcendentals use co-issue-aware issue
-// progress; others use issueCycles.
+// progress; others (including ds_read) use issueCycles.
+//
+// ds_read's real cost here is always the raw ISA issueCycles: a wave issues
+// one instruction per cycle from its own stream regardless of contention on
+// the shared (cross-wave) ds issue pipe. That contention is a capacity
+// constraint on admission (see dsReadPerCap()), not a per-instruction cycle
+// cost, so it has no business inflating this same-wave timeline.
 void CDNA5ReadyQueue::updateWMMAStatus(DAGNode* node) {
     int elapsedCycles = node->inst->issueCycles;
     if (isBarrier(*node->inst))
         elapsedCycles = node->inst->latencyCycles;
     else if (isVectorALU(*node->inst) || isTranscendental(*node->inst))
         elapsedCycles = computeValuAdvanceCycles(node->inst->issueCycles);
-    else if (isDSRead(*node->inst))
-        elapsedCycles = dsIssueCost(*node->inst);
     advanceTime(elapsedCycles);
 }
 
@@ -1266,10 +1281,17 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
         // comparison below is false for every wait and would drop the ds_load
         // -- the veto this change removed, reached by another route.
         const bool outOfWmmaWindow = activeWmmaLatency_ <= 0 && dsReadThrottleWait() == 0;
+        // schedulingSpace/activeWmmaLatency_ is this wave's own remaining
+        // window, consumed at the raw issueCycles rate once a ds_load is
+        // actually picked (see updateWMMAStatus). Wave-sharing contention is
+        // a capacity constraint on admission and belongs to dsReadPerCap()
+        // (which dsThrottleWait's dsCapWait already reflects, added above),
+        // not to this same-wave scheduling-space test -- inflating the cost
+        // here too would reject a ds_load the window can actually fit.
         const bool fitsSchedulingBudget =
             dsThrottleWait == 0 || outOfWmmaWindow ||
             (schedulingPos < activeWmmaLatency_ &&
-             dsThrottleWait + dsIssueCost(*pickedDS->inst) <= schedulingSpace);
+             dsThrottleWait + pickedDS->inst->issueCycles <= schedulingSpace);
         if (fitsSchedulingBudget) consider(pickedDS, kLocalRead, dsThrottleWait);
     }
     const bool dsWindowOk = dsBaseOk && dsThrottleWait == 0;
