@@ -67,9 +67,13 @@ separate types would require changes to both contracts.
 
 The executing device supplies the GPU model and resource limits used for
 prediction. TensileLite validates each proposed recipe against that GPU's
-instruction set before compilation. Origami ranks `MatrixInstruction`,
-`DepthU`, and `NonTemporalA/B`. Other parameters begin with
-TensileLite's defaults and are then derived or validated by its solution builder.
+instruction set before compilation. Origami ranks `MatrixInstruction`, macro tiles,
+`DepthU`, and `NonTemporalA/B`, and supplies all workgroup-mapping and stagger
+outputs applicable to the data-parallel candidate domain. The
+[modeled-input inventory](../../JIT.md#origami-modeled-inputs) records translations
+and mode constraints. Unsupported translations or changed modeled values reject
+the candidate. Only unpredicted parameters begin with TensileLite defaults and
+are then derived or validated by its solution builder.
 The manifest records which values came from prediction, defaults, or derivation.
 If Origami returns no finite positive-latency ranking, the request fails before
 invoking the generator. If every ranked recipe is invalid, the request reports

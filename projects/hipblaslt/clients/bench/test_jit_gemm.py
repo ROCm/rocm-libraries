@@ -142,9 +142,35 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
     require(
         prediction["predicted_cycles"] == accepted["predicted_cycles"], "Score changed"
     )
-    require(
-        prediction["selected_parameters"] == accepted["parameters"], "Candidate changed"
-    )
+    selected = prediction["selected_parameters"]
+    require(all(selected[key] == value for key, value in accepted["parameters"].items()),
+            "Candidate changed")
+    require(prediction.get("modeled_contract") == "origami.gemm.dp.v1",
+            "Missing complete data-parallel modeled contract")
+    modeled = prediction["modeled"]
+    require(modeled == accepted["modeled"], "Modeled outputs changed")
+    mapping, stagger, launch = modeled["workgroup_mapping"], modeled["stagger"], modeled["launch"]
+    require(set(mapping) == {"wgm", "wgmxcc", "wgmxccchunk", "wgmxccsplitk"},
+            "Incomplete modeled mapping")
+    require(set(stagger) == {"staggerU", "staggerUMapping", "staggerUStrideShift"},
+            "Incomplete modeled stagger")
+    require(mapping["wgmxccchunk"] == mapping["wgmxccsplitk"] == 0,
+            "Accepted an unrepresentable data-parallel mapping")
+    require(launch["stream_k"] == 0 and launch["reduction"] == "none" and launch["split_factor"] == 1,
+            "Unexpected launch mode")
+    resolved = prediction["resolved_parameters"]
+    expected = {"WorkGroupMapping": mapping["wgm"],
+                "WorkGroupMappingXCC": max(1, mapping["wgmxcc"]),
+                "WorkGroupMappingXCCGroup": 0,
+                "StaggerU": stagger["staggerU"], "StaggerUMapping": stagger["staggerUMapping"],
+                "_staggerStrideShift": stagger["staggerUStrideShift"],
+                "MacroTile0": modeled["macro_tile"][0], "MacroTile1": modeled["macro_tile"][1],
+                "DepthU": modeled["macro_tile"][2], "StreamK": 0, "GlobalSplitU": 1,
+                "NonTemporalA": selected["NonTemporalA"], "NonTemporalB": selected["NonTemporalB"]}
+    require(all(resolved.get(key) == value for key, value in expected.items()),
+            "Derived recipe changed a modeled output")
+    require(not set(selected) & set(prediction["default_parameters"]),
+            "Modeled output replaced with a default")
     require(prediction["defaults_source"], "No default provenance")
     problem = prediction["problem"]
     for key, expected in case["problem"].items():
@@ -168,7 +194,7 @@ def check_provenance(stderr, stdout, case, artifact_root, architecture):
         )
     fork = document["BenchmarkProblems"][0][1]["ForkParameters"]
     parameters = {key: values[0] for item in fork for key, values in item.items()}
-    for key, value in accepted["parameters"].items():
+    for key, value in selected.items():
         require(
             parameters[key] == value, f"Resolved YAML does not preserve predicted {key}"
         )

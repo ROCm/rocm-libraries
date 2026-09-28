@@ -172,6 +172,12 @@ integer ID, its predicted cost or null, and Tensile tuning parameters.
 python -m Tensile.JitGemm request.json new-request-output --architecture gfx950
 ```
 
+The generic TensileLite provider additionally supplies `modeled_contract: origami.gemm.dp.v1`
+and each candidate’s raw `modeled` outputs. The [Origami capability inventory](../JIT.md#origami-modeled-inputs)
+defines this data-parallel contract, its unit translations and explicit unsupported cases.
+Selection rejects missing or changed modeled outputs; ordinary caller recipes without
+this marker retain the existing sentinel/default behavior. Explicit YAML bypasses this selector.
+
 The request uses `schema_version: 1`. `model` identifies the caller's prediction
 method, such as `origami.gemm.estimation`. Candidates are tried in the supplied
 order; `predicted_cycles` records a positive estimate or null when none is available.
@@ -232,9 +238,10 @@ solution and never benchmarks candidates.
 ## hipBLASLt provider integration
 
 The library's TensileLite backend can now create the ranked request internally
-from a generic operation request. Its initial GEMM model supplies
-`MatrixInstruction`, `DepthU`, and `NonTemporalA/B`; this module retains the
-supplied order and validates every candidate before compilation. Descriptor
+from a generic operation request. Its data-parallel GEMM contract supplies
+`MatrixInstruction`, macro tile/`DepthU`, `NonTemporalA/B`, workgroup mapping,
+stagger and launch outputs. This module retains the supplied order, translates
+model units, and rejects unsupported or changed predictions before compilation. Descriptor
 scale modes are translated here, separately from tuning parameters, so the C++
 caller does not repeat target-dependent layout rules.
 

@@ -1,11 +1,13 @@
 # Request and execute JIT solutions
 
-This is a source guide for contributors and integration developers, maintained
-under the existing hipBLASLt code/documentation reviewer rules. See the
+This is a source guide to the current just-in-time (JIT) application programming
+interface (API) for general matrix multiplication (GEMM), maintained under the
+existing hipBLASLt code/documentation reviewer rules. See the
 [roadmap](JIT_ROADMAP.md) for ownership, source publication and deferred release
 documentation integration.
 
-The [direct TensileLite API](JIT_TENSILELITE.md) accepts an explicit YAML recipe
+The [direct TensileLite API](JIT_TENSILELITE.md) accepts an explicit
+YAML (YAML Ain't Markup Language) recipe
 and returns a GEMM algorithm in one call. That API and the
 [direct sample](clients/samples/29_hipblaslt_jit_gemm/README.md) remain available.
 This guide describes the optional generic interface layered above that path.
@@ -28,7 +30,60 @@ algorithm accepted by `hipblasLtMatmul` and `hipblaslt_ext::Gemm`.
 
 The application owns its buffers and workspace. The request owns descriptor
 values and host scalars; it does not take ownership of device pointers.
-Compilation and support checks finish before GPU work is submitted.
+Compilation and support checks finish before graphics processing unit (GPU) work is submitted.
+
+Internally, the GEMM request already reuses `RocblasltContractionProblem` with
+owned scalar values. The generic `Solution` retains executable ownership around
+existing GEMM support and execution machinery. The
+[design discussion](jit-design/confluence-roadmap-draft.md) assesses further reuse
+of existing problem/solution types and KernelFromAnywhere (KFA) metadata across
+TensileLite, rocRoller, and possible other generators. Those are proposals: the
+current generic production provider is TensileLite, and existing rocRoller runtime
+generation uses a separate path. An ordinary matmul does not initiate this new
+TensileLite/generic JIT path; rocRoller's existing path can already generate code.
+
+## Origami modeled inputs
+
+An empty TensileLite `Options::configPath` requests Origami prediction. The private
+`origami.gemm.dp.v1` contract covers the existing data-parallel candidate domain.
+Origami ranks caller-supplied configurations; it does not synthesize their fields
+or choose whether to enable Stream-K. `StreamK=0` and occupancy 1 remain explicit
+model inputs. Every applicable prediction is transferred; defaults supply only
+settings that this model does not predict.
+
+The inventory below follows `shared/origami/include/origami/{origami,gemm,streamk,types}.hpp`
+and their implementations. A selected configuration is an output of ranking even
+though its fields originate in the caller's candidate catalog.
+
+| Origami output | Generator input or use | Conditions |
+| --- | --- | --- |
+| `rank_configs` / `select_config`: ordered configuration and latency | Nine-value `MatrixInstruction` recipe (MI plus retained wave topology), macro tile, `DepthU`, `NonTemporalA/B`; latency and order in provenance | Estimation ranks the existing target instruction/tile/depth/cache-hint catalog. No kernel benchmarking. |
+| `select_workgroup_mapping`: signed `wgm` | `WorkGroupMapping` | Preserved exactly; zero and values outside the runtime range are rejected. |
+| `select_workgroup_mapping`: `wgmxcc` | `WorkGroupMappingXCC`, with `WorkGroupMappingXCCGroup=0` | Origami 0/1 both mean identity and translate to Tensile 1. Larger values require a supported power of two and a divisible grid for equivalent whole-grid grouping. |
+| `select_workgroup_mapping`: `wgmxccchunk`, `wgmxccsplitk` | Retained in every candidate's `modeled.workgroup_mapping` | Nonzero values require the Stream-K mapping ABI and reject the current data-parallel candidate; neither is substituted with `WorkGroupMappingXCCGroup`. |
+| `select_staggerU`: `staggerU`, `staggerUMapping` | `StaggerU`, `StaggerUMapping` | All results, including zero, are supplied and checked after derivation. Origami currently returns zero for batches, K splitting, and several no-benefit conditions. |
+| `select_staggerU`: `staggerUStrideShift` | `StaggerUStride = DepthU × Tensile DataType bytes × 2^shift` | Check the derived `_staggerStrideShift`; zero stagger may normalize the byte stride without changing its meaning. |
+| `gemm::compute_launch_parameters`: reduction, grid, active CUs, timesteps, split factor | `modeled.launch`; `StreamK=0`, `GlobalSplitU=1` | Data parallel derives `none`, output-tile grid and split factor 1. Active CUs/timesteps describe the model, not kernel tuning fields. |
+| `streamk::select_reduction`, `select_grid_size` | Mode-dependent prediction APIs | Applicable when a caller enables Stream-K. The data-parallel domain has no reduction/grid tuning prediction to default. Adding Stream-K candidates requires preserving these outputs through Tensile's workspace and launch reconciliation. |
+| `streamk::select_hybrid_mode` | Static/dynamic schedule within StreamK=5 | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
+| `gemm::predict_workgroup_mapping` | Internal latency-estimation approximation | Alternative fast mapping estimate, not an additional kernel field. The generator receives the full `select_workgroup_mapping` result. |
+| Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The provider uses the full instruction catalog plus ranking, preserving the selected MI. |
+| GEMM/Formocast performance and resource estimates | Scores/diagnostics | These APIs estimate latency/utilization/resource costs; they do not predict new vector widths, occupancy, or backend tuning settings. |
+
+Unpredicted inputs include wave topology, occupancy, Stream-K enablement and grid
+policy, workspace limits, vector widths, subtile/main-loop choice, prefetch and
+scheduling, direct-to-LDS/VGPR settings, load coalescing, swizzle/layout and
+split-U policy. Some are fixed by the request or candidate domain; others retain
+Tensile defaults and derivation. Formocast consumes additional backend settings
+to estimate cost; it does not fill them in. Epilogue overhead is not modeled.
+
+The selector rejects missing modeled fields, unsupported translations, and any
+derived recipe that changes a modeled value or cannot carry it at runtime.
+Rejection advances to the next ranked candidate; exhausting the ranking fails
+with reasons and emits no selected recipe. A CU budget smaller than the device's
+XCD count is rejected before calling the mapping selectors. Diagnostic manifests
+retain raw outputs, translated parameters, defaults, and rejections. Explicit
+recipes continue through `Tensile.SingleSolution` without this prediction contract.
 
 ## Build
 
@@ -99,13 +154,18 @@ describes the recipe, bundle, and Python builder contracts.
 
 The private provider loader reads `loader.bin`, a bounded, versioned envelope
 published alongside the human-readable `manifest.json`. Corruption tests modify
-the consumed envelope or code objects; JSON is a diagnostic record.
+the consumed envelope or code objects; JavaScript Object Notation (JSON) is a diagnostic record.
 
 A searchable JIT solution library and persistent code cache are future work.
 Such a library could index solutions by problem description and look up compatible
 code before requesting generation. The current API retains explicitly selected
 algorithms in one process; it does not search a JIT collection or reuse code from
-an earlier program invocation.
+an earlier program invocation. The design discussion assesses a fallback library
+that generates only after complete existing lookup yields zero compatible results,
+including Equality and Origami-based selection. It is not implemented and would
+share generation/validation with the explicit API, which remains useful for
+backend choice and prewarming. Neither adding a library type nor generic handles
+alone provides a non-GEMM operation adapter.
 
 
 The [component roadmap](JIT_ROADMAP.md) describes the complete flow and remaining planning, search and cache work.

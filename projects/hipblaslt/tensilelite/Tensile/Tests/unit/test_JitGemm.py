@@ -104,6 +104,150 @@ def solution(depth=64, problem_type=None):
     return state
 
 
+@pytest.fixture
+def modeled_request(prediction_request):
+    request = prediction_request
+    request["modeled_contract"] = "origami.gemm.dp.v1"
+    request["problem"].update(m=128, n=128, k=512, batch=1)
+    for tensor in "abcd":
+        request["problem"][f"strides_{tensor}"] = [1, 512 if tensor in "ab" else 128, 65536]
+    for candidate in request["candidates"]:
+        candidate["parameters"]["MatrixInstruction"][2] = 32
+        candidate["modeled"] = {
+            "macro_tile": [64, 64, candidate["parameters"]["DepthU"]],
+            "workgroup_mapping": {"wgm": -2, "wgmxcc": 0, "wgmxccchunk": 0, "wgmxccsplitk": 0},
+            "stagger": {"staggerU": 4, "staggerUMapping": 1, "staggerUStrideShift": 1},
+            "launch": {"stream_k": 0, "reduction": "none", "grid": 4,
+                       "active_cus": 4, "timesteps": 1, "split_factor": 1},
+        }
+    return request
+
+
+def modeled_solution(request, candidate):
+    result = solution(candidate["parameters"]["DepthU"])
+    result.update(JG._candidateParameters(request, candidate))
+    result["MatrixInstruction"] = result["MatrixInstruction"][:4]
+    result["_staggerStrideShift"] = candidate["modeled"]["stagger"]["staggerUStrideShift"]
+    result["InternalSupportParams"].update(
+        KernArgsVersion=3, SupportCustomWGM=True, SupportCustomStaggerU=True)
+    return result
+
+
+@pytest.mark.parametrize("group,key", [
+    ("workgroup_mapping", "wgm"), ("workgroup_mapping", "wgmxcc"),
+    ("workgroup_mapping", "wgmxccchunk"), ("workgroup_mapping", "wgmxccsplitk"),
+    ("stagger", "staggerU"), ("stagger", "staggerUMapping"),
+    ("stagger", "staggerUStrideShift"), ("launch", "grid"),
+])
+def test_missing_modeled_output_cannot_use_default(modeled_request, tmp_path, group, key):
+    del modeled_request["candidates"][0]["modeled"][group][key]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(modeled_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match="Missing/invalid modeled"):
+        JG._readRequest(source)
+
+
+@pytest.mark.parametrize("field", ["MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB"])
+def test_missing_ranked_parameter_cannot_use_default(modeled_request, tmp_path, field):
+    del modeled_request["candidates"][0]["parameters"][field]
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(modeled_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match=f"Missing modeled parameter {field}"):
+        JG._readRequest(source)
+
+
+def test_streamk_prediction_requires_a_supported_contract(modeled_request, tmp_path):
+    modeled_request["candidates"][0]["modeled"]["launch"]["stream_k"] = 5
+    source = tmp_path / "request.json"
+    source.write_text(json.dumps(modeled_request))
+    with pytest.raises(SS.SingleSolutionConfigError, match="data-parallel contract"):
+        JG._readRequest(source)
+
+
+@pytest.mark.parametrize("name,value", [
+    ("NonTemporalA", 4), ("WorkGroupMapping", 1), ("StaggerU", 0),
+    ("_staggerStrideShift", 0), ("MacroTile0", 128), ("StreamK", 3),
+])
+def test_changed_modeled_output_rejects_candidate(modeled_request, tmp_path, name, value):
+    attempted = []
+
+    def derive(config, label):
+        candidate = modeled_request["candidates"][len(attempted)]
+        attempted.append(candidate["id"])
+        result = modeled_solution(modeled_request, candidate)
+        if len(attempted) == 1:
+            result[name] = value
+        return result
+
+    _, _, metadata = JG._select(modeled_request, tmp_path / "selected.yaml", derive)
+    assert attempted == [7, 2]
+    assert metadata["candidate_id"] == 2
+    assert f"changed modeled {name}" in metadata["rejections"][0]["reason"]
+    assert not set(metadata["selected_parameters"]) & set(metadata["default_parameters"])
+    assert metadata["modeled"] == modeled_request["candidates"][1]["modeled"]
+
+
+@pytest.mark.parametrize("mapping,reason", [
+    ({"wgmxccchunk": 8}, "wgmxccchunk=8"),
+    ({"wgmxccsplitk": 2}, "wgmxccsplitk=2"),
+    ({"wgmxcc": 8}, "grid=4"),
+    ({"wgm": -1024}, "runtime range"),
+])
+def test_unrepresentable_mapping_never_reaches_derivation(modeled_request, tmp_path, mapping, reason):
+    for candidate in modeled_request["candidates"]:
+        candidate["modeled"]["workgroup_mapping"].update(mapping)
+    output = tmp_path / "selected.yaml"
+    with pytest.raises(SS.SingleSolutionConfigError, match=reason):
+        JG._select(modeled_request, output, lambda *_: pytest.fail("unsupported mapping reached derivation"))
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("zero", [False, True])
+def test_modeled_stagger_units_and_identity_xcc(modeled_request, zero):
+    candidate = modeled_request["candidates"][0]
+    if zero:
+        candidate["modeled"]["stagger"] = dict(staggerU=0, staggerUMapping=0, staggerUStrideShift=0)
+    parameters = JG._candidateParameters(modeled_request, candidate)
+    assert parameters["WorkGroupMapping"] == -2
+    assert parameters["WorkGroupMappingXCC"] == 1  # Origami zero is identity.
+    assert parameters["WorkGroupMappingXCCGroup"] == 0
+    assert parameters["StaggerUStride"] == (64 if zero else 128)
+    result = modeled_solution(modeled_request, candidate)
+    assert JG._modeledRejection(result, modeled_request, candidate) is None
+    if not zero:
+        result["InternalSupportParams"]["SupportCustomStaggerU"] = False
+        assert "cannot carry the modeled stagger" in JG._modeledRejection(result, modeled_request, candidate)
+
+
+def test_stagger_stride_uses_tensile_mac_type_not_physical_operand_width(modeled_request):
+    modeled_request["problem_type"] = {
+        "OperationType": "GEMM", "DataType": "H", "DataTypeA": "F4", "DataTypeB": "F8",
+        "MacDataTypeA": "H", "MacDataTypeB": "H", "DestDataType": "S", "ComputeDataType": "S",
+    }
+    parameters = JG._modeledParameters(modeled_request, modeled_request["candidates"][0])
+    assert parameters["StaggerUStride"] == 128  # DepthU32 * H(2 bytes) * 2^1
+
+
+@pytest.mark.parametrize("xcc", [2, 4])
+def test_divisible_grid_preserves_contiguous_xcc_mapping(modeled_request, xcc):
+    candidate = modeled_request["candidates"][0]
+    candidate["modeled"]["workgroup_mapping"]["wgmxcc"] = xcc
+    assert JG._modeledTransportRejection(modeled_request, candidate) is None
+    parameters = JG._modeledParameters(modeled_request, candidate)
+    assert parameters["WorkGroupMappingXCC"] == xcc
+    assert parameters["WorkGroupMappingXCCGroup"] == 0
+
+
+def test_modeled_outputs_survive_real_generation(modeled_request, tmp_path):
+    manifest = compile_request(modeled_request, tmp_path)
+    prediction = manifest["jit_prediction"]
+    assert prediction["modeled_contract"] == "origami.gemm.dp.v1"
+    assert prediction["candidate_id"] == 7
+    assert prediction["resolved_parameters"]["WorkGroupMapping"] == -2
+    assert prediction["resolved_parameters"]["StaggerU"] == 4
+    assert prediction["resolved_parameters"]["_staggerStrideShift"] == 1
+
+
 def problem_rejection(derived, request, candidate=None):
     from Tensile.SolutionStructs.Validators.ProblemSizes import problemSizeRejection
 

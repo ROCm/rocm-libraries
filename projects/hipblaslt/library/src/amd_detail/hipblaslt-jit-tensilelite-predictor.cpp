@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <limits>
+#include <origami/gemm.hpp>
 #include <origami/origami.hpp>
 #include <sstream>
 #include <stdexcept>
@@ -137,7 +138,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
                             config.mt                   = {shape[0], shape[1], depth};
                             config.mi                   = mi;
                             config.occupancy = 1; // Conservative model input, not WG dimensions.
-                            config.stream_k  = 0; // Match the canonical Tensile default.
+                            config.stream_k  = 0; // Caller-selected data-parallel candidate domain.
                             config.cache_hints_a   = hint[0];
                             config.cache_hints_b   = hint[1];
                             config.prediction_mode = origami::prediction_modes_t::estimation;
@@ -214,6 +215,10 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
                                      && !problem.sparse()
                                                      ? candidates(analytical, request.mi_dtype)
                                                      : std::vector<Candidate>{};
+        // Both mapping selectors require at least one CU per XCD. Do not let
+        // an unsupported budget reach their integer divisions or replace it.
+        require(origami::resolve_num_cus(request.num_cus, analytical.N_CU) >= analytical.NUM_XCD,
+                "Origami mapping requires a CU budget of at least the device XCD count");
         std::vector<origami::config_t> configs;
         for(const auto& recipe : recipes)
             configs.push_back(recipe.config);
@@ -239,7 +244,7 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
 
         std::ostringstream json;
         json << std::setprecision(17) << std::boolalpha;
-        json << "{\n\"schema_version\":1,\"model\":" << jsonString("origami.gemm.estimation")
+        json << "{\n\"schema_version\":1,\"modeled_contract\":\"origami.gemm.dp.v1\",\"model\":" << jsonString("origami.gemm.estimation")
              << ",\"architecture\":" << jsonString(options.architecture)
              << ",\"problem_type\":{\"OperationType\":\"GEMM\",\"Batched\":true,"
                 "\"StridedBatched\":true,\"TransposeA\":"
@@ -319,8 +324,10 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
              << ",\"lds_capacity\":" << analytical.lds_capacity
              << ",\"rf_capacity\":" << analytical.rf_capacity
              << "},\"model_assumptions\":{\"occupancy\":1,\"stream_k\":0,"
-                "\"workgroup_mapping\":\"estimated internally; Tensile uses its default\","
-                "\"vector_widths\":\"Origami defaults; Tensile derives actual widths\","
+                "\"stream_k_origin\":\"caller-selected data-parallel domain; Origami does not select enablement\","
+                "\"workgroup_mapping\":\"select_workgroup_mapping; unsupported transport rejects the candidate\","
+                "\"stagger\":\"select_staggerU; all three outputs including zeros are preserved\","
+                "\"vector_widths\":\"not predicted by estimation; Tensile derives actual widths\","
                 "\"epilogue\":\"bias, activation, auxiliary outputs and scaling overhead are not "
                 "modeled\","
                 "\"architecture_constants\":"
@@ -334,14 +341,34 @@ namespace hipblaslt_ext::experimental::jit::tensilelite::detail
         {
             require(result.config.index < recipes.size(), "Origami returned an unknown candidate");
             const auto& recipe = recipes[result.config.index];
+            const auto& config = result.config;
+            const auto [reduction, grid, activeCUs, timesteps, split]
+                = origami::gemm::compute_launch_parameters(request, analytical, config,
+                                                          config.grid_selection);
+            require(config.stream_k == 0 && reduction == origami::reduction_t::none && split == 1,
+                    "Origami returned a launch outside the data-parallel candidate domain");
+            const auto mapping = origami::select_workgroup_mapping(request, analytical, config, grid);
+            require(mapping.wgm != 0, "Origami returned a zero workgroup mapping");
+            const auto stagger = origami::select_staggerU(request, analytical, config, grid, mapping.wgm);
             if(count++)
                 json << ',';
             json << "{\"id\":" << result.config.index << ",\"predicted_cycles\":" << result.latency
                  << ",\"parameters\":{\"MatrixInstruction\":";
             array(json, recipe.matrixInstruction);
-            json << ",\"DepthU\":" << recipe.config.mt.k
-                 << ",\"NonTemporalA\":" << recipe.config.cache_hints_a
-                 << ",\"NonTemporalB\":" << recipe.config.cache_hints_b << "}}";
+            json << ",\"DepthU\":" << config.mt.k
+                 << ",\"NonTemporalA\":" << config.cache_hints_a
+                 << ",\"NonTemporalB\":" << config.cache_hints_b
+                 << "},\"modeled\":{\"macro_tile\":[" << config.mt.m << ',' << config.mt.n << ',' << config.mt.k
+                 << "],\"workgroup_mapping\":{\"wgm\":" << mapping.wgm
+                 << ",\"wgmxcc\":" << mapping.wgmxcc
+                 << ",\"wgmxccchunk\":" << mapping.wgmxccchunk
+                 << ",\"wgmxccsplitk\":" << mapping.wgmxccsplitk
+                 << "},\"stagger\":{\"staggerU\":" << stagger.staggerU
+                 << ",\"staggerUMapping\":" << stagger.staggerUMapping
+                 << ",\"staggerUStrideShift\":" << stagger.staggerUStrideShift
+                 << "},\"launch\":{\"stream_k\":0,\"reduction\":\"none\",\"grid\":" << grid
+                 << ",\"active_cus\":" << activeCUs << ",\"timesteps\":" << timesteps
+                 << ",\"split_factor\":" << split << "}}}";
         }
         json << "]}\n";
         const auto requestPath = output + ".request.json";

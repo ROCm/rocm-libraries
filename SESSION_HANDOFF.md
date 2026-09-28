@@ -1,7 +1,7 @@
 # hipBLASLt JIT downstream handoff
 
-Updated September 24, 2026. This is the canonical handoff for the consolidated
-hipBLASLt/TensileLite JIT work. Development continues on the remote-backed branch
+Updated September 25, 2026. This is the canonical handoff for the consolidated
+hipBLASLt/TensileLite just-in-time (JIT) work. Development continues on the remote-backed branch
 below, with no associated pull request. Consolidation, closure of the upstream
 review stack, and the branch rename are complete.
 
@@ -29,11 +29,11 @@ git status --short
 git ls-remote --heads origin refs/heads/users/jolabega/downstream-hipblaslt-jit-develop
 ```
 
-The user's meaning of downstream is a branch with a remote copy and **no PR**,
+The user's meaning of downstream is a branch with a remote copy and **no pull request (PR)**,
 even though `origin` is the ROCm repository. Continue new requested work here;
-do not resume the former upstream review, split, CI-triage or publication tasks
+do not resume the former upstream review, split, continuous-integration (CI) triage or publication tasks
 from older handoffs. Reopening or replacing those PRs is not the default workflow.
-Keep the implementation and existing API/file names; the move downstream did
+Keep the implementation and existing application programming interface (API)/file names; the move downstream did
 not request a naming redesign. The old `downstream/hipblaslt-jit` branch was
 removed locally and remotely after the renamed branch was verified.
 
@@ -45,8 +45,9 @@ solution API and separate sample, prediction and benchmark integration, and
 the validation driver/workflow. Direct and generic APIs share one production
 runtime and algorithm registry. Direct `configPath` remains required;
 empty-config prediction belongs to the generic provider. Generation returns an
-algorithm for existing C/C++ GEMM execution; an ordinary matmul call does not
-itself initiate JIT compilation.
+algorithm for existing C/C++ general matrix multiplication (GEMM) execution.
+An ordinary matmul call does not initiate this new TensileLite/generic JIT path;
+the separate existing rocRoller integration can generate code at runtime.
 
 - [Roadmap and delivered scope](projects/hipblaslt/JIT_ROADMAP.md).
 - [Standalone builder](projects/hipblaslt/tensilelite/SINGLE_SOLUTION.md).
@@ -56,10 +57,14 @@ itself initiate JIT compilation.
   [sample 30](projects/hipblaslt/clients/samples/30_hipblaslt_generic_jit_gemm/README.md).
 - [Benchmark usage](projects/hipblaslt/clients/bench/README.jit.md) and
   [shared validation driver](.github/scripts/test_hipblaslt_jit.py).
-- [Preserved design notes](projects/hipblaslt/jit-design/README.md): Confluence
-  discussion draft, host/Python timing plans and producer-first KFA plan.
-  The Confluence draft has not been published; its review statements and the
-  plans' source line numbers describe historical snapshots.
+- [Design notes](projects/hipblaslt/jit-design/README.md): the September 25
+  Confluence-copyable discussion draft and KernelFromAnywhere (KFA) assessment
+  cover existing type reuse, common producer metadata, rocRoller integration, and
+  an optional zero-result fallback library. These are design updates, not source
+  implementation. Timing plans retain their historical source anchors.
+  The draft revision has not been published; the supplied Confluence URL is a
+  format/tone reference, with no destination page identified. Reading that
+  reference returned an access-denied response; its contents were not verified.
 
 ## Completed upstream transition
 
@@ -165,8 +170,10 @@ backup or a standalone clone. Its prerequisite commits are recorded by
 The agreed direct/generic/prediction implementation and branch transition are
 complete. No source fix or integration step from that delivery remains pending.
 Continue with the next requested downstream change. Broader AIHPBLAS-4801
-planning/cache protocols and modeled-input coverage remain future work in the
-roadmap; preserving a design note does not implement it.
+planning/cache protocols remain future work. The subsequent modeled-input change
+adds the complete applicable data-parallel Origami contract, with its capability
+inventory and unsupported transport cases documented in `projects/hipblaslt/JIT.md`.
+Broader candidate domains and unmodeled tuning knowledge remain separate work.
 
 The optional timing/progress design uses independent `HIPBLASLT_JIT_DEBUG`
 categories `timing` and `progress`, including `timing,progress`. Unset/empty adds

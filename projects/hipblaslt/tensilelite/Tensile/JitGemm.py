@@ -26,6 +26,7 @@ from Tensile import SingleSolution as SS
 
 _DEFAULTS_SOURCE = "Tensile/Common/GlobalParameters.py:defaultBenchmarkCommonParameters"
 _MAX_CANDIDATES = 192
+_MODELED_CONTRACT = "origami.gemm.dp.v1"
 
 
 def _require(condition, message):
@@ -35,6 +36,128 @@ def _require(condition, message):
 
 def _integer(value, minimum=0):
     return type(value) is int and value >= minimum
+
+
+def _validateModeled(request, candidate):
+    contract = request.get("modeled_contract")
+    if contract is None:
+        _require("modeled" not in candidate, "Modeled outputs require a modeled_contract")
+        return
+    _require(contract == _MODELED_CONTRACT, f"Unsupported modeled contract: {contract}")
+    modeled = candidate.get("modeled")
+    _require(isinstance(modeled, dict), "Missing Origami modeled outputs")
+    mt = modeled.get("macro_tile")
+    _require(isinstance(mt, list) and len(mt) == 3 and all(_integer(v, 1) for v in mt),
+             "Invalid modeled macro_tile")
+    for group, keys in (
+            ("workgroup_mapping", ("wgm", "wgmxcc", "wgmxccchunk", "wgmxccsplitk")),
+            ("stagger", ("staggerU", "staggerUMapping", "staggerUStrideShift")),
+            ("launch", ("stream_k", "grid", "active_cus", "timesteps", "split_factor"))):
+        values = modeled.get(group)
+        _require(isinstance(values, dict), f"Missing modeled {group}")
+        for key in keys:
+            value = values.get(key)
+            _require(type(value) is int and (value != 0 if key == "wgm" else value >= 0),
+                     f"Missing/invalid modeled {group}.{key}")
+    launch = modeled["launch"]
+    _require(modeled["stagger"]["staggerUStrideShift"] <= 31,
+             "Modeled staggerUStrideShift exceeds the runtime argument range")
+    problem = request["problem"]
+    grid = ((problem["m"] + mt[0] - 1) // mt[0]
+            * ((problem["n"] + mt[1] - 1) // mt[1]) * problem["batch"])
+    _require(launch.get("reduction") == "none" and launch["stream_k"] == 0
+             and launch["split_factor"] == 1 and launch["grid"] == grid,
+             "Modeled launch conflicts with the data-parallel contract")
+    parameters = candidate["parameters"]
+    for name in ("MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB"):
+        _require(name in parameters, f"Missing modeled parameter {name}; defaults are not predictions")
+    mi = parameters["MatrixInstruction"]
+    _require(isinstance(mi, list) and len(mi) == 9 and all(_integer(v, 1) for v in mi),
+             "Modeled MatrixInstruction must retain the nine-value recipe")
+    _require(parameters["DepthU"] == mt[2], "Modeled DepthU differs from macro_tile")
+
+
+def _modeledParameters(request, candidate):
+    """Translate model outputs into Tensile units without changing their meaning."""
+    if request.get("modeled_contract") is None:
+        return {}
+    from Tensile.Common.DataType import DataType
+
+    modeled = candidate["modeled"]
+    mapping, stagger = modeled["workgroup_mapping"], modeled["stagger"]
+    bpe = DataType(_problemType(request)["DataType"]).numBytes()
+    stride = modeled["macro_tile"][2] * bpe * (2 ** stagger["staggerUStrideShift"])
+    _require(float(stride).is_integer(), "Modeled stagger stride is not an integral byte count")
+    # Origami 0 and 1 both disable XCC remapping. Tensile's recipe uses 1 for
+    # identity. Group=0 implements whole-grid contiguous grouping, not chunking.
+    return {"StreamK": 0, "GlobalSplitU": 1,
+            "WorkGroupMapping": mapping["wgm"],
+            "WorkGroupMappingXCC": max(1, mapping["wgmxcc"]),
+            "WorkGroupMappingXCCGroup": 0,
+            "StaggerU": stagger["staggerU"],
+            "StaggerUMapping": stagger["staggerUMapping"],
+            "StaggerUStride": int(stride)}
+
+
+def _candidateParameters(request, candidate):
+    parameters = dict(candidate["parameters"])
+    for name, value in _modeledParameters(request, candidate).items():
+        _require(name not in parameters or parameters[name] == value,
+                 f"Candidate {name} conflicts with its modeled output")
+        parameters[name] = value
+    return parameters
+
+
+def _modeledTransportRejection(request, candidate):
+    if request.get("modeled_contract") is None:
+        return None
+    modeled = candidate["modeled"]
+    mapping, stagger = modeled["workgroup_mapping"], modeled["stagger"]
+    if mapping["wgmxccchunk"] or mapping["wgmxccsplitk"]:
+        return ("Data-parallel Tensile cannot represent Origami "
+                f"wgmxccchunk={mapping['wgmxccchunk']}, wgmxccsplitk={mapping['wgmxccsplitk']}; "
+                "these outputs require the Stream-K mapping ABI")
+    xcc = mapping["wgmxcc"]
+    if xcc > 1 and (xcc not in (2, 4, 8, 16, 32) or modeled["launch"]["grid"] % xcc):
+        return (f"Data-parallel Tensile cannot represent Origami wgmxcc={xcc} "
+                f"for grid={modeled['launch']['grid']} with whole-grid contiguous grouping")
+    if abs(mapping["wgm"]) >= 1024:
+        return f"Origami wgm={mapping['wgm']} exceeds the data-parallel runtime range"
+    if stagger["staggerUStrideShift"] > 31:
+        return "Origami staggerUStrideShift exceeds the runtime argument range"
+    return None
+
+
+def _modeledRejection(solution, request, candidate):
+    if request.get("modeled_contract") is None:
+        return None
+    from Tensile.Common import state
+
+    expected = {name: value for name, value in candidate["parameters"].items()
+                if name in ("MatrixInstruction", "DepthU", "NonTemporalA", "NonTemporalB")}
+    expected.update(_modeledParameters(request, candidate))
+    # Tensile normalizes the nine-value instruction into MI + wave topology.
+    mi = expected.pop("MatrixInstruction")
+    expected.update(MatrixInstruction=mi[:4], MIWaveTile=mi[5:7], MIWaveGroup=mi[7:9])
+    mt = candidate["modeled"]["macro_tile"]
+    expected.update(MacroTile0=mt[0], MacroTile1=mt[1])
+    # Byte stride is normalized when stagger is zero. Its semantic output is
+    # the loop-iteration shift, which must still equal Origami's prediction.
+    expected.pop("StaggerUStride")
+    expected["_staggerStrideShift"] = candidate["modeled"]["stagger"]["staggerUStrideShift"]
+    for name, value in expected.items():
+        actual = state(solution.get(name))
+        if actual != value:
+            return f"Tensile changed modeled {name}={value} to {actual}"
+    support = solution.get("InternalSupportParams", {})
+    if solution.get("SpaceFillingAlgo") or solution.get("ClusterDim", [1, 1]) != [1, 1]:
+        return "Tensile solution replaces the modeled workgroup mapping with another mapping algorithm"
+    if not support.get("SupportCustomWGM") or support.get("KernArgsVersion", 0) < 2:
+        return "Tensile solution cannot carry the modeled workgroup mapping at runtime"
+    if candidate["modeled"]["stagger"]["staggerU"] and (
+            not solution.get("BufferLoad") or not support.get("SupportCustomStaggerU")):
+        return "Tensile solution cannot carry the modeled stagger at runtime"
+    return None
 
 
 def _implementationParameters(request):
@@ -175,6 +298,7 @@ def _readRequest(path):
                  and 0 < latency < sys.float_info.max), "Invalid predicted latency")
         _require(isinstance(candidate.get("parameters"), dict) and candidate["parameters"],
                  "A JIT candidate requires supplied tuning parameters; no default recipe is selected")
+        _validateModeled(request, candidate)
         # Parameter names, types, values, and coupled constraints belong to
         # BenchmarkProcess/Solution, just as they do for an explicit YAML recipe.
 
@@ -199,7 +323,7 @@ def _configuration(request, candidate):
         final.append({"ActivationArgs": [[{"Enum": "none"}]]})
     # Fill omitted/Auto layout from the request, but preserve explicit predictor
     # choices. Selection rejects concrete conflicts before deriving a solution.
-    parameters = dict(candidate["parameters"])
+    parameters = _candidateParameters(request, candidate)
     for name, value in _implementationParameters(request).items():
         if parameters.get(name, "Auto") == "Auto":
             parameters[name] = value
@@ -243,7 +367,8 @@ def _select(request, configPath, derive):
     rejections = []
     candidates = request["candidates"]
     for candidate in candidates:
-        reason = _candidateDescriptorRejection(candidate, request)
+        reason = (_modeledTransportRejection(request, candidate)
+                  or _candidateDescriptorRejection(candidate, request))
         if reason:
             rejections.append({"candidate_id": candidate["id"], "reason": reason})
             continue
@@ -262,10 +387,11 @@ def _select(request, configPath, derive):
         # Any other exception is a request/toolchain/implementation failure. It
         # propagates without trying another candidate or emitting a kernel.
         problem = request["problem"]
-        reason = _descriptorRejection(solution, request) or problemSizeRejection(
+        reason = (_modeledRejection(solution, request, candidate)
+                  or _descriptorRejection(solution, request) or problemSizeRejection(
             solution, [problem[key] for key in ("m", "n", "batch", "k")],
             {tensor.upper(): problem[f"strides_{tensor}"] for tensor in "abcd"},
-            {tensor.upper(): problem.get(f"sizes_{tensor}") for tensor in "abcd"})
+            {tensor.upper(): problem.get(f"sizes_{tensor}") for tensor in "abcd"}))
         if reason:
             rejections.append({"candidate_id": candidate["id"], "reason": reason})
             continue
@@ -274,13 +400,14 @@ def _select(request, configPath, derive):
                          "# SPDX-License-Identifier: MIT\n")
             yaml.safe_dump(config, stream, sort_keys=False)
         implementation = _implementationParameters(request)
+        selected = _candidateParameters(request, candidate)
         defaults = {name: state(value) for name, value in defaultSolution.items()
-                    if name not in candidate["parameters"] and name not in implementation}
+                    if name not in selected and name not in implementation}
         resolved = {name: state(solution[name]) for name in defaultSolution if name in solution}
         for name in ("MacroTile0", "MacroTile1", "MIWaveTile", "MIWaveGroup", "NumThreads",
-                     "_GlobalAccumulation"):
-            resolved[name] = state(solution[name])
-        selected = copy.deepcopy(candidate["parameters"])
+                     "_GlobalAccumulation", "_staggerStrideShift"):
+            if name in solution:
+                resolved[name] = state(solution[name])
         latency = candidate.get("predicted_cycles")
         metadata = {
             "model": request["model"],
@@ -308,6 +435,9 @@ def _select(request, configPath, derive):
                        (f"{request['model']} candidate {candidate['id']}; no latency prediction; "
                         f"{len(rejections)} earlier candidates rejected by Tensile"),
         }
+        if request.get("modeled_contract"):
+            metadata["modeled_contract"] = request["modeled_contract"]
+            metadata["modeled"] = copy.deepcopy(candidate["modeled"])
         return configPath, solution, metadata
     details = "; ".join(f"{item['candidate_id']}: {item['reason']}" for item in rejections)
     raise SS.SingleSolutionConfigError("No JIT candidate supports the problem; all supplied recipes were rejected: " + details)
