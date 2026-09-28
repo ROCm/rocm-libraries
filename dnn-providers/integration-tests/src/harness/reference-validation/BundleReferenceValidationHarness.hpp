@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -18,6 +19,7 @@
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
@@ -56,21 +58,17 @@ public:
     {
     }
 
-    /// `bundleId` is "<suiteName>.<testName>", the registered GTest name minus the
-    /// reference suffix. It is what knownReferenceGaps() is keyed on, so it must
-    /// match the name printed for a failing test.
-    ///
-    /// Required rather than defaulted: an omitted id looks up as the empty string,
-    /// finds no gap entry, and silently puts the bundle on the ordinary path. That
-    /// is the safe direction, but it is still behaviour changing on an argument a
-    /// caller forgot. Callers with no id say so by passing "".
+    /// `expectedGap` is the knownReferenceGaps() entry this test asserts, or empty to
+    /// validate against golden data. It is decided at registration by
+    /// planGoldenDataValidation() and not looked up here, so the harness cannot
+    /// disagree with the plan about which bundles are gaps.
     void setBundle(std::shared_ptr<IntegrationTestBundle> bundle,
                    std::filesystem::path path,
-                   std::string bundleId)
+                   std::optional<KnownReferenceGap> expectedGap)
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
-        _bundleId = std::move(bundleId);
+        _expectedGap = expectedGap;
     }
 
     static const char* referenceLabel(ReferenceExecutorType type)
@@ -103,7 +101,7 @@ private:
     /// Where the comparison runs. AUTO means the host: golden data is loaded there.
     ValidatorDevice _validator;
     std::filesystem::path _bundlePath;
-    std::string _bundleId;
+    std::optional<KnownReferenceGap> _expectedGap;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 };
 

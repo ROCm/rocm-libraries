@@ -533,7 +533,8 @@ The pieces this harness is assembled from, and the one question each answers.
 | `SupportClaimReport` | The end-of-run summary and the coverage counters behind it. |
 | `BundleReferenceValidationHarness` | The other job entirely: our golden data vs a reference. No engine, no claims, no skip path. |
 | `BundleRegistration` | Discovery and eager load, shared by both binaries, then the engine-test registration entry point. |
-| `GoldenDataRegistration` | The golden-data binary's test registration. Its decisions live in `ReferenceLaneVerdict` (per-lane verdicts, the cross-lane `_Unvalidated` check) and `GoldenOutputProbe` (which bundles to load). |
+| `GoldenDataPlan` | What the golden-data binary registers for each bundle: each lane's verdict, and the cross-lane `_Unvalidated` check. Pure data, so the unit tests cover it. |
+| `GoldenDataRegistration` | Registers that plan's tests, the one place golden-data validation does. |
 
 ## See Also
 

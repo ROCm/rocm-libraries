@@ -59,52 +59,67 @@ struct LoadedBundle
     SupportClaimLocator claimLocator;
 };
 
-// A GTest test body that immediately fails with a stored diagnostic message.
-// Registered in place of a bundle that failed to load, so the failure surfaces
-// as a red test result — attributed to that bundle's suite/test name — instead
-// of only an ERROR log line that nothing in CI asserts on.
+// How a synthetic test ends. FAIL stands in for a bundle that failed to load, or
+// for golden data nothing validated; SKIP for a declared coverage gap.
+enum class SyntheticOutcome
+{
+    FAIL,
+    SKIP,
+};
+
+// A GTest test body that immediately fails or skips with a stored diagnostic
+// message. Registered in place of a real test, so the outcome surfaces as a test
+// result attributed to that bundle's suite/test name instead of only a log line
+// that nothing in CI asserts on.
 //
 // TestBody() is public (rather than the usual protected/private override) so
-// tests can invoke it directly to verify the failure message it records;
-// GTest's own dispatch through Test::Run() works the same regardless of
-// access, since that call happens from within the base class.
-class FailedBundleLoadTest : public ::testing::Test
+// tests can invoke it directly to verify what it records; GTest's own dispatch
+// through Test::Run() works the same regardless of access, since that call
+// happens from within the base class.
+class SyntheticBundleTest : public ::testing::Test
 {
 public:
-    explicit FailedBundleLoadTest(std::string message)
-        : _message(std::move(message))
+    SyntheticBundleTest(SyntheticOutcome outcome, std::string message)
+        : _outcome(outcome)
+        , _message(std::move(message))
     {
     }
 
     void TestBody() override
     {
+        if(_outcome == SyntheticOutcome::SKIP)
+        {
+            GTEST_SKIP() << _message;
+        }
         ADD_FAILURE() << _message;
     }
 
 private:
+    SyntheticOutcome _outcome;
     std::string _message;
 };
 
-// Registers a synthetic failing test for a bundle that failed to load. Keeps
-// registration of the other, unrelated bundles unaffected: this only replaces
-// what would otherwise be a silently-dropped test with a failing one under the
-// same suite/test name.
-inline void registerFailedBundleLoad(const std::string& suiteName,
-                                     const std::string& testName,
-                                     const std::string& message)
+// Registers a synthetic test under a bundle's suite/test name. Registration of
+// other, unrelated bundles is unaffected: this only replaces what would otherwise
+// be a silently-dropped test.
+inline void registerSyntheticBundleTest(const std::string& suiteName,
+                                        const std::string& testName,
+                                        SyntheticOutcome outcome,
+                                        const std::string& message)
 {
-    ::testing::RegisterTest(
-        suiteName.c_str(),
-        testName.c_str(),
-        nullptr,
-        nullptr,
-        __FILE__,
-        __LINE__,
-        [message]() -> ::testing::Test* { return new FailedBundleLoadTest(message); });
+    ::testing::RegisterTest(suiteName.c_str(),
+                            testName.c_str(),
+                            nullptr,
+                            nullptr,
+                            __FILE__,
+                            __LINE__,
+                            [outcome, message]() -> ::testing::Test* {
+                                return new SyntheticBundleTest(outcome, message);
+                            });
 }
 
 // A bundle that failed to load, carrying enough information to register a
-// FailedBundleLoadTest in its place: the suite/test name it would have used
+// failing SyntheticBundleTest in its place: the suite/test name it would have used
 // had it loaded, plus a diagnostic message describing why it didn't.
 struct FailedLoad
 {
@@ -308,7 +323,7 @@ inline std::optional<std::vector<LoadedBundle>>
     // fails to load because of the runtime-pass-by-value invariant (see
     // RuntimePassByValueInvariantError in IntegrationTestBundle.hpp) gets a
     // synthetic failing test registered in its place — see
-    // detail::registerFailedBundleLoad() — instead of just an ERROR log, so
+    // detail::registerSyntheticBundleTest() — instead of just an ERROR log, so
     // that specific contradiction turns the suite red rather than quietly
     // shrinking it. The same applies to golden blobs whose metadata is missing or
     // unparseable (LoadError::UNVALIDATABLE_GOLDEN_DATA): pulling the data must never
@@ -327,7 +342,8 @@ inline std::optional<std::vector<LoadedBundle>>
         if(auto* failed = std::get_if<FailedLoad>(&outcome))
         {
             HIPDNN_PLUGIN_LOG_ERROR(failed->message);
-            registerFailedBundleLoad(failed->suiteName, failed->testName, failed->message);
+            registerSyntheticBundleTest(
+                failed->suiteName, failed->testName, SyntheticOutcome::FAIL, failed->message);
             continue;
         }
         if(auto* skipped = std::get_if<SkippedLoad>(&outcome))

@@ -84,7 +84,7 @@ void BundleReferenceValidationHarness::TestBody()
 {
     // Checked before any allocation: a known-gap bundle never reaches execution, and
     // building a variant pack for a graph the reference will decline is wasted work.
-    if(const auto* gap = findKnownReferenceGap(_referenceType, _bundleId); gap != nullptr)
+    if(_expectedGap.has_value())
     {
         // Declining by throwing ReferenceCapabilityError is the same answer as
         // returning false, so both satisfy the entry. Any other exception is a
@@ -102,7 +102,8 @@ void BundleReferenceValidationHarness::TestBody()
         catch(const std::exception& e)
         {
             FAIL() << referenceLabel(_referenceType) << " errored checking applicability of "
-                   << _bundleId << " (listed in knownReferenceGaps() as: " << gap->reason
+                   << _expectedGap->bundleId
+                   << " (listed in knownReferenceGaps() as: " << _expectedGap->reason
                    << "): " << e.what() << "\n  bundle: " << _bundlePath;
         }
 
@@ -111,7 +112,8 @@ void BundleReferenceValidationHarness::TestBody()
         // real. Failing here is how the list gets deleted.
         ASSERT_FALSE(applicable)
             << referenceLabel(_referenceType) << " now reports this graph applicable, but "
-            << _bundleId << " is still listed in knownReferenceGaps() as: " << gap->reason
+            << _expectedGap->bundleId
+            << " is still listed in knownReferenceGaps() as: " << _expectedGap->reason
             << "\n  Remove that entry so the bundle is validated against its golden data."
             << "\n  bundle: " << _bundlePath;
         return;

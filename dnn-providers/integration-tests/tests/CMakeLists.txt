@@ -7,7 +7,7 @@
 # leaving them out makes "these unit tests never reach an engine or a device" a
 # link-time guarantee rather than a convention. GoldenDataRegistration.cpp is absent
 # for the same reason: it registers gtest tests and reaches the shared reference
-# executors. Its decisions live in GoldenOutputProbe.cpp and ReferenceLaneVerdict.cpp,
+# executors. Its decisions live in GoldenDataPlan.cpp and GoldenOutputProbe.cpp,
 # which are linked and tested here.
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
@@ -22,8 +22,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/VariantPackBuilder.cpp
     ../src/harness/input-init/FillInputs.cpp
     ../src/harness/reference-validation/BundleReferenceValidationHarness.cpp
+    ../src/harness/reference-validation/GoldenDataPlan.cpp
     ../src/harness/reference-validation/GoldenOutputProbe.cpp
-    ../src/harness/reference-validation/ReferenceLaneVerdict.cpp
     ../src/harness/reference-validation/ReferenceOpCoverage.cpp
     TestBundleMetadata.cpp
     TestSupportClaims.cpp
@@ -74,7 +74,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestClaimModeResolution.cpp
     TestUnpinnedRunEnforcement.cpp
     TestBundleReferenceValidationHarness.cpp
-    TestGoldenDataRegistration.cpp
+    TestGoldenDataPlan.cpp
     TestGoldenOutputProbe.cpp
     TestProductionPolicy.cpp
     TestGraphSession.cpp

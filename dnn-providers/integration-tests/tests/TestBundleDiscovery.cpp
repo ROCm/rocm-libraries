@@ -1108,11 +1108,32 @@ TEST_F(TestBundleDiscoveryFixture, ClassifyBundleIsolatesFailureAmongMultipleDis
 // "the failing test GTest actually runs really fails": constructs the
 // synthetic test body directly and confirms it records exactly the stored
 // message as a non-fatal failure, the same way GTest would run it once
-// registerFailedBundleLoad() has registered it.
+// registerSyntheticBundleTest() has registered it.
 TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
 {
-    detail::FailedBundleLoadTest test("boom");
+    detail::SyntheticBundleTest test(detail::SyntheticOutcome::FAIL, "boom");
     EXPECT_NONFATAL_FAILURE(test.TestBody(), "boom");
+}
+
+// The other outcome stands in for a declared coverage gap, such as a bundle too
+// costly for the one lane that runs. It must skip naming the gap: a failure would
+// turn every device-less run red for a deliberate trade, and a pass would claim a
+// validation that never happened.
+TEST_F(TestBundleDiscoveryFixture, SkippingSyntheticTestSkipsWithItsMessage)
+{
+    detail::SyntheticBundleTest test(detail::SyntheticOutcome::SKIP, "nothing validated this");
+
+    ::testing::TestPartResultArray results;
+    {
+        const ::testing::ScopedFakeTestPartResultReporter reporter(
+            ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);
+        test.TestBody();
+    }
+
+    ASSERT_EQ(results.size(), 1);
+    EXPECT_TRUE(results.GetTestPartResult(0).skipped());
+    EXPECT_NE(std::string(results.GetTestPartResult(0).message()).find("nothing validated this"),
+              std::string::npos);
 }
 
 // NOLINTEND(readability-identifier-naming)

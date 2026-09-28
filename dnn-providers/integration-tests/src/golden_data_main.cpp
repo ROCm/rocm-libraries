@@ -18,7 +18,6 @@
 #include <argparse.hpp>
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -149,61 +148,23 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // The CPU lane's cost exclusion is justified by the GPU lane covering the
-        // bundles it drops, so it has to know whether that lane really runs.
+        // bundles it drops, so the plan has to know whether that lane really runs.
         // --reference already answers half of it; the other half is the device,
         // because the GPU harness SKIP_IF_NO_DEVICES()s in SetUp() and a registered
         // suite that skips covers nothing. Short-circuited so --reference cpu does
         // not probe for a device.
-        const bool gpuLaneWillRun
-            = runGpu && !hipdnn_integration_tests::bundle::noHipDevicesAvailable();
+        hipdnn_integration_tests::bundle::GoldenDataSession session;
+        session.cpuSelected = runCpu;
+        session.gpuSelected = runGpu;
+        session.gpuHasDevice = runGpu && !hipdnn_integration_tests::bundle::noHipDevicesAvailable();
 
-        // Discovered and loaded once, then handed to each lane. The tree is ~5700
-        // bundles of which ~50 carry golden data, so this is the bulk of the
-        // binary's startup; doing it per lane paid it twice and registered every
-        // failing-load test twice under the same name.
-        using hipdnn_integration_tests::bundle::ReferenceLaneVerdict;
-        std::vector<ReferenceLaneVerdict> cpuVerdicts;
-        std::vector<ReferenceLaneVerdict> gpuVerdicts;
         const auto bundles = hipdnn_integration_tests::bundle::loadGoldenDataBundles();
         if(bundles.has_value())
         {
-            if(runCpu)
-            {
-                cpuVerdicts = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                    *bundles, hipdnn_integration_tests::ReferenceExecutorType::CPU, gpuLaneWillRun);
-            }
-            if(runGpu)
-            {
-                gpuVerdicts = hipdnn_integration_tests::bundle::registerGoldenDataValidationTests(
-                    *bundles, hipdnn_integration_tests::ReferenceExecutorType::GPU, gpuLaneWillRun);
-            }
-            // A golden-bearing bundle that no lane put a test under -- outside both
-            // op sets, or dropped on cost by the CPU lane for a GPU lane that does
-            // not implement it -- would otherwise show up only in the counters
-            // printed above. With a single --reference the other lane's bundles are
-            // out of scope by the caller's choice, so there is nothing to cross-check.
-            if(runCpu && runGpu)
-            {
-                hipdnn_integration_tests::bundle::registerUnvalidatedGoldenDataFailures(
-                    *bundles, cpuVerdicts, gpuVerdicts);
-            }
-        }
-
-        // Per-reference, not just per-run. A lane that registered nothing while its
-        // sibling registered plenty is invisible in the binary-wide total below.
-        // Every bundle it skipped is either covered by the sibling or already a
-        // failing <bundle>_Unvalidated test; this line is the human-readable
-        // counterpart, printed before the run so it frames the results that follow.
-        const auto cpuRegistered
-            = std::count(cpuVerdicts.begin(), cpuVerdicts.end(), ReferenceLaneVerdict::REGISTERED);
-        const auto gpuRegistered
-            = std::count(gpuVerdicts.begin(), gpuVerdicts.end(), ReferenceLaneVerdict::REGISTERED);
-        if(runCpu && runGpu && (cpuRegistered == 0) != (gpuRegistered == 0))
-        {
-            std::cerr << "NOTE: only one reference lane registered any golden-data validation "
-                         "tests (CpuRef: "
-                      << cpuRegistered << ", GpuRef: " << gpuRegistered
-                      << "). The empty lane verified nothing this run.\n";
+            const auto plan
+                = hipdnn_integration_tests::bundle::planGoldenDataValidation(*bundles, session);
+            hipdnn_integration_tests::bundle::printPlanSummary(plan, std::cerr);
+            hipdnn_integration_tests::bundle::registerGoldenDataPlan(plan, *bundles);
         }
 
         const int result = RUN_ALL_TESTS();

@@ -200,9 +200,9 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
+    src/harness/reference-validation/GoldenDataPlan.cpp
     src/harness/reference-validation/GoldenDataRegistration.cpp
     src/harness/reference-validation/GoldenOutputProbe.cpp
-    src/harness/reference-validation/ReferenceLaneVerdict.cpp
     src/harness/reference-validation/ReferenceOpCoverage.cpp
 )
 
