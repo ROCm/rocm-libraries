@@ -4983,12 +4983,6 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
     }
 }
 
-rocfft_status rocfft_plan_allocate(rocfft_plan* plan)
-{
-    *plan = new rocfft_plan_t;
-    return rocfft_status_success;
-}
-
 rocfft_status rocfft_plan_create(rocfft_plan*                  plan,
                                  const rocfft_result_placement placement,
                                  const rocfft_transform_type   transform_type,
