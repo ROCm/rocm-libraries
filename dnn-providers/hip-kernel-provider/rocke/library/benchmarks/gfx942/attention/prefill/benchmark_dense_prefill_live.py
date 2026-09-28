@@ -18,7 +18,7 @@ the perf harness for the optimization phases.
 IT MEASURES THE SHIPPED KERNEL
 ------------------------------
 The spec under test is **resolved through the dispatch factory**
-(``dispatch.attention.gfx942.dense_spec_for_request``), not hand-built from CLI
+(``dispatch.attention.gfx942_dense.dense_spec_for_request``), not hand-built from CLI
 defaults. That is the difference between a gate and a decoration: the tuning that
 ships (per-config ``waves_per_eu``, the 304-CTA persistent grid and its auto-on
 rule, the ragged path) lives in dispatch, so a hardcoded CLI default here would
@@ -400,7 +400,7 @@ def main() -> int:
         f"warmup={args.warmup} iters={args.iterations}"
     )
     print(
-        "spec source: dispatch.attention.gfx942.dense_spec_for_request"
+        "spec source: dispatch.attention.gfx942_dense.dense_spec_for_request"
         + (
             f"  (+ explicit overrides: {overrides})"
             if overrides

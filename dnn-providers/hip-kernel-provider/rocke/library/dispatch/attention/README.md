@@ -2,7 +2,8 @@
 
 Registration procedure and shared registry mechanics live in
 [`../AGENTS.md`](../AGENTS.md). This page only covers what is attention-specific:
-route versus execution, capability versus support, and the production boundary.
+route versus execution, how the tuning knob space is built, capability versus
+support, and the production boundary.
 
 This package selects attention implementations and exposes a uniform execution
 contract for benchmarks and graph integrations. It deliberately separates:
@@ -95,21 +96,193 @@ for result in dispatch_attention_all(request):
     binding.launch(stream=stream)
 ```
 
-Each tuning candidate has two sweep levels. `sweep_level="production"` (the
-default) walks the curated stacks exhaustively. Those stacks leave off the
-dead-end knobs (`use_q_reread` on gfx950, `use_conflict_free_v` on gfx942).
-Dead ends are not `KNOWN_WRONG_KNOBS`. `sweep_level="full"` samples every other
-kernel knob, dead ends included; that stream is millions of specs per shape on
-the transposed paths, so pass `tuning_sample=n, seed=s` to draw `n` random
-legal specs per candidate.
-`candidate_prefix` / `tuning_id_prefix` narrow either walk. Production
-`algorithm="auto"` selection does not see these candidates.
+Each executable candidate expands into many concrete specs through its
+`sweep_space` / `sample_space`; how that space is built is the next section.
+Production `algorithm="auto"` selection never sees the opt-in candidates.
 
-Dense candidates also expand `waves_per_eu`: production walks the shipped
-policy plus WPE 2 and 4, while full walks WPE 1 through 4. Set
-`AttentionRequest.dense_waves_per_eu` (or the combo sweep CLI's
-`--dense-waves-per-eu`) to 1..8 to pin one value; 0 keeps policy selection for
-normal dispatch and enables sweep expansion.
+## Tuning knob space
+
+A swept configuration is built in four layers. A registered candidate fixes a
+coarse geometry, `select_spec` fills in the problem, a walk over the arch's
+knob axes varies the tuning fields, and a `waves_per_eu` loop runs inside each
+knob set:
+
+```text
+candidate            one geometry variant, fixed at registration
+ └─ base spec        select_spec(request): problem semantics + variant geometry
+     └─ knob set     one walk step over the arch's KnobAxis list
+         └─ WPE      waves_per_eu loop
+             = one concrete spec: validated, never a duplicate, stable identity
+```
+
+Everything below lives in `tuning_common.py` except the geometry catalogs,
+which live in the arch modules.
+
+### Variants: what a candidate fixes
+
+| Family | Registered candidates | Module | Fixed per candidate |
+|---|---|---|---|
+| Unified tiled tuning | `AttentionGeometryVariant` catalog: 109 on gfx950, 75 on gfx942 | `gfx{942,950}_unified.py` | path, codepath, builder, tile policy, warps, rows per warp, segments, compile backend |
+| gfx950 dense | six `Gfx950DenseVariant`s (tile x persist x wide DMA) | `gfx950_dense.py` | `block_m` / `block_n`, `persistent`, `wide_lds_dma` |
+| gfx942 dense | one candidate | `gfx942_dense.py` | nothing; its geometry is swept |
+
+Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
+`attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the
+`attention_` prefix). A codepath also fixes base knobs through
+`_CODEPATH_KNOBS`; `transposed32`, for instance, always sets `use_mfma_32x32`
+and `use_transposed_qk_32x32`. The gfx942 `gfx942_4warp_gqa` builder reads no
+tuning knobs, so its variant has no axes.
+
+The base spec is what the candidate would launch unswept. Unified tuning
+candidates build it with `tuning_specs.py` from the request and the variant.
+Dense candidates use their production factory (`_dense_spec`), so the first
+swept spec is always the shipped one.
+
+### Axes: the knob space as data
+
+`KnobAxis(name, choices, enabler)` is one tuning decision. Each choice is a
+tuple of `(field, value)` pairs, and `choices[0]` is always `()`, meaning
+"leave the base value". Axes are built with a few helpers:
+
+- `_flag(name)`: off or on.
+- `_values(name, default, values)`: every value except the default.
+- `_gated(gate, {sub: values})`: gate off, or on with every sub-knob
+  combination. Sub-knobs are read only while the gate is on, so they never
+  vary while it is off.
+- `_choices_axis(name, values)`: every value, the base's included, for axes
+  whose base comes from the request or a policy (dense geometry).
+- Combined axes, when knobs are mutually exclusive: dense `pv_schedule` puts
+  IGLP and the manual PV fence / sched_group template in one decision.
+
+`_AXES[(arch, path)]` holds the list for `2d`, `3d` and `dense` on each arch.
+The unified test `test_every_kernel_tuning_field_is_swept` and the dense
+field-classification tests fail when a kernel spec gains a field that no axis
+or exemption covers.
+
+Order matters. Axes run prerequisites-first, so any "X requires Y" relation
+points at an earlier axis. **Enabler** axes lead the list: they are knobs that
+can turn an otherwise illegal setting legal. Examples are the gfx950 2D
+LDS-saving knobs, gfx942 direct-Q plus conflict-free V store (needed by
+`num_warps=8, block_m_per_warp=32`), and the gfx942 dense conflict-free V and
+K pads (which let an over-budget tile fit).
+
+Some knobs are held out:
+
+- `KNOWN_WRONG_KNOBS` produced wrong output in a reference sweep and are never
+  offered.
+- `DEAD_END_KNOBS` are correct but documented as slower. The unified
+  production stacks leave them off; the full level still samples them.
+- `DENSE_UNTUNABLE_KNOBS` accept a single value (`lds_num_buffers`) or are
+  never read by that arch's body (gfx942 `lazy_rescale`).
+
+### Validity and pruning
+
+A walk asks `is_valid(knobs)` for each prefix, with undecided axes at their
+base values. The checks run in this order:
+
+- **Unified:** `_policy_conflict` rejects exclusive knobs and knobs that only
+  exist on another codepath (softmax interleave off the transposed body,
+  `sched_barrier` off the 16x16 loop). Then `tuning_specs.py` builds the kernel
+  spec, so the spec's `__post_init__` and the kernel's `supports_tiled_*` run.
+  Last, on gfx950 2D, `_supports_tuning_spec` checks KQ-pad eligibility and a
+  static LDS model against the arch's LDS capacity.
+- **Dense:** `_dense_knob_spec` applies the knobs to the base spec, so the
+  dataclass validators run. It then drops any setting that would compile to
+  the same IR as another under a new symbol:
+  - a choice equal to the base value;
+  - a changed `num_persistent` on a non-persistent spec;
+  - an explicit value equal to what its `resolved_*` policy picks;
+  - the persistent-only knobs on a non-persistent spec, and `interleave` off
+    the causal `qb_major` decode;
+  - the arch's own rules in `_DENSE_ARCH[arch].inert`, such as a gfx950 fence
+    mask while the fence is off or a gfx942 V pad without the conflict-free V
+    store.
+
+  Finally the kernel's `supports_attention_dense` runs.
+
+Because every relation points at an earlier axis, a failing prefix cannot be
+repaired later and its whole subtree is skipped. The one exception: while
+enabler axes are undecided, an invalid prefix is kept.
+
+Two more filters apply to dense before walking. `_DENSE_ARCH[arch].scope`
+drops axes the base spec's problem or variant never reads, such as K/V row pads
+at head size 64. `dense_pinned_axes(request)` drops axes the request pins:
+`dense_persistent` or `dense_persist_decode` set to anything but `auto`.
+
+### Walks: production, full, sample
+
+| Level | Unified tuning | Dense |
+|---|---|---|
+| `production` | Hand-curated `_PRODUCTION_STACKS` per (arch, codepath), on top of the codepath base knobs, plus two gfx950 micro-axes (padded K on the `ksb_qdreg` stack, softmax interleave on three transposed stacks). WPE {policy, 2, 4} for 2D, {policy, 1–4} for 3D. | The base spec, then each applicable axis choice on its own (`_one_knob_at_a_time`). WPE {policy, 2, 4}. |
+| `full` | `_iter_knob_sets`: depth-first product of every axis. WPE {policy, 1–4}. | The same depth-first walk. WPE {policy, 1–4}. |
+| `full` + `tuning_sample=n` | `_random_knob_set`: one random walk down the pruned tree per draw, uniform at each axis, seeded by `"{seed}:{candidate}"`; `n` distinct specs, stopping after `20n` draws. | The same sampler. |
+
+The full product runs to millions of specs per shape on the transposed unified
+paths and on dense, which is why `full` is normally sampled. The streams are
+lazy, so a walk is never materialized unless the caller asks for it.
+
+The level reaches the candidates through `configure_sweep(level,
+tuning_sample)`. It sets a context variable that `sweep_space` reads, and
+returns the sample count, which is always 0 at `production`.
+`CandidateRegistry.iter_combos` calls `sample_space(req, n, seed)` when that
+count is positive and `sweep_space(req)` otherwise.
+
+Pins narrow a walk to one point on an axis:
+
+- `AttentionRequest.dense_waves_per_eu=1..8` pins dense WPE.
+- `dense_persistent` / `dense_persist_decode` pin those dense axes.
+- `algorithm` + `spec_id` pin a candidate.
+- `attention_tuning_id` makes a unified tuning candidate's `select_spec`
+  return exactly that spec. It searches the production specs first, then the
+  full space, so a sampled id still replays.
+
+With `attention_tuning_id="auto"`, unified tuning candidates select their first
+production spec. Dense candidates always select the base spec.
+
+### Identity and deduplication
+
+Unified tuning specs carry `tuning_id`, a readable geometry/WPE prefix plus a
+hash of the complete spec (see "Concrete tuning specs" below). Dense specs are
+identified by `kernel_name()`, which tags every knob away from its default:
+gfx950 folds the codegen knobs into one `cg<hash>` token, and gfx942 appends a
+tag per knob. Samplers deduplicate by these identities. The benchmark lanes
+add a backstop: the combo sweep and dense table sweep hash the lowered IR with
+the kernel name blanked, and record a match as `duplicate` instead of running
+it. Their rows also carry `knobs`, the non-default dense fields in readable
+form.
+
+### From the knob space to the benchmarks
+
+```text
+candidate.sweep_space / sample_space
+ └─ CandidateRegistry.iter_combos            (probes opt-in candidates)
+     ├─ iter_registered_attention_combos / dispatch_attention_all
+     │    └─ attention_combo_sweep.py, dense_prefill_table_sweep.py,
+     │       decode_table_sweep.py           (dense + unified tuning)
+     └─ attention_sweep_space                (unified 2D/3D specs only)
+          └─ attention_sweep.run_sweep       (--variants sweep in the live
+                                              prefill benchmarks)
+```
+
+### Extending the space
+
+- **New unified knob:** add a defaulted field to the tiled kernel spec. Add
+  its `KnobAxis` to the arch's 2D or 3D list after its prerequisites; make it
+  an enabler only if it can make a geometry legal. Add a `_policy_conflict`
+  entry if it is inert on some codepath, and add it to a production stack if
+  it should be timed by default.
+- **New dense knob:** add a defaulted, name-tagged field to the dense spec.
+  Add its axis to `_GFX9xx_DENSE_AXES`. If it only applies to some problems,
+  add a scope rule in `_DENSE_ARCH`; if it depends on another knob, add an
+  inert rule there. List it in `DENSE_UNTUNABLE_KNOBS` instead if it has
+  nothing to sweep.
+- **New geometry:** add an `AttentionGeometryVariant` to the arch's unified
+  catalog, or a `Gfx950DenseVariant` to the gfx950 dense tuple. gfx942 dense
+  geometry values live in `_GFX942_BLOCK_M` / `_GFX942_BLOCK_N`.
+
+In every case the coverage tests in
+`tests/dispatch/attention/test_tuning_space.py` fail until the new field sits
+on an axis or in an exemption.
 
 ## Capability versus support
 
@@ -145,14 +318,6 @@ only problem semantics such as dtype, masks, heads, and cache addressing.
 It does **not** call production selection heuristics or silently resize an
 invalid point. Concrete kernel validators remain the final structural gate;
 dispatcher support in `tuning_common.py` applies tuning-policy exclusions.
-
-The knob space is data: one `KnobAxis` per kernel tuning field in
-`tuning_common.py`, ordered so each knob's prerequisites come first. A
-depth-first walk asks the kernel's own `__post_init__` validator about each
-prefix and prunes the ones that fail. Sub-knobs such as `sched_barrier_mask`
-only vary while their gate is on, and knobs documented as inert off the
-transposed path are excluded, so the walk does not emit duplicate kernels.
-`KNOWN_WRONG_KNOBS` holds out knobs with a failed reference sweep.
 
 The resulting `AttentionTuningSpec` is also the runtime's launch contract:
 `run_unified_attention_torch(tuning_spec=...)` compiles `spec.build()` under
@@ -204,12 +369,15 @@ from the gfx942 spec rather than from a free field.
 - `__init__.py` — registry assembly and public entry points.
 - `common.py` — arch-neutral request/spec types and shared gates.
 - `generic.py` — candidates that cover more than one architecture.
-- `gfx942.py`, `gfx1250.py` — architecture-owned candidates.
+- `gfx1250.py` — architecture-owned candidates.
+- `gfx942_dense.py` — the gfx942 dense-kernel candidate (geometry swept by its
+  knob space).
+- `gfx942_unified.py` — gfx942 unified-kernel candidates: the fp16 `dense_pipe`
+  flash path and the finite tuning geometry catalog.
 - `gfx950_dense.py` — gfx950 dense-kernel candidates (frozen tile × persist ×
   wide-DMA variants and the dense ranker).
 - `gfx950_unified.py` — gfx950 unified-kernel candidates: the D256 prefill fast
   path and the finite tuning geometry catalog.
-- `gfx942_tuning.py` — gfx942 finite geometry catalog.
 - `tuning_common.py` — candidate construction, the per-arch knob axes, the
   pruned depth-first enumeration and random sampler, support filtering,
   stable IDs, and sweep expansion.

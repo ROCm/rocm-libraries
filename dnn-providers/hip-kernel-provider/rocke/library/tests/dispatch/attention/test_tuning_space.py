@@ -17,9 +17,13 @@ from dispatch.attention import (
     dispatch_attention_all,
     iter_registered_attention_combos,
 )
+from dispatch.attention.gfx942_dense import (
+    dense_spec_for_request as gfx942_dense_spec,
+)
 from dispatch.attention.gfx950_dense import dense_spec_for_request
 from dispatch.attention.tuning_common import (
     _CODEPATH_KNOBS,
+    DENSE_BASE_RELATIVE_KNOBS,
     DENSE_LOOP_FIELDS,
     DENSE_PROBLEM_FIELDS,
     DENSE_UNTUNABLE_KNOBS,
@@ -34,6 +38,10 @@ from dispatch.attention.tuning_common import (
 )
 from dispatch.attention.tuning_specs import _SEMANTIC_FIELDS
 from kernels.common.attention_unified import _tiled_2d_impl, _tiled_3d_impl
+from kernels.gfx942.attention_dense import (
+    Gfx942AttentionDenseSpec,
+    supports_attention_dense as supports_gfx942,
+)
 from kernels.gfx942.attention_tiled_2d import UnifiedAttention2DTiledSpec as Gfx942Spec
 from kernels.gfx950.attention_dense import (
     Gfx950AttentionDenseSpec,
@@ -405,7 +413,7 @@ class TestTuningSpace(unittest.TestCase):
             for c in attention_execution_candidates()
             if c.algorithm == "unified_tuning"
         ]
-        from dispatch.attention.gfx942_tuning import GFX942_TUNING_VARIANTS
+        from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
         from dispatch.attention.gfx950_unified import GFX950_TUNING_VARIANTS
 
         expected = len(GFX942_TUNING_VARIANTS) + len(GFX950_TUNING_VARIANTS)
@@ -494,12 +502,15 @@ def _dense_request(**kw):
 
 
 def _dense_combos(req, level="production", limit=0, **kw):
-    """Registered gfx950 dense ``(candidate, spec)`` pairs, through the same
-    entry point the combo-sweep bench uses."""
+    """Registered dense ``(candidate, spec)`` pairs for ``req.arch``, through the
+    same entry point the combo-sweep bench uses."""
     combos = (
         (candidate, spec)
         for candidate, spec in iter_registered_attention_combos(
-            req, candidate_prefix="attention_gfx950_dense", sweep_level=level, **kw
+            req,
+            candidate_prefix=f"attention_{req.arch}_dense",
+            sweep_level=level,
+            **kw,
         )
         if candidate.algorithm == "attention_dense"
     )
@@ -521,30 +532,55 @@ def _changed_fields(spec, base):
     }
 
 
-def _dense_swept_fields():
+def _dense_swept_fields(arch="gfx950"):
     return {
         name
-        for axis in tuning_axes("gfx950", "dense")
+        for axis in tuning_axes(arch, "dense")
         for choice in axis.choices
         for name, _value in choice
     }
+
+
+def _assert_dense_fields_classified(case, arch, spec_type):
+    fields = {f.name for f in dataclasses.fields(spec_type)}
+    swept = _dense_swept_fields(arch)
+    fixed = (
+        DENSE_PROBLEM_FIELDS
+        | DENSE_VARIANT_FIELDS[arch]
+        | DENSE_LOOP_FIELDS
+        | DENSE_UNTUNABLE_KNOBS[arch]
+    )
+    case.assertFalse(fields - fixed - swept, sorted(fields - fixed - swept))
+    case.assertFalse((swept | fixed) - fields, sorted((swept | fixed) - fields))
+    case.assertFalse(swept & fixed, sorted(swept & fixed))
+
+
+def _assert_axes_never_restate_defaults(case, arch, spec_type):
+    defaults = {f.name: f.default for f in dataclasses.fields(spec_type)}
+    for axis in tuning_axes(arch, "dense"):
+        case.assertEqual(axis.choices[0], (), axis.name)
+        for choice in axis.choices[1:]:
+            for name, value in choice:
+                if name in DENSE_BASE_RELATIVE_KNOBS:
+                    continue  # relative to the base spec, pruned when equal
+                with case.subTest(axis=axis.name, knob=name, value=value):
+                    case.assertNotEqual(value, defaults[name])
+
+
+def _production_changed_fields(requests):
+    changed = set()
+    for req in requests:
+        for _candidate, specs in _by_candidate(_dense_combos(req)).values():
+            for spec in specs[1:]:
+                changed |= _changed_fields(spec, specs[0])
+    return changed
 
 
 class TestGfx950DenseTuningSpace(unittest.TestCase):
     """The gfx950 dense kernel's knobs on the shared ``KnobAxis`` machinery."""
 
     def test_every_dense_spec_field_is_classified(self):
-        fields = {f.name for f in dataclasses.fields(Gfx950AttentionDenseSpec)}
-        swept = _dense_swept_fields()
-        fixed = (
-            DENSE_PROBLEM_FIELDS
-            | DENSE_VARIANT_FIELDS
-            | DENSE_LOOP_FIELDS
-            | DENSE_UNTUNABLE_KNOBS["gfx950"]
-        )
-        self.assertFalse(fields - fixed - swept, sorted(fields - fixed - swept))
-        self.assertFalse((swept | fixed) - fields, sorted((swept | fixed) - fields))
-        self.assertFalse(swept & fixed, sorted(swept & fixed))
+        _assert_dense_fields_classified(self, "gfx950", Gfx950AttentionDenseSpec)
 
     def test_untunable_knobs_accept_only_their_default(self):
         defaults = {
@@ -564,24 +600,12 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
                     Gfx950AttentionDenseSpec(**shape, **{name: defaults[name] + 1})
 
     def test_axis_choices_never_restate_a_field_default(self):
-        defaults = {
-            f.name: f.default for f in dataclasses.fields(Gfx950AttentionDenseSpec)
-        }
-        for axis in tuning_axes("gfx950", "dense"):
-            self.assertEqual(axis.choices[0], (), axis.name)
-            for choice in axis.choices[1:]:
-                for name, value in choice:
-                    if name == "num_persistent":
-                        continue  # symbolic policy, resolved per problem
-                    with self.subTest(axis=axis.name, knob=name, value=value):
-                        self.assertNotEqual(value, defaults[name])
+        _assert_axes_never_restate_defaults(self, "gfx950", Gfx950AttentionDenseSpec)
 
     def test_production_varies_every_declared_knob(self):
-        changed = set()
-        for req in (_dense_request(), _dense_request(hdim_q=64, hdim_v=64)):
-            for _candidate, specs in _by_candidate(_dense_combos(req)).values():
-                for spec in specs[1:]:
-                    changed |= _changed_fields(spec, specs[0])
+        changed = _production_changed_fields(
+            (_dense_request(), _dense_request(hdim_q=64, hdim_v=64))
+        )
         missing = _dense_swept_fields() - changed
         self.assertFalse(missing, sorted(missing))
 
@@ -678,6 +702,132 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
         specs = [s for _c, s in _dense_combos(_dense_request(dense_waves_per_eu=3))]
         self.assertGreater(len(specs), 6)
         self.assertEqual({s.waves_per_eu for s in specs}, {3})
+
+
+def _gfx942_request(**kw):
+    base = dict(arch="gfx942", dtype="fp16")
+    base.update(kw)
+    return _dense_request(**base)
+
+
+def _gfx942_specs(req, level="production", limit=0, **kw):
+    combos = _dense_combos(req, level=level, limit=limit, **kw)
+    return [spec for _candidate, spec in combos]
+
+
+class TestGfx942DenseTuningSpace(unittest.TestCase):
+    """The gfx942 dense kernel's knobs on the same machinery. gfx942 registers
+    one dense candidate, so its geometry is swept rather than fixed by a variant."""
+
+    def test_every_dense_spec_field_is_classified(self):
+        _assert_dense_fields_classified(self, "gfx942", Gfx942AttentionDenseSpec)
+
+    def test_axis_choices_never_restate_a_field_default(self):
+        _assert_axes_never_restate_defaults(self, "gfx942", Gfx942AttentionDenseSpec)
+
+    def test_untunable_knobs_have_nothing_to_sweep(self):
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx942.attention_dense import build_attention_dense
+
+        base = gfx942_dense_spec(_gfx942_request())
+        ok, why = supports_gfx942(replace(base, lds_num_buffers=2), arch="gfx942")
+        self.assertFalse(ok)
+        self.assertIn("lds_num_buffers", why)
+
+        def ir(spec):
+            kernel = build_attention_dense(spec, arch="gfx942")
+            return lower_kernel_to_llvm(kernel, arch="gfx942").replace(
+                kernel.name, "@k"
+            )
+
+        flipped = replace(base, lazy_rescale=not base.lazy_rescale)
+        self.assertEqual(ir(flipped), ir(base), "lazy_rescale reached gfx942 IR")
+
+    def test_production_varies_every_declared_knob(self):
+        changed = _production_changed_fields(
+            (
+                _gfx942_request(),
+                _gfx942_request(seqlen_q=8192, seqlen_k=8192),
+                _gfx942_request(dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1),
+            )
+        )
+        missing = _dense_swept_fields("gfx942") - changed
+        self.assertFalse(missing, sorted(missing))
+
+    def test_production_specs_are_legal_distinct_and_start_at_the_shipped_spec(self):
+        for req in (_gfx942_request(), _gfx942_request(seqlen_q=8192, seqlen_k=8192)):
+            specs = _gfx942_specs(req)
+            with self.subTest(seqlen=req.seqlen_q):
+                self.assertEqual(specs[0], gfx942_dense_spec(req))
+                names = [spec.kernel_name() for spec in specs]
+                self.assertEqual(len(names), len(set(names)))
+                for spec in specs:
+                    ok, why = supports_gfx942(spec, arch="gfx942")
+                    self.assertTrue(ok, (spec.kernel_name(), why))
+                self.assertEqual({s.persistent for s in specs}, {True, False})
+                self.assertGreater(len({s.block_m for s in specs}), 1)
+
+    def test_request_pins_hold_across_the_knob_space(self):
+        grid = _gfx942_specs(_gfx942_request(dense_persistent="off"))
+        self.assertEqual({s.persistent for s in grid}, {False})
+        decoded = _gfx942_specs(
+            _gfx942_request(
+                seqlen_q=8192,
+                seqlen_k=8192,
+                dense_persistent="on",
+                dense_persist_decode="hkv_major",
+            )
+        )
+        self.assertEqual({s.persistent for s in decoded}, {True})
+        self.assertEqual({s.persist_decode for s in decoded}, {"hkv_major"})
+        pinned_wpe = _gfx942_specs(_gfx942_request(dense_waves_per_eu=3))
+        self.assertEqual({s.waves_per_eu for s in pinned_wpe}, {3})
+
+    def test_redundant_settings_are_pruned(self):
+        base = gfx942_dense_spec(_gfx942_request())
+        d64 = gfx942_dense_spec(
+            _gfx942_request(dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1)
+        )
+
+        def spec(knobs, on=base):
+            return _dense_knob_spec(on, supports_gfx942, "gfx942", knobs)
+
+        redundant = (
+            dict(use_cfvst=True),  # the policy already turns it on here
+            dict(use_exp2_fast=base.resolved_use_exp2_fast()),
+            dict(persistent=base.persistent),  # base-relative no-op
+            dict(num_persistent=base.num_persistent * 2),  # grid body ignores it
+            dict(persist_decode="hkv_major"),
+            dict(interleave=True),
+        )
+        for knobs in redundant:
+            with self.subTest(**knobs):
+                self.assertIsNone(spec(knobs))
+        for knobs in (dict(v_row_pad=16), dict(use_v_swizzle=False)):
+            with self.subTest(d64=knobs):
+                self.assertIsNone(spec(knobs, on=d64))  # no cfvst path at D64
+        self.assertIsNotNone(spec(dict(use_cfvst=False)))
+        self.assertIsNotNone(spec(dict(pv_sched_fence_mask=0)))
+        self.assertIsNotNone(spec(dict(persistent=not base.persistent)))
+
+    def test_full_stream_and_samples_are_distinct_and_reproducible(self):
+        req = _gfx942_request()
+        streamed = _gfx942_specs(req, level="full", limit=300)
+        self.assertEqual(
+            len({s.kernel_name() for s in streamed}), len(streamed), "duplicates"
+        )
+
+        def sampled(seed):
+            return [
+                s.kernel_name()
+                for s in _gfx942_specs(req, level="full", tuning_sample=16, seed=seed)
+            ]
+
+        first = sampled(3)
+        self.assertEqual(len(first), 16)
+        self.assertEqual(first, sampled(3))
+        self.assertNotEqual(first, sampled(4))
+        self.assertEqual(len(first), len(set(first)))
 
 
 class TestAutoDispatchUnchanged(unittest.TestCase):

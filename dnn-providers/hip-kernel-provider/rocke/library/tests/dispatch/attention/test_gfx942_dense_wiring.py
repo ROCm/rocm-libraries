@@ -22,6 +22,7 @@ off the default gfx942 path.
 from __future__ import annotations
 
 import unittest
+from itertools import islice
 
 import kernels.common.attention_unified as au
 from dispatch.attention import (
@@ -29,12 +30,12 @@ from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
     dispatch_attention,
-    registered_attention_combos,
+    iter_registered_attention_combos,
 )
 
 # gfx942's own spec factory. NOT the package-level ``dense_spec_for_request``,
 # which is gfx950's and would hand back an untuned spec for a gfx942 request.
-from dispatch.attention.gfx942 import _dense_spec
+from dispatch.attention.gfx942_dense import _dense_spec
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
@@ -277,12 +278,17 @@ class TestGfx942DenseWavesPerEu(unittest.TestCase):
             _dense_spec(_req(dense_waves_per_eu=9))
 
     def _swept_waves(self, level: str, *, pin: int = 0) -> set[int]:
+        # The full level streams the whole knob product; the WPE loop runs
+        # inside each knob set, so the first one already carries every WPE.
         return {
             spec.waves_per_eu
-            for _candidate, spec in registered_attention_combos(
-                _req(dense_waves_per_eu=pin),
-                candidate_prefix=_NAME,
-                sweep_level=level,
+            for _candidate, spec in islice(
+                iter_registered_attention_combos(
+                    _req(dense_waves_per_eu=pin),
+                    candidate_prefix=_NAME,
+                    sweep_level=level,
+                ),
+                64,
             )
         }
 

@@ -491,7 +491,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         A plain read of the INHERITED field, kept as a named accessor because the
         builder, the name tag and :func:`supports_attention_dense` all need the same
         int and the shared field is typed loosely enough to be worth normalizing in
-        one place. ``dispatch.attention.gfx942._dense_spec`` fills it from
+        one place. ``dispatch.attention.gfx942_dense._dense_spec`` fills it from
         :func:`_tuned_waves_per_eu`, so the shipped value tracks the measured policy
         without this class restating it."""
         return int(self.waves_per_eu)

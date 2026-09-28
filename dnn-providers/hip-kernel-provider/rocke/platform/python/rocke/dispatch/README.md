@@ -29,8 +29,8 @@ rocke/dispatch/
 
 Attention lives outside this package, in `library/dispatch/attention/`, because
 its cohort predicates import arch-specific kernel modules. That package is split
-per architecture — `common.py`, `generic.py`, `gfx942.py`, `gfx950_dense.py`,
-`gfx950_unified.py`, `gfx1250.py` — with `__init__.py` holding the registry assembly and the entry
+per architecture — `common.py`, `generic.py`, `gfx942_dense.py`,
+`gfx942_unified.py`, `gfx950_dense.py`, `gfx950_unified.py`, `gfx1250.py` — with `__init__.py` holding the registry assembly and the entry
 points. It uses the same `core.py` contracts and is subject to the same coverage
 invariants.
 

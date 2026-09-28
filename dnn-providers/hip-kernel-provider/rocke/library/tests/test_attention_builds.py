@@ -3391,7 +3391,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         gfx942 IR golden: this fails fast with a readable message if the
         predicate is ever loosened, instead of surfacing as an opaque hash diff.
         """
-        from dispatch.attention.gfx942 import _dense_spec
+        from dispatch.attention.gfx942_dense import _dense_spec
         from dispatch.attention.common import AttentionRequest
 
         req = AttentionRequest(

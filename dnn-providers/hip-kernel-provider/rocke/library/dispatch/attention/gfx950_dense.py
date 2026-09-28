@@ -428,10 +428,13 @@ def _make_gfx950_attention_dense_candidate(
     def _tuning_kwargs(req: AttentionRequest) -> dict:
         from kernels.gfx950.attention_dense import supports_attention_dense
 
+        from .tuning_common import dense_pinned_axes
+
         return dict(
             arch="gfx950",
             supports=supports_attention_dense,
             wpe_pinned=int(req.dense_waves_per_eu) != 0,
+            pinned_axes=dense_pinned_axes(req),
         )
 
     def sweep(req: OperatorRequest):
@@ -482,6 +485,11 @@ def _make_gfx950_attention_dense_candidate(
 
 
 def register_route(registry: CandidateRegistry) -> None:
+    for variant in GFX950_DENSE_VARIANTS:
+        registry.register(_make_gfx950_attention_dense_candidate(variant))
+
+
+def register_execution(registry: CandidateRegistry) -> None:
     for variant in GFX950_DENSE_VARIANTS:
         registry.register(_make_gfx950_attention_dense_candidate(variant))
 

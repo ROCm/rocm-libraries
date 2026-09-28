@@ -106,8 +106,12 @@ def _flag(name: str, *, enabler: bool = False) -> KnobAxis:
     return KnobAxis(name, ((), ((name, True),)), enabler)
 
 
-def _values(name: str, default: object, values: Sequence[object]) -> KnobAxis:
-    return KnobAxis(name, ((),) + tuple(((name, v),) for v in values if v != default))
+def _values(
+    name: str, default: object, values: Sequence[object], *, enabler: bool = False
+) -> KnobAxis:
+    return KnobAxis(
+        name, ((),) + tuple(((name, v),) for v in values if v != default), enabler
+    )
 
 
 def _gated(
@@ -223,8 +227,9 @@ _3D_AXES: Tuple[KnobAxis, ...] = (
 
 # Dense-kernel spec fields the tuning space never varies. Problem fields come
 # from the request; variant fields are fixed by the registered dense candidate
-# (tile x persist x wide-DMA); ``waves_per_eu`` is walked by its own loop, as
-# on the unified paths.
+# (gfx950: tile x persist x wide-DMA; gfx942 registers one candidate and sweeps
+# its geometry); ``waves_per_eu`` is walked by its own loop, as on the unified
+# paths.
 DENSE_PROBLEM_FIELDS = frozenset(
     {
         "batch",
@@ -245,12 +250,22 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "causal_bottom_right",
     }
 )
-DENSE_VARIANT_FIELDS = frozenset({"block_m", "block_n", "persistent", "wide_lds_dma"})
+DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
+    "gfx950": frozenset({"block_m", "block_n", "persistent", "wide_lds_dma"}),
+    "gfx942": frozenset(),
+}
 DENSE_LOOP_FIELDS = frozenset({"waves_per_eu"})
-# Knobs whose validator accepts a single value, so there is nothing to sweep.
+# Knobs with nothing to sweep: the validator accepts a single value, or (gfx942
+# ``lazy_rescale``) the body never reads the field and only the name changes.
 DENSE_UNTUNABLE_KNOBS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"lds_num_buffers"}),
+    "gfx942": frozenset({"lds_num_buffers", "lazy_rescale"}),
 }
+# Axes whose values are relative to the base spec (request or policy derived),
+# so a choice may equal a dataclass default; the base-equal choice is pruned.
+DENSE_BASE_RELATIVE_KNOBS = frozenset(
+    {"num_persistent", "persistent", "block_m", "block_n"}
+)
 
 _DENSE_LDS_PADS = (0, 8, 16, 24, 32)
 _DENSE_LAZY_THRESHOLDS = (1.0, 2.0, 4.0)
@@ -260,7 +275,32 @@ _DENSE_FENCE_MASK_DEFAULT = 0
 _DENSE_DS_READ_DEFAULT = 2
 # Symbolic persistent-CTA counts, resolved against the problem by
 # :func:`resolve_dense_num_persistent` (the ``tile_policy="2x"`` pattern).
-_DENSE_NUM_PERSISTENT_POLICIES = ("half", "2x", "gqa_pair", "gqa_pair_2phase", "work")
+_GFX950_NUM_PERSISTENT_POLICIES = (
+    "half",
+    "2x",
+    "gqa_pair",
+    "gqa_pair_2phase",
+    "work",
+)
+# gfx942 implements only the qb_major / hkv_major decodes.
+_GFX942_NUM_PERSISTENT_POLICIES = ("half", "2x", "work")
+# gfx942 K row pad: 0 is left out -- removing the pad is recorded as settled
+# negative in the kernel (the value, not the pad itself, is the open question).
+_GFX942_LDS_ROW_PADS = (4, 8, 12, 16, 24, 32)
+_GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
+_GFX942_BLOCK_M = (32, 64, 128, 256, 512)
+_GFX942_BLOCK_N = (32, 64, 128, 256)
+
+
+def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
+    return KnobAxis(
+        "num_persistent", ((),) + tuple((("num_persistent", p),) for p in policies)
+    )
+
+
+def _choices_axis(name: str, values: Sequence[object]) -> KnobAxis:
+    """Every value, the base's included; the base-equal choice is pruned."""
+    return KnobAxis(name, ((),) + tuple(((name, v),) for v in values))
 
 
 def _dense_pv_schedule_axis() -> KnobAxis:
@@ -319,11 +359,7 @@ def _dense_pv_schedule_axis() -> KnobAxis:
 # Ordered prerequisites-first: persist_decode's gqa_pair modes require an exact
 # num_persistent, and interleave is read only on the resolved qb_major decode.
 _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
-    KnobAxis(
-        "num_persistent",
-        ((),)
-        + tuple((("num_persistent", p),) for p in _DENSE_NUM_PERSISTENT_POLICIES),
-    ),
+    _num_persistent_axis(_GFX950_NUM_PERSISTENT_POLICIES),
     _values(
         "persist_decode",
         "auto",
@@ -348,6 +384,38 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("o_store_width", 4, (1, 2, 4)),
 )
 
+# gfx942 registers one dense candidate, so its geometry (persistent, block_m,
+# block_n) is swept here rather than fixed by a variant. The LDS-saving knobs
+# lead as enablers: they can bring an otherwise over-budget tile under the LDS
+# limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
+# prerequisites-first: exp2 policy reads persistent, v_row_pad policy reads
+# block_n, a non-derived v_row_pad needs the swizzle off, and interleave is read
+# only on the resolved qb_major decode.
+_GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
+    _values("use_cfvst", None, (True, False), enabler=True),
+    _values("lds_row_pad", 8, _GFX942_LDS_ROW_PADS, enabler=True),
+    _values("lds_k_group_pad", 8, _DENSE_LDS_PADS, enabler=True),
+    _choices_axis("persistent", (True, False)),
+    _choices_axis("block_m", _GFX942_BLOCK_M),
+    _choices_axis("block_n", _GFX942_BLOCK_N),
+    _num_persistent_axis(_GFX942_NUM_PERSISTENT_POLICIES),
+    _values("persist_decode", "auto", ("qb_major", "hkv_major")),
+    _flag("interleave"),
+    _values("use_v_swizzle", None, (True, False)),
+    _values("v_row_pad", None, _GFX942_V_ROW_PADS),
+    _values("use_exp2_fast", None, (True, False)),
+    # iglp owns the loop schedule, so it and the PV fence are one decision.
+    KnobAxis(
+        "pv_schedule",
+        ((), (("iglp", True),), (("iglp", True), ("iglp_mode", 1)))
+        + tuple((("pv_sched_fence_mask", m),) for m in _SCHED_BARRIER_MASKS),
+    ),
+    _values("pv_priority", 0, (0, 1, 2, 3)),
+    _values("pv_loop_order", "d_major", ("d_major", "k_major")),
+    _values("o_store_width", 4, (1, 2, 4)),
+    _values("causal_diag_split", False, (True,)),
+)
+
 # Axes cover every tuning field; ones an arch rejects are pruned at once.
 _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "2d"): _GFX950_2D_AXES,
@@ -355,6 +423,7 @@ _AXES: Mapping[Tuple[str, str], Tuple[KnobAxis, ...]] = {
     ("gfx950", "3d"): _3D_AXES,
     ("gfx942", "3d"): _3D_AXES,
     ("gfx950", "dense"): _GFX950_DENSE_AXES,
+    ("gfx942", "dense"): _GFX942_DENSE_AXES,
 }
 
 # Knobs fixed by the geometry variant's codepath rather than enumerated.
@@ -1064,36 +1133,119 @@ def sample_tuning_specs(
             yield spec
 
 
-# Dense axes that exist only on some base specs, keyed by axis name. The kernel
-# reads the knob nowhere else, and the symbol drops it there, so offering it
-# would only re-emit the base kernel.
-_DENSE_AXIS_SCOPE: Mapping[str, Callable[[object], bool]] = {
-    "num_persistent": lambda s: bool(s.persistent),
-    # A request-pinned decode is request-owned, not swept.
-    "persist_decode": lambda s: bool(s.persistent) and s.persist_decode == "auto",
-    "interleave": lambda s: bool(s.persistent) and bool(s.causal),
-    # Wide DMA locks the K/V slab pads.
-    "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
-    "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
-    "lds_k_group_pad": lambda s: int(s.head_size) < 128,
-    # Sliding window keeps its own three-phase band loop.
-    "causal_diag_split": lambda s: bool(s.causal) and int(s.sliding_window) == 0,
-}
-# ``None`` knobs that resolve through a per-variant ``resolved_<name>()`` policy.
-_DENSE_POLICY_KNOBS = (
-    "exp_per_pv_step",
-    "pv_sched_fence",
-    "pv_sched_group_template",
-    "iglp_mode",
-    "pv_loop_order",
-)
-
 DenseSupports = Callable[..., Tuple[bool, str]]
+
+
+def _gfx950_dense_inert_knob(spec) -> Optional[str]:
+    defaults = _dense_field_defaults(type(spec))
+    if (
+        not spec.lazy_rescale
+        and spec.lazy_rescale_threshold != defaults["lazy_rescale_threshold"]
+    ):
+        return "lazy_rescale_threshold is read only with lazy_rescale"
+    if (
+        not spec.resolved_pv_sched_fence()
+        and spec.pv_sched_fence_mask != defaults["pv_sched_fence_mask"]
+    ):
+        return "pv_sched_fence_mask is read only while the fence is on"
+    if (
+        not spec.resolved_pv_sched_group_template()
+        and spec.pv_sched_group_ds_read != defaults["pv_sched_group_ds_read"]
+    ):
+        return "pv_sched_group_ds_read is read only while the template is on"
+    return None
+
+
+def _gfx942_dense_inert_knob(spec) -> Optional[str]:
+    # Only the conflict-free-V store builds the transposed V_lds these shape.
+    if not spec.resolved_use_cfvst() and (
+        spec.v_row_pad is not None or spec.use_v_swizzle is not None
+    ):
+        return "v_row_pad and use_v_swizzle are read only on the cfvst path"
+    return None
+
+
+@dataclass(frozen=True)
+class _DenseTuningArch:
+    """What the shared dense walk needs to know about one arch's dense body.
+
+    ``scope`` drops an axis for a base spec whose problem or variant never
+    reads it (the symbol drops it too, so offering it only re-emits the base
+    kernel). ``policy_knobs`` are ``None`` fields resolved by a
+    ``resolved_<name>()`` policy; an explicit value equal to the policy is a
+    duplicate. ``inert`` names the remaining knob-on-knob dependencies.
+    """
+
+    scope: Mapping[str, Callable[[object], bool]]
+    policy_knobs: Tuple[str, ...]
+    inert: Callable[[object], Optional[str]]
+
+
+_DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
+    "gfx950": _DenseTuningArch(
+        scope={
+            "num_persistent": lambda s: bool(s.persistent),
+            "persist_decode": lambda s: bool(s.persistent),
+            "interleave": lambda s: bool(s.persistent) and bool(s.causal),
+            # Wide DMA locks the K/V slab pads.
+            "lds_k_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
+            "lds_v_row_pad": lambda s: int(s.head_size) == 128 and not s.wide_lds_dma,
+            "lds_k_group_pad": lambda s: int(s.head_size) < 128,
+            # Sliding window keeps its own three-phase band loop.
+            "causal_diag_split": lambda s: bool(s.causal)
+            and int(s.sliding_window) == 0,
+        },
+        policy_knobs=(
+            "exp_per_pv_step",
+            "pv_sched_fence",
+            "pv_sched_group_template",
+            "iglp_mode",
+            "pv_loop_order",
+        ),
+        inert=_gfx950_dense_inert_knob,
+    ),
+    "gfx942": _DenseTuningArch(
+        # persistent is itself an axis here, so the persistent-only knobs stay
+        # and the per-spec duplicate check drops them on non-persistent specs.
+        scope={
+            "interleave": lambda s: bool(s.causal),
+            "lds_row_pad": lambda s: int(s.head_size) == 128,
+            "lds_k_group_pad": lambda s: int(s.head_size) < 128,
+            # Policy turns cfvst (and its swizzle) on only where it is legal;
+            # the knobs can only turn it off.
+            "use_cfvst": lambda s: s.resolved_use_cfvst(),
+            "use_v_swizzle": lambda s: s.resolved_use_cfvst(),
+            "v_row_pad": lambda s: s.resolved_use_cfvst(),
+            "causal_diag_split": lambda s: bool(s.causal)
+            and int(s.sliding_window) == 0,
+        },
+        policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
+        inert=_gfx942_dense_inert_knob,
+    ),
+}
+
+
+def _dense_arch(arch: str) -> _DenseTuningArch:
+    try:
+        return _DENSE_ARCH[arch]
+    except KeyError:
+        raise ValueError(f"no dense tuning space for arch {arch!r}") from None
 
 
 @lru_cache(maxsize=None)
 def _dense_field_defaults(spec_type: type) -> Mapping[str, object]:
     return {f.name: f.default for f in _dataclass_fields(spec_type)}
+
+
+def dense_pinned_axes(req: AttentionRequest) -> frozenset:
+    """Dense axes the request owns: ``dense_persistent`` / ``dense_persist_decode``
+    set away from ``auto`` are pins, not starting points."""
+    pinned = set()
+    if req.dense_persistent.strip().lower() != "auto":
+        pinned.add("persistent")
+    if req.dense_persist_decode.strip().lower() != "auto":
+        pinned.add("persist_decode")
+    return frozenset(pinned)
 
 
 def dense_tuning_knobs(spec) -> dict:
@@ -1133,11 +1285,20 @@ def resolve_dense_num_persistent(spec, policy: str) -> int:
         ) from None
 
 
-def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
-    """The declared dense axes that apply to ``base``, with concrete values."""
+def _dense_axes_for(
+    base, arch: str, pinned_axes: frozenset = frozenset()
+) -> Tuple[KnobAxis, ...]:
+    """The declared dense axes that apply to ``base``, with concrete values.
+
+    ``pinned_axes`` are request-owned (``dense_persistent`` /
+    ``dense_persist_decode`` set away from ``auto``) and are not swept.
+    """
+    scopes = _dense_arch(arch).scope
     axes = []
     for axis in tuning_axes(arch, "dense"):
-        scope = _DENSE_AXIS_SCOPE.get(axis.name)
+        if axis.name in pinned_axes:
+            continue
+        scope = scopes.get(axis.name)
         if scope is not None and not scope(base):
             continue
         if axis.name == "num_persistent":
@@ -1161,7 +1322,7 @@ def _dense_policy_value(spec, name: str):
         return None
 
 
-def _dense_redundant_knob(spec) -> Optional[str]:
+def _dense_redundant_knob(spec, arch: str) -> Optional[str]:
     """Why ``spec`` re-emits a kernel an earlier walk step already emits.
 
     An explicit value equal to what its policy resolves to, or a knob the body
@@ -1169,7 +1330,8 @@ def _dense_redundant_knob(spec) -> Optional[str]:
     symbol. The walk treats such a prefix as invalid; every relation here
     points at an earlier axis or at the base spec, so pruning is exact.
     """
-    for name in _DENSE_POLICY_KNOBS:
+    rules = _dense_arch(arch)
+    for name in rules.policy_knobs:
         value = getattr(spec, name)
         if value is not None and value == _dense_policy_value(spec, name):
             return f"{name}={value!r} restates its policy"
@@ -1181,27 +1343,11 @@ def _dense_redundant_knob(spec) -> Optional[str]:
         == spec.persist_decode
     ):
         return f"persist_decode={spec.persist_decode!r} is what auto resolves to"
-    defaults = _dense_field_defaults(type(spec))
-    if (
-        not spec.lazy_rescale
-        and spec.lazy_rescale_threshold != defaults["lazy_rescale_threshold"]
-    ):
-        return "lazy_rescale_threshold is read only with lazy_rescale"
-    if (
-        not spec.resolved_pv_sched_fence()
-        and spec.pv_sched_fence_mask != defaults["pv_sched_fence_mask"]
-    ):
-        return "pv_sched_fence_mask is read only while the fence is on"
-    if (
-        not spec.resolved_pv_sched_group_template()
-        and spec.pv_sched_group_ds_read != defaults["pv_sched_group_ds_read"]
-    ):
-        return "pv_sched_group_ds_read is read only while the template is on"
     if spec.interleave:
         nqb = -(-int(spec.seqlen_q) // int(spec.block_m))
         if not spec.causal or spec.resolved_persist_decode != "qb_major" or nqb < 2:
             return "interleave is read only on the causal qb_major decode with NQB > 1"
-    return None
+    return rules.inert(spec)
 
 
 def _dense_knob_spec(base, supports: DenseSupports, arch: str, knobs: Mapping):
@@ -1210,7 +1356,14 @@ def _dense_knob_spec(base, supports: DenseSupports, arch: str, knobs: Mapping):
         spec = replace(base, **knobs)
     except (ValueError, TypeError, ZeroDivisionError):
         return None
-    if _dense_redundant_knob(spec) is not None:
+    # A choice equal to the base value (possible on base-relative axes) is the
+    # base kernel again.
+    if any(getattr(base, name) == value for name, value in knobs.items()):
+        return None
+    # The grid body never reads the persistent-CTA count.
+    if not spec.persistent and spec.num_persistent != base.num_persistent:
+        return None
+    if _dense_redundant_knob(spec, arch) is not None:
         return None
     ok, _why = supports(spec, arch=arch)
     return spec if ok else None
@@ -1237,6 +1390,7 @@ def iter_dense_tuning_specs(
     arch: str,
     supports: DenseSupports,
     wpe_pinned: bool,
+    pinned_axes: frozenset = frozenset(),
     level: Optional[str] = None,
 ):
     """Dense specs for one registered variant at ``level``, ``base`` first.
@@ -1249,7 +1403,7 @@ def iter_dense_tuning_specs(
     level = _SWEEP_LEVEL.get() if level is None else level
     if level not in SWEEP_LEVELS:
         raise ValueError(f"sweep level must be one of {SWEEP_LEVELS}, got {level!r}")
-    axes = _dense_axes_for(base, arch)
+    axes = _dense_axes_for(base, arch, pinned_axes)
 
     def is_valid(knobs) -> bool:
         return _dense_knob_spec(base, supports, arch, knobs) is not None
@@ -1277,6 +1431,7 @@ def sample_dense_tuning_specs(
     supports: DenseSupports,
     wpe_pinned: bool,
     salt: str,
+    pinned_axes: frozenset = frozenset(),
 ):
     """Up to ``n`` distinct random legal dense specs from the full knob space.
 
@@ -1285,7 +1440,7 @@ def sample_dense_tuning_specs(
     """
     import random
 
-    axes = _dense_axes_for(base, arch)
+    axes = _dense_axes_for(base, arch, pinned_axes)
 
     def is_valid(knobs) -> bool:
         return _dense_knob_spec(base, supports, arch, knobs) is not None
