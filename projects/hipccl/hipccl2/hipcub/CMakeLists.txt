@@ -41,17 +41,13 @@ endif()
 # Update these variables at release time
 #
 # Set the library version
-# NOTE(hipccl2): guarded so the hipccl2 root CMakeLists.txt can force
-# VERSION_STRING via a CACHE variable before add_subdirectory(hipcub). The
-# fallback below is also hipccl-flavored (matching hipccl2's/hipccl3's root
-# HIPCCL_VERSION placeholder, currently 0.1.0) rather than hipCUB's own
-# 4.7.0, so a fully standalone build of this copy still reports a
-# hipccl-consistent version. Duplicates the version number in multiple
-# places - keep them in sync manually until real unified-versioning infra
-# exists.
-if(NOT DEFINED VERSION_STRING)
-  set(VERSION_STRING "0.1.0")
-endif()
+# NOTE(hipccl2): deliberately independent of the root's HIPCCL_VERSION. The
+# hipCCL umbrella package and the individual component APIs are versioned
+# separately - see ../../README.md. Do not force these to match: hipCUB has
+# already shipped at 4.x, so aligning it down to the umbrella version would
+# be a backwards version move and would break downstream
+# find_package(hipcub 4.x) consumers.
+set(VERSION_STRING "4.7.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 2)
 set(HIPCUB_CCCL_VERSION_MINOR 8)

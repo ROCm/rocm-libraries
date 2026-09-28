@@ -8,17 +8,13 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-# NOTE(hipccl2): guarded so the hipccl2 root CMakeLists.txt can force
-# VERSION_STRING via a CACHE variable before add_subdirectory(rocthrust). The
-# fallback below is also hipccl-flavored (matching hipccl2's/hipccl3's root
-# HIPCCL_VERSION placeholder, currently 0.1.0) rather than rocThrust's own
-# 4.7.0, so a fully standalone build of this copy still reports a
-# hipccl-consistent version. Duplicates the version number in multiple
-# places - keep them in sync manually until real unified-versioning infra
-# exists.
-if(NOT DEFINED VERSION_STRING)
-  set(VERSION_STRING "0.1.0")
-endif()
+# NOTE(hipccl2): deliberately independent of the root's HIPCCL_VERSION. The
+# hipCCL umbrella package and the individual component APIs are versioned
+# separately - see ../../README.md. Do not force these to match: rocThrust
+# has already shipped at 4.x, so aligning it down to the umbrella version
+# would be a backwards version move and would break downstream
+# find_package(rocthrust 4.x) consumers.
+set(VERSION_STRING "4.7.0")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version

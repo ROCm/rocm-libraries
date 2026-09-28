@@ -13,14 +13,14 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-# --- Unified hipCCL version ---
-# NOTE(hipccl3): placeholder starting point. rocprim/hipcub/rocthrust today
-# each ship their own VERSION_STRING (currently all "4.7.0" on develop); once
-# this superbuild is the primary way these projects are released, bump this
-# instead of the per-project values. Each of rocprim/hipcub/rocthrust's own
-# CMakeLists.txt has been given a `if(NOT DEFINED VERSION_STRING)` guard so
-# this value propagates down; libhipcxx has not been touched/wired in yet
-# (see HIPCCL_BUILD_LIBHIPCXX below).
+# --- hipCCL umbrella version ---
+# NOTE(hipccl3): placeholder starting point. This versions the hipCCL
+# umbrella only - the CPack package and find_package(hipccl) - NOT the
+# individual components, which keep their own 4.7.0 line (see the Component
+# versioning note below). The intent is for this to eventually track the
+# CCCL version it corresponds to, so that find_package(hipccl 3.0.0) lines up
+# with find_package(CCCL 3.0.0); that change belongs with the CCCL 3.0
+# merge-forward work, not before it.
 set(HIPCCL_VERSION_MAJOR 0)
 set(HIPCCL_VERSION_MINOR 1)
 set(HIPCCL_VERSION_PATCH 0)
@@ -54,12 +54,17 @@ include(fetch_rocm_cmake)
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
 
-# --- Unified version propagation ---
-# Force VERSION_STRING as a CACHE variable so it wins over each subproject's
-# own `set(VERSION_STRING "4.7.0")` (which is guarded with
-# `if(NOT DEFINED VERSION_STRING)` in the hipccl3 copies of rocprim/hipcub/
-# rocthrust specifically for this purpose).
-set(VERSION_STRING "${HIPCCL_VERSION}" CACHE STRING "Unified hipCCL component version" FORCE)
+# --- Component versioning ---
+# NOTE(hipccl3): HIPCCL_VERSION above versions the hipCCL *umbrella* package
+# (the CPack package and find_package(hipccl)) only. rocprim/hipcub/rocthrust
+# keep their own independent VERSION_STRING (4.7.0) and their own
+# find_package(rocprim) etc. versions - this root deliberately does NOT force
+# them to match. See ../README.md; the short version is that those components
+# have already shipped at 4.x, so pulling them down to the umbrella version
+# would be a backwards version move for already-released packages and would
+# break downstream find_package(rocprim 4.x) consumers. hipCUB's existing
+# HIPCUB_CCCL_VERSION_* variables are the same pattern: "my version" and "the
+# CCCL version I correspond to" are separate things.
 
 # --- Component selection ---
 option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the unified hipCCL build" ON)

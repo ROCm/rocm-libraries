@@ -80,25 +80,49 @@ old `<prefix>/include/rocprim` layout. When built through hipccl3's root
 instead, that root's own `CACHE ... FORCE` already claimed the cache entry
 first, so each project's own copy of this line is a harmless no-op.
 
-### Unified versioning
+### Versioning: umbrella vs components
 
-`VERSION_STRING` is forced via a `CACHE STRING ... FORCE` at the hipccl3 root,
-set to the single `HIPCCL_VERSION` (currently a placeholder `0.1.0`). Each of
-rocPRIM/hipCUB/rocThrust's own `CMakeLists.txt` originally did an
-unconditional `set(VERSION_STRING "4.7.0")` - each now has a
-`if(NOT DEFINED VERSION_STRING) ... endif()` guard around that line, so the
-hipccl3-level override actually takes effect instead of being silently
-overwritten.
+hipCCL deliberately keeps **two independent version numbers**, and it is
+important not to collapse them into one:
 
-The fallback value itself was also changed, from `"4.7.0"` to `"0.1.0"`
-(matching `HIPCCL_VERSION`), so that a fully standalone build of one of these
-hipccl3 copies (e.g. `cd hipccl3/rocprim && cmake ..`, with no superbuild
-involved at all) still reports a hipccl-consistent version instead of
-rocPRIM/hipCUB/rocThrust's own upstream version number. This does duplicate
-the version number in four places (`hipccl3/CMakeLists.txt`'s
-`HIPCCL_VERSION`, plus each of the three projects' own fallback) that must be
-kept in sync manually until real unified-versioning infrastructure exists -
-see Known gaps.
+- **The hipCCL umbrella version** (`HIPCCL_VERSION`, currently a placeholder
+  `0.1.0`) versions the unified CPack package and `find_package(hipccl)`.
+- **The component API versions** (`VERSION_STRING`, currently `4.7.0` in
+  rocPRIM/hipCUB/rocThrust) version `find_package(rocprim)`,
+  `find_package(hipcub)`, and `find_package(rocthrust)`, exactly as they
+  always have.
+
+Neither root forces the components to adopt `HIPCCL_VERSION`.
+
+**Why they must stay separate.** The plan is for `HIPCCL_VERSION` to
+eventually track the CCCL version it corresponds to, so that
+`find_package(hipccl 3.0.0)` lines up with `find_package(CCCL 3.0.0)`. But
+rocPRIM/hipCUB/rocThrust have *already shipped* at 4.7.0. Pulling them down to
+a 3.x umbrella version would be a **backwards version move on
+already-released packages**: package managers would treat it as a downgrade,
+and every downstream consumer with `find_package(rocprim 4.x REQUIRED)` would
+break. Because the `hipccl` package name is brand new, the umbrella can start
+at whatever number matches CCCL without regressing anything, while the
+components keep moving forward on their own 4.x line.
+
+hipCUB already uses this same pattern internally - its `VERSION_STRING`
+(4.7.0) and its `HIPCUB_CCCL_VERSION_MAJOR/MINOR/PATCH` (2.8.2) are separate
+values, because "my version" and "the CCCL version I correspond to" are
+different things.
+
+**A concrete bug this caused.** An earlier iteration *did* force
+`VERSION_STRING` down to `HIPCCL_VERSION`, making rocPRIM install as `0.1.0`.
+hipCUB and rocThrust ask for rocPRIM via
+`find_package(rocprim ${MIN_ROCPRIM_PACKAGE_VERSION} ...)` with floors of
+`4.1.0` and `4.0.0` respectively, so `0.1.0` failed the version check and both
+silently fell back to downloading a separate rocPRIM copy:
+
+```
+-- No existing rocprim package meeting the minimum version requirement (4.1.0) was found.
+```
+
+Keeping the component versions on their real 4.x line makes those existing
+floors work as intended, with no need to weaken them.
 
 ### Unified packaging (`make package` / `cpack`)
 
@@ -287,5 +311,10 @@ scope.
   `projects/hipccl` layout selector yet (each of rocPRIM/hipCUB/rocThrust has
   its own convenience wrapper script today); unifying those is separate
   follow-up work.
-- **Version numbers are duplicated in four places** (see Unified versioning
-  above) pending real unified-versioning infrastructure.
+- **`HIPCCL_VERSION` is still the `0.1.0` placeholder.** Setting it to the
+  real CCCL-aligned value belongs with the CCCL 3.0 merge-forward work (see
+  [Versioning: umbrella vs components](#versioning-umbrella-vs-components)),
+  since claiming `3.0.0` before the components actually have CCCL 3.0
+  semantics would mislead downstream `#if CCCL_VERSION >= ...` checks. The
+  `#define CCCL_VERSION HIPCCL_VERSION` compatibility glue downstream
+  consumers have asked for should land at the same time.

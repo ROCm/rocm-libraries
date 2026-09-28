@@ -19,10 +19,12 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 
-# --- Unified hipCCL version ---
-# Deliberately kept identical to hipccl3's HIPCCL_VERSION so that CI or other
-# tooling built against one layout's version number doesn't need to special-
-# case the other.
+# --- hipCCL umbrella version ---
+# Versions the hipCCL umbrella only - the CPack package and
+# find_package(hipccl) - NOT the individual components, which keep their own
+# 4.7.0 line (see the Component versioning note below). Deliberately kept
+# identical to hipccl3's HIPCCL_VERSION so that CI or other tooling built
+# against one layout's version number doesn't need to special-case the other.
 set(HIPCCL_VERSION_MAJOR 0)
 set(HIPCCL_VERSION_MINOR 1)
 set(HIPCCL_VERSION_PATCH 0)
@@ -46,11 +48,15 @@ include(fetch_rocm_cmake)
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
 
-# --- Unified version propagation ---
-# Force VERSION_STRING as a CACHE variable so it wins over each subproject's
-# own `set(VERSION_STRING "4.7.0")` (guarded with
-# `if(NOT DEFINED VERSION_STRING)` in these hipccl2 copies, same as hipccl3).
-set(VERSION_STRING "${HIPCCL_VERSION}" CACHE STRING "Unified hipCCL component version" FORCE)
+# --- Component versioning ---
+# NOTE(hipccl2): HIPCCL_VERSION above versions the hipCCL *umbrella* package
+# (the CPack package and find_package(hipccl)) only. rocprim/hipcub/rocthrust
+# keep their own independent VERSION_STRING (4.7.0) and their own
+# find_package(rocprim) etc. versions - this root deliberately does NOT force
+# them to match. See ../README.md; the short version is that those components
+# have already shipped at 4.x, so pulling them down to the umbrella version
+# would be a backwards version move for already-released packages and would
+# break downstream find_package(rocprim 4.x) consumers.
 
 # --- Component selection ---
 option(HIPCCL_BUILD_ROCPRIM "Build rocPRIM as part of the hipCCL legacy build" ON)
