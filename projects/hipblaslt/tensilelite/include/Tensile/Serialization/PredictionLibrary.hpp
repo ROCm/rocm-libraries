@@ -31,8 +31,8 @@
 #include <Tensile/PredictionLibrary.hpp>
 
 #include <Tensile/Debug.hpp>
-#include <tensilelitehost/export.h>
 #include <iostream>
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -72,7 +72,8 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    for(std::size_t local_index = 0; local_index < mappingIndices.size(); local_index++)
+                    for(std::size_t local_index = 0; local_index < mappingIndices.size();
+                        local_index++)
                     {
                         int  index    = mappingIndices[local_index];
                         auto solution = resolveContextSolution(ctx, index);
@@ -152,4 +153,3 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
-
