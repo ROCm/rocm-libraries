@@ -24,6 +24,7 @@
 #include "../common.hpp"
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../iterator/constant_iterator.hpp"
 #include "../iterator/zip_iterator.hpp"
 #include "../types/tuple.hpp"
 
@@ -63,9 +64,6 @@ inline hipError_t transform_impl(InputIterator     input,
                                  const hipStream_t stream,
                                  bool              debug_synchronous)
 {
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
-
     if(size == size_t(0))
     {
         return hipSuccess;
@@ -114,12 +112,11 @@ inline hipError_t transform_impl(InputIterator     input,
             detail::transform_kernel_impl<IsPointer,
                                           params.kernel_config.block_size,
                                           params.kernel_config.items_per_thread,
-                                          params.load_type,
-                                          result_type>(input + offset,
-                                                       current_size,
-                                                       output + offset,
-                                                       predicate,
-                                                       transform_op);
+                                          params.load_type>(input + offset,
+                                                            current_size,
+                                                            output + offset,
+                                                            predicate,
+                                                            transform_op);
         };
 
         ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
@@ -556,6 +553,72 @@ inline hipError_t transform(rocprim::tuple<InputIterators...> input_iters,
             transform_op),
         stream,
         debug_synchronous);
+}
+
+/// \brief Parallel generate primitive for device level.
+///
+/// generate function performs a device-wide generation operation
+/// using nullary \p generate_op operator.
+///
+/// \par Overview
+/// * Ranges specified by \p output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p transform_config or a class derived from it.
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam NullaryFunction type of nullary function used for generate.
+///
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of elements in the output range.
+/// \param [in] generate_op nullary operation function object that will be used for generate.
+/// The function object must not modify the object passed to it.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level generate operation is performed on an array of
+/// integer values, effectively initializing the array to a constant value.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom generator function
+/// auto generate_op = []() -> int { return 5; };
+///
+/// // Prepare output (declare pointers, allocate device memory etc.)
+/// size_t size; // e.g., 8
+/// int* output; // empty array of 8 elements
+///
+/// // perform generate
+/// rocprim::generate(output, size, generate_op);
+/// // output: [5, 5, 5, 5, 5, 5, 5, 5]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class OutputIterator, class NullaryFunction>
+inline hipError_t generate(OutputIterator    output,
+                           const size_t      size,
+                           NullaryFunction   generate_op,
+                           const hipStream_t stream            = 0,
+                           bool              debug_synchronous = false)
+{
+    constexpr bool is_pointer = std::is_pointer<OutputIterator>::value;
+
+    using output_type    = typename std::iterator_traits<OutputIterator>::value_type;
+    using op_result_type = typename detail::
+        nary_result_type<true /*is_nullary_op*/, NullaryFunction, output_type>::type;
+    using result_type = typename std::
+        conditional<std::is_void<output_type>::value, op_result_type, output_type>::type;
+    using selector = detail::transform_config_selector<result_type, is_pointer>;
+
+    return detail::transform_impl<is_pointer, Config, selector>(output,
+                                                                output,
+                                                                size,
+                                                                detail::always_true_predicate{},
+                                                                generate_op,
+                                                                stream,
+                                                                debug_synchronous);
 }
 
 END_ROCPRIM_NAMESPACE
