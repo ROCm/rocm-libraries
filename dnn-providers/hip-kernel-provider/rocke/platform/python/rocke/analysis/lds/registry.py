@@ -32,6 +32,7 @@ class LdsProfile(Protocol):
     """
 
     identity: ProfileIdentity
+    lds_capacity_bytes: int
     supported_wave_sizes: frozenset[int]
     supported_opcodes: frozenset[str]
 

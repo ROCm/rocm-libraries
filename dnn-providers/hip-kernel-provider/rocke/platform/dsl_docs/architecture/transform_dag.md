@@ -217,7 +217,7 @@ After the chain:
   - `desc.offset(b, m=m_val, k=k_val)` produces `(i32 offset, i1
     valid)`.
 
-This is the exact descriptor used by `rocke/instances/common/conv_implicit_gemm.py`.
+This is the exact descriptor used by `library/kernels/common/conv_implicit_gemm.py`.
 The kernel body never writes `(m / (Ho*Wo)) * Hi*Wi*C + (m / Wo) % Ho
 * Wi * C + ...` by hand. The algebra captures every offset
 computation, and editing the conv shape (e.g., stride 2 or dilated)

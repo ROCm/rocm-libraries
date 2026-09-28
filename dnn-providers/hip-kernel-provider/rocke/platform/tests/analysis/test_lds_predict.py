@@ -6,12 +6,18 @@
 import pytest
 
 from rocke.analysis.lds import LdsAccess, LdsPredictionError, predict_lds_conflicts
-from rocke.analysis.lds.opcodes import get_opcode_spec, supported_opcodes
-from rocke.analysis.lds.registry import registered_targets
+from rocke.analysis.lds.opcodes import get_opcode_spec
+from rocke.analysis.lds.registry import registered_targets, resolve_profile
 
 
-@pytest.mark.parametrize("target", registered_targets())
-@pytest.mark.parametrize("opcode", supported_opcodes())
+@pytest.mark.parametrize(
+    ("target", "opcode"),
+    [
+        (target, opcode)
+        for target in registered_targets()
+        for opcode in sorted(resolve_profile(target).supported_opcodes)
+    ],
+)
 @pytest.mark.parametrize("address", [0, 128])
 @pytest.mark.parametrize("active", [True, False])
 def test_repeated_lane_requires_inactive_access(target, opcode, address, active):

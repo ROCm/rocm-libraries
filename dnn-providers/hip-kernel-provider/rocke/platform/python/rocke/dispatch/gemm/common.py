@@ -6,12 +6,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from typing import Tuple
 
 from ...core.arch import ArchTarget
 from ...helpers.split_k import select_split_k
 from ...instances.common.gemm_universal import UniversalGemmSpec
-from ..core import KernelCandidate, OperatorRequest
+from ..core import OperatorRequest, normalize_selector
 
 
 @dataclass(frozen=True)
@@ -55,10 +54,6 @@ def normalize_dtype(dtype: str) -> str:
     if d in ("f16", "half"):
         return "fp16"
     return d
-
-
-def normalize_selector(value: str) -> str:
-    return value.strip().lower()
 
 
 def basic_gemm_request_errors(req: OperatorRequest) -> list[str]:
@@ -126,13 +121,3 @@ def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpe
     if decision.split_k <= 1:
         return spec
     return replace(spec, trait=replace(spec.trait, split_k=decision.split_k))
-
-
-def selector_matches(req: GemmRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = normalize_selector(req.algorithm)
-    spec_id = normalize_selector(req.spec_id)
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"

@@ -145,7 +145,7 @@ bool rocke_dconv4c_prologue(rocke_dconv_4c_ctx_t* ctx)
     ctx->a_rsrc = rocke_b_buffer_rsrc(b, ctx->A, ctx->A_bytes);
     ctx->b_rsrc = rocke_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
     ctx->d_rsrc = rocke_b_buffer_rsrc(b, ctx->D, ctx->D_bytes);
-    ctx->fp16x4_zero = rocke_b_zero_vec_f16(b, 4);
+    ctx->io_vec4_zero = rocke_b_zero_vec_f16(b, 4);
     ctx->zero_acc = rocke_b_zero_vec_f32(b, 4);
 
     return rocke_ir_builder_ok(b);
@@ -242,7 +242,9 @@ void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx)
         static const char* const up_h[1] = {"y_iter"};
         static const char* const up_w[2] = {"wo", "s"};
         int strides_h[1] = {1};
-        int strides_w[2] = {1, 1};
+        int strides_w[2];
+        strides_w[0] = p->stride;
+        strides_w[1] = 1;
 
         lengths[0] = p->N;
         lengths[1] = p->H;
@@ -253,7 +255,7 @@ void rocke_dconv4c_build_descriptors(rocke_dconv_4c_ctx_t* ctx)
         /* embed(upper=("y_iter",), into="h", strides=(1,), offset=-PAD,
          *       lo=0, hi=H). */
         xforms[0] = rocke_embed_bounded(b, up_h, 1, "h", strides_h, -p->PAD, 0, p->H);
-        /* embed(upper=("wo","s"), into="w", strides=(1,1), offset=-PAD,
+        /* embed(upper=("wo","s"), into="w", strides=(stride,1), offset=-PAD,
          *       lo=0, hi=W). */
         xforms[1] = rocke_embed_bounded(b, up_w, 2, "w", strides_w, -p->PAD, 0, p->W);
 
@@ -336,8 +338,8 @@ rocke_kernel_def_t* rocke_dconv4c_stream_h_loop(rocke_dconv_4c_ctx_t* ctx)
                     b, valid, rocke_b_mul(b, a_off, ctx->c_half_bytes), ctx->oob_sentinel);
                 /* Line 985: vec = buffer_load_vN_f16(a_rsrc, safe_a, c0, 2). */
                 vec = rocke_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_a, ctx->c0, 2);
-                /* Line 986: vec = select(valid, vec, fp16x4_zero). */
-                vec = rocke_b_select(b, valid, vec, ctx->fp16x4_zero);
+                /* Line 986: vec = select(valid, vec, io_vec4_zero). */
+                vec = rocke_b_select(b, valid, vec, ctx->io_vec4_zero);
                 inputs_by_qtile[qt][s_idx] = vec;
             }
         }
