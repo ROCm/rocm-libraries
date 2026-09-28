@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-include(dependencies/rocm-cmake)
-include(dependencies/monorepo)
+include(primlibs/dependencies/rocm-cmake)
+include(primlibs/dependencies/monorepo)
 
 include(FetchContent)
 if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
@@ -46,6 +46,6 @@ if(BUILD_FORTRAN_WRAPPER)
 endif()
 
 if(BUILD_TEST)
-  include(dependencies/googletest)
+  include(primlibs/dependencies/googletest)
 endif()
 
