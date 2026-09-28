@@ -27,6 +27,47 @@
 
 #include "rocsparse_spsort.hpp"
 
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spsort_alg_default:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_input value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spsort_input_alg:
+    case rocsparse_spsort_input_direction:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_stage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spsort_stage_analysis:
+    case rocsparse_spsort_stage_compute:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
 _rocsparse_spsort_descr::~_rocsparse_spsort_descr() {}
 
 _rocsparse_spsort_descr::_rocsparse_spsort_descr()
@@ -46,7 +87,7 @@ rocsparse_spsort_alg _rocsparse_spsort_descr::get_alg() const
     return this->m_alg;
 }
 
-rocsparse_direction _rocsparse_spsort_descr::get_dir() const
+rocsparse_direction _rocsparse_spsort_descr::get_direction() const
 {
     return this->m_dir;
 }
@@ -61,7 +102,7 @@ void _rocsparse_spsort_descr::set_alg(rocsparse_spsort_alg value)
     this->m_alg = value;
 }
 
-void _rocsparse_spsort_descr::set_dir(rocsparse_direction value)
+void _rocsparse_spsort_descr::set_direction(rocsparse_direction value)
 {
     this->m_dir = value;
 }
@@ -164,7 +205,7 @@ try
         const rocsparse_direction dir = *reinterpret_cast<const rocsparse_direction*>(data);
         ROCSPARSE_CHECKARG(
             3, data, rocsparse::enum_utils::is_invalid(dir), rocsparse_status_invalid_value);
-        descr->set_dir(dir);
+        descr->set_direction(dir);
         return rocsparse_status_success;
     }
         // LCOV_EXCL_START

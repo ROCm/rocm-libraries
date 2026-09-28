@@ -83,7 +83,7 @@ rocsparse_status rocsparse::spsort_check_arguments(rocsparse_spsort_descr      d
                        rocsparse_status_invalid_value);
     ROCSPARSE_CHECKARG(1,
                        descr,
-                       rocsparse::enum_utils::is_invalid(descr->get_dir()),
+                       rocsparse::enum_utils::is_invalid(descr->get_direction()),
                        rocsparse_status_invalid_value);
 
     return rocsparse_status_success;
@@ -103,7 +103,7 @@ namespace rocsparse
 
         const rocsparse_format format = source->format;
 
-        const rocsparse_direction dir = spsort_descr->get_dir();
+        const rocsparse_direction dir = spsort_descr->get_direction();
 
         switch(stage)
         {
@@ -177,7 +177,7 @@ extern "C" rocsparse_status rocsparse_spsort(rocsparse_handle            handle,
                                              rocsparse_spmat_descr       target, //3
                                              rocsparse_spsort_stage      stage, //4
                                              size_t                      buffer_size_in_bytes, //5
-                                             void*                       temp_buffer, //6
+                                             void*                       buffer, //6
                                              rocsparse_error*            error)
 try
 {
@@ -190,11 +190,11 @@ try
     ROCSPARSE_CHECKARG_ENUM(4, stage);
     ROCSPARSE_CHECKARG(5,
                        buffer_size_in_bytes,
-                       (buffer_size_in_bytes == 0 && temp_buffer != nullptr),
+                       (buffer_size_in_bytes == 0 && buffer != nullptr),
                        rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(6,
-                       temp_buffer,
-                       (temp_buffer == nullptr && buffer_size_in_bytes > 0),
+                       buffer,
+                       (buffer == nullptr && buffer_size_in_bytes > 0),
                        rocsparse_status_invalid_pointer);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spsort_check_arguments(descr, source, target));
@@ -235,7 +235,7 @@ try
     }
 
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::spsort(handle, descr, source, target, stage, buffer_size_in_bytes, temp_buffer));
+        rocsparse::spsort(handle, descr, source, target, stage, buffer_size_in_bytes, buffer));
 
     // Record the stage that has been executed.
     descr->set_stage(stage);

@@ -41,8 +41,6 @@ namespace rocsparse
 
         const rocsparse_format format = source->format;
 
-        const rocsparse_direction dir = descr->get_dir();
-
         switch(stage)
         {
         case rocsparse_spsort_stage_analysis:
@@ -75,7 +73,7 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::coosort_buffer_size(handle,
                                                    rocsparse_coosort_alg_default,
-                                                   dir,
+                                                   descr->get_direction(),
                                                    source,
                                                    target,
                                                    buffer_size_in_bytes));
@@ -105,7 +103,7 @@ extern "C" rocsparse_status rocsparse_spsort_buffer_size(rocsparse_handle       
                                                          rocsparse_spmat_descr       target,
                                                          rocsparse_spsort_stage      stage,
                                                          size_t*          buffer_size_in_bytes,
-                                                         rocsparse_error* error)
+                                                         rocsparse_error* p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

@@ -27,45 +27,13 @@
 #include "rocsparse_enum_utils.hpp"
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_alg value_)
-{
-    switch(value_)
-    {
-    case rocsparse_spsort_alg_default:
-    {
-        return false;
-    }
-    }
-    return true;
-}
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_alg value_);
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_input value_)
-{
-    switch(value_)
-    {
-    case rocsparse_spsort_input_alg:
-    case rocsparse_spsort_input_direction:
-    {
-        return false;
-    }
-    }
-    return true;
-}
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_input value_);
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_stage value_)
-{
-    switch(value_)
-    {
-    case rocsparse_spsort_stage_analysis:
-    case rocsparse_spsort_stage_compute:
-    {
-        return false;
-    }
-    }
-    return true;
-}
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsort_stage value_);
 
 struct _rocsparse_spsort_descr
 {
@@ -80,10 +48,10 @@ public:
 
     rocsparse_spsort_stage get_stage() const;
     rocsparse_spsort_alg   get_alg() const;
-    rocsparse_direction    get_dir() const;
+    rocsparse_direction    get_direction() const;
     void                   set_stage(rocsparse_spsort_stage value);
     void                   set_alg(rocsparse_spsort_alg value);
-    void                   set_dir(rocsparse_direction value);
+    void                   set_direction(rocsparse_direction value);
 };
 
 namespace rocsparse
