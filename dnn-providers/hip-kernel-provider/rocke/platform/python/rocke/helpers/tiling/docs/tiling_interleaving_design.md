@@ -674,7 +674,7 @@ NOT a label change.
 often hidden in the MMA shadow. Treat it like a bank conflict: real, modelled, but subordinate to the
 binding stage. **Measure per case** (sweep the A↔B-swap knob); do not assume the 4× shows up end-to-end.
 The table's *absolute* per-line counts assume the intended `b128` (`dwordx4`) store; the emit realizes
-≤ `b64` (see [`bug_report_c_store_vectorization.md`](./bug_report_c_store_vectorization.md)), so read those
+≤ `b64` (the realized ISA store, comgr-vectorized), so read those
 two columns as **intent-side**. The 4× ratio is a cross-lane fusion property, **width-independent**, and
 holds regardless.
 

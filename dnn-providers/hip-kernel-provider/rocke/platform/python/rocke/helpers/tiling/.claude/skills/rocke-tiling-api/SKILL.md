@@ -347,7 +347,7 @@ conflict lives. The recording is authoritative; do not substitute an artifact-by
 | register usage vs limits | any | artifact (`vgpr/agpr/sgpr`, spill) vs registered `ResourceLimits` | populates |
 | **residency UPPER BOUND** (naming which bounds were sourced) | any | the occupancy model — `dsl_docs/architecture/multi_arch_data_layout.md` → *Residency* | per that model: UNKNOWN bounds excluded, all-UNKNOWN reads UNKNOWN |
 | pad headroom (bytes to the limit) | any LDS space | the registered limit | N/A if no LDS space. Gates the **padding** lever only — a swizzle costs instructions, not bytes (`docs/lds_banks.md` §6) |
-| output-stage access width + coalescing class | COMBINE/WRITEBACK | the memory tier | populates — **but a global store's recorded `vw` is hardcoded to 1** (`emit.py:326`), so this reads 1 by construction, not by measurement. That is the emit defect in `docs/bug_report_c_store_vectorization.md`, not a layout finding |
+| output-stage access width + coalescing class | COMBINE/WRITEBACK | the memory tier | populates — **but a global store's recorded `vw` is 1 by construction** (`tiling_recorder.py:159` mirrors emit's per-element global store), so this column reads 1 from the RECORDING, never the ISA. rocke emits scalar stores at `base + <constant>` addresses, so comgr's LoadStoreVectorizer merges them into `dwordx2`/`dwordx4` post-facto (verify in the ISA -- f16 lands at dwordx2); the recorder sits before that merge. A recorder-vs-ISA gap, not a layout finding |
 | pad VALUE / conflict verdict | any LDS space | the bank model | **UNKNOWN** |
 | rows per served group | any LDS space | `docs/lds_banks.md` §1.2 + §3 | **geometry populates; the verdict is UNKNOWN** |
 
