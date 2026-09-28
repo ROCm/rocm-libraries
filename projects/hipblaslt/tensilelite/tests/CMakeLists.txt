@@ -63,6 +63,11 @@ if(NOT HIPBLASLT_ENABLE_YAML)
     )
 endif()
 
+if(HIPBLASLT_ENABLE_YAML)
+    target_include_directories(tensilelite-tests PRIVATE ${LLVM_INCLUDE_DIRS})
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
+endif()
+
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../client/include")
 
