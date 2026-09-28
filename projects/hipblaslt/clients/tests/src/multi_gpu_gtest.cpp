@@ -1,17 +1,13 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for collective_rendezvous.hpp. Multi-rank cases run the
+// Host-only unit tests for multi_gpu.hpp. Multi-rank cases run the
 // real TCP path with one thread per rank against loopback; no GPU is involved.
 
-#include "collective_rendezvous.hpp"
+#include "multi_gpu.hpp"
+#include "testing_multi_gpu.hpp"
 
 #include <gtest/gtest.h>
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -19,7 +15,9 @@
 #include <thread>
 #include <vector>
 
+using hipblaslt_bench::free_port;
 using hipblaslt_bench::LauncherEnv;
+using hipblaslt_bench::peers_reachable;
 using hipblaslt_bench::read_launcher_env;
 using hipblaslt_bench::TcpRendezvous;
 
@@ -31,9 +29,6 @@ namespace
             {"RANK", "WORLD_SIZE", "LOCAL_RANK", "MASTER_ADDR", "MASTER_PORT"})
             ::unsetenv(name);
     }
-
-    // Binds port 0, reads back what the OS assigned, then releases it.
-    bool free_port(uint16_t& port);
 } // namespace
 
 TEST(collective_rendezvous_smoke, absent_env_degrades_to_single_rank)
@@ -234,28 +229,12 @@ TEST(collective_rendezvous_smoke, multi_segment_payload_arrives_intact)
     }
 }
 
-namespace
+TEST(peer_access_smoke, rejects_local_rank_that_does_not_match_rank)
 {
-    bool free_port(uint16_t& port)
-    {
-        const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        if(fd < 0)
-            return false;
+    LauncherEnv env;
+    env.rank       = 0;
+    env.world      = 2;
+    env.local_rank = 1;
 
-        sockaddr_in addr{};
-        addr.sin_family      = AF_INET;
-        addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
-        addr.sin_port        = 0;
-
-        socklen_t  len = sizeof(addr);
-        const bool ok  = ::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0
-                         && ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len) == 0
-                         && addr.sin_port != 0;
-        ::close(fd);
-        if(!ok)
-            return false;
-
-        port = ::ntohs(addr.sin_port);
-        return true;
-    }
-} // namespace
+    EXPECT_FALSE(peers_reachable(env));
+}

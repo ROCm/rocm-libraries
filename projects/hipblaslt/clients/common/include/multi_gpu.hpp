@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include "benchmark_collective.hpp"
+#include "hipblaslt_ostream.hpp"
+
+#include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
 #include <arpa/inet.h>
@@ -16,11 +20,14 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace hipblaslt_bench
 {
+    constexpr int kRendezvousTimeoutSec = 60;
+
     struct LauncherEnv
     {
         uint32_t    rank        = 0;
@@ -266,5 +273,142 @@ namespace hipblaslt_bench
                                                            size_t      bytesPerRank)
     {
         return static_cast<TcpRendezvous*>(userData)->allgather(sendbuf, recvbuf, bytesPerRank);
+    }
+
+    inline CollectiveAgreement make_agreement(TcpRendezvous& rendezvous, uint32_t world)
+    {
+        CollectiveAgreement agreement;
+        agreement.world     = world;
+        agreement.allgather = [&rendezvous](const void* send, void* recv, size_t bytes) {
+            return rendezvous.allgather(send, recv, bytes) == HIPBLAS_STATUS_SUCCESS;
+        };
+        return agreement;
+    }
+
+    inline bool peers_reachable(const LauncherEnv& env)
+    {
+        if(env.world == 1)
+            return true;
+
+        if(env.local_rank != int(env.rank))
+        {
+            hipblaslt_cerr << "error: LOCAL_RANK " << env.local_rank << " must equal RANK "
+                           << env.rank << " when every rank shares a host\n";
+            return false;
+        }
+
+        int visible = 0;
+        if(hipGetDeviceCount(&visible) != hipSuccess || visible < int(env.world))
+        {
+            hipblaslt_cerr << "error: " << visible << " device(s) visible, need " << env.world
+                           << "\n";
+            return false;
+        }
+
+        if(hipSetDevice(env.local_rank) != hipSuccess)
+        {
+            hipblaslt_cerr << "error: hipSetDevice(" << env.local_rank << ") failed\n";
+            return false;
+        }
+
+        for(uint32_t j = 0; j < env.world; ++j)
+        {
+            if(int(j) == env.local_rank)
+                continue;
+
+            int canAccess = 0;
+            if(hipDeviceCanAccessPeer(&canAccess, env.local_rank, int(j)) != hipSuccess
+               || canAccess == 0)
+            {
+                hipblaslt_cerr << "error: device " << env.local_rank << " cannot peer with " << j
+                               << "\n";
+                return false;
+            }
+
+            const hipError_t e = hipDeviceEnablePeerAccess(int(j), 0);
+            if(e != hipSuccess && e != hipErrorPeerAccessAlreadyEnabled)
+            {
+                hipblaslt_cerr << "error: hipDeviceEnablePeerAccess(" << env.local_rank << " -> "
+                               << j << ") -> " << hipGetErrorString(e) << "\n";
+                return false;
+            }
+        }
+        return true;
+    }
+
+    inline bool join_group(const LauncherEnv& env, TcpRendezvous& rendezvous, uint32_t maxWorld)
+    {
+        if(env.world > maxWorld)
+        {
+            hipblaslt_cout << "skipped: WORLD_SIZE " << env.world << " exceeds " << maxWorld
+                           << "\n";
+            return false;
+        }
+
+        if(!rendezvous.same_host_group())
+        {
+            hipblaslt_cout << "skipped: ranks span hosts\n";
+            return false;
+        }
+
+        if(!make_agreement(rendezvous, env.world).agree(peers_reachable(env), std::logical_and<>{}))
+        {
+            hipblaslt_cout << "skipped: peer access unavailable on at least one rank\n";
+            return false;
+        }
+        return true;
+    }
+
+    // peers[j] is rank j's `local` mapped into this process; peers[env.rank] is
+    // `local` itself.
+    inline bool exchange_ipc_pointers(const LauncherEnv& env,
+                                      TcpRendezvous&     rendezvous,
+                                      void*              local,
+                                      void**             peers)
+    {
+        if(env.world == 1)
+        {
+            peers[0] = local;
+            return true;
+        }
+
+        struct HandleContribution
+        {
+            uint8_t           ok;
+            hipIpcMemHandle_t handle;
+        };
+        HandleContribution mine{};
+        mine.ok = hipIpcGetMemHandle(&mine.handle, local) == hipSuccess ? 1 : 0;
+
+        std::vector<HandleContribution> all(env.world);
+        if(rendezvous.allgather(&mine, all.data(), sizeof(mine)) != HIPBLAS_STATUS_SUCCESS)
+        {
+            hipblaslt_cerr << "error: IPC handle allgather failed\n";
+            return false;
+        }
+        bool gotAllHandles = true;
+        for(uint32_t j = 0; j < env.world; ++j)
+            gotAllHandles = gotAllHandles && all[j].ok != 0;
+        if(!gotAllHandles)
+        {
+            hipblaslt_cerr << "error: hipIpcGetMemHandle failed on at least one rank\n";
+            return false;
+        }
+
+        bool openedAll = true;
+        for(uint32_t j = 0; j < env.world; ++j)
+        {
+            if(j == env.rank)
+                peers[j] = local;
+            else if(hipIpcOpenMemHandle(&peers[j], all[j].handle, hipIpcMemLazyEnablePeerAccess)
+                    != hipSuccess)
+                openedAll = false;
+        }
+
+        const bool groupOpened
+            = make_agreement(rendezvous, env.world).agree(openedAll, std::logical_and<>{});
+        if(!groupOpened)
+            hipblaslt_cerr << "error: hipIpcOpenMemHandle failed on at least one rank\n";
+        return groupOpened;
     }
 } // namespace hipblaslt_bench
