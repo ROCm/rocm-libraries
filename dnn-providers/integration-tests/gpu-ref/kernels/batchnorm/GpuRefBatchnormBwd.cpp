@@ -3,7 +3,8 @@
 
 // GPU reference Batchnorm backward kernel.
 // Compiled via HipRTC with all tensor and compute types supplied as preprocessor defines.
-// Each block handles one channel and reduces over its N*spatial elements.
+// Each block handles one channel and reduces over its N*spatial elements. It obtains the channel
+// statistics, reduces dscale and dbias, then computes dx from those reduced gradients.
 
 #include "GpuRefTypes.h"
 
@@ -35,8 +36,8 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
     COMPUTE_TYPE channelInvVariance;
     if(savedMean == nullptr)
     {
+        // Compute the channel mean
         COMPUTE_TYPE sum = static_cast<COMPUTE_TYPE>(0);
-        COMPUTE_TYPE squareSum = static_cast<COMPUTE_TYPE>(0);
         for(long long i = lid; i < nhw; i += localSize)
         {
             const long long nidx = i / args.hw;
@@ -45,28 +46,46 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
                                                         : nidx * chw + channel * args.hw + hwidx;
             const COMPUTE_TYPE xValue = toAccum(input[index]);
             sum = sum + xValue;
-            squareSum = squareSum + xValue * xValue;
         }
 
         reduceA[lid] = sum;
-        reduceB[lid] = squareSum;
         __syncthreads();
         for(long long offset = localSize >> 1; offset > 0; offset >>= 1)
         {
             if(lid < offset)
             {
                 reduceA[lid] = reduceA[lid] + reduceA[lid + offset];
-                reduceB[lid] = reduceB[lid] + reduceB[lid + offset];
             }
             __syncthreads();
         }
 
         channelMean = reduceA[0] * invNhw;
-        COMPUTE_TYPE variance = reduceB[0] * invNhw - channelMean * channelMean;
-        if(variance < static_cast<COMPUTE_TYPE>(0))
+
+        // Compute variance from deviations from the mean to avoid cancellation
+        COMPUTE_TYPE varianceSum = static_cast<COMPUTE_TYPE>(0);
+        for(long long i = lid; i < nhw; i += localSize)
         {
-            variance = static_cast<COMPUTE_TYPE>(0);
+            const long long nidx = i / args.hw;
+            const long long hwidx = i - nidx * args.hw;
+            const long long index = isChannelLastLayout ? nidx * chw + hwidx * args.c + channel
+                                                        : nidx * chw + channel * args.hw + hwidx;
+            const COMPUTE_TYPE deviation = toAccum(input[index]) - channelMean;
+            varianceSum = varianceSum + deviation * deviation;
         }
+
+        __syncthreads();
+        reduceA[lid] = varianceSum;
+        __syncthreads();
+        for(long long offset = localSize >> 1; offset > 0; offset >>= 1)
+        {
+            if(lid < offset)
+            {
+                reduceA[lid] = reduceA[lid] + reduceA[lid + offset];
+            }
+            __syncthreads();
+        }
+
+        const COMPUTE_TYPE variance = reduceA[0] * invNhw;
         channelInvVariance = rsqrt(variance + toAccum(args.epsilon));
     }
     else
@@ -75,6 +94,7 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         channelInvVariance = toAccum(savedInvVariance[channel]);
     }
 
+    // Accumulate the per-channel scale and bias gradients
     COMPUTE_TYPE dotProduct = static_cast<COMPUTE_TYPE>(0);
     COMPUTE_TYPE sumDy = static_cast<COMPUTE_TYPE>(0);
     for(long long i = lid; i < nhw; i += localSize)
@@ -90,6 +110,8 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         sumDy = sumDy + dyValue;
     }
 
+    // Every thread must finish reading the channel statistics before the buffers are reused
+    __syncthreads();
     reduceA[lid] = dotProduct;
     reduceB[lid] = sumDy;
     __syncthreads();
@@ -108,6 +130,7 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
     const COMPUTE_TYPE meanDy = reduceB[0] * invNhw;
     const COMPUTE_TYPE scalarCoefficient = channelScale * channelInvVariance;
 
+    // Store the reduced affine gradients once per channel
     if(lid == 0)
     {
         SCALE_BIAS_TYPE* tag = nullptr;
@@ -115,6 +138,7 @@ extern "C" __global__ void BatchnormBwdRef(BatchnormBwdArgs args)
         dbias[channel] = fromAccum(reduceB[0], tag);
     }
 
+    // Compute the input gradient for each element from the channel reductions
     GRAD_INPUT_TYPE* tag = nullptr;
     for(long long i = lid; i < nhw; i += localSize)
     {
