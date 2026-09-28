@@ -140,27 +140,6 @@ def ensureUtils() {
     }
 }
 
-// Posts GitHub status from the pipeline post section, loading utils if needed.
-def postGithubStatus(String context, String state, String description, Closure extraActions = null) {
-    if (utils == null) {
-        node(rocmnode("nogpu")) {
-            withWorkingDir {
-                utils.setGithubStatus(context, state, description)
-                if (extraActions) {
-                    extraActions()
-                }
-            }
-        }
-    } else {
-        node {
-            utils.setGithubStatus(context, state, description)
-            if (extraActions) {
-                extraActions()
-            }
-        }
-    }
-}
-
 def runDbSyncJob(def flags, def gpu_family)
 {
     script {
@@ -476,19 +455,19 @@ pipeline {
     }
 
     post {
-        success {
-            script {
-                // TEST: temporarily disabled to verify whether the "Math CI Summary"
-                // required check still appears on the PR without Jenkins posting it.
-                // postGithubStatus('Math CI Summary', 'success', 'All checks have passed')
-            }
-        }
         failure {
             script {
-                // TEST: temporarily disabled, see note above.
-                // postGithubStatus('Math CI Summary', 'failure', 'Some checks have failed') {
-                //     utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
-                // }
+                if (utils == null) {
+                    node(rocmnode("nogpu")) {
+                        withWorkingDir {
+                            utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
+                        }
+                    }
+                } else {
+                    node {
+                        utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
+                    }
+                }
             }
         }
     }
