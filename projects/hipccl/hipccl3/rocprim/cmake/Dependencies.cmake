@@ -20,11 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-include(dependencies/monorepo)
+include(primlibs/dependencies/monorepo)
 
 # Test dependencies
 if(BUILD_TEST)
-  include(dependencies/googletest)
+  include(primlibs/dependencies/googletest)
 endif()
 
 if(WITH_ROCRAND)
