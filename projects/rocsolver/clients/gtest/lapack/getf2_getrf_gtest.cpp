@@ -101,7 +101,7 @@ Arguments getrf_setup_arguments(getrf_tuple tup)
     return arg;
 }
 
-template <bool BLOCKED, typename I, int BATCH_COUNT = 3>
+template <bool BLOCKED, typename I, int BATCH_COUNT = 17>
 class GETF2_GETRF : public ::TestWithParam<getrf_tuple>
 {
 protected:
@@ -127,7 +127,7 @@ protected:
     }
 };
 
-template <bool BLOCKED, typename I, int BATCH_COUNT = 3>
+template <bool BLOCKED, typename I, int BATCH_COUNT = 17>
 class GETF2_GETRF_NPVT : public ::TestWithParam<getrf_tuple>
 {
 protected:
