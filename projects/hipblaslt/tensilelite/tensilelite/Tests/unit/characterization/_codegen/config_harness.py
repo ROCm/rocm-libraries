@@ -528,7 +528,7 @@ def assert_config_rejects(config_path, arch, monkeypatch, capsys, expected_rejec
     whose designed zero-survivor cases exercise validation through the config
     front end rather than through a pre-built solution state.
     """
-    import Tensile.BenchmarkProblems as benchmark_problems
+    import tensilelite.BenchmarkProblems as benchmark_problems
 
     def serial_map(function, objects, *_args, **_kwargs):
         return [function(*args) for args in objects]
