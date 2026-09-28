@@ -286,6 +286,7 @@ def mfma_attention_fwd_inner_body(
     codebook_ptr: Optional[Value] = None,
     wmma_v_lds_stage: bool = False,
     arch: str = "gfx950",
+    mask_neg_inf: Optional[Value] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -299,6 +300,10 @@ def mfma_attention_fwd_inner_body(
     causal-mask threshold (``k_idx <= q_pos + offset``). For
     self-attention pass ``b.const_i32(0)``; for cross-attention pass
     the cache length.
+
+    ``mask_neg_inf`` supplies true negative infinity for masked scores and the
+    initial row maximum. Empty rows use a zero exponential shift, avoiding
+    inf-inf without excluding large finite negative logits.
 
     ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
     the K / V row base addresses (for varlen / paged-KV layouts).
@@ -492,6 +497,7 @@ def mfma_attention_fwd_inner_body(
             v_lds_stage=wmma_v_lds_stage,
             arch=arch,
             target=target,
+            mask_neg_inf=mask_neg_inf,
         )
         return
 
@@ -565,7 +571,7 @@ def mfma_attention_fwd_inner_body(
     # Each lane has 4 rows worth of (m, l) state: rows m_blk*4 + i for
     # i in 0..3, where m_blk = lane / 16. We carry m_r, l_r per row
     # slot through the K-loop.
-    neg_inf = b.const_f32(-1e30)
+    neg_inf = mask_neg_inf if mask_neg_inf is not None else b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
     acc_zero = b.zero_vec_f32(atom.c_per_lane)
 
@@ -718,11 +724,15 @@ def mfma_attention_fwd_inner_body(
                 query_pos=row_q_pos,
                 sliding_window=sliding_window,
                 context_len=causal_ctx_offset,
+                neg_inf=mask_neg_inf,
             )
             # If the whole K-tile is masked off (sparse-skip), force the
             # score to -inf so the softmax exponential collapses to 0.
             if keep_tile is not None:
-                s_r_scaled = b.select(keep_tile, s_r_scaled, neg_inf)
+                s_r_scaled = b.select(
+                    keep_tile, s_r_scaled,
+                    mask_neg_inf if mask_neg_inf is not None else neg_inf,
+                )
             # 16-lane row-max reduce via the distribution-driven
             # ``block_tile_reduce_sync`` (CK Tile ``BlockReduce2dSync``). The
             # reduce distribution's lane-owned R level (length 16, derivative 1)
@@ -730,8 +740,12 @@ def mfma_attention_fwd_inner_body(
             # ``wave_reduce_max(lanes_per_row=16)`` produced.
             row_max = _softmax_row_reduce(b, s_r_scaled, combine="max")
             m_new_r = b.fmax(ms[r], row_max)
-            alpha_r = b.exp2(b.fsub(ms[r], m_new_r))
-            p_r = b.exp2(b.fsub(s_r_scaled, m_new_r))
+            shift = m_new_r
+            if mask_neg_inf is not None:
+                empty = b.fcmp("oeq", m_new_r, mask_neg_inf)
+                shift = b.select(empty, zero_f, m_new_r)
+            alpha_r = b.exp2(b.fsub(ms[r], shift))
+            p_r = b.exp2(b.fsub(s_r_scaled, shift))
             # Row-sum reduce of p.
             row_psum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new_r = b.fadd(b.fmul(ls[r], alpha_r), row_psum)
@@ -957,6 +971,7 @@ def _wmma_attention_fwd_inner_body(
     v_lds_stage: bool = False,
     arch: str,
     target,
+    mask_neg_inf: Optional[Value] = None,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1009,7 +1024,7 @@ def _wmma_attention_fwd_inner_body(
     # Accumulator column == this lane's k-position in the QK score tile.
     col = b.mod(lane, c16)
 
-    neg_inf = b.const_f32(-1e30)
+    neg_inf = mask_neg_inf if mask_neg_inf is not None else b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
 
     k_off = k_token_offset_elems if k_token_offset_elems is not None else b.const_i32(0)
@@ -1122,17 +1137,25 @@ def _wmma_attention_fwd_inner_body(
                 query_pos=row_q_pos,
                 sliding_window=sliding_window,
                 context_len=causal_ctx_offset,
+                neg_inf=mask_neg_inf,
             )
             if keep_tile is not None:
-                s_r = b.select(keep_tile, s_r, neg_inf)
+                s_r = b.select(
+                    keep_tile, s_r,
+                    mask_neg_inf if mask_neg_inf is not None else neg_inf,
+                )
             # Per-row reduce across the 16 k-columns of this wave32 half. The
             # distribution-driven ``block_tile_reduce_sync`` emits the same
             # 4-stage in-half XOR butterfly as the legacy wave32
             # ``wave_reduce_max(lanes_per_row=16)``.
             row_max = _softmax_row_reduce(b, s_r, combine="max")
             m_new = b.fmax(ms[r], row_max)
-            alpha = b.exp2(b.fsub(ms[r], m_new))
-            p_r = b.exp2(b.fsub(s_r, m_new))
+            shift = m_new
+            if mask_neg_inf is not None:
+                empty = b.fcmp("oeq", m_new, mask_neg_inf)
+                shift = b.select(empty, zero_f, m_new)
+            alpha = b.exp2(b.fsub(ms[r], shift))
+            p_r = b.exp2(b.fsub(s_r, shift))
             row_sum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new = b.fadd(b.fmul(ls[r], alpha), row_sum)
             new_ms.append(m_new)

@@ -58,6 +58,23 @@ by `rocke_wmma_fmha_fwd_spec_default()`. Native callers must rebuild against
 the updated header and archive; the pybind spec adapter also carries the field.
 The parity emitters cover both dtypes, head sizes, masks, GQA, and V staging.
 
+### Bottom-right causal alignment
+
+With `mask_mode="causal"` and `causal_bottom_right=True`, the mask admits
+`key_index <= query_index + seqlen_k - seqlen_q`. This supports chunked dense
+prefill and also `seqlen_q > seqlen_k`, where the fully masked query prefix is
+written as zero. Both input dtypes and both V-staging choices use the same rule.
+Query/KV tile-alignment requirements are unchanged.
+
+The bottom-right variant has a distinct kernel-cache key. It uses true negative
+infinity for masked scores and the initial row maximum. An empty row uses a
+zero exponential shift, avoiding `inf-inf` while retaining zero probability
+mass. BF16 also uses this normalization for ordinary attention: large finite
+negative logits must not underflow solely because of a finite initial maximum.
+`test_wmma_fmha_fwd_numeric.py` covers constant-value preservation under those
+logits and exact-zero masked prefixes. Legacy FP16 default emission remains
+unchanged; the BF16 normalization change is intentional.
+
 The sections below are a historical campaign, not results for this comparator.
 
 ## TL;DR (executive summary)

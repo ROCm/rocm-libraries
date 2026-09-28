@@ -62,6 +62,7 @@ extern "C" {
  *   sliding_window   : default 0 (passed through to the inner body).
  *   v_lds_stage      : optional V staging through LDS; default false.
  *   name             : NULL => "rocke_wmma_fmha_fwd".
+ *   causal_bottom_right : shift the causal diagonal by Sk-Sq; requires CAUSAL.
  *
  * dtype is referenced as-is; keep it alive while using the spec. */
 typedef struct rocke_wmma_fmha_fwd_spec
@@ -74,6 +75,7 @@ typedef struct rocke_wmma_fmha_fwd_spec
     int sliding_window; /* default 0                             */
     const char* name; /* NULL => "rocke_wmma_fmha_fwd"        */
     const char* dtype; /* "fp16" default; "f16" alias or "bf16" */
+    bool causal_bottom_right; /* default false; causal diagonal is seqlen_k - seqlen_q */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -81,9 +83,10 @@ typedef struct rocke_wmma_fmha_fwd_spec
 rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void);
 
 /* WmmaFmhaFwdSpec.kernel_name(): kernel_name_join(name, "wmma16x16x16",
- * "H{hd}", "HQ{hq}", "HK{kv_heads}", dtype, mask_mode,
- * "vlds" if v_lds_stage else "vgather"). Writes NUL-terminated into out
- * (capacity out_cap). Returns ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */
+ * "H{hd}", "HQ{hq}", "HK{kv_heads}", dtype, mask tag,
+ * "vlds" if v_lds_stage else "vgather"). The mask tag is "causal_br" for
+ * bottom-right alignment. Writes NUL-terminated into out (capacity out_cap).
+ * Returns ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */
 rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t* spec,
                                                char* out,
                                                size_t out_cap);

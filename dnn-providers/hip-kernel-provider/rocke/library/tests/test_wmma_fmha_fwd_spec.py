@@ -32,6 +32,22 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         with self.assertRaises(ValueError):
             WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, dtype="fp32")
 
+    def test_bottom_right_requires_causal_mask(self):
+        with self.assertRaises(ValueError):
+            WmmaFmhaFwdSpec(
+                head_size=64, num_query_heads=4, causal_bottom_right=True,
+            )
+
+    def test_causal_alignment_cache_keys(self):
+        top_left = WmmaFmhaFwdSpec(
+            head_size=64, num_query_heads=4, mask_mode="causal",
+        )
+        bottom_right = WmmaFmhaFwdSpec(
+            head_size=64, num_query_heads=4, mask_mode="causal",
+            causal_bottom_right=True,
+        )
+        self.assertNotEqual(top_left.kernel_name(), bottom_right.kernel_name())
+
 
 if __name__ == "__main__":
     unittest.main()

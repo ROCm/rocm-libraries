@@ -647,10 +647,14 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (128, 4, 4, "causal", False),
         (64, 6, 0, "none", True),
     ]
-    return [
+    configs = [
         dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v, dtype=dtype)
         for dtype in ("fp16", "bf16")
         for (h, q, k, m, v) in rows
+    ]
+    return configs + [
+        dict(configs[index], mask_mode="causal", causal_bottom_right=True)
+        for index in (2, 8, 3, 9, 5, 11)
     ]
 
 

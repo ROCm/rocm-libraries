@@ -242,6 +242,7 @@ typedef struct rocke_mfma_attn_params
     rocke_value_t* codebook_ptr;
     bool wmma_v_lds_stage;
     const char* arch; /* NULL => "gfx950"                                  */
+    rocke_value_t* mask_neg_inf; /* NULL => legacy sentinel; true -inf permits fully masked rows */
 } rocke_mfma_attn_params_t;
 
 /* ---------------------------------------------- mfma_attention_fwd_inner_body *

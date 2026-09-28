@@ -395,7 +395,7 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_value_t* P_lds = rocke_b_smem_alloc(b, dtype_ir, p_lds_shape, 2, "Pmfma");
 
     /* ---- Online softmax + PV accumulator iter_args ---- */
-    rocke_value_t* neg_inf = rocke_b_const_f32(b, -1e30);
+    rocke_value_t* neg_inf = p->mask_neg_inf != NULL ? p->mask_neg_inf : rocke_b_const_f32(b, -1e30);
     rocke_value_t* zero_f = rocke_b_const_f32(b, 0.0);
     rocke_value_t* acc_zero = rocke_b_zero_vec_f32(b, atom->c_per_lane);
 
@@ -527,15 +527,22 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                                                     row_q_pos,
                                                     p->sliding_window,
                                                     p->causal_ctx_offset,
-                                                    NULL);
+                                                    p->mask_neg_inf);
             if(keep_tile != NULL)
             {
-                s_r_scaled = rocke_b_select(b, keep_tile, s_r_scaled, neg_inf);
+                s_r_scaled = rocke_b_select(
+                    b, keep_tile, s_r_scaled, p->mask_neg_inf != NULL ? p->mask_neg_inf : neg_inf);
             }
             rocke_value_t* row_max = rocke_softmax_row_reduce(b, s_r_scaled, ROCKE_REDUCE_MAX);
             rocke_value_t* m_new_r = rocke_b_fmax(b, ms[r], row_max);
-            rocke_value_t* alpha_r = rocke_b_exp2(b, rocke_b_fsub(b, ms[r], m_new_r));
-            rocke_value_t* p_r = rocke_b_exp2(b, rocke_b_fsub(b, s_r_scaled, m_new_r));
+            rocke_value_t* shift = m_new_r;
+            if(p->mask_neg_inf != NULL)
+            {
+                rocke_value_t* empty = rocke_b_fcmp(b, "oeq", m_new_r, p->mask_neg_inf);
+                shift = rocke_b_select(b, empty, zero_f, m_new_r);
+            }
+            rocke_value_t* alpha_r = rocke_b_exp2(b, rocke_b_fsub(b, ms[r], shift));
+            rocke_value_t* p_r = rocke_b_exp2(b, rocke_b_fsub(b, s_r_scaled, shift));
             rocke_value_t* row_psum = rocke_softmax_row_reduce(b, p_r, ROCKE_REDUCE_SUM);
             rocke_value_t* l_new_r = rocke_b_fadd(b, rocke_b_fmul(b, ls[r], alpha_r), row_psum);
 
@@ -757,7 +764,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     }
     rocke_value_t* col = rocke_b_mod(b, lane, c16);
 
-    rocke_value_t* neg_inf = rocke_b_const_f32(b, -1e30);
+    rocke_value_t* neg_inf = p->mask_neg_inf != NULL ? p->mask_neg_inf : rocke_b_const_f32(b, -1e30);
     rocke_value_t* zero_f = rocke_b_const_f32(b, 0.0);
 
     rocke_value_t* k_off = rocke_attn_opt(b, p->k_token_offset_elems);
@@ -912,15 +919,22 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                                              row_q_pos,
                                              p->sliding_window,
                                              p->causal_ctx_offset,
-                                             NULL);
+                                             p->mask_neg_inf);
             if(keep_tile != NULL)
             {
-                s_r = rocke_b_select(b, keep_tile, s_r, neg_inf);
+                s_r = rocke_b_select(
+                    b, keep_tile, s_r, p->mask_neg_inf != NULL ? p->mask_neg_inf : neg_inf);
             }
             rocke_value_t* row_max = rocke_softmax_row_reduce(b, s_r, ROCKE_REDUCE_MAX);
             rocke_value_t* m_new = rocke_b_fmax(b, ms[r], row_max);
-            rocke_value_t* alpha = rocke_b_exp2(b, rocke_b_fsub(b, ms[r], m_new));
-            rocke_value_t* p_r = rocke_b_exp2(b, rocke_b_fsub(b, s_r, m_new));
+            rocke_value_t* shift = m_new;
+            if(p->mask_neg_inf != NULL)
+            {
+                rocke_value_t* empty = rocke_b_fcmp(b, "oeq", m_new, p->mask_neg_inf);
+                shift = rocke_b_select(b, empty, zero_f, m_new);
+            }
+            rocke_value_t* alpha = rocke_b_exp2(b, rocke_b_fsub(b, ms[r], shift));
+            rocke_value_t* p_r = rocke_b_exp2(b, rocke_b_fsub(b, s_r, shift));
             rocke_value_t* row_sum = rocke_softmax_row_reduce(b, p_r, ROCKE_REDUCE_SUM);
             rocke_value_t* l_new = rocke_b_fadd(b, rocke_b_fmul(b, ls[r], alpha), row_sum);
             new_ms[r] = m_new;

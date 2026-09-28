@@ -90,6 +90,10 @@ class WmmaFmhaFwdSpec:
     ``seqlen_q`` / ``seqlen_k`` are runtime kernel args (the grid is sized from
     ``seqlen_q`` at launch), so the spec only carries the compile-time tile
     facts.
+
+    ``causal_bottom_right=True`` shifts the causal diagonal by
+    ``seqlen_k - seqlen_q``. It requires ``mask_mode="causal"`` and returns
+    zero for a query row with no visible keys.
     """
 
     head_size: int
@@ -101,6 +105,7 @@ class WmmaFmhaFwdSpec:
     # Optional V staging through LDS; benchmark it per shape and dtype.
     v_lds_stage: bool = False
     name: str = "rocke_wmma_fmha_fwd"
+    causal_bottom_right: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16", "bf16"):
@@ -115,6 +120,8 @@ class WmmaFmhaFwdSpec:
             raise ValueError(
                 f"WMMA FMHA supports mask_mode 'none'/'causal', got {self.mask_mode!r}"
             )
+        if self.causal_bottom_right and self.mask_mode != "causal":
+            raise ValueError("bottom-right alignment requires causal masking")
         if self.num_kv_heads and self.num_query_heads % self.num_kv_heads != 0:
             raise ValueError(
                 "num_query_heads must be a multiple of num_kv_heads for GQA "
@@ -142,7 +149,7 @@ class WmmaFmhaFwdSpec:
             f"HQ{self.num_query_heads}",
             f"HK{self.kv_heads}",
             "bf16" if self.dtype == "bf16" else "fp16",
-            self.mask_mode,
+            "causal_br" if self.causal_bottom_right else self.mask_mode,
             "vlds" if self.v_lds_stage else "vgather",
         )
 
@@ -310,7 +317,14 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         dtype="bf16" if spec.dtype == "bf16" else "f16",
         mask_mode=spec.mask_mode,
         sliding_window=spec.sliding_window,
-        causal_ctx_offset=b.const_i32(0),
+        causal_ctx_offset=(
+            b.sub(seqlen_k, seqlen_q)
+            if spec.causal_bottom_right else b.const_i32(0)
+        ),
+        mask_neg_inf=(
+            b.const_f32(float("-inf"))
+            if spec.causal_bottom_right or spec.dtype == "bf16" else None
+        ),
         k_token_offset_elems=batch_off_k,
         v_token_offset_elems=batch_off_v,
         wmma_v_lds_stage=spec.v_lds_stage,

@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 12 sampled FP16/BF16
- * configs by argv[1] (0..11), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 18 dtype/alignment
+ * configs by argv[1] (0..17), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,12 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 12 && idx < 18)
+    {
+        static const int bases[] = {2, 8, 3, 9, 5, 11};
+        spec->causal_bottom_right = true;
+        idx = bases[idx - 12];
+    }
     if(idx >= 6 && idx < 12)
     {
         spec->dtype = "bf16";
@@ -79,6 +85,8 @@ static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
     default:
         return -1;
     }
+    if(spec->causal_bottom_right)
+        spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
     return 0;
 }
 
@@ -86,7 +94,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..11>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..17>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

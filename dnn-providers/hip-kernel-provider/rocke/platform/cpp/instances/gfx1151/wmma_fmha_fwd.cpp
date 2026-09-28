@@ -17,6 +17,7 @@
 
 #include "rocke/instance_gfx1151_wmma_fmha_fwd.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -84,6 +85,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.sliding_window = 0;
     s.name = WMMA_FMHA_DEFAULT_NAME;
     s.dtype = "fp16";
+    s.causal_bottom_right = false;
     return s;
 }
 
@@ -123,7 +125,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     parts[2] = hq;
     parts[3] = hk;
     parts[4] = strcmp(dtype, "bf16") == 0 ? "bf16" : "fp16";
-    parts[5] = mask;
+    parts[5] = spec->causal_bottom_right ? "causal_br" : mask;
     parts[6] = spec->v_lds_stage ? "vlds" : "vgather";
 
     return rocke_kernel_name_join(name, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
@@ -166,6 +168,16 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(dtype == NULL)
     {
         wmma_set_reason(reason, reason_cap, "WMMA FMHA dtype must be fp16/f16 or bf16");
+        return false;
+    }
+    if(spec->mask_mode != ROCKE_FMHA_MASK_NONE && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL)
+    {
+        wmma_set_reason(reason, reason_cap, "WMMA FMHA supports none/causal masking");
+        return false;
+    }
+    if(spec->causal_bottom_right && spec->mask_mode != ROCKE_FMHA_MASK_CAUSAL)
+    {
+        wmma_set_reason(reason, reason_cap, "bottom-right alignment requires causal masking");
         return false;
     }
 
@@ -405,7 +417,12 @@ static rocke_status_t
     p.dtype = wmma_dtype(spec);
     p.mask_mode = wmma_to_attn_mask(spec->mask_mode);
     p.sliding_window = spec->sliding_window;
-    p.causal_ctx_offset = rocke_b_const_i32(b, 0);
+    p.causal_ctx_offset = spec->causal_bottom_right
+                              ? rocke_b_sub(b, seqlen_k, seqlen_q)
+                              : rocke_b_const_i32(b, 0);
+    p.mask_neg_inf = (spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0)
+                        ? rocke_b_const_f32(b, -INFINITY)
+                        : NULL;
     p.k_token_offset_elems = batch_off_k;
     p.v_token_offset_elems = batch_off_v;
     p.wmma_v_lds_stage = spec->v_lds_stage;

@@ -30,15 +30,14 @@ class RockeKernels:
             raise UnsupportedCase("WMMA adapter requires matching fp16/bf16 Q/K/V storage")
         if case.seqlen_q % 16 or case.seqlen_k % 16:
             raise UnsupportedCase("existing WMMA adapter requires complete 16-token tiles")
-        if case.mask not in ("none", "causal_topleft"):
-            raise UnsupportedCase("existing WMMA adapter has no bottom-right mask")
         if case.window or case.softcap or case.sinks or case.alibi or case.qq_bias:
             raise UnsupportedCase("existing WMMA adapter lacks this score/mask feature")
         spec = WmmaFmhaFwdSpec(
             head_size=case.head_dim, num_query_heads=case.heads_q,
             num_kv_heads=case.heads_kv,
-            mask_mode="causal" if case.mask == "causal_topleft" else "none",
+            mask_mode="none" if case.mask == "none" else "causal",
             dtype=case.dtype,
+            causal_bottom_right=case.mask == "causal_bottomright",
         )
         key = spec.kernel_name()
         if key not in self.cache:

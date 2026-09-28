@@ -3256,6 +3256,7 @@ rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<st
     s.num_kv_heads = dict_int(d, "num_kv_heads", s.num_kv_heads);
     s.v_lds_stage = dict_bool(d, "v_lds_stage", s.v_lds_stage);
     s.sliding_window = dict_int(d, "sliding_window", s.sliding_window);
+    s.causal_bottom_right = dict_bool(d, "causal_bottom_right", s.causal_bottom_right);
     {
         std::string v;
         if(dict_str(d, "mask_mode", v))
