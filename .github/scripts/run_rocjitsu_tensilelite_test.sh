@@ -348,15 +348,22 @@ run_tensilelite_tests() {
 
   # Parse JUnit XML for per-test timing summary
   if [[ -f "${junit_dir}/tensilelite.xml" ]]; then
-    "${PYTHON}" << 'JUNIT_PARSE'
+    REPORT_DIR="${REPORT_DIR}" "${PYTHON}" << 'JUNIT_PARSE'
 import xml.etree.ElementTree as ET, os
 junit_dir = os.environ.get('REPORT_DIR', '.') + '/junit'
 tree = ET.parse(junit_dir + '/tensilelite.xml')
-tests = [(tc.get('time','0'), tc.get('name',''), 'PASSED' if tc.find('failure') is None and tc.find('error') is None else 'FAILED') for tc in tree.iter('testcase')]
+def outcome(tc):
+    if tc.find('failure') is not None or tc.find('error') is not None:
+        return 'FAILED'
+    if tc.find('skipped') is not None:
+        return 'SKIPPED'
+    return 'PASSED'
+tests = [(tc.get('time','0'), tc.get('name',''), outcome(tc)) for tc in tree.iter('testcase')]
 tests.sort(key=lambda x: float(x[0]), reverse=True)
 total = sum(float(t) for t,_,_ in tests)
 passed = sum(1 for _,_,s in tests if s == 'PASSED')
 failed = sum(1 for _,_,s in tests if s == 'FAILED')
+skipped = sum(1 for _,_,s in tests if s == 'SKIPPED')
 print()
 print('=' * 80)
 print('Per-test timing from JUnit XML (rocjitsu emulation)')
@@ -369,7 +376,7 @@ for t, name, status in tests:
     short = name.split('[')[-1].rstrip(']').split('/')[-1].replace('.yaml','') if '[' in name else name
     print('%-55s %10s %8s' % (short, time_str, status))
 print('-' * 80)
-print('Total: %d tests, %d passed, %d failed, %.0fs (%.0f min)' % (len(tests), passed, failed, total, total/60))
+print('Total: %d tests, %d passed, %d failed, %d skipped, %.0fs aggregate test time (%.0f min)' % (len(tests), passed, failed, skipped, total, total/60))
 print('=' * 80)
 JUNIT_PARSE
   fi
