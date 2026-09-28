@@ -57,3 +57,29 @@ def test_adaptive_gsu_store_modes(tmp_path, arch, opt_nll, strategy):
         assert re.search(r"^label_GW_B\w+_MB\w*:", source, re.MULTILINE)
         assert ("OptNLL_MB" in source) == bool(opt_nll)
     assert_assembles(source, name)
+
+
+@pytest.mark.parametrize("algorithm", ["MultipleBuffer", "MultipleBufferSingleKernel"])
+def test_gfx1250_adaptive_gsu_store_modes(tmp_path, algorithm):
+    # The external gfx1250 job also exercises adaptive GSU through this fixture.
+    # Keep one TDM tile shape and test both declared accumulation algorithms.
+    fixture = Path(__file__).parents[1] / "common/gemm/gfx12/gsu_gfx1250.yaml"
+    config = yaml.safe_load(fixture.read_text())
+    config["GlobalParameters"]["CpuThreads"] = 1
+    for parameter in config["BenchmarkProblems"][0][1]["ForkParameters"]:
+        for key, values in parameter.items():
+            parameter[key] = [values[0]]
+            if key == "AdaptiveGemmGSUA":
+                parameter[key] = [1]
+            elif key == "GlobalSplitUAlgorithm":
+                parameter[key] = [algorithm]
+    path = tmp_path / "adaptive_gsu_gfx1250.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    kernels = emit_kernels_from_config(path, arch="gfx1250", limit=1)
+    assert len(kernels) == 1
+    name, source, error = kernels[0]
+    (tmp_path / "adaptive_gsu_gfx1250.s").write_text(source)
+    assert error == 0
+    assert re.search(r"^label_GW_B\w+_MBSK\w*:", source, re.MULTILINE)
+    assert re.search(r"^label_GW_B\w+_MB\w*:", source, re.MULTILINE)
+    assert_assembles(source, name)
