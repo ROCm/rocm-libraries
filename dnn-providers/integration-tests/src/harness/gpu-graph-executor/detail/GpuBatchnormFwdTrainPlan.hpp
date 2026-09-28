@@ -275,9 +275,6 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->epsilon_tensor_uid(), ComputeDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->momentum_tensor_uid().value(), ComputeDataTypeEnum);
 
         std::vector<int64_t> operandUids = {nodeAttributes->x_tensor_uid(),
                                             nodeAttributes->scale_tensor_uid(),
