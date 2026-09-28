@@ -2416,6 +2416,62 @@ def test_only_the_first_target_directive_is_rewritten(tmp_path):
     assert text.count(_DIRECTIVE.format(GFX1250)) == 1
 
 
+def test_the_assembler_retarget_leaves_a_stepping_directive_alone(tmp_path):
+    """The assembler retargets every source it is handed, including one this
+    module already rewrote. Matching only the leading hex of the processor made
+    it keep `-strict` as a tail and add the target again -- `gfx1250-strict-strict`,
+    which the assembler rejects as a malformed target id."""
+    from Tensile.Toolchain.Component import Assembler
+
+    asm = tmp_path / "k0.s"
+    original = (
+        f"{_DIRECTIVE.format(GFX1250_STRICT)}\n"
+        f"\tamdhsa.target: amdgcn-amd-amdhsa--{GFX1250_STRICT}\n"
+    )
+    asm.write_text(original)
+    before = asm.stat().st_mtime_ns
+
+    Assembler._retargetAssemblySource(GFX1250_STRICT, str(asm))
+
+    assert asm.read_text() == original
+    assert asm.stat().st_mtime_ns == before
+
+
+def test_the_two_retargets_compose_to_a_single_suffix(tmp_path):
+    """The build runs both on each stepping kernel: this module's directive
+    rewrite while writing it, then the assembler's before assembling it. Either
+    alone is covered above; this is the order they actually run in."""
+    from Tensile.TensileCreateLibrary.Run import _alignAmdgcnTargetToStepping
+    from Tensile.Toolchain.Component import Assembler
+
+    asm = tmp_path / "k0.s"
+    asm.write_text(
+        f"{_DIRECTIVE.format(GFX1250)}\n"
+        f"\tamdhsa.target: amdgcn-amd-amdhsa--{GFX1250}\n"
+    )
+
+    _alignAmdgcnTargetToStepping(asm, ISA_GFX1250, GFX1250_STRICT)
+    Assembler._retargetAssemblySource(GFX1250_STRICT, str(asm))
+
+    text = asm.read_text()
+    assert _DIRECTIVE.format(GFX1250_STRICT) in text
+    assert f"amdhsa.target: amdgcn-amd-amdhsa--{GFX1250_STRICT}\n" in text
+    assert "-strict-strict" not in text
+
+
+def test_the_assembler_retarget_keeps_features_after_a_stepping(tmp_path):
+    """A stepping name and a feature suffix are separate axes: the hyphen belongs
+    to the processor, the colon starts what the retarget carries over."""
+    from Tensile.Toolchain.Component import Assembler
+
+    asm = tmp_path / "k0.s"
+    asm.write_text(_DIRECTIVE.format(f"{GFX1250_STRICT}:xnack+") + "\n")
+
+    Assembler._retargetAssemblySource(GFX1250_STRICT, str(asm))
+
+    assert asm.read_text() == _DIRECTIVE.format(f"{GFX1250_STRICT}:xnack+") + "\n"
+
+
 # =========================================================================== #
 # Partitioning. One run cannot name two architectures sharing an ISA, so the
 # build asks isaCollisionFreeGroups how many runs it takes to cover what was
