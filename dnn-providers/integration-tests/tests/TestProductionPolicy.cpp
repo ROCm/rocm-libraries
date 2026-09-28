@@ -45,7 +45,13 @@ TEST_F(TestProductionPolicy, EveryFieldMirrorsItsOwnConfigGetter)
 
     EXPECT_EQ(policy.mode, TestConfig::get().getVerificationMode());
     EXPECT_EQ(policy.validator, TestConfig::get().getValidatorDevice());
-    EXPECT_EQ(policy.enforceSupportClaims, TestConfig::get().enforceSupportClaims());
+    // The one field fed by a helper rather than a getter, and the assertion is
+    // wiring only: this fixture initializes the singleton with the flag false, so
+    // both sides can only ever answer OFF. What it does catch is productionPolicy()
+    // growing a second opinion about the mode instead of deferring to claimMode() --
+    // the header main.cpp prints comes from that same call, and the two disagreeing
+    // would label the run with a mode it did not use.
+    EXPECT_EQ(policy.claims, claimMode());
     EXPECT_EQ(policy.arch, TestConfig::get().getCurrentArch());
     EXPECT_EQ(policy.platform, currentPlatform());
     EXPECT_EQ(policy.deviceVramMb, TestConfig::get().getCurrentDeviceVramMb());
