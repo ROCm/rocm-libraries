@@ -60,6 +60,7 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t VectorSizeC = 1;
 
     static constexpr bool EnableSmallerVectorLoadFallback = false;
+    static constexpr bool LargeTensors                    = false;
 };
 
 // A,B vector sizes must divide K_Warp_Tile. Used directly by test_gemm_unaligned_k.cpp; the
@@ -247,6 +248,7 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
     static constexpr int kBlockPerCu = 2;
 
     static constexpr bool EnableSmallerVectorLoadFallback = true;
+    static constexpr bool LargeTensors = !std::is_same_v<PrecType, ck_tile::int8_t>;
 };
 
 template <typename PrecType>
