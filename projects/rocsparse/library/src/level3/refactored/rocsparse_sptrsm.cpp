@@ -30,9 +30,7 @@
 #include "rocsparse_coosm.hpp"
 #include "rocsparse_csrsm.hpp"
 
-#ifdef ROCSPARSE_WITH_CSC_TRSM
 #include "rocsparse_cscsm.hpp"
-#endif
 
 #include "../rocsparse_sptrsm_descr.hpp"
 
@@ -199,13 +197,6 @@ namespace rocsparse
         //
         switch(A->format)
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-        case rocsparse_format_csc:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
-
-#else
         case rocsparse_format_csc:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_analysis(handle,
@@ -222,8 +213,6 @@ namespace rocsparse
                                                                 p_error));
             break;
         }
-
-#endif
 
         case rocsparse_format_csr:
         {
@@ -395,13 +384,7 @@ namespace rocsparse
         //
         switch(A->format)
         {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-        case rocsparse_format_csc:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
 
-#else
         case rocsparse_format_csc:
         {
 
@@ -418,7 +401,7 @@ namespace rocsparse
                                                                p_error));
             break;
         }
-#endif
+
         case rocsparse_format_csr:
         {
 

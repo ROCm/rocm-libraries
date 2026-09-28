@@ -226,7 +226,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     const uint32_t    wfsize_ = sleep_ ? 64 : handle->wavefront_size;
 
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-    const bool conjugate = (trans == rocsparse_operation_conjugate_transpose) || (force_conj);
+    const bool conjugate = ((trans == rocsparse_operation_conjugate_transpose) || (force_conj))
+                           && rocsparse::datatype_is_complex(A->data_type);
 
     rocsparse::csrsv_launch_kernel_t csrsv_launch_kernel{};
     RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(&csrsv_launch_kernel,

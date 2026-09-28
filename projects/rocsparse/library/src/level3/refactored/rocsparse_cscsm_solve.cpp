@@ -48,9 +48,11 @@ rocsparse_status rocsparse::cscsm_compute(rocsparse_handle            handle,
     _rocsparse_mat_descr   descr_csr;
     _rocsparse_spmat_descr A_csr(A, rocsparse_format_csr, &descr_csr, A->info);
 
-    const auto A_csr_op         = (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
-                                                                     : rocsparse_operation_none;
-    const bool A_load_conjugate = (op_A == rocsparse_operation_conjugate_transpose);
+    const auto A_csr_op = (op_A == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                                             : rocsparse_operation_none;
+
+    const bool A_load_conjugate = (op_A == rocsparse_operation_conjugate_transpose)
+                                  && rocsparse::datatype_is_complex(A->data_type);
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_compute(handle,
                                                        nrhs,
