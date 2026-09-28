@@ -139,6 +139,13 @@ def _parse_args(argv):
         "recorded in each rocKE UKD's provenance, so a shipped kernel names "
         "the wheel that produced it.",
     )
+    p.add_argument(
+        "--no-rocke",
+        action="store_true",
+        help="The build was configured without rocKE "
+        "(HIPKERNELPROVIDER_ENABLE_ROCKE=OFF), so no rocKE producer exists: "
+        "any rocke UKD selected for packing is an error, never skipped.",
+    )
     return p.parse_args(argv)
 
 
@@ -155,6 +162,7 @@ def main(argv=None):
         rocke_wheel_stamp=args.rocke_wheel_stamp,
         group=args.group,
         source_label=args.source_label,
+        enable_rocke=not args.no_rocke,
     )
     return 0
 

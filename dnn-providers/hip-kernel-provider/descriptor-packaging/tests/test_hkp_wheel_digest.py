@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.rocke
+
 TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_wheel_digest.py"
 
 

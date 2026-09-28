@@ -1,4 +1,5 @@
 [tool.pytest.ini_options]
 markers = [
     "quick: load-time / pure-unit tests that run without invoking hipcc or comgr",
+    "rocke: exercises the rocKE producer or its wheel/comgr toolchain; deselected when HIPKERNELPROVIDER_ENABLE_ROCKE=OFF",
 ]

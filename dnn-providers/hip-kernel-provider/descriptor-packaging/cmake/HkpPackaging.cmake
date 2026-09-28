@@ -111,90 +111,68 @@ function(hkp_selected_arches out_var out_source_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
-#               ARCHES <list> HIPCC <path>
-#               ROCM_KPACK_DIR <dir> OUT_ROOT <dir>
-#               ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
-#               ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
-#               [PACK_JOBS <n>])
-#   Wire the compile -> prune -> pack DAG for ONE authored source root.
+# _hkp_pack_producer(<hkp_wire_pack_target arguments>)
+#   Resolve the producer half of one pack step, from the keywords
+#   hkp_wire_pack_target() was called with, into the caller's scope:
 #
-#   The root is walked recursively. Each descriptor's authored
-#   subpath is preserved into the packed tree. Producer selection is per-UKD on
-#   kernel_source.kind, never per-folder, so one root feeds all producers into
-#   ONE kpack per arch.
+#     _interp          interpreter the pack tool runs under
+#     _interp_what     how diagnostics name that interpreter
+#     _producer_deps   file-level dependencies of the pack step beyond its inputs
+#     _tool_cmd        `cmake -E env ... -- <interp> <tool>` prefix
+#     _producer_arg    producer flag(s) appended to the tool's arguments
 #
-#   OUT_ROOT is where the packer writes: one output folder, wiped and filled by
-#   this invocation alone. No two invocations may share a destination. One
-#   source root may be invoked more than once, into different output roots.
-#   Installation is not wired here -- a root delivers into arch_content/ or
-#   test_arch_content/ in the build tree, and those two trees are installed
-#   wholesale by hip-kernel-provider/CMakeLists.txt.
+#   Validates the ENABLE_ROCKE contract documented on hkp_wire_pack_target().
 #
-#   A source root that is not a directory, or a missing output root, is a
-#   configure error: each one makes the pack step write nothing, and a consumer
-#   cannot tell that apart from a broken layout.
-#
-#   What actually differs between roots is declared, not forked into a second
-#   function:
-#
-#   Every root runs under the supplied ROCKE_INTERP with ROCKE_PYTHON_DIR
-#   prepended to PYTHONPATH, so `import rocke`/`kernels` resolve from the private
-#   wheels wherever a UKD names them. Producer selection stays per-UKD on
-#   kernel_source.kind, including roots holding only hip descriptors.
-#
-#   ROCKE_READY is the private directory's wheel-install stamp. The pack step
-#   depends on it rather than only the interpreter, so changing a kernel under
-#   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
-#   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
-#   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
-#   tool environment.
-#
-#   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
-#   serial path. Omitted, the packer sizes its pool against the machine. Roots have
-#   no ordering edge between them, so the generator runs them at once: the test
-#   roots name a small cap so their pools do not multiply, and the product root
-#   omits it because it is the root expected to be large enough to repay a full pool.
-#
-#   NAME is the source label written into every descriptor's provenance. NAME, the
-#   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
-#   hkp_verify_embedded_sources() and hkp_register_census_tests().
+#   Called with hkp_wire_pack_target()'s ${ARGV}, which flattens list values such
+#   as ARCHES; only the scalar keywords NAME, ENABLE_ROCKE, ROCKE_* and PACK_JOBS
+#   are read here, so that flattening is immaterial.
 # ---------------------------------------------------------------------------
-function(hkp_wire_pack_target)
+function(_hkp_pack_producer)
     set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
-        OUT_ROOT ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR ROCKE_COMGR_LIB
-        ROCKE_WHEEL_STAMP PACK_JOBS)
+        OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
+        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
 
-    if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
+    if(NOT DEFINED ARG_ENABLE_ROCKE)
         message(FATAL_ERROR
-            "hkp: source root '${ARG_NAME}' is not a directory: "
-            "${ARG_SOURCE_ROOT}")
-    endif()
-    if(NOT ARG_OUT_ROOT)
-        message(FATAL_ERROR
-            "hkp: root '${ARG_NAME}' (${ARG_SOURCE_ROOT}) has no OUT_ROOT, so "
-            "the pack step has nowhere to write.")
+            "hkp: root '${ARG_NAME}' was wired without ENABLE_ROCKE; pass "
+            "ENABLE_ROCKE ON or OFF.")
     endif()
 
-    set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
-    # Inside the output root, so the stamp shares the fate of the tree it vouches for.
-    # A stamp kept anywhere else witnesses only the pack's own run: it can say "the pack
-    # finished", never "the output is still there". Whatever empties the tree -- a partial
-    # restore, a stray clean, a disk that filled -- takes the stamp with it, and the next
-    # build packs again instead of reading a stamp that outlived its descriptors.
-    #
-    # Dot-prefixed to match the convention the packer already uses for the in-progress
-    # shard directories it does not ship.
-    set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
+    if(NOT ARG_ENABLE_ROCKE)
+        foreach(_kw IN ITEMS ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
+                             ROCKE_WHEEL_STAMP ROCKE_COMGR_LIB)
+            if(DEFINED ARG_${_kw})
+                message(FATAL_ERROR
+                    "hkp: root '${ARG_NAME}' disables rocKE but was wired with "
+                    "${_kw}, which names a rocKE toolchain this build does not have.")
+            endif()
+        endforeach()
+        set(_tool_env "")
+        if(ARG_PACK_JOBS)
+            list(APPEND _tool_env "HKP_PACK_JOBS=${ARG_PACK_JOBS}")
+        endif()
+        set(_interp "${Python3_EXECUTABLE}" PARENT_SCOPE)
+        set(_interp_what "base interpreter (rocKE disabled, root '${ARG_NAME}')"
+            PARENT_SCOPE)
+        set(_producer_deps "" PARENT_SCOPE)
+        set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env} --
+            "${Python3_EXECUTABLE}" "${HKP_TOOL}" PARENT_SCOPE)
+        set(_producer_arg --no-rocke PARENT_SCOPE)
+        return()
+    endif()
+
+    foreach(_kw IN ITEMS ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR ROCKE_WHEEL_STAMP)
+        if(NOT ARG_${_kw})
+            message(FATAL_ERROR
+                "hkp: root '${ARG_NAME}' enables rocKE but was wired without "
+                "${_kw}.")
+        endif()
+    endforeach()
 
     # All roots use the supplied interpreter and private wheels, including
     # hip-only roots: producer selection is per descriptor, not per root.
-    set(_interp "${ARG_ROCKE_INTERP}")
-    set(_interp_what "rocKE wheel interpreter (root '${ARG_NAME}')")
-    set(_interp_dep "${ARG_ROCKE_READY}")
-    set(_wheel_dep "${ARG_ROCKE_WHEEL_STAMP}")
-
+    #
     # Tool environment. Two backend pins belong here, alongside the in-process
     # ones the producer sets:
     #
@@ -219,6 +197,107 @@ function(hkp_wire_pack_target)
     if(ARG_ROCKE_COMGR_LIB)
         list(APPEND _tool_env "ROCKE_COMGR_LIB=${ARG_ROCKE_COMGR_LIB}")
     endif()
+
+    set(_interp "${ARG_ROCKE_INTERP}" PARENT_SCOPE)
+    set(_interp_what "rocKE wheel interpreter (root '${ARG_NAME}')" PARENT_SCOPE)
+    set(_producer_deps "${ARG_ROCKE_READY}" "${ARG_ROCKE_WHEEL_STAMP}" PARENT_SCOPE)
+    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
+        --modify "PYTHONPATH=path_list_prepend:${ARG_ROCKE_PYTHON_DIR}" --
+        "${ARG_ROCKE_INTERP}" "${HKP_TOOL}" PARENT_SCOPE)
+    set(_producer_arg --rocke-wheel-stamp "${ARG_ROCKE_WHEEL_STAMP}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
+#               ARCHES <list> HIPCC <path>
+#               ROCM_KPACK_DIR <dir> OUT_ROOT <dir> ENABLE_ROCKE <bool>
+#               [ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
+#                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]]
+#               [PACK_JOBS <n>])
+#   Wire the compile -> prune -> pack DAG for ONE authored source root.
+#
+#   The root is walked recursively. Each descriptor's authored
+#   subpath is preserved into the packed tree. Producer selection is per-UKD on
+#   kernel_source.kind, never per-folder, so one root feeds all producers into
+#   ONE kpack per arch.
+#
+#   OUT_ROOT is where the packer writes: one output folder, wiped and filled by
+#   this invocation alone. No two invocations may share a destination. One
+#   source root may be invoked more than once, into different output roots.
+#   Installation is not wired here -- a root delivers into arch_content/ or
+#   test_arch_content/ in the build tree, and those two trees are installed
+#   wholesale by hip-kernel-provider/CMakeLists.txt.
+#
+#   A source root that is not a directory, or a missing output root, is a
+#   configure error: each one makes the pack step write nothing, and a consumer
+#   cannot tell that apart from a broken layout.
+#
+#   What actually differs between roots is declared, not forked into a second
+#   function:
+#
+#   ENABLE_ROCKE says whether the rocKE producer may run, and is required so no
+#   caller can reach either mode by omission. It mirrors
+#   HIPKERNELPROVIDER_ENABLE_ROCKE: the rocKE engine and its wheels exist only
+#   when that option is ON, so a root cannot enable a producer the build never made.
+#
+#   ON: ROCKE_INTERP, ROCKE_READY, ROCKE_PYTHON_DIR and ROCKE_WHEEL_STAMP are
+#   required. Every root runs under ROCKE_INTERP with ROCKE_PYTHON_DIR prepended
+#   to PYTHONPATH, so `import rocke`/`kernels` resolve from the private wheels
+#   wherever a UKD names them. Producer selection stays per-UKD on
+#   kernel_source.kind, including roots holding only hip descriptors.
+#   ROCKE_READY is the private directory's wheel-install stamp. The pack step
+#   depends on it rather than only the interpreter, so changing a kernel under
+#   rocke/library restages the pack. ROCKE_WHEEL_STAMP is the wheel content
+#   digest, recorded into each rocKE UKD's provenance so a shipped kernel names
+#   the wheel that produced it. ROCKE_COMGR_LIB, if set, is forwarded to the
+#   tool environment.
+#
+#   OFF: every ROCKE_* keyword is a configure error, since each would name a
+#   toolchain the build does not have. The root runs under the base
+#   Python3_EXECUTABLE (hip compiles shell out to hipcc and are
+#   interpreter-agnostic) with no rocKE environment, no PYTHONPATH prepend and
+#   no wheel edge, and the tool gets --no-rocke: a rocKE UKD selected for any
+#   requested arch fails the pack rather than being skipped, so a root cannot
+#   silently ship without kernels its descriptors promise.
+#
+#   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
+#   serial path. Omitted, the packer sizes its pool against the machine. Roots have
+#   no ordering edge between them, so the generator runs them at once: the test
+#   roots name a small cap so their pools do not multiply, and the product root
+#   omits it because it is the root expected to be large enough to repay a full pool.
+#
+#   NAME is the source label written into every descriptor's provenance. NAME, the
+#   absolute SOURCE_ROOT, OUT_ROOT and ARCHES go into a global registry read by
+#   hkp_verify_embedded_sources() and hkp_register_census_tests().
+# ---------------------------------------------------------------------------
+function(hkp_wire_pack_target)
+    set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
+        OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
+        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
+
+    if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
+        message(FATAL_ERROR
+            "hkp: source root '${ARG_NAME}' is not a directory: "
+            "${ARG_SOURCE_ROOT}")
+    endif()
+    if(NOT ARG_OUT_ROOT)
+        message(FATAL_ERROR
+            "hkp: root '${ARG_NAME}' (${ARG_SOURCE_ROOT}) has no OUT_ROOT, so "
+            "the pack step has nowhere to write.")
+    endif()
+    _hkp_pack_producer(${ARGV})
+
+    set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
+    # Inside the output root, so the stamp shares the fate of the tree it vouches for.
+    # A stamp kept anywhere else witnesses only the pack's own run: it can say "the pack
+    # finished", never "the output is still there". Whatever empties the tree -- a partial
+    # restore, a stray clean, a disk that filled -- takes the stamp with it, and the next
+    # build packs again instead of reading a stamp that outlived its descriptors.
+    #
+    # Dot-prefixed to match the convention the packer already uses for the in-progress
+    # shard directories it does not ship.
+    set(_stamp "${ARG_OUT_ROOT}/${HKP_PACK_STAMP_NAME}")
 
     # The authored root is a tree: glob recursively so a descriptor added in any
     # child folder retriggers the pack step. The packer itself walks recursively
@@ -260,15 +339,6 @@ function(hkp_wire_pack_target)
 
     string(REPLACE ";" "," _arch_csv "${ARG_ARCHES}")
 
-    set(_wheel_stamp_arg "")
-    if(_wheel_dep)
-        set(_wheel_stamp_arg --rocke-wheel-stamp "${_wheel_dep}")
-    endif()
-
-    set(_tool_cmd "${CMAKE_COMMAND}" -E env ${_tool_env}
-        --modify "PYTHONPATH=path_list_prepend:${ARG_ROCKE_PYTHON_DIR}" --
-        "${_interp}" "${HKP_TOOL}")
-
     # The wipe removes the stamp along with the tree, because the stamp lives inside it.
     # So no stamp exists from the moment a pack begins until it completes: a pack that
     # dies after the wipe -- a compiler failure, a killed job, an interrupted build --
@@ -298,12 +368,12 @@ function(hkp_wire_pack_target)
                 --inter-root "${_inter_root}"
                 --kpack-python-dir "${ARG_ROCM_KPACK_DIR}"
                 --source-label "${ARG_NAME}"
-                ${_wheel_stamp_arg}
+                ${_producer_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}"
-                ${_interp_dep} ${_wheel_dep}
+                ${_producer_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -844,8 +914,8 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_require_ingestor_toolchain(<out_arches>)
 #   Assert what the ingestor needs to pack anything -- hipcc, a non-empty gfx
-#   list, and the rocke wheel supply -- and return the architecture list. Set
-#   HKP_HIPCC as a side effect.
+#   list, and, when HIPKERNELPROVIDER_ENABLE_ROCKE is ON, the rocke wheel
+#   supply -- and return the architecture list. Set HKP_HIPCC as a side effect.
 #
 #   Without hipcc or a gfx list the packer creates no output root at all, and a
 #   consumer of a packed root reports that as a broken layout rather than as a
@@ -856,6 +926,9 @@ endfunction()
 #   The wheel check covers SUPPLY, not importability. The private directory
 #   hkp_rocke_wheel_python_interp populates does not exist until the build runs;
 #   imports are asserted there under the environment the pack step will use.
+#   With rocKE disabled no wheel exists or is wanted: the hip producer runs
+#   alone, and the pack step itself rejects any rocKE descriptor it is asked to
+#   pack.
 # ---------------------------------------------------------------------------
 function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is
@@ -877,33 +950,35 @@ function(hkp_require_ingestor_toolchain out_arches)
             "HIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
     endif()
 
-    if(NOT ROCKE_WHEEL_DIR OR NOT ROCKE_WHEEL_VERSION)
-        message(FATAL_ERROR
-            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires the rocke "
-            "wheels to pack rocKE kernels, but ROCKE_WHEEL_DIR "
-            "(${ROCKE_WHEEL_DIR}) and ROCKE_WHEEL_VERSION "
-            "(${ROCKE_WHEEL_VERSION}) are not both set. Leave "
-            "ROCKE_BUILD_PYENV=ON to have the build produce the wheels and set "
-            "both variables, or with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
-            "and ROCKE_WHEEL_VERSION to the wheels you supply.")
-    endif()
-
-    # ROCKE_BUILD_PYENV=ON makes the wheels build outputs, absent until the build
-    # runs. Only with it OFF are they inputs, and only then can they be checked.
-    if(NOT ROCKE_BUILD_PYENV)
-        set(_platform_wheel
-            "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
-        set(_library_wheel
-            "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
-        if(NOT EXISTS "${_platform_wheel}" OR NOT EXISTS "${_library_wheel}")
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        if(NOT ROCKE_WHEEL_DIR OR NOT ROCKE_WHEEL_VERSION)
             message(FATAL_ERROR
-                "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and ROCKE_BUILD_PYENV "
-                "is OFF, so the rocke wheels must be supplied, but "
-                "ROCKE_WHEEL_DIR (${ROCKE_WHEEL_DIR}) does not hold both of:\n"
-                "    rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
-                "    rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
-                "Point ROCKE_WHEEL_DIR at a directory holding both, correct "
-                "ROCKE_WHEEL_VERSION, or set ROCKE_BUILD_PYENV=ON to build them.")
+                "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires the rocke "
+                "wheels to pack rocKE kernels, but ROCKE_WHEEL_DIR "
+                "(${ROCKE_WHEEL_DIR}) and ROCKE_WHEEL_VERSION "
+                "(${ROCKE_WHEEL_VERSION}) are not both set. Leave "
+                "ROCKE_BUILD_PYENV=ON to have the build produce the wheels and set "
+                "both variables, or with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
+                "and ROCKE_WHEEL_VERSION to the wheels you supply.")
+        endif()
+
+        # ROCKE_BUILD_PYENV=ON makes the wheels build outputs, absent until the build
+        # runs. Only with it OFF are they inputs, and only then can they be checked.
+        if(NOT ROCKE_BUILD_PYENV)
+            set(_platform_wheel
+                "${ROCKE_WHEEL_DIR}/rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+            set(_library_wheel
+                "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
+            if(NOT EXISTS "${_platform_wheel}" OR NOT EXISTS "${_library_wheel}")
+                message(FATAL_ERROR
+                    "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and ROCKE_BUILD_PYENV "
+                    "is OFF, so the rocke wheels must be supplied, but "
+                    "ROCKE_WHEEL_DIR (${ROCKE_WHEEL_DIR}) does not hold both of:\n"
+                    "    rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
+                    "    rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
+                    "Point ROCKE_WHEEL_DIR at a directory holding both, correct "
+                    "ROCKE_WHEEL_VERSION, or set ROCKE_BUILD_PYENV=ON to build them.")
+            endif()
         endif()
     endif()
 
@@ -1137,11 +1212,15 @@ endfunction()
 # ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root; producer selection is per-UKD on
-#   kernel_source.kind, so both producers are available to every root. Runs only under
-#   HIPDNN_ENABLE_KERNEL_INGESTOR, whose prerequisites it asserts first through
-#   hkp_require_ingestor_toolchain. rocKE is required for the test roots as much as for
-#   production, so it is resolved once here for every root; unresolvable comgr is fatal
-#   at configure.
+#   kernel_source.kind, so every enabled producer is available to every root. Runs only
+#   under HIPDNN_ENABLE_KERNEL_INGESTOR, whose prerequisites it asserts first through
+#   hkp_require_ingestor_toolchain.
+#
+#   HIPKERNELPROVIDER_ENABLE_ROCKE decides rocKE for every root at once, test roots as
+#   much as production. ON resolves the rocKE toolchain once here for every root, and
+#   unresolvable comgr is fatal at configure. OFF resolves nothing rocKE and wires every
+#   root with ENABLE_ROCKE OFF: the hip producer packs alone, and a rocKE descriptor
+#   selected for a requested arch fails that root's pack.
 #
 #   The root defaults to the provider's in-tree descriptor root, which currently holds no
 #   descriptor, so production packaging is dormant unless the root is pointed at a
@@ -1158,7 +1237,18 @@ function(hkp_add_packaging)
 
     _hkp_resolve_production_root(_source_root _source_root_is_default)
 
-    _hkp_resolve_rocke_args(_rocke_args _rocke_comgr_lib)
+    # One list for every root, so "every root is wired to rocKE identically" holds in
+    # both modes rather than at six sites that have to agree.
+    if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+        _hkp_resolve_rocke_args(_rocke_resolved_args _rocke_comgr_lib)
+        set(_rocke_args ENABLE_ROCKE ON ${_rocke_resolved_args})
+    else()
+        set(_rocke_args ENABLE_ROCKE OFF)
+        set(_rocke_comgr_lib "")
+        message(STATUS
+            "hkp: rocKE disabled (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); packing with "
+            "the hip producer only")
+    endif()
 
     # A KDP is what arch pruning consumes, so a root holding none has nothing to ship.
     # Standalone UKD/UMD/UED/UDD/KMD/UHD files, kernel sources and READMEs do not make
@@ -1296,6 +1386,14 @@ endfunction()
 #
 #   hipcc is a requirement of the whole ingestor, so the hipcc-dependent tests
 #   are hard-gated: their fixture fails on a missing hipcc rather than skipping.
+#
+#   rocKE tests are registered only when HIPKERNELPROVIDER_ENABLE_ROCKE is ON, since
+#   with it OFF the build makes no rocKE toolchain for them to exercise, and a
+#   registered test that skips reads as coverage it is not. ON runs every test, and
+#   a rocKE fixture fails rather than skips on a missing toolchain. OFF keeps them
+#   out of both entries at collection: the files that exist only to exercise rocKE
+#   are passed as --ignore, and rocKE tests inside shared files are deselected by
+#   their `rocke` marker. A new rocKE-only test file joins _rocke_only_files.
 # ---------------------------------------------------------------------------
 function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
@@ -1341,13 +1439,31 @@ function(hkp_register_tests rocm_kpack_dir hipcc rocke_comgr_lib)
             "-DHIPKERNELPROVIDER_ENABLE_TESTS=OFF.")
     endif()
 
+    set(_quick_expr "quick")
+    set(_standard_expr "not quick")
+    set(_rocke_ignores "")
+    if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
+        set(_rocke_only_files
+            test_hkp_pack_producer_guards.py
+            test_hkp_pack_rocke.py
+            test_hkp_python_environment.py
+            test_hkp_wheel_digest.py)
+        foreach(_file IN LISTS _rocke_only_files)
+            list(APPEND _rocke_ignores "--ignore=${HKP_PKG_DIR}/tests/${_file}")
+        endforeach()
+        set(_quick_expr "quick and not rocke")
+        set(_standard_expr "not quick and not rocke")
+    endif()
+
     add_test(NAME hip-kernel-provider-hkp-pack-quick
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m quick -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "${_quick_expr}" -v
+                     ${_rocke_ignores})
     set_tests_properties(hip-kernel-provider-hkp-pack-quick PROPERTIES
         ENVIRONMENT "${_pyenv}")
 
     add_test(NAME hip-kernel-provider-hkp-pack
-             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "not quick" -v)
+             COMMAND "${Python3_EXECUTABLE}" -m pytest "${HKP_PKG_DIR}/tests" -m "${_standard_expr}" -v
+                     ${_rocke_ignores})
     set_tests_properties(hip-kernel-provider-hkp-pack PROPERTIES
         ENVIRONMENT "${_pyenv}")
 

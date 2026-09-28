@@ -52,8 +52,26 @@ _ROCKE_UKD_SPEC = {
     "head_size": 128,
 }
 _ROCKE_UNAVAILABLE_HINT = (
-    "provision the rocke platform and libamd_comgr; both are ingestor requirements"
+    "provision the rocke platform and libamd_comgr; both are requirements of an "
+    "ingestor built with HIPKERNELPROVIDER_ENABLE_ROCKE=ON"
 )
+
+# The fixtures gating rocKE tests. A test requesting either is a rocKE test by
+# construction, so it carries the `rocke` marker without restating it.
+# `rocke_fixture` and `rocke_ukd` are plain descriptor data and confer nothing.
+_ROCKE_GATE_FIXTURES = frozenset({"rocke_available", "rocke_importable"})
+
+
+def pytest_collection_modifyitems(items):
+    """Attach the `rocke` marker to every test gated on a rocKE fixture.
+
+    Only marks, never skips: a build with rocKE disabled keeps these tests out of
+    the run at registration, by `-m "not rocke"` and `--ignore` of the rocKE-only
+    files, so a rocKE test that runs is always one the build expects to pass.
+    """
+    for item in items:
+        if _ROCKE_GATE_FIXTURES.intersection(getattr(item, "fixturenames", ())):
+            item.add_marker(pytest.mark.rocke)
 
 
 @pytest.fixture(scope="session")
@@ -142,9 +160,9 @@ def rocke_importable():
     has rocke but no working comgr. Kept separate from rocke_available for that
     reason.
 
-    Fails rather than skips: rocke is a requirement of the ingestor, asserted at
-    configure time, so an unimportable one here is a broken build rather than an
-    unprovisioned machine.
+    Fails rather than skips: rocke is asserted at configure time whenever the
+    build enables it, and rocKE tests are registered only then, so an
+    unimportable one here is a broken build rather than an unprovisioned machine.
     """
     try:
         import kernels  # noqa: F401
@@ -159,10 +177,11 @@ def rocke_available():
     """Session gate for the comgr-dependent rocke tests.
 
     Returns True when rocke/kernels import and comgr loads, and fails otherwise.
-    comgr ships with ROCm and configure refuses to proceed without it, so this
-    tier cannot be legitimately unavailable -- skipping instead would let a ROCm
-    bump that moved or dropped comgr turn the tier green by not running it. A
-    real ComgrError from a compile is not gated here.
+    comgr ships with ROCm and a rocKE-enabled configure refuses to proceed
+    without it, so this tier cannot be legitimately unavailable wherever it is
+    registered -- skipping instead would let a ROCm bump that moved or dropped
+    comgr turn the tier green by not running it. A real ComgrError from a compile
+    is not gated here.
     """
     ok, reason = _probe_rocke()
     if not ok:

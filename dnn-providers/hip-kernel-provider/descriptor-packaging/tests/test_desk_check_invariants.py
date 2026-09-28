@@ -98,6 +98,7 @@ def _pack_mutated(tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir, mutate):
 # Invariant 1: metadata/spec drift.
 # ---------------------------------------------------------------------------
 class TestInvariant1MetadataSpecDrift:
+    @pytest.mark.rocke
     def test_runbook_scripts_invariant_1_is_dead_on_packed_output(
         self, packed_desk_check
     ):
@@ -126,11 +127,13 @@ class TestInvariant1MetadataSpecDrift:
             "output again and the dead-check finding needs re-verification"
         )
 
+    @pytest.mark.rocke
     def test_corrected_check_finds_no_drift_on_clean_packed_output(
         self, packed_desk_check
     ):
         assert metadata_spec_drift(_kernels(packed_desk_check), _MATCHER_FIELDS) == []
 
+    @pytest.mark.rocke
     def test_corrected_check_catches_real_injected_drift(self, packed_desk_check):
         kernels = json.loads(json.dumps(_kernels(packed_desk_check)))
         kernels[1]["metadata"]["head_size"] = 999
@@ -160,6 +163,7 @@ class TestInvariant1MetadataSpecDrift:
 # Invariant 2: no two kernels share a matcher tuple on the same arch.
 # ---------------------------------------------------------------------------
 class TestInvariant2DuplicateMatcherTuples:
+    @pytest.mark.rocke
     def test_distinct_variants_report_no_duplicates(self, packed_desk_check):
         assert (
             duplicate_matcher_tuples(_kernels(packed_desk_check), _MATCHER_FIELDS) == {}
@@ -192,6 +196,7 @@ class TestInvariant2DuplicateMatcherTuples:
         kernels = self._twins(None, ["gfx942"])
         assert duplicate_matcher_tuples(kernels, ("dtype",)) == {("FLOAT",): 2}
 
+    @pytest.mark.rocke
     def test_real_pack_of_two_identical_matcher_tuples_is_detected(
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
     ):
@@ -219,10 +224,12 @@ class TestInvariant2DuplicateMatcherTuples:
 # Invariant 3: every variant individually addressable (toc_key uniqueness).
 # ---------------------------------------------------------------------------
 class TestInvariant3TocKeyUniqueness:
+    @pytest.mark.rocke
     def test_distinct_variants_have_distinct_toc_keys(self, packed_desk_check):
         distinct, total = toc_key_uniqueness(_kernels(packed_desk_check))
         assert distinct == total == 2
 
+    @pytest.mark.rocke
     def test_real_pack_of_a_genuine_duplicate_spec_collides_on_one_toc_key(
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
     ):
@@ -251,12 +258,14 @@ class TestInvariant3TocKeyUniqueness:
 # Invariant 4: symbol names are NOT unique, and that is fine.
 # ---------------------------------------------------------------------------
 class TestInvariant4SymbolNonUniquenessTolerated:
+    @pytest.mark.rocke
     def test_distinct_shapes_get_distinct_symbols(self, packed_desk_check):
         # head_size 64 vs 128 changes the kernel_name() the builder derives,
         # so THIS fixture shows distinct symbols per kernel.
         distinct, total = symbol_distinctness(_kernels(packed_desk_check))
         assert distinct == total == 2
 
+    @pytest.mark.rocke
     def test_real_pack_where_symbol_is_shared_but_toc_key_disambiguates(
         self, tmp_path, desk_check_fixture, hipcc, rocm_kpack_dir
     ):
@@ -307,6 +316,7 @@ def _run_cli(*args, mode="structural"):
 
 
 class TestCliEndToEnd:
+    @pytest.mark.rocke
     def test_clean_real_pack_exits_zero(self, packed_desk_check, tmp_path):
         kdp_path = tmp_path / "clean.kdp.json"
         kdp_path.write_text(
@@ -317,6 +327,7 @@ class TestCliEndToEnd:
         assert "metadata/authored-spec drift: none" in proc.stdout
         assert "toc_key: distinct=2 of 2 OK" in proc.stdout
 
+    @pytest.mark.rocke
     def test_structural_mode_never_reports_compiled_agreement(
         self, packed_desk_check, tmp_path
     ):
@@ -332,6 +343,7 @@ class TestCliEndToEnd:
         assert "compiled specialization agreement: NOT CHECKED" in proc.stdout
         assert "mode=structural" in proc.stdout
 
+    @pytest.mark.rocke
     def test_the_mode_is_required(self, packed_desk_check, tmp_path):
         """No default: a run whose mode is unstated cannot be read back out of a
         log, and the weaker result would read as the stronger."""
@@ -358,6 +370,7 @@ class TestCliEndToEnd:
         assert "'rocke'" in proc.stdout
         assert "NOT VERIFIED HERE" not in proc.stdout
 
+    @pytest.mark.rocke
     def test_real_injected_drift_exits_nonzero(self, packed_desk_check, tmp_path):
         """A real packed tree with a genuine metadata/spec mismatch must fail the
         CLI, not just the underlying function: the script wires `report.ok` into
@@ -422,6 +435,7 @@ class TestRealBundleDtypeVocabulary:
     bundle -- data_types.fbs:6-26), and a raw string compare false-positives on
     every rocKE kernel that ships."""
 
+    @pytest.mark.rocke
     @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
     def test_real_rocke_example_dtype_vocabularies_are_not_drift(self, rocke_root):
         for kdp in _require_bundles(rocke_root):
@@ -635,6 +649,7 @@ class TestCliOnRealShippedBundles:
     """The CLI, run exactly as an agent runs it at RUNBOOK §4's host boundary,
     against the real bundles this repository ships."""
 
+    @pytest.mark.rocke
     @pytest.mark.parametrize("rocke_root", _ROCKE_EXAMPLE, ids=_ROOT_IDS)
     def test_real_rocke_example_passes_out_of_the_box(self, rocke_root):
         for kdp in _require_bundles(rocke_root):

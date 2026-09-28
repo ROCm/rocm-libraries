@@ -18,6 +18,8 @@ from hkp_pack.rocke_compile import (
     rocke_variant_key,
 )
 
+pytestmark = pytest.mark.rocke
+
 ARCH = "gfx950"
 
 

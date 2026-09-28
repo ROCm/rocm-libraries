@@ -13,6 +13,13 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
+The rocKE producer, and the private rocKE wheels and comgr it lowers through, are wired
+only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. With it OFF every root packs with the hip
+producer alone, and the packer is run with `--no-rocke`: a `rocke` UKD selected for any
+requested arch fails that root's pack rather than being skipped, while one that arch
+pruning drops is never looked at. Configure with `-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON`,
+or remove the rocKE descriptors from the root.
+
 The provider wires six roots: production, plus five over the four authored test sets
 (`shared` packs twice, once into each test binary's discovery root).
 
@@ -250,6 +257,14 @@ Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
 
 `-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
 `rocm_kpack`/comgr.
+
+`-m rocke` selects the tests that exercise the rocKE producer or its wheel/comgr
+toolchain; `conftest.py` also attaches it to every test requesting the
+`rocke_available` or `rocke_importable` fixture. With
+`HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the registered ctest entries leave rocKE out
+entirely: they add `and not rocke` to their marker expression and `--ignore` the
+rocKE-only files `hkp_register_tests` lists, so a new rocKE-only test file joins that
+list.
 
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 

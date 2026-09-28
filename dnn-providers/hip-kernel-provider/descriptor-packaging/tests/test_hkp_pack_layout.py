@@ -1933,3 +1933,64 @@ def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
     assert str(root) in message
     assert "no archive" in message
     assert OTHER_ARCH in message
+
+
+# --- L. A build without rocKE (quick, compile-free) --------------------------
+
+
+def _pack_without_rocke(root, tmp_path, rocm_kpack_dir, arches):
+    return run_pipeline(
+        source_root=root,
+        arches=list(arches),
+        out_root=tmp_path / "out",
+        hipcc="hipcc-not-invoked",
+        rocm_kpack_dir=rocm_kpack_dir,
+        inter_root=tmp_path / "inter",
+        enable_rocke=False,
+    )
+
+
+@pytest.mark.quick
+def test_a_selected_rocke_ukd_fails_a_pack_without_rocke(
+    tmp_path, rocke_fixture, rocm_kpack_dir
+):
+    """A rocKE kernel a build without rocKE is asked to ship fails the pack.
+
+    Skipping it would ship a shard missing a kernel its descriptors promise. The
+    error is raised before the arch compiles anything, so neither hipcc nor rocke
+    is reached, and it names the kernel, the arch and the remedy.
+    """
+    root = tmp_path / "root"
+    _nest(root, "rocKE/attention", rocke_fixture)
+
+    with pytest.raises(HkpPackError, match="HIPKERNELPROVIDER_ENABLE_ROCKE") as excinfo:
+        _pack_without_rocke(root, tmp_path, rocm_kpack_dir, [ROCKE_ARCH])
+
+    message = str(excinfo.value)
+    assert "ukd-attention-dense-gfx950" in message
+    assert "attention.kdp.json" in message
+    assert ROCKE_ARCH in message
+    assert "remove rocKE descriptors from the source root" in message
+    assert not (tmp_path / "inter" / ROCKE_ARCH).exists()
+
+
+@pytest.mark.quick
+def test_an_arch_pruned_rocke_ukd_does_not_trip_the_rocke_gate(
+    tmp_path, rocke_fixture, rocm_kpack_dir
+):
+    """The gate walks the arch selection, not the root.
+
+    The fixture's KDP targets gfx942 and gfx950 while its one rocKE UKD is scoped
+    to gfx950, so a gfx942 pack keeps the KDP and prunes the UKD. That pack must
+    run past the gate to the pipeline's own verdict on a compiling root that
+    wrote no archive; a gate reading the whole root would stop it first.
+    """
+    root = tmp_path / "root"
+    _nest(root, "rocKE/attention", rocke_fixture)
+
+    with pytest.raises(HkpPackError) as excinfo:
+        _pack_without_rocke(root, tmp_path, rocm_kpack_dir, [ARCH])
+
+    message = str(excinfo.value)
+    assert "HIPKERNELPROVIDER_ENABLE_ROCKE" not in message
+    assert "no archive" in message

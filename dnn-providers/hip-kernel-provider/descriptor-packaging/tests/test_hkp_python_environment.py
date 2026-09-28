@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.quick
+pytestmark = [pytest.mark.quick, pytest.mark.rocke]
 PKG = Path(__file__).resolve().parent.parent
 MODULE = PKG / "cmake" / "HkpPackaging.cmake"
 
@@ -182,7 +182,7 @@ foreach(label first second)
         OUT_ROOT "${{CMAKE_CURRENT_BINARY_DIR}}/${{label}}"
         ARCHES gfx942 HIPCC unused
         ROCM_KPACK_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/kpack with spaces"
-        ROCKE_INTERP "${{interp}}" ROCKE_READY "${{ready}}"
+        ENABLE_ROCKE ON ROCKE_INTERP "${{interp}}" ROCKE_READY "${{ready}}"
         ROCKE_PYTHON_DIR "${{python_dir}}" ROCKE_WHEEL_STAMP "${{wheel_stamp}}"
         ROCKE_COMGR_LIB "${{HIPKERNELPROVIDER_ROCKE_COMGR_LIB}}" PACK_JOBS 2)
 endforeach()

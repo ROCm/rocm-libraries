@@ -391,6 +391,28 @@ def _selected_entries(doc, arch, ukd_by_id):
             yield None, entry, None
 
 
+def _reject_rocke_entries(surviving, arch, ukd_by_id):
+    """Fail on any rocke UKD selected for arch in a pack built without rocKE.
+
+    Walks the same selection the prewarm and the walk compile from, so a rocke UKD
+    that prunes out of arch -- by its KDP's arch list or its own -- does not fail
+    the pack, and one that would ship always does. Skipping it instead would ship
+    a shard missing a kernel its descriptors promise, which no consumer can tell
+    apart from a kernel that was never authored.
+    """
+    for kdp in surviving:
+        for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+            if ukd["kernel_source"]["kind"] == "rocke":
+                raise HkpPackError(
+                    f"UKD '{ukd['id']}' in KDP {kdp.path.name} is a rocKE kernel "
+                    f"selected for {arch}, but this build has rocKE disabled "
+                    "(HIPKERNELPROVIDER_ENABLE_ROCKE=OFF), so no rocKE producer "
+                    "exists to compile it. Configure with "
+                    "-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON, or remove rocKE "
+                    "descriptors from the source root."
+                )
+
+
 def _agreement_inputs(flat, arch):
     """Every consumer's declaration and observation request, before any compile.
 
@@ -1365,6 +1387,7 @@ def run_pipeline(
     rocke_wheel_stamp=None,
     group=GROUP_NAME,
     source_label=None,
+    enable_rocke=True,
     log=print,
 ):
     """One invocation over the full arch list: compile, prune, pack, install.
@@ -1380,6 +1403,10 @@ def run_pipeline(
     surviving KDP is skipped cleanly (no folder, no kpack) and logged with 'no
     kernels for <arch>, skipping'; every arch skipping is a failure, not a
     pack. Empty arch list installs nothing (exit 0).
+
+    `enable_rocke=False` states the build has no rocKE producer: a rocke UKD
+    selected for any requested arch raises before that arch compiles anything,
+    while one pruned out of every requested arch is left alone.
     """
     out_root = Path(out_root)
     results = {}
@@ -1409,6 +1436,8 @@ def run_pipeline(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
             continue
+        if not enable_rocke:
+            _reject_rocke_entries(surviving, arch, flat.ukd_by_id())
         try:
             inter = compile_intermediate(
                 flat, source_root, arch, hipcc, inter_root / arch, log=log

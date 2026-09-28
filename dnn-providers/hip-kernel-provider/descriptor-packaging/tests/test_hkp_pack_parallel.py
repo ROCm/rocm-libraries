@@ -960,6 +960,7 @@ def failing_corpus(tmp_path):
     return dest
 
 
+@pytest.mark.rocke
 @pytest.mark.quick
 def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
     """A pool failure names one variant, not N tracebacks.
@@ -1435,6 +1436,7 @@ def _editable_jobs(corpus, out_dir):
     return flat, [replace(job, out_dir=str(out_dir), hipcc="hipcc") for job in jobs]
 
 
+@pytest.mark.rocke
 @pytest.mark.quick
 def test_worker_returns_picklable_producer_origins(editable_producer, tmp_path):
     """A worker hands back the producer identities it observed, in picklable form.
@@ -1461,6 +1463,7 @@ def test_worker_returns_picklable_producer_origins(editable_producer, tmp_path):
     assert str(producer.resolve()) in origins
 
 
+@pytest.mark.rocke
 @pytest.mark.quick
 def test_pool_rejects_variants_built_by_different_producer_revisions(
     editable_producer, tmp_path, monkeypatch
@@ -1497,6 +1500,7 @@ def test_pool_rejects_variants_built_by_different_producer_revisions(
     assert str(producer.resolve()) in message
 
 
+@pytest.mark.rocke
 @pytest.mark.quick
 def test_pool_accepts_variants_built_by_one_producer_revision(
     editable_producer, tmp_path, monkeypatch
