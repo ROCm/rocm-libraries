@@ -1881,13 +1881,6 @@ namespace TensileLite
         return numWorkGroupsX * numWorkGroupsY * numWorkGroupsZ;
     }
 
-    inline double calculateGranularity(
-        uint32_t m, uint32_t n, uint32_t mt0, uint32_t mt1, uint32_t gsu, uint32_t cuCount)
-    {
-        return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
-               / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
-    }
-
     std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
@@ -2113,9 +2106,15 @@ namespace TensileLite
         // this mode's zeros for concurrent callers who did not request it.
         if(problem.getParams().uniformSummationOrder())
         {
+            const bool rowUniformStaggerCapable
+                = internalArgsSupport.staggerU
+                  && (sizeMapping.streamK == 0 || internalArgsSupport.perTileExtraIters);
+            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
+            {
             defaultStaggerUMapping     = 0;
             defaultStaggerU            = 0;
             defaultStaggerUStrideShift = 0;
+            }
         }
 
         // Mapping should be in this range: [0, 1, 2, 3, 4]
@@ -5472,8 +5471,11 @@ namespace TensileLite
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
-                    size_t splitk         = skGrid / tiles;
-                    size_t idealWorkspace = requiredWorkspaceSizeGsu(problem, hardware, splitk);
+                    // The resolved grid already includes the batch count. Reuse
+                    // the split-reduction sizing rules for bias, amaxD and custom
+                    // metadata, but do not multiply the partial tiles by batch again.
+                    size_t idealWorkspace
+                        = requiredWorkspaceSizeForSplitTiles(problem, skGrid / tiles, skGrid);
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
@@ -5504,11 +5506,18 @@ namespace TensileLite
                                                          Hardware const& hardware,
                                                          size_t          gsu) const
     {
+        const size_t batch = problem.d().sizes()[2];
+        const size_t tiles = problem.getNumTiles(sizeMapping, gsu) * batch;
+        return requiredWorkspaceSizeForSplitTiles(problem, gsu, tiles);
+    }
+
+    size_t ContractionSolution::requiredWorkspaceSizeForSplitTiles(Problem const& problem,
+                                                                  size_t         gsu,
+                                                                  size_t         tiles) const
+    {
         size_t size = 0;
 
         size_t gsuMultiplier = gsu > 1 ? gsu : 0;
-        size_t batch         = problem.d().sizes()[2];
-        size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
         size_t tileSize      = 0;
         size_t workspaceSizePerElemBias = 0;
         bool inferWorkspaceSizeForCustom = !problem.groupedGemm()
@@ -6430,12 +6439,14 @@ namespace TensileLite
         // calculateAutoStaggerU() should already have forced this to 0; checking
         // it anyway is what catches a future path that bypasses the clamp.
         const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, sk.grid));
-        const size_t  resolvedStaggerU
-            = std::get<1>(calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM));
-        if(resolvedStaggerU != 0)
+        const auto   resolvedStaggerUParams
+            = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
+        const size_t resolvedStaggerUMapping = std::get<0>(resolvedStaggerUParams);
+        const size_t resolvedStaggerU        = std::get<1>(resolvedStaggerUParams);
+        if(resolvedStaggerU != 0 && resolvedStaggerUMapping != 1)
             return refuse("ResolvedStaggerU",
                           "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
-                              + " rather than 0");
+                              + " with mapping " + std::to_string(resolvedStaggerUMapping));
 
         // Only a handwritten custom kernel can carry a stagger the host cannot
         // reach. A generated kernel takes StaggerU exclusively from the packed
