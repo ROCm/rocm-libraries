@@ -233,6 +233,30 @@ __host__ __device__ void
     const I tid = hqr_tid();
     if(tau == T(0))
         return;
+#if !defined(__HIP_DEVICE_COMPILE__)
+    if constexpr(BS == 1)
+    {
+        // (on the host, by columns, which are contiguous: w = tau * C * v, then
+        // C <- C - w * v^H)
+        thread_local std::vector<T> w;
+        w.assign(m, T(0));
+        for(I j = 0; j < n; j++)
+        {
+            const T vj = v[j];
+            for(I i = 0; i < m; i++)
+                w[i] += C[idx2D(i, j, ldc)] * vj;
+        }
+        for(I i = 0; i < m; i++)
+            w[i] = tau * w[i];
+        for(I j = 0; j < n; j++)
+        {
+            const T vj = conj(v[j]);
+            for(I i = 0; i < m; i++)
+                C[idx2D(i, j, ldc)] -= w[i] * vj;
+        }
+        return;
+    }
+#endif
     for(I i = tid; i < m; i += BS)
     {
         T w = 0;
