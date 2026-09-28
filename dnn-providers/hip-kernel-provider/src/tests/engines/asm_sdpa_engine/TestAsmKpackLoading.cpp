@@ -75,7 +75,7 @@ std::string kpackDir()
     }
     // Installed layout: resolve relative to the test executable
     //   <prefix>/bin/<exe> → <prefix>/<ASM_KPACK_INSTALL_DIR>
-    if(std::string_view installDir{ASM_KPACK_INSTALL_DIR}; !installDir.empty())
+    if(const std::string_view installDir{ASM_KPACK_INSTALL_DIR}; !installDir.empty())
     {
         auto candidate = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / ".."
                          / std::string(installDir);
