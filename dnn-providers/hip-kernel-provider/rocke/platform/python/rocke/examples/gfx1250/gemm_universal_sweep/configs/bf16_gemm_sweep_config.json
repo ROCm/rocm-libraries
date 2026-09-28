@@ -8,36 +8,39 @@
     "warp_tile": [16, 16, 32]
   },
   "problem": {
-    "m": 1792,
-    "n": 2895,
-    "k": 2048
+    "m": 114688,
+    "n": 2048,
+    "k": 256
   },
   "tile_config": {
-    "tile_m": [16, 32, 64, 128],
-    "tile_n": [16, 32, 64, 128],
-    "tile_k": [32, 64, 128],
-    "warp_m": [1, 2, 4],
-    "warp_n": [1, 2, 4]
+    "tile_m": [64, 128, 256],
+    "tile_n": [64, 128, 256],
+    "tile_k": [32, 64, 128, 256],
+    "warp_m": [1, 2, 4, 8],
+    "warp_n": [1, 2, 4, 8]
   },
   "trait_config": {
-    "pipelines": ["mem", "wmma_v1"],
+    "pipelines": ["mem"],
     "schedulers": ["intrawave"],
-    "epilogues": ["default"],
-    "waves_per_eu": [null, 1, 2, 4],
-    "lds_swizzle": [false, true],
-    "lds_k_pad": [0, 16],
-    "direct_to_lds": [true]
+    "epilogues": ["default", "cshuffle"],
+    "waves_per_eu": [1, 2, 4],
+    "lds_swizzle": [false],
+    "lds_k_pad": [8, 16, 24, 0],
+    "direct_to_lds": [false, true],
+    "dtl_prefetch": [false, true],
+    "tdm": [true, false],
+    "tdm_depth": [2, 1, 3, 4],
+    "persistent_ctas": [0, 256]
   },
   "selection": {
-    "tile_finalists": 12,
+    "tile_finalists": 40,
     "final_timed": 5,
     "tolerance": 0.02
   },
   "benchmark": {
     "workers": 8,
-    "warmup": 10,
-    "iters": 100,
-    "attempts": 3
-  },
-  "output_dir": "/home/jialuo12/OPT_Results/rocke_bf16_gfx1250_m1792_n2895_k2048"
+    "warmup": 5,
+    "iters": 20,
+    "attempts": 1
+  }
 }
