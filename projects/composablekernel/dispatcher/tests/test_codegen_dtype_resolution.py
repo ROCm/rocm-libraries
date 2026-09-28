@@ -18,10 +18,12 @@ import pytest
 
 DISPATCHER_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
+sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 
 import unified_gemm_codegen as ugc  # noqa: E402
 from arch_filter import ELEMENT_SIZE_MAP  # noqa: E402
 from codegen_common import CommonTypeMappings, TileConfig  # noqa: E402
+from ctypes_utils import KernelConfig, validate_kernel_config  # noqa: E402
 
 
 class _RecordingFilter:
@@ -74,7 +76,9 @@ def test_every_mapped_dtype_resolves_to_itself(dtype):
 
 
 @pytest.mark.skipif(not ugc.HAS_ARCH_FILTER, reason="arch_filter not importable")
-@pytest.mark.parametrize("gpu_target,listed", [("gfx942", True), ("gfx1250", False)])
+@pytest.mark.parametrize(
+    "gpu_target,listed", [("gfx942", True), ("gfx1250", True), ("gfx1201", False)]
+)
 def test_fp32_needs_listed_warp_tiles(tmp_path, gpu_target, listed):
     # An arch whose table has no fp32 warp-tile entry must reject fp32 tiles
     # rather than let the arch filter pass every warp tile unchecked.
@@ -86,3 +90,43 @@ def test_fp32_needs_listed_warp_tiles(tmp_path, gpu_target, listed):
 
     assert codegen._is_tile_arch_valid(tile, variant=ugc.GemmVariant.STANDARD) is listed
     assert len(codegen.arch_filter.calls) == int(listed)
+
+
+def _fp32_config(arch, warp):
+    return KernelConfig(
+        dtype_a="fp32",
+        dtype_b="fp32",
+        dtype_c="fp32",
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=warp[0],
+        warp_n=warp[1],
+        warp_k=warp[2],
+        pipeline="compv3",
+        gfx_arch=arch,
+    )
+
+
+@pytest.mark.parametrize(
+    "arch,warp,valid",
+    [
+        ("gfx1250", (16, 16, 4), True),
+        ("gfx1250", (32, 32, 16), False),
+        ("gfx950", (32, 32, 8), True),
+        ("gfx950", (32, 32, 16), False),
+    ],
+)
+def test_ctypes_fp32_warp_tile_uses_arch_table(arch, warp, valid):
+    # The warp tile is checked against the arch's fp32 list; the old
+    # [[32,32,16],[16,16,16]] default no longer admits fp16 shapes for fp32.
+    result = validate_kernel_config(_fp32_config(arch, warp))
+    warp_errors = [e for e in result.errors if "warp tile" in e.lower()]
+    assert (not warp_errors) is valid, result.errors
+
+
+def test_ctypes_unlisted_dtype_key_is_an_error():
+    # gfx1201 has no fp32 entry: report the missing key, suggest no warp tile.
+    result = validate_kernel_config(_fp32_config("gfx1201", (16, 16, 16)))
+    assert any("No warp tiles listed for fp32_fp32_fp32" in e for e in result.errors)
+    assert "warp_m" not in result.suggested_fixes

@@ -110,35 +110,6 @@ def get_build_dir() -> Path:
 # Supported Data Types
 # =============================================================================
 
-# All supported GEMM dtype combinations from warp_gemm_dispatcher.hpp
-SUPPORTED_DTYPES = {
-    # dtype_a, dtype_b -> acc_dtype, warp_tiles
-    ("fp32", "fp32"): {"acc": "fp32", "warp_tiles": [(16, 16, 4), (16, 16, 16)]},
-    ("fp16", "fp16"): {
-        "acc": "fp32",
-        "warp_tiles": [(32, 32, 8), (32, 32, 16), (16, 16, 16), (16, 16, 32)],
-    },
-    ("bf16", "bf16"): {
-        "acc": "fp32",
-        "warp_tiles": [(32, 32, 8), (32, 32, 16), (16, 16, 16), (16, 16, 32)],
-    },
-    ("fp8", "fp8"): {
-        "acc": "fp32",
-        "warp_tiles": [(32, 32, 16), (32, 32, 32), (16, 16, 32), (16, 16, 64)],
-    },
-    ("fp8", "bf8"): {"acc": "fp32", "warp_tiles": [(32, 32, 16), (16, 16, 32)]},
-    ("bf8", "fp8"): {"acc": "fp32", "warp_tiles": [(32, 32, 16), (16, 16, 128)]},
-    ("bf8", "bf8"): {
-        "acc": "fp32",
-        "warp_tiles": [(32, 32, 16), (32, 32, 32), (16, 16, 32)],
-    },
-    ("int8", "int8"): {
-        "acc": "int32",
-        "warp_tiles": [(32, 32, 16), (16, 16, 32), (16, 16, 16)],
-    },
-    ("pk_fp4", "pk_fp4"): {"acc": "fp32", "warp_tiles": [(16, 16, 128)]},
-}
-
 # All valid individual dtypes
 VALID_DTYPES = ["fp16", "bf16", "fp32", "fp8", "bf8", "int8", "pk_fp4"]
 
@@ -328,22 +299,22 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
         if variant == "preshuffle"
         else "warp_tile_combos"
     )
-    warp_tile_combos = (
-        arch_data.get(table_key, {})
-        .get(arch, {})
-        .get(dtype_key, [[32, 32, 16], [16, 16, 16]])
-    )
+    warp_tile_combos = arch_data.get(table_key, {}).get(arch, {}).get(dtype_key, [])
     warp_cfg = [warp_m, warp_n, warp_k]
-    if warp_cfg not in warp_tile_combos:
+    if not warp_tile_combos:
+        errors.append(
+            f"No warp tiles listed for {dtype_key} on {arch} in {table_key}; "
+            f"add them to arch_specs.json before generating this dtype"
+        )
+    elif warp_cfg not in warp_tile_combos:
         valid_str = ", ".join(f"[{c[0]},{c[1]},{c[2]}]" for c in warp_tile_combos[:5])
         dtype_label = dtype if dtype_b == dtype else f"{dtype}/{dtype_b}"
         errors.append(
             f"Unsupported warp tile [{warp_m},{warp_n},{warp_k}] for {arch}/{dtype_label}. Valid: {valid_str}"
         )
-        if warp_tile_combos:
-            suggested_fixes["warp_m"] = warp_tile_combos[0][0]
-            suggested_fixes["warp_n"] = warp_tile_combos[0][1]
-            suggested_fixes["warp_k"] = warp_tile_combos[0][2]
+        suggested_fixes["warp_m"] = warp_tile_combos[0][0]
+        suggested_fixes["warp_n"] = warp_tile_combos[0][1]
+        suggested_fixes["warp_k"] = warp_tile_combos[0][2]
 
     # Check arch is supported
     if arch not in arch_data["supported_archs"]:
