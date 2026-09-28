@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+# Functions are invoked through run_timed and the EXIT trap.
+# shellcheck disable=SC2329
 set -euo pipefail
 
 # Run TensileLite common GEMM tests under rocjitsu gfx1250/gfx942 emulation.
@@ -12,6 +14,11 @@ set -euo pipefail
 #
 # Advisory job (continue-on-error in workflow). Validates that TensileLite
 # kernels build and execute correctly under CPU emulation.
+# Activate the test venv and install the artifact's requirements-test.txt first.
+# Extra command-line arguments are forwarded to pytest for focused local runs.
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${PYTHON:-$(command -v python3)}"
 
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 AMDGPU_FAMILIES="${AMDGPU_FAMILIES:-}"
@@ -23,10 +30,11 @@ REPORT_DIR="${REPORT_DIR:-${PWD}/rocjitsu-tensilelite-reports}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
 PER_TEST_TIMEOUT="${PER_TEST_TIMEOUT:-2700}"
-# xdist worker count. Emulation is CPU-bound and ~15-20 min/test; serial
-# execution of the full gfx1250 suite exceeds the workflow step timeout. Local
-# validation used 12-16 workers. Override via PYTEST_WORKERS.
-PYTEST_WORKERS="${PYTEST_WORKERS:-16}"
+# Leave time within the 345-minute step for cleanup and report generation.
+SUITE_TIMEOUT_SECONDS="${SUITE_TIMEOUT_SECONDS:-19800}"
+HOST_CORES="$(nproc)"
+PYTEST_WORKERS="${PYTEST_WORKERS:-$(( HOST_CORES < 16 ? HOST_CORES : 16 ))}"
+ROCJITSU_BUILD_JOBS="${ROCJITSU_BUILD_JOBS:-$(( HOST_CORES < 48 ? HOST_CORES : 48 ))}"
 # AVX2 build; -march=native breaks (libstdc++ <experimental/simd> AVX-512 assert).
 ROCJITSU_MARCH="${ROCJITSU_MARCH:-x86-64-v3}"
 ROCJITSU_LTO="${ROCJITSU_LTO:-ON}"
@@ -37,7 +45,29 @@ ROCJITSU_FUNCTIONAL_QUANTUM="${ROCJITSU_FUNCTIONAL_QUANTUM:-}"
 ROCJITSU_CPU_DISPATCH_THREADS="${ROCJITSU_CPU_DISPATCH_THREADS:-auto}"
 ROCJITSU_NUM_THREADS="${ROCJITSU_NUM_THREADS:-auto}"
 ROCJITSU_MAX_XCD_THREADS="${ROCJITSU_MAX_XCD_THREADS:-8}"  # gfx1250/94x/950 have 8 XCDs
+# Compiler capability probes can write into the current directory. Resolve
+# inputs before running pytest from the report directory to retain those files.
+for setting in ROCM_PATH ROCJITSU_SOURCE_DIR ROCJITSU_BUILD_DIR REPORT_DIR TENSILELITE_ROOT TENSILELITE_CLIENT; do
+  printf -v "${setting}" '%s' "$(realpath -m -- "${!setting}")"
+done
+if [[ -n "${ROCJITSU_CONFIG}" ]]; then
+  ROCJITSU_CONFIG="$(realpath -m -- "${ROCJITSU_CONFIG}")"
+fi
+PYTHON="$(realpath -ms -- "$(command -v "${PYTHON}")")"
 TIMING_FILE="${REPORT_DIR}/timing.tsv"
+
+for setting in PYTEST_WORKERS ROCJITSU_BUILD_JOBS PER_TEST_TIMEOUT SUITE_TIMEOUT_SECONDS ROCJITSU_MAX_XCD_THREADS; do
+  if [[ ! "${!setting}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${setting} must be a positive integer, got '${!setting}'" >&2
+    exit 1
+  fi
+done
+for setting in ROCJITSU_NUM_THREADS ROCJITSU_CPU_DISPATCH_THREADS; do
+  if [[ "${!setting}" != auto && ! "${!setting}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${setting} must be 'auto' or a positive integer, got '${!setting}'" >&2
+    exit 1
+  fi
+done
 
 select_rocjitsu_target() {
   local target_selector="${ROCJITSU_GPU_TARGET:-${AMDGPU_FAMILIES}}"
@@ -84,15 +114,19 @@ run_timed() {
   echo "::group::${label}"
   local start
   start="$(date +%s)"
+  local had_errexit=0
+  case "$-" in *e*) had_errexit=1 ;; esac
   set +e
   "$@"
   local status=$?
-  set -e
   local end
   end="$(date +%s)"
   local elapsed=$((end - start))
   echo "::endgroup::"
   printf "%s\t%s\t%s\n" "${label}" "${elapsed}" "${status}" | tee -a "${TIMING_FILE}"
+  if [[ "${had_errexit}" -ne 0 ]]; then
+    set -e
+  fi
   return "${status}"
 }
 
@@ -154,8 +188,8 @@ mkdir -p "${REPORT_DIR}"
 # Inject a bounded per-process thread budget into a config copy; repoint ROCJITSU_CONFIG.
 apply_dispatch_sizing() {
   local py host_cores budget num_threads cpu_dispatch injected
-  py="$(command -v python3.12 || command -v python3)"
-  host_cores="$(nproc)"
+  py="${PYTHON}"
+  host_cores="${HOST_CORES}"
 
   budget=$(( host_cores / PYTEST_WORKERS ))
   (( budget < 1 )) && budget=1
@@ -177,7 +211,8 @@ apply_dispatch_sizing() {
 
   injected="${REPORT_DIR}/rocjitsu-config.json"
   SRC_CONFIG="${ROCJITSU_CONFIG}" INJECT_NUM_THREADS="${num_threads}" \
-    INJECT_CPU_DISPATCH="${cpu_dispatch}" INJECT_FQ="${ROCJITSU_FUNCTIONAL_QUANTUM}" \
+    INJECT_CPU_DISPATCH="${cpu_dispatch}" INJECT_BUDGET="${budget}" \
+    INJECT_FQ="${ROCJITSU_FUNCTIONAL_QUANTUM}" \
     OUT_CONFIG="${injected}" \
     "${py}" - <<'PYEOF'
 import json, os
@@ -187,6 +222,8 @@ if em != "functional":
     print(f"::warning::exec_mode={em} — 'functional' is the fast path; clocked/other is far slower")
 cfg["num_threads"] = int(os.environ["INJECT_NUM_THREADS"])
 cfg["cpu_dispatch_threads"] = int(os.environ["INJECT_CPU_DISPATCH"])
+cfg["cpu_thread_budget"] = int(os.environ["INJECT_BUDGET"])
+cfg["async_helper_threads"] = 0
 
 # functional_quantum is a per-CU config entry under topology.
 fq = os.environ.get("INJECT_FQ", "")
@@ -205,7 +242,7 @@ if fq != "":
         elif isinstance(node, list):
             for v in node:
                 set_cu_quantum(v)
-    set_cu_quantum(cfg.get("topology", {}))
+    set_cu_quantum(cfg)
 
 with open(os.environ["OUT_CONFIG"], "w") as f:
     json.dump(cfg, f, indent=2)
@@ -226,7 +263,7 @@ apply_dispatch_sizing
 export ROCM_PATH
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${LLVM_RUNTIME_LIBRARY_PATH}:${LD_LIBRARY_PATH:-}"
-export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${SCRIPT_DIR}:${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"
 echo "AMDGPU_FAMILIES=${AMDGPU_FAMILIES}"
@@ -236,7 +273,20 @@ echo "ROCJITSU_MARCH=${ROCJITSU_MARCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
 echo "TENSILELITE_CLIENT=${TENSILELITE_CLIENT}"
 echo "PER_TEST_TIMEOUT=${PER_TEST_TIMEOUT}"
+echo "SUITE_TIMEOUT_SECONDS=${SUITE_TIMEOUT_SECONDS}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+
+"${PYTHON}" - <<'PY'
+import sys
+if sys.version_info < (3, 12):
+    raise SystemExit("TensileLite emulation requires Python 3.12 or newer")
+import pytest, xdist, yaml, numpy, msgpack, filelock, rocisa
+print(f"Test interpreter: {sys.executable}")
+PY
+"${PYTHON}" - <<'PY' > "${REPORT_DIR}/python-packages.txt"
+from importlib.metadata import distributions
+print('\n'.join(sorted(f"{d.metadata['Name']}=={d.version}" for d in distributions())))
+PY
 
 # ── Build rocjitsu ────────────────────────────────────────────────────────────
 
@@ -259,7 +309,8 @@ configure_rocjitsu() {
 }
 
 build_rocjitsu() {
-  cmake --build "${ROCJITSU_BUILD_DIR}" --target rocjitsu_bin rocjitsu_shared hsa_hotswap_rocjitsu
+  cmake --build "${ROCJITSU_BUILD_DIR}" --parallel "${ROCJITSU_BUILD_JOBS}" \
+    --target rocjitsu_bin rocjitsu_shared hsa_hotswap_rocjitsu
 }
 
 ROCJITSU_BIN="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
@@ -272,14 +323,14 @@ run_timed "configure rocjitsu" configure_rocjitsu
 run_timed "build rocjitsu" build_rocjitsu
 run_timed "rocjitsu version" show_rocjitsu_version
 
-# The HSA hotswap hook lets rocjitsu intercept the HIP runtime's device query.
-# Without it, tensilelite-client fails with hipErrorNoDevice.
-HOTSWAP_LIB=$(find "${ROCJITSU_BUILD_DIR}" -name "libhsa_hotswap_rocjitsu.so" -type f | head -1)
+# The HSA hotswap hook translates gfx1250 code objects for emulation.
+HOTSWAP_LIB=$(find "${ROCJITSU_BUILD_DIR}" -name "libhsa_hotswap_rocjitsu.so" -type f -print -quit)
 if [[ -n "${HOTSWAP_LIB}" ]]; then
   cp "${HOTSWAP_LIB}" "${ROCM_PATH}/lib/"
   echo "Installed hotswap lib: ${ROCM_PATH}/lib/libhsa_hotswap_rocjitsu.so"
 else
-  echo "::warning::libhsa_hotswap_rocjitsu.so not found — tests may fail with hipErrorNoDevice"
+  echo "::error::libhsa_hotswap_rocjitsu.so was not built"
+  exit 1
 fi
 
 # Log the rocjitsu commit and warn on env that slows a functional run.
@@ -297,43 +348,25 @@ log_provenance_and_hygiene() {
 
 log_provenance_and_hygiene
 
-# ── Install pytest dependencies ───────────────────────────────────────────────
-
-install_pytest_deps() {
-  # Python 3.12+ required for rocisa stable-ABI extension
-  local python_bin
-  python_bin="$(command -v python3.12 || command -v python3)"
-  PYTHON="${python_bin}"
-
-  if command -v uv >/dev/null 2>&1; then
-    uv pip install \
-      pytest pyyaml msgpack \
-      pytest-xdist pytest-timeout \
-      syrupy tqdm joblib numpy filelock
-  else
-    "${PYTHON}" -m pip install --quiet \
-      pytest pyyaml msgpack \
-      pytest-xdist pytest-timeout \
-      syrupy tqdm joblib numpy filelock
-  fi
-}
-
-run_timed "install pytest deps" install_pytest_deps
-
 # ── Run TensileLite tests ─────────────────────────────────────────────────────
 
 run_tensilelite_tests() {
   local junit_dir="${REPORT_DIR}/junit"
   mkdir -p "${junit_dir}"
 
-  # pytest-timeout handles per-test kills; xdist (-n) runs tests concurrently so
-  # the suite fits inside the workflow step timeout. The step timeout is the
-  # process-tree kill backstop.
-  "${ROCJITSU_BIN}" \
+  # The supervisor bounds the entire suite and reaps orphaned descendants.
+  # The plugin writes results incrementally, including before a suite timeout.
+  (
+    cd "${REPORT_DIR}" || exit 1
+    exec "${PYTHON}" "${SCRIPT_DIR}/rocjitsu_pytest.py" \
+      --report-dir "${REPORT_DIR}" --timeout "${SUITE_TIMEOUT_SECONDS}" -- \
+      "${ROCJITSU_BIN}" \
       --config "${ROCJITSU_CONFIG}" \
       -- "${PYTHON}" -m pytest \
-        "${TENSILELITE_ROOT}/Tensile/Tests/common" \
+        "${TENSILELITE_ROOT}/Tensile/Tests/common/test_config.py" \
+        -p rocjitsu_pytest --rocjitsu-report-dir="${REPORT_DIR}" \
         -m "${ROCJITSU_GPU_TARGET}" \
+        --gpu-targets="${ROCJITSU_GPU_TARGET}" \
         -v -s \
         -n "${PYTEST_WORKERS}" \
         --client-lock-scope=worker \
@@ -342,9 +375,14 @@ run_tensilelite_tests() {
         --prebuilt-client="${TENSILELITE_CLIENT}" \
         --global-parameters="LibraryFormat='msgpack'" \
         "--tensile-options=--cxx-compiler,${ROCM_PATH}/bin/amdclang++,--gpu-targets,${ROCJITSU_GPU_TARGET}" \
-    2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"
+        "$@"
+  ) 2>&1 | tee "${REPORT_DIR}/tensilelite-test.log"
 
-  local status=${PIPESTATUS[0]}
+  local statuses=("${PIPESTATUS[@]}")
+  local status=${statuses[0]}
+  if [[ "${status}" -eq 0 ]]; then
+    status=${statuses[1]}
+  fi
 
   # Parse JUnit XML for per-test timing summary
   if [[ -f "${junit_dir}/tensilelite.xml" ]]; then
@@ -379,20 +417,23 @@ print('-' * 80)
 print('Total: %d tests, %d passed, %d failed, %d skipped, %.0fs aggregate test time (%.0f min)' % (len(tests), passed, failed, skipped, total, total/60))
 print('=' * 80)
 JUNIT_PARSE
+    local report_status=$?
+    if [[ "${status}" -eq 0 ]]; then
+      status=${report_status}
+    fi
   fi
 
   return "${status}"
 }
 
 set +e
-run_timed "tensilelite tests (${ROCJITSU_GPU_TARGET})" run_tensilelite_tests
+run_timed "tensilelite tests (${ROCJITSU_GPU_TARGET})" run_tensilelite_tests "$@"
 test_status=$?
 set -e
 
 if [[ "${test_status}" -ne 0 ]]; then
   echo "tensilelite rocjitsu tests exited with status ${test_status}" >&2
-  # Exit code 1 = test failures, 5 = no tests collected. Both are useful signal.
-  # Don't treat as infra failure.
+  # Preserve pytest failures, missing-test errors, and the suite timeout (124).
 fi
 
 exit "${test_status}"

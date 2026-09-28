@@ -318,7 +318,7 @@ jobs:
     # A caller cannot depend on an individual job inside a reusable workflow,
     # so start after the Linux workflow has finished publishing its artifacts.
     # This sidecar remains advisory and is not part of the required summary.
-    # gfx94X is the HW-baseline leg: cross-checks the emulator against real hardware.
+    # gfx94X provides functional emulation coverage for an established GPU target.
     needs: [ci-env, configure, linux_build_and_test]
     if: >-
       ${{

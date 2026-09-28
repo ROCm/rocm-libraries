@@ -95,10 +95,14 @@ def _call_helper_in_subprocess(
     try:
         returncode = proc.wait()
     finally:
-        if proc.poll() is None:
+        # The helper may exit before its client. Own the whole group until
+        # the phase finishes, including normal exit and interruption races.
+        if os.name == "posix":
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+        elif proc.poll() is None:
+            proc.kill()
+        proc.wait()
     if returncode != 0:
         raise subprocess.CalledProcessError(returncode, proc.args)
 
