@@ -684,11 +684,13 @@ __device__ void hqr_laqr1(const int nn, const T* H, const I ldh, const T s1, con
     it is 0 again after each barrier. **/
 __device__ inline void laqr5_grid_barrier(unsigned* bar, const unsigned G)
 {
-    // (every thread makes its own writes visible at the device level before the
-    // thread-block arrives, as __ockl_grid_sync does: a barrier of the thread-block does not
-    // wait for the global memory writes of the other wavefronts, so the fence of thread 0
-    // alone could miss some of them)
-    __threadfence();
+    // (on gfx94x each XCD has its own L2 cache: every wavefront waits for its global memory
+    // writes to reach it before the thread-block arrives, so that the write-back of the L2
+    // by the fence of thread 0 includes them; a barrier of the thread-block alone does not
+    // wait for them)
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+    __builtin_amdgcn_s_waitcnt(0x0F70); // vmcnt(0)
+#endif
     __syncthreads();
     if(hipThreadIdx_x == 0)
     {
