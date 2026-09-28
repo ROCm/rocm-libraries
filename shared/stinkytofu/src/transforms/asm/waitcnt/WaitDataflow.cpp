@@ -195,6 +195,7 @@ bool hasUntaggedTensorAnchor(BasicBlock& bb) {
         auto* inst = dyn_cast<StinkyInstruction>(&ir);
         if (inst == nullptr) continue;
         if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr) return true;
+        if (inst->getModifier<LdsRingData>() != nullptr) return true;
     }
     return false;
 }
@@ -214,6 +215,26 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     return false;
 }
 
+int positiveModulo(int value, int modulus) {
+    int result = value % modulus;
+    return result < 0 ? result + modulus : result;
+}
+
+bool ringAliases(const QueuedOp& producer, size_t producerIndex, const LdsRingAccess& consumer) {
+    if (producer.op == nullptr) return false;
+    const auto* ring = producer.op->getModifier<LdsRingData>();
+    if (ring == nullptr || producerIndex >= ring->accesses.size()) return false;
+    const auto& access = ring->accesses[producerIndex];
+    if (access.bufferClass != consumer.bufferClass || access.frame != consumer.frame ||
+        access.ring != consumer.ring || access.ring <= 0) {
+        return false;
+    }
+    const int delta =
+        producerIndex < producer.frameDeltas.size() ? producer.frameDeltas[producerIndex] : 0;
+    return positiveModulo(delta + access.gdelta, access.ring) ==
+           positiveModulo(consumer.gdelta, consumer.ring);
+}
+
 // Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
 // of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
 // queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
@@ -227,7 +248,7 @@ std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount
         const int qsize = static_cast<int>(q.ops.size());
         const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
         for (int idx = 0; idx < drainedEnd; ++idx) {
-            StinkyInstruction* op = q.ops[idx];
+            StinkyInstruction* op = q.ops[idx].op;
             if (op == nullptr) continue;
             const auto* mt = op->getModifier<MemTokenData>();
             if (mt == nullptr) continue;
@@ -247,7 +268,8 @@ std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount
 
 int PerPredQueue::countFrom(StinkyInstruction* op) const {
     if (saturatedOps.find(op) != saturatedOps.end()) return static_cast<int>(kMaxInFlight);
-    auto it = std::find(ops.begin(), ops.end(), op);
+    auto it = std::find_if(ops.begin(), ops.end(),
+                           [op](const QueuedOp& queued) { return queued.op == op; });
     if (it == ops.end()) return 0;
     return static_cast<int>(std::distance(it, ops.end()));
 }
@@ -277,6 +299,8 @@ bool DataflowState::operator==(const DataflowState& other) const {
 WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
                            const std::vector<BasicBlock*>& rpo)
     : rpo(rpo) {
+    for (unsigned i = 0; i < rpo.size(); ++i) rpoIndex[rpo[i]] = i;
+
     const unsigned n = static_cast<unsigned>(rpo.size());
     // Wait-count immediates are capped to the hardware window
     // (kMaxInFlight - 1). Keep a floor above that window so loop-carried
@@ -320,12 +344,40 @@ DataflowState WaitDataflow::mergeFromPredecessors(
         auto it = exitState.find(p);
         if (it == exitState.end()) continue;
         const auto& predState = it->second;
+        const LdsRingData* edgeRing = nullptr;
+        if (IRBase* terminator = p->getTerminator()) {
+            if (auto* inst = dyn_cast<StinkyInstruction>(terminator)) {
+                edgeRing = inst->getModifier<LdsRingData>();
+            }
+        }
         for (int c = 0; c < CK_Count; ++c) {
             for (const auto& predQ : predState.queues[c]) {
                 PerPredQueue q;
                 q.pred = p;
                 q.ops = predQ.ops;
                 q.saturatedOps = predQ.saturatedOps;
+                q.ringSaturated = predQ.ringSaturated;
+                if (edgeRing != nullptr && !edgeRing->advances.empty() && isBackEdge(p, &bb)) {
+                    for (QueuedOp& queued : q.ops) {
+                        const auto* opRing =
+                            queued.op == nullptr ? nullptr : queued.op->getModifier<LdsRingData>();
+                        if (opRing == nullptr) continue;
+                        if (queued.frameDeltas.size() != opRing->accesses.size()) {
+                            queued.frameDeltas.assign(opRing->accesses.size(), 0);
+                        }
+                        for (size_t i = 0; i < opRing->accesses.size(); ++i) {
+                            const auto& access = opRing->accesses[i];
+                            if (access.ring <= 0) continue;
+                            for (const auto& advance : edgeRing->advances) {
+                                if (advance.frame != access.frame) continue;
+                                int phase = queued.frameDeltas[i] - advance.amount;
+                                phase %= access.ring;
+                                if (phase < 0) phase += access.ring;
+                                queued.frameDeltas[i] = phase;
+                            }
+                        }
+                    }
+                }
                 // Dedup identical (pred, ops) queues. A back-edge otherwise
                 // re-copies the same per-pred queue on every fixed-point
                 // iteration: the predecessor's exit already contains the
@@ -438,6 +490,7 @@ struct CounterEmitState {
 void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
     for (auto& q : qs) {
         q.saturatedOps.clear();
+        q.ringSaturated = false;
         if (keep <= 0) {
             q.ops.clear();
         } else if (static_cast<int>(q.ops.size()) > keep) {
@@ -573,9 +626,15 @@ bool appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     if (qs.empty()) qs.push_back(PerPredQueue{});
     bool saturated = false;
     for (auto& q : qs) {
-        q.ops.push_back(op);
+        const auto* ring = op->getModifier<LdsRingData>();
+        q.ops.push_back(
+            QueuedOp{op, std::vector<int>(ring == nullptr ? 0 : ring->accesses.size(), 0)});
         while (q.ops.size() > kMaxInFlight) {
-            q.saturatedOps.insert(q.ops.front());
+            q.saturatedOps.insert(q.ops.front().op);
+            if (q.ops.front().op != nullptr &&
+                q.ops.front().op->getModifier<LdsRingData>() != nullptr) {
+                q.ringSaturated = true;
+            }
             q.ops.pop_front();
             saturated = true;
         }
@@ -645,6 +704,7 @@ void trimPredQueues(std::vector<PerPredQueue>& qs, BasicBlock* pred, int keep) {
     for (auto& q : qs) {
         if (q.pred != pred) continue;
         q.saturatedOps.clear();
+        q.ringSaturated = false;
         if (keep <= 0) {
             q.ops.clear();
         } else if (static_cast<int>(q.ops.size()) > keep) {
@@ -739,6 +799,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         if (w < 0) return;
         if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
     };
+    const auto* anchorRing = inst->getModifier<LdsRingData>();
 
     // For each src dep on counter `c` that appears in some per-pred
     // queue, contribute its (countFrom - 1) wait via tightenRequired.
@@ -782,6 +843,41 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         return false;
     };
 
+    auto scanRingDeps = [&](CounterKind c, LdsRingAccessKind anchorKind,
+                            LdsRingAccessKind producerKind) {
+        if (anchorRing == nullptr) return;
+        for (const auto& q : state.queues[c]) {
+            if (q.ringSaturated) {
+                tightenRequired(c, 0);
+                continue;
+            }
+            const int qsize = static_cast<int>(q.ops.size());
+            for (const auto& anchorAccess : anchorRing->accesses) {
+                if (anchorAccess.kind != anchorKind) continue;
+                for (int idx = 0; idx < qsize; ++idx) {
+                    const QueuedOp& queued = q.ops[idx];
+                    if (queued.op == inst || queued.op == nullptr) continue;
+                    const auto* producerRing = queued.op->getModifier<LdsRingData>();
+                    if (producerRing == nullptr) continue;
+                    for (size_t accessIdx = 0; accessIdx < producerRing->accesses.size();
+                         ++accessIdx) {
+                        if (producerRing->accesses[accessIdx].kind != producerKind) continue;
+                        if (!ringAliases(queued, accessIdx, anchorAccess)) continue;
+                        tightenRequired(c, waitToDrain(c, qsize - idx));
+                    }
+                }
+            }
+        }
+    };
+
+    // Multi-wave tensor fills become visible to all waves at publishing
+    // barriers. Protecting barriers similarly retire prior LDS reads before a
+    // rotating buffer is overwritten.
+    scanRingDeps(CK_Tensor, LdsRingAccessKind::Publish, LdsRingAccessKind::Write);
+    scanRingDeps(CK_DS, LdsRingAccessKind::Protect, LdsRingAccessKind::Read);
+    scanRingDeps(CK_Tensor, LdsRingAccessKind::Read, LdsRingAccessKind::Write);
+    scanRingDeps(CK_DS, LdsRingAccessKind::Write, LdsRingAccessKind::Read);
+
     // WAR-on-LDS / barrier ordering: the SSA def-use chain captures
     // RAW (consumer's src == producer) but NOT anti-dependencies. An
     // LDS writer must wait for prior LDS readers on the same token,
@@ -799,7 +895,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         for (const auto& q : state.queues[CK_DS]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+                StinkyInstruction* op = q.ops[idx].op;
                 if (op == inst) continue;
                 // Barrier guards every DS op on a matching token; LDS
                 // writer guards only readers/atomics.
@@ -831,7 +927,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         for (const auto& q : state.queues[CK_Tensor]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+                StinkyInstruction* op = q.ops[idx].op;
                 if (op == inst) continue;
                 if (op->getModifier<MemTokenData>() == nullptr) {
                     tightenRequired(CK_Tensor, waitToDrain(CK_Tensor, qsize - idx));
@@ -848,7 +944,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         for (const auto& q : state.queues[CK_Async]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+                StinkyInstruction* op = q.ops[idx].op;
                 if (op == inst) continue;
                 auto* opTokens = op->getModifier<MemTokenData>();
                 bool overlap =
@@ -883,7 +979,8 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         bool needs = inst->getModifier<MemTokenData>() == nullptr;
         if (!needs) {
             for (const auto& q : state.queues[CK_DS]) {
-                for (StinkyInstruction* op : q.ops) {
+                for (const QueuedOp& queued : q.ops) {
+                    StinkyInstruction* op = queued.op;
                     if (op->getModifier<MemTokenData>() == nullptr) {
                         needs = true;
                         break;

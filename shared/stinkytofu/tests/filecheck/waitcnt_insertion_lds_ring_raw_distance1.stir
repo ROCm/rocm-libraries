@@ -1,0 +1,26 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=1 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# A ring-3 CFG trip advances the frame by two. The previous trip's gdelta-2
+# tensor fill therefore aliases the current gdelta-0 read and is the newest
+# outstanding tensor operation, requiring tlcnt=0.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_ring_raw_distance1
+# CHECK: ^loop:
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: ds_load_b64
+# CHECK: tensor_load_to_lds
+# CHECK: advances = [0,2]
+
+st.func @waitcnt_insertion_lds_ring_raw_distance1() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] }, mod.lds_ring = { accesses = [0,0,3,0,0], advances = [] } }
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [2] }, mod.lds_ring = { accesses = [0,0,3,2,1], advances = [] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0) { mod.lds_ring = { accesses = [], advances = [0,2] } }
+  Successors: ^loop, ^exit
+^exit:
+}

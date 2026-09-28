@@ -27,6 +27,7 @@ from ..ExecutionPolicy import isPersistent, isStreamK, isPersistentDataParallel,
 import collections
 import copy
 import math
+import os
 import sys
 
 from enum import Enum
@@ -6191,8 +6192,10 @@ class Solution(collections.abc.Mapping):
     # read-after-write race on the rotating LDS (a fast wave overwrites a buffer
     # a slow wave is still reading). Silently fall back to 2 buffers for every
     # value (auto -1 and forced 1) so existing library logic that selected a
-    # triple kernel keeps building. Re-enable once the race is fixed.
-    state["TDMPlusLdsBuf"] = 0
+    # triple kernel keeps building. The developer-only environment override
+    # exercises the frame-aware dependency implementation without shipping it.
+    if os.getenv("TENSILE_ENABLE_TDMPLUSLDSBUF") != "1":
+      state["TDMPlusLdsBuf"] = 0
 
     # disable TDMPlusLdsBuf if not applicable. TDMPlusLdsBuf asks for PGR+1 (3) LDS
     # buffers for PGR2 without requiring DirectToLds. -1 (auto) is still unresolved

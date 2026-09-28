@@ -318,6 +318,7 @@ class TestInstructionBase(unittest.TestCase):
         self.assertEqual(inst.instStr, "")
         self.assertFalse(inst.outputInlineAsm)
         self.assertIsNone(inst.m_memToken)
+        self.assertIsNone(inst.m_ldsRing)
 
     def test_setInst_records_str(self):
         inst = Instruction(InstType.INST_B32)
@@ -338,6 +339,12 @@ class TestInstructionBase(unittest.TestCase):
         token = object()  # opaque sentinel matches "any shared_ptr"
         inst.setMemToken(token)
         self.assertIs(inst.getMemToken(), token)
+
+    def test_lds_ring_roundtrip(self):
+        inst = Instruction(InstType.INST_B32)
+        ring = object()
+        inst.setLdsRing(ring)
+        self.assertIs(inst.getLdsRing(), ring)
 
     def test_default_issue_latency_and_cycles(self):
         # rocisa::Instruction defaults; subclasses override.

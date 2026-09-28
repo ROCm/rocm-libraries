@@ -1189,6 +1189,22 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         if (auto memToken = inst->getMemToken()) {
             stinkyInst->addModifier<MemTokenData>(MemTokenData{memToken->tokens});
         }
+        if (auto ring = inst->getLdsRing()) {
+            std::vector<LdsRingAccess> accesses;
+            std::vector<LdsFrameAdvance> advances;
+            accesses.reserve(ring->accesses.size());
+            advances.reserve(ring->advances.size());
+            for (const auto& row : ring->accesses) {
+                accesses.push_back(
+                    {row[0], row[1], row[2], row[3],
+                     static_cast<LdsRingAccessKind>(row[4])});
+            }
+            for (const auto& row : ring->advances) {
+                advances.push_back({row[0], row[1]});
+            }
+            stinkyInst->addModifier<LdsRingData>(
+                LdsRingData{std::move(accesses), std::move(advances)});
+        }
 
         Legalized legalizedInsts =
             legalizeInstruction(stinkyInst, inst, irBuilder, archId, asmCaps, archCaps, hasVgprMsb);

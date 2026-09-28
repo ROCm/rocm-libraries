@@ -484,6 +484,30 @@ bool serializeVisit(const MemTokenData& mod, std::ostream& os) {
     return true;
 }
 
+// LdsRingData
+bool serializeVisit(const LdsRingData& mod, std::ostream& os) {
+    std::vector<int> accesses;
+    accesses.reserve(mod.accesses.size() * 5);
+    for (const auto& access : mod.accesses) {
+        accesses.push_back(access.bufferClass);
+        accesses.push_back(access.frame);
+        accesses.push_back(access.ring);
+        accesses.push_back(access.gdelta);
+        accesses.push_back(static_cast<int>(access.kind));
+    }
+
+    std::vector<int> advances;
+    advances.reserve(mod.advances.size() * 2);
+    for (const auto& advance : mod.advances) {
+        advances.push_back(advance.frame);
+        advances.push_back(advance.amount);
+    }
+
+    os << ", mod.lds_ring = { accesses = " << vectorToString(accesses)
+       << ", advances = " << vectorToString(advances) << " }";
+    return true;
+}
+
 // LabelData
 bool serializeVisit(const LabelData& mod, std::ostream& os) {
     os << ", mod.label = { label = \"" << mod.label << "\""
@@ -511,8 +535,8 @@ bool ModifierSerializer::serialize(const Modifier& mod, std::ostream& os) {
                           CacheScopeModifiers, SMEMModifiers, SDWAModifiers, DPPModifiers,
                           VOP3Modifiers, VOP3PModifiers, True16Modifiers, EXEC, VCC, SWaitCntData,
                           SWaitTensorCntData, SWaitAsyncCntData, SWaitStoreCntData, SDelayAluData,
-                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData, LabelData,
-                          CallTargetData>(mod, os);
+                          SWaitAluData, MFMAModifiers, MatrixFmtModifiers, MemTokenData,
+                          LdsRingData, LabelData, CallTargetData>(mod, os);
 }
 
 /*
@@ -651,6 +675,21 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
         if (fields.contains("tokens")) {
             inst->addModifier(MemTokenData(getIntVector(fields, "tokens")));
         }
+    } else if (attrKey == "mod.lds_ring") {
+        const auto flatAccesses = getIntVector(fields, "accesses");
+        const auto flatAdvances = getIntVector(fields, "advances");
+        std::vector<LdsRingAccess> accesses;
+        std::vector<LdsFrameAdvance> advances;
+
+        for (size_t i = 0; i + 4 < flatAccesses.size(); i += 5) {
+            accesses.push_back({flatAccesses[i], flatAccesses[i + 1], flatAccesses[i + 2],
+                                flatAccesses[i + 3],
+                                static_cast<LdsRingAccessKind>(flatAccesses[i + 4])});
+        }
+        for (size_t i = 0; i + 1 < flatAdvances.size(); i += 2) {
+            advances.push_back({flatAdvances[i], flatAdvances[i + 1]});
+        }
+        inst->addModifier(LdsRingData(std::move(accesses), std::move(advances)));
     } else if (attrKey == "mod.label") {
         inst->addModifier(LabelData(getStr(fields, "label", ""),
                                     static_cast<uint16_t>(getInt(fields, "alignment", 1))));
