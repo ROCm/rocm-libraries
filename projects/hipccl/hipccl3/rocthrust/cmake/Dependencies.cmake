@@ -2,7 +2,7 @@
 # Copyright 2019-2026 Advanced Micro Devices, Inc.
 # ########################################################################
 
-include(dependencies/monorepo)
+include(primlibs/dependencies/monorepo)
 
 # The option of using the SQLite provided by the system, instead of downloading a copy
 option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" ON )
@@ -24,7 +24,7 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
-  include(dependencies/googletest)
+  include(primlibs/dependencies/googletest)
 
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     find_package(TBB QUIET)
