@@ -2627,7 +2627,7 @@ inline void rpp_store24_f32pln3_to_f32pkd3_avx(Rpp32f* dstPtr, __m256* p) {
     _mm_storeu_ps(dstPtr + 15, p128[1]);
     _mm_storeu_ps(dstPtr + 18, p128[2]);
     // Fixed: Only store 3 floats (not 4) to avoid writing beyond 24-float (96-byte) boundary
-    rpp_storeu_si64(dstPtr + 21, _mm_castps_si128(p128[3])); /* store first 2 floats [R08|G08] */
+    rpp_storeu_si64(dstPtr + 21, _mm_castps_si128(p128[3]));    /* store first 2 floats [R08|G08] */
     _mm_store_ss(dstPtr + 23, _mm_movehl_ps(p128[3], p128[3])); /* store 3rd float [B08] */
 }
 

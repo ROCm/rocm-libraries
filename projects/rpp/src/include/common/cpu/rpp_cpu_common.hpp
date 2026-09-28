@@ -56,7 +56,7 @@ SOFTWARE.
 #define RGB_TO_GREY_WEIGHT_RED 0.299f
 #define RGB_TO_GREY_WEIGHT_GREEN 0.587f
 #define RGB_TO_GREY_WEIGHT_BLUE 0.114f
-#define INTERP_BILINEAR_KERNEL_SIZE 2       // Kernel size needed for Bilinear Interpolation
+#define INTERP_BILINEAR_KERNEL_SIZE 2  // Kernel size needed for Bilinear Interpolation
 
 // Intra-image multithreading parameters
 // Minimum rows per thread for effective parallelization (avoid overhead on small images)
