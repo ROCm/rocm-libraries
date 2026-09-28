@@ -322,6 +322,7 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
         use_sinks=use_sinks,
         wide_lds_dma=variant.wide_lds_dma,
         causal_bottom_right=moving_bottom_right,
+        kv_storage_dtype="fp8e4m3" if bool(req.use_fp8) else None,
     )
 
 
@@ -453,10 +454,16 @@ def _make_gfx950_attention_dense_candidate(
         capability=Capability(
             arches=("gfx950",),
             dtypes=("bf16", "fp16"),
-            # Only frozen grid variants implement a moving bottom-right diagonal.
+            # Only frozen grid variants implement a moving bottom-right diagonal;
+            # fp8 KV is likewise grid-only in the first cut (persistent is a
+            # follow-up), and the spec rejects fp8 + ragged shapes in support().
             supports_features=frozenset(
                 {"causal", "sliding_window", "sinks"}
-                | ({"causal_bottom_right"} if not variant.persistent else set())
+                | (
+                    {"causal_bottom_right", "fp8"}
+                    if not variant.persistent
+                    else set()
+                )
             ),
         ),
         _supports=support,
