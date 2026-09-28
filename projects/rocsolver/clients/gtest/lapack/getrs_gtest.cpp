@@ -138,7 +138,7 @@ class GETRS_64 : public GETRS_BASE<int64_t>
 
 // large batch
 
-int constexpr BCOUNT = 65537; /* 65537 = 64*1024 + 1 */
+int constexpr BCOUNT = 64 * 1024 + 1;
 
 class GETRS_LARGE_BATCH : public GETRS_BASE<rocblas_int, BCOUNT>
 {
