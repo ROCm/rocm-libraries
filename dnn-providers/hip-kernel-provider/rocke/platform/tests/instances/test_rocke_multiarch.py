@@ -740,18 +740,38 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             _flavor_for_rocm(*sys_ver) if sys_ver else _detect_llvm_flavor()
         )
         rocke_dl = _datalayout_for_flavor(detected_flavor)
+        # The address spaces LLVM gained in 5bf967cb132b. Bound unconditionally:
+        # the per-arch loop below reads it on the llvm23 path too.
+        expected_p10_p15 = (
+            "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
+        )
+
         if detected_flavor == LLVM_FLAVOR_LLVM23:
-            # Drift proven on LLVM 23 (ROCm 7.13+): its datalayout is the llvm22
-            # one with the ELF symbol-mangling spec `m:e` inserted after the
-            # leading endianness field, and identical otherwise. Pin that exact
+            # Drift proven on LLVM 23+ (ROCm 7.13+): its datalayout is the llvm22
+            # one with TWO independent additions -- the ELF symbol-mangling spec
+            # `m:e` after the leading endianness field, and address spaces
+            # p10-p15 after p9 -- and identical otherwise. Pin that exact
             # relationship (derived from the llvm22 constant, not a second copy)
             # so a stray edit to either constant is caught here, not only by the
             # toolchain diff below.
+            #
+            # p10-p15 is the half that bites: it was missing until the backend
+            # stopped silently overwriting a module's DataLayout, at which point
+            # every attention kernel failed codegen. Assert it explicitly so a
+            # regression names the field rather than dumping two long strings.
+            self.assertIn(
+                "-p9:192:256:256:32" + expected_p10_p15 + "-i64:64",
+                rocke_dl,
+                "llvm23 datalayout must carry address spaces p10-p15 between p9 "
+                "and i64; without them codegen rejects the module outright",
+            )
             self.assertEqual(
                 rocke_dl,
-                _datalayout_for_flavor("llvm22").replace("e-", "e-m:e-", 1),
+                _datalayout_for_flavor("llvm22")
+                .replace("e-", "e-m:e-", 1)
+                .replace("-i64:64", expected_p10_p15 + "-i64:64", 1),
                 "llvm23 datalayout must be the llvm22 layout plus the m:e "
-                "symbol-mangling spec",
+                "symbol-mangling spec and address spaces p10-p15",
             )
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant
@@ -768,6 +788,34 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     # prove the gfx-invariant datalayout the flavor split needs.
                     self.skipTest(f"hipcc cannot target {arch} on this toolchain: {e}")
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
+                if (
+                    detected_flavor == LLVM_FLAVOR_LLVM23
+                    and toolchain_dl != rocke_dl
+                    and toolchain_dl.replace("-i64:64", expected_p10_p15 + "-i64:64", 1)
+                    == rocke_dl
+                ):
+                    # The ONLY difference is that this toolchain predates
+                    # 5bf967cb132b, which added address spaces p10-p15. That is
+                    # not drift, and our superset constant is still the correct
+                    # value to emit, because 5bf967cb132b landed before fc6829a3:
+                    #
+                    #   * a backend that ENFORCES the module DataLayout has
+                    #     fc6829a3, hence also 5bf967cb132b, so it HAS p10-p15
+                    #     and requires them;
+                    #   * a backend lacking p10-p15 predates 5bf967cb132b, hence
+                    #     fc6829a3, hence still silently overwrites the module
+                    #     DataLayout -- verified to accept the superset.
+                    #
+                    # So skip rather than fail: failing here would push someone to
+                    # "fix" the constant by deleting p10-p15, which re-breaks every
+                    # kernel on a current toolchain. Note a box can legitimately
+                    # pair a new-numbered ROCm with an LLVM predating
+                    # 5bf967cb132b, which is exactly the case this arm covers.
+                    self.skipTest(
+                        f"hipcc for {arch} predates the p10-p15 address spaces "
+                        f"(5bf967cb132b); its backend does not enforce the module "
+                        f"DataLayout, so the superset constant remains correct"
+                    )
                 self.assertEqual(
                     rocke_dl,
                     toolchain_dl,

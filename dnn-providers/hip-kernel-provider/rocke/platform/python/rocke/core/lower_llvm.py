@@ -102,15 +102,33 @@ _DATALAYOUT_LLVM22 = (
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
-# LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host (AMD clang 23.0.0git,
-# ROCm 7.13) and found to drift from LLVM 22 by one field -- LLVM 23 emits the
-# ELF symbol-mangling spec ``m:e`` that LLVM 20 and LLVM 22 omit. Otherwise the
-# p8-indexed layout is identical to LLVM 22 for every wired arch. Regenerate via
-# ``test_datalayout_matches_hipcc_emitted_ir`` if a future LLVM 23 build drifts
-# further.
+# LLVM 23+ (ROCm 7.13+): drifts from LLVM 22 by two independent edits, both
+# re-derived from an amd-staging host (AMD clang 24.0.0git, ROCm 10.0) and
+# confirmed gfx-invariant across every wired arch (gfx90a/942/950/1100/1151/
+# 1201/1250):
+#
+#   1. the ELF symbol-mangling spec ``m:e``, which LLVM 20 and LLVM 22 omit;
+#   2. address spaces ``p10``-``p15``, added upstream by ``5bf967cb132b``. These
+#      are what the ``m:e``-only form was missing, and omitting them is not
+#      cosmetic: the backend used to silently overwrite the module's DataLayout
+#      with the target's, which masked the mismatch. Once ``fc6829a3`` ("clang:
+#      Do not overwrite a module's DataLayout in the backend") stopped that, a
+#      module carrying the short form fails codegen with "Can't create a
+#      MachineFunction using a Module with a Target-incompatible DataLayout
+#      attached".
+#
+# Carrying p10-p15 is safe on every toolchain, because ``5bf967cb132b`` landed
+# before ``fc6829a3``: a backend that enforces the module DataLayout necessarily
+# has ``fc6829a3``, hence ``5bf967cb132b``, hence has p10-p15 and requires them;
+# a backend lacking p10-p15 predates ``5bf967cb132b``, hence ``fc6829a3``, hence
+# still overwrites and tolerates the longer string. Do NOT "fix" a mismatch
+# against an older hipcc by deleting
+# p10-p15 -- that re-breaks every kernel on a current toolchain. Regenerate via
+# ``test_datalayout_matches_hipcc_emitted_ir`` if a future build drifts further.
 _DATALAYOUT_LLVM23 = (
     "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"
+    "-p12:32:32-p13:32:32-p14:32:32-p15:32:32-i64:64-v16:16-v24:32"
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
