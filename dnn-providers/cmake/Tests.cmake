@@ -364,10 +364,8 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # whichever suites apply_test_category_labels()/apply_ctest_category_labels()
     # actually creates.
     #
-    # EXPLICIT_REGISTRATION reaches the same point from the other direction: a binary
-    # whose suites are only meaningful under state a caller supplies has no correct bare
-    # invocation, so running the whole target proves nothing and fails or skips
-    # wholesale. The caller registers the entries that are meaningful instead.
+    # EXPLICIT_REGISTRATION returns here for the same reason: its binary has no correct
+    # bare invocation, so an unfiltered run proves nothing and fails or skips wholesale.
     if(DNN_PROVIDER_TEST_CATEGORY_YAMLS OR ARG_EXPLICIT_REGISTRATION)
         set(${TARGET}_TEST_ENVIRONMENT "${_MERGED_TEST_ENVIRONMENT}" PARENT_SCOPE)
         return()

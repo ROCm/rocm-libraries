@@ -56,9 +56,9 @@ struct ValidatorOverride
 };
 
 // Loads a per-engine TOML settings file for integration tests.
-// Currently supports tolerance overrides and arch-scoped test skips;
-// additional settings (knobs, support matrix, etc.) will be added in
-// future versions.
+// Currently supports tolerance overrides, validator overrides and arch-scoped
+// test skips; additional settings (knobs, support matrix, etc.) will be added
+// in future versions.
 //
 // TOML format:
 //   [meta]

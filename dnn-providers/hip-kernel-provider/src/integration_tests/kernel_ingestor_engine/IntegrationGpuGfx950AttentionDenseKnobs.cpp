@@ -53,13 +53,11 @@ using namespace hip_kernel_provider::test_utilities;
  *        kernel launches with its own geometry and computes what the CPU reference
  *        computes, and a knob pair no kernel has is refused before any plan exists.
  *
- * Each expected kernel id is resolved at run time from the production descriptors
- * HIPDNN_DESCRIPTOR_RUNTIME_DIR names, the tree the engine itself loads them from: the one
- * kernel of this engine's gfx950 packs whose metadata matches the case's semantic fields
- * and expected tile (see expectedKernelId). Every forced tile except the 256/64 baseline
- * is paired with a shape whose no-knob winner is a different tile, so a knob that failed
- * to reach the plugin would select that winner and fail the id check. The baseline always
- * wins where it fits, so its two cases select the no-knob winner by design.
+ * Each expected kernel id is resolved at run time from the production descriptors by
+ * expectedKernelId(). Every forced tile except the 256/64 baseline is paired with a shape
+ * whose no-knob winner is a different tile, so a knob that failed to reach the plugin would
+ * select that winner and fail the id check. The baseline always wins where it fits, so its
+ * two cases select the no-knob winner by design.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {

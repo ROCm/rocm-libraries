@@ -1018,9 +1018,7 @@ class TestShippedExampleConfigsLoad:
     dispatcher, request class and predicate the tools import, and carries none of the
     keys `load_config` requires. Selecting it by extension alone feeds the wrong schema
     into the generator loader, so it is selected out here and checked through the loader
-    that owns it. No file COUNT is asserted either way: a count fails for the one change
-    that is always correct -- adding a worked example -- while saying nothing about
-    whether any of them load.
+    that owns it.
     """
 
     @staticmethod

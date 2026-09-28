@@ -381,8 +381,7 @@ constexpr const char* TILE_MARKER = "no supported block_m/block_n tile";
 /// If registerGfx950AttentionDenseSymbols stops adding DISPATCH_SYMBOL, or IngestorPacks
 /// drops this engine's row, every descriptor naming the symbol is dropped at load: the
 /// pack disappears, then the engine, and at the default log level nothing says so. The
-/// graph would simply be served by some other provider, or by none. Nothing else in the
-/// fast suite asks the registry for this symbol.
+/// graph would simply be served by some other provider, or by none.
 TEST(TestGfx950AttentionDenseDispatch, DispatchSymbolResolves)
 {
     registerNativeIngestorSymbols();
@@ -398,8 +397,7 @@ TEST(TestGfx950AttentionDenseDispatch, DispatchSymbolResolves)
 
 /// This kernel's only scratch is LDS and registers, and the shipped 8-argument ABI has no
 /// workspace pointer to hand global scratch through, so there is nowhere for a non-zero
-/// answer to be used. The one caller -- execution-plan build -- never checks the value,
-/// which makes this the only place the zero is pinned.
+/// answer to be used. This is the only place the zero is pinned.
 TEST(TestGfx950AttentionDenseDispatch, WorkspaceBytesIsAlwaysZero)
 {
     const AttentionGraph graph;

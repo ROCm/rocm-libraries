@@ -33,9 +33,7 @@
  * @brief Applicability negatives for hipkernel:Gfx950AttentionDense.
  *
  * One case per applicability rule the matcher must decline, in severity order:
- * silent-wrong-answer cases first, then faults, then declined features. Each of these is
- * a graph the kernel would accept and compute something plausible-but-wrong for if the
- * matcher did not stop it.
+ * silent-wrong-answer cases first, then faults, then declined features.
  *
  * These are matcher-only: no device, no compile, no launch.
  */
@@ -165,11 +163,8 @@ struct GraphSpec
     StrideLayout oLayout = StrideLayout::BSHD;
     bool omitStrides = false;
 
-    // Per-operand dimension overrides, each falling back to the shared value. They spell
-    // the one family of graphs the shared fields cannot: an operand whose extents disagree
-    // with the problem shape the kernel derives from Q and K. Strides follow the override,
-    // so a perturbed operand is still dense BSHD for its own extents and the layout gate is
-    // not what rejects the graph.
+    // Per-operand dimension overrides, each falling back to the shared value. Strides follow
+    // the override, so a perturbed operand is still dense BSHD for its own extents.
     std::optional<int64_t> qBatch;
     std::optional<int64_t> kBatch;
     std::optional<int64_t> vBatch;
@@ -186,10 +181,8 @@ struct GraphSpec
     // cannot spell: an operand of another rank.
     std::optional<std::vector<int64_t>> kDimsOverride;
 
-    // Per-operand stride vectors, written out instead of derived from the operand's
-    // extents. They spell a single-axis stride perturbation the layout fields cannot, and
-    // a graph whose extents are too large to multiply together: stridesFor would have to
-    // evaluate the very product the matcher must not evaluate.
+    // Per-operand stride vectors, written out instead of derived: a single-axis perturbation
+    // the layout fields cannot spell, or extents whose product would overflow.
     std::optional<std::vector<int64_t>> qStridesOverride;
     std::optional<std::vector<int64_t>> kStridesOverride;
     std::optional<std::vector<int64_t>> vStridesOverride;
@@ -1291,15 +1284,12 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputHeadSizeMismatch)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
 {
     // O's extents here are positive and rank-4, so the well-formedness predicate passes
-    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX. That
-    // product is what hasBshdStrides derives O's batch stride from, and checkedProduct
-    // reports it as not fitting. As ordered, the head-count compare rejects the graph
-    // before O's layout is read; the case exists to keep the overflow-capable domain
-    // reachable and declined.
-    //
-    // O's strides are written out as the ordinary dense BSHD spelling of the PROBLEM
-    // shape, so no stride value is what rejects this graph and the fixture forms no
-    // oversized product either.
+    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX, and that
+    // product is what hasBshdStrides derives O's batch stride from. As ordered, the
+    // head-count compare rejects the graph before O's layout is read; the case exists to
+    // keep the overflow-capable domain reachable and declined. O's strides are written out
+    // as the ordinary dense BSHD spelling of the PROBLEM shape, so no stride value is what
+    // rejects this graph.
     const GraphSpec spec;
     EXPECT_TRUE(matchGraph(spec).has_value());
 
@@ -1683,10 +1673,8 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesFp8Descale)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryOtherSpellingOfEachDeclinedFeature)
 {
     // The cases above decline each feature through one spelling. Every other uid that
-    // requests the same feature -- varlen's KV side, the remaining four dropout inputs,
-    // the V page table, the rest of the FP8 scales and amaxes, and the softmax auxiliary
-    // outputs -- is set here on its own, so dropping any one of them from its decline
-    // is seen.
+    // requests the same feature is set here on its own, so dropping any one of them from
+    // its decline is seen.
     using UidField = std::optional<int64_t> GraphSpec::*;
     const std::vector<std::pair<const char*, UidField>> spellings{
         {"seq_len_kv", &GraphSpec::seqLenKvUid},
@@ -1781,8 +1769,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryFp8MmaCoreMode)
 }
 
 // ---------------------------------------------------------------------------
-// Sliding-window: declined outright. No variant in this catalog carries a
-// non-zero sliding_window, so a windowed graph has nothing that could serve it.
+// Sliding-window: declined outright.
 // ---------------------------------------------------------------------------
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSlidingWindowForSelfAttention)
@@ -1832,10 +1819,9 @@ TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoB
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
 {
-    // A graph with both left_bound and a non-zero right_bound is a bidirectional
-    // window. The gfx950 kernel is hard-causal (upper mask only) and has no
-    // right-bound field, so serving it would produce silent wrong numerics.
-    // Here left=127, right=64; no windowed variant ships, so every kernel declines it.
+    // A graph with both left_bound and a non-zero right_bound is a bidirectional window.
+    // The gfx950 kernel is hard-causal (upper mask only) and has no right-bound field, so
+    // serving it would produce silent wrong numerics.
     GraphSpec spec;
     spec.leftBound = 127;
     spec.rightBound = 64;

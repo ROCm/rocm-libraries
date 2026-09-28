@@ -182,11 +182,10 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
-# Gated on the same predicate as the census and the external integration target: the
-# feature flags say the engine could be built, the authored content says whether this
-# configuration ships it for gfx950. Pinned by ENGINE_NAME, so a build that does not
-# ship it registers a target whose engine never appears.
-# The predicate lives in HkpPackaging.cmake, which only an ingestor build includes.
+# Gated on the same predicate as the census and the external integration target:
+# ENGINE_NAME pins this target, so a build that does not ship the engine registers one
+# whose engine never appears. The predicate lives in HkpPackaging.cmake, which only an
+# ingestor build includes.
 set(_hkp_gfx950_attention_dense FALSE)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)

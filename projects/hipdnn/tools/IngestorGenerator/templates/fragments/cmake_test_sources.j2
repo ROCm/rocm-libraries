@@ -63,35 +63,22 @@ hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
 ## `PACK_NAME product` addresses the `product` pack target, wired only where the shipped
 ## root holds a descriptor AND at least one of them declares an architecture this build
 ## packs for. A build whose GPU_TARGETS your bundle does not declare leaves production
-## packaging dormant: the call registers nothing and says so at STATUS, naming the
-## dormant pack, so leave it unguarded. A PACK_NAME no pack target carries is a configure
-## error, which is the typo this keeps visible.
+## packaging dormant: the call registers nothing and says so at STATUS, so leave it
+## unguarded.
 ##
 ## `ARCHES` narrows registration to the architectures THIS bundle emitted, intersected
 ## with the arches the pack target was wired for. Without it the suite registers for every
 ## arch the pack target carries, including ones this bundle ships nothing for, and the
-## census then asserts a gfx950 inventory against a gfx942 shard. Omitting the keyword is
-## the deliberate "every wired arch" spelling; supplying it with no values is a configure
-## error.
+## census then asserts a gfx950 inventory against a gfx942 shard.
 ##
 ## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing this
 ## call, or the census runs against a shard without your descriptors.
 ##
 ## The call registers one CTest entry per eligible arch:
-## hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs,
-## running hip_kernel_provider_census_tests --gtest_filter=Test{{ config.engine.pascal_name }}Packs.*
-## with HIPDNN_TEST_CENSUS_SUITE=Test{{ config.engine.pascal_name }}Packs,
-## HIPDNN_TEST_EXPECTED_ARCH=<arch> and HIPDNN_DESCRIPTOR_DIR set to that pack target's
-## own out-root shard for <arch>, under the labels unit_test;hip-kernel-provider;host.
-## Declare a suite name at one pack target only: the CTest name carries no pack
-## component, so a second declaration is a configure error. Every registered case must
-## execute and pass without skipping in every iteration; missing suites,
-## filtered/disabled/sharded-out cases and zero iterations fail.
-##
-## EXPECTED_CASES is optional to configure and required for the census to mean what it
-## claims, since the guard's obligations come from the cases the suite registered. The
-## list above is read out of the suite this run rendered; re-splice whenever the bundle's
-## shape changes.
+## hip-kernel-provider-hkp-census-<arch>-Test{{ config.engine.pascal_name }}Packs.
+## The EXPECTED_CASES list above is read out of the suite this run rendered; re-splice
+## whenever the bundle's shape changes. hkp_register_census_tests() in HkpPackaging.cmake
+## documents the keyword contract.
 {% else %}
 ## Splice point 5c: nothing is registered for this direct-load engine by default.
 ##
@@ -105,9 +92,7 @@ hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
 ##
 ## Write NO `ARCHES` keyword in that call. This bundle's descriptors declare no concrete
 ## architecture, so it ships on every arch its pack target was wired for, and omission is
-## exactly how that is spelled. `ARCHES *` is not the wildcard -- no shard is named "*" --
-## and the keyword with no values after it is a configure error rather than "no
-## restriction".
+## exactly how that is spelled.
 ##
 ## Census requires every case in the suite to execute without skipping, so only declare a
 ## suite that reads this bundle's shard and no other.

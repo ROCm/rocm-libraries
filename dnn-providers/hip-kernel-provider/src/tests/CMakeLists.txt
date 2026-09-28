@@ -144,10 +144,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}"
         HIPKERNELPROVIDER_UNIT_KPACK_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}/${HIPKERNELPROVIDER_TEST_SET_SHARED}")
 
-    # The same two roots the shared main() reads, so it resolves identically in both
-    # binaries. The kpack reldir is not among them: the archive cases that read it stay
-    # in the ordinary binary, and a define no source here consumes would only invite a
-    # census case to start depending on one.
+    # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
+    # the shared main() resolves its root identically in both. The archive cases that read
+    # the kpack reldir stay in the ordinary binary, and a define no source here consumes
+    # would only invite a census case to start depending on one.
     target_compile_definitions(hip_kernel_provider_census_tests PRIVATE
         HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR="${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}"
         HIPKERNELPROVIDER_TEST_SET_UNIT_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_UNIT}")
@@ -243,11 +243,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Census for the gfx950 dense-attention production pack. Reads only the product
     # shard, so it is eligible for census registration.
     #
-    # Two independent narrowings, because they answer different questions. The predicate
-    # asks whether `product` carries THIS bundle at all -- it is a pack target, not a
-    # bundle, and a build may point it at another one. ARCHES then asks which of the
-    # architectures it was wired for this bundle emits for. Either alone lets a census
-    # address a shard its suite has nothing to say about.
+    # The predicate and ARCHES narrow independently -- whether `product` carries THIS
+    # bundle at all, and which of its wired architectures the bundle emits for. Either
+    # alone lets a census address a shard its suite has nothing to say about.
     #
     # The Pointwise call above needs neither: its fixtures are the unit root itself, and
     # they cover every architecture it is wired for.
@@ -287,11 +285,9 @@ add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hip_kernel_provider_census_tests)
 
-    # EXPLICIT_REGISTRATION: every entry for this binary comes from
-    # hkp_register_census_tests() above, each naming one shard, one architecture and one
-    # filtered suite. A bare run supplies none of those, so registering the whole target
-    # would add an entry that cannot pass and proves nothing when it does. Installation,
-    # RPATH, Windows DLL staging and the check-target lifecycle are unaffected.
+    # Every entry for this binary comes from hkp_register_census_tests() above, each naming
+    # one shard, one architecture and one filtered suite; a bare run supplies none of those.
+    # That is the no-correct-bare-invocation case EXPLICIT_REGISTRATION exists for.
     add_unit_test_target(hip_kernel_provider_census_tests ${CMAKE_CURRENT_BINARY_DIR}
                          EXPLICIT_REGISTRATION)
 endif()

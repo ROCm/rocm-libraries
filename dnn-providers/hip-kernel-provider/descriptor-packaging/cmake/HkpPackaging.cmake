@@ -1096,12 +1096,6 @@ endfunction()
 # _hkp_engine_ids_named(<out> <ambiguous> <root> <engine>)
 #   The ids of every authored UED under <root> whose name is <engine>.
 #
-#   A pack target names a TARGET, not a bundle; which bundle it carries is a cache entry
-#   a configuration may redirect. Asking the authored content which engine it declares is
-#   what tells one bundle from another without hard-coding where either lives, so a
-#   bundle that legitimately moves keeps answering and a root swapped for someone else's
-#   stops.
-#
 #   A root declaring a valid different engine yields nothing: foreign and inapplicable,
 #   not an error.
 #
@@ -1991,8 +1985,6 @@ endfunction()
 #   no census would otherwise never be visited and its entries would be dropped without a
 #   word.
 #
-#   Reserving here rather than at the call sites makes that unforgettable: a caller asking
-#   where a shard lives is about to put something in it, so the two cannot drift apart.
 #   Reserving an architecture that turns out to hold nothing is harmless -- the finalizer
 #   skips a shard with no content of any kind.
 # ---------------------------------------------------------------------------

@@ -57,10 +57,8 @@ inline bool applyTomlToleranceOverride(const std::string& testName, float& atol,
 // nullopt when no [[validator_overrides]] entry matches it — which means allclose, the
 // default and the only thing any other code path can produce.
 //
-// Shared by both verification harnesses: the selection is a per-engine numerical
-// property, and two copies of it would be two chances to disagree about what the
-// config said. `tensorLabel` must be the label form the TOML globs are written
-// against — bundle::tensorLabel(uid, name), never a raw tensor name.
+// `tensorLabel` must be the label form the TOML globs are written against —
+// bundle::tensorLabel(uid, name), never a raw tensor name.
 inline std::optional<ValidatorOverride> findTomlValidatorOverride(const std::string& testName,
                                                                   const std::string& tensorLabel)
 {

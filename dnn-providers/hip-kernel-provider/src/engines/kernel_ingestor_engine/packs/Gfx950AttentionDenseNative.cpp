@@ -45,11 +45,6 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Its
  * applicability rules live only in that Python; this file is where they become
  * enforceable.
- *
- * The catalog is aligned-only: every shipped candidate has ragged=0 and takes runtime
- * batch/seqlen_q/seqlen_kv. Each candidate carries its own (block_m, block_n) tile and
- * serves any valid B/Sq/Skv with Sq divisible by ITS block_m and Skv divisible by ITS
- * block_n. A graph whose lengths no shipped tile divides is not served by this engine.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -782,7 +777,6 @@ double scoreKernel(const MatchContext& /*context*/,
 /// The kernel signature for all variants in this engine.
 ///
 /// All variants are non-persistent. use_sinks=False so no sink_ptr slot.
-/// ABI: (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv) -- 8 args.
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one. Kind and size alone cannot tell the four pointers

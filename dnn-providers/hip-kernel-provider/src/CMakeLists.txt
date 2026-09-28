@@ -333,12 +333,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
     endif()
 
-    # The same predicate the census uses. The feature flags say the engine COULD be
-    # built; only the authored content says this configuration actually ships it for
-    # gfx950. A build with every flag ON but `product` redirected to another bundle
-    # would otherwise register an engine-pinned target for an engine that never
-    # registers, which fails as a missing engine rather than reading as absent.
-    # The predicate lives in HkpPackaging.cmake, which only an ingestor build includes.
+    # The same predicate the census uses: the feature flags alone would register this
+    # engine-pinned target on a build whose `product` root ships another bundle, where it
+    # fails as a missing engine rather than reading as absent. It lives in
+    # HkpPackaging.cmake, which only an ingestor build includes -- hence the guard.
     set(_hkp_gfx950_attention_dense FALSE)
     if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)

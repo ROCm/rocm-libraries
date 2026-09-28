@@ -108,11 +108,9 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
                 {}};
 
     case ValidatorKind::RMS:
-        // Only the glob-selectable kinds are caught. They are the kinds a
-        // [[validator_overrides]] entry can pick, so an unsupported data type here is an
-        // operator's config mistake and deserves a legible answer. allclose is the
-        // default that nothing selects, so there is no glob to blame and its own throw
-        // stays a throw.
+        // Only the glob-selectable kinds are caught: an unsupported data type here is an
+        // operator's config mistake and deserves a legible answer. allclose has no glob to
+        // blame, so its own throw stays a throw.
         try
         {
             if(site == ValidationSite::DEVICE)

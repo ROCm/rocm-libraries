@@ -104,9 +104,7 @@ std::vector<KernelArgument> pythonAbi()
 }
 
 /// The form a persistent body would take: the same four pointers and scale, with the
-/// shape tail dropped because `num_persistent` bakes the work-item space. No shipped
-/// variant is persistent, so a descriptor recording this is a descriptor the pack cannot
-/// launch.
+/// shape tail dropped because `num_persistent` bakes the work-item space.
 std::vector<KernelArgument> persistentAbi()
 {
     auto signature = pythonAbi();

@@ -284,20 +284,12 @@ class TestGfx950RealBundle:
     to hold here. A tile applicable to NO corpus shape is still dead weight, and that is
     what this catches.
 
-    How much this discriminates depends on the corpus, and on the present one it is loose
-    on six tiles and tight on the seventh. Every sequence length here is a power of two,
-    so each tile up to (256, 128) is applicable to the same broad majority of shapes and
-    any power-of-two tile that size would pass; against those six the gate catches only a
-    tile dividing NOTHING, not one that is merely rare. Sharpening that half needs a
-    corpus carrying a non-power-of-two sequence length rather than a different control
-    value -- 384, 192 and 96 each divide zero shapes here, exactly like the prime the
-    control below uses.
-
-    (256, 256) is the exception and the reason this is load-bearing. It ships at
-    head_size 64 alone, and one cohort reaches it: bf16, 64 query heads, 8 KV heads. Drop
-    that single model family from the corpus and the descriptors carrying that tile are
-    provably selectable by nothing, and this fails. The gate is tightest exactly where the
-    catalog is thinnest.
+    Every sequence length in the present corpus is a power of two, so the six tiles up to
+    (256, 128) each divide a broad majority of shapes and the gate catches only a tile
+    dividing NOTHING. (256, 256) is the exception: it ships at head_size 64 alone and one
+    cohort reaches it -- bf16, 64 query heads, 8 KV heads -- so dropping that model family
+    from the corpus leaves the descriptors carrying that tile selectable by nothing, and
+    this fails. The gate is tightest exactly where the catalog is thinnest.
     """
 
     _REPO_ROOT = find_repo_root(Path(__file__).resolve().parent)

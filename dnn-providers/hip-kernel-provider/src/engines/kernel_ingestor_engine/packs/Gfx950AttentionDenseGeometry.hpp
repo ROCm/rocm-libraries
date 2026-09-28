@@ -22,13 +22,11 @@
  * and the graph's dimensions, testable with no HIP context and nothing to mock.
  *
  * block_m is a per-candidate KMD field here, not the module constant the gfx942 twin
- * uses. `attention_dense_grid` divides by `spec.block_m` and `attention_dense_block` is
- * `(spec.num_waves * 64, 1, 1)` with `num_waves = block_m // 32`. The catalog ships more
- * than one block_m, so the engine passes the selected candidate's own completed value; a
- * binary launched with another candidate's block_m runs the wrong number of lanes over
- * the wrong number of query blocks. `block_n` changes which graphs a candidate can serve
- * (Skv % block_n) but not the launch, so it is an applicability input, not a launch
- * parameter.
+ * uses. The catalog ships more than one, so the engine passes the selected candidate's
+ * own completed value; a binary launched with another candidate's block_m runs the wrong
+ * number of lanes over the wrong number of query blocks. `block_n` changes which graphs a
+ * candidate can serve (Skv % block_n) but not the launch, so it is an applicability
+ * input, not a launch parameter.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -153,9 +151,8 @@ struct Gfx950AttentionDenseGeometry
  * @p numQueryHeads and @p batch are the graph's, since the binary takes its shape at
  * runtime and its metadata carries only canonical build inputs.
  *
- * Every shipped variant is non-persistent, so only the `else` arm above is mirrored here;
- * the Python's persistent arm, `(spec.num_persistent, 1, 1)`, has no counterpart in this
- * catalog.
+ * Every shipped variant is non-persistent; the Python's persistent grid,
+ * `(spec.num_persistent, 1, 1)`, has no counterpart in this catalog.
  *
  * Throws instead of returning a degenerate grid: an empty or negative launch returns
  * cleanly having written nothing, and prepare() is the last place a named failure is
