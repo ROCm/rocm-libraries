@@ -1864,6 +1864,36 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
 
 
+class TestResolveLlvmFlavorPublicAccessor(unittest.TestCase):
+    """:func:`resolve_llvm_flavor` is the public wrapper over the private
+    resolution chain (:func:`_resolve_llvm_flavor` / :func:`_detect_llvm_flavor`).
+
+    A caller that wants to assert which flavor a run used previously had to
+    reach into ``_resolve_llvm_flavor`` directly. These pin the additive
+    contract: the default path must delegate byte-for-byte, and an explicit
+    ``pin=`` must fail loudly on an unrecognised flavor instead of silently
+    autodetecting.
+    """
+
+    def test_default_matches_private_resolver(self):
+        from rocke.core.lower_llvm import _resolve_llvm_flavor, resolve_llvm_flavor
+
+        self.assertEqual(resolve_llvm_flavor(), _resolve_llvm_flavor())
+
+    def test_pin_returns_the_pinned_flavor(self):
+        from rocke.core.lower_llvm import LLVM_FLAVORS, resolve_llvm_flavor
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                self.assertEqual(resolve_llvm_flavor(pin=flavor), flavor)
+
+    def test_pin_rejects_an_unrecognised_flavor(self):
+        from rocke.core.lower_llvm import resolve_llvm_flavor
+
+        with self.assertRaises(ValueError):
+            resolve_llvm_flavor(pin="not-a-real-flavor")
+
+
 # Probe run in a child process: print the datalayout the Python resolver picks
 # for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
 # child because the flavor depends on process environment and Python memoises

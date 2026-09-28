@@ -37,6 +37,22 @@ test_categories:
       - "pre-commit"
       - "smoke"
 
+  standard:
+    description: >-
+      rocKE GPU functional lane: replays the committed attention_dense .npz
+      reference on real gfx942 silicon and asserts against the tolerance frozen
+      into the artifact. Needs numpy only at test time (the torch oracle ran
+      offline in the generator), and self-skips on a host-only runner via the
+      device-arch gate, so listing it here is safe for non-GPU tiers of CI.
+      Deliberately NOT in `quick`: that tier is documented above as "<5s total
+      combined" and this compiles a kernel before it launches one.
+    test_patterns:
+      - "rocke_library_attention_dense_gpu_replay"
+    labels:
+      - "standard"
+      - "gpu"
+      - "attention"
+
   ffm-quick:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:

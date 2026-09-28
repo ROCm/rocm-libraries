@@ -431,6 +431,28 @@ if(ROCKE_INSTALL_TESTS)
            "  LABELS \"ckc\\;python\\;conv\\;gpu\"\n"
            "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
            "  TIMEOUT 1800)\n")
+
+    # GPU functional lane: replay the committed attention_dense .npz reference on
+    # a real gfx942. Its own entry rather than a row in the conv GPU list above
+    # because it is the only suite here with a tiered label -- see
+    # ROCKE_ENGINE_test_categories_external.yaml, which places it at `standard`
+    # (the `quick` tier is documented as <5s total combined, and this compiles a
+    # kernel before it launches one). Without that yaml entry the target carries
+    # no tier and drops out of `ctest -L standard` entirely, reporting green by
+    # never running.
+    #
+    # The test itself needs numpy only and self-skips via requires_gfx942_gpu, so
+    # a host-only runner passes the byte-budget case and skips the replay. The
+    # .npz artifacts ride along in the install(DIRECTORY .../tests) rule above.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_library_attention_dense_gpu_replay python -m pytest"
+           " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_gfx942_replay.py\""
+           " -v)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_library_attention_dense_gpu_replay PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;attention\\;gpu\\;standard\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+           "  TIMEOUT 1800)\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

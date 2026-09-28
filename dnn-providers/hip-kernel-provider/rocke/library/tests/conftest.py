@@ -17,6 +17,14 @@ from pathlib import Path
 
 import pytest
 
+from ._archgate import (  # noqa: F401 - re-exported for `from conftest import ...`
+    device_arch,
+    has_arch,
+    requires_arch,
+    requires_gfx942_gpu,
+    requires_gfx950_gpu,
+)
+
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
 # Keep the library packages ahead of the CTest working directory. In the
 # standalone install layout that directory is bin/rocke, whose platform

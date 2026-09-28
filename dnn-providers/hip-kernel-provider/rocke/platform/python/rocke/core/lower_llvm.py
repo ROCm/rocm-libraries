@@ -387,6 +387,32 @@ def _resolve_llvm_flavor() -> str:
     return _LLVM_FLAVOR
 
 
+def resolve_llvm_flavor(*, pin: Optional[str] = None) -> str:
+    """Public accessor for the LLVM IR flavor rocke will emit.
+
+    With ``pin=None`` (the default), returns the same autodetected flavor
+    :func:`lower_kernel_to_llvm` would use -- i.e. it delegates to
+    :func:`_resolve_llvm_flavor` and does not change resolution behaviour for
+    any existing caller.
+
+    Pass ``pin=`` to assert a specific flavor instead of trusting
+    autodetection: unlike ``$ROCKE_LLVM_FLAVOR`` (which silently falls back to
+    autodetection on an unrecognised value, see :func:`_detect_llvm_flavor`),
+    an unrecognised ``pin`` raises ``ValueError`` immediately so a test or
+    caller that demands a specific flavor gets a clear error rather than a
+    silent mismatch.
+
+    :raises ValueError: if ``pin`` is not one of :data:`LLVM_FLAVORS`.
+    """
+    if pin is not None:
+        if pin not in LLVM_FLAVORS:
+            raise ValueError(
+                f"unknown LLVM flavor {pin!r} pinned; expected one of {LLVM_FLAVORS}"
+            )
+        return pin
+    return _resolve_llvm_flavor()
+
+
 # Intrinsic declarations we may emit.
 #
 # Entries below are the LLVM 20 / ROCm 7.0--7.1 signatures. The

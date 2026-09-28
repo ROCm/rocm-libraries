@@ -24,31 +24,13 @@ import dataclasses as dc
 
 import pytest
 
+from ._archgate import requires_gfx950_gpu as requires_gfx950
+
 ARCH = "gfx950"
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
 pytestmark = pytest.mark.gpu
-
-
-def _device_is_gfx950() -> bool:
-    # rocke's own query, not torch's: `hip_module.get_device_arch` goes through
-    # hipDeviceGetAttribute and already strips the feature flags, returning
-    # "gfx950" rather than "gfx950:sramecc+:xnack-". Asking torch would mean a
-    # substring test against torch's formatting of the same string.
-    if not torch.cuda.is_available():
-        return False
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() == ARCH
-    except Exception:
-        return False
-
-
-requires_gfx950 = pytest.mark.skipif(
-    not _device_is_gfx950(), reason=f"needs a {ARCH} device"
-)
 
 
 @pytest.fixture(scope="module")
