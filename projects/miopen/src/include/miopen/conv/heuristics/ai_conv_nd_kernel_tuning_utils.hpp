@@ -412,15 +412,15 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                                          << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
 
     // Only applicable for supported architectures
-    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name
                       << ": Unsupported architecture, skipping AI heuristics");
         return false;
     }
 
-    // Candidate Selection heuristics for gfx942/gfx950
-    if(arch == "gfx942" || arch == "gfx950")
+    // Candidate Selection heuristics for gfx942/gfx950/gfx1250
+    if(arch == "gfx942" || arch == "gfx950" || arch == "gfx1250")
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);
