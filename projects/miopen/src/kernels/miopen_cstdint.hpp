@@ -33,13 +33,8 @@ typedef unsigned short uint16_t;
 #if HIP_PACKAGE_VERSION_FLAT >= 6000025000ULL
 typedef signed int int32_t;
 typedef unsigned int uint32_t;
-#ifdef __LP64__
-typedef unsigned long uint64_t;
-typedef signed long int64_t;
-#else
-typedef unsigned long long uint64_t;
-typedef signed long long int64_t;
-#endif
+typedef __UINT64_TYPE__ uint64_t;
+typedef __INT64_TYPE__ int64_t;
 #endif
 
 #else

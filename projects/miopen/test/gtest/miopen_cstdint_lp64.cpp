@@ -1,68 +1,51 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Advanced Micro Devices, Inc.
 
 // Regression test for TheRock#6258 / LP64 typedef conflict in miopen_cstdint.hpp.
 //
 // On LP64 platforms (64-bit Linux, macOS), <stdint.h> defines uint64_t as
 // 'unsigned long', but __hip_internal::uint64_t is 'unsigned long long'.
 // These are distinct C++ types despite being the same width, so a typedef
-// redefinition is a hard error when both are visible.
+// redefinition is a hard error when both are visible during JIT compilation.
+//
+// This test exercises the real comgr JIT path via Handle::AddKernel with an
+// inline kernel that includes miopen_cstdint.hpp alongside system headers.
 
 #include <gtest/gtest.h>
-#include <cstdint>
-#include <type_traits>
 
-#define MIOPEN_HIP_RUNTIME_COMPILE
-#define HIP_PACKAGE_VERSION_FLAT 7015026333ULL
+#include <miopen/handle.hpp>
+#include <miopen/manage_ptr.hpp>
 
-// Provide __hip_internal types as they would appear during HIPRTC compilation
-namespace __hip_internal {
-typedef unsigned long long uint64_t;
-typedef signed long long int64_t;
-} // namespace __hip_internal
+#include "get_handle.hpp"
 
-// Include the header under test — this must not conflict with <cstdint> above
-#include "miopen_cstdint.hpp"
-
-#undef MIOPEN_HIP_RUNTIME_COMPILE
-
-TEST(CPU_MiopenCstdintLP64_NONE, Uint64TypeMatchesSystem)
+static std::string CstdintKernelSource()
 {
-    EXPECT_TRUE((std::is_same<::uint64_t, std::uint64_t>::value))
-        << "miopen_cstdint.hpp uint64_t must be the same type as <cstdint> uint64_t";
+    return "#include \"miopen_cstdint.hpp\"\n"
+           "extern \"C\" {\n"
+           "__global__ void cstdint_write(uint64_t* data) {\n"
+           "    if(threadIdx.x == 0 && blockIdx.x == 0)\n"
+           "        data[0] = (uint64_t)42;\n"
+           "}\n"
+           "}\n";
 }
 
-TEST(CPU_MiopenCstdintLP64_NONE, Int64TypeMatchesSystem)
+TEST(CPU_MiopenCstdintLP64_NONE, JitCompileWithMiopenCstdint)
 {
-    EXPECT_TRUE((std::is_same<::int64_t, std::int64_t>::value))
-        << "miopen_cstdint.hpp int64_t must be the same type as <cstdint> int64_t";
-}
+    auto&& h = get_handle();
 
-TEST(CPU_MiopenCstdintLP64_NONE, SizesAre64Bit)
-{
-    EXPECT_EQ(sizeof(::uint64_t), 8u);
-    EXPECT_EQ(sizeof(::int64_t), 8u);
+    std::vector<uint64_t> data_in(1, 0);
+    auto data_dev = h.Write(data_in);
+
+    h.AddKernel("NoAlgo",
+                "",
+                "cstdint_test.cpp",
+                "cstdint_write",
+                {1, 1, 1},
+                {1, 1, 1},
+                "",
+                0,
+                CstdintKernelSource())(data_dev.get());
+
+    auto data_out = h.Read<uint64_t>(data_dev, 1);
+    EXPECT_EQ(data_out[0], 42u);
 }
