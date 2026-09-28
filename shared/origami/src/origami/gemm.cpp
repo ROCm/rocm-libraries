@@ -129,6 +129,9 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("transpose: " << (problem.a_transpose == transpose_t::T ? "T" : "N") << (problem.b_transpose == transpose_t::T ? "T" : "N"));
     OLOG_DEBUG("MacroTile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
+    OLOG_DEBUG("ClusterDimX: " << int(config.cluster_dim.m));
+    OLOG_DEBUG("ClusterDimY: " << int(config.cluster_dim.n));
+    OLOG_DEBUG("ClusterDimZ: " << int(config.cluster_dim.k));
     OLOG_DEBUG("ElementSizeA (bits): " << int(a_bits));
     OLOG_DEBUG("ElementSizeB (bits): " << int(b_bits));
     OLOG_DEBUG("CacheHintsA: " << int(config.cache_hints_a));

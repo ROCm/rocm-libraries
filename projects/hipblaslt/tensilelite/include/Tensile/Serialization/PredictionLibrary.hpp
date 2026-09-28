@@ -141,6 +141,9 @@ namespace TensileLite
                                     solution->sizeMapping.grvwB),
                                 .gwvw_d                    = static_cast<std::size_t>(
                                     solution->sizeMapping.gwvwD),
+                                .cluster_dim               = {solution->sizeMapping.clusterDim.x,
+                                                              solution->sizeMapping.clusterDim.y,
+                                                              solution->sizeMapping.clusterDim.z},
                                 .backend                   = origami::tensile_params_t{
                                     .local_split_u        = solution->sizeMapping.LocalSplitU,
                                     .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,

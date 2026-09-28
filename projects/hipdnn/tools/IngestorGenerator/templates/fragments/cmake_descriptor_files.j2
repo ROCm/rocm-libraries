@@ -1,0 +1,64 @@
+{% set slug = config.engine.slug %}
+## Splice point 1: NO CMAKE EDIT IS REQUIRED to install this bundle's descriptors.
+##
+## Place the authored files under the root the bundle targets; the build picks them up
+## by directory. A TEST bundle goes under `test_descriptors/<set>/<slug>/`, walked by
+## hkp_wire_pack_target and installed by
+## install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/" ...) under
+## HIPKERNELPROVIDER_ENABLE_TESTS. A SHIPPED bundle goes under
+## `descriptors/<producer>/<bundle>/`, reached through the
+## HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT CACHE PATH (default: the in-tree
+## E/descriptors/) and installed under if(TARGET hkp_packaging_product).
+##
+## That cache variable and HIPKERNELPROVIDER_TEST_DESCRIPTOR_SOURCE_ROOT are the only
+## roots an author repoints, and repointing one adds no CMake.
+##
+{% if config.is_packaged %}
+## This is a PACKAGED bundle: the runtime loader does not read its descriptors as
+## authored. hkp_pack walks the shipped source root recursively, compiles or lowers
+## each UKD, and writes the descriptors into the per-arch tree, rewriting
+## `kind: {{ config.kernel_source_kind }}` to `kind: kpack`. A second, unlowered copy
+## would hand the loader a kind it rejects ("no implementation yet"), dropping the pack
+## and then the engine, so the authored files belong under the shipped source root only.
+##
+## Authored subpath (preserved verbatim into the staged and installed trees):
+##     {{ config.descriptor_dir }}/
+##
+## Files placed there by this run:
+{% for pack in config.packs %}
+##     {{ config.kdp_stem(pack) }}.kdp.json
+{% if config.is_multi_pack %}
+##     operation_is_{{ pack.discriminator }}.umd.json
+{% endif %}
+{% endfor %}
+##     {{ slug }}.kmd.json
+##     {{ slug }}.ued.json
+##     {{ slug }}.udd.json
+{% if config.engine.has_heuristic %}
+##     {{ slug }}.uhd.json
+{% endif %}
+##     kernel_dtype_matches_graph.umd.json
+{% else %}
+## This is a DIRECT-LOAD bundle: the runtime loader reads these files as authored, out
+## of the shard belonging to the set `{{ config.authored_subpath }}`. The set is a pack
+## target walked by directory, so a bundle written into the wrong set installs cleanly
+## and is then invisible to the binary meant to read it.
+##
+## Authored subpath:
+##     {{ config.descriptor_dir }}/
+##
+## Files placed there by this run:
+##     {{ slug }}.kmd.json
+##     {{ slug }}.ued.json
+##     {{ slug }}.udd.json
+{% if config.engine.has_heuristic %}
+##     {{ slug }}.uhd.json
+{% endif %}
+##     kernel_dtype_matches_graph.umd.json
+{% for pack in config.packs %}
+##     {{ config.kdp_stem(pack) }}.kdp.json
+{% if config.is_multi_pack %}
+##     operation_is_{{ pack.discriminator }}.umd.json
+{% endif %}
+{% endfor %}
+{% endif %}
