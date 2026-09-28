@@ -8,16 +8,7 @@ name: "Component CI: TensileLite gtest"
 # that suite off the TheRock multi-arch GPU runner, where the `standard` tier ran
 # `ctest -L standard -LE ex_gpu` on a gfx942 GPU it never used.
 #
-# Distinct from the `TensileLite unit` lane (pytest: rocisa + Tensile/Tests/unit)
-# and the `TensileLite coverage` lane (pytest coverage only) — neither builds or
-# runs the C++ gtest. GPU-labelled ctest cases (`ex_gpu`) are excluded here and
-# stay covered by the comprehensive/full GPU tiers on TheRock CI.
-#
-# NOTE: ctest category labels (`-L standard`) are applied at INSTALL time by
-# apply_test_category_labels() (tensilelite/tests/CMakeLists.txt), so this lane
-# builds, INSTALLS, then runs ctest against the install tree. A plain build tree
-# falls back to gtest_discover_tests() with no labels, where `-L standard` would
-# match nothing.
+# Distinct from the `unit`/`coverage` lanes (pytest); neither builds the C++ gtest.
 
 on:
   workflow_call:
@@ -66,8 +57,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # msgpack-cxx and GTest are TheRock build-time third-parties, stripped from
-      # the consumer dist that setup-rocm installs; provide them for the source build.
+      # msgpack-cxx and GTest are build-time third-parties stripped from the dist; vendor them.
       - name: Provide msgpack-cxx and GTest
         run: |
           set -e
@@ -86,11 +76,7 @@ jobs:
             apt-get update -qq && apt-get install -y -qq zlib1g-dev python3-dev || true
           fi
 
-      # Configure/build the tensilelite host + C++ gtest from source. Mirrors the
-      # `build_coverage` invoke task (tasks.py) minus the coverage flags: the
-      # `tensilelite` preset (projects/hipblaslt/CMakePresets.json, "just
-      # tensilelite host and client") lives one dir up, hence `-S ../`.
-      # HIPBLASLT_ENABLE_YAML=OFF forces msgpack (LLVM headers may be absent).
+      # `tensilelite` preset lives one dir up (-S ../); YAML=OFF forces msgpack.
       - name: Build tensilelite-tests
         env:
           CMAKE_GENERATOR: Ninja
@@ -104,13 +90,10 @@ jobs:
             -DHIPBLASLT_ENABLE_YAML=OFF
           cmake --build build --parallel --target tensilelite-tests
 
-      # Install so apply_test_category_labels() emits the CTest category labels;
-      # ctest then filters `standard` and excludes the GPU-only `ex_gpu` cases.
-      - name: Install tensilelite-tests
-        run: cmake --install build --prefix build/install
-
-      - name: Run tensilelite gtest (standard, host-only)
+      # No install: the label module (shared/ctest) is TheRock-only and a full
+      # install hits the unbuilt rocisa target; run ctest from the build tree.
+      - name: Run tensilelite gtest (host-only, CPU)
         run: |
-          TL_DIR="$(dirname "$(find build/install -name CTestTestfile.cmake -path '*tensilelite*' | head -1)")"
-          echo "ctest dir: ${TL_DIR}"
-          ctest --test-dir "${TL_DIR}" -L '^standard$' -LE ex_gpu --output-on-failure
+          # Exclude cases needing a real HIP device (hard-assert deviceCount>0); no GPU here.
+          ctest --test-dir build/tensilelite/tests --output-on-failure \
+            -E 'QueryDeviceChipId|HipHardwarePopulatesPciChipId|PciChipIdEqualPredicate|HardwareSelectionWithPciChipId|FindAllSolutionsWithPciChipId|DataInitializationReferenceRecompute'
