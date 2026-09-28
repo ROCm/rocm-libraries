@@ -52,8 +52,13 @@ def _detect_gpu() -> str | None:
     try:
         if int(_hip_check(_hip.hipGetDeviceCount())) == 0:
             return None
-        props = _hip.hipDeviceProp_t()
-        _hip_check(_hip.hipGetDeviceProperties(props, 0))
+        try:
+            # hip-python 10 (a wrapper over rocm-bindings) returns the struct.
+            props = _hip_check(_hip.hipGetDeviceProperties(0))
+        except TypeError:
+            # Earlier releases fill a caller-owned struct instead.
+            props = _hip.hipDeviceProp_t()
+            _hip_check(_hip.hipGetDeviceProperties(props, 0))
     except RuntimeError:
         return None
     name = props.gcnArchName

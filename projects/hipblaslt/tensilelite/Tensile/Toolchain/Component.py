@@ -172,13 +172,18 @@ class Assembler(Component):
             return
 
         target = f"amdgcn-amd-amdhsa--{targetGfx}"
+        # The processor is the whole hyphenated name: a stepping (gfx1250-strict)
+        # or a generic (gfx9-4-generic) must be replaced as one token, or a source
+        # already naming the stepping gains its suffix twice. Only the `:feature`
+        # tail is carried over.
+        processor = r'gfx[0-9a-fA-F]+(?:-[0-9A-Za-z]+)*'
         updated = sub(
-            r'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^"]*")',
+            rf'(\.amdgcn_target\s+")amdgcn-amd-amdhsa--{processor}([^"]*")',
             rf'\1{target}\2',
             src,
         )
         updated = sub(
-            r'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--gfx[0-9a-fA-F]+([^\s]*)',
+            rf'(amdhsa\.target:\s*)amdgcn-amd-amdhsa--{processor}([^\s]*)',
             rf'\1{target}\2',
             updated,
         )

@@ -228,19 +228,10 @@ def findAvailableArchs(gpu_targets=None):
         List of architecture strings (e.g. ["gfx942"]).
     """
     if gpu_targets:
-        # A versioned target ("gfx1250v0") also matches its base "gfx1250" marks: return
-        # both so configMarks matches each; findConfigs strips back to the base for codegen.
-        archs = []
-        for t in gpu_targets.split(";"):
-            t = t.strip()
-            if not t:
-                continue
-            if t not in archs:
-                archs.append(t)
-            base = re.sub(r"v\d+$", "", t)
-            if base not in archs:
-                archs.append(base)
-        return archs
+        # Names pass through whole. Stripping a trailing `vN` once mapped the
+        # retired gfx1250v0 onto gfx1250, the other stepping, inverting every
+        # stepping-specific mark; left intact it is rejected as unknown instead.
+        return [t.strip() for t in gpu_targets.split(";") if t.strip()]
 
     from Tensile.Tests.gpu_detection import get_available_archs
     return get_available_archs()
@@ -264,9 +255,7 @@ def findConfigs(rootDir=None, availableArchs=None):
 
     if availableArchs is None:
         availableArchs = findAvailableArchs()
-    # Codegen uses the base gfx arch; strip any trailing version suffix (and dedup).
-    buildArchs = list(dict.fromkeys(re.sub(r"v\d+$", "", a) for a in availableArchs))
-    globalParamArchsStr = ';'.join(buildArchs)
+    globalParamArchsStr = ';'.join(availableArchs)
     os.environ["PyTestBuildArchNames"] = globalParamArchsStr
 
     rocm_version = get_rocm_version_or_none()
