@@ -11,8 +11,32 @@ Dense matrix LAPACK auxiliary functions
 These functions support more :ref:`advanced LAPACK routines <dense_lapackfunc>`.
 The auxiliary functions are divided into the following categories:
 
+* :ref:`dense_householder`: Generation and application of Householder matrices.
 * :ref:`dense_orthonormal`: Generation and application of orthonormal matrices.
 * :ref:`dense_unitary`: Generation and application of unitary matrices.
+
+
+
+.. _dense_householder:
+
+Householder reflections
+==================================
+
+.. contents:: List of Householder functions
+   :local:
+   :backlinks: top
+
+.. _dense_larft_bufferSize:
+
+hipsolverDn<type>larft_bufferSize()
+---------------------------------------
+.. doxygenfunction:: hipsolverDnXlarft_bufferSize
+
+.. _dense_larft:
+
+hipsolverDn<type>larft()
+---------------------------------------
+.. doxygenfunction:: hipsolverDnXlarft
 
 
 

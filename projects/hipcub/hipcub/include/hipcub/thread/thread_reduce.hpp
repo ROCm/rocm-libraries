@@ -30,6 +30,8 @@
 #ifndef HIPCUB_THREAD_THREAD_REDUCE_HPP_
 #define HIPCUB_THREAD_THREAD_REDUCE_HPP_
 
+#include <hip/hip_common.h>
+
 #ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/thread/thread_reduce.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)

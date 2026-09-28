@@ -23,7 +23,7 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 
 This is a hipDNN graph of two `BlockScaleDequantize` nodes feeding a `Matmul` node — an OCP MX block-scaled matrix multiplication. The plugin recognizes the pattern and executes it as a single fused GEMM, mapping the block-scale dequantization onto hipBLASLt's `VEC32_UE8M0` scale mode.
 
-Supported MX input element types are **FP8 OCP** (`FP8_E4M3` / `FP8_E5M2`) and **OCP MX FP4** (`FP4_E2M1`), including **mixed pairs** (e.g. FP8 × FP4).
+Supported MX input element types are **FP8 OCP** (`FP8_E4M3` / `FP8_E5M2`), **OCP MX FP6** (`FP6_E2M3` / `FP6_E3M2`), and **OCP MX FP4** (`FP4_E2M1`), including **mixed pairs** (e.g. FP8 × FP4, or FP6 E2M3 × FP6 E3M2).
 
 > **Build-time feature flag.** This path is gated behind the CMake option
 > `HIPBLASLTPROVIDER_ENABLE_MX_GEMM`, which defaults to **OFF**; when OFF the plugin
@@ -38,10 +38,14 @@ Matmul(a, b) → d
 ```
 
 **Supported types:**
-- Inputs: `FP8_E4M3`, `FP8_E5M2` (OCP FP8), or `FP4_E2M1` (OCP MX FP4); A and B may differ (mixed pairs allowed)
+- Inputs: `FP8_E4M3`, `FP8_E5M2` (OCP FP8), `FP6_E2M3`, `FP6_E3M2` (OCP MX FP6), or `FP4_E2M1` (OCP MX FP4); A and B may differ (mixed pairs allowed)
 - Scale tensors: `FP8_E8M0` (UE8M0 block scale)
 - Output: `FP32`, `FP16`, or `BF16`
 - Compute type: `FP32`
+
+> **Known issue (#10811):** FP8 OCP on operand A paired with FP6 OCP on operand
+> B currently returns incorrect results and is rejected as unsupported
+> (originally observed on gfx950; not yet arch-gated pending further testing).
 
 **Hardware support:** Supported on **gfx950** and **gfx1250** only.
 
@@ -66,4 +70,6 @@ against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` sc
 - **FP8_E4M3**: OCP FP8, 4 exponent / 3 mantissa bits (8-bit)
 - **FP8_E5M2**: OCP FP8, 5 exponent / 2 mantissa bits (8-bit)
 - **FP8_E8M0**: UE8M0 block-scale type, 8-bit unsigned exponent (MX scales)
+- **FP6_E2M3**: OCP MX FP6, 2 exponent / 3 mantissa bits (6-bit, packed 4 values per 3 bytes)
+- **FP6_E3M2**: OCP MX FP6, 3 exponent / 2 mantissa bits (6-bit, packed 4 values per 3 bytes)
 - **FP4_E2M1**: OCP MX FP4, 2 exponent / 1 mantissa bits (4-bit, packed 2 values per byte)

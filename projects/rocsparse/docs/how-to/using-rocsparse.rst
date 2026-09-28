@@ -30,6 +30,13 @@ consumed by the rocSPARSE library. You **cannot** switch devices
 between :ref:`rocsparse_create_handle_` and :ref:`rocsparse_destroy_handle_`. To change the device,
 you must destroy the current handle and create another rocSPARSE handle on a new device.
 
+:ref:`rocsparse_create_handle_` blocks the calling thread until the handle is ready.
+If you want handle creation to be stream-ordered instead, use :ref:`rocsparse_handle_create_`,
+which binds the handle to a user-provided stream and enqueues all setup work on that stream
+without blocking the host. Handles created this way are destroyed with
+:ref:`rocsparse_handle_destroy_`, which also reports an optional error descriptor.
+Neither routine can be called during HIP graph stream capture.
+
 .. note::
 
    :cpp:func:`hipSetDevice` and :cpp:func:`hipGetDevice` are not part of the rocSPARSE API.

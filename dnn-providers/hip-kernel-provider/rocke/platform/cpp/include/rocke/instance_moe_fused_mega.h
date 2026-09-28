@@ -163,13 +163,17 @@ rocke_status_t rocke_moe_fused_mega_signature(const rocke_moe_fused_mega_kernel_
  *      -> NULL + ROCKE_ERR_VALUE "invalid fused-mega gate+up GEMM spec: <why>".
  *   2. u_down = spec.down_universal_spec(); is_valid_gemm_spec(u_down, arch)
  *      -> NULL + ROCKE_ERR_VALUE "invalid fused-mega down GEMM spec: <why>".
- *   3. Set builder attrs (max_workgroup_size, optional waves_per_eu).
- *   4. rocke_moe_mega_build_ctx_init(...) -- run the WHOLE prologue into the ctx
+ *   3. validate_mega_lds_budget(_lds_allocs(spec), arch)
+ *      -> NULL + ROCKE_ERR_VALUE "invalid fused-mega spec: <why>". Steps 1-2
+ *      validate the two GEMMs INDEPENDENTLY and neither sees Hidden_smem, so a
+ *      tiling whose fused total overruns the per-WG LDS budget only fails here.
+ *   4. Set builder attrs (max_workgroup_size, optional waves_per_eu).
+ *   5. rocke_moe_mega_build_ctx_init(...) -- run the WHOLE prologue into the ctx
  *      (params -> geometry -> thread decode -> per-expert B byte bases -> LDS
  *      allocs -> views -> plans/operands -> acc inits -> down setup).
- *   5. scf_if(expert_idx >= 0) { rocke_moe_mega_emit_body(ctx); }  -- the empty
+ *   6. scf_if(expert_idx >= 0) { rocke_moe_mega_emit_body(ctx); }  -- the empty
  *      tail block (BlockExpertIds == -1) skips all work.
- *   6. Return b->kernel.
+ *   7. Return b->kernel.
  *
  * The prologue locals + the STAGE-1..5 body phases live in
  * rocke/instance_moe_fused_mega_internal.h (rocke_moe_mega_build_ctx_t +

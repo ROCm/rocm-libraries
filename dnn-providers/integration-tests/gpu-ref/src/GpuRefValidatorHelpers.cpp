@@ -14,29 +14,21 @@ namespace hipdnn_gpu_ref
 namespace detail
 {
 
-std::vector<std::string> buildValidatorDefines(const char* dataType, const char* computeType)
+namespace
 {
-    std::vector<std::string> defines;
-    defines.emplace_back(std::string("-DDATA_TYPE=") + dataType);
-    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + computeType);
-    return defines;
-}
 
-void launchValidatorKernel(hipFunction_t function, int64_t totalElements, ValidatorArgs& args)
+void launch(hipFunction_t function, int64_t totalElements, void* args, size_t argsSize)
 {
-    const int64_t blockSize = 256;
-    auto gridSize = (totalElements + blockSize - 1) / blockSize;
+    auto gridSize = (totalElements + VALIDATOR_BLOCK_SIZE - 1) / VALIDATOR_BLOCK_SIZE;
 
     if(gridSize > static_cast<int64_t>(std::numeric_limits<unsigned int>::max()))
     {
         throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");
     }
 
-    auto argsSize = sizeof(ValidatorArgs);
-
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                      &args,
+                      args,
                       HIP_LAUNCH_PARAM_BUFFER_SIZE,
                       &argsSize,
                       HIP_LAUNCH_PARAM_END};
@@ -45,7 +37,7 @@ void launchValidatorKernel(hipFunction_t function, int64_t totalElements, Valida
                                           static_cast<unsigned int>(gridSize),
                                           1,
                                           1,
-                                          static_cast<unsigned int>(blockSize),
+                                          static_cast<unsigned int>(VALIDATOR_BLOCK_SIZE),
                                           1,
                                           1,
                                           0,
@@ -55,6 +47,27 @@ void launchValidatorKernel(hipFunction_t function, int64_t totalElements, Valida
                     "launchValidatorKernel: hipModuleLaunchKernel failed");
 
     throwOnHipError(hipDeviceSynchronize(), "launchValidatorKernel: hipDeviceSynchronize failed");
+}
+
+} // namespace
+
+std::vector<std::string> buildValidatorDefines(const char* dataType, const char* computeType)
+{
+    std::vector<std::string> defines;
+    defines.emplace_back(std::string("-DDATA_TYPE=") + dataType);
+    defines.emplace_back(std::string("-DCOMPUTE_TYPE=") + computeType);
+    defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(VALIDATOR_BLOCK_SIZE));
+    return defines;
+}
+
+void launchValidatorKernel(hipFunction_t function, int64_t totalElements, ValidatorArgs& args)
+{
+    launch(function, totalElements, &args, sizeof(ValidatorArgs));
+}
+
+void launchValidatorKernel(hipFunction_t function, int64_t totalElements, RmsValidatorArgs& args)
+{
+    launch(function, totalElements, &args, sizeof(RmsValidatorArgs));
 }
 
 } // namespace detail

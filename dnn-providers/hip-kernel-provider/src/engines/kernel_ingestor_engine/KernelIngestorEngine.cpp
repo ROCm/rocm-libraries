@@ -24,11 +24,9 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 std::filesystem::path descriptorSearchDirectory()
 {
-    // Three sources, in falling order of specificity. Env var first: it's the only one an
-    // operator or test can set (tests and run-from-build-dir use it, like the ASM engine's
-    // HIPDNN_AITER_ASM_DIR), but only if it names a real directory -- a stale value is
-    // common (install-tree CTestTestfile.cmake bakes in the build's staging path, which
-    // won't exist on a test machine), and trusting it blindly would load nothing at all.
+    // Three sources, in falling order of specificity.
+
+    // 1. Env var first: it's the only one an operator or test can set.
     if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
        !override.empty())
     {
@@ -43,16 +41,15 @@ std::filesystem::path descriptorSearchDirectory()
                                   "the descriptor tree from the loaded module instead");
     }
 
-    // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR bakes in
-    //    the configure-time prefix, which a relocated or repackaged install invalidates;
-    //    measuring from the loaded module is correct wherever it lands. Keyed on this
+    // 2. Where this plugin was actually loaded from.
+    //    Measuring from the loaded module is correct wherever it lands. Keyed on this
     //    function's own address rather than a symbol name, since a name lookup can resolve
     //    to a different module when every provider exports the same plugin entry points.
     try
     {
         const auto candidate = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
                                    reinterpret_cast<const void*>(&descriptorSearchDirectory))
-                               / HIPDNN_DESCRIPTOR_SUBDIR;
+                               / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR;
         std::error_code notFound;
         if(std::filesystem::is_directory(candidate, notFound))
         {
@@ -69,7 +66,7 @@ std::filesystem::path descriptorSearchDirectory()
     }
 
     // 3. The configure-time prefix. Right for an install that never moved.
-    return HIPDNN_DESCRIPTOR_INSTALL_DIR;
+    return HIPKERNELPROVIDER_DESCRIPTOR_INSTALL_DIR;
 }
 
 std::vector<std::filesystem::path> descriptorSearchDirectories()

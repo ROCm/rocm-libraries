@@ -25,42 +25,19 @@
 #include <map>
 #include <numeric>
 #include <optional>
-
-#include "../shared/client_except.h"
-#include "../shared/concurrency.h"
-#include "../shared/fft_params.h"
-#include "../shared/hip_object_wrapper.h"
-#include "hipfft/hipfft.h"
-#include "hipfft/hipfftXt.h"
 #include <random>
 
+#include "hipfft/hipfft.h"
+#include "hipfft/hipfftXt.h"
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
 #include <mpi.h>
 #endif
-// plan handles are pointers for rocFFT backend, and ints for cuFFT
-#ifdef __HIP_PLATFORM_AMD__
-static constexpr hipfftHandle INVALID_HIPFFT_PLAN_HANDLE = nullptr;
-#else
-static constexpr hipfftHandle INVALID_HIPFFT_PLAN_HANDLE = -1;
-#endif
 
-// hipfftXtMalloc takes (plan, &desc, format) but hip_object_wrapper_t expects TCreate(&obj, ...).
-// This adapter reorders the arguments to match.
-inline hipfftResult
-    hipfftXtMalloc_adapted(hipLibXtDesc** desc, hipfftHandle plan, hipfftXtSubFormat fmt)
-{
-    return hipfftXtMalloc(plan, desc, fmt);
-}
-// RAII wrappers for hipFFT handles and Xt descriptors
-typedef hip_object_wrapper_t<hipfftHandle,
-                             hipfftCreate,
-                             hipfftDestroy,
-                             HIPFFT_SUCCESS,
-                             INVALID_HIPFFT_PLAN_HANDLE>
-    hipfftHandle_wrapper_t;
-typedef hip_object_wrapper_t<hipLibXtDesc*, hipfftXtMalloc_adapted, hipfftXtFree, HIPFFT_SUCCESS>
-    hipfftLibXtDesc_wrapper_t;
+#include "../shared/client_except.h"
+#include "../shared/concurrency.h"
+#include "../shared/fft_params.h"
+#include "../shared/hipfft_object_wrapper.h"
 
 inline fft_status fft_status_from_hipfftparams(const hipfftResult_t val)
 {
@@ -163,6 +140,11 @@ public:
     // will be provided with externally-managed work area(s):
     static std::vector<gpubuf> externally_managed_workareas;
 
+    // JIT callback data pointers, stored in a params-level vector so
+    // that they live as long as the plan
+    std::vector<void*> load_jit_cb_data_ptrs;
+    std::vector<void*> store_jit_cb_data_ptrs;
+
     static std::vector<size_t> externally_managed_extra_vram_footprint()
     {
         std::vector<size_t> footprint;
@@ -258,12 +240,8 @@ public:
                                          "vram-probing purposes, error code: "
                                          + std::to_string(plan_status) + ")");
             }
-            std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus());
-            required_worksizes[0] = absurd_init_worksize_estimate;
-            // replace the above by
-            //std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus(),
-            //                                       absurd_init_worksize_estimate);
-            // when hipFFT's mGPU workspace size query is fixed for multi-GPU
+            std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus(),
+                                                   absurd_init_worksize_estimate);
             auto get_size_ret = hipfftGetSize(temp_copy.plan, required_worksizes.data());
             if(get_size_ret != HIPFFT_SUCCESS)
             {
@@ -1120,8 +1098,8 @@ private:
             auto&      buf      = externally_managed_workareas[workarea_idx];
             if(buf.size() < req_size)
             {
-                // too small, free and reallocate to meet current needs
-                buf.free();
+                // workarea_idx == device ID (natural GPU ordering used in this struct)
+                rocfft_scoped_device dev(workarea_idx);
                 if(buf.alloc(req_size) != hipSuccess)
                 {
                     return HIPFFT_ALLOC_FAILED;
@@ -1131,13 +1109,7 @@ private:
         }
         if(get_num_used_gpus() > 1)
         {
-            // TODO: enable below once hipfftXtSetWorkArea is enabled
-#if 0
-            ret = hipfftXtSetWorkArea(plan, workareas.data);
-#else
-            throw unimplemented_exception(
-                "No implementation support for externally-managed work areas with multi-gpu usage");
-#endif
+            ret = hipfftXtSetWorkArea(plan, workareas.data());
         }
         else
         {
@@ -1256,8 +1228,6 @@ private:
         {
             return HIPFFT_SUCCESS;
         }
-        throw unimplemented_exception("jit callbacks not implemented");
-#if 0
         hipfftResult_t       ret{HIPFFT_INVALID_PLAN};
         hipfftXtCallbackType cbtype = HIPFFT_CB_UNDEFINED;
         switch(itype)
@@ -1302,14 +1272,13 @@ private:
         }
 
         check_jit_callback_state();
-        ret = hipfftXtSetJITCallback(plan,
+        load_jit_cb_data_ptrs = load_jit_cb_state->get_raw_data_ptrs();
+        ret                   = hipfftXtSetJITCallback(plan,
                                      load_jit_cb_state->symbol,
                                      load_jit_cb_state->func.data(),
                                      load_jit_cb_state->func.size(),
                                      cbtype,
-                                     load_jit_cb_state->data.empty()
-                                         ? nullptr
-                                         : load_jit_cb_state->get_raw_data_ptrs().data());
+                                     load_jit_cb_data_ptrs.data());
         if(ret != HIPFFT_SUCCESS)
             return ret;
 
@@ -1353,16 +1322,14 @@ private:
             throw std::runtime_error("unsupported data type for store callback");
         }
         }
-        ret = hipfftXtSetJITCallback(plan,
+        store_jit_cb_data_ptrs = store_jit_cb_state->get_raw_data_ptrs();
+        ret                    = hipfftXtSetJITCallback(plan,
                                      store_jit_cb_state->symbol,
                                      store_jit_cb_state->func.data(),
                                      store_jit_cb_state->func.size(),
                                      cbtype,
-                                     store_jit_cb_state->data.empty()
-                                         ? nullptr
-                                         : store_jit_cb_state->get_raw_data_ptrs().data());
+                                     store_jit_cb_data_ptrs.data());
         return ret;
-#endif
     }
 
     // call hipfftCreate + hipfftMake* functions, inserting calls to
@@ -1394,6 +1361,8 @@ private:
                 throw std::runtime_error("not enough devices for requested multi-gpu computation!");
 
             std::vector<int> GPUs(multiGPU);
+            // natural ordering used in this struct
+            // (NOTE: assumed elsewhere, see set_externally_managed_work_areas)
             std::iota(GPUs.begin(), GPUs.end(), 0);
             ret = hipfftXtSetGPUs(plan, static_cast<int>(multiGPU), GPUs.data());
             if(ret != HIPFFT_SUCCESS)

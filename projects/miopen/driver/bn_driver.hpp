@@ -28,7 +28,6 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "miopen_BatchNormHost.hpp"
 #include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
@@ -62,8 +61,6 @@
 #define ERRTOL_FP16 0.5e-3
 #define RMSTOL_FP32 1e-4
 #define RMSTOL_FP16 2e-3
-
-#define MIO_DRIVER_BN_REFERENCE_COMPUTE_3D_AS_2D 1 // Resolves issue #1974
 
 // #define BN_RUNFOR_PROFILER
 

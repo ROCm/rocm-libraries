@@ -77,3 +77,7 @@ __pycache__/
 *.egg-info/
 
 *.profraw
+
+# Security
+secrets.*
+credentials.*

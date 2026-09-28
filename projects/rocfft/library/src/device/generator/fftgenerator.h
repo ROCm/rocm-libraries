@@ -30,6 +30,7 @@
 
 #pragma once
 #include "../../../../shared/arithmetic.h"
+#include "../../include/rtc_kernel.h"
 #include "generator.h"
 
 #include <cmath>
@@ -244,10 +245,14 @@ struct FFTComputeOffsets
 
     std::shared_ptr<Context> context;
 
-    Variable transform{"transform", "size_t"};
-    Variable remaining{"remaining", "size_t"};
-    Variable index_along_d{"index_along_d", "size_t"};
-    Variable d{"d", "int"};
+    // transform is blockIdx.x scaled by transforms_per_block, so it
+    // outgrows 32 bits while the grid itself is still legal; remaining
+    // and index_along_d are decomposed from it against lengths.  d only
+    // counts dimensions, so it stays narrow.
+    Variable transform{"transform", "integer_type"};
+    Variable remaining{"remaining", "integer_type"};
+    Variable index_along_d{"index_along_d", "integer_type"};
+    Variable d{"d", rtc_kint_type(KIntType::U32)};
 
     FFTComputeOffsets() = delete;
     FFTComputeOffsets(unsigned int             length0,
@@ -1059,18 +1064,20 @@ struct StockhamTransform
     std::shared_ptr<Context> context;
 
     FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
-    FFTBuffer lds{"lds", Variable{"offset_lds", "int"}, Variable{"stride_lds", "int"}};
-    FFTBuffer X{"X", Variable{"offset_lds", "size_t"}, Literal{1}};
+    FFTBuffer lds{"lds",
+                  Variable{"offset_lds", rtc_kint_type(KIntType::U32)},
+                  Variable{"stride_lds", rtc_kint_type(KIntType::U32)}};
+    FFTBuffer X{"X", Variable{"offset_lds", rtc_kint_type(KIntType::U32)}, Literal{1}};
 
-    Variable dim{"dim", "unsigned int"};
-    Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable stride{"stride", "size_t", true, true};
-    Variable offset{"offset", "size_t"};
+    Variable dim{"dim", rtc_kint_type(KIntType::U32)};
+    Variable nbatch{"nbatch", "integer_type"};
+    Variable lengths{"lengths", "integer_type", true, true};
+    Variable stride{"stride", "integer_type", true, true};
+    Variable offset{"offset", "integer_type"};
 
     Variable write{"write", "bool"};
-    Variable thread{"thread", "size_t"};
-    Variable batch{"batch", "size_t"};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)};
+    Variable batch{"batch", "integer_type"};
 
     Variable twiddles{"twiddles", "const scalar_type", true, true};
     Variable load_cb_fn{"load_cb_fn", "void*"};
@@ -1152,23 +1159,25 @@ struct BluesteinTransform
     // FFT registers
     FFTBuffer R{"R", Literal{0}, Literal{1}, 0};
     // LDS buffer
-    FFTBuffer A{"A", Variable{"offset_lds", "int"}, Variable{"stride_lds", "int"}};
+    FFTBuffer A{"A",
+                Variable{"offset_lds", rtc_kint_type(KIntType::U32)},
+                Variable{"stride_lds", rtc_kint_type(KIntType::U32)}};
     // FFTed chirp signal (second half of chirp buffer)
     FFTBuffer B{"B", Literal{0}, Literal{1}};
     // chirp signal (first half of chirp buffer)
     FFTBuffer a{"a", Literal{0}, Literal{1}};
     // user data
-    FFTBuffer X{"X", Variable{"offset", "size_t"}, Variable{"stride0", "size_t"}};
+    FFTBuffer X{"X", Variable{"offset", "integer_type"}, Variable{"stride0", "integer_type"}};
 
-    Variable dim{"dim", "unsigned int"};
-    Variable nbatch{"nbatch", "size_t"};
-    Variable lengths{"lengths", "size_t", true, true};
-    Variable stride{"stride", "size_t", true, true};
-    Variable offset{"offset", "size_t"};
+    Variable dim{"dim", rtc_kint_type(KIntType::U32)};
+    Variable nbatch{"nbatch", "integer_type"};
+    Variable lengths{"lengths", "integer_type", true, true};
+    Variable stride{"stride", "integer_type", true, true};
+    Variable offset{"offset", "integer_type"};
 
     Variable write{"write", "bool"};
-    Variable thread{"thread", "size_t"};
-    Variable batch{"batch", "size_t"};
+    Variable thread{"thread", rtc_kint_type(KIntType::U32)};
+    Variable batch{"batch", "integer_type"};
     Variable val{"val", "scalar_type"};
 
     Variable buf_temp{"buf_temp", "scalar_type", true, true};

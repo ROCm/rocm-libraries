@@ -124,6 +124,10 @@ AMDGPU intrinsic `llvm.amdgcn.raw.ptr.buffer.load.lds` that copies from a buffer
 
 A list of IR operations. Kernel body and structured control-flow bodies are regions.
 
+## Runtime Param Field
+
+A spec field the kernel body reads as a runtime kernel argument instead of baking into the body, declared by overriding `runtime_param_fields` on the spec that owns the body. The launcher cache key excludes exactly those fields, so one compiled binary serves every value of them — this is what collapses the AOT batch x seqlen instance explosion. Declaring a field the body still bakes is a cache collision. Currently only the gfx950 aligned dense attention path opts in, with `("batch", "seqlen_q", "seqlen_kv")`. See [instances/attention.md](../instances/attention.md#runtime-param-fields).
+
 ## SmemType
 
 `SmemType(elem, shape)` — the type of an LDS allocation token. Lowers to `ptr addrspace(3)`.

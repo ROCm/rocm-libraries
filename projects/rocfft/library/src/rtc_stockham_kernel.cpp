@@ -40,6 +40,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     std::optional<StockhamGeneratorSpecs> specs2d;
     StockhamPartialPassParams             pp_params;
 
+    KIntType itype = node.GetKIntType();
+
     // SBRC variants look in the function pool for plain BLOCK_RC to
     // learn the block width, then decide on the transpose type once
     // that's known.
@@ -76,7 +78,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
         auto precision = static_cast<unsigned int>(node.precision);
 
-        specs.emplace(factors,
+        specs.emplace(itype,
+                      factors,
                       std::vector<unsigned int>(),
                       precision,
                       get_curr_gcn_arch_name(),
@@ -125,7 +128,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
             }
         }
 
-        specs.emplace(factors1d,
+        specs.emplace(itype,
+                      factors1d,
                       factors2d,
                       precision,
                       get_curr_gcn_arch_name(),
@@ -135,7 +139,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->half_lds              = kernel->half_lds;
         specs->ebtype                = node.ebtype;
 
-        specs2d.emplace(factors2d,
+        specs2d.emplace(itype,
+                        factors2d,
                         factors1d,
                         precision,
                         get_curr_gcn_arch_name(),
@@ -229,11 +234,11 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.storeOps);
     };
 
-    generator.construct_rtckernel = [](const std::string&                       kernel_name,
-                                       std::shared_future<hipModule_wrapper_t>& module,
-                                       dim3,
-                                       dim3) {
-        return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, module));
+    generator.construct_rtckernel = [=](const std::string&                       kernel_name,
+                                        std::shared_future<hipModule_wrapper_t>& module,
+                                        dim3,
+                                        dim3) {
+        return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, itype, module));
     };
     return generator;
 }
@@ -241,7 +246,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 {
     // construct arguments to pass to the kernel
-    RTCKernelArgs kargs;
+    RTCKernelArgs kargs = make_launch_args();
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
@@ -255,19 +260,19 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
        || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
     if(!hardcoded_dim)
-        kargs.append_size_t(data.node->length.size());
+        kargs.append_kint(data.node->length.size(), KIntType::U32);
     // lengths
-    kargs.append_ptr(kargs_lengths(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.lengths());
     // stride in/out
-    kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
+    kargs.append_ptr(data.node->devKernArg.stride_in());
     if(data.node->placement == rocfft_placement_notinplace)
-        kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
+        kargs.append_ptr(data.node->devKernArg.stride_out());
     // nbatch
-    kargs.append_size_t(data.node->batch);
+    kargs.append_kint(data.node->batch);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);
-    kargs.append_unsigned_int(data.callbacks.load_cb_lds_bytes);
+    kargs.append_kint(data.callbacks.load_cb_lds_bytes, KIntType::U32);
     kargs.append_ptr(data.callbacks.store_cb_fn);
     kargs.append_ptr(data.callbacks.store_cb_data);
 
@@ -294,16 +299,16 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
         if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
             kargs.append_ptr(data.node->chirp);
 
-        kargs.append_size_t(data.node->lengthBlueN);
-        kargs.append_size_t(data.node->lengthBlue);
+        kargs.append_kint(data.node->lengthBlueN);
+        kargs.append_kint(data.node->lengthBlue);
 
         break;
     case BFT_INV_CHIRP_MUL:
         if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
             kargs.append_ptr(data.node->chirp);
 
-        kargs.append_size_t(data.node->lengthBlueN);
-        kargs.append_size_t(data.node->lengthBlue);
+        kargs.append_kint(data.node->lengthBlueN);
+        kargs.append_kint(data.node->lengthBlue);
 
         break;
     }
@@ -314,13 +319,13 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 
         if(data.node->fuseBlue == BFT_FWD_CHIRP)
         {
-            kargs.append_size_t(empty_val);
-            kargs.append_size_t(empty_val);
-            kargs.append_size_t(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
 
-            kargs.append_size_t(empty_val);
-            kargs.append_size_t(empty_val);
-            kargs.append_size_t(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
+            kargs.append_kint(empty_val);
         }
         else
         {
@@ -328,31 +333,31 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
             switch(data.node->inStrideBlue.size())
             {
             case 2: // 1D FFT
-                kargs.append_size_t(empty_val);
-                kargs.append_size_t(empty_val);
-                kargs.append_size_t(data.node->iDistBlue);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->iDistBlue);
 
-                kargs.append_size_t(empty_val);
-                kargs.append_size_t(empty_val);
-                kargs.append_size_t(data.node->oDistBlue);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->oDistBlue);
                 break;
             case 3: // 2D FFT
-                kargs.append_size_t(data.node->inStrideBlue[2]);
-                kargs.append_size_t(empty_val);
-                kargs.append_size_t(data.node->iDistBlue);
+                kargs.append_kint(data.node->inStrideBlue[2]);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->iDistBlue);
 
-                kargs.append_size_t(data.node->outStrideBlue[2]);
-                kargs.append_size_t(empty_val);
-                kargs.append_size_t(data.node->oDistBlue);
+                kargs.append_kint(data.node->outStrideBlue[2]);
+                kargs.append_kint(empty_val);
+                kargs.append_kint(data.node->oDistBlue);
                 break;
             case 4: // 3D FFT
-                kargs.append_size_t(data.node->inStrideBlue[2]);
-                kargs.append_size_t(data.node->inStrideBlue[3]);
-                kargs.append_size_t(data.node->iDistBlue);
+                kargs.append_kint(data.node->inStrideBlue[2]);
+                kargs.append_kint(data.node->inStrideBlue[3]);
+                kargs.append_kint(data.node->iDistBlue);
 
-                kargs.append_size_t(data.node->outStrideBlue[2]);
-                kargs.append_size_t(data.node->outStrideBlue[3]);
-                kargs.append_size_t(data.node->oDistBlue);
+                kargs.append_kint(data.node->outStrideBlue[2]);
+                kargs.append_kint(data.node->outStrideBlue[3]);
+                kargs.append_kint(data.node->oDistBlue);
                 break;
             default:
                 throw std::runtime_error("Invalid strides for Bluestein kernel");

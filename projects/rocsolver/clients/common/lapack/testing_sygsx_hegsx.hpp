@@ -202,20 +202,31 @@ void sygsx_hegsx_initData(const rocblas_handle handle,
             T one = T(1);
             if(itype == rocblas_eform_ax)
             {
-                // form A = U' M U
-                cpu_trmm(rocblas_side_left, rocblas_fill_upper, rocblas_operation_conjugate_transpose,
-                         rocblas_diagonal_non_unit, n, n, one, U[b], ldu, hA[b], lda);
-                cpu_trmm(rocblas_side_right, rocblas_fill_upper, rocblas_operation_none,
-                         rocblas_diagonal_non_unit, n, n, one, U[b], ldu, hA[b], lda);
+                if(test)
+                {
+                    // -------------------------------------
+                    // form A = U' M U only for verification
+                    // -------------------------------------
+                    cpu_trmm(rocblas_side_left, rocblas_fill_upper,
+                             rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit, n, n,
+                             one, U[b], ldu, hA[b], lda);
+                    cpu_trmm(rocblas_side_right, rocblas_fill_upper, rocblas_operation_none,
+                             rocblas_diagonal_non_unit, n, n, one, U[b], ldu, hA[b], lda);
+                }
             }
             else
             {
-                // form A = inv(U) M inv(U')
-                cpu_trsm(rocblas_side_left, rocblas_fill_upper, rocblas_operation_none,
-                         rocblas_diagonal_non_unit, n, n, one, U[b], ldu, hA[b], lda);
-                cpu_trsm(rocblas_side_right, rocblas_fill_upper,
-                         rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit, n, n,
-                         one, U[b], ldu, hA[b], lda);
+                if(test)
+                {
+                    // -------------------------------------
+                    // form A = inv(U) M inv(U') only for verification
+                    // -------------------------------------
+                    cpu_trsm(rocblas_side_left, rocblas_fill_upper, rocblas_operation_none,
+                             rocblas_diagonal_non_unit, n, n, one, U[b], ldu, hA[b], lda);
+                    cpu_trsm(rocblas_side_right, rocblas_fill_upper,
+                             rocblas_operation_conjugate_transpose, rocblas_diagonal_non_unit, n, n,
+                             one, U[b], ldu, hA[b], lda);
+                }
             }
         }
     }

@@ -43,6 +43,7 @@ from ..core import (
     OperatorRequest,
     Ranker,
     stable_json_hash,
+    selector_matches,
 )
 
 _FAMILY = "norm2d"
@@ -115,16 +116,6 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     return errors
 
 
-def _selector_matches(req: NormRequest, candidate: KernelCandidate) -> Tuple[bool, str]:
-    algorithm = req.algorithm.strip().lower()
-    spec_id = req.spec_id.strip().lower()
-    if algorithm not in ("auto", candidate.algorithm):
-        return False, f"request algorithm {req.algorithm!r} != {candidate.algorithm!r}"
-    if spec_id not in ("auto", candidate.spec_id):
-        return False, f"request spec_id {req.spec_id!r} != {candidate.spec_id!r}"
-    return True, "ok"
-
-
 def _make_spec(req: NormRequest, *, block_size: int, vec: int):
     """Build the instance spec for one (kind, block_size, vec) candidate."""
     dtype = _norm_dtype(req.dtype)
@@ -165,7 +156,7 @@ def _make_candidate(
         assert isinstance(req, NormRequest)
         if req.kind.lower() != kind:
             return False, f"candidate kind {kind!r} != request kind {req.kind!r}"
-        ok, why = _selector_matches(req, candidate)
+        ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
         spec = _make_spec(req, block_size=block_size, vec=vec)
@@ -257,18 +248,30 @@ def _kernel_id(req: NormRequest, candidate: KernelCandidate, spec) -> KernelId:
     )
 
 
+def registered_norm_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Every registered norm candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_norm` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.combos(req)
+
+
 def norm_sweep_space(req: OperatorRequest) -> Sequence[object]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in NORM_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return NORM_REGISTRY.sweep_space(req)
+
+
+def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible norm2d kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:

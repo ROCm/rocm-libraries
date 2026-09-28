@@ -20,7 +20,9 @@ import math
 
 import pytest
 
+from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 from kernels.gfx950.attention_dense import (
+    Gfx950AttentionDenseSpec,
     run_attention_dense_torch,
 )
 
@@ -39,7 +41,7 @@ def _gpu_ready():
 
 
 requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 (MI355X) GPU with ROCm torch"
+    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
 )
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
@@ -53,6 +55,7 @@ _COHORT = [
     ("bf16", 128, 16, 4, True),  # bf16 D128 persistent
     ("bf16", 128, 16, 4, False),  # bf16 D128 default
     ("fp16", 64, 16, 16, False),  # D64 MHA default
+    ("fp16", 128, 16, 16, True),  # D128 MHA persistent (auto -> qb_major)
     ("bf16", 64, 16, 4, True),  # D64 bf16 persistent
 ]
 
@@ -102,6 +105,20 @@ def _spec(
     )
 
 
+def _launcher_for(spec):
+    """The cached ``KernelLauncher`` for ``spec``, or None if none is compiled.
+
+    ``run_attention_dense_torch`` owns ``_DENSE_LAUNCHER_CACHE`` internally and
+    exposes no accessor, so this reads the module-level dict through the very
+    key function the production path uses -- a test-local reimplementation of
+    the key would assert against itself rather than against the shipped one.
+    """
+    from kernels.common.attention_dense_spec import attention_dense_cache_key
+    from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+    return _DENSE_LAUNCHER_CACHE.get(attention_dense_cache_key(spec, arch="gfx950"))
+
+
 def _tolerance(dtype):
     """Numerical tolerance for max_abs error (matches gfx942).
 
@@ -111,7 +128,7 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _standard_reference(q, k, v, scale):
+def _standard_reference(q, k, v, scale, sliding_window=0):
     """Standard causal attention reference using PyTorch SDPA.
 
     Args:
@@ -136,11 +153,20 @@ def _standard_reference(q, k, v, scale):
     vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
 
     # PyTorch SDPA with causal masking
-    ref = F.scaled_dot_product_attention(
-        qf, kf, vf, is_causal=True, scale=scale
-    ).transpose(
-        1, 2
-    )  # -> [B, S, Hq, D]
+    if sliding_window:
+        sq, sk = q.shape[1], k.shape[1]
+        qi = torch.arange(sq, device=q.device).view(-1, 1)
+        ki = torch.arange(sk, device=q.device).view(1, -1)
+        allowed = (ki <= qi) & (ki > qi - sliding_window)
+        ref = F.scaled_dot_product_attention(
+            qf, kf, vf, attn_mask=allowed, scale=scale
+        ).transpose(1, 2)
+    else:
+        ref = F.scaled_dot_product_attention(
+            qf, kf, vf, is_causal=True, scale=scale
+        ).transpose(
+            1, 2
+        )  # -> [B, S, Hq, D]
 
     return ref
 
@@ -178,6 +204,85 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_one_binary_serves_every_shape(self):
+        """One compiled artifact, two shapes, correct numerics at both.
+
+        The cohort above runs many shapes, but it stopped discriminating the
+        moment batch/seqlen_q/seqlen_kv became runtime kernel params: it passes
+        identically whether N shapes are served by N binaries or by one. The
+        property that actually needs a guard now is *artifact reuse*.
+
+        ``is`` on the launcher covers the whole path rather than just the key
+        function. A key regression would land the two shapes in different cache
+        slots; a lookup regression would overwrite the one slot with a freshly
+        compiled launcher. Both yield a different object, and neither is visible
+        to a numeric assertion -- recompiling per shape is *correct*, merely
+        wasteful, so what regresses is the AOT instance count and first-call
+        latency, which no accuracy check can see.
+
+        Paired with the numeric check at both shapes so the test cannot pass by
+        reusing one binary that happens to be wrong for the second shape.
+        """
+        import torch
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        dtype, d, hq, hkv = "bf16", 128, 16, 4  # flagship default, non-persistent
+        tol = _tolerance(dtype)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        scale = 1.0 / math.sqrt(d)
+
+        shapes = ((1, 512), (4, 1024))
+        specs = [_spec(dtype, d, hq, hkv, False, batch=b, sq=s) for b, s in shapes]
+
+        # Preconditions: genuinely different shapes, on the runtime path, and
+        # sharing one key -- otherwise the reuse assertion is vacuous.
+        assert specs[0].runtime_shape, "cohort row is not on the runtime-shape path"
+        assert (specs[0].batch, specs[0].seqlen_q) != (
+            specs[1].batch,
+            specs[1].seqlen_q,
+        )
+        keys = [attention_dense_cache_key(s, arch="gfx950") for s in specs]
+        assert keys[0] == keys[1], f"shapes {shapes} did not share a cache key"
+
+        # Own the cache state: evicting first makes the "exactly one new entry"
+        # assertion independent of which tests ran before this one.
+        _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
+        before = set(_DENSE_LAUNCHER_CACHE)
+
+        launchers = []
+        for (B, S), spec in zip(shapes, specs):
+            torch.manual_seed(0)
+            q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt)
+            k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt)
+            out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+
+            run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+            torch.cuda.synchronize()
+            launchers.append(_launcher_for(spec))
+
+            ref = _standard_reference(q, k, v, scale)
+            max_abs = (ref - out.float()).abs().max().item()
+            assert max_abs < tol, f"B={B} S={S}: max_abs={max_abs:.3e} >= {tol}"
+
+        assert launchers[0] is not None, (
+            "no launcher cached after a successful run; _DENSE_LAUNCHER_CACHE is "
+            "no longer keyed by attention_dense_cache_key and this test is blind"
+        )
+        assert launchers[0] is launchers[1], (
+            f"shapes {shapes} share a cache key but were served by DIFFERENT "
+            "launcher objects -- the runtime-shape kernel recompiled per shape, "
+            "so the AOT instance count still scales with the shape space"
+        )
+        assert set(_DENSE_LAUNCHER_CACHE) - before == {keys[0]}, (
+            "two shapes on the runtime path added more than one cache entry: "
+            f"{sorted(set(_DENSE_LAUNCHER_CACHE) - before)}"
         )
 
 
@@ -272,6 +377,121 @@ def _sink_reference(q, k, v, sinks, scale, sliding_window=0, causal=True):
     # Weighted sum over values
     ref = torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
     return ref
+
+
+_GQA_PAIR_VARIANTS = [
+    ("plain", 0, False, False),
+    ("interleave", 0, False, True),
+    ("sliding_window", 128, False, False),
+    ("sinks", 0, True, False),
+    ("sinks_sliding_window", 128, True, False),
+]
+
+
+class TestDenseGqaPairVariants:
+    """Numeric coverage for features composed with the optimized work mapping."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "_name,sliding_window,use_sinks,interleave", _GQA_PAIR_VARIANTS
+    )
+    def test_gqa_pair_variant_numeric(
+        self, _name, sliding_window, use_sinks, interleave
+    ):
+        import torch
+
+        B, S, Hq, Hkv, D = 1, 512, 32, 8, 128
+        torch.manual_seed(0)
+        q = torch.randn(B, S, Hq, D, device="cuda", dtype=torch.float16)
+        k = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
+        v = torch.randn(B, S, Hkv, D, device="cuda", dtype=torch.float16)
+        out = torch.empty_like(q)
+        sinks = (
+            torch.zeros(Hq, device="cuda", dtype=torch.float16) if use_sinks else None
+        )
+        scale = 1.0 / math.sqrt(D)
+
+        # NQB=2 and Hkv=8, so the balanced mapping needs exactly 16 CTAs.
+        spec = Gfx950AttentionDenseSpec(
+            batch=B,
+            seqlen_q=S,
+            seqlen_kv=S,
+            num_query_heads=Hq,
+            num_kv_heads=Hkv,
+            head_size=D,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+            persistent=True,
+            num_persistent=16,
+            persist_decode="gqa_pair",
+            interleave=interleave,
+            sliding_window=sliding_window,
+            use_sinks=use_sinks,
+            wide_lds_dma=True,
+        )
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            scale=scale,
+            sinks=sinks,
+        )
+        torch.cuda.synchronize()
+
+        if use_sinks:
+            ref = _sink_reference(
+                q,
+                k,
+                v,
+                sinks,
+                scale,
+                sliding_window=sliding_window,
+                causal=True,
+            )
+        else:
+            ref = _standard_reference(q, k, v, scale, sliding_window=sliding_window)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < _tolerance("fp16"), f"gqa_pair {_name}: max_abs={max_abs:.3e}"
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("block_m", (256, 128), ids=("bm256", "bm128"))
+    def test_wide_dma_mha_numeric(self, block_m):
+        """Both wide-DMA line-pass geometries work without GQA reuse."""
+        import torch
+
+        B, S, H, D = 1, 512, 16, 128
+        torch.manual_seed(0)
+        q = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
+        k = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
+        v = torch.randn(B, S, H, D, device="cuda", dtype=torch.float16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(D)
+        spec = Gfx950AttentionDenseSpec(
+            batch=B,
+            seqlen_q=S,
+            seqlen_kv=S,
+            num_query_heads=H,
+            num_kv_heads=H,
+            head_size=D,
+            causal=True,
+            dtype="fp16",
+            block_m=block_m,
+            block_n=64,
+            persistent=True,
+            num_persistent=32,
+            persist_decode="qb_major",
+            wide_lds_dma=True,
+        )
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+        torch.cuda.synchronize()
+        ref = _standard_reference(q, k, v, scale)
+        max_abs = (ref - out.float()).abs().max().item()
+        assert max_abs < _tolerance("fp16"), f"wide DMA MHA: max_abs={max_abs:.3e}"
 
 
 class TestDenseSinksNumeric:
@@ -392,6 +612,125 @@ class TestDenseSinksNumeric:
             f"{dtype} D{d} GQA{hq}/{hkv} "
             f"{'persist' if persistent else 'default'} {mask_str} sink_{sink_magnitude}: "
             f"max_abs={max_abs:.3e} >= {tol}"
+        )
+
+
+def _bottom_right_reference(q, k, v, sinks, scale, *, top_left):
+    """Explicit fp32 causal oracle for unequal query and KV lengths."""
+    import torch
+
+    batch, sq, hq, _ = q.shape
+    skv = k.shape[1]
+    hkv = k.shape[2]
+    qh = q.transpose(1, 2).float()
+    kh = k.transpose(1, 2).repeat_interleave(hq // hkv, dim=1).float()
+    vh = v.transpose(1, 2).repeat_interleave(hq // hkv, dim=1).float()
+
+    scores = torch.einsum("bhqd,bhkd->bhqk", qh, kh) * scale
+    qi = torch.arange(sq, device=q.device).view(-1, 1)
+    ki = torch.arange(skv, device=q.device).view(1, -1)
+    diagonal = 0 if top_left else skv - sq
+    allowed = ki <= qi + diagonal
+    scores.masked_fill_(~allowed.view(1, 1, sq, skv), float("-inf"))
+
+    if sinks is None:
+        probabilities = torch.softmax(scores, dim=-1)
+    else:
+        sink_col = sinks.float().view(1, hq, 1, 1).expand(batch, hq, sq, 1)
+        probabilities = torch.softmax(torch.cat([scores, sink_col], dim=-1), dim=-1)[
+            ..., :-1
+        ]
+    return torch.einsum("bhqk,bhkd->bhqd", probabilities, vh).transpose(1, 2)
+
+
+# The original nine PR cases plus one aligned and one ragged BM128 case. Each
+# pytest.param is a separate GPU test node: on a real gfx950 none can disappear
+# behind an aggregate helper that reports success after skipping every case.
+_BOTTOM_RIGHT_CASES = [
+    pytest.param("default", 197, 400, 1, True, False, id="bm256-ragged-197x400"),
+    pytest.param("default", 300, 1234, 1, True, False, id="bm256-ragged-300x1234"),
+    pytest.param("default", 512, 4097, 1, True, False, id="bm256-ragged-512x4097"),
+    pytest.param("default", 100, 8000, 1, True, False, id="bm256-ragged-100x8000"),
+    # The ragged buffer spans the whole tensor: padded rows in batch 0 can read
+    # live batch-1 data, so correctness depends on the qtok < Sq store guard.
+    pytest.param("default", 300, 1000, 2, True, False, id="bm256-ragged-batch2"),
+    pytest.param("default", 256, 512, 1, False, False, id="bm256-aligned-256x512"),
+    pytest.param("default", 512, 1024, 1, False, False, id="bm256-aligned-512x1024"),
+    pytest.param("default", 512, 1024, 1, False, True, id="bm256-sinks-aligned"),
+    pytest.param("default", 300, 1234, 1, True, True, id="bm256-sinks-ragged"),
+    pytest.param("bm128", 512, 1024, 1, False, False, id="bm128-aligned-512x1024"),
+    pytest.param("bm128", 197, 400, 1, True, False, id="bm128-ragged-197x400"),
+]
+
+_BOTTOM_RIGHT_TOL = 2e-2
+
+
+class TestDenseBottomRightNumeric:
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "geometry,sq,skv,batch,ragged,use_sinks", _BOTTOM_RIGHT_CASES
+    )
+    def test_jit_matches_shifted_diagonal_not_top_left(
+        self, geometry, sq, skv, batch, ragged, use_sinks
+    ):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES[geometry]
+        spec = Gfx950AttentionDenseSpec(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            ragged=ragged,
+            persistent=False,
+            use_sinks=use_sinks,
+            causal_bottom_right=True,
+        )
+        assert skv > sq, "every case must exercise a moving diagonal"
+
+        torch.manual_seed(0)
+        q = torch.randn(batch, sq, 4, 128, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(batch, skv, 1, 128, device="cuda", dtype=torch.bfloat16)
+        out = torch.empty_like(q)
+        sinks = (
+            torch.randn(4, device="cuda", dtype=torch.bfloat16) if use_sinks else None
+        )
+        scale = 1.0 / math.sqrt(spec.head_size)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            scale=scale,
+            sinks=sinks,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k, v, sinks, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k, v, sinks, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+
+        label = (
+            f"{geometry} B{batch} {sq}x{skv} "
+            f"{'ragged' if ragged else 'aligned'}"
+            f"{'+sinks' if use_sinks else ''}"
+        )
+        assert shifted_err < _BOTTOM_RIGHT_TOL, (
+            f"{label}: shifted max_abs={shifted_err:.3e} " f">= {_BOTTOM_RIGHT_TOL}"
+        )
+        assert top_left_err > 1e-3, (
+            f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
         )
 
 

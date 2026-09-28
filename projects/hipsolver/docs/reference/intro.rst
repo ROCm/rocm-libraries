@@ -58,6 +58,8 @@ LAPACK main functions
     :ref:`hipsolverXpotrfBatched <potrf_batched>`, x, x, x, x
     :ref:`hipsolverXgetrf_bufferSize <getrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXgetrf <getrf>`, x, x, x, x
+    :ref:`hipsolverXgetrfBatched_bufferSize <getrfBatched_bufferSize>`, x, x, x, x
+    :ref:`hipsolverXgetrfBatched <getrfBatched>`, x, x, x, x
     :ref:`hipsolverXsytrf_bufferSize <sytrf_bufferSize>`, x, x, x, x
     :ref:`hipsolverXsytrf <sytrf>`, x, x, x, x
 
@@ -158,6 +160,17 @@ The following tables summarize the wrapper functions that are provided only in t
 These wrappers are supported in rocSOLVER, but are provided by equivalent functions
 that use different algorithmic approaches or by functionality that is not fully exposed in the public API.
 For these reasons, the corresponding wrappers are not provided in the regular hipSOLVER API.
+
+Householder reflections
+------------------------------
+
+The following Householder reflector methods are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
+
+.. csv-table:: Householder reflections
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXlarft_bufferSize <dense_larft_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXlarft <dense_larft>`, x, x, x, x
 
 Linear-system solvers
 ------------------------------

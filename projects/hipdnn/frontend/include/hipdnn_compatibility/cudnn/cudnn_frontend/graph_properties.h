@@ -1,8 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Portions derived from NVIDIA cuDNN frontend
-// (include/cudnn_frontend/graph_properties.h), used under the MIT license.
+// Portions derived from NVIDIA cuDNN frontend, used under the MIT license:
+//   include/cudnn_frontend/graph_properties.h
+//     Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// License text and pinned upstream version: THIRD_PARTY_LICENSES.md
+// (installed to share/doc/hipdnn_frontend).
 
 /**
  * @file graph_properties.h
@@ -30,6 +33,8 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -61,6 +66,8 @@ using hipdnn_frontend::graph::Conv_wgrad_attributes;
 using hipdnn_frontend::graph::Layernorm_attributes;
 using hipdnn_frontend::graph::Layernorm_backward_attributes;
 using hipdnn_frontend::graph::Matmul_attributes;
+using hipdnn_frontend::graph::Moe_grouped_matmul_attributes;
+using hipdnn_frontend::graph::Moe_grouped_matmul_bwd_attributes;
 using hipdnn_frontend::graph::Pointwise_attributes;
 using hipdnn_frontend::graph::Reduction_attributes;
 using hipdnn_frontend::graph::Resample_attributes;

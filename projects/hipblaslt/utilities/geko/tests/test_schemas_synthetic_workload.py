@@ -35,6 +35,15 @@ def test_tensile_triple_mixed_bh():
     assert a_t == "bf16_r" and b_t == "f16_r" and c_t == "bf16_r" and comp == "f32_r"
 
 
+def test_tensile_triple_xf32():
+    """Test XF32 (TensorFloat32) dtype mapping: a_type should be f32_r, not xf32_r."""
+    a_t, b_t, c_t, comp = GemmType._tensile_triple_to_hipblaslt("X", "S", "S")
+    assert a_t == "f32_r", f"a_type should be f32_r, got {a_t}"
+    assert b_t == "f32_r"
+    assert c_t == "f32_r"
+    assert comp == "xf32_r", f"compute_type should be xf32_r, got {comp}"
+
+
 def test_workload_log_rows_keys_and_sample_values():
     gt = GemmType.from_tensile("N", "T", "B", "B", "S")
     row = GemmConfig(gt, [[1024, 1024, 1, 1024]]).workload_log_rows()[0]

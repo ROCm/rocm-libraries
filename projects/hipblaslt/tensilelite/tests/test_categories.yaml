@@ -1,0 +1,67 @@
+# TensileLite C++ Test Categories Configuration
+#
+# Purpose: define cumulative test tiers for TheRock so tensilelite-tests (the
+# ~700-case host-side gtest suite under tensilelite/tests) can be run by
+# category via `ctest -L <category>` instead of a bespoke --gtest_filter
+# string. See AIHPBLAS-4410 for the CI-gate enablement effort this supports.
+#
+# How the patterns select tests:
+#   Unlike hipBLASLt's YAML-generated client tests (clients/tests/test_categories.yaml),
+#   tensilelite/tests is a hand-written gtest suite with no category token
+#   embedded in test names (no smoke/quick/pre_checkin/nightly convention).
+#   There is currently no natural fast/slow subdivision of the suite, so every
+#   defined tier below selects the whole suite via the "*" wildcard.
+#
+#   The two known-failing gfx950 cases tracked by AIHPBLAS-3506 are quarantined
+#   via native GTEST_SKIP() calls in the test source itself (see
+#   RangeLibrary_test.cpp, MXDataGen_test.cpp), not via an `exclude:` pattern
+#   here -- they report as skipped, not failed, in every tier automatically.
+#   (AIHPBLAS-4417's AlmostEqual_test.cpp tolerance regression was fixed
+#   upstream in rocm-libraries#11066, so no skip is needed for it anymore.)
+#
+# CI tier placement (decision recorded in the enablement plan):
+#   Land in the "standard" (pre-checkin) tier first, not "quick" (every PR).
+#   The "quick" tier is intentionally omitted for now -- promote by adding a
+#   "quick:" entry (e.g. copying the "standard" entry below) once the
+#   standard-tier run has proven stable for a few days across gfx94x/gfx950.
+
+test_categories:
+  standard:
+    description: "Full host-side TensileLite C++ unit test suite (pre-checkin)"
+    test_patterns:
+      - "*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Full host-side TensileLite C++ unit test suite (nightly)"
+    test_patterns:
+      - "*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete TensileLite C++ unit test suite"
+    test_patterns:
+      - "*"
+    labels:
+      - "full"
+      - "weekly"
+
+# GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
+# exclude_gpu:
+#   exclude_gpu_gfxXXXX:
+#     test_patterns: [...]
+#     labels: ["standard", "comprehensive", "full", "ex_gpu_gfxXXXX"]
+
+execution_settings:
+  default_timeout: 60
+  timeout_multiplier: 1
+  category_timeouts:
+    standard: 1800     # 30 min
+    comprehensive: 3600 # 1 h
+    full: 3600          # 1 h

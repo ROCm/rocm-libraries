@@ -25,8 +25,33 @@
 import pytest
 import itertools
 import copy
+import Tensile.Common as Common
 from Tensile.Hardware import HardwarePredicate
 from Tensile.SolutionLibrary import PredicateLibrary
+
+
+@pytest.fixture
+def strictCompilerTarget():
+    """Enable the gfx1250-strict compiler target for the duration of a test."""
+    Common.os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    yield
+    Common.os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+
+
+def test_hardware_predicate_strict_strips_suffix(strictCompilerTarget):
+    # Under strict, gfxName((12,5,0)) yields "gfx1250-strict", but the runtime
+    # hardware predicate must still match the real gfx1250 device.
+    assert Common.gfxName((12, 5, 0)) == "gfx1250-strict"
+
+    fromISA = HardwarePredicate.FromISA((12, 5, 0))
+    fromHardware = HardwarePredicate.FromHardware((12, 5, 0))
+    processor = fromISA.value
+
+    assert processor.tag == "Processor"
+    assert processor.value == "gfx1250"
+    assert "strict" not in processor.value
+    assert fromISA == HardwarePredicate("AMDGPU", value=HardwarePredicate("Processor", value="gfx1250"))
+    assert fromHardware == fromISA
 
 
 def test_hardware_predicate_comparison():

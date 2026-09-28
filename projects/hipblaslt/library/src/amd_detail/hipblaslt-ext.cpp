@@ -711,64 +711,6 @@ namespace hipblaslt_ext
     // End of pimpl classes
     /////////////////////////////////////////////////////
 
-    bool currentArchSupportsFp8()
-    {
-        using std::begin;
-        using std::end;
-
-        static const std::string fp8Archs[] = {"gfx942", "gfx950"};
-        const auto               archName   = rocblaslt_internal_get_arch_name();
-        return std::find(begin(fp8Archs), end(fp8Archs), archName) != end(fp8Archs);
-    }
-
-    template <typename SrcType, typename DstType, typename ScaleType = float>
-    __global__ void datatypeConversion(const SrcType*   src,
-                                       DstType*         dst,
-                                       const ScaleType* scale,
-                                       std::size_t      numElements)
-    {
-        const auto tId        = threadIdx.x;
-        const auto bId        = blockIdx.x;
-        const auto blockSize  = blockDim.x * blockDim.y * blockDim.z;
-        const auto elemOffset = bId * blockSize + tId;
-        const auto scaleValue = scale ? *scale : 1.f;
-
-        if(elemOffset < numElements)
-        {
-            dst[elemOffset] = DstType(float(src[elemOffset]) * scaleValue);
-        }
-    }
-
-    template <typename SrcType, typename DstType>
-    void datatypeConversionCpu(const SrcType* src, DstType* dst, std::size_t numElements)
-    {
-        for(std::size_t i = 0; i < numElements; ++i)
-        {
-            dst[i] = DstType(src[i]);
-        }
-    }
-
-    auto NullDeleter = [](void*) { return hipSuccess; };
-
-    HipBufferPtr makeHipBuffer(std::size_t numBytes)
-    {
-        if(!numBytes)
-        {
-            return HipBufferPtr(nullptr, NullDeleter);
-        }
-
-        void* ptr = nullptr;
-        auto  err = hipMalloc(&ptr, numBytes);
-
-        if(err != hipSuccess)
-        {
-            return HipBufferPtr(nullptr, NullDeleter);
-        }
-
-        return HipBufferPtr(ptr, &hipFree);
-    }
-
-    ////////////////////////////////////////////////////////////
     // Gemm Instance
     ////////////////////////////////////////////////////////////
 

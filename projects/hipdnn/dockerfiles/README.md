@@ -19,8 +19,27 @@ This directory contains the Dockerfile for building the hipDNN development envir
 - **Includes**:
   - ROCm development tools
   - CMake build system
-  - Google Test framework
+  - GoogleTest and GoogleMock 1.17.0
+  - spdlog 1.15.3 with bundled fmt
   - Ninja build tool
+
+GoogleTest/GoogleMock and spdlog are installed automatically in **`/usr/local`**,
+which CMake searches by default. No manual dependency download, install, extra
+prefix, or `-DALLOW_FETCH_DEPS=ON` is needed for the normal standalone hipDNN
+build inside the image. The final image's ROCm prefix supplies the remaining
+prerequisites, including FlatBuffers and nlohmann_json.
+
+The separate `install_dev_deps` stage builds Release static PIC libraries from
+GoogleTest commit `52eb8108c5bdec04579160ae17225d66034bd723` and spdlog commit
+`6fa36017cfd5731d617e1a934f0e5ea9c4445b13`. Only the installed prefix is copied
+into `devshell`; both `prebuilt` and `fullbuild` final images inherit it, as do
+enroot images rebuilt from them. Existing images must be rebuilt to include these
+packages. Mounting `/opt/rocm` does not hide them. A `devshell` still needs a
+complete ROCm development installation mounted there. These developer packages
+are not installed in `base`, `fullbuildshell`, or any TheRock build/install stage.
+
+For builds outside the image, see the separate
+[installed-prefix and opt-in fetching recipes](../docs/Building.md#third-party-libraries).
 
 ## 🔨 Building the Docker Image
 
@@ -33,6 +52,39 @@ The Dockerfile supports two build types: **prebuilt** (using current per-family 
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
 | `BUILD_TYPE` | `prebuilt` | Selects build method | `prebuilt`, `fullbuild` |
+
+#### 🧩 Kernel Packing Tooling
+
+The `devshell` and `hipdnn` images stage the `rocm_kpack` Python tooling at
+**`/opt/rocm-kpack/python`**, together with its `msgpack` and `zstandard` dependencies. The
+hip-kernel-provider build finds this path on its own, so kernel packing works inside the container
+with no CMake flags and no network access at build time. (The `fullbuildshell` target builds from
+`base` and does not include it.)
+
+Passing `-DHIPKERNELPROVIDER_KPACK_PYTHON_DIR=<dir>` overrides the staged copy — useful when
+building against a local rocm-systems checkout. See
+[Building.md](../docs/Building.md#kernel-packing-rocm_kpack).
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `ROCM_SYSTEMS_KPACK_REF` | a pinned commit | Git ref of [rocm-systems](https://github.com/ROCm/rocm-systems) to take `shared/kpack` from. Only `shared/kpack` is checked out. A branch, a tag, or a **full** commit SHA — the git wire protocol cannot fetch an abbreviated one. Independent of `ROCM_SYSTEMS_REF`, which selects TheRock's rocm-systems submodule. |
+
+> [!NOTE]
+> The default is a pinned commit, not a branch: Docker keys a layer on the command string, so a
+> branch default would let a warm builder cache ship stale tooling. Pass
+> `ROCM_SYSTEMS_KPACK_REF=develop` to track the branch. The staged commit is recorded at
+> `/opt/rocm-kpack/ROCM_SYSTEMS_COMMIT`.
+
+> [!NOTE]
+> The tooling is staged outside `/opt/rocm` because the `devshell` target expects a ROCm install
+> to be mounted at `/opt/rocm` at run time, which would shadow anything placed there at build time.
+
+```bash
+# Stage kpack from a specific rocm-systems commit
+docker build -f Dockerfile.ubuntu24 \
+    --build-arg ROCM_SYSTEMS_KPACK_REF=a022846cf553c2b135410a5168f97705f1b9c6ac \
+    -t hipdnn:prebuilt .
+```
 
 #### 📦 Prebuilt-Only Arguments
 
@@ -48,7 +100,7 @@ https://github.com/ROCm/TheRock/issues/2179
 | `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a nightly version such as `7.12.0a20260202` or a commit-addressed dev version such as `7.15.0.dev0+<sha>`. TheRock selects the appropriate multi-arch feed. |
 | `THEROCK_ASIC` | `gfx94X` | GPU architecture family prefix. Combined with `THEROCK_ASIC_VARIANT` to form the artifact group. |
 | `THEROCK_ASIC_VARIANT` | `dcgpu` | GPU variant suffix (e.g., `dcgpu`, `all`, `dgpu`). Combined with `THEROCK_ASIC` to form the artifact group. |
-| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. The default `gfx94X-dcgpu` selects the current per-family multi-arch tarball. Use `multiarch` only when all GPU kernel packs are required; it is substantially larger. Choose other per-family group names from the [tarball feed](https://rocm.nightlies.amd.com/tarball-multi-arch/). |
+| `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. The default `gfx94X-dcgpu` selects the current per-family multi-arch tarball. Use `multiarch` only when all GPU kernel packs are required; it is substantially larger. Choose other per-family group names from the [tarball feed](https://nightly.repo.amd.com/rocm/core/tarball/). |
 
 #### Version Logging
 
@@ -63,7 +115,7 @@ The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VE
 |----------|---------|-------------|
 | `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified). |
 | `ROCM_LIBRARIES_REF` | `default` | Specific git commit hash for rocm-libraries submodule to checkout (uses default branch if not specified). |
-| `THEROCK_ASIC` | `gfx94X` | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found in the LLVM Target column of the Supported GPU table [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
+| `THEROCK_ASIC` | `gfx94X-dcgpu` | GPU architecture or family accepted by TheRock's `THEROCK_AMDGPU_FAMILIES`, for example `gfx942`, `gfx94X-dcgpu`, or `gfx950`. |
 | `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types). |
 | `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset. |
 | `BUILD_JOBS` | `0` | Number of parallel build jobs. 0 uses all available CPU cores. |
@@ -112,22 +164,22 @@ docker build -f Dockerfile.ubuntu24 \
 
 Note that the full build can take several hours to complete.
 
-**Default fullbuild** (gfx94X, default branch):
+**Default fullbuild** (gfx94X-dcgpu, default branch):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild -t hipdnn:fullbuild .
 ```
 
-**Debug build** (gfx94X, debug mode):
+**Debug build** (gfx94X-dcgpu, debug mode):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Debug -t hipdnn:debug .
 ```
 
-**Release build with limited cores** (gfx94X, release mode, 4 cores):
+**Release build with limited cores** (gfx94X-dcgpu, release mode, 4 cores):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Release --build-arg BUILD_JOBS=4 -t hipdnn:release .
 ```
 
-**Custom preset with all cores** (gfx94X, custom preset):
+**Custom preset with all cores** (gfx94X-dcgpu, custom preset):
 ```bash
 docker build -f Dockerfile.ubuntu24 --build-arg BUILD_TYPE=fullbuild --build-arg THEROCK_BUILD_MODE=Preset --build-arg THEROCK_BUILD_PRESET=linux-debug-package -t hipdnn:custom-preset .
 ```

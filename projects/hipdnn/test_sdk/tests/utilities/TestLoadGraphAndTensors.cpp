@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/detail/ScopedExecute.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
@@ -132,7 +133,7 @@ TEST(TestScanBundleJsonFiles, NonexistentDirectory)
 
 TEST(TestScanBundleJsonFiles, EmptyDirectory)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_empty");
+    const ScopedDirectory dir = claimScratchDirectory("scan_empty");
 
     auto results = scanBundleJsonFiles(dir.path());
     EXPECT_TRUE(results.empty());
@@ -140,7 +141,7 @@ TEST(TestScanBundleJsonFiles, EmptyDirectory)
 
 TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_recursive");
+    const ScopedDirectory dir = claimScratchDirectory("scan_recursive");
     const auto nested = dir.path() / "sub1" / "sub2";
     std::filesystem::create_directories(nested);
 
@@ -163,7 +164,7 @@ TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
 
 TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_meta");
+    const ScopedDirectory dir = claimScratchDirectory("scan_meta");
 
     touchFile(dir.path() / "bundle.json");
     touchFile(dir.path() / "meta.json");
@@ -176,7 +177,7 @@ TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
 
 TEST(TestScanBundleJsonFiles, ReturnsSortedPaths)
 {
-    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_sorted");
+    const ScopedDirectory dir = claimScratchDirectory("scan_sorted");
     const auto subC = dir.path() / "c_dir";
     const auto subA = dir.path() / "a_dir";
     std::filesystem::create_directory(subC);

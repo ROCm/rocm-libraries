@@ -420,13 +420,9 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 } // namespace unit_implicitgemm_ck_util_test
 
 // ---------------------------------------------------------------------------
-// Regression: RequiresLargeTensorCKInstance must force a large-tensor (int64) CK
-// instance for a grouped backward-weights problem whose flattened element count
-// exceeds INT_MAX even though every individual length/stride still fits int32.
-// Without the element-count gate the loader keeps such a problem eligible for a
-// fast int32-indexing instance whose flat element offset overflows, silently
-// returning wrong results. The gate is scoped to backward-weights: forward and
-// backward-data verify correctly on the int32 instances. Shape is synthetic.
+// Regression: the gate keys on byte span, not element count, and applies to every
+// direction (previously backward-weights only). Shapes below are chosen so every
+// individual length/stride still fits int32 -- only the byte-span check can flag them.
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -486,6 +482,35 @@ miopen::conv::ProblemDescription MakeElemCount3DConvProblem(miopen::conv::Direct
     return {y, weights, x, conv, dir};
 }
 
+// dtype-parameterized sibling of MakeElemCountConvProblem: fp32's larger byte-per-element
+// ratio lets a shape cross the byte-span boundary while its element count stays well
+// under INT_MAX, isolating the byte-span check from the element-count one.
+miopen::conv::ProblemDescription MakeByteSpanConvProblem(miopenDataType_t dtype,
+                                                         miopen::conv::Direction dir,
+                                                         std::size_t n,
+                                                         std::size_t c,
+                                                         std::size_t h,
+                                                         std::size_t w,
+                                                         std::size_t k)
+{
+    const miopen::TensorDescriptor x{dtype, miopenTensorNHWC, {n, c, h, w}};
+    const miopen::TensorDescriptor weights{dtype, miopenTensorNHWC, {k, c, 3, 3}};
+    const miopen::ConvolutionDescriptor conv{2,
+                                             miopenConvolution,
+                                             miopenPaddingDefault,
+                                             {1, 1}, // pads (SAME for 3x3)
+                                             {1, 1}, // strides
+                                             {1, 1}, // dilations
+                                             {0, 0}, // trans output pads
+                                             1,      // group count
+                                             1.0f};  // lowp quant
+    const miopen::TensorDescriptor y = conv.GetForwardOutputTensor(x, weights, dtype);
+
+    if(dir == miopen::conv::Direction::Forward)
+        return {x, weights, y, conv, dir};
+    return {y, weights, x, conv, dir};
+}
+
 } // namespace
 
 TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate)
@@ -493,22 +518,21 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate
     using miopen::conv::Direction;
     using miopen::solver::RequiresLargeTensorCKInstance;
 
-    // N*C*H*W = 256*1024*128*128 = 4.29e9 > INT_MAX, yet every length and stride
-    // (max stride = H*W*C = 16.78M) fits int32, so AllTensorsDimsFitIntoInt() is true
-    // and only the element-count gate can flag it.
+    // N*C*H*W = 256*1024*128*128 = 4.29e9 elements; fp16 byte span ~8.58 GB, over INT_MAX
+    // bytes despite every stride (max = H*W*C = 16.78M) fitting int32.
     constexpr std::size_t n = 256, c = 1024, hw = 128, k = 1024;
 
     EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::BackwardWeights, n, c, hw, hw, k)))
-        << "grouped wrw with >INT_MAX element count must require a large-tensor instance";
+        << "grouped wrw with >INT_MAX byte span must require a large-tensor instance";
 
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::Forward, n, c, hw, hw, k)))
-        << "forward must stay on the (faster) int32 instances";
+        << "forward with >INT_MAX byte span must require a large-tensor instance";
 
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::BackwardData, n, c, hw, hw, k)))
-        << "backward-data must stay on the (faster) int32 instances";
+        << "backward-data with >INT_MAX byte span must require a large-tensor instance";
 
     // A small wrw problem (element count well within int32) stays on the int32 path.
     EXPECT_FALSE(RequiresLargeTensorCKInstance(
@@ -520,25 +544,63 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, Wrw3DElementCountOverflowGa
     using miopen::conv::Direction;
     using miopen::solver::RequiresLargeTensorCKInstance;
 
-    // N*C*D*H*W = 256*512*32*32*32 = 4.29e9 > INT_MAX, yet every length and stride
-    // (max stride = C*D*H*W = 16.78M) fits int32, so AllTensorsDimsFitIntoInt() is true
-    // and only the element-count gate can flag it. Mirrors WrwElementCountOverflowGate
-    // for the 3D (NDHWC) grouped wrw path.
+    // Mirrors WrwElementCountOverflowGate for the 3D (NDHWC) path: N*C*D*H*W =
+    // 256*512*32*32*32 = 4.29e9 elements, fp16 byte span ~8.58 GB, over INT_MAX bytes
+    // despite every stride (max = C*D*H*W = 16.78M) fitting int32.
     constexpr std::size_t n = 256, c = 512, d = 32, hw = 32, k = 512;
 
     EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardWeights, n, c, d, hw, hw, k)))
-        << "3D grouped wrw with >INT_MAX element count must require a large-tensor instance";
+        << "3D grouped wrw with >INT_MAX byte span must require a large-tensor instance";
 
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::Forward, n, c, d, hw, hw, k)))
-        << "3D forward must stay on the (faster) int32 instances";
+        << "3D forward with >INT_MAX byte span must require a large-tensor instance";
 
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardData, n, c, d, hw, hw, k)))
-        << "3D backward-data must stay on the (faster) int32 instances";
+        << "3D backward-data with >INT_MAX byte span must require a large-tensor instance";
 
     // A small 3D wrw problem (element count well within int32) stays on the int32 path.
     EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardWeights, 1, 64, 8, 16, 16, 64)));
+}
+
+TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, ByteSpanOverflowGate)
+{
+    using miopen::conv::Direction;
+    using miopen::solver::RequiresLargeTensorCKInstance;
+
+    // fp32, c=512, h=w=32, k=512, 3x3/pad1/stride1 (=> Ho=Wo=32, Y = {n,512,32,32}); element
+    // count stays under INT_MAX on both sides of the boundary below, so only the byte span
+    // (not GetElementSpace()) distinguishes them -- this is the case the original bug missed.
+    // X and Y have equal span here (k=c, Ho=h, Wo=w):
+    //   n=1024: elem = 536,870,912 (< INT_MAX); bytes = 2,147,483,648 (INT_MAX + 1) -> TRIGGER
+    //   n=1023: elem = 536,346,624 (< INT_MAX); bytes = 2,145,386,496 (< INT_MAX)   -> no trigger
+    constexpr std::size_t c = 512, hw = 32, k = 512;
+    constexpr std::size_t n_over  = 1024; // byte span 2,147,483,648 > INT_MAX
+    constexpr std::size_t n_under = 1023; // byte span 2,145,386,496 < INT_MAX
+
+    // Over the 2 GiB byte boundary: every direction must require a large-tensor instance.
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+        MakeByteSpanConvProblem(miopenFloat, Direction::Forward, n_over, c, hw, hw, k)))
+        << "fwd: >INT_MAX byte span (element count still < INT_MAX) must require large-tensor";
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardData, n_over, c, hw, hw, k)))
+        << "bwd-data: >INT_MAX byte span must require large-tensor";
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardWeights, n_over, c, hw, hw, k)))
+        << "wrw: >INT_MAX byte span must require large-tensor";
+
+    // One N below the boundary: byte span < INT_MAX, element count < INT_MAX, all strides
+    // fit int32 -> every direction must stay on the int32 path.
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeByteSpanConvProblem(miopenFloat, Direction::Forward, n_under, c, hw, hw, k)))
+        << "fwd: byte span just under INT_MAX must stay on the int32 instances";
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardData, n_under, c, hw, hw, k)))
+        << "bwd-data: byte span just under INT_MAX must stay on the int32 instances";
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardWeights, n_under, c, hw, hw, k)))
+        << "wrw: byte span just under INT_MAX must stay on the int32 instances";
 }

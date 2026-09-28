@@ -102,9 +102,8 @@ using TensorWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttrib
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 // Our current implementation limitations (distinct from hipBLASLt's own
-// restrictions, checked later). Inputs must be MX operand types: FP8 OCP
-// (E4M3 / E5M2) or FP4 (E2M1). A and B are checked independently, so mixed
-// pairs (e.g. FP8 OCP + FP4) are supported here; hipBLASLt's heuristic is the
+// restrictions, checked later). A and B are checked independently, so mixed
+// pairs (e.g. FP8 OCP + FP4) are accepted here; hipBLASLt's heuristic is the
 // final gate on whether a given combination has a kernel.
 void checkImplementationLimitations(const TensorWrapper& tXA, const TensorWrapper& tXB)
 {
@@ -112,13 +111,15 @@ void checkImplementationLimitations(const TensorWrapper& tXA, const TensorWrappe
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A input must be an MX type (FP8 OCP E4M3/E5M2 or FP4 E2M1)");
+            "MX matmul: A input must be an MX type (FP8 OCP E4M3/E5M2, FP6 E2M3/E3M2, or "
+            "FP4 E2M1)");
     }
     if(!hipblaslt_utils::isTypeMxOcp(tXB.dataType()))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B input must be an MX type (FP8 OCP E4M3/E5M2 or FP4 E2M1)");
+            "MX matmul: B input must be an MX type (FP8 OCP E4M3/E5M2, FP6 E2M3/E3M2, or "
+            "FP4 E2M1)");
     }
 }
 
@@ -448,6 +449,7 @@ bool HipblasltMxMatmulPlanBuilder::isApplicable(
     try
     {
         auto [deqAttrA, deqAttrB, matmulAttr] = getNodeAttrs(opGraph);
+        REJECT_IF_WORKAROUND_ISSUE_10811(deqAttrA, deqAttrB, opGraph.getTensorMap());
         checkConstraints(opGraph, deqAttrA, deqAttrB, matmulAttr, opGraph.getTensorMap());
         // Constructing the plan runs hipblasLtMatmulAlgoGetHeuristic, the
         // authoritative check that this GPU + hipBLASLt build actually has an MX

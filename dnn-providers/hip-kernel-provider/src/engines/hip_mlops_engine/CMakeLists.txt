@@ -19,12 +19,15 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormFwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormUtilities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleFwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResamplePlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleBwdPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResampleBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/ApplicabilityChecks.cpp
 )
 

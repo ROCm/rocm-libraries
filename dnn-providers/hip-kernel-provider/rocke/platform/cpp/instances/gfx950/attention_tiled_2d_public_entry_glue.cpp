@@ -440,6 +440,15 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
         }
     }
 
+    /* ---- use_fast_paged_kv_desc: bf16-only descriptor (Python __post_init__
+     * line 725). The selector guards this already, but mirror the restriction
+     * here so a hand-constructed spec trips loudly rather than producing
+     * mis-addressed KV loads. */
+    if(spec->use_fast_paged_kv_desc && !rocke_g950_streq(spec->dtype, "bf16"))
+    {
+        rocke_g950_fail(b, ROCKE_ERR_VALUE, "use_fast_paged_kv_desc is restricted to dtype='bf16'");
+    }
+
     /* ---- V-double-buffer / deep-ring / staggered-wait / q-reread.
      * Python __post_init__ accepts these flags (and the emitter wires the
      * depth-2 V-double-buffer + staggered iter-start schedule). The gfx950 C

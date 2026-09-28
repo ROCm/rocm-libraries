@@ -68,19 +68,8 @@ namespace
 // assign_ilu0_boost_value
 // ===========================================================================
 //
-// PR #10290 (merged to upstream/develop) makes ROCSPARSE_ENABLE_ILU0_BOOST_SIGN
-// default ON, so ROCSPARSE_WITH_ILU0_BOOST_SIGN is defined in this build and the
-// sign/inertia-preserving path is the default. In that path the routine returns
-// the boost *magnitude* carried along the sign/phase of the original pivot:
-//
-//   real:    (|value| > 0) ? copysign(|boost|, value) : |boost|
-//   complex: (|value| > 0) ? |boost| * value / |value| : |boost|
-//
-// i.e. a negative boost can never flip the pivot's sign (inertia is preserved),
-// and a zero pivot receives the pure boost magnitude. The sign-aware result is
-// therefore the DEFAULT expectation below; a verbatim-boost expectation is only
-// retained under an explicit #ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN fallback for
-// a hypothetical no-sign build.
+// Sign/inertia-preserving ILU0 boost: the routine returns the boost magnitude
+// carried along the sign/phase of the original pivot.
 
 // --- Primary, same-direction cases (identical under both configurations) -----
 TEST(internal_collectives_assign_ilu0_boost, f64)
@@ -108,88 +97,52 @@ TEST(internal_collectives_assign_ilu0_boost, complex_f64)
 // value=-4.0, boost=0.25 -> copysign(|0.25|, -4.0) == -0.25 (sign-aware default).
 TEST(internal_collectives_assign_ilu0_boost, f64_negative_value)
 {
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<double>(-4.0, 0.25, 0.25); // no-sign fallback: verbatim boost
-#else
     run_assign_boost<double>(-4.0, 0.25, -0.25);
-#endif
 }
 TEST(internal_collectives_assign_ilu0_boost, f32_negative_value)
 {
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<float>(-4.0f, 0.25f, 0.25f);
-#else
     run_assign_boost<float>(-4.0f, 0.25f, -0.25f);
-#endif
 }
 TEST(internal_collectives_assign_ilu0_boost, complex_f32_negative_value)
 {
     const rocsparse_float_complex value(-4.0f, 0.0f);
     const rocsparse_float_complex boost(0.25f, 0.0f);
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<rocsparse_float_complex>(value, boost, rocsparse_float_complex(0.25f, 0.0f));
-#else
     // |0.25| * (-4,0)/|(-4,0)| == (-0.25, 0)
     run_assign_boost<rocsparse_float_complex>(value, boost, rocsparse_float_complex(-0.25f, 0.0f));
-#endif
 }
 TEST(internal_collectives_assign_ilu0_boost, complex_f64_negative_value)
 {
     const rocsparse_double_complex value(-4.0, 0.0);
     const rocsparse_double_complex boost(0.25, 0.0);
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<rocsparse_double_complex>(value, boost, rocsparse_double_complex(0.25, 0.0));
-#else
     run_assign_boost<rocsparse_double_complex>(value, boost, rocsparse_double_complex(-0.25, 0.0));
-#endif
 }
 
 // --- Negative boost: magnitude used, so the pivot sign is never flipped ------
 // value=4.0, boost=-0.25 -> copysign(|-0.25|, 4.0) == +0.25 (sign-aware default).
 TEST(internal_collectives_assign_ilu0_boost, f64_negative_boost_uses_magnitude)
 {
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<double>(4.0, -0.25, -0.25); // no-sign fallback: verbatim boost
-#else
     run_assign_boost<double>(4.0, -0.25, 0.25);
-#endif
 }
 TEST(internal_collectives_assign_ilu0_boost, f32_negative_boost_uses_magnitude)
 {
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<float>(4.0f, -0.25f, -0.25f);
-#else
     run_assign_boost<float>(4.0f, -0.25f, 0.25f);
-#endif
 }
 
 // --- Zero pivot: |value| == 0 returns the pure boost magnitude |boost| -------
 TEST(internal_collectives_assign_ilu0_boost, f64_zero_value_returns_abs_boost)
 {
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<double>(0.0, -0.25, -0.25); // no-sign fallback: verbatim boost
-#else
     run_assign_boost<double>(0.0, -0.25, 0.25);
-#endif
 }
 TEST(internal_collectives_assign_ilu0_boost, f32_zero_value_returns_abs_boost)
 {
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<float>(0.0f, -0.25f, -0.25f);
-#else
     run_assign_boost<float>(0.0f, -0.25f, 0.25f);
-#endif
 }
 TEST(internal_collectives_assign_ilu0_boost, complex_f64_zero_value_returns_abs_boost)
 {
     // |value| == 0 -> returns |boost| as a pure-real complex.
     const rocsparse_double_complex value(0.0, 0.0);
     const rocsparse_double_complex boost(0.0, -0.25); // |boost| == 0.25
-#ifndef ROCSPARSE_WITH_ILU0_BOOST_SIGN
-    run_assign_boost<rocsparse_double_complex>(value, boost, rocsparse_double_complex(0.0, -0.25));
-#else
     run_assign_boost<rocsparse_double_complex>(value, boost, rocsparse_double_complex(0.25, 0.0));
-#endif
 }
 // ===========================================================================
 // host-side primitives::double_buffer

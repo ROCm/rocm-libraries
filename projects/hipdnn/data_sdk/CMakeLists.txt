@@ -17,6 +17,19 @@ add_library(hipdnn_data_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_data_sdk)
 
+# CMake-baked per-platform default cache root -- see CacheRoot.hpp for resolution order.
+# expandUser() resolves the leading ~/%USERPROFILE% token at run time.
+if(WIN32)
+    set(HIPDNN_CACHE_ROOT_DEFAULT "%USERPROFILE%\\\\.hipdnn\\\\cache\\\\")
+else()
+    set(HIPDNN_CACHE_ROOT_DEFAULT "~/.cache/hipdnn/")
+endif()
+configure_file(
+    "${HIP_DNN_DATA_SDK_INCLUDE_DIR}/hipdnn_data_sdk/utilities/CacheRootDefaults.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/utilities/CacheRootDefaults.h"
+    @ONLY
+)
+
 target_include_directories(
     hipdnn_data_sdk INTERFACE $<BUILD_INTERFACE:${HIP_DNN_DATA_SDK_INCLUDE_DIR}>
                               $<INSTALL_INTERFACE:${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}>
@@ -46,6 +59,13 @@ install(
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/version.h"
     DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/hipdnn_data_sdk
+    COMPONENT Development
+)
+
+# Install generated cache-root defaults header
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_data_sdk/utilities/CacheRootDefaults.h"
+    DESTINATION ${HIP_DNN_DATA_SDK_INSTALL_INCLUDE_DIR}/hipdnn_data_sdk/utilities
     COMPONENT Development
 )
 

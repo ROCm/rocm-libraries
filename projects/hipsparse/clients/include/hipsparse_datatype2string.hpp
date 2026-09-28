@@ -159,10 +159,8 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
         return "bell";
     case HIPSPARSE_FORMAT_SLICED_ELL:
         return "sell";
-#ifdef HIPSPARSE_WITH_SPMV_BSR
     case HIPSPARSE_FORMAT_BSR:
         return "bsr";
-#endif
     }
     return "invalid";
 }
@@ -549,10 +547,8 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
         return "csr_alg2";
     case HIPSPARSE_SPMV_SELL_ALG1:
         return "sell_alg1";
-#ifdef HIPSPARSE_WITH_SPMV_BSR
     case HIPSPARSE_SPMV_BSR_ALG1:
         return "bsr_alg1";
-#endif
     case HIPSPARSE_SPMV_CSR_ALG3:
         return "csr_alg3";
     }
@@ -576,10 +572,8 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
         return "csr_alg2";
     case HIPSPARSE_SPMV_SELL_ALG1:
         return "sell_alg1";
-#ifdef HIPSPARSE_WITH_SPMV_BSR
     case HIPSPARSE_SPMV_BSR_ALG1:
         return "bsr_alg1";
-#endif
     }
     return "invalid";
 }

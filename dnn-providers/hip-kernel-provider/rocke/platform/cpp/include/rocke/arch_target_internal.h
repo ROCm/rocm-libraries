@@ -56,15 +56,6 @@ extern const int rocke_ati_arch_registry_len;
  * in sync. */
 extern const char* const rocke_ati_known_arches[];
 
-/* ------------------------------------------------------- dtype normalisation */
-
-/* The canonical-key core of rocke_normalize_dtype, shared so both buckets resolve
- * spellings identically. `lowered` is a caller buffer that receives the
- * strip+lower of `name` (used as the pass-through result for unknown spellings).
- * Returns a static interned canonical string for a known alias, else `lowered`.
- * Defined in bucket 0. */
-const char* rocke_ati_normalize_dtype(const char* name, char* lowered, size_t cap);
-
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

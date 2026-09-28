@@ -215,8 +215,18 @@ rocsparse_status
 
         const int64_t nblocks = (nnz_A - 1) / BLOCKSIZE + 1;
 
-        const uint32_t grid_x = std::min(nblocks, static_cast<int64_t>(2147483647));
-        const uint32_t grid_y = std::min((nblocks - 1) / grid_x + 1, static_cast<int64_t>(65535));
+        // A dispatch is rejected once grid.x * blockDim.x reaches 2^32, well
+        // before grid.x itself reaches the 2^31 block cap. Bound the x extent
+        // by that limit and let the remainder spill onto grid.y, which the
+        // kernel already folds into its flat index.
+        static constexpr int64_t max_blocks_x = (static_cast<int64_t>(1) << 32) / BLOCKSIZE - 1;
+
+        const int64_t blocks_x = std::min(nblocks, max_blocks_x);
+        const int64_t blocks_y
+            = std::min((nblocks - 1) / blocks_x + 1, static_cast<int64_t>(65535));
+
+        const uint32_t grid_x = static_cast<uint32_t>(blocks_x);
+        const uint32_t grid_y = static_cast<uint32_t>(blocks_y);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((abs_kernel<BLOCKSIZE, T>),
                                            dim3(grid_x, grid_y, 1),

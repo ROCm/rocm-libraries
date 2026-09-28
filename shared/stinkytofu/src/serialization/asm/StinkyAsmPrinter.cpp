@@ -23,15 +23,38 @@
 
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
+#include <algorithm>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
+#include <vector>
 
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
+namespace {
+
+/// Register classes \p inst's attached SSA was built for, which decides how many
+/// slots each operand consumes.
+///
+/// An instruction printed outside a function has no arena to ask, so it falls
+/// back to every liftable class — the answer that predates lift scoping. Printing
+/// is diagnostic, so a wrong guess there misreads a dump rather than the program.
+const RegClassSet& ssaClassesOf(const StinkyInstruction& inst) {
+    static const RegClassSet kAllClasses = RegClassSet::all();
+    const BasicBlock* block = inst.getParentBlock();
+    const Function* function = block == nullptr ? nullptr : block->getParentFunc();
+    return function == nullptr ? kAllClasses : function->ssaArena().liftedClasses();
+}
+
+}  // namespace
+
 //----------------------------------------------------------------------
 // AsmPrinter implementation
 //----------------------------------------------------------------------
@@ -54,6 +77,7 @@ void AsmPrinter::printRegister(const StinkyRegister& reg) {
             //         os << prefix << "[" << reg.getSymbolicName() << ":" << reg.getSymbolicName()
             //            << "+" << (reg.reg.num - 1) << "]";
             // }
+            if (reg.reg.isMinus) os << "-";
             if (reg.reg.num == 1)
                 os << prefix << reg.reg.idx;
             else
@@ -119,9 +143,101 @@ void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex, int baseInd
     std::string blockId =
         bb.getLabel().empty() ? ("bb" + std::to_string(blockIndex)) : bb.getLabel();
     os << std::string(static_cast<size_t>(baseIndent), ' ');
-    os << "^" << blockId << ":\n";
+    os << "^" << blockId;
+    if (options.ssaForm) printBlockArgumentList(bb);
+    os << ":\n";
+    if (options.ssaForm) printBlockArgumentSources(bb, baseIndent);
     for (const IRBase& ir : bb) printIR(ir, baseIndent);
     printSuccessorsLine(bb, baseIndent);
+}
+
+void AsmPrinter::printSSAValue(const StinkySSAValue* value) {
+    if (value == nullptr) {
+        os << "%<null>";
+        return;
+    }
+    os << "%" << value->valueId() << ":" << regTypeToString(value->type().regType);
+}
+
+void AsmPrinter::printBlockArgumentList(const BasicBlock& bb) {
+    if (bb.ssaArguments().empty()) return;
+    os << "(";
+    for (size_t i = 0; i < bb.ssaArguments().size(); ++i) {
+        if (i > 0) os << ", ";
+        printSSAValue(bb.ssaArguments()[i].value);
+    }
+    os << ")";
+}
+
+void AsmPrinter::printBlockArgumentSources(const BasicBlock& bb, int baseIndent) {
+    // Lift appends incoming as the dominator walk reaches each predecessor, so
+    // the stored order is deterministic but tracks that walk rather than the CFG.
+    // Printing in predecessor order lines the edges up with the block's
+    // predecessor list and keeps a dump stable if the walk ever changes.
+    const std::vector<BasicBlock*>& preds = bb.getPredecessors();
+
+    for (const SSABlockArgument& arg : bb.ssaArguments()) {
+        // A live-in has no incoming edge; the header alone already names it.
+        if (arg.incoming.empty()) continue;
+
+        std::vector<const SSABlockIncoming*> ordered;
+        ordered.reserve(arg.incoming.size());
+        for (const SSABlockIncoming& incoming : arg.incoming) ordered.push_back(&incoming);
+        std::stable_sort(ordered.begin(), ordered.end(),
+                         [&preds](const SSABlockIncoming* lhs, const SSABlockIncoming* rhs) {
+                             const auto position = [&preds](const BasicBlock* block) {
+                                 const auto it = std::find(preds.begin(), preds.end(), block);
+                                 return static_cast<size_t>(std::distance(preds.begin(), it));
+                             };
+                             return position(lhs->predecessor) < position(rhs->predecessor);
+                         });
+
+        os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+        printSSAValue(arg.value);
+        os << " = phi(";
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            if (i > 0) os << ", ";
+            const SSABlockIncoming& incoming = *ordered[i];
+            os << "^"
+               << (incoming.predecessor == nullptr ? "<null>" : incoming.predecessor->getLabel())
+               << ": ";
+            printSSAValue(incoming.use == nullptr ? nullptr : incoming.use->value());
+        }
+        os << ")\n";
+    }
+}
+
+bool AsmPrinter::printsSSA(const StinkyInstruction& inst) const {
+    return options.ssaForm && inst.hasAttachedSSA();
+}
+
+void AsmPrinter::printSSAOperandGroup(const StinkyInstruction& inst, const StinkyRegister& reg,
+                                      bool isDestination, size_t& cursor) {
+    const size_t units = liftedSSAUnits(reg, ssaClassesOf(inst));
+    const size_t available = isDestination ? inst.getNumSSAResults() : inst.getNumSSAOperands();
+
+    if (units == 0) {
+        // Not lifted: the SSA slot holds the same payload the physical operand
+        // spells, so print the physical form. Destinations consume no slot.
+        if (!isDestination && cursor < available) ++cursor;
+        printRegister(reg);
+        return;
+    }
+    if (cursor + units > available) {
+        // Attached SSA does not describe this operand; stay inspectable rather
+        // than reading past the end.
+        printRegister(reg);
+        return;
+    }
+
+    // Brackets keep a multi-DWORD range distinguishable from separate operands.
+    if (units > 1) os << "[";
+    for (size_t unit = 0; unit < units; ++unit) {
+        if (unit > 0) os << ", ";
+        printSSAValue(isDestination ? inst.getSSAResult(cursor++)
+                                    : inst.getSSAOperandValue(cursor++));
+    }
+    if (units > 1) os << "]";
 }
 
 void AsmPrinter::printIR(const IRBase& ir) {
@@ -164,12 +280,19 @@ void AsmPrinter::printInstruction(const StinkyInstruction& inst, int baseIndent)
 
     os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
 
+    const bool ssa = printsSSA(inst);
+
     if (!inst.getDestRegs().empty()) {
+        size_t resultCursor = 0;
         for (size_t i = 0; i < inst.getDestRegs().size(); ++i) {
             if (i > 0) {
                 os << ", ";
             }
-            printRegister(inst.getDestRegs()[i]);
+            if (ssa)
+                printSSAOperandGroup(inst, inst.getDestRegs()[i], /*isDestination=*/true,
+                                     resultCursor);
+            else
+                printRegister(inst.getDestRegs()[i]);
         }
         os << " = ";
     }
@@ -178,11 +301,16 @@ void AsmPrinter::printInstruction(const StinkyInstruction& inst, int baseIndent)
     os << "\"" << irNamespace << "." << inst.getHwInstDesc()->mnemonic << "\"";
 
     os << "(";
+    size_t operandCursor = 0;
     for (size_t i = 0; i < inst.getSrcRegs().size(); ++i) {
         if (i > 0) {
             os << ", ";
         }
-        printRegister(inst.getSrcRegs()[i]);
+        if (ssa)
+            printSSAOperandGroup(inst, inst.getSrcRegs()[i], /*isDestination=*/false,
+                                 operandCursor);
+        else
+            printRegister(inst.getSrcRegs()[i]);
     }
     os << ")";
 

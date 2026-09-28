@@ -967,6 +967,7 @@ def makeMasterLibraries(
 
     for logic in logicList:
         (_, architectureName, _, solutionsForSchedule, _, newLibrary) = logic
+        architectureName = Common.compilerTarget(architectureName)
         if separate:
             if architectureName in masterLibraries:
                 nextSolIndex[architectureName] = masterLibraries[architectureName].merge(
@@ -1001,7 +1002,7 @@ def addFallback(masterLibraries: Dict[str, MasterSolutionLibrary]) -> None:
             value.insert(masterLibraries["fallback"])
 
     for archName in archs:
-        archName = archName.split("-", 1)[0]
+        archName = archName.split("-xnack", 1)[0]
         if archName not in masterLibraries:
             tPrint(1, "Using fallback for arch: " + archName)
             masterLibraries[archName] = masterLibraries["fallback"]
@@ -1472,7 +1473,12 @@ def TensileCreateLibrary():
     tPrint(3, HR)
     tPrint(3, "")
 
-    assignGlobalParameters(args)
+    # Library generation does not benchmark assembly kernels, so a GPU-less
+    # host (e.g. CI) is expected; suppress the "no ISA detected" warning.
+    Common.configureCompilerTarget(args["Architecture"])
+    if Common.compilerTarget("gfx1250") == "gfx1250-strict":
+        args["CacheAsmCaps"] = False
+    assignGlobalParameters(args, warnOnMissingIsa=False)
 
     supportedArchs = [
         gfxName(arch)

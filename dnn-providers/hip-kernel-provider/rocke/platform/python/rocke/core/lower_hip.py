@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from .arch.wmma_scale import gfx1250_scaled_wmma
 from .ir import (
     KernelDef,
     Op,
@@ -39,6 +40,14 @@ _HIP_TYPE = {
     "f32": "float",
     "fp8e4m3": "fp8e4m3",
     "bf8e5m2": "bf8e5m2",
+}
+
+_HIP_UNSIGNED_INT_TYPE = {
+    "i1": "bool",
+    "i8": "uint8_t",
+    "i16": "uint16_t",
+    "i32": "uint32_t",
+    "i64": "uint64_t",
 }
 
 
@@ -112,11 +121,12 @@ _ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);
 _ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);
 _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
-_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8);
+_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
 _ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);
 _ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);
 _ROCKE_VEC(int8_t, i8x, 4); _ROCKE_VEC(int8_t, i8x, 8); _ROCKE_VEC(int8_t, i8x, 16);
+_ROCKE_VEC(int8_t, i8x, 32); _ROCKE_VEC(int8_t, i8x, 48); _ROCKE_VEC(int8_t, i8x, 64);
 _ROCKE_VEC(bool, boolx, 2); _ROCKE_VEC(bool, boolx, 4); _ROCKE_VEC(bool, boolx, 8);
 _ROCKE_VEC(bool, boolx, 16);
 #undef _ROCKE_VEC
@@ -161,6 +171,34 @@ __device__ extern "C" void _llvm_amdgcn_raw_ptr_buffer_load_lds(
 
 def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
+
+
+# Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
+# typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
+_VEC_PREFIX = {
+    "f16": "f16x",
+    "bf16": "bf16x",
+    "f32": "f32x",
+    "i32": "i32x",
+    "i16": "i16x",
+    "i8": "i8x",
+    "fp8e4m3": "i8x",
+    "bf8e5m2": "i8x",
+}
+
+
+def _vec_prefix(elem_name: str, op_desc: str) -> str:
+    """Vector prefix for a vector load/store ``elem_type``. Validate rather than
+    silently falling back to f16, which would reinterpret the bits of another
+    type: an ``i32`` load viewed as ``f16x4`` then assigned to an ``i32x4``
+    converts the values instead of moving them."""
+    try:
+        return _VEC_PREFIX[elem_name]
+    except KeyError:
+        raise NotImplementedError(
+            f"{op_desc}: unsupported element type {elem_name!r} "
+            f"(supported: {sorted(_VEC_PREFIX)})"
+        ) from None
 
 
 def _f32_literal(val: float) -> str:
@@ -238,7 +276,16 @@ class _Lowerer:
         # or WMMA (RDNA/wave32), and whether ``ds_read_*_tr_*`` is available.
         from .arch import ArchTarget
 
-        self.arch = ArchTarget.from_gfx(arch or _DEFAULT_HIP_ARCH)
+        # Only an omitted arch (``None``) takes the baseline default; an arch
+        # that was passed but is empty/unknown is a caller bug, so surface it
+        # rather than silently lowering for a different target. ``from_gfx``
+        # raises on an unknown gfx string.
+        if arch is not None and not arch.strip():
+            raise ValueError(
+                "arch must be a gfx target string (e.g. 'gfx950'), not "
+                f"{arch!r}; pass None to use the {_DEFAULT_HIP_ARCH} baseline"
+            )
+        self.arch = ArchTarget.from_gfx(arch if arch is not None else _DEFAULT_HIP_ARCH)
 
     # -------------------- arch seam --------------------
 
@@ -263,6 +310,9 @@ class _Lowerer:
         self._indent -= 1
 
     def lower_op(self, op: Op) -> None:
+        if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
+            self._emit_wmma_gfx1250_scaled(op)
+            return
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no HIP lowering for op {op.name!r}")
@@ -366,8 +416,15 @@ class _Lowerer:
 
     def _op_arith_zext(self, op: Op) -> None:
         (v,) = op.operands
+        source_unsigned = _HIP_UNSIGNED_INT_TYPE.get(v.type.name)
+        if source_unsigned is None:
+            raise NotImplementedError(
+                f"HIP zext requires an integer scalar source, got {v.type.name!r}"
+            )
+        target = _type_to_hip(op.result.type)
         self._emit(
-            f"{_type_to_hip(op.result.type)} {_name(op.result)} = ({_type_to_hip(op.result.type)}){_name(v)};"
+            f"{target} {_name(op.result)} = "
+            f"({target})({source_unsigned}){_name(v)};"
         )
 
     def _op_arith_sext(self, op: Op) -> None:
@@ -427,7 +484,7 @@ class _Lowerer:
         ptr, idx = op.operands
         vec = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "global_load_vN")
         self._emit(
             f"{prefix}{vec} {_name(op.result)} = "
             f"*reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)});"
@@ -443,16 +500,7 @@ class _Lowerer:
             raise RuntimeError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {
-            "f16": "f16x",
-            "bf16": "bf16x",
-            "f32": "f32x",
-            "i32": "i32x",
-            "i16": "i16x",
-            "i8": "i8x",
-            "fp8e4m3": "i8x",
-            "bf8e5m2": "i8x",
-        }.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "smem_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
         )
@@ -482,7 +530,7 @@ class _Lowerer:
 
         The HIP source path has no ISA backend (it emits ``__builtin_amdgcn_*``
         directly), so the ``op_id`` is mapped back to the concrete
-        ``tile.<op_id>`` op and dispatched through the existing per-op handler.
+        ``tile.<op_id>`` op and passed through the shared operation dispatcher.
         This keeps the HIP emission identical to the legacy ISA-named path while
         the IRBuilder helpers route through :meth:`IRBuilder.mma`.
         """
@@ -617,6 +665,26 @@ class _Lowerer:
             f"f32x8 {_name(op.result)} = "
             f"__builtin_amdgcn_wmma_f32_16x16x64_{ab}("
             f"{_name(a)}, {_name(b)}, (int16_t)0, {_name(c)}, false, false);"
+        )
+
+    def _emit_wmma_gfx1250_scaled(self, op: Op) -> None:
+        spec = gfx1250_scaled_wmma(op.name)
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        op_id = spec.op_id
+        fmt0, fmt1 = spec.matrix_formats
+        self._require_wmma_arch(op_id)
+        a, b, c, a_scale, b_scale = op.operands
+        builtin = (
+            "__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4"
+            if spec.scale16
+            else "__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4"
+        )
+        self._emit(
+            f"f32x8 {_name(op.result)} = {builtin}("
+            f"{fmt0}, {_name(a)}, {fmt1}, {_name(b)}, (int16_t)0, {_name(c)}, "
+            f"0, {spec.scale_formats[0]}, {_name(a_scale)}, "
+            f"0, {spec.scale_formats[1]}, {_name(b_scale)}, false, false);"
         )
 
     def _op_tile_wmma_gfx1250_f32_16x16x32_bf16(self, op: Op) -> None:
@@ -1076,17 +1144,46 @@ class _Lowerer:
     def _op_tile_s_setprio(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_s_setprio({int(op.attrs['level'])});")
 
-    def _op_memref_global_store_vN(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        vec = int(op.attrs["vec"])
-        self._emit(
-            f"*reinterpret_cast<f16x{vec}*>({_name(ptr)} + {_name(idx)}) = "
-            f"{_name(val)};"
-        )
+    def _op_tile_inline_asm(self, op: Op) -> None:
+        """General AMDGPU inline-asm for the HIP backend (ADDITIVE).
 
-    def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
+        Emits GCC-style ``asm volatile("<tmpl>" : <out> : <ins> : <clob>)``.
+        rocKE templates use LLVM ``$N`` placeholders (``$0`` = output if any,
+        then inputs in operand order); GCC C++ asm uses ``%N`` so we translate.
+        Constraints are the LLVM comma list (``"=v,v"``): leading ``=``/``+``
+        entries are outputs, the rest inputs. A ``"memory"`` clobber is added
+        for side-effecting asm so raw-address ds_reads order against the
+        surrounding LDS writes/barriers.
+        """
+        import re as _re
+
+        # TODO: support multi-output inline asm (inline_asm_multi) in the HIP backend.
+        if len(op.results) > 1:
+            raise NotImplementedError(
+                "HIP backend inline asm supports at most one output; "
+                f"got {len(op.results)} (inline_asm_multi not yet lowered)"
+            )
+
+        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
+        parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
+        side = "volatile " if op.attrs.get("sideeffect", True) else ""
+        in_names = [_name(o) for o in op.operands]
+        clob = op.attrs.get(
+            "clobber", "memory" if op.attrs.get("sideeffect", True) else ""
+        )
+        clob_str = f' : "{clob}"' if clob else ""
+        if op.results:
+            out_c = parts[0]
+            in_cs = parts[1:]
+            res = op.results[0]
+            self._emit(f"{_type_to_hip(res.type)} {_name(res)};")
+            outs = f'"{out_c}"({_name(res)})'
+            ins = ", ".join(f'"{c}"({n})' for c, n in zip(in_cs, in_names))
+            self._emit(f'asm {side}("{template}" : {outs} : {ins}{clob_str});')
+        else:
+            ins = ", ".join(f'"{c}"({n})' for c, n in zip(parts, in_names))
+            inner = (" " + ins) if ins else ""
+            self._emit(f'asm {side}("{template}" : :{inner}{clob_str});')
 
     def _op_vector_extract(self, op: Op) -> None:
         (v,) = op.operands
@@ -1701,7 +1798,7 @@ class _Lowerer:
         ptr, idx, val = op.operands
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        prefix = _vec_prefix(elem_name, "global_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)}) = "
             f"{_name(val)};"
@@ -1718,7 +1815,8 @@ class _Lowerer:
         indices = op.operands[1:]
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        # Validate rather than silently reinterpreting an unmapped type as f16.
+        prefix = _vec_prefix(elem_name, "smem_load_vN")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
@@ -1870,6 +1968,22 @@ class _Lowerer:
         self._emit(
             f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
             f"{_name(data)}, {_name(data)}, {dpp_ctrl}, 15, 15, 1);"
+        )
+
+    def _op_tile_quad_perm(self, op: Op) -> None:
+        """Lower an eight-bit DPP quad-permute control word.
+
+        See :meth:`_op_tile_quad_perm` in ``lower_llvm.py``: ``ctrl``
+        packs four two-bit lane selectors, so ``0..255`` is the whole
+        legal range and out-of-range values are malformed IR.
+        """
+        (data,) = op.operands
+        ctrl = int(op.attrs["ctrl"])
+        if not 0 <= ctrl <= 255:
+            raise ValueError(f"tile.quad_perm: ctrl must be in 0..255, got {ctrl}")
+        self._emit(
+            f"int {_name(op.result)} = __builtin_amdgcn_update_dpp("
+            f"{_name(data)}, {_name(data)}, {ctrl}, 15, 15, 1);"
         )
 
     def _op_tile_ds_swizzle_xor(self, op: Op) -> None:

@@ -47,7 +47,7 @@ def test_vw8_applies_with_handedit_values():
     assert r["offsets"] == {"ldsBaseB": 33024, "writeStrideBytes": 66048,
                             "footprintPacked": True}
 
-def test_vw4_fine_uses_port_split():
+def test_vw4_halfvw_uses_port_split():
     # VWA=4 == WaveTileA/2 + TDMSplit -> port-split; same tight footprint as coarse.
     r = evaluate(_vw8_state(VectorWidthA=4, TDMSplit=1))
     assert r["applicable"] is True
@@ -65,8 +65,8 @@ def test_non_gfx1250_skips():
         r = evaluate(_vw8_state(ISA=isa))
         assert r["applicable"] is False and "gfx1250" in r["reason"]
 
-def test_vwb_fine_aligned_applies():
-    # Fine VWB is OK when each VW-group (vIdx) stays within one component, i.e. the
+def test_vwb_halfvw_aligned_applies():
+    # VWB=WaveTileB/2 is OK when each VW-group (vIdx) stays within one component, i.e. the
     # component column span is a whole multiple of one vIdx's column advance. For
     # MT256x256 (compCols=128), VWB in {1,2,4} all divide cleanly -> apply. LocalRead
     # (calcGfx1250LdsOffset) adds the per-vIdx component jump. GPU-validated 8/4/2/1.
@@ -74,7 +74,7 @@ def test_vwb_fine_aligned_applies():
         r = evaluate(_vw8_state(VectorWidthB=vwb))
         assert r["applicable"] is True, f"VWB={vwb} should apply"
 
-def test_vwb_fine_unaligned_uses_bcontig():
+def test_vwb_halfvw_unaligned_uses_bcontig():
     # When a single vIdx would straddle a component (component span not a multiple of the vIdx
     # column advance), B cannot be split -> fall back to the bcontig layout [A0][B0][B1][A1]:
     # B stays whole (baseline reads, WaveTileB unrestricted), only A moves to a separate segment. MT*x224
@@ -110,8 +110,8 @@ def test_bcontig_small_mt_needs_pgr2():
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
-def test_vwa_finer_than_half_skips():
-    # VWA=2 (numVec=4) is finer than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
+def test_vwa_smaller_than_half_skips():
+    # VWA=2 (numVec=4) is smaller than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
     r = evaluate(_vw8_state(VectorWidthA=2, TDMSplit=1))
     assert r["applicable"] is False and "WaveTileA/2" in r["reason"]
 
@@ -145,8 +145,8 @@ def test_aligned_applies_small_mt():
     assert _aligned_tiles_disjoint(r, 16512, 16512)
     assert "ALIGNED" in r["segmentMap"]
 
-def test_aligned_fine_vwb_applies():
-    # Fine-VWB is supported on the aligned branch too (per-vIdx component jump + enough
+def test_aligned_halfvw_vwb_applies():
+    # VWB=WaveTileB/2 is supported on the aligned branch too (per-vIdx component jump + enough
     # LocalReadAddr +64K registers, see KernelWriter numVgprLocalReadAddr). DepthU=64 VWB2.
     r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2,
                             LDSSegmentInterleave=1, VectorWidthB=2))
@@ -232,13 +232,152 @@ def test_auto_skips_aligned():
     r1 = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r1["applicable"] is True and r1["aligned"] is True
 
-def test_miwavegroup_not_2x2_skips():
-    # footprint packing assumes 2 waves per MFMA dim; NumWaves=4 with MIWG [4,1]/[1,4] passes
-    # Solution.py's prod>1 / pow2 gates but would lose/OOB the component jump. Must skip.
-    # MacroTile follows MIWG (derived in the helper), so each state stays MI-consistent.
-    for miwg in ([4, 1], [1, 4]):
-        r = evaluate(_vw8_state(MIWaveGroup=miwg))
-        assert r["applicable"] is False and "MIWaveGroup" in r["reason"], miwg
+def test_miwg_4x1_large_tile_baseline_sufficient():
+    # [4,1] large tile: active data fits one segment (fActData <= SEG) AND baseline already lands
+    # A0/A1 in different segments -> no interleave needed (only pad tail spills, negligible).
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1]))            # MIWaveTile[8,8] -> fActData=SEG
+    assert r["applicable"] is False
+    assert "baseline" in r["reason"], r["reason"]
+
+def test_miwg_1x4_large_tile_interleaves_not_baseline():
+    # [1,4]: B active, but baseline lays out [A][MX][B] so B sits at a non-aligned offset -> its
+    # comps span/overlap a segment even at fB==SEG. No baseline shortcut here; interleave realigns
+    # B to offset 0 (bcontig) -> aBaseline. (Contrast [4,1] where A@0 stays baseline.)
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4]))
+    assert r["applicable"] is True
+    assert r["offsets"]["aBaseline"] is True
+
+def test_asym_componentsplit_tdmsplit():
+    # TDMSplit + asymmetric MIWaveGroup ([4,1]/[1,4]) with a VW==WaveTile/2 active tensor
+    # component axis: the two components go to different segments, each wave's two load-halves stay
+    # together -- halves conflict at the same load count. Marked componentSplit (not portSplitA/B).
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4))
+    assert r["applicable"] is True and r["reason"] == "compaxis-asym"
+    assert r["offsets"].get("componentSplit") is True
+    assert r["offsets"].get("activeTC") == "A" and r["offsets"].get("bBaseline") is True
+    assert "portSplitA" not in r["offsets"]
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4], TDMSplit=1, VectorWidthB=4))
+    assert r["applicable"] is True and r["reason"] == "compaxis-asym"
+    assert r["offsets"].get("componentSplit") is True
+    assert r["offsets"].get("activeTC") == "B" and r["offsets"].get("aBaseline") is True
+    assert "portSplitB" not in r["offsets"]
+
+def test_asym_componentsplit_aligned_labels_compaxis():
+    # componentSplit that falls into the aligned branch (small DepthU -> both components fit one
+    # segment) must report compaxis, not portaxis, in reason/segmentMap and in the PGR reject.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["aligned"] is True
+    assert r["reason"] == "compaxis-asym-aligned" and "COMPAXIS-ALIGNED" in r["segmentMap"]
+    assert r["offsets"].get("componentSplit") is True
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
+                            PrefetchGlobalRead=1, LDSSegmentInterleave=1))
+    assert r["applicable"] is False and r["reason"].startswith("compaxis-asym")
+
+def test_asym_4x1_coarse_tdmsplit_port_axis():
+    # Coarse A ([4,1], default VWA=8 == WaveTileA=8) + TDMSplit -> portSplit layout:
+    # [active.port0][shared][active.port1], shared (B) stays whole/baseline.
+    st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1)
+    r = evaluate(st)
+    assert r["applicable"] and r["offsets"]["portSplitA"] is True
+    assert r["offsets"].get("bBaseline") is True
+    assert "portSplitB" not in r["offsets"]
+    # fAct=footprint(A)=66048, fSh=footprint(B)=16512 -> shared @ base+fAct, stride=fAct+2*fSh.
+    assert r["offsets"]["ldsBaseB"] == 66048
+    assert r["offsets"]["writeStrideBytes"] == 66048 + 2 * 16512
+    assert r["blockSpan"] == 0
+
+def test_asym_1x4_coarse_tdmsplit_port_axis():
+    # Mirror: coarse B ([1,4], default VWB=8 == WaveTileB=8) + TDMSplit -> portSplit, A shared.
+    st = _vw8_state(MIWaveGroup=[1, 4], TDMSplit=1)
+    r = evaluate(st)
+    assert r["applicable"] and r["offsets"]["portSplitB"] is True
+    assert r["offsets"].get("aBaseline") is True
+    assert "portSplitA" not in r["offsets"]
+    assert r["offsets"]["ldsBaseA"] == 66048
+    assert r["offsets"]["writeStrideBytes"] == 66048 + 2 * 16512
+
+def test_asym_tdmsplit_tight_reason():
+    # Coarse [4,1]+TDMSplit at DepthU=128: the shared B block already pushes port1 into the next
+    # segment (base+strideAct crosses base+fActData's segment) -> tight portSplit, no extra LDS.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1))
+    assert r["applicable"] is True and r["reason"] == "portaxis-asym"
+    assert r["aligned"] is False and r["blockSpan"] == 0
+    assert r["offsets"].get("portSplitA") is True
+
+def test_asym_tdmsplit_nontight_uses_aligned():
+    # Coarse [4,1]+TDMSplit, DepthU=64: fAct+2*fSh stays inside comp0's segment, so port1 does NOT
+    # cross on its own -> aligned fallback pads the portSplit stride to the next segment (grows LDS).
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "portaxis-asym-aligned"
+    assert r["aligned"] is True
+    o = r["offsets"]
+    # fAct=33024, fSh=8256, strideAct=49536 (<SEG) -> pre padded to SEG.
+    assert o.get("portSplitA") is True and o.get("bBaseline") is True
+    assert o["ldsBaseB"] == 33024 and o["writeStrideBytes"] == SEG
+    assert r["blockSpan"] == SEG + 33024               # base + pre + fAct
+
+def test_asym_tdmsplit_nontight_auto_skips():
+    # Auto (-1) refuses the LDS-growing aligned fallback for the portSplit asym branch.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64, PrefetchGlobalRead=2))
+    assert r["applicable"] is False and "auto" in r["reason"]
+
+def test_asym_tdmsplit_nontight_needs_pgr2():
+    # The portSplit aligned fallback double-buffers -> requires PGR2.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, DepthU=64,
+                            PrefetchGlobalRead=1, LDSSegmentInterleave=1))
+    assert r["applicable"] is False and "PGR" in r["reason"]
+
+def test_asym_tdmsplit_nontight_mirror_1x4_aligned():
+    # [1,4] mirror: B active, non-tight -> aligned fallback, aBaseline + portSplitB.
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4], TDMSplit=1, DepthU=64,
+                            PrefetchGlobalRead=2, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["reason"] == "portaxis-asym-aligned"
+    o = r["offsets"]
+    assert o.get("portSplitB") is True and o.get("aBaseline") is True
+    assert o["ldsBaseA"] == 33024 and o["writeStrideBytes"] == SEG
+
+def test_asym_smaller_than_half_tdmsplit_rejected():
+    # VWA=2 with WaveTileA=8 -> numVec=4 (smaller than WaveTile/2): a port/comp would need >2 pieces,
+    # but TDMSplit gives only a 2-way split. Only VW==WaveTile/2 (componentSplit) is supported.
+    st = _vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=2)
+    r = evaluate(st)
+    assert r["applicable"] is False and "TDMSplit" in r["reason"]
+
+def test_directtovgpr_operand_rejected():
+    # DirectToVgpr operands bypass LDS -> operand LDS placement is inapplicable; must reject.
+    for kw in (dict(DirectToVgprA=True), dict(DirectToVgprB=True)):
+        r = evaluate(_vw8_state(**kw))
+        assert r["applicable"] is False and "DirectToVgpr" in r["reason"], kw
+
+def test_miwg_4x1_nonzero_base_no_false_baseline_shortcut():
+    # fp8/fp4 LDS-transpose kernels use a half-wave shift (LdsOffsetA=4). With fActData==SEG the
+    # active comp0 data straddles into the next segment where comp1 also lands, so the [4,1] baseline
+    # shortcut must NOT fire (it would wrongly report the conflict as already resolved). base=0 is
+    # genuinely clean and still takes the shortcut.
+    f8 = _FakeDataType(bf16=False, f8=True, nbytes=1.0)
+    kw = dict(MIWaveGroup=[4, 1], MIWaveTile=[8, 4], DepthU=256, VectorWidthA=8, VectorWidthB=4,
+              ProblemType={"DataType": f8})   # MT0=512 -> fActData = 256*256*1 = SEG
+    r4 = evaluate(_vw8_state(LdsOffsetA=4, **kw))
+    assert not (r4["applicable"] is False and "baseline already separates" in r4["reason"]), \
+        "base=4, fActData==SEG must not take the (false) baseline shortcut"
+    r0 = evaluate(_vw8_state(LdsOffsetA=0, **kw))
+    assert r0["applicable"] is False and "baseline already separates" in r0["reason"], \
+        "base=0, fActData==SEG is genuinely clean -> baseline shortcut"
+
+def test_miwg_4x1_small_tile_bcontig():
+    # [4,1] small tile: baseline packs A0/A1 in one segment -> interleave separates them with the
+    # whole shared B as the gap ([A0][B_whole][A1]) -> bBaseline.
+    r = evaluate(_vw8_state(MIWaveGroup=[4, 1], MIWaveTile=[4, 8], VectorWidthA=4))
+    assert r["applicable"] is True
+    assert r["offsets"]["bBaseline"] is True
+
+def test_miwg_1x4_small_tile_bcontig_mirror():
+    # Mirror small [1,4] -> aBaseline.
+    r = evaluate(_vw8_state(MIWaveGroup=[1, 4], MIWaveTile=[8, 4], VectorWidthB=4))
+    assert r["applicable"] is True
+    assert r["offsets"]["aBaseline"] is True
 
 def test_tdmsplit_composes():
     # TDMSplit composes: same offsets as the non-split path.

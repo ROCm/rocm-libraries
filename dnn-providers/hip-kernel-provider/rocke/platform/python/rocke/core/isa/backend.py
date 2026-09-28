@@ -21,7 +21,7 @@ encoders emit) fails loudly here instead of silently truncating a partial wait
 into a full VMEM drain. See
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("ISA Backend").
 
-This module imports only from ``core/arch`` at module load; the shared LLVM
+This module imports from ``core/arch`` at module load; the shared LLVM
 constants are pulled from ``core/lower_llvm`` lazily inside methods to avoid an
 import cycle (``lower_llvm`` imports :func:`backend_for` at module top).
 """
@@ -31,6 +31,8 @@ from __future__ import annotations
 from typing import Callable, Dict, Tuple, Union
 
 from ..arch import ArchTarget
+from ..arch.wmma_scale import gfx1250_scaled_wmma
+from .wmma_scale import ScaledWmmaLLVM
 
 
 class ISABackend:
@@ -558,15 +560,24 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
 
     def emit_wmma(self, lowerer, op) -> None:
+        scale_spec = gfx1250_scaled_wmma(op.name)
+        if scale_spec is not None:
+            self._emit_wmma_scale(lowerer, op)
+            return
         fp8_spec = _GFX1250_WMMA_FP8.get(op.name)
         if fp8_spec is not None:
             self._emit_wmma_fp8(lowerer, op, fp8_spec)
             return
         spec = _GFX1250_WMMA.get(op.name)
         if spec is None:
+            scaled_ops = [
+                f"tile.{atom.op_id}"
+                for atom in self.arch.mma.ops
+                if gfx1250_scaled_wmma(atom.op_id) is not None
+            ]
             raise NotImplementedError(
                 f"WMMA op {op.name!r} not yet wired for {self.arch.gfx}; "
-                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8)}"
+                f"known: {sorted(_GFX1250_WMMA) + sorted(_GFX1250_WMMA_FP8) + sorted(scaled_ops)}"
             )
         decl_key, intrinsic, elt = spec
         a, b, c = op.operands
@@ -598,6 +609,40 @@ class Gfx1250Backend(Gfx12RdnaBackend):
             f"<8 x i32> {lowerer._operand(a)}, "
             f"<8 x i32> {lowerer._operand(b)}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i1 false, i1 false)"
+        )
+
+    def _emit_wmma_scale(self, lowerer, op) -> None:
+        """Emit the gfx1250 SCALE/SCALE16 intrinsic using the resolved operand contract."""
+        if lowerer._flavor != "llvm23":
+            raise NotImplementedError(
+                f"{op.name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
+            )
+        if len(op.operands) != 5:
+            raise ValueError(f"{op.name} expects 5 operands, got {len(op.operands)}")
+        spec = gfx1250_scaled_wmma(op.name)
+        if spec is None:
+            raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        # Declarations describe physical signatures, independently of matrix encodings.
+        signature = ScaledWmmaLLVM(spec)
+        decl_key = signature.declaration_key
+        intrinsic = signature.intrinsic
+        scale_ty = signature.scale_type
+        fmt0, fmt1 = spec.matrix_formats
+        a, b, c, a_scale, b_scale = op.operands
+        if a_scale.type.name != scale_ty or b_scale.type.name != scale_ty:
+            raise ValueError(
+                f"{op.name} expects {scale_ty} scale operands, got "
+                f"{a_scale.type.name}/{b_scale.type.name}"
+            )
+        lowerer._need(decl_key)
+        lowerer._current().emit(
+            f"  {op.result.name} = call <8 x float> @{intrinsic}("
+            f"i32 {fmt0}, {signature.matrix_types[0]} {lowerer._operand(a)}, "
+            f"i32 {fmt1}, {signature.matrix_types[1]} {lowerer._operand(b)}, "
+            f"i16 0, <8 x float> {lowerer._operand(c)}, "
+            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

@@ -20,6 +20,7 @@ add_executable(
     flatbuffer_utilities/TestEngineConfigWrapper.cpp
     flatbuffer_utilities/TestEngineDetailsWrapper.cpp
     flatbuffer_utilities/TestGraphWrapper.cpp
+    flatbuffer_utilities/TestGraphContentKey.cpp
     flatbuffer_utilities/TestNodeWrapper.cpp
     flatbuffer_utilities/TestKnobWrapper.cpp
     flatbuffer_utilities/TestKnobSettingWrapper.cpp

@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from rocke.core.arch import validate_arch
 from rocke.core.ir import (
     BF16,
     F16,
@@ -124,6 +125,18 @@ class UnifiedAttentionProblem:
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
     num_kv_blocks: int = 0
+    # Arch the split-KV SEGMENT CLAMP keys on, threaded from the dispatch request.
+    #
+    # This is NOT the spec's authoritative arch. The 3D spec CLASS and every other
+    # tuning field (tile_size_override, waves_per_eu, the hoist / wide-KV gates)
+    # still come from the running box via ``_resolve_attention_arch`` -- see
+    # ``builders/common/attention_spec_builder.py::_tiled_3d_spec_from_problem``.
+    # ``num_segments`` is the one field keyed here, so that an off-box
+    # tuner/benchmark passing an explicit ``num_cus`` while targeting one arch
+    # never picks up another arch's clamp. When the two sources disagree the
+    # clamp stops describing the kernel that actually gets built; unifying them
+    # is tracked separately. ``None`` => fall back to the running-box arch.
+    clamp_arch: Optional[str] = None
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -433,6 +446,7 @@ def _reject_fp8_format_arch_mismatch(
 
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether CK DSL can run this problem without fallback today.
 
@@ -458,7 +472,9 @@ def supports_native_unified_attention(
     if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
-        rejected = _reject_fp8_format_arch_mismatch(problem, _resolve_attention_arch())
+        rejected = _reject_fp8_format_arch_mismatch(
+            problem, arch or _resolve_attention_arch()
+        )
         if rejected is not None:
             return rejected
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -563,9 +579,10 @@ def supports_native_unified_attention_tiled(
 
 def supports_native_unified_attention_3d_tiled(
     problem: UnifiedAttentionProblem,
+    arch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """Return whether the optimized tiled MFMA 3D split-KV path can run this."""
-    arch = _resolve_attention_arch()
+    arch = arch or _resolve_attention_arch()
     rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
@@ -1629,8 +1646,9 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     """
     if not problem.use_fp8:
         return False
-    # The 32x32 combo reads bf16 K from LDS, so it MUST use the sync-dequant
-    # loader (bf16 K_lds), not this in-LDS-fp8 path. Never combine them.
+    # The 32x32 combo reads K from LDS at the working dtype (bf16/fp16), so it
+    # MUST use the sync-dequant loader (working-dtype K_lds), not this in-LDS-fp8
+    # path. Never combine them.
     if _enable_combo_2d(problem):
         return False
     if not _fp8_qk_loader_fits(problem):
@@ -1962,7 +1980,7 @@ def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
-    """gfx950 full-causal bf16 attention-sink prefill -> waves_per_eu=3.
+    """gfx950 full-causal bf16/fp16 attention-sink prefill -> waves_per_eu=3.
 
     Same-run A/B on gfx950 vs the shipped nw4/mw16/T64 config (waves_per_eu is
     the only difference): 1.07x @ S1024, 1.11x @ S2048, 1.15x @ S4096, reproduced
@@ -1973,7 +1991,7 @@ def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
     """
     return (
         _resolve_attention_arch() == "gfx950"
-        and problem.dtype == "bf16"
+        and problem.dtype in ("bf16", "fp16")
         and not problem.use_fp8
         and problem.head_size == 64
         and problem.block_size == 16
@@ -2457,8 +2475,9 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
 
     This wires the kernel config that the parity + trace benchmarks proved
     fastest-and-correct for the AITER prefill-2D trace family (d64 / b32 /
-    GQA-8 / bf16, with attention sinks) into production. The combo stacks,
-    on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
+    GQA-8) into production: bf16 for the whole cohort, and fp16 only for sink
+    prefill (the fp16 win was measured on sinks). The combo stacks, on top of
+    ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
 
       * ``use_transposed_scalar_state``  (one m/l per lane + broadcast alpha)
       * ``use_transposed_mask_once``     (mask invariants once / KV iter; no-SW)
@@ -2483,12 +2502,18 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     """
     if _resolve_attention_arch() != "gfx950":
         return False
-    if problem.dtype != "bf16":
+    # fp16 combo is sink-prefill only (the fp16 widening was measured on sinks);
+    # non-sink fp16 stays on its existing path. bf16 admits the whole cohort.
+    # Mirror this in the C++ twin.
+    if problem.dtype == "fp16":
+        if not problem.use_sinks:
+            return False
+    elif problem.dtype != "bf16":
         return False
-    # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
-    # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo
-    # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
-    # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
+    # FP8 KV is supported via the *sync-dequant* loader, which writes the working
+    # dtype (bf16/fp16) into K_lds/V_lds (k_scale folded in) -- exactly what the
+    # 32x32 combo reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
+    # in-LDS-fp8 mode (incompatible with the working-dtype 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
     if problem.head_size != 64 or problem.block_size != 32:
         return False
@@ -2872,28 +2897,44 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 
 
 # Reference CU count for the split-KV segment clamp below. This is NOT the device
-# count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
+# count (routing resolves that live); it is the tuned pre-bump
 # baseline -- the segment count the formula produced at the historical num_cus=120
 # -- used only as the safe ceiling so raising num_cus cannot over-split 3D shapes.
 _PRE_BUMP_CUS = 120
+
+
+def _pre_bump_segments(problem: UnifiedAttentionProblem) -> int:
+    """Segment count the split-KV formula produced at the historical
+    ``num_cus=120`` (target 480) for this shape -- the arch-independent safe
+    ceiling every arch's clamp bounds to, so raising ``num_cus`` can never
+    over-split an already-3D shape. One source of truth (gfx942 / gfx950, and
+    gfx1250 when it lands) rather than pasted per arch.
+    """
+    num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+    min_seg = 16 if problem.block_size <= 16 else 8
+    return max(
+        min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
+        min_seg,
+    )
 
 
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
+    # Key the clamp on the arch this problem targets when the dispatcher threaded
+    # it through; fall back to the running-box arch otherwise. This keeps an
+    # off-box build targeting one arch from picking up another arch's clamp.
+    # NOTE ``clamp_arch`` governs THIS field only -- the spec class and the other
+    # tuning fields still resolve from the running box.
+    arch = problem.clamp_arch or _resolve_attention_arch()
     # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
     # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
-    if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
-        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
-        min_seg = 16 if problem.block_size <= 16 else 8
-        pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
-            min_seg,
-        )
+    if arch == "gfx942" and problem.sliding_window == 0:
+        pre_bump = _pre_bump_segments(problem)
         if problem.max_seqlen_q == 1:
             # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
             if problem.max_seqlen_k <= 2048:
@@ -2918,6 +2959,36 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
             # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
+    if (
+        arch == "gfx950"
+        and problem.sliding_window == 0
+        and int(problem.target_ctas) <= 0
+    ):
+        # CONSERVATIVE gfx950 clamp: bound EVERY already-3D shape to the pre-bump
+        # (num_cus=120 -> target 480) baseline split, capturing the 2D->3D reroute
+        # win with zero over-split regression.
+        #
+        # For DEFAULT callers -- num_cus resolved from the device -- this is
+        # exactly the shipped split, byte-identical. A caller that ALREADY passed
+        # an explicit num_cus > 120 is the one exception: that path was previously
+        # unclamped and is now capped, so it gets a coarser split than before.
+        #
+        # ESCAPE HATCH: an explicit ``target_ctas > 0`` skips this clamp entirely
+        # (the guard above), restoring the pre-clamp split. It has to be the guard
+        # and not a bigger target: ``target_ctas`` raises the RAW split through
+        # ``_effective_target_ctas``, but ``_pre_bump_segments`` is derived from the
+        # fixed ``_PRE_BUMP_CUS`` and ignores it, so ``min(segments, pre_bump)``
+        # would cap any target straight back to the 120-baseline ceiling. That is
+        # also why the knob's contract ("replaces num_cus*4 for routing AND
+        # segmentation") only holds here if the clamp steps aside.
+        #
+        # UNLIKE the gfx942 branch above, this one has no measured carve-outs:
+        # every shape is clamped, none falls through. Carve-outs for shapes where
+        # a finer split is measured to win on gfx950 can be added here later, each
+        # gated by its own measurement -- never assumed from gfx942, whose CU
+        # count, LDS, and reduce cost all differ.
+        pre_bump = _pre_bump_segments(problem)
+        return min(segments, pre_bump)
     return segments
 
 
@@ -3292,6 +3363,7 @@ def _run_3d_tiled(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     use_graph: bool = True,
+    tuning_spec=None,
 ):
     """Launch the tiled 3D segment + reduce kernels.
 
@@ -3302,10 +3374,18 @@ def _run_3d_tiled(
       3. Launch the 3D segment kernel with grid
          `(total_num_q_blocks, num_kv_heads, num_segments)`.
       4. Launch the reduce kernel with grid `(total_q, num_query_heads, 1)`.
+
+    ``tuning_spec`` replaces the heuristic segment/reduce specs with the
+    dispatcher's explicit pair.
     """
-    num_segments = _num_segments(problem)
-    cache_key = _tiled_3d_cache_key(problem)
-    if use_graph and _enable_3d_graph_replay(problem) and not _torch_stream_capturing():
+    if tuning_spec is not None:
+        num_segments = int(tuning_spec.kernel_spec.num_segments)
+        cache_key = tuning_spec.cache_key()
+    else:
+        num_segments = _num_segments(problem)
+        cache_key = _tiled_3d_cache_key(problem)
+    capturing = _torch_stream_capturing()
+    if use_graph and _enable_3d_graph_replay(problem) and not capturing:
         graph_key = (
             cache_key,
             int(problem.total_q),
@@ -3354,6 +3434,7 @@ def _run_3d_tiled(
                 k_scale=k_scale,
                 v_scale=v_scale,
                 use_graph=False,
+                tuning_spec=tuning_spec,
             )
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
@@ -3380,6 +3461,7 @@ def _run_3d_tiled(
                         k_scale=k_scale,
                         v_scale=v_scale,
                         use_graph=False,
+                        tuning_spec=tuning_spec,
                     )
             _3D_GRAPHS[graph_key] = graph
             _3D_GRAPH_REFS[graph_key] = (
@@ -3407,7 +3489,9 @@ def _run_3d_tiled(
     # ``rocke/runtime/launcher.py`` are removed by construction; the
     # only remaining per-call cost is packing args and issuing two
     # ``hipModuleLaunchKernel`` calls on the caller's stream.
-    prepared = _get_3d_pipeline(problem, cache_key, num_segments)
+    prepared = _get_3d_pipeline(
+        problem, cache_key, num_segments, tuning_spec=tuning_spec
+    )
     segm_output, segm_max, segm_expsum = prepared.workspace(
         problem, num_segments, q.device
     )
@@ -3475,10 +3559,14 @@ def _run_3d_tiled(
         # Output is commonly a fresh tensor per request; workspace and inputs are
         # fixed by the bound key.
         red_vals["output_ptr"] = out
-    return prepared.pipeline(
-        (seg_vals, red_vals),
-        (prepared.seg_config, prepared.red_config),
-        stream=int(stream),
+    # hipStreamSynchronize is illegal while a stream is capturing, and the
+    # default LaunchConfig.fence=True path does exactly that. Frameworks
+    # that wrap the whole forward in torch.cuda.graph (vLLM, an outer
+    # microbench) skip the internal hipGraph above; this keeps the two
+    # eager launches capturable. Workspace / compile still need a warmup
+    # call outside capture — same contract as the internal graph path.
+    return _launch_3d_pipeline(
+        prepared, seg_vals, red_vals, stream, capturing=capturing
     )
 
 
@@ -3526,6 +3614,69 @@ _2D_LAUNCH_META: Dict[Tuple, _Attention2DLaunchMeta] = {}
 _2D_GRAPHS: Dict[Tuple, Any] = {}
 _2D_GRAPH_REFS: Dict[Tuple, Tuple[Any, ...]] = {}
 _SCALAR_LAUNCHERS: Dict[Tuple, KernelLauncher] = {}
+
+
+def _launch_3d_pipeline(prepared, seg_vals, red_vals, stream, *, capturing: bool):
+    """Launch segment+reduce, without a stream fence while capturing."""
+    if capturing:
+        with no_fence():
+            return prepared.pipeline(
+                (seg_vals, red_vals),
+                (prepared.seg_config, prepared.red_config),
+                stream=int(stream),
+            )
+    return prepared.pipeline(
+        (seg_vals, red_vals),
+        (prepared.seg_config, prepared.red_config),
+        stream=int(stream),
+    )
+
+
+# The dispatcher's ``AttentionTuningSpec`` satisfies this; the runtime only
+# compiles ``build()`` under ``cache_key()`` and launches its geometry.
+_EXPLICIT_TUNING_ATTRS = (
+    "arch",
+    "path",
+    "kernel_spec",
+    "compile_backend",
+    "allow_unsupported",
+    "cache_key",
+    "build",
+    "launch_grid",
+    "launch_block",
+    "with_num_kv_blocks",
+)
+
+
+def _require_explicit_tuning_spec(tuning_spec) -> None:
+    """Reject a tuning spec that does not carry the launch contract."""
+    missing = [
+        name for name in _EXPLICIT_TUNING_ATTRS if not hasattr(tuning_spec, name)
+    ]
+    if missing:
+        raise TypeError(
+            "tuning spec is missing "
+            + ", ".join(missing)
+            + "; required attributes are "
+            + ", ".join(_EXPLICIT_TUNING_ATTRS)
+        )
+
+
+def _explicit_path_supported(
+    problem: UnifiedAttentionProblem, tuning_spec, kind: str
+) -> Tuple[bool, str]:
+    """Problem-shape support for a path, with or without an explicit spec.
+
+    A tuning spec is a knob combination, not proof the problem is runnable.
+    ``AttentionTuningSpec.allow_unsupported`` is the only bypass.
+    """
+    if tuning_spec is not None and tuning_spec.allow_unsupported:
+        return True, f"explicit {kind} tuning spec (unsupported override)"
+    if kind == "3d":
+        return supports_native_unified_attention_3d_tiled(problem)
+    if kind == "2d":
+        return supports_native_unified_attention_tiled(problem)
+    raise ValueError(f"unknown attention path kind {kind!r}")
 
 
 def _recommend_graph_replay(problem: UnifiedAttentionProblem) -> bool:
@@ -3580,21 +3731,11 @@ def _enable_3d_graph_replay(problem: UnifiedAttentionProblem) -> bool:
         )
         return env in ("1", "on", "enable", "enabled", "yes", "true")
     if arch == "gfx950":
-        # The 3D split-KV decode launch is host/dispatch bound here: the two
-        # kernels (segment + reduce) device-execute in ~26-35us but the eager
-        # Python dispatch adds a ~17us flat floor, so the wall time is ~43us and
-        # does not scale with context length. Capturing the (segment + reduce)
-        # launch sequence into a hipGraph and replaying it removes that
-        # per-launch host cost and roughly halves decode latency (43->21us at
-        # k=2048), producing bitwise-identical output. Gated to the decode /
-        # short-q regime (``max_seqlen_q <= 768``) so prefill routing is never
-        # affected, and feature-flagged shapes are excluded. Opt-in via
-        # ``HIPDNN_GFX950_3D_GRAPH=1`` until broadly validated across traces.
-        if problem.max_seqlen_q > 768:
-            return False
-        if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
-            return False
-        if problem.sliding_window > 0 or problem.use_fp8:
+        # Decode / short-q 3D is launch-overhead bound. Keep replay opt-in
+        # until it is the production default (``HIPDNN_GFX950_3D_GRAPH=1``).
+        # Skipped when the caller is already capturing so an outer
+        # torch.cuda.graph wins.
+        if not _recommend_graph_replay(problem):
             return False
         env = __import__("os").environ.get("HIPDNN_GFX950_3D_GRAPH", "").strip().lower()
         return env in ("1", "on", "enable", "enabled", "yes", "true")
@@ -3832,38 +3973,40 @@ def _get_3d_pipeline(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
     num_segments: int,
+    *,
+    tuning_spec=None,
 ) -> _Attention3DPrepared:
     prepared_key = cache_key + ("total_q", int(problem.total_q))
     if prepared_key in _3D_PIPELINES:
         return _3D_PIPELINES[prepared_key]
     if cache_key not in _ATTN_3D_TILED_CACHE:
         arch = _resolve_attention_arch()
-        (
-            _,
-            UnifiedAttentionReduceTiledSpec,
-            build_unified_attention_3d_tiled,
-            build_unified_attention_reduce_tiled,
-            _,
-        ) = _tiled_3d_impl(arch)
-        seg_spec = _tiled_3d_spec_from_problem(problem)
-        reduce_spec = UnifiedAttentionReduceTiledSpec(
-            head_size=problem.head_size,
-            num_query_heads=problem.num_query_heads,
-            num_kv_heads=problem.num_kv_heads,
-            dtype=problem.dtype,
-            num_segments=num_segments,
-            waves_per_eu=_select_3d_waves_per_eu(problem),
-        )
-        seg_art = compile_kernel(
-            build_unified_attention_3d_tiled(seg_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
-        red_art = compile_kernel(
-            build_unified_attention_reduce_tiled(reduce_spec, arch=arch),
-            arch=arch,
-            capture_ir_text=False,
-        )
+        if tuning_spec is not None:
+            seg_kernel, red_kernel = tuning_spec.build(arch)
+        else:
+            (
+                _,
+                UnifiedAttentionReduceTiledSpec,
+                build_unified_attention_3d_tiled,
+                build_unified_attention_reduce_tiled,
+                _,
+            ) = _tiled_3d_impl(arch)
+            seg_kernel = build_unified_attention_3d_tiled(
+                _tiled_3d_spec_from_problem(problem), arch=arch
+            )
+            red_kernel = build_unified_attention_reduce_tiled(
+                UnifiedAttentionReduceTiledSpec(
+                    head_size=problem.head_size,
+                    num_query_heads=problem.num_query_heads,
+                    num_kv_heads=problem.num_kv_heads,
+                    dtype=problem.dtype,
+                    num_segments=num_segments,
+                    waves_per_eu=_select_3d_waves_per_eu(problem),
+                ),
+                arch=arch,
+            )
+        seg_art = compile_kernel(seg_kernel, arch=arch, capture_ir_text=False)
+        red_art = compile_kernel(red_kernel, arch=arch, capture_ir_text=False)
         _ATTN_3D_TILED_CACHE[cache_key] = (
             seg_art.hsaco,
             seg_art.kernel_name,
@@ -3874,7 +4017,14 @@ def _get_3d_pipeline(
     seg_launcher = KernelLauncher(
         hsaco=seg_hsaco,
         kernel_name=seg_kname,
-        signature=_3d_signature(problem.dtype, kv_dtype=_kv_storage_dtype(problem)),
+        signature=_3d_signature(
+            problem.dtype,
+            kv_dtype=(
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
+                else _kv_storage_dtype(problem)
+            ),
+        ),
         cache_key=("3d_seg",) + cache_key,
     )
     red_launcher = KernelLauncher(
@@ -4010,23 +4160,29 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    tuning_spec=None,
 ) -> KernelLauncher:
     if cache_key in _2D_LAUNCHERS:
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
         arch = _resolve_attention_arch()
-        _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-        spec = _tiled_spec_from_problem(problem)
-        route = _gfx942_4warp_route(problem)
-        if route is not None:
-            # Distinct 4-warp GQA paged builder (keyed separately in
-            # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged ABI
-            # as the default builder. Parity+ with AITER @Sq4096/8192 (vs the
-            # 1-warp std-QK's 0.55x).
-            kernel = route.builder(spec, arch=arch)
+        if tuning_spec is not None:
+            kernel = tuning_spec.build(arch)
+            backend = tuning_spec.compile_backend
         else:
-            kernel = build_unified_attention_2d_tiled(spec, arch=arch)
-        backend = _select_2d_compile_backend(problem)
+            _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+            spec = _tiled_spec_from_problem(problem)
+            route = _gfx942_4warp_route(problem)
+            if route is not None:
+                # Distinct 4-warp GQA paged builder (keyed separately in
+                # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
+                # ABI as the default builder. Parity+ with AITER @Sq4096/8192
+                # (vs the 1-warp std-QK's 0.55x).
+                kernel = route.builder(spec, arch=arch)
+            else:
+                kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+            backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -4042,7 +4198,11 @@ def _get_2d_launcher(
             problem.dtype,
             include_bt_stride=True,
             include_qq_bias_stride=True,
-            kv_dtype=_kv_storage_dtype(problem),
+            kv_dtype=(
+                tuning_spec.kernel_spec.kv_storage_dtype
+                if tuning_spec is not None
+                else _kv_storage_dtype(problem)
+            ),
         ),
         cache_key=("2d",) + cache_key,
     )
@@ -4050,24 +4210,89 @@ def _get_2d_launcher(
     return launcher
 
 
+def gfx942_4warp_launch_grid(problem) -> Tuple[int, int, int]:
+    """Grid the gfx942 4-warp GQA builder actually launches.
+
+    Fold-eligible shapes pack four query heads into one kv-head tile. The
+    dispatcher grid and ``_get_2d_launch_meta`` both call this so they cannot
+    drift.
+    """
+    fold = gfx942_gqa_fold_eligible(
+        problem.head_size,
+        problem.num_queries_per_kv,
+        problem.sliding_window,
+        problem.dtype,
+        problem.block_size,
+    )
+    if fold:
+        qblocks = problem.total_q // 32 + problem.num_seqs
+        return (int(problem.num_kv_heads), int(qblocks), 1)
+    qblocks = problem.total_q // 128 + problem.num_seqs
+    return (int(problem.num_query_heads), int(qblocks), 1)
+
+
+def gfx942_gqa_fold_eligible(
+    head_size, num_queries_per_kv, sliding_window, dtype, block_size
+) -> bool:
+    """GQA head-fold cohort predicate -- SINGLE source of truth for the builder and
+    the launch grid (they MUST agree or the kernel and its grid disagree).
+
+    The fold packs the 4 GQA query heads that share a kv-head into the 128-row M-tile
+    (32 tokens x 4 heads) so KV is loaded once per kv-head instead of 4x (the HBM
+    traffic cut). Applies to the D128 / 4:1-GQA / sliding-window / bf16 / paged cohort
+    with block_size <= 32 (the tiled 4-warp double-buffer path).
+    """
+    return (
+        int(head_size) == 128
+        and int(num_queries_per_kv) == 4
+        and int(sliding_window or 0) > 0
+        # bf16-only is a MEASUREMENT boundary, not a structural one: the fold is a
+        # data-movement change (pack 4 heads per M-tile so KV is read once per
+        # kv-head) and the fp16 MFMA atom has the same 32x32x8 geometry, so it
+        # would very likely fold correctly. It is excluded because only bf16 has an
+        # A/B run behind it. Widening to fp16 requires a measured fp16 A/B plus a
+        # numeric-oracle case, not just deleting this clause.
+        and str(dtype) == "bf16"
+        and int(block_size) <= 32
+    )
+
+
 def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    *,
+    tuning_spec=None,
 ) -> _Attention2DLaunchMeta:
     meta_key = cache_key + ("total_q", int(problem.total_q))
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
+    if tuning_spec is not None:
+        meta = _Attention2DLaunchMeta(
+            grid=tuning_spec.launch_grid(problem), block=tuning_spec.launch_block()
+        )
+        _2D_LAUNCH_META[meta_key] = meta
+        return meta
     route = _gfx942_4warp_route(problem)
     if route is not None:
-        # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M q-tokens for ONE
-        # query head. grid = (num_query_heads, q-token-blocks + per-seq padding).
-        # block_q == BLOCK_M, matching the kernel's binary_search_seq_idx.
-        total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
-        meta = _Attention2DLaunchMeta(
-            grid=(int(problem.num_query_heads), int(total_num_q_blocks), 1),
-            block=route.block_dim,
+        _fold = gfx942_gqa_fold_eligible(
+            problem.head_size,
+            problem.num_queries_per_kv,
+            problem.sliding_window,
+            problem.dtype,
+            problem.block_size,
         )
+        if _fold:
+            # GQA head-fold cohort: one CTA covers 32 q-tokens x nqpk heads for one
+            # kv-head (KV loaded once). grid.x = num_kv_heads, grid.y = 32-token blocks.
+            total_num_q_blocks = problem.total_q // 32 + problem.num_seqs
+            grid = (int(problem.num_kv_heads), int(total_num_q_blocks), 1)
+        else:
+            # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M q-tokens for ONE query
+            # head. grid = (num_query_heads, q-token-blocks + per-seq padding).
+            total_num_q_blocks = problem.total_q // route.block_m + problem.num_seqs
+            grid = (int(problem.num_query_heads), int(total_num_q_blocks), 1)
+        meta = _Attention2DLaunchMeta(grid=grid, block=route.block_dim)
         _2D_LAUNCH_META[meta_key] = meta
         return meta
     if _enable_gfx942_bf16_flash(problem):
@@ -4109,7 +4334,9 @@ def _get_scalar_launcher(
         arch = _resolve_attention_arch()
         spec = UnifiedAttention2DSpec(problem=problem)
         artifact = compile_kernel(
-            build_unified_attention_2d(spec), arch=arch, capture_ir_text=False
+            build_unified_attention_2d(spec, arch=arch),
+            arch=arch,
+            capture_ir_text=False,
         )
         _ATTN_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)
     hsaco, kname = _ATTN_CACHE[cache_key]
@@ -4150,6 +4377,7 @@ def run_unified_attention_torch(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    tuning_spec=None,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -4171,6 +4399,21 @@ def run_unified_attention_torch(
     harness amortises the segment + reduce launch overhead in the 3D
     path under a hipgraph.
     """
+    if tuning_spec is not None:
+        _require_explicit_tuning_spec(tuning_spec)
+        if tuning_spec.arch != _resolve_attention_arch():
+            raise ValueError(
+                f"tuning spec targets {tuning_spec.arch}, running on "
+                f"{_resolve_attention_arch()}"
+            )
+        implied = "3d" if tuning_spec.path == "3d" else "tiled"
+        if backend not in ("auto", implied):
+            raise ValueError(
+                f"tuning spec path {tuning_spec.path!r} conflicts with "
+                f"backend {backend!r}"
+            )
+        backend = implied
+
     bt_stride = (
         int(block_table.stride(0))
         if hasattr(block_table, "stride")
@@ -4192,6 +4435,10 @@ def run_unified_attention_torch(
         )
         if int(k.shape[0]) * _blk_stride > 0x8000_0000:
             problem = replace(problem, num_kv_blocks=int(k.shape[0]))
+    if tuning_spec is not None:
+        # Explicit specs are initially selected before framework tensors exist.
+        # Refresh address-width state and tuning identity from the real cache.
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(k.shape[0]))
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton
@@ -4218,7 +4465,7 @@ def run_unified_attention_torch(
     # is fine" branch of ``use_2d_kernel``).
     prefer_2d = backend == "auto" and problem.select_path() == "2d"
     if backend == "3d" or (backend == "auto" and not prefer_2d):
-        ok_3d, reason_3d = supports_native_unified_attention_3d_tiled(problem)
+        ok_3d, reason_3d = _explicit_path_supported(problem, tuning_spec, "3d")
         if ok_3d:
             return _run_3d_tiled(
                 problem=problem,
@@ -4241,6 +4488,7 @@ def run_unified_attention_torch(
                 stream=int(stream),
                 k_scale=k_scale,
                 v_scale=v_scale,
+                tuning_spec=tuning_spec,
             )
         if backend == "3d":
             raise NotImplementedError(reason_3d)
@@ -4252,7 +4500,11 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
-        if _enable_2d_graph_replay(problem) and not _torch_stream_capturing():
+        if (
+            tuning_spec is None
+            and _enable_2d_graph_replay(problem)
+            and not _torch_stream_capturing()
+        ):
             graphed = _run_2d_graphed(
                 problem,
                 q=q,
@@ -4276,14 +4528,18 @@ def run_unified_attention_torch(
             )
             if graphed is not _GRAPH_FALLBACK:
                 return graphed
-        ok_t, reason_t = supports_native_unified_attention_tiled(problem)
+        ok_t, reason_t = _explicit_path_supported(problem, tuning_spec, "2d")
         if ok_t:
             # Hot path: compute the cache key directly from the problem +
             # selectors (skip the 17-field dataclass build). Spec is only
             # built on cache miss inside _get_2d_launcher and for grid
             # math below.
-            key = _tiled_cache_key(problem)
-            launcher = _get_2d_launcher(problem, key)
+            key = (
+                tuning_spec.cache_key()
+                if tuning_spec is not None
+                else _tiled_cache_key(problem)
+            )
+            launcher = _get_2d_launcher(problem, key, tuning_spec=tuning_spec)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -4309,7 +4565,7 @@ def run_unified_attention_torch(
             # The dispatcher must launch with the same BLOCK_Q/threads the
             # kernel was built for. Cache that fixed metadata per kernel key so
             # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(problem, key)
+            meta = _get_2d_launch_meta(problem, key, tuning_spec=tuning_spec)
             return launcher(
                 vals,
                 config=LaunchConfig(
@@ -4397,14 +4653,23 @@ class UnifiedAttention2DSpec:
         )
 
 
-def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
+def build_unified_attention_2d(
+    spec: UnifiedAttention2DSpec, *, arch: str = "gfx950"
+) -> KernelDef:
     """Build a scalar-correct 2D unified-attention kernel.
 
     One workgroup computes one output element `(query_token, query_head, dim)`.
     This is deliberately a correctness kernel: it implements the full paged
     online-softmax semantics for fp16/bf16 without relying on Triton. The
     optimized MFMA/tiled kernel will replace this body once parity is locked.
+
+    The body is arch-neutral -- one scalar element per workgroup, no MMA atom, no
+    LDS, no cross-lane op -- so `arch` selects nothing here; it is validated and
+    the emitted `KernelDef` is identical for every target. It is still part of the
+    signature because a kernel descriptor has to name a target without calling the
+    builder, and that only works if every builder has the same shape.
     """
+    validate_arch(arch)
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
@@ -4619,8 +4884,15 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
         )
 
 
-def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
-    """Build scalar-correct split-3D segment attention kernel."""
+def build_unified_attention_3d(
+    spec: UnifiedAttention3DSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build scalar-correct split-3D segment attention kernel.
+
+    Arch-neutral like the 2D builder: `arch` is validated, not consumed. See
+    `build_unified_attention_2d` for why it is in the signature anyway.
+    """
+    validate_arch(arch)
     p = spec.problem
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
@@ -4762,7 +5034,15 @@ class UnifiedAttentionReduceSpec:
         )
 
 
-def build_unified_attention_reduce(spec: UnifiedAttentionReduceSpec) -> KernelDef:
+def build_unified_attention_reduce(
+    spec: UnifiedAttentionReduceSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """Build the scalar cross-segment reduction that finishes a split-3D attention.
+
+    Arch-neutral like the 2D builder: `arch` is validated, not consumed. See
+    `build_unified_attention_2d` for why it is in the signature anyway.
+    """
+    validate_arch(arch)
     p = spec.problem
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())

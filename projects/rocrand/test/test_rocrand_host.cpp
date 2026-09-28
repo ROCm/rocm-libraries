@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "test_common.hpp"
+#include "test_rocrand_common.hpp"
 
 #include <rocrand/rocrand.h>
 
@@ -426,6 +427,15 @@ TEST_P(rocrand_generate_host_test, poisson_parity_test)
     HIP_CHECK(hipFree(output));
 }
 
+static std::string host_test_param_name(const ::testing::TestParamInfo<host_test_params>& info)
+{
+    std::string name = rocrand_rng_name(info.param.rng_type);
+    name += info.param.blocking_host_generator ? "_Blocking" : "_NonBlocking";
+    name += info.param.use_default_stream ? "_DefaultStream" : "_UserStream";
+    return name;
+}
+
 INSTANTIATE_TEST_SUITE_P(rocrand_generate_host_test,
                          rocrand_generate_host_test,
-                         ::testing::ValuesIn(host_test_params_array));
+                         ::testing::ValuesIn(host_test_params_array),
+                         host_test_param_name);

@@ -123,8 +123,9 @@ ArgType = make_dummy_enum(f"{_P}.ArgType", _ArgType_values)
 export_enum_values(globals(), ArgType, _ArgType_values)
 
 
-_HighBitSel_values = ["NONE", "LOW", "HIGH"]
-HighBitSel = make_dummy_enum(f"{_P}.HighBitSel", _HighBitSel_values)
+_HighBitSel_members = [("NONE", -1), ("LOW", 0), ("HIGH", 1)]
+_HighBitSel_values = [name for name, _ in _HighBitSel_members]
+HighBitSel = make_bound_enum(f"{_P}.HighBitSel", _HighBitSel_members)
 export_enum_values(globals(), HighBitSel, _HighBitSel_values)
 
 

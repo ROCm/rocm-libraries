@@ -21,8 +21,8 @@ namespace hipdnn_data_sdk::utilities
  * - ASM_SDPA_ENGINE (ASM) next: Preferred SDPA path, ranked above rocKE
  * - ROCKE_ENGINE (rocKE) next: SDPA fallback below ASM
  * - Other engines middle: Stable order preserved for predictability
- * - MIOPEN_ENGINE_DETERMINISTIC last: Limited to conv operations only,
- *   deprioritized due to performance trade-offs and reduced operation support
+ * - MIOPEN_ENGINE_DETERMINISTIC last: reduced operation support relative to
+ *   MIOPEN_ENGINE, deprioritized due to performance trade-offs
  *
  * This is a header-only implementation shared between backend and heuristic plugins.
  *

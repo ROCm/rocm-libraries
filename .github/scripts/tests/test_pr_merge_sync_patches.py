@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -561,43 +562,185 @@ class ApplyPatchTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+FAKE_SHA = "abc1234def5678901234567890123456789abcdef"
+
+
 class PushChangesTest(unittest.TestCase):
+    """Tests for _push_changes(repo_path, branch).
 
-    @pytest.mark.xfail(
-        reason="BUG: push failures are not retried — they propagate immediately; after the fix there should be retry logic before the error propagates",
-        strict=True,
-    )
-    def test_push_failure_propagates_as_runtime_error(self):
-        call_count = 0
+    _run_git is always mocked. The call sequence for a clean push is:
+      1. rev-parse HEAD          -> local SHA
+      2. push origin <branch>    -> ""
+      3. ls-remote origin <ref>  -> "<sha>\trefs/heads/<branch>"
+    """
 
-        def fail_then_succeed(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("push rejected")
-            return ""
+    def _make_git_mock(self, *, push_side_effect=None):
+        """Return a side_effect function that routes by git sub-command."""
 
-        with patch.object(sut, "_run_git", side_effect=fail_then_succeed):
-            sut._push_changes(Path("/tmp/fake"), "develop")  # should retry, not raise
-        self.assertGreater(call_count, 1)
+        def _git(args, **kwargs):
+            sub = args[0]
+            if sub == "rev-parse":
+                return FAKE_SHA
+            if sub == "push":
+                if push_side_effect:
+                    return push_side_effect(args, **kwargs)
+                return ""
+            if sub == "ls-remote":
+                return f"{FAKE_SHA}\trefs/heads/develop"
+            if sub in ("fetch", "rebase"):
+                return ""
+            raise AssertionError(f"Unexpected git call: {args}")
+
+        return _git
 
     def test_successful_push_calls_git_push_origin_branch(self):
-        with patch.object(sut, "_run_git") as mock_git:
-            mock_git.return_value = ""
-            sut._push_changes(Path("/tmp/repo"), "develop")
-        mock_git.assert_called_once_with(
-            ["push", "origin", "develop"], cwd=Path("/tmp/repo")
-        )
+        calls = []
 
-    @pytest.mark.xfail(
-        reason="BUG: after a successful push there is no verification step (e.g. fetching the remote to confirm the commit landed); the current code calls _run_git exactly once and returns",
-        strict=True,
-    )
-    def test_no_post_push_verification_performed(self):
-        with patch.object(sut, "_run_git") as mock_git:
-            mock_git.return_value = ""
+        def side_effect(args, **kwargs):
+            calls.append((args, kwargs))
+            return self._make_git_mock()(args, **kwargs)
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
             sut._push_changes(Path("/tmp/repo"), "develop")
-        self.assertGreater(mock_git.call_count, 1)
+
+        push_call = next(((args, kw) for args, kw in calls if args[0] == "push"), None)
+        self.assertIsNotNone(push_call, "expected a push call but none was made")
+        push_args, push_kwargs = push_call
+        self.assertEqual(push_args, ["push", "origin", "develop"])
+        self.assertEqual(push_kwargs.get("cwd"), Path("/tmp/repo"))
+
+    def test_transient_failure_is_retried_and_succeeds(self):
+        push_calls = []
+
+        def push_side_effect(args, **kwargs):
+            push_calls.append(args)
+            if len(push_calls) == 1:
+                raise RuntimeError(
+                    "Git command failed: push\nremote: Internal Server Error"
+                )
+            return ""
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ), patch.object(time, "sleep"):
+            sut._push_changes(Path("/tmp/fake"), "develop")  # should not raise
+
+        self.assertEqual(len(push_calls), 2)
+
+    def test_transient_failure_exhausts_retries_and_raises(self):
+        def push_side_effect(args, **kwargs):
+            raise RuntimeError(
+                "Git command failed: push\nremote: Internal Server Error"
+            )
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ), patch.object(time, "sleep"):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/fake"), "develop", max_attempts=1)
+
+    def test_non_fast_forward_triggers_rebase_and_retry(self):
+        push_calls = []
+        extra_calls = []
+
+        def push_side_effect(args, **kwargs):
+            push_calls.append(args)
+            if len(push_calls) == 1:
+                raise RuntimeError(
+                    "Git command failed: push\nerror: failed to push some refs (non-fast-forward)"
+                )
+            return ""
+
+        def side_effect(args, **kwargs):
+            result = self._make_git_mock(push_side_effect=push_side_effect)(
+                args, **kwargs
+            )
+            if args[0] in ("fetch", "rebase"):
+                extra_calls.append(args[0])
+            return result
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            sut._push_changes(Path("/tmp/fake"), "develop")  # should not raise
+
+        self.assertEqual(len(push_calls), 2)
+        self.assertEqual(extra_calls, ["fetch", "rebase"])
+
+    def test_non_fast_forward_exhausts_retries_and_raises(self):
+        def push_side_effect(args, **kwargs):
+            raise RuntimeError(
+                "Git command failed: push\nerror: failed to push some refs (non-fast-forward)"
+            )
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/fake"), "develop", max_attempts=1)
+
+    def test_auth_failure_propagates_immediately(self):
+        push_calls = []
+
+        def push_side_effect(args, **kwargs):
+            push_calls.append(args)
+            raise RuntimeError("Git command failed: push\nerror: authentication failed")
+
+        with patch.object(
+            sut,
+            "_run_git",
+            side_effect=self._make_git_mock(push_side_effect=push_side_effect),
+        ):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/fake"), "develop")
+
+        self.assertEqual(len(push_calls), 1)  # no retry on auth failure
+
+    def test_post_push_verification_uses_ls_remote(self):
+        calls = []
+
+        def side_effect(args, **kwargs):
+            calls.append(args[0])
+            return self._make_git_mock()(args, **kwargs)
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            sut._push_changes(Path("/tmp/repo"), "develop")
+
+        self.assertIn("ls-remote", calls)
+
+    def test_verification_fails_if_remote_sha_does_not_match(self):
+        wrong_sha = "0" * 40
+
+        def side_effect(args, **kwargs):
+            if args[0] == "rev-parse":
+                return FAKE_SHA
+            if args[0] == "push":
+                return ""
+            if args[0] == "ls-remote":
+                return f"{wrong_sha}\trefs/heads/develop"
+            return ""
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/repo"), "develop")
+
+    def test_ls_remote_empty_output_raises(self):
+        def side_effect(args, **kwargs):
+            if args[0] == "rev-parse":
+                return FAKE_SHA
+            if args[0] == "push":
+                return ""
+            if args[0] == "ls-remote":
+                return ""  # branch not found on remote
+            return ""
+
+        with patch.object(sut, "_run_git", side_effect=side_effect):
+            with self.assertRaises(RuntimeError):
+                sut._push_changes(Path("/tmp/repo"), "develop")
 
 
 # ---------------------------------------------------------------------------

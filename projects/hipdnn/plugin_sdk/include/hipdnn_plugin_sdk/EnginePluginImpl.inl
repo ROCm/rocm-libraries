@@ -35,6 +35,8 @@
  * 3. Container type (HIPDNN_PLUGIN_CONTAINER_TYPE):
  *    - Must have: EngineManager<...>& getEngineManager()
  *    - Must have: static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
+ *    - May have (optional): static hipdnnPluginStatus_t getEngineName(int64_t, const char**)
+ *      See hipdnnEnginePluginGetEngineName.
  *
  * ## Usage Example
  *
@@ -78,6 +80,7 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
 
 #include <hip/hip_runtime.h>
 
@@ -104,6 +107,30 @@ namespace
                                              HIPDNN_PLUGIN_CONTAINER_TYPE>(),
        true);
 // NOLINTEND(readability-identifier-naming)
+} // namespace
+
+namespace
+{
+/// Dispatches to the container's optional static getEngineName member.
+///
+/// This lives in a function template because `if constexpr` only suppresses
+/// instantiation of the discarded branch inside a template; written directly in
+/// the extern "C" entry point below, it would fail to compile for containers
+/// that do not provide the member.
+template <typename ContainerType>
+hipdnnPluginStatus_t invokeContainerGetEngineName(int64_t engineId, const char** name)
+{
+    if constexpr(hipdnn_plugin_sdk::HasGetEngineName<ContainerType>::value)
+    {
+        return ContainerType::getEngineName(engineId, name);
+    }
+    else
+    {
+        (void)engineId;
+        (void)name;
+        return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+    }
+}
 } // namespace
 
 // Static plugin metadata
@@ -235,6 +262,48 @@ hipdnnPluginStatus_t
 
         LOG_API_SUCCESS(apiName, "numEngines=" << *numEngines << " totalEngines=" << totalEngines);
     });
+}
+
+hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const char** name)
+{
+    LOG_API_ENTRY("engineId=" << engineId << ", name=" << static_cast<void*>(name));
+
+    hipdnnPluginStatus_t containerStatus = HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
+
+    const auto status = hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(name);
+
+        containerStatus
+            = invokeContainerGetEngineName<HIPDNN_PLUGIN_CONTAINER_TYPE>(engineId, name);
+
+        if(containerStatus == HIPDNN_PLUGIN_STATUS_SUCCESS)
+        {
+            LOG_API_SUCCESS(apiName, "engineId=" << engineId);
+        }
+        else if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+        {
+            // The ordinary answer for a container that supplies no name for this engine.
+            HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << apiName
+                                                           << "] engineId=" << engineId);
+        }
+        else
+        {
+            // A container that reports failure by returning a status rather than throwing never
+            // reaches tryCatch's catch blocks, so route it through setLastError here. Otherwise
+            // hipdnnPluginGetLastErrorString would serve a stale message from an unrelated
+            // earlier failure.
+            hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+                containerStatus,
+                "getEngineName failed for engine ID " + std::to_string(engineId));
+        }
+    });
+
+    if(status != HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    return containerStatus;
 }
 
 hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)

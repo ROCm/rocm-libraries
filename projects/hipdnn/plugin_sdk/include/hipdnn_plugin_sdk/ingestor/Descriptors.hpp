@@ -6,10 +6,13 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -191,18 +194,137 @@ struct DispatchDescriptor
 enum class KernelSourceKind
 {
     EMBEDDED_SOURCE, ///< Source file plus entry point, compiled at plan-build time.
-    KPACK, ///< Prebuilt kpack archive plus toc key and symbol. No adapter yet.
+    KPACK, ///< Prebuilt kpack archive plus toc key and symbol.
     HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
     ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
 
-/// UKD's source. Only `EMBEDDED_SOURCE` is implemented.
+/// One argument a kernel expects the host to marshal, as the compiled code object's AMDGPU
+/// metadata note declares it -- read out of the object by the packager, never authored.
+///
+/// Compiler-appended hidden arguments are excluded: the host does not marshal them, so
+/// keeping them would make this list incomparable with the one a pack passes to `launch`.
+struct KernelArgument
+{
+    /// `.value_kind` verbatim: `global_buffer`, `by_value`, and so on. Kept as the string
+    /// the toolchain emits rather than mapped to an enum, so a kind this build has never
+    /// heard of still parses, still compares, and still prints in a diagnostic.
+    std::string kind;
+    uint32_t size = 0; ///< Bytes it occupies in the kernarg segment.
+    uint32_t offset = 0; ///< Where it starts within that segment.
+    /// `.name`, empty when the producer emitted none -- clang omits names for HIP
+    /// `extern "C" __global__` kernels. Empty means "this producer records no names",
+    /// never "named the empty string".
+    std::string name;
+};
+
+/// One argument list rendered for a diagnostic, as `kind:size@offset` per argument with the
+/// name appended when there is one.
+inline std::string describeKernelSignature(const std::vector<KernelArgument>& signature)
+{
+    if(signature.empty())
+    {
+        return "(no arguments)";
+    }
+    std::string text;
+    for(const auto& argument : signature)
+    {
+        if(!text.empty())
+        {
+            text += ", ";
+        }
+        text += argument.kind + ":" + std::to_string(argument.size) + "@"
+                + std::to_string(argument.offset);
+        if(!argument.name.empty())
+        {
+            text += " '" + argument.name + "'";
+        }
+    }
+    return text;
+}
+
+/// UKD's source. `EMBEDDED_SOURCE` and `KPACK` are implemented; a kind fills only its own
+/// fields and leaves the rest empty.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
-    std::string sourceFile;
-    std::string entryPoint;
+    std::string sourceFile; ///< EMBEDDED_SOURCE.
+    std::string entryPoint; ///< EMBEDDED_SOURCE.
+    /// KPACK: archive path, relative to the directory of the descriptor that declared it.
+    /// Relative because the installed tree is relocatable and an absolute build-machine
+    /// path would not survive packaging.
+    std::string library;
+    /// KPACK: the archive's own key for this code object. Opaque -- the hip packager
+    /// content-addresses it on (source, build) and the rocKE producer uses a different
+    /// scheme entirely, so nothing here may parse it. Not unique per kernel: two kernels
+    /// differing only by entry point share one key, one blob, and one loaded module.
+    std::string tocKey;
+    /// KPACK: the undecorated extern "C" name to resolve inside the loaded module. The
+    /// only field that separates two kernels sharing a tocKey.
+    std::string symbol;
+    /// KPACK: digest of the raw decompressed code object, as the packager recorded it.
+    ///
+    /// Checked before the code object reaches the driver: a TOC entry pointing at the
+    /// wrong offset decompresses cleanly and yields another entry's blob, which only this
+    /// field can catch. An integrity check, not a security control -- a descriptor travels
+    /// with the archive it names, so whoever can rewrite one can rewrite the other.
+    std::string sha256;
+    /// KPACK: the argument list `symbol` declares, read out of the code object at pack
+    /// time. Not a description of the call -- the list a pack marshals is fixed in its
+    /// C++; this is the copy that comparison checks it against, in requireSignatureMatch.
+    ///
+    /// Empty is a kernel that takes no arguments, which is why the parser rejects the key
+    /// being absent rather than reading absence as empty.
+    std::vector<KernelArgument> signature;
 };
+
+namespace detail
+{
+
+/// True iff `T{Args...}` is a valid brace initialization. `std::is_constructible` cannot
+/// answer this under C++17: it probes parenthesized direct-initialization, which does not
+/// perform aggregate initialization until C++20.
+template <typename T, typename = void, typename... Args>
+struct IsBraceInitializable : std::false_type
+{
+};
+
+template <typename T, typename... Args>
+struct IsBraceInitializable<T, std::void_t<decltype(T{std::declval<Args>()...})>, Args...>
+    : std::true_type
+{
+};
+
+template <typename T, typename... Args>
+inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, Args...>::value;
+
+} // namespace detail
+
+// KernelSource's field count is pinned here: accepting exactly eight initializers and no
+// more makes an inserted field ill-formed at this assertion, rather than silently
+// rebinding every value after it at a positional initialization site. Only the count --
+// two same-typed members swapped past each other still brace-initialize.
+static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
+                                               KernelSourceKind,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::string,
+                                               std::vector<KernelArgument>>
+                  && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
+                                                       KernelSourceKind,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::string,
+                                                       std::vector<KernelArgument>,
+                                                       std::string>,
+              "KernelSource gained or lost a field; append only, then extend this "
+              "assertion.");
 
 /// UKD: one launchable kernel. Matchers, engine, and dispatch come from its pack.
 struct KernelDescriptor
@@ -224,6 +346,26 @@ struct KernelDescriptor
     /// it lives inside a pack document that the pack's own (id, arch) key already separates
     /// per shard -- so there the field is applicability only.
     std::vector<std::string> arch;
+    /// Directory of the descriptor file that defined this kernel. Any path a descriptor
+    /// names is resolved against it, so a relocated, DESTDIR-staged or drop-in install
+    /// resolves from where the file actually is rather than from a loader root. Empty for a
+    /// kernel built in memory, which names no file. Filled by the loader, never authored.
+    std::filesystem::path originDirectory;
+    /// The descriptor tree @c originDirectory was found under -- the root the loader was
+    /// pointed at, not the file's own folder.
+    ///
+    /// Carried because resolution and CONTAINMENT are different questions. A path is
+    /// resolved against originDirectory (above), but the boundary it may not cross is the
+    /// tree, not the individual descriptor's folder: one archive is shipped per arch shard
+    /// at the shard root, so a descriptor nested inside that shard legitimately climbs out
+    /// of its own directory to reach it. Anchoring containment on originDirectory rejected
+    /// every nested descriptor and made production-packaged kernels unloadable.
+    ///
+    /// The tree root rather than the arch shard root: it is what the loader actually
+    /// walked, so it needs no probing and no assumption about how deep a shard sits, and
+    /// it stays correct for a flat tree where the two coincide. Empty for a kernel built
+    /// in memory. Filled by the loader, never authored.
+    std::filesystem::path treeRoot;
 };
 
 /// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over

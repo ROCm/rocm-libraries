@@ -75,7 +75,7 @@ RUN for tool in /usr/bin/llvm*-20; do \
 # This queries THEROCK_URL_BASE for the most recent tarball for the ASIC. ADHOCBUILD tarballs are excluded.
 # The tarball suffix (-dcgpu, -dgpu, -all, or none) is derived automatically from THEROCK_ASIC.
 # Override THEROCK_PREBUILT_ID to select a non-default suffix (e.g. --build-arg THEROCK_PREBUILT_ID=gfx110X-dgpu).
-# The prebuilt tar.gz is downloaded from the nightly builds in: https://rocm.nightlies.amd.com/tarball/
+# The prebuilt tar.gz is downloaded from the nightly builds in: https://nightly.repo.amd.com/rocm/core/tarball/
 #
 # To provide the full download URL directly (bypasses all auto-detection):
 # docker build -f Dockerfile.ubuntu24.prebuilt --build-arg THEROCK_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx950-dcgpu-7.12.0.tar.gz -t rocblas:prebuilt .
@@ -86,9 +86,9 @@ RUN for tool in /usr/bin/llvm*-20; do \
 #
 # Options for THEROCK_URL_BASE are (may not be available externally from AMD):
 # - Stable releases: https://repo.amd.com/rocm/tarball/
-# - Nightly builds: https://rocm.nightlies.amd.com/tarball/
+# - Nightly builds: https://nightly.repo.amd.com/rocm/core/tarball/
 # - Prereleases (QA): https://rocm.prereleases.amd.com/tarball/
-# - Dev builds: https://rocm.devreleases.amd.com/tarball/
+# - Dev builds: https://dev.repo.amd.com/rocm/core/tarball/
 # See https://github.com/ROCm/TheRock/blob/main/RELEASES.md#browsing-release-tarballs
 #
 # ============================================================================
@@ -97,7 +97,7 @@ FROM base AS install_therock_prebuilt
 ARG THEROCK_ASIC=gfx94X
 ARG THEROCK_GIT_TAG=latest
 ARG THEROCK_PREBUILT_ID=
-ARG THEROCK_URL_BASE=https://rocm.nightlies.amd.com/tarball/
+ARG THEROCK_URL_BASE=https://nightly.repo.amd.com/rocm/core/tarball/
 ARG THEROCK_TARBALL_URL=
 
 RUN mkdir -p /opt/rocm
@@ -144,10 +144,10 @@ RUN --mount=type=bind,source=.,target=/build-context \
                 echo "The URL may require authentication or may not be publicly accessible." >&2; \
                 echo "Use THEROCK_TARBALL_URL to provide the full download URL directly, or" >&2; \
                 echo "use one of the public URLs for THEROCK_URL_BASE:" >&2; \
-                echo "  Nightly builds:   https://rocm.nightlies.amd.com/tarball/" >&2; \
+                echo "  Nightly builds:   https://nightly.repo.amd.com/rocm/core/tarball/" >&2; \
                 echo "  Stable releases:  https://repo.amd.com/rocm/tarball/" >&2; \
                 echo "  Prereleases (QA): https://rocm.prereleases.amd.com/tarball/" >&2; \
-                echo "  Dev builds:       https://rocm.devreleases.amd.com/tarball/" >&2; \
+                echo "  Dev builds:       https://dev.repo.amd.com/rocm/core/tarball/" >&2; \
                 exit 1; \
             fi; \
             echo "Resolving latest tarball for prefix '${PREFIX}' from ${THEROCK_URL_BASE} ..."; \

@@ -3,10 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/TimingStatistics.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
-#include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/autotune/TimedRunLoop.hpp>
@@ -342,7 +343,7 @@ TEST(TestAutotune, FixedAverageIgnoresMaxIterations)
 TEST(TestAutotune, FixedAverageRejectsZeroTimedIterations)
 {
     // Regression guard: FIXED_AVERAGE with timedIterations=0 must still be
-    // rejected (an empty timings vector would otherwise throw in computeMean).
+    // rejected (an empty timings vector would otherwise throw in mean()).
     hipdnn_frontend::graph::Graph g;
     AutotuneConfig config;
     config.strategy = AutotuneStrategy::FIXED_AVERAGE;
@@ -440,4 +441,697 @@ TEST(TestAutotune, RankAndSelectWinnerSortsSucceededAndSelectsFastest)
     EXPECT_EQ(results[3].rank, -1);
 
     EXPECT_EQ(activePlanIndex, 1u);
+}
+
+// ============================================================================
+// AutotuneResult factories
+//
+// The trailing string parameters are same-typed, so each case passes a distinct
+// self-identifying value and asserts the exact field it lands in.
+// ============================================================================
+
+namespace
+{
+constexpr int64_t FACTORY_ENGINE_ID = 4242;
+constexpr int64_t ESTIMATED_WORKSPACE = 111;
+constexpr int64_t COMPILED_WORKSPACE = 222;
+constexpr const char* ENGINE_NAME_VALUE = "engine-name-value";
+constexpr const char* REASON_VALUE = "reason-value";
+constexpr const char* ERROR_MESSAGE_VALUE = "error-value";
+
+std::vector<KnobSetting> factoryKnobSettings()
+{
+    return {KnobSetting("knob-id-value", int64_t{7})};
+}
+
+// Non-default mode and strategy so the pass-through of both is observable.
+AutotuneConfig factoryConfig()
+{
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    return config;
+}
+
+// Fields every non-benchmarked factory sets identically.
+void expectNonBenchmarkedCommonFields(const AutotuneResult& result)
+{
+    EXPECT_EQ(result.engineId, FACTORY_ENGINE_ID);
+    EXPECT_EQ(result.engineName, ENGINE_NAME_VALUE);
+    EXPECT_EQ(result.exhaustiveNotRunReason, REASON_VALUE);
+    EXPECT_EQ(result.knobSettings, factoryKnobSettings());
+    EXPECT_TRUE(result.supportsExhaustive);
+    EXPECT_FALSE(result.ranExhaustive);
+    EXPECT_FALSE(result.succeeded);
+    EXPECT_EQ(result.rank, -1);
+    EXPECT_EQ(result.compiledPlanIndex, -1);
+    EXPECT_EQ(result.modeUsed, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::FIXED_AVERAGE);
+}
+} // namespace
+
+TEST(TestAutotune, MakeBenchmarkResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeBenchmarkResult(FACTORY_ENGINE_ID,
+                                                              factoryKnobSettings(),
+                                                              ESTIMATED_WORKSPACE,
+                                                              COMPILED_WORKSPACE,
+                                                              factoryConfig(),
+                                                              ENGINE_NAME_VALUE);
+
+    EXPECT_EQ(result.engineId, FACTORY_ENGINE_ID);
+    EXPECT_EQ(result.engineName, ENGINE_NAME_VALUE);
+    EXPECT_EQ(result.knobSettings, factoryKnobSettings());
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.modeUsed, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(result.strategyUsed, AutotuneStrategy::FIXED_AVERAGE);
+    EXPECT_TRUE(result.errorMessage.empty());
+    EXPECT_TRUE(result.exhaustiveNotRunReason.empty());
+}
+
+TEST(TestAutotune, MakeNonBenchmarkedResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeNonBenchmarkedResult(FACTORY_ENGINE_ID,
+                                                                   factoryKnobSettings(),
+                                                                   ESTIMATED_WORKSPACE,
+                                                                   COMPILED_WORKSPACE,
+                                                                   factoryConfig(),
+                                                                   ERROR_MESSAGE_VALUE,
+                                                                   /*supportsExhaustive=*/true,
+                                                                   /*ranExhaustive=*/false,
+                                                                   REASON_VALUE,
+                                                                   ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+}
+
+TEST(TestAutotune, MakeSkippedResultAssignsEveryField)
+{
+    constexpr int64_t MAX_WORKSPACE_SIZE = 128;
+    const auto result = autotune::detail::makeSkippedResult(FACTORY_ENGINE_ID,
+                                                            factoryKnobSettings(),
+                                                            ESTIMATED_WORKSPACE,
+                                                            COMPILED_WORKSPACE,
+                                                            factoryConfig(),
+                                                            MAX_WORKSPACE_SIZE,
+                                                            /*supportsExhaustive=*/true,
+                                                            /*ranExhaustive=*/false,
+                                                            REASON_VALUE,
+                                                            ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.errorMessage, "Workspace size 222 exceeds limit 128");
+}
+
+TEST(TestAutotune, MakeBarredResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeBarredResult(FACTORY_ENGINE_ID,
+                                                           factoryKnobSettings(),
+                                                           ESTIMATED_WORKSPACE,
+                                                           COMPILED_WORKSPACE,
+                                                           factoryConfig(),
+                                                           /*supportsExhaustive=*/true,
+                                                           /*ranExhaustive=*/false,
+                                                           REASON_VALUE,
+                                                           ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.errorMessage, "Plan barred (engine ID or workspace deselect filter).");
+}
+
+TEST(TestAutotune, MakeCompileFailedResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeCompileFailedResult(FACTORY_ENGINE_ID,
+                                                                  factoryKnobSettings(),
+                                                                  ESTIMATED_WORKSPACE,
+                                                                  factoryConfig(),
+                                                                  ERROR_MESSAGE_VALUE,
+                                                                  /*supportsExhaustive=*/true,
+                                                                  /*ranExhaustive=*/false,
+                                                                  REASON_VALUE,
+                                                                  ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, -1);
+}
+
+TEST(TestAutotune, MakeFinalizeFailedResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeFinalizeFailedResult(FACTORY_ENGINE_ID,
+                                                                   factoryKnobSettings(),
+                                                                   factoryConfig(),
+                                                                   ERROR_MESSAGE_VALUE,
+                                                                   /*supportsExhaustive=*/true,
+                                                                   /*ranExhaustive=*/false,
+                                                                   REASON_VALUE,
+                                                                   ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
+    EXPECT_EQ(result.estimatedWorkspaceSize, -1);
+    EXPECT_EQ(result.workspaceSize, -1);
+}
+
+TEST(TestAutotune, MakeFilteredResultAssignsEveryField)
+{
+    const auto result = autotune::detail::makeFilteredResult(FACTORY_ENGINE_ID,
+                                                             factoryKnobSettings(),
+                                                             ESTIMATED_WORKSPACE,
+                                                             COMPILED_WORKSPACE,
+                                                             factoryConfig(),
+                                                             /*supportsExhaustive=*/true,
+                                                             /*ranExhaustive=*/false,
+                                                             REASON_VALUE,
+                                                             ENGINE_NAME_VALUE);
+
+    expectNonBenchmarkedCommonFields(result);
+    EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
+    EXPECT_EQ(result.workspaceSize, COMPILED_WORKSPACE);
+    EXPECT_EQ(result.errorMessage, "Plan excluded by engineIdFilter.");
+}
+
+TEST(TestAutotune, MakeBenchmarkResultResolvesAnOmittedEngineName)
+{
+    // Omitting the name is the arity a caller with no handle has. The registry
+    // answers for an engine it carries, and the hexadecimal rendering for one it
+    // does not, rather than the result carrying an empty name.
+    const auto registered
+        = autotune::detail::makeBenchmarkResult(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                                                factoryKnobSettings(),
+                                                ESTIMATED_WORKSPACE,
+                                                COMPILED_WORKSPACE,
+                                                factoryConfig());
+    EXPECT_EQ(registered.engineName, "MIOPEN_ENGINE");
+
+    const auto unregistered = autotune::detail::makeBenchmarkResult(FACTORY_ENGINE_ID,
+                                                                    factoryKnobSettings(),
+                                                                    ESTIMATED_WORKSPACE,
+                                                                    COMPILED_WORKSPACE,
+                                                                    factoryConfig());
+    EXPECT_EQ(unregistered.engineName, "0x0000000000001092");
+}
+
+TEST(TestAutotune, NonBenchmarkedFactoriesResolveAnOmittedEngineName)
+{
+    // The shared factory resolves the name, so every wrapper over it inherits the
+    // behavior; makeFilteredResult stands in for the five.
+    const auto shared
+        = autotune::detail::makeNonBenchmarkedResult(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                                                     factoryKnobSettings(),
+                                                     ESTIMATED_WORKSPACE,
+                                                     COMPILED_WORKSPACE,
+                                                     factoryConfig(),
+                                                     ERROR_MESSAGE_VALUE,
+                                                     /*supportsExhaustive=*/true,
+                                                     /*ranExhaustive=*/false,
+                                                     REASON_VALUE);
+    EXPECT_EQ(shared.engineName, "MIOPEN_ENGINE");
+
+    const auto wrapped = autotune::detail::makeFilteredResult(FACTORY_ENGINE_ID,
+                                                              factoryKnobSettings(),
+                                                              ESTIMATED_WORKSPACE,
+                                                              COMPILED_WORKSPACE,
+                                                              factoryConfig(),
+                                                              /*supportsExhaustive=*/true,
+                                                              /*ranExhaustive=*/false,
+                                                              REASON_VALUE);
+    EXPECT_EQ(wrapped.engineName, "0x0000000000001092");
+}
+
+// ============================================================================
+// autotuneExhaustiveSweep
+// ============================================================================
+
+// mode and primingFailurePolicy are locked because they are what makes the call an
+// exhaustive sweep that populates the cache. STANDARD would not prime any engine, and
+// ABORT_ON_PRIMING_FAILURE would let one broken engine abandon the sweep and persist
+// nothing -- denying a ranking for every graph on the machine, permanently, since the next
+// run aborts the same way.
+TEST(TestAutotune, SweepConfigLocksModeAndPrimingPolicy)
+{
+    AutotuneConfig requested;
+    requested.mode = TuneMode::STANDARD;
+    requested.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
+
+    const auto applied = autotune::detail::sweepConfigFrom(requested);
+
+    EXPECT_EQ(applied.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(applied.primingFailurePolicy, PrimingFailurePolicy::BENCHMARK_UNPRIMED);
+}
+
+// Everything the two locked fields do not decide stays the caller's.
+TEST(TestAutotune, SweepConfigPreservesEveryOtherField)
+{
+    AutotuneConfig requested;
+    requested.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    requested.timedIterations = 37;
+    requested.warmupIterations = 4;
+    requested.maxIterations = 55;
+    requested.windowSize = 6;
+    requested.stabilityThreshold = 0.02f;
+    requested.engineIdFilter = {11, 22};
+
+    const auto applied = autotune::detail::sweepConfigFrom(requested);
+
+    EXPECT_EQ(applied.strategy, AutotuneStrategy::FIXED_AVERAGE);
+    EXPECT_EQ(applied.timedIterations, 37);
+    EXPECT_EQ(applied.warmupIterations, 4);
+    EXPECT_EQ(applied.maxIterations, 55);
+    EXPECT_EQ(applied.windowSize, 6);
+    EXPECT_FLOAT_EQ(applied.stabilityThreshold, 0.02f);
+    EXPECT_EQ(applied.engineIdFilter, (std::vector<int64_t>{11, 22}));
+}
+
+// A default-constructed config must come back ready to sweep, so the common call is
+// autotuneExhaustiveSweep(handle, variantPack, workspace, size) with nothing else supplied.
+TEST(TestAutotune, SweepConfigFromDefaultsIsReadyToSweep)
+{
+    const auto applied = autotune::detail::sweepConfigFrom(AutotuneConfig{});
+
+    EXPECT_EQ(applied.mode, TuneMode::EXHAUSTIVE);
+    EXPECT_EQ(applied.primingFailurePolicy, PrimingFailurePolicy::BENCHMARK_UNPRIMED);
+    EXPECT_TRUE(static_cast<bool>(applied.rankingFn));
+}
+
+TEST(TestAutotune, ExhaustiveSweepRejectsNegativeWorkspaceSize)
+{
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+
+    auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{-1});
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_NE(err.get_message().find("workspaceSize"), std::string::npos);
+}
+
+// autotuneExhaustiveSweep takes no sweep/variant parameter, so add_engine_sweep()/
+// add_engine_variants() are structurally unreachable from it, checked at compile time.
+TEST(TestAutotune, ExhaustiveSweepHasNoSweepOrVariantOverload)
+{
+    using Graph = hipdnn_frontend::graph::Graph;
+    using VariantPack = std::unordered_map<int64_t, void*>;
+
+    static_assert(!std::is_invocable_v<decltype(&Graph::autotuneExhaustiveSweep),
+                                       Graph*,
+                                       hipdnnHandle_t,
+                                       const VariantPack&,
+                                       void*,
+                                       int64_t,
+                                       AutotuneConfig,
+                                       AutotuneStorageConfig,
+                                       std::vector<AutotuneResult>*,
+                                       int>,
+                  "autotuneExhaustiveSweep must not accept extra sweep/variant-shaped arguments");
+    SUCCEED();
+}
+
+TEST(TestAutotune, ExhaustiveSweepExhaustiveIsTheOnlyModeItProduces)
+{
+    EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), std::string("EXHAUSTIVE"));
+}
+
+// timedIterations is the caller's accuracy/cost dial, validated by autotuneImpl for the
+// strategy that reads it. A count of zero would otherwise leave an empty sample set.
+TEST(TestAutotune, ExhaustiveSweepRejectsNonPositiveTimedIterations)
+{
+    hipdnn_frontend::graph::Graph g;
+    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
+
+    for(const int bad : {0, -1})
+    {
+        AutotuneConfig config;
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+        config.timedIterations = bad;
+
+        auto err = g.autotuneExhaustiveSweep(nullptr, variantPack, nullptr, int64_t{0}, config);
+        EXPECT_TRUE(err.is_bad());
+        EXPECT_NE(err.get_message().find("timedIterations"), std::string::npos);
+    }
+}
+
+// ============================================================================
+// autotuneExhaustiveSweep ranking
+// ============================================================================
+
+namespace
+{
+AutotuneResult makeRankable(const char* name, float robustMs, float minMs)
+{
+    AutotuneResult result;
+    result.engineName = name;
+    result.robustTimeMs = robustMs;
+    result.minTimeMs = minMs;
+    result.succeeded = true;
+    return result;
+}
+
+std::vector<std::string> rankedNames(const std::vector<AutotuneResult>& results)
+{
+    std::vector<std::string> names;
+    names.reserve(results.size());
+    for(const auto& result : results)
+    {
+        names.push_back(result.engineName);
+    }
+    return names;
+}
+} // namespace
+
+TEST(TestAutotune, RankByRobustTimeOrdersFastestFirst)
+{
+    std::vector<AutotuneResult> results{makeRankable("slow", 30.0f, 30.0f),
+                                        makeRankable("fast", 10.0f, 10.0f),
+                                        makeRankable("medium", 20.0f, 20.0f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    EXPECT_EQ(rankedNames(results), (std::vector<std::string>{"fast", "medium", "slow"}));
+}
+
+// The reason the sweep ranks on robustTimeMs at all. The volatile candidate has the better
+// fastest iteration but is usually slower, so ranking must not put it first.
+TEST(TestAutotune, RankByRobustTimePrefersConsistentEngineOverLuckyOne)
+{
+    std::vector<AutotuneResult> results{
+        makeRankable("volatile", /*robustMs=*/25.0f, /*minMs=*/5.0f),
+        makeRankable("consistent", /*robustMs=*/10.0f, /*minMs=*/9.5f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    EXPECT_EQ(results.front().engineName, "consistent");
+    // Guard against a silent regression to min-based ranking, which would invert this.
+    EXPECT_LT(results.back().minTimeMs, results.front().minTimeMs);
+}
+
+TEST(TestAutotune, RankByRobustTimeKeepsBenchmarkedOrderOnTies)
+{
+    std::vector<AutotuneResult> results{makeRankable("first", 10.0f, 10.0f),
+                                        makeRankable("second", 10.0f, 9.0f),
+                                        makeRankable("third", 10.0f, 8.0f)};
+
+    autotune::detail::rankByRobustTime(results);
+
+    // Equal robust times must not be reordered by any other field, or the persisted
+    // ranking would vary run to run for candidates that measured the same.
+    EXPECT_EQ(rankedNames(results), (std::vector<std::string>{"first", "second", "third"}));
+}
+
+TEST(TestAutotune, RankByRobustTimeHandlesEmptyAndSingleResult)
+{
+    std::vector<AutotuneResult> empty;
+    autotune::detail::rankByRobustTime(empty);
+    EXPECT_TRUE(empty.empty());
+
+    std::vector<AutotuneResult> single{makeRankable("only", 10.0f, 10.0f)};
+    autotune::detail::rankByRobustTime(single);
+    EXPECT_EQ(single.front().engineName, "only");
+}
+
+// The sweep defaults rankingFn rather than overriding it, so a caller can rank on any
+// criterion its own results expose -- ranking by stddev to prefer the steadiest engine, for
+// instance, which no built-in ordering provides.
+TEST(TestAutotune, SweepRankingHonoursCallerSuppliedFunction)
+{
+    bool called = false;
+    const AutotuneRankingFn callerSupplied = [&called](std::vector<AutotuneResult>& succeeded) {
+        called = true;
+        std::stable_sort(succeeded.begin(),
+                         succeeded.end(),
+                         [](const AutotuneResult& a, const AutotuneResult& b) {
+                             return a.stddevMs < b.stddevMs;
+                         });
+    };
+
+    auto chosen = autotune::detail::sweepRankingOr(callerSupplied);
+    ASSERT_TRUE(static_cast<bool>(chosen));
+
+    // "steady" has the worse robust time but the lower stddev, so the caller's ordering and
+    // the default disagree: only the caller's puts it first.
+    std::vector<AutotuneResult> results{makeRankable("steady", 20.0f, 19.0f),
+                                        makeRankable("quick", 10.0f, 1.0f)};
+    results[0].stddevMs = 0.1f;
+    results[1].stddevMs = 9.0f;
+
+    chosen(results);
+
+    EXPECT_TRUE(called);
+    EXPECT_EQ(results.front().engineName, "steady");
+}
+
+TEST(TestAutotune, SweepRankingFallsBackToRobustTimeWhenCallerSuppliesNone)
+{
+    auto chosen = autotune::detail::sweepRankingOr(nullptr);
+    ASSERT_TRUE(static_cast<bool>(chosen));
+
+    std::vector<AutotuneResult> results{makeRankable("steady", 20.0f, 19.0f),
+                                        makeRankable("quick", 10.0f, 1.0f)};
+    results[0].stddevMs = 0.1f;
+    results[1].stddevMs = 9.0f;
+
+    chosen(results);
+
+    // Same inputs as above, but with no caller function the robust ordering wins.
+    EXPECT_EQ(results.front().engineName, "quick");
+}
+
+// ============================================================================
+// Sweep record plan: what a sweep persists, and when persisting is unsound
+// ============================================================================
+//
+// The read path (ConfigBuiltIn::applyExactCacheEntry) derives candidates from the
+// pre-compile applicability probe and then rejects an entry if any live candidate is
+// missing from its sampled set, or if the stored order is not the same size as the
+// candidate list. Both rejections are permanent in practice: a re-tune produces the same
+// record, and put() returns UNCHANGED without appending. These tests pin the writer-side
+// rules that keep a record appliable.
+
+namespace
+{
+
+AutotuneResult makeSucceeded(int64_t engineId, float robustTimeMs)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = true;
+    r.benchmarked = true;
+    r.robustTimeMs = robustTimeMs;
+    r.minTimeMs = robustTimeMs;
+    return r;
+}
+
+/// Reached the timing loop and failed there: an intrinsic, recurring outcome.
+AutotuneResult makeMeasuredFailure(int64_t engineId)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = false;
+    r.benchmarked = true;
+    return r;
+}
+
+/// Never reached the timing loop for a reason intrinsic to engine+graph, e.g. the plan
+/// would not compile or finalize. Also recurring.
+AutotuneResult makeIntrinsicMiss(int64_t engineId)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = false;
+    r.benchmarked = false;
+    r.excludedByCaller = false;
+    return r;
+}
+
+/// Held out of the timing loop by a caller choice: engineIdFilter, a deselect filter, or
+/// a workspace budget too small for the compiled plan. Not recurring -- the next call may
+/// admit it.
+AutotuneResult makeCallerExclusion(int64_t engineId)
+{
+    AutotuneResult r;
+    r.engineId = engineId;
+    r.succeeded = false;
+    r.benchmarked = false;
+    r.excludedByCaller = true;
+    return r;
+}
+
+} // namespace
+
+TEST(TestAutotuneSweepRecord, SucceededEnginesKeepTheirRankOrder)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeSucceeded(20, 2.0f), makeSucceeded(30, 3.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 30}));
+}
+
+// An engine that is applicable but always fails is a live candidate on every later run.
+// Omitting it from the record makes it a candidate the record cannot account for, which
+// rejects the entry on every lookup, forever.
+TEST(TestAutotuneSweepRecord, MeasuredFailuresAreRecordedAfterSurvivors)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeMeasuredFailure(99), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 99}));
+}
+
+// A plan that never reached the timing loop because it would not compile or finalize.
+// The read path's candidate probe runs before any plan is built, so it reports this
+// engine too, and the record must name it.
+TEST(TestAutotuneSweepRecord, EnginesThatNeverBuiltAreStillRecorded)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeIntrinsicMiss(77), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 77}));
+    EXPECT_NE(std::find(plan.order.begin(), plan.order.end(), int64_t{77}), plan.order.end())
+        << "an engine that never compiled is still a live candidate at lookup time";
+}
+
+// Ordering among the three groups, in one case: survivors, then measured failures, then
+// engines that never built. Everything unmeasured must lose to everything measured.
+TEST(TestAutotuneSweepRecord, RecordOrdersSurvivorsThenMeasuredFailuresThenUnbuilt)
+{
+    const std::vector<AutotuneResult> results{makeIntrinsicMiss(77),
+                                              makeMeasuredFailure(99),
+                                              makeSucceeded(10, 1.0f),
+                                              makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20, 99, 77}));
+}
+
+// Results are one per plan spec, and specs are keyed on (engineId, knobSettings). Knob
+// variants therefore produce several results for one engine. The record stores ids only,
+// and the read path's order filter is non-consuming set membership, so a duplicate would
+// survive it and make the order longer than the candidate set -- rejecting every lookup.
+TEST(TestAutotuneSweepRecord, KnobVariantsCollapseToOneIdPerEngine)
+{
+    const std::vector<AutotuneResult> results{makeSucceeded(10, 1.0f),
+                                              makeSucceeded(10, 2.0f),
+                                              makeSucceeded(20, 3.0f),
+                                              makeSucceeded(10, 4.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20}));
+    EXPECT_EQ(std::count(plan.order.begin(), plan.order.end(), int64_t{10}), 1)
+        << "a duplicated engine id makes the stored order un-appliable";
+}
+
+// First occurrence wins because results arrive rank-ordered, so it is the engine's best
+// showing. A last-wins collapse would rank an engine on its worst knob setting.
+TEST(TestAutotuneSweepRecord, DuplicateCollapseKeepsTheBestRankedOccurrence)
+{
+    // Rank order: 20 (fastest), then 10's good variant, then 10's poor variant.
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(20, 1.0f), makeSucceeded(10, 2.0f), makeSucceeded(10, 9.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{20, 10}));
+}
+
+// A measured result and an unmeasured one for the same engine must not both land in the
+// order; the measured one is the engine's showing.
+TEST(TestAutotuneSweepRecord, EngineMeasuredOnOneSpecIsNotAlsoRecordedAsFailed)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeMeasuredFailure(10), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20}));
+}
+
+// The coverage gate. A caller-excluded engine may be a live candidate next run, so the
+// sweep did not cover the set a lookup will see. Recording it would claim a measurement
+// that never happened; omitting it makes every later lookup reject the entry.
+TEST(TestAutotuneSweepRecord, CallerExcludedCandidateMakesTheSweepUnpersistable)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeSucceeded(20, 2.0f), makeCallerExclusion(30)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_FALSE(plan.persistable)
+        << "a filtered or workspace-barred candidate must not produce a persisted ranking";
+    EXPECT_EQ(std::find(plan.order.begin(), plan.order.end(), int64_t{30}), plan.order.end())
+        << "a never-measured engine must never enter the record's sampled set";
+}
+
+// Distinguishes the two unmeasured kinds: an intrinsic miss recurs and is recordable, a
+// caller exclusion may not recur and is not.
+TEST(TestAutotuneSweepRecord, IntrinsicMissPersistsWhereCallerExclusionDoesNot)
+{
+    const std::vector<AutotuneResult> intrinsic{makeSucceeded(10, 1.0f), makeIntrinsicMiss(30)};
+    const std::vector<AutotuneResult> callerChosen{makeSucceeded(10, 1.0f),
+                                                   makeCallerExclusion(30)};
+
+    EXPECT_TRUE(autotune::detail::sweepRecordPlanFrom(intrinsic).persistable);
+    EXPECT_FALSE(autotune::detail::sweepRecordPlanFrom(callerChosen).persistable);
+}
+
+// One engine, two specs: excluded on one, measured on the other. The record covers that
+// id, so this is a full sweep for it. Guards against a naive any_of over the flag.
+TEST(TestAutotuneSweepRecord, EngineExcludedOnOneSpecButMeasuredOnAnotherStaysPersistable)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeCallerExclusion(10), makeSucceeded(20, 2.0f)};
+
+    const auto plan = autotune::detail::sweepRecordPlanFrom(results);
+
+    EXPECT_TRUE(plan.persistable);
+    EXPECT_EQ(plan.order, (std::vector<int64_t>{10, 20}));
+}
+
+// The default sweep -- no filters, workspace large enough, one spec per engine -- is the
+// configuration the API documents, and it must persist.
+TEST(TestAutotuneSweepRecord, FullSweepWithNoExclusionsIsPersistable)
+{
+    const std::vector<AutotuneResult> results{
+        makeSucceeded(10, 1.0f), makeSucceeded(20, 2.0f), makeSucceeded(30, 3.0f)};
+
+    EXPECT_TRUE(autotune::detail::sweepRecordPlanFrom(results).persistable);
+}
+
+TEST(TestAutotuneSweepRecord, EmptyResultsProduceAnEmptyPersistablePlan)
+{
+    const auto plan = autotune::detail::sweepRecordPlanFrom({});
+
+    EXPECT_TRUE(plan.order.empty());
+    EXPECT_TRUE(plan.persistable) << "nothing to decline when nothing was swept";
+}
+
+// The write outcome is how a caller learns a sweep was not persisted, so the new decline
+// must be reportable and distinct from the pre-existing ones.
+TEST(TestAutotuneSweepRecord, PartialSweepOutcomeHasADistinctName)
+{
+    EXPECT_STREQ(
+        autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP),
+        "NOT_ATTEMPTED_PARTIAL_SWEEP");
+    EXPECT_STRNE(
+        autotuneCacheWriteOutcomeToString(AutotuneCacheWriteOutcome::NOT_ATTEMPTED_PARTIAL_SWEEP),
+        autotuneCacheWriteOutcomeToString(
+            AutotuneCacheWriteOutcome::NOT_ATTEMPTED_NO_SUCCESSFUL_ENGINE));
 }

@@ -96,24 +96,28 @@ inline flatbuffers::FlatBufferBuilder createValidGraph()
 }
 
 /// Same shape as createValidGraph(), but the X tensor carries a ragged-offset
-/// link to an auxiliary offset tensor. Used to exercise the derived
-/// GraphDescriptor::hasRaggedTensors() path.
-inline flatbuffers::FlatBufferBuilder createValidGraphWithRaggedTensor()
+/// link to an auxiliary offset tensor. The parameters decide whether and how the
+/// aux tensor lands in the tensor list; the defaults build a valid graph that
+/// exercises the derived GraphDescriptor::hasRaggedTensors() path.
+///
+/// @param includeAux false omits the aux, leaving a dangling ragged_offset_tensor_uid.
+/// @param auxVirtual true marks the aux tensor virtual (no backing storage).
+/// @param auxNested  true gives the aux its own ragged_offset_tensor_uid.
+inline flatbuffers::FlatBufferBuilder createValidGraphWithRaggedTensor(bool includeAux = true,
+                                                                       bool auxVirtual = false,
+                                                                       bool auxNested = false)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     using namespace hipdnn_tests::constants;
 
     flatbuffers::FlatBufferBuilder builder;
 
-    // UID for the auxiliary ragged-offset tensor; distinct from the conv tensors.
-    constexpr int64_t K_RAGGED_OFFSET_UID = K_FPROP_TENSOR_X_UID + 10000;
-
     TensorAttributesT xTensor;
     xTensor.uid = K_FPROP_TENSOR_X_UID;
     xTensor.data_type = DataType::FLOAT;
     xTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_X_DIMS);
     xTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_X_STRIDES);
-    xTensor.ragged_offset_tensor_uid = K_RAGGED_OFFSET_UID;
+    xTensor.ragged_offset_tensor_uid = K_FPROP_TENSOR_RAGGED_OFFSET_UID;
 
     TensorAttributesT wTensor;
     wTensor.uid = K_FPROP_TENSOR_W_UID;
@@ -127,18 +131,28 @@ inline flatbuffers::FlatBufferBuilder createValidGraphWithRaggedTensor()
     yTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_Y_DIMS);
     yTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_Y_STRIDES);
 
-    // Auxiliary ragged-offset tensor referenced by xTensor.
-    TensorAttributesT raggedOffsetTensor;
-    raggedOffsetTensor.uid = K_RAGGED_OFFSET_UID;
-    raggedOffsetTensor.data_type = DataType::INT64;
-    raggedOffsetTensor.dims = {2, 1, 1, 1};
-    raggedOffsetTensor.strides = {1, 1, 1, 1};
-
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorOffsets;
     tensorOffsets.push_back(TensorAttributes::Pack(builder, &xTensor));
     tensorOffsets.push_back(TensorAttributes::Pack(builder, &wTensor));
     tensorOffsets.push_back(TensorAttributes::Pack(builder, &yTensor));
-    tensorOffsets.push_back(TensorAttributes::Pack(builder, &raggedOffsetTensor));
+
+    if(includeAux)
+    {
+        // Auxiliary ragged-offset tensor referenced by xTensor.
+        TensorAttributesT raggedOffsetTensor;
+        raggedOffsetTensor.uid = K_FPROP_TENSOR_RAGGED_OFFSET_UID;
+        raggedOffsetTensor.data_type = DataType::INT64;
+        raggedOffsetTensor.dims = hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_DIMS);
+        raggedOffsetTensor.strides = hipdnn_tests::toVec(K_FPROP_TENSOR_RAGGED_OFFSET_STRIDES);
+        raggedOffsetTensor.virtual_ = auxVirtual;
+        if(auxNested)
+        {
+            // A ragged aux may not itself be ragged; point at an existing tensor
+            // so nesting is the sole reason for rejection.
+            raggedOffsetTensor.ragged_offset_tensor_uid = K_FPROP_TENSOR_X_UID;
+        }
+        tensorOffsets.push_back(TensorAttributes::Pack(builder, &raggedOffsetTensor));
+    }
 
     ConvolutionFwdAttributesT convAttrs;
     convAttrs.x_tensor_uid = K_FPROP_TENSOR_X_UID;

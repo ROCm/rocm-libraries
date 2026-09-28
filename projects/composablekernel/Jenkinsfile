@@ -34,10 +34,63 @@ def loadCk() {
         : 'develop')
     library("ck@${branch}")
 }
+def showCompilerInfo(boolean deferBinaryInfo = false, String dockerImage = "") {
+    def image = dockerImage ?: ck.getDockerImageName()
+    def requestedVersion = params.COMPILER_VERSION ?: "ROCm ${params.ROCMVERSION} release"
+    def requestedCommit = params.COMPILER_COMMIT ?: "not pinned"
+
+    echo """Compiler configuration:
+  Docker image: ${image}
+  Compiler executable: ${params.BUILD_COMPILER}
+  Requested compiler version: ${requestedVersion}
+  Requested compiler commit: ${requestedCommit}"""
+
+    env.COMPILER_INFO_DEFERRED = String.valueOf(deferBinaryInfo)
+    if (deferBinaryInfo) {
+        echo "Compiler binary details deferred until the Docker image rebuild completes."
+        return
+    }
+
+    try {
+        def imageInfo = ck.pullImage(docker_name: image)
+        image = imageInfo[1]
+
+        withEnv([
+            "CK_COMPILER_IMAGE=${image}",
+            "CK_BUILD_COMPILER=${params.BUILD_COMPILER}"
+        ]) {
+            sh(
+                label: 'Show compiler image ID',
+                script: '''#!/bin/bash
+                    set -eu
+                    docker image inspect --format='Compiler image ID: {{.Id}}' "$CK_COMPILER_IMAGE"
+                '''
+            )
+            withDockerContainer(image: image, args: '') {
+                sh(
+                    label: 'Show compiler version',
+                    script: '''#!/bin/bash
+                        set -eu
+                        echo "Compiler executable: $CK_BUILD_COMPILER"
+                        "$CK_BUILD_COMPILER" --version
+                    '''
+                )
+            }
+        }
+        env.COMPILER_INFO_DEFERRED = "false"
+    }
+    catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        throw e
+    }
+    catch (Exception e) {
+        env.COMPILER_INFO_DEFERRED = "true"
+        echo "Compiler binary details are not available yet: ${e.getMessage()}"
+    }
+}
+
 
 //launch develop branch daily jobs
 CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 23 * * * % RUN_FULL_QA=true;RUN_CK_TILE_FMHA_TESTS=true;RUN_PERFORMANCE_TESTS=true;FORCE_CI=true
-                                              0 22 * * * % RUN_FULL_QA=true;DISABLE_DL_KERNELS=true;RUN_TILE_ENGINE_BASIC_TESTS=true;RUN_TILE_ENGINE_GEMM_TESTS=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 21 * * * % RUN_GROUPED_CONV_LARGE_CASES_TESTS=true;hipTensor_test=true;BUILD_GFX101=false;BUILD_GFX908=false;BUILD_GFX942=true;BUILD_GFX950=true;RUN_PERFORMANCE_TESTS=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true;BUILD_PACKAGES=true
                                               0 19 * * * % BUILD_DOCKER=true;COMPILER_VERSION=develop;BUILD_COMPILER=/llvm-project/build/bin/clang++;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
                                               0 17 * * * % BUILD_DOCKER=true;COMPILER_VERSION=therock;USE_SCCACHE=false;NINJA_BUILD_TRACE=true;RUN_ALL_UNIT_TESTS=true;FORCE_CI=true
@@ -69,8 +122,8 @@ pipeline {
             description: 'If you want to use a custom docker image, please specify it here (default: leave blank).')
         string(
             name: 'ROCMVERSION',
-            defaultValue: '7.14',
-            description: 'Specify which ROCM version to use: 7.14 (default).')
+            defaultValue: '10.0',
+            description: 'Specify which ROCM version to use: 10.0 (default).')
         string(
             name: 'COMPILER_VERSION',
             defaultValue: '',
@@ -127,14 +180,6 @@ pipeline {
             name: "RUN_CK_TILE_FMHA_TESTS",
             defaultValue: false,
             description: "Run the ck_tile FMHA tests (default: OFF)")
-        booleanParam(
-            name: "RUN_TILE_ENGINE_BASIC_TESTS",
-            defaultValue: true,
-            description: "Run the tile_engine_basic tests (default: ON)")
-        booleanParam(
-            name: "RUN_TILE_ENGINE_GEMM_TESTS",
-            defaultValue: false,
-            description: "Run the tile_engine_gemm tests (default: OFF)")
         booleanParam(
             name: "BUILD_INSTANCES_ONLY",
             defaultValue: false,
@@ -274,6 +319,7 @@ pipeline {
                 script {
                     loadCk()
                     ck.runOnHealthyNode(rocmnode("nogpu")) {
+                        showCompilerInfo(params.BUILD_DOCKER.toBoolean())
                         ck.checkoutComposableKernel()
                         env.SHOULD_RUN_CI = String.valueOf(params.FORCE_CI.toBoolean() || ck.shouldRunCICheck())
                         echo "SHOULD_RUN_CI: ${env.SHOULD_RUN_CI}"
@@ -295,6 +341,9 @@ pipeline {
                             ck.runOnHealthyNode(rocmnode("nogpu")) {
                                 deleteDir()
                                 ck.buildDocker('/opt/rocm')
+                                if ("${env.COMPILER_INFO_DEFERRED}".toBoolean()) {
+                                    showCompilerInfo(false, env.CK_BASE_IMAGE)
+                                }
                                 cleanWs()
                             }
                         }
@@ -573,98 +622,6 @@ pipeline {
                             ck.runOnHealthyNode(rocmnode("gfx1201")) {
                                 deleteDir()
                                 ck.buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: ck.build_and_run_fmha("gfx1201"))
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        stage("Run TILE_ENGINE_BASIC Tests")
-        {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
-            }
-            parallel
-            {
-                stage("Run TILE_ENGINE_BASIC Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_TILE_ENGINE_BASIC_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runTileEngineBasicTests(params.BUILD_COMPILER)
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        stage("Run TILE_ENGINE_GEMM Tests")
-        {
-            when {
-                beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
-            }
-            parallel
-            {
-                stage("Run TILE_ENGINE_GEMM Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_TILE_ENGINE_GEMM_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx942")) {
-                                deleteDir()
-                                ck.runTileEngineGemmTests("gfx942", params.BUILD_COMPILER)
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run TILE_ENGINE_GEMM Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_TILE_ENGINE_GEMM_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx950")) {
-                                deleteDir()
-                                ck.runTileEngineGemmTests("gfx950", params.BUILD_COMPILER)
-                                cleanWs()
-                            }
-                        }
-                    }
-                }
-                stage("Run TILE_ENGINE_GEMM Tests on gfx1201")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_TILE_ENGINE_GEMM_TESTS.toBoolean() }
-                    }
-                    agent none
-                    steps{
-                        script {
-                            loadCk()
-                            ck.runOnHealthyNode(rocmnode("gfx1201")) {
-                                deleteDir()
-                                ck.runTileEngineGemmTests("gfx1201", params.BUILD_COMPILER)
                                 cleanWs()
                             }
                         }

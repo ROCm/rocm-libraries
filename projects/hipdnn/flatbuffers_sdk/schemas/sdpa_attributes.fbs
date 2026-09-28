@@ -3,6 +3,9 @@
 
 include "data_types.fbs";
 
+// See graph.fbs for the semantics of this annotation.
+attribute "cache_uid";
+
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
 enum DiagonalAlignment : byte {
@@ -18,44 +21,44 @@ enum AttentionImplementation : byte {
 
 table SdpaAttributes {
     // Required input tensor UIDs
-    q_tensor_uid:             long;
-    k_tensor_uid:             long;
-    v_tensor_uid:             long;
+    q_tensor_uid:             long (cache_uid);
+    k_tensor_uid:             long (cache_uid);
+    v_tensor_uid:             long (cache_uid);
 
     // Required output tensor UID
-    o_tensor_uid:             long;
+    o_tensor_uid:             long (cache_uid);
 
     // Optional input tensor UIDs
-    attn_mask_tensor_uid:     long = null;  // Additive attention bias (Bias)
-    scale_tensor_uid:         long = null;  // Attention scale tensor (Attn_scale)
-    seq_len_q_tensor_uid:     long = null;
-    seq_len_kv_tensor_uid:    long = null;
-    seed_tensor_uid:          long = null;  // Dropout seed
-    offset_tensor_uid:        long = null;  // Dropout offset
-    dropout_mask_tensor_uid:  long = null;
-    dropout_scale_tensor_uid: long = null;
-    page_table_k_tensor_uid:  long = null;
-    page_table_v_tensor_uid:  long = null;
-    block_mask_tensor_uid:    long = null;
-    sink_token_tensor_uid:    long = null;
+    attn_mask_tensor_uid:     long = null (cache_uid);  // Additive attention bias (Bias)
+    scale_tensor_uid:         long = null (cache_uid);  // Attention scale tensor (Attn_scale)
+    seq_len_q_tensor_uid:     long = null (cache_uid);
+    seq_len_kv_tensor_uid:    long = null (cache_uid);
+    seed_tensor_uid:          long = null (cache_uid);  // Dropout seed
+    offset_tensor_uid:        long = null (cache_uid);  // Dropout offset
+    dropout_mask_tensor_uid:  long = null (cache_uid);
+    dropout_scale_tensor_uid: long = null (cache_uid);
+    page_table_k_tensor_uid:  long = null (cache_uid);
+    page_table_v_tensor_uid:  long = null (cache_uid);
+    block_mask_tensor_uid:    long = null (cache_uid);
+    sink_token_tensor_uid:    long = null (cache_uid);
 
     // FP8-specific input tensor UIDs
-    descale_q_tensor_uid:     long = null;
-    descale_k_tensor_uid:     long = null;
-    descale_v_tensor_uid:     long = null;
-    descale_s_tensor_uid:     long = null;
-    scale_s_tensor_uid:       long = null;
-    scale_o_tensor_uid:       long = null;
+    descale_q_tensor_uid:     long = null (cache_uid);
+    descale_k_tensor_uid:     long = null (cache_uid);
+    descale_v_tensor_uid:     long = null (cache_uid);
+    descale_s_tensor_uid:     long = null (cache_uid);
+    scale_s_tensor_uid:       long = null (cache_uid);
+    scale_o_tensor_uid:       long = null (cache_uid);
 
     // Optional output tensor UIDs
-    stats_tensor_uid:         long = null;
-    max_tensor_uid:           long = null;  // Logit max (Max)
-    sum_exp_tensor_uid:       long = null;  // Score sum exp (Sum_exp)
-    rng_dump_tensor_uid:      long = null;  // RNG dump for dropout debugging
+    stats_tensor_uid:         long = null (cache_uid);
+    max_tensor_uid:           long = null (cache_uid);  // Logit max (Max)
+    sum_exp_tensor_uid:       long = null (cache_uid);  // Score sum exp (Sum_exp)
+    rng_dump_tensor_uid:      long = null (cache_uid);  // RNG dump for dropout debugging
 
     // FP8-specific output tensor UIDs
-    amax_s_tensor_uid:        long = null;  // Absolute max for attention scores
-    amax_o_tensor_uid:        long = null;  // Absolute max for output tensor
+    amax_s_tensor_uid:        long = null (cache_uid);  // Absolute max for attention scores
+    amax_o_tensor_uid:        long = null (cache_uid);  // Absolute max for output tensor
 
     // Boolean flags
     generate_stats:           bool = null;

@@ -3,6 +3,10 @@
 
 ARG BUILD_TYPE=prebuilt
 ARG THEROCK_BASE_IMAGE=rocm/miopen:therock
+# Where the prebuilt ROCm multi-arch nightly tarballs are published. AMD's CD pipeline moved these
+# off the legacy therock-nightly-tarball S3 bucket to nightly.repo.amd.com (the bucket went stale
+# after 2026-08-22). Overridable so a future relocation is a one-line change.
+ARG THEROCK_NIGHTLY_REPO=https://nightly.repo.amd.com/rocm/core/tarball
 
 # ============================================================================
 # Common base image with all dependencies
@@ -235,6 +239,72 @@ RUN if [ "$BUILD_JOBS" = "0" ]; then \
     cmake --install .
 
 #============================================================================
+# ARTIFACT: Install a prebuilt TheRock base by downloading the multi-arch
+# nightly release tarball instead of compiling TheRock from source. Trades the
+# fragile, multi-hour source build for a single ~minutes tarball download; CK
+# and MIOpen are still built from THIS repo's own source, unchanged.
+#============================================================================
+# TheRock's install_rocm_from_artifacts.py resolves/downloads nightlies from the legacy
+# therock-nightly-tarball S3 bucket, which stopped receiving multi-arch nightlies on 2026-08-22 --
+# the CD pipeline now publishes to nightly.repo.amd.com and the installer was not repointed (even on
+# main). Its "install" is just a tarball extract into /opt/rocm with no strip/fixup, so we resolve +
+# download the multi-arch tarball directly from the current repo instead: functionally identical,
+# but sourced from where the nightlies actually are. This also drops the boto3 / TheRock clone the
+# installer needed -- the artifact path is now plain curl + tar.
+
+# Resolve-only: list the repo index and pick the newest linux-multiarch nightly version WITHOUT
+# downloading the multi-GB tarball. We capture it to /rocm_version.txt so the pipeline can tag/label
+# the image with the actual ROCm nightly and pin the real download to it. THEROCK_RESOLVE_BUST (set
+# to the build date by buildTheRockDockerImage()) folds the date into this layer's cache key so the
+# resolve re-runs as the nightly rolls.
+FROM base AS resolve_therock
+ARG THEROCK_NIGHTLY_REPO
+ARG THEROCK_RESOLVE_BUST=default
+RUN echo "resolve bust: ${THEROCK_RESOLVE_BUST}" && \
+    curl -fsSL "${THEROCK_NIGHTLY_REPO}/" \
+      | grep -oE 'therock-dist-linux-multiarch-[0-9]+\.[0-9]+\.[0-9]+(a|rc)[0-9]{8}\.tar\.gz' \
+      | sed -E 's/.*multiarch-(.+)\.tar\.gz/\1/' \
+      | sort -V | uniq | tail -1 > /rocm_version.txt && \
+    test -s /rocm_version.txt && \
+    echo "Resolved ROCm nightly version: $(cat /rocm_version.txt)"
+
+# Minimal export surface: a scratch stage carrying only the version file, so groovy can read it
+# back cheaply via `docker buildx build --target resolve_version_out --output type=local`.
+FROM scratch AS resolve_version_out
+COPY --from=resolve_therock /rocm_version.txt /rocm_version.txt
+
+# Real install: download the pinned multi-arch tarball and extract it into /opt/rocm. TheRock's
+# tarball bundles every gfx family plus the lib/run/dev components (only the test component is
+# omitted) and lays /opt/rocm out exactly like the source build -- flat lib/rocblas/library/ with
+# one TensileLibrary_lazy_<arch>.dat per arch, and the dev CMake package configs (ROCMConfig.cmake,
+# rocblasConfig.cmake, ...) present -- so a plain extract needs no per-arch install loop, rocBLAS
+# accumulate, or subdir-flatten fixup (this is exactly what install_rocm_from_artifacts.py did:
+# tarfile.extractall into the output dir). THEROCK_ASIC still selects which archs CK and MIOpen
+# build for in the downstream stages.
+#
+# ROCM_NIGHTLY_VERSION serves double duty: it pins the exact tarball the resolve stage found (so the
+# image tag/label always match the installed ROCm, with no "latest is a moving target" race), and
+# referencing it in the RUN makes the version this layer's cache key -- the tarball is re-downloaded
+# only when the nightly actually changes, not merely when the calendar rolls. A standalone
+# `docker build` that omits it resolves the latest at build time so the image still builds directly;
+# the pipeline always pins.
+FROM base AS artifact_therock
+ARG THEROCK_NIGHTLY_REPO
+ARG ROCM_NIGHTLY_VERSION=default
+RUN set -e; \
+    ver="${ROCM_NIGHTLY_VERSION}"; \
+    if [ "$ver" = "default" ]; then \
+        ver=$(curl -fsSL "${THEROCK_NIGHTLY_REPO}/" \
+              | grep -oE 'therock-dist-linux-multiarch-[0-9]+\.[0-9]+\.[0-9]+(a|rc)[0-9]{8}\.tar\.gz' \
+              | sed -E 's/.*multiarch-(.+)\.tar\.gz/\1/' | sort -V | uniq | tail -1); \
+    fi; \
+    echo "Installing ROCm nightly: ${ver} from ${THEROCK_NIGHTLY_REPO}"; \
+    curl -fSL "${THEROCK_NIGHTLY_REPO}/therock-dist-linux-multiarch-${ver}.tar.gz" -o /tmp/rocm.tar.gz; \
+    mkdir -p /opt/rocm; \
+    tar -xzf /tmp/rocm.tar.gz -C /opt/rocm; \
+    rm -f /tmp/rocm.tar.gz
+
+#============================================================================
 # REGULAR: Use the pre-built ROCm image from TheRock to build the rest of
 # the MIOpen environment
 #============================================================================
@@ -261,7 +331,10 @@ ADD miopen/dev-requirements.txt /dev-requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 # Composable Kernel install separated from rbuild
-# Remove components that are already built by TheRock.
+# Remove components that are already built by TheRock. nlohmann-json is stripped
+# because the multi-arch nightly tarball's /opt/rocm already ships it (dev
+# component); otherwise rbuild's cget install fails linking it into the prefix
+# ("Failed to link .../nlohmann_jsonConfigVersion.cmake -> /opt/rocm/...").
 RUN cd / && \
     sed -i '/composablekernel/d; /half/d; /nlohmann/d' /requirements.txt && \
     if [ "$USE_FIN" = "ON" ]; then \

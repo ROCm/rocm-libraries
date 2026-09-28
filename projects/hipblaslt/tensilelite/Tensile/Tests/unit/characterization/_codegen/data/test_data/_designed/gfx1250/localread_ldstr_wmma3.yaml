@@ -53,6 +53,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         # Two MI shapes: [16,16,32,1,1,4,4,2,2] and [16,16,32,1,1,2,4,2,1]
         # With LDSTrInst=True, these emit enableLDSTrA/B=True (bpeDS=2, HasLDSTrB128B16=1)
@@ -104,6 +105,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
+        - MaxOccupancy: [40]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 128, 1, 1, 2, 2, 2, 2]

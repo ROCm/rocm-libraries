@@ -136,6 +136,7 @@ __all__ = [
     "AutotuneConfig",
     "AutotuneResult",
     "AutotuneStorageConfig",
+    "AutotuneCacheWriteOutcome",
     "Handle",
     "create_handle",
     "destroy_handle",

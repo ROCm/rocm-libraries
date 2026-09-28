@@ -232,17 +232,71 @@ def init(arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
     ``debug`` is accepted for signature parity but ignored. Capability
     probing is delegated to ``stinkytofu.getHardwareCaps`` via
     ``caps.getCaps`` (comgr inside stinkytofu, not ``llvm-mc`` here).
+
+    For unsupported ISAs, the call falls back to the native ``_rocisa``
+    extension transparently.
     """
     global _current_isa, _assembler_path, _is_init
     key = _caps.normalize_isa_key(arch)
     _current_isa = key
     _assembler_path = assemblerPath
     if key not in _data:
-        asm, arch_c, reg, bugs = _caps.getCaps(key)
+        try:
+            asm, arch_c, reg, bugs = _caps.getCaps(key)
+        except KeyError:
+            _init_native_fallback(arch, assemblerPath, debug, key)
+            _is_init = True
+            return
         _data[key] = IsaInfo(asm, arch_c, reg, bugs)
     _is_init = True
-    # ``debug`` is accepted for API parity only.
     del debug
+
+
+def _init_native_fallback(arch: Any, assemblerPath: str, debug: bool,
+                          key: "tuple") -> None:
+    """Query ISA caps from native rocisa via a subprocess.
+
+    Loading ``_rocisa.so`` in-process would conflict with the already-loaded
+    ``_stinkytofu.so`` (nanobind duplicate type registration).  A subprocess
+    gets its own address space, so both extensions can coexist safely.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    isa_tuple = tuple(int(x) for x in key)
+    script = textwrap.dedent(f"""\
+        import os, json
+        os.environ["ROCISA_BACKEND"] = "rocisa"
+        import rocisa
+        ti = rocisa.rocIsa.getInstance()
+        arch = {isa_tuple!r}
+        ti.init(arch, {assemblerPath!r}, {debug!r})
+        info = ti.getIsaInfo(arch)
+        print(json.dumps({{
+            "asmCaps":  {{str(k): int(v) for k, v in dict(info.asmCaps).items()}},
+            "archCaps": {{str(k): int(v) for k, v in dict(info.archCaps).items()}},
+            "regCaps":  {{str(k): int(v) for k, v in dict(info.regCaps).items()}},
+            "asmBugs":  {{str(k): int(v) for k, v in dict(info.asmBugs).items()}},
+        }}))
+    """)
+
+    env = {**os.environ, "ROCISA_BACKEND": "rocisa"}
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Native rocisa fallback subprocess failed for ISA {key}:\n"
+            f"{result.stderr}"
+        )
+    data = json.loads(result.stdout)
+    _data[key] = IsaInfo(
+        data["asmCaps"], data["archCaps"], data["regCaps"], data["asmBugs"],
+    )
 
 
 def isInit() -> bool:
@@ -261,11 +315,17 @@ def getIsaInfo(arch: Any) -> "IsaInfo":
     Lazy-populates the cache so callers can ask for any supported ISA
     without a prior ``init()`` call (Tensile's
     ``Tensile.Common.Capabilities.makeIsaInfoMap`` relies on this).
+
+    Falls back to native ``_rocisa`` for ISAs not supported by stinkytofu.
     """
     key = _caps.normalize_isa_key(arch)
     info = _data.get(key)
     if info is None:
-        asm, arch_c, reg, bugs = _caps.getCaps(key)
+        try:
+            asm, arch_c, reg, bugs = _caps.getCaps(key)
+        except KeyError:
+            _init_native_fallback(arch, "", False, key)
+            return _data[key]
         info = IsaInfo(asm, arch_c, reg, bugs)
         _data[key] = info
     return info
@@ -336,13 +396,19 @@ def setKernel(arch: Any, wavefrontSize: int) -> None:
 def setKernelInfo(info: KernelInfo) -> None:
     """Replace the live ``KernelInfo`` directly. No C++ equivalent.
 
-    Used by test harnesses that need to restore a previously captured
-    ``KernelInfo`` -- in particular the initial ``KernelInfo()`` state
-    where ``info.isa is None``, which ``setKernel`` cannot represent
-    (it requires a concrete ISA tuple).
+    Used by callers that need to restore a previously captured ``KernelInfo`` --
+    in particular the initial ``KernelInfo()`` state where ``info.isa is None``,
+    which ``setKernel`` cannot represent (it requires a concrete ISA tuple).
+
+    Also resets ``_current_isa`` to match, so capability lookups
+    (``getAsmCaps`` / ``getAsmBugs`` / ...) go back to raising rather than
+    silently continuing to answer for whatever ISA was pinned before this call
+    -- otherwise ``getKernel()`` would report the restored (unpinned) state
+    while capability queries stayed pinned to the old ISA.
     """
-    global _kernel_info
+    global _kernel_info, _current_isa
     _kernel_info = info
+    _current_isa = info.isa
 
 
 def getKernel() -> KernelInfo:

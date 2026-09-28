@@ -5,12 +5,10 @@
 
 #include "compilation/KernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
-#include <optional>
 
 namespace hip_kernel_provider::batchnorm
 {
 
-using namespace core::utils;
 using namespace compilation;
 
 class BatchnormKernelCompileOptions : public KernelCompileOptions
@@ -22,7 +20,7 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanTensorAttrs,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensorAttrs,
         const hipDeviceProp_t& deviceProps,
-        const ActivationMode optActivationMode = ActivationMode::PASTHRU)
+        const core::utils::ActivationMode optActivationMode = core::utils::ActivationMode::PASTHRU)
         : KernelCompileOptions(inputTensorAttrs, deviceProps)
     {
         addBatchnormDefaults();

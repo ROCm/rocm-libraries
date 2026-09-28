@@ -238,6 +238,18 @@ struct HwInstDesc {
     // after this instruction is issued (used for matrix instructions).
     uint16_t coIssueWindow = 0;
 
+    // cycles of the latency window the hardware occupies outright: nothing of any pipe
+    // (VALU, SALU, memory) can be issued into them. Distinct from coIssueWindow, which
+    // only gates VALU. Non-zero for the VOP3PX2/VOP3PX3 scale pairs, whose window
+    // carries an LD_SCALE sub-issue alongside the WMMA.
+    //
+    // Anchored at the END of the window, not the start: bit 0 = last cycle, bit 1 =
+    // second-to-last, and so on. The anchor matters because a matrix instruction's
+    // latency varies with its operand formats (see matrixFmtCostOverrides -- the same
+    // v_wmma_scale_* runs 16 or 8 cycles on gfx1250v0), and an end-anchored mask tracks
+    // every one of those without a per-format override of its own.
+    uint16_t blockedScaleMask = 0;
+
     // mnemonic string for the instruction.
     const char* mnemonic = nullptr;
 
@@ -251,6 +263,16 @@ struct HwInstDesc {
 
     // execution unit (e.g., VALU, SALU, MatrixUnit)
     ExecUnit unit = ExecUnit::NONE;
+
+    /// Experimental upper bound on modeled LDS-burst drain latency for this DS
+    /// load opcode (cycles). 0 = use HWModel::lds.dsLoadDefaultMaxDrain via
+    /// makeDsLoadDrainEntry (not "uncapped").
+    uint16_t dsMaxDrain = 0;
+
+    /// Overflow issue throughput for this DS load opcode (per WGP). Higher
+    /// shortens the overflow term of the dynamic drain model. 0 = fall back to
+    /// HWModel::lds.dsLoadDefaultThroughput.
+    uint16_t dsThroughput = 0;
 
     /// Per-operand encoding field description (dest/src, encoding field,
     /// register type, and size in bits).

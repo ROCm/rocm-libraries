@@ -13,9 +13,10 @@ This guide shows you how to add a new instruction from bottom (Assembly IR) to t
 | Goal | What to do |
 |------|------------|
 | **Assembly-only instruction** | Add `DEF_T(Class, "mnemonic", .format = X, .flags = {...})` or an entry inside a `DEF_BATCH` in `hardware/src/gfx/GfxXXX/GfxXXXInstructions.def`. Rebuild. |
-| **Group of related instructions** | Use `DEF_BATCH(.format = X, ...)` to share the format across entries. Each entry is `Class, "mnemonic"` with optional per-entry `.flags`, `.cost`, `.operand_fields`, `.logical`. |
+| **Group of related instructions** | Use `DEF_BATCH(.format = X, ...)` to share the format across entries. Each entry is `Class, "mnemonic"` with optional per-entry `.flags`, `.cost`, `.dsMaxDrain`, `.dsThroughput`, `.operand_fields`, `.logical`. |
 | **Used from Logical IR / Rocisa** | Add `.logical = "LogicalName"` to the `DEF_T` / `DEF_BATCH` entry. Tablegen auto-generates the `setGfxXXXLogicalToArchMap()` — no manual `.cpp` edit needed. Also add an entry in `tools/tablegen/LogicalInstructionDefs.inc`. |
 | **Non-default cost** | Add `.cost = {cycle, latency}` to the `DEF_T` or `DEF_BATCH` entry. No .cpp edit. |
+| **DS-load drain model** | For LDS reads that need a non-default burst drain model, add `.dsMaxDrain = N` (experimental cap) and/or `.dsThroughput = N` (overflow rate per WGP). `0` / omitted falls back to `HWModel.lds` defaults. |
 | **Modifier-dependent cost** (e.g. matrix fmt) | Add `.costOverride = { { MatrixFmtModifiers(FP4, FP4), cycle, latency } }` alongside `.cost`. |
 | **Operand requirements** (e.g. 4 SGPRs, 8 SGPRs) | Define `.fields` in the format (e.g., `DEF_FORMAT(TENSOR, .fields = { {S0, ..., sgpr, 128}, {S1, ..., sgpr, 256} })`) or override per-instruction via `.operand_fields = { {D0, .size=64} }`. Tablegen generates `*_operands.inc`. No manual .hpp edit. |
 | **Dual-encoding operand override** | Add `.alt_operand_fields = { ... }` for the promoted encoding (e.g. VOP3 form of a VOP2 instruction). |
@@ -67,7 +68,7 @@ struct FloatAddInst : GfxInstDef
 
 `s_wait_tensorcnt` is a Gfx1250 feature. Add it to `hardware/src/gfx/Gfx1250/Gfx1250Instructions.def` (not in the .cpp).
 
-Use `DEF_T(ClassName, "mnemonic", ...)` or add an entry inside a `DEF_BATCH(...)`. Both accept the same optional fields: `.format`, `.flags`, `.cost`, `.logical`, `.operand_fields`. The tablegen generates the init and cost tables; the .cpp only includes the generated files.
+Use `DEF_T(ClassName, "mnemonic", ...)` or add an entry inside a `DEF_BATCH(...)`. Both accept the same optional fields: `.format`, `.flags`, `.cost`, `.dsMaxDrain`, `.dsThroughput`, `.logical`, `.operand_fields`. The tablegen generates the init and cost tables; the .cpp only includes the generated files.
 
 #### DEF_T — single instruction
 
@@ -106,7 +107,7 @@ DEF_BATCH(.format = SOPP_WAIT16,
 )
 ```
 
-Each entry is: `ClassName, "mnemonic"` followed by optional per-entry fields (`.flags`, `.cost`, `.logical`, `.operand_fields`, `.costOverride`). Entries must **not** redefine `.format` — that comes from the batch header.
+Each entry is: `ClassName, "mnemonic"` followed by optional per-entry fields (`.flags`, `.cost`, `.dsMaxDrain`, `.dsThroughput`, `.logical`, `.operand_fields`, `.costOverride`). Entries must **not** redefine `.format` — that comes from the batch header.
 
 Real-world example with load instructions, costs, and operand overrides:
 

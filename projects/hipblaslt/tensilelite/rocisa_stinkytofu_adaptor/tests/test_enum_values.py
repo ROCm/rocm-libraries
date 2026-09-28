@@ -13,6 +13,7 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from rocisa_stinkytofu_adaptor.enum import (  # noqa: E402
+    HighBitSel,
     InstType,
     NonVolatile,
     TemporalHint,
@@ -36,6 +37,11 @@ class TestDevelopGapEnumValues(unittest.TestCase):
     def test_inst_type_b192_value(self):
         self.assertEqual(InstType.INST_B192, 22)
         self.assertEqual(InstType.INST_NOTYPE, 68)
+
+    def test_high_bit_sel_values(self):
+        self.assertEqual(HighBitSel.NONE, -1)
+        self.assertEqual(HighBitSel.LOW, 0)
+        self.assertEqual(HighBitSel.HIGH, 1)
 
 
 if __name__ == "__main__":

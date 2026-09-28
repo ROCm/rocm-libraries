@@ -51,6 +51,10 @@ Here is the sample command for gfx950:
 
 `./bin/geko --search --hipblaslt /path/to/rocm-libraries/projects/hipblaslt --workload-log hipblaslt-log-mask64.yaml --devices=0,1,2,3,4,5,6,7`
 
+To compare against a custom reference library during search/analyze, add:
+
+`--custom-lib-src /path/to/custom_lib`
+
 This is the workflow:
 ```
 hipBLASLt Logs → Search → Extract → Benchmark → Filter → Merge
@@ -65,6 +69,11 @@ hipBLASLt Logs → Search → Extract → Benchmark → Filter → Merge
 Runs hipblaslt-bench on a workload log without any tuning. Useful for measuring baseline performance or verifying results after integration.
 
 `./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt --workload-log hipblaslt-log-mask64.yaml --devices=0`
+
+Optional custom library inputs for `--bench`:
+- `--custom-lib-src PATH`: source logic directory to build into `workdir/ref_build` and benchmark as reference.
+- `--custom-lib-dir PATH`: pre-built custom library directory containing `library/**/TensileLibrary_lazy_gfx*.dat` (or `.dat.zlib`).
+- If both are provided, `--custom-lib-dir` takes precedence.
 
 ### Workload Input Options
 
@@ -405,11 +414,14 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--duration SEC` | `0.04` | Target dense-search benchmark duration per GEMM. |
+| `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) for summarize/search/analyze comparisons. |
 
 ### `--bench` options
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--benchmark-duration SEC` | `0.5` | Target seconds per cold and per timed phase of `hipblaslt-bench`. |
+| `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) and benchmark against it. |
+| `--custom-lib-dir PATH` | _none_ | Optional pre-built custom library directory containing `library/**/TensileLibrary_lazy_gfx*.dat` (or `.dat.zlib`). If set together with `--custom-lib-src`, this flag wins. |
 
 ### Validation rules (enforced by the parser)
 - `--hipblaslt` must point to an existing directory.
@@ -609,7 +621,8 @@ Both entry points below run the same `run_search` pipeline and produce the same 
 ```bash
 ./bin/geko --search --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
   --workload-log hipblaslt-log-mask64.yaml \
-  --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03
+    --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03 \
+    --custom-lib-src /path/to/custom_lib
 ```
 
 #### Option B: Script entry point (`scripts/search.py`)
@@ -624,12 +637,14 @@ Equivalent to Option A but takes the workload log as a positional argument and u
 | `--up_thr` | Performance uplift threshold | 1.03 (3%) |
 | `-w, --workdir` | Working directory | workdir |
 | `--duration` | Target benchmark duration per GEMM (seconds) | 0.04 |
+| `--custom-lib-src` | Source logic directory for building reference custom library | None |
 | `-v, --verbose` | Logging verbosity (0=WARNING, 1=INFO, 2=DEBUG) | 1 |
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
 
 ```bash
 python scripts/search.py /path/to/rocm-libraries/projects/hipblaslt/ hipblaslt-log-mask64.yaml \
-  --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03
+    --devices=0,1,2,3,4,5,6,7 --workdir my_search --keep_thr 0.1 --up_thr 1.03 \
+    --custom-lib-src /path/to/custom_lib
 ```
 
 Log:
@@ -668,6 +683,16 @@ Runs hipblaslt-bench on a workload without any tuning. Useful for measuring base
 # From a workload log
 ./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
   --workload-log hipblaslt-log-mask64.yaml --devices=0
+
+# From a source custom library (builds ref library under workdir/ref_build)
+./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+    --workload-log hipblaslt-log-mask64.yaml --devices=0 \
+    --custom-lib-src /path/to/custom_lib
+
+# From a pre-built custom library directory
+./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \
+    --workload-log hipblaslt-log-mask64.yaml --devices=0 \
+    --custom-lib-dir /path/to/custom_build
 
 # From a single inline GEMM
 ./bin/geko --bench --hipblaslt /path/to/rocm-libraries/projects/hipblaslt \

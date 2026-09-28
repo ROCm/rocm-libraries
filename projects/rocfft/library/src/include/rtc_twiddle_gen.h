@@ -22,6 +22,7 @@
 #define RTC_TWIDDLE_GEN
 
 #include "rocfft/rocfft.h"
+#include "rtc_generator.h"
 #include <hip/hip_runtime_api.h>
 #include <string>
 
@@ -61,9 +62,13 @@ enum struct TwiddleTableType
 };
 
 // generate name for twiddle-compute kernel
-std::string twiddle_rtc_kernel_name(TwiddleTableType type, rocfft_precision precision);
+std::string twiddle_rtc_kernel_name(TwiddleTableType type,
+                                    rocfft_precision precision,
+                                    const KIntType&  itype);
 // generate source for twiddle-compute kernel
-std::string
-    twiddle_rtc(const std::string& kernel_name, TwiddleTableType type, rocfft_precision precision);
+std::string twiddle_rtc(const std::string& kernel_name,
+                        const KIntType&    itype,
+                        TwiddleTableType   type,
+                        rocfft_precision   precision);
 
 #endif

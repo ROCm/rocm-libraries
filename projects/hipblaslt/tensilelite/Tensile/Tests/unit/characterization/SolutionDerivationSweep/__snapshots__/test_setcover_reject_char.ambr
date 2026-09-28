@@ -1,0 +1,101 @@
+# serializer version: 1
+# name: test_setcover_reject[sk_atomic_maxviol]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 3,
+    'StreamKAtomic': 1,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+    'rejections': list([
+      'Atomic Stream-K currently only tested for SGEMM',
+    ]),
+  })
+# ---
+# name: test_setcover_reject[sk_cluster_maxviol]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 4,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+    'rejections': list([
+      'StreamK dynamic/hybrid (SK4/SK5) do not support ClusterDim (cluster support is SK3-only)',
+      'Stream-K + ClusterDim Y-extent > 1 requires StreamKForceDPOnly=1 and a cluster [Cs, Ck] with both axes > 1; got [2, 2]',
+    ]),
+  })
+# ---
+# name: test_setcover_reject[sk_debugloop]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 4,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+    'rejections': list([
+      'DebugPersistentKernelLoopForever requires StreamK=3 (got 4)',
+    ]),
+  })
+# ---
+# name: test_setcover_reject[sk_pap_maxviol]
+  dict({
+    'BufferStore': False,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 3,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+    'rejections': list([
+      'Stream-K requires BufferStore',
+      'PrefetchAcrossPersistent requires BufferLoad',
+      'PrefetchAcrossPersistent requires PGR >= 1',
+      'PrefetchAcrossPersistent not supported with DirectToVgpr',
+      'PrefetchAcrossPersistent not supported with multiple summation indices',
+      'PrefetchAcrossPersistent NLL path requires BufferStore',
+      'PrefetchAcrossPersistent NLL path not supported with sparse',
+      'PrefetchAcrossPersistent NLL path not supported with StoreRemap',
+    ]),
+  })
+# ---
+# name: test_setcover_reject[sk_schedule_maxviol]
+  dict({
+    'BufferStore': False,
+    'EnableMatrixInstruction': False,
+    'GlobalSplitU': 0,
+    'StreamK': 1,
+    'StreamKAtomic': 0,
+    'StreamKWorkStealing': 0,
+    'Valid': False,
+    'rejections': list([
+      'Stream-K (non-MatrixInstruction) requires Assembly source kernels',
+      'General batch not supported with Stream-K',
+      'Grouped gemm not yet supported with Stream-K',
+      'ScheduleGlobalRead not supported with Stream-K',
+      'ScheduleLocalWrite not supported with Stream-K',
+      'Stream-K requires BufferStore',
+    ]),
+  })
+# ---
+# name: test_setcover_reject[sk_ws_maxviol]
+  dict({
+    'BufferStore': True,
+    'EnableMatrixInstruction': True,
+    'GlobalSplitU': 0,
+    'StreamK': 3,
+    'StreamKAtomic': 1,
+    'StreamKWorkStealing': True,
+    'Valid': False,
+    'rejections': list([
+      'Atomic Stream-K currently only tested for SGEMM',
+      'StreamKWorkStealing requires StreamK in {4,5} (got 3)',
+      'StreamKWorkStealing is not supported with StreamKAtomic',
+      'StreamKWorkStealing requires DebugStreamK=0 (the per-queue auto-reset relies on W_q>=1 whenever tiles_q>=1); got 1',
+    ]),
+  })
+# ---

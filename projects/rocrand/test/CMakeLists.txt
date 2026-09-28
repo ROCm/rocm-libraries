@@ -142,6 +142,9 @@ endif()
 # Checks for simple linkage problems
 add_subdirectory(linkage)
 
+# Checks that the public headers compile as C (see ROCM-28020)
+add_subdirectory(c_compile)
+
 # Add tests for the internal APIs
 add_subdirectory(internal)
 

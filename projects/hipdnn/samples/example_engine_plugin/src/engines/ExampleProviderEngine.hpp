@@ -4,6 +4,8 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "ExampleProviderHandle.hpp"
@@ -31,7 +33,10 @@ class ExampleProviderEngine : public hipdnn_plugin_sdk::IEngine<ExampleProviderH
                                                                 ExampleProviderContext>
 {
 public:
-    explicit ExampleProviderEngine(int64_t id);
+    /// @param id   Engine ID, as reported through copyEngineIds().
+    /// @param name Canonical engine name, echoed into EngineDetails.name. An
+    ///             empty name leaves the field unset.
+    explicit ExampleProviderEngine(int64_t id, std::string_view name = {});
 
     int64_t id() const override;
 
@@ -61,6 +66,7 @@ public:
 
 private:
     int64_t _id;
+    std::string _name;
     std::vector<std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<ExampleProviderHandle,
                                                                 ExampleProviderSettings,
                                                                 ExampleProviderContext>>>

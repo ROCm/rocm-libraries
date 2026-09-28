@@ -185,15 +185,27 @@ def test_kernel_name_adds_thread_tile_for_non_mi_kernel(make_state):
     assert "_TT4_8" in N.getKernelNameMin(state, splitGSU=False)
 
 
-def test_lds_segment_interleave_is_named_only_when_applied(make_state):
+def test_lds_segment_interleave_tags_value_in_kernel_name(make_state):
     names = {
         value: N.getKernelNameMin(make_state(LDSSegmentInterleave=value), splitGSU=False)
-        for value in (0, 1, 2)
+        for value in (0, 1)
     }
 
+    assert "_LDSSI0" in names[0]
     assert "_LDSSI1" in names[1]
-    assert "_LDSSI" not in names[0]
-    assert "_LDSSI" not in names[2]
+
+
+def test_tdmfuse_is_named_only_when_nonzero(make_state):
+    names = {
+        value: N.getKernelNameMin(make_state(TDMFuse=value), splitGSU=False)
+        for value in (0, 1, 2, 3)
+    }
+
+    assert "TDMF" not in names[0]
+    assert "TDMF1" in names[1] and "TDMF1" not in names[2]
+    assert "TDMF2" in names[2]
+    assert "TDMF3" in names[3]
+    assert len(set(names.values())) == 4
 
 
 def test_empty_custom_kernel_name_is_not_emitted_as_parameter(make_state):

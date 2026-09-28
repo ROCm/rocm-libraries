@@ -1121,3 +1121,35 @@ class TestParameterReverseOperators:
         assert (p2 >= p1) == True
         assert (p1 < p2) == True
         assert (p1 <= p2) == True
+
+
+def test_deepcopy_records_result_in_memo():
+    config = ReadWriteTransformDict()
+    config.writeNoTransform("value", 1)
+    memo = {}
+
+    result = config.__deepcopy__(memo)
+
+    assert memo[id(config)] is result
+    assert result.readNoTransform("value") == 1
+
+
+def test_project_config_three_level_dotted_access():
+    config = ProjectConfig()
+    section_a = config.createSection("A")
+    section_b = section_a.createSection("B")
+    section_b.createValue("C", 1, defaultValue=7, description="nested value")
+
+    assert config.getDescription("A.B.C") == "nested value"
+    assert config.getDefaultValue("A.B.C") == 7
+
+    config["A.B.C"] = 99
+    assert config["A.B.C"] == 99
+
+
+def test_project_config_failed_constraint_reports_expression():
+    config = ProjectConfig()
+    config.addConstraint("False")
+
+    with pytest.raises(AssertionError, match="^Constraint evaluation failed: False$"):
+        config.checkConstraints()

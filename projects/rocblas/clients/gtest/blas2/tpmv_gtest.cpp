@@ -21,6 +21,7 @@
  * ************************************************************************ */
 
 #include "blas2/common_tpmv.hpp"
+#include "client_utility.hpp"
 #include "rocblas_data.hpp"
 #include "rocblas_datatype2string.hpp"
 #include "rocblas_test.hpp"
@@ -70,21 +71,28 @@ namespace
         static std::string name_suffix(const Arguments& arg)
         {
             RocBLAS_TestName<tpmv_template> name(arg.name);
+            name << rocblas_datatype2string(arg.a_type);
 
-            name << rocblas_datatype2string(arg.a_type) << '_' << (char)std::toupper(arg.uplo)
-                 << '_' << (char)std::toupper(arg.transA) << '_' << (char)std::toupper(arg.diag)
-                 << '_' << arg.M;
+            if(strstr(arg.function, "_bad_arg") != nullptr)
+            {
+                name << "_bad_arg";
+            }
+            else
+            {
+                name << '_' << (char)std::toupper(arg.uplo) << '_' << (char)std::toupper(arg.transA)
+                     << '_' << (char)std::toupper(arg.diag) << '_' << arg.N;
 
-            if(TPMV_TYPE == TPMV_STRIDED_BATCHED)
-                name << '_' << arg.stride_a;
+                if(TPMV_TYPE == TPMV_STRIDED_BATCHED)
+                    name << '_' << arg.stride_a;
 
-            name << '_' << arg.incx;
+                name << '_' << arg.incx;
 
-            if(TPMV_TYPE == TPMV_STRIDED_BATCHED)
-                name << '_' << arg.stride_x;
+                if(TPMV_TYPE == TPMV_STRIDED_BATCHED)
+                    name << '_' << arg.stride_x;
 
-            if(TPMV_TYPE == !TPMV)
-                name << '_' << arg.batch_count;
+                if(TPMV_TYPE != TPMV)
+                    name << '_' << arg.batch_count;
+            }
 
             if(arg.api & c_API_64)
             {
@@ -139,7 +147,7 @@ namespace
     using tpmv = tpmv_template<tpmv_testing, TPMV>;
     TEST_P(tpmv, blas2)
     {
-        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(rocblas_simple_dispatch<tpmv_testing>(GetParam()));
+        RUN_TEST_ON_THREADS_STREAMS(rocblas_simple_dispatch<tpmv_testing>(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(tpmv);
 

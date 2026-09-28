@@ -410,7 +410,22 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_mmaop_t* op)
 {
     const rocke_conv_problem_t* p = &spec->problem;
-    int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
+    int max_store_vec;
+    if(spec->has_vector_size_c)
+    {
+        max_store_vec = spec->vector_size_c;
+    }
+    else
+    {
+        /* Mirror Python default_vector_sizes(cpg, kpg, dtype_d)[2] (depends only on kpg):
+         * largest power-of-two dividing kpg (fp32: max 4, otherwise max 8). */
+        int kpg = rocke_conv_problem_kpg(p);
+        bool is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+        if(is_fp32_d)
+            max_store_vec = (kpg % 4 == 0) ? 4 : (kpg % 2 == 0) ? 2 : 1;
+        else
+            max_store_vec = (kpg % 8 == 0) ? 8 : (kpg % 4 == 0) ? 4 : (kpg % 2 == 0) ? 2 : 1;
+    }
     int _war_barriers = (spec->pipeline && strcmp(spec->pipeline, "wavelet") == 0) ? 2 : 1;
     rocke_cshuffle_epilogue_t epi;
     if(op != NULL && op->family != NULL && strcmp(op->family, "wmma") == 0)

@@ -20,6 +20,7 @@
 
 #include "tree_node.h"
 #include "../../shared/precision_type.h"
+#include "../../shared/ptrdiff.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "logging.h"
@@ -28,6 +29,8 @@
 #include "rocfft_mpi.h"
 #include "twiddles.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <thread>
@@ -261,8 +264,7 @@ void LeafNode::Print(rocfft_ostream& os, int indent) const
 
 bool LeafNode::CreateDevKernelArgs()
 {
-    devKernArg = kargs_create(length, inStride, outStride, iDist, oDist);
-    return (devKernArg != nullptr);
+    return devKernArg.create(length, inStride, outStride, iDist, oDist, GetKIntType());
 }
 
 bool LeafNode::CreateDeviceResources()

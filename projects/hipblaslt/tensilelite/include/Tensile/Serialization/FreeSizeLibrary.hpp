@@ -51,24 +51,38 @@ namespace TensileLite
                     = SingleSolutionLibrary<ContractionProblemGemm, ContractionSolution>;
 
                 auto ctx = static_cast<LibraryIOContext<ContractionSolution>*>(iot::getContext(io));
-                if(ctx == nullptr || ctx->solutions == nullptr)
+                if(ctx == nullptr || (ctx->solutions == nullptr && ctx->blobCache == nullptr))
                 {
                     iot::setError(io,
                                   "SingleSolutionLibrary requires that context be set to "
                                   "a SolutionMap.");
                 }
-
-                auto iter = ctx->solutions->find(index);
-                if(iter == ctx->solutions->end())
+                else if(ctx->blobCache)
                 {
-                    std::ostringstream msg;
-                    msg << "[FreeSizeLibrary] Invalid solution index: " << index;
-                    iot::setError(io, msg.str());
+                    if(!ctx->blobCache->contains(index))
+                    {
+                        iot::setError(
+                            io, concatenate("[FreeSizeLibrary] Invalid solution index: ", index));
+                    }
+                    else
+                    {
+                        entry.value = std::make_shared<SSLibrary>(index, ctx->blobCache);
+                    }
                 }
                 else
                 {
-                    std::shared_ptr<ContractionSolution> solution = iter->second;
-                    entry.value = std::make_shared<SSLibrary>(solution);
+                    auto iter = ctx->solutions->find(index);
+                    if(iter == ctx->solutions->end())
+                    {
+                        std::ostringstream msg;
+                        msg << "[FreeSizeLibrary] Invalid solution index: " << index;
+                        iot::setError(io, msg.str());
+                    }
+                    else
+                    {
+                        std::shared_ptr<ContractionSolution> solution = iter->second;
+                        entry.value = std::make_shared<SSLibrary>(solution);
+                    }
                 }
             }
 

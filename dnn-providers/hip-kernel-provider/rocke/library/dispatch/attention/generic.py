@@ -53,6 +53,8 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
+    # Unified kernels already shift the causal diagonal by the runtime
+    # difference between each sequence's KV and query lengths.
     supports_features=ATTENTION_FEATURES,
 )
 
@@ -70,7 +72,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if problem.select_path() != path:
@@ -92,6 +94,8 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             dtype=problem.dtype,
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
+            use_fp8=problem.use_fp8,
+            fp8_fnuz=problem.fp8_fnuz,
         )
 
     candidate = KernelCandidate(
@@ -136,7 +140,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if not ok:
             return False, why
         problem = _problem(req)
-        ok, why = supports_native_unified_attention(problem)
+        ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
         if not _d256_decode_cohort(problem):
@@ -177,7 +181,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=(256,)),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "causal_bottom_right"}),
         ),
         _supports=support,
         select_spec=select,
