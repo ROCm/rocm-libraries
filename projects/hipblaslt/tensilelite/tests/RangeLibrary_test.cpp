@@ -29,6 +29,9 @@
 #include <filesystem>
 
 #include <Tensile/ContractionLibrary.hpp>
+#ifdef TENSILE_YAML
+#include <Tensile/llvm/YAML.hpp>
+#endif
 #include <TestUtils.hpp>
 
 #include "TestData.hpp"
