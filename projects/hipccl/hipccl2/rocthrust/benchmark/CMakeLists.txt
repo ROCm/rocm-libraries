@@ -87,9 +87,17 @@ function(add_thrust_benchmark BENCHMARK_SOURCE)
         )
     endforeach()
 
+    # NOTE(hipccl2): ${PROJECT_BINARY_DIR}, not ${CMAKE_BINARY_DIR}, so a
+    # nested build writes to <build>/rocthrust/benchmark rather than sharing
+    # one directory with rocPRIM and hipCUB. PROJECT_BINARY_DIR equals
+    # CMAKE_BINARY_DIR for a top-level project, so standalone builds land in
+    # the same place as before. rocThrust's own targets are already prefixed
+    # (benchmark_thrust_*) so it has no filename clash with the others - this
+    # is for a consistent <build>/<component>/benchmark layout across all
+    # three components.
     set_target_properties(${BENCHMARK_TARGET}
         PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/benchmark/
+            RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/benchmark/
     )
     rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
 endfunction()
