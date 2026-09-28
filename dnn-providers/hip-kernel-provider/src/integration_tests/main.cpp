@@ -58,8 +58,7 @@ int main(int argc, char** argv)
     // tree the production engines would otherwise come from; HIPDNN_DESCRIPTOR_RUNTIME_DIR
     // is additive, so both load. The root is the arch-neutral one: the loader walks every
     // arch subtree under it and prunes each pack by its `arch` list against the running
-    // device at match time, so the device's own shard is the only one that can serve. A
-    // caller-set value is kept as given.
+    // device at match time, so the device's own shard is the only one that can serve.
     if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
     {
         const auto product = hip_kernel_provider::testing::descriptorSetRoot(

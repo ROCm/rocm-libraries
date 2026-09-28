@@ -2,9 +2,8 @@
 ##
 ## TWO targets, one line each. The pack-shape census needs a descriptor shard and the
 ## census environment to say anything; the matcher test needs neither and must keep
-## running as an ordinary unit. Putting both in one binary is what made ordinary units
-## require package-census state. Append each line INSIDE the target_sources() block
-## named above it -- do not replace either block, and do not merge the two.
+## running as an ordinary unit. Append each line INSIDE the target_sources() block named
+## above it -- do not replace either block, and do not merge the two.
 ##
 ## This tool's output tree places both files under tests/ (see fragments header) while
 ## the provider's test tree nests pack-scoped test files under packs/ (see
@@ -38,7 +37,7 @@
    among them: "*" is how a descriptor says it ships everywhere, not an architecture a
    shard can be named after, and `ARCHES *` would ask for a shard that never exists.
    The keyword is emitted only when the list is non-empty -- present-with-no-values is
-   fatal by contract, and rightly so: it reads as a restriction while admitting nothing.
+   fatal by contract.
 -#}
 {% set restricted_arches = [] %}
 {% for arch in emitted.arches %}
@@ -61,11 +60,6 @@ hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
 {% endfor %}
                           )
 ##
-## `TARGET hip_kernel_provider_census_tests` is not interchangeable with the ordinary
-## unit binary: the census target is the one registered with a shard, an expected arch
-## and the strict guard. Naming the unit binary here puts package-census state back on
-## every ordinary unit run.
-##
 ## `PACK_NAME product` addresses the `product` pack target, wired only where the shipped
 ## root holds a descriptor AND at least one of them declares an architecture this build
 ## packs for. A build whose GPU_TARGETS your bundle does not declare leaves production
@@ -74,11 +68,11 @@ hkp_register_census_tests(TARGET hip_kernel_provider_census_tests
 ## error, which is the typo this keeps visible.
 ##
 ## `ARCHES` narrows registration to the architectures THIS bundle emitted, intersected
-## with the arches the pack target was wired for. Eligibility is restricted, not
-## universal: without it the suite registers for every arch the pack target carries,
-## including ones this bundle ships nothing for, and the census then asserts a gfx950
-## inventory against a gfx942 shard. Omitting the keyword is the deliberate
-## "every wired arch" spelling; supplying it with no values is a configure error.
+## with the arches the pack target was wired for. Without it the suite registers for every
+## arch the pack target carries, including ones this bundle ships nothing for, and the
+## census then asserts a gfx950 inventory against a gfx942 shard. Omitting the keyword is
+## the deliberate "every wired arch" spelling; supplying it with no values is a configure
+## error.
 ##
 ## Commit your bundle under `E/descriptors/<producer>/<bundle>/` **before** splicing this
 ## call, or the census runs against a shard without your descriptors.

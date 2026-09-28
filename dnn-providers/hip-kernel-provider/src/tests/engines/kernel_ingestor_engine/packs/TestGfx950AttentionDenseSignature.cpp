@@ -39,38 +39,18 @@
  * a success status. This is the silent-wrong-answer class the layout and stride gates in
  * the matcher exist to stop, one layer lower down.
  *
- * Sources for the expectations, all read off the Python and written here as literals:
- *   attention_dense_signature (rocke/library/kernels/gfx950/attention_dense.py:2078-2110)
- *     q_ptr, k_ptr, v_ptr, o_ptr as `ptr<dtype, global>`, then `scale` as f32, then
- *     `batch`, `seqlen_q`, `seqlen_kv` as i32.
- *   build_attention_dense  (attention_dense.py:369-396) declares those same parameters
- *     in that order, and declares the three shape params unconditionally.
- *   _has_shape_params      (attention_dense.py:2062-2075) gates the shape tail on
- *     `not spec.persistent`, so only a persistent body takes the 5-argument
- *     form. Every variant in gfx950_attention_dense.kdp.json declares
- *     `persistent: false`, `use_sinks: false`, `varlen: false` and `paged: false`, so the
- *     8-argument form is the only one that ships and the sink / cu_seqlens / page-table
- *     tails of attention_dense_signature are unreachable from this catalog. The
- *     5-argument form is covered here only as a shape the pack must REFUSE.
+ * Every variant in gfx950_attention_dense.kdp.json declares `persistent: false`,
+ * `use_sinks: false`, `varlen: false` and `paged: false`, so the 8-argument form is the
+ * only one that ships and the sink / cu_seqlens / page-table tails of
+ * attention_dense_signature are unreachable from this catalog. The 5-argument form is
+ * covered here only as a shape the pack must refuse.
  *
- * ROUTE. The list the pack marshals lives in attentionDenseKernelSignature(), in the
- * anonymous namespace of Gfx950AttentionDenseNative.cpp, so no test translation unit can
- * name it. Reading it through the pack's own dispatch handler instead: prepare() hands it
- * to buildIngestorKernelCode as the expected side of requireSignatureMatch, which
- * compares it against the list the descriptor records and throws before the archive is
- * opened. Every case below therefore presents a descriptor recording a candidate ABI and
- * asks which failure comes back. Acceptance of the Python form plus refusal of each
- * neighbouring form is what pins the pack's list to the Python's; copying the expected
- * values out of the C++ under test would assert only that it equals itself.
- *
- * WHAT IS PINNED. requireSignatureMatch compares `kind` and `size`, and `name` only when
- * both sides carry one. The descriptor records the names hkp_pack lowers from the Python
- * parameter list, so the recorded ABI here carries them too, and the cases reach kind,
- * size, count, order and name. The name comparison is the only one that tells the four
- * pointers apart, or `scale` (f32) from the i32 shape parameters -- all four by-value
- * slots are `by_value` of 4 bytes -- so an exchange of two like slots, or a slot under
- * another name, is refused by name alone. `offset` is printed and never compared, which
- * is why every expectation below carries zero for it.
+ * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
+ * one. The name comparison is the only one that tells the four pointers apart, or `scale`
+ * (f32) from the i32 shape parameters -- all four by-value slots are `by_value` of 4
+ * bytes -- so an exchange of two like slots, or a slot under another name, is refused by
+ * name alone. `offset` is printed and never compared, which is why every expectation
+ * below carries zero for it.
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
  * the signature refusal and the archive's absence are raised on the host.
@@ -104,17 +84,13 @@ constexpr const char* BY_VALUE_KIND = "by_value";
 /// whatever the element type is.
 constexpr uint32_t POINTER_BYTES = 8;
 
-/// Bytes one `f32` or `i32` scalar occupies.
 constexpr uint32_t SCALAR_BYTES = 4;
 
-/// Position of `scale`, the first by-value argument.
 constexpr std::size_t SCALE_INDEX = 4;
 
-/// Position of `seqlen_kv`, the last argument.
 constexpr std::size_t LAST_INDEX = 7;
 
-/// (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv): four buffers, then
-/// an f32, then three i32, under the names attention_dense_signature gives them.
+/// The argument list attention_dense_signature declares, under the names it gives them.
 std::vector<KernelArgument> pythonAbi()
 {
     return {KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "q_ptr"},
@@ -138,7 +114,6 @@ std::vector<KernelArgument> persistentAbi()
     return signature;
 }
 
-/// `pythonAbi()` with one entry replaced.
 std::vector<KernelArgument> withArgument(std::size_t index, const KernelArgument& argument)
 {
     auto signature = pythonAbi();
@@ -155,9 +130,8 @@ constexpr int64_t K_UID = 2;
 constexpr int64_t V_UID = 3;
 constexpr int64_t O_UID = 4;
 
-/// bf16, D128, B=2, Hq=Hkv=4, Sq=Skv=256, top-left causal, dense BSHD throughout. Any
-/// graph the engine accepts would do; the shape is not what these cases are about, and
-/// TestGfx950AttentionDenseMatchers.cpp owns the applicability rules.
+/// The shape is not what these cases are about -- any graph the engine accepts would do,
+/// and TestGfx950AttentionDenseMatchers.cpp owns the applicability rules.
 constexpr int64_t BATCH = 2;
 constexpr int64_t HEADS = 4;
 constexpr int64_t SEQ = 256;
@@ -232,9 +206,9 @@ constexpr const char* MISMATCH_MARKER = "is packaged with arguments";
 ///
 /// The archive it names is not there, which is the point: the containment and link checks
 /// pass, the signature comparison runs, and only if it agrees does the loader get as far
-/// as reporting the absence. Nothing here depends on the archive's contents. The metadata
-/// is the completed baseline tile prepare() reads before the comparison; the tile is not
-/// what these cases are about, and TestGfx950AttentionDenseDispatch.cpp owns its refusal.
+/// as reporting the absence. The metadata is the completed baseline tile prepare() reads
+/// before the comparison; the tile is not what these cases are about, and
+/// TestGfx950AttentionDenseDispatch.cpp owns its refusal.
 KernelDefinition makeKernel(const std::vector<KernelArgument>& recorded)
 {
     KernelDefinition kernel;
@@ -359,10 +333,6 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAnExtraTrailingArgument)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
 {
-    // attention_dense_signature drops batch/seqlen_q/seqlen_kv when the spec is
-    // persistent. No variant in this catalog is, and the pack marshals the shape
-    // unconditionally, so a persistent code object reaching this pack must be refused
-    // rather than launched with three arguments it never declared.
     expectRefused(persistentAbi(), "the persistent form does not ship in this catalog");
 }
 
@@ -422,9 +392,7 @@ TEST(TestGfx950AttentionDenseSignature, RefusesAWidenedScalarSlot)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesEachSlotUnderAnotherName)
 {
-    // Kind, size, count and order all agree; only the one slot's name differs. A pack that
-    // marshals under another spelling than the Python declares is refused rather than
-    // launched on the chance that the two lists still line up.
+    // Kind, size, count and order all agree; only the one slot's name differs.
     const auto abi = pythonAbi();
     for(std::size_t index = 0; index < abi.size(); ++index)
     {
@@ -436,8 +404,6 @@ TEST(TestGfx950AttentionDenseSignature, RefusesEachSlotUnderAnotherName)
 
 TEST(TestGfx950AttentionDenseSignature, RefusesEachExchangeOfTwoLikeSlots)
 {
-    // Every pair of slots sharing a kind and a size, exchanged: the four pointers among
-    // themselves, and the four by-value scalars -- scale included -- among themselves.
     // Kind and size agree position by position, so the names are the only thing that
     // separates each of these from the shipped ABI; accepted, the kernel reads keys as
     // queries, or a batch count as a sequence length, with no fault and no status.

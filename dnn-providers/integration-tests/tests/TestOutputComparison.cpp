@@ -687,8 +687,6 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesAcceptsSameSignedInfinities
                      .has_value())
         << "both sides are -inf and both are right";
 
-    // The two answers on one pair of tensors are the fact worth pinning: this kind is
-    // only worth having because the default disagrees with it here.
     EXPECT_TRUE(
         compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
             .has_value())
@@ -758,8 +756,6 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillRejectsFiniteVersusInf
         << "a very large finite value is not an infinity, however large";
 }
 
-// The relaxation is one element's verdict, not the tensor's. Everything finite is
-// still graded, at the atol/rtol the harness resolved.
 TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsByAtolRtol)
 {
     const auto buffer = makeGraphBuffer();
@@ -791,8 +787,7 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesStillGradesFiniteElementsBy
         << "atol still decides the finite elements";
 }
 
-// One graph, two outputs, two validators — what a TOML 'tensors' glob drives. Both
-// tensors hold -inf, so the kind alone decides which of them passes.
+// Both tensors hold -inf, so the kind alone decides which of them passes.
 TEST(TestOutputComparison, AllcloseMatchingInfinitiesIsChosenPerTensor)
 {
     const auto buffer = makeGraphBuffer();
@@ -829,8 +824,7 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesIsChosenPerTensor)
 }
 
 // Integers have no infinity, so this kind is undefined for them — the same shape of
-// over-matched glob RMS already has, and the same answer: a named failure the operator
-// can act on, not an exception unwinding out of the test body.
+// over-matched glob RMS already has.
 TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsReportedNotThrown)
 {
     const auto buffer = makeGraphBuffer();
@@ -860,16 +854,14 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnAnUnsupportedDataTypeIsRe
         << "the operator has to be told which config section over-matched";
     EXPECT_NE(mismatch->report.find("allclose_matching_infinities"), std::string::npos)
         << "and which of the three validators that section named";
-    // The only sentence in the message that says what to do about it. A refactor that
-    // shares this text between two validators can drop it and stay green everywhere else.
+    // The only sentence in the message that says what to do about it.
     EXPECT_NE(mismatch->report.find("Narrow that entry's 'tensors' glob"), std::string::npos);
 }
 
 // This kind exists only as a host validator. A GPU reference leaves its output on the
-// device, so the comparison runs there — and the two answers on one pair of tensors are
-// the fact worth pinning: identical data passes on the host and is refused on the
-// device. Serving the device request from the host validator would read device memory
-// through host pointers, so the refusal is the correct behaviour, not a gap.
+// device, so the comparison runs there: identical data passes on the host and is refused
+// on the device. Serving the device request from the host validator would read device
+// memory through host pointers.
 TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnTheDeviceIsRefusedNotHostGraded)
 {
     const auto buffer = makeGraphBuffer();
@@ -906,8 +898,6 @@ TEST(TestOutputComparison, AllcloseMatchingInfinitiesOnTheDeviceIsRefusedNotHost
         << "the operator has to be told which validator could not be honoured";
     EXPECT_NE(mismatch->report.find("--validator cpu"), std::string::npos)
         << "and the one flag that makes the run grade on the host instead";
-    // The data type is fine here; only the site is not. A refactor that folds this back
-    // into the data-type message would send the reader to the wrong config field.
     EXPECT_EQ(mismatch->report.find("does not support this data type"), std::string::npos)
         << "the report must not blame the data type for a site refusal";
 }

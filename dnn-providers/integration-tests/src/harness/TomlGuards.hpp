@@ -27,8 +27,6 @@ inline std::string currentTestName()
     return std::string(info->test_suite_name()) + "." + info->name();
 }
 
-// The [[tolerance_overrides]] entry this engine's TOML selects for `testName`, or
-// nullopt when none matches.
 inline std::optional<ToleranceOverride> findTomlToleranceOverride(const std::string& testName)
 {
     if(testName.empty())
@@ -75,9 +73,7 @@ inline std::optional<ValidatorOverride> findTomlValidatorOverride(const std::str
 
 // How one output tensor is graded, and the one place that says so out loud.
 //
-// `validatorOverride` and `toleranceOverride` are the [[validator_overrides]] entry the
-// config selects for this tensor and the [[tolerance_overrides]] entry it selects for this
-// test, or nullopt where none matches; this overload reads no TestConfig state.
+// This overload reads no TestConfig state: the caller supplies both overrides.
 //
 // The validator override is consulted first because it outranks atol/rtol: announcing a
 // tolerance before knowing whether it survives is how a reader is told the wrong check
@@ -122,7 +118,6 @@ inline bundle::ComparisonTolerance
             break; // an explicit allclose entry takes the default path below
 
         default:
-            // A kind with no case here, i.e. a new ValidatorOverrideKind nobody wired.
             // Falling through to allclose would grade the tensor with a validator its
             // config did not ask for, silently.
             throw std::invalid_argument("gradingForTensor: unhandled ValidatorOverrideKind");

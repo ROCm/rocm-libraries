@@ -118,9 +118,8 @@ macro(_stage_external_integration_install_test)
     set(_install_plugin "")
     set(_install_config "")
     if(ARG_INSTALL_SUBDIR)
-        # Where the entry, its config and its CTest file land. Everything below derives
-        # from it, so the offsets follow the destination rather than needing correction
-        # for it. The header says why an engine-pinned test must not take the default.
+        # Where the entry, its config and its CTest file land; every offset below derives
+        # from it. The header says why an engine-pinned test must not take the default.
         set(_install_dest "${CMAKE_INSTALL_BINDIR}/${ARG_INSTALL_SUBDIR}")
         if(ARG_INSTALL_DESTINATION)
             set(_install_dest "${ARG_INSTALL_DESTINATION}")
@@ -296,8 +295,7 @@ function(add_external_integration_test_target)
     # an engine name is free-form and may hold characters a label may not.
     # parse_test_categories.py accepts only [A-Za-z0-9_.-], and rejecting a label
     # makes apply_test_category_labels warn and register nothing, so map the
-    # remaining characters to underscores. Names already within that set are
-    # unchanged.
+    # remaining characters to underscores.
     string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _engine_label "${ARG_ENGINE_NAME}")
 
     _build_external_integration_command(_CMD)

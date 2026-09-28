@@ -241,11 +241,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                          "\n# External integration test (cross-provider suite)\n${_external_staging}"
                     )
                 endif()
-                # Consumed. External targets registered BELOW this point -- the gfx950
-                # attention ones are -- stage after this drain and would otherwise never
-                # reach the installed file at all. A second drain further down catches
-                # them, and emptying the property here is what stops that second pass
-                # re-emitting everything above.
+                # Consumed. A second drain further down catches external targets
+                # registered below this point; emptying the property here is what stops
+                # that pass re-emitting everything above.
                 set_property(GLOBAL PROPERTY
                     "EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider" "")
                 # Install tree.
@@ -312,16 +310,13 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
-    # Register the gfx950 dense attention engine's CI target.
-    # Gated on the flags that produce the engine: ingestor ON, SDPA frontend ON,
-    # and the rocKE producer ON (descriptors only exist when all three hold).
-    # These suites are engine-pinned, so their installed entries belong in the gfx950
-    # shard rather than the common arch-neutral file, for the reason the gpu_ref
-    # registration in src/integration_tests/CMakeLists.txt sets out. Categorized suites
-    # reach the install tree by being appended to INSTALL_TEST_FILE, so the routing is
-    # that file: a per-arch one that hkp_finalize_census_install() folds into the shard.
-    # Truncated here because apply_test_category_labels() appends, and a stale file would
-    # carry entries from a previous configure into this one.
+    # The gfx950 dense attention suites are engine-pinned, so their installed entries
+    # belong in the gfx950 shard rather than the common arch-neutral file, for the reason
+    # the gpu_ref registration in src/integration_tests/CMakeLists.txt sets out.
+    # Categorized suites reach the install tree by being appended to INSTALL_TEST_FILE, so
+    # the routing is that file: a per-arch one that hkp_finalize_census_install() folds
+    # into the shard. Truncated here because apply_test_category_labels() appends, and a
+    # stale file would carry entries from a previous configure into this one.
     set(_hkp_gfx950_external_ctest
         "${CMAKE_CURRENT_BINARY_DIR}/census_external_gfx950_CTestTestfile.cmake")
     file(WRITE "${_hkp_gfx950_external_ctest}" "")
@@ -392,11 +387,10 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # Second drain of the common external staging, after every registration above.
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can
-    # only carry what was staged before it. Nothing reaches the common accumulator after
-    # it today -- both gfx950 registrations route to their own architecture's shard -- so
-    # this pass is currently empty and exists for the next external target registered
-    # below that first drain, which would otherwise never reach the install tree. The
-    # property is emptied when consumed, so anything here is by definition late.
+    # only carry what was staged before it, and the property is emptied when consumed --
+    # anything here is by definition late. Nothing is today, both gfx950 registrations
+    # routing to their own architecture's shard, but an external target registered below
+    # that first drain would otherwise never reach the install tree.
     #
     # Only the YAML path needs it. Without categorization there is no common file to
     # append to and install_provider_ctest_files() below does its own drain, which
@@ -433,7 +427,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # emits an unlabeled CTestTestfile.cmake.
     #
     # Either way the result is the common entrypoint the census discovery stub is
-    # appended to, so capture which file that is.
+    # appended to.
     if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
         install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
                 DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
@@ -449,14 +443,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     # Materialise the installed census now that every registration has run and the
-    # common entrypoint exists. The census registrations live in tests/, which was added
-    # well above, so they could only accumulate; this is where they land.
+    # common entrypoint exists.
     #
     # Placed after the install block, not before it, because the non-categorized
     # entrypoint does not exist until install_provider_ctest_files() writes it -- and
-    # that function truncates, so a stub appended earlier would be lost. Running here
-    # gives both modes an entrypoint to carry the discovery stub, which is what lets an
-    # engine-pinned entry be sharded regardless of categorization.
+    # that function truncates, so a stub appended earlier would be lost.
     if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hkp_finalize_census_install(
             COMMON_TEST_FILE   "${_hkp_common_ctest}"

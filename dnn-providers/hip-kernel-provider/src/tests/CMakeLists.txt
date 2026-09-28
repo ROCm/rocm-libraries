@@ -99,9 +99,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # environment. Left in hip_kernel_provider_tests those suites run in every bare
     # invocation of it with neither supplied -- against the unit shard on a build that
     # may not even pack their bundle -- where they can only fail or skip, and say nothing
-    # about the descriptors either way. Separating the binary is what lets the ordinary
-    # units run with no census environment at all, rather than teaching each census suite
-    # to recognise and tolerate an invocation that was never meant for it.
+    # about the descriptors either way.
     #
     # Same main() as the ordinary binary, so the census listener, the cache redirect and
     # the compiled-in descriptor root behave identically, and the same embedded-source

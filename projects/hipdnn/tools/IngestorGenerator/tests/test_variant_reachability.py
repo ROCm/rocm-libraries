@@ -309,8 +309,7 @@ class TestGfx950RealBundle:
 
     #: The request corpus is an author's input that this repository does not ship: the
     #: workflow mines it to a path of the operator's choosing, so there is no in-tree
-    #: location for it and a hard-coded one would be a private convention. Name it here
-    #: and this class runs; leave it unset and it skips, saying which variable to set.
+    #: location for it and a hard-coded one would be a private convention.
     _SHAPES_VAR = "HIPDNN_INGESTOR_SHAPES"
 
     #: Corpus vocabulary -> matcher vocabulary. `seqlen_q`/`seqlen_k` are deliberately

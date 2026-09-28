@@ -405,9 +405,6 @@ validator = "allclose"
     EXPECT_EQ(bf16->kind, hipdnn_integration_tests::ValidatorOverrideKind::ALLCLOSE);
 }
 
-// The third spelling parses to its own kind, and it is selected the same way every
-// other validator override is: a 'filters' glob on the test name AND a 'tensors' glob
-// on the output tensor's label, never one of the two alone.
 TEST(TestSettingsValidatorOverrides, ParsesAllcloseMatchingInfinities)
 {
     const TempTomlFile file(R"(
@@ -440,8 +437,6 @@ validator = "allclose_matching_infinities"
         << "the 'filters' glob is what keeps other tests out";
 }
 
-// Precedence is a property of the section, not of any one validator: a later, narrower
-// entry still wins when the kind it names is the new one.
 TEST(TestSettingsValidatorOverrides, AllcloseMatchingInfinitiesLaterEntryTakesPrecedence)
 {
     const TempTomlFile file(R"(
@@ -489,9 +484,9 @@ rms_threshold = 1e-4
 }
 
 // This entry is wrong twice over: the name is not one the parser knows, and it carries
-// a threshold no non-rms validator may carry. The name is the one to report — the
-// threshold is only wrong *because* of which name was meant, and an operator told to
-// delete 'rms_threshold' would be sent to the line that is not the mistake.
+// a threshold no non-rms validator may carry. The name is the one to report: an
+// operator told to delete 'rms_threshold' would be sent to the line that is not the
+// mistake.
 TEST(TestSettingsValidatorOverrides, ThrowsOnUnknownValidatorKind)
 {
     const TempTomlFile file(R"(
@@ -568,8 +563,7 @@ rms_threshold = 1e-4
 }
 
 // The same "does not say what it means" rule covers the matching-infinities spelling:
-// it takes its atol/rtol from the resolved tolerance and has no threshold of its own,
-// so a threshold on the entry means the file is wrong about which check runs.
+// it takes its atol/rtol from the resolved tolerance and has no threshold of its own.
 TEST(TestSettingsValidatorOverrides, ThrowsOnAllcloseMatchingInfinitiesWithRmsThreshold)
 {
     const TempTomlFile file(R"(

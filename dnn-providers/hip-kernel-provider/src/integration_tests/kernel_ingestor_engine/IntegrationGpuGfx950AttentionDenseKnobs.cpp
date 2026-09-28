@@ -55,13 +55,11 @@ using namespace hip_kernel_provider::test_utilities;
  *
  * Each expected kernel id is resolved at run time from the production descriptors
  * HIPDNN_DESCRIPTOR_RUNTIME_DIR names, the tree the engine itself loads them from: the one
- * kernel of this engine's gfx950 packs whose dtype, head_size, num_query_heads,
- * num_kv_heads, causal, ragged, sliding_window, block_m and block_n equal the case's
- * semantic fields and expected tile. Every forced tile except the 256/64 baseline is
- * paired with a shape whose no-knob winner is a different tile, so a knob that failed to
- * reach the plugin would select that winner and fail the id check. The baseline always
- * wins where it fits, so its two cases select the no-knob winner by design. A cold case
- * sets no knob, and its tile is the one the engine's own ranking picks for the shape.
+ * kernel of this engine's gfx950 packs whose metadata matches the case's semantic fields
+ * and expected tile (see expectedKernelId). Every forced tile except the 256/64 baseline
+ * is paired with a shape whose no-knob winner is a different tile, so a knob that failed
+ * to reach the plugin would select that winner and fail the id check. The baseline always
+ * wins where it fits, so its two cases select the no-knob winner by design.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -71,7 +69,6 @@ namespace
 
 constexpr const char* ENGINE_NAME = "hipkernel:Gfx950AttentionDense";
 
-/// The one architecture the engine's packs claim.
 constexpr const char* SERVED_ARCH = "gfx950";
 
 constexpr const char* BLOCK_M_KNOB = "block_m";
@@ -162,10 +159,9 @@ constexpr GraphShape makeShape(DataType dataType,
     return {dataType, headSize, queryHeads, kvHeads, mask, mmaCoreMode, batch, seqQ, seqKv};
 }
 
-/// Thirteen forced (tile, head size) pairs, then four cold cases whose tile is the one the
-/// engine's own ranking picks for the shape. Within them: bounds on both corners and both
-/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and four forced cases with B > 1 and
-/// Sq != Skv.
+/// Thirteen forced (tile, head size) pairs, then four cold cases. Within them: bounds on
+/// both corners and both deprecated flags, fp16 and bf16, MHA, GQA and MQA, and four
+/// forced cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -230,7 +226,6 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          FORCED,
          Tile{256, 64}},
-        // Cold: no knob set.
         {"Cold_MmaHalf",
          makeShape(BF16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
          COLD,
@@ -250,9 +245,9 @@ std::vector<KnobCase> knobCases()
     };
 }
 
-/// A D64 fp16 MHA no-mask graph at Sq = Skv = 256. It admits the D64 tiles 128/32, 128/64,
-/// 128/128, 256/32, 256/64, 256/128 and 256/256, so block_m=128 and block_n=256 are each
-/// advertised while no D64 kernel is 128/256.
+/// The D64 tiles this graph admits are 128/32, 128/64, 128/128, 256/32, 256/64, 256/128
+/// and 256/256, so block_m=128 and block_n=256 are each advertised while no D64 kernel
+/// is 128/256.
 std::vector<UnsatisfiableCase> unsatisfiableCases()
 {
     return {
@@ -568,8 +563,8 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
     }
 
-    /// Builds the operation graph and requires the engine among those offering to serve
-    /// it. On this architecture its absence is a missing engine or pack, not a skip.
+    /// On this architecture the engine's absence from the ranked list is a missing engine
+    /// or pack, not a skip.
     void buildOperationGraphTheEngineOffersToServe(Graph& graph)
     {
         auto result = graph.build_operation_graph(this->_handle);

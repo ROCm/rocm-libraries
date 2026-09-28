@@ -1060,13 +1060,9 @@ endfunction()
 #   The packer's own arch_matches(): a KDP naming no architecture, or an empty list,
 #   wildcards and ships everywhere.
 #
-#   Every ambiguous case -- an unparseable file, an `arch` that is not an array, an
-#   element that will not read -- also resolves TRUE, and deliberately. Only FALSE is
-#   authoritative here. A root this returns FALSE for is provably not for these
-#   architectures; a root it returns TRUE for is merely not provably otherwise, and the
-#   packer, which has the full parse, is what reports whatever is actually wrong with it.
+#   Every ambiguous case also resolves TRUE, deliberately: only FALSE is authoritative.
 #   Resolving ambiguity the other way would let a malformed declaration read as a clean
-#   absence and silently withdraw the packaging that would have reported it.
+#   absence and silently withdraw the packaging whose validation would have reported it.
 # ---------------------------------------------------------------------------
 function(_hkp_kdp_arch_matches out_var kdp_json arches)
     # cmake-lint: disable=E1120
@@ -1106,15 +1102,12 @@ endfunction()
 #   bundle that legitimately moves keeps answering and a root swapped for someone else's
 #   stops.
 #
-#   A root declaring a VALID different engine yields nothing: foreign, inapplicable, and
-#   not an error -- the registrations that depend on this engine simply do not apply to
-#   that configuration.
+#   A root declaring a valid different engine yields nothing: foreign and inapplicable,
+#   not an error.
 #
-#   A UED that will not parse, or that names an engine unreadably, is neither this engine
-#   nor demonstrably another, and it is reported as ambiguous rather than skipped. The
-#   caller resolves ambiguity toward "available" so the pack stays wired and the packer's
-#   own validation is what fails on it. Treating it as a foreign root instead would let a
-#   malformed file quietly withdraw the very packaging that would have reported it.
+#   A UED that will not parse, or that names an engine unreadably, is reported as
+#   ambiguous rather than skipped, so the caller can resolve it toward "available" and
+#   leave the packer's own validation to fail on it.
 # ---------------------------------------------------------------------------
 function(_hkp_engine_ids_named out_var ambiguous_var root engine)
     set(${out_var} "" PARENT_SCOPE)
@@ -1172,9 +1165,7 @@ endfunction()
 #   ambiguity semantics the packer and _hkp_root_covers_any_arch() use, so a KDP cannot
 #   read as shipping here and not there.
 #
-#   An ambiguous root -- one holding a UED nothing can classify -- answers TRUE. It is
-#   not this engine as far as anyone can tell, but withdrawing the registrations would
-#   also withdraw the packaging whose validation is what reports the malformed file.
+#   An ambiguous root -- one holding a UED nothing can classify -- answers TRUE.
 # ---------------------------------------------------------------------------
 function(_hkp_root_declares_engine_for_arch out_var root engine arch)
     set(${out_var} FALSE PARENT_SCOPE)
@@ -1220,10 +1211,8 @@ endfunction()
 #   and the authored content it carries declares hipkernel:Gfx950AttentionDense for
 #   gfx950.
 #
-#   One predicate, evaluated fresh each configure and held in no cache entry, so every
-#   registration that depends on the bundle -- its census, its external integration
-#   target, its GPU-reference target -- turns on the same answer and cannot drift into
-#   disagreeing about whether the engine is present.
+#   Evaluated fresh each configure and held in no cache entry, so every registration that
+#   depends on the bundle turns on the same answer.
 #
 #   All three conjuncts are required, and the third is the one that is easy to omit.
 #   `product` carries whatever HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT points at, which
@@ -1564,12 +1553,10 @@ endfunction()
 # _hkp_record_census_install_entry(<name> <target> <filter> <env> <pass-regex>)
 #   Accumulate the installed twin of one census entry into this architecture's shard.
 #
-#   The installed entry is the same definition as the build-tree one -- same name, same
-#   filter, same environment, same labels and timeout -- differing only in that every
-#   absolute build path becomes a path relative to the shard file that will carry it.
-#   Emitting both from one definition is what stops the two inventories drifting; a
-#   separately maintained installed list is how an entry comes to exist in one and not
-#   the other.
+#   The installed entry is the same definition as the build-tree one, differing only in
+#   that every absolute build path becomes a path relative to the shard file that will
+#   carry it. Emitting both from one definition is what stops the two inventories
+#   drifting.
 #
 #   Offsets are not known here. The two descriptor roots are rewritten to placeholders
 #   and the binary is left as one, for hkp_finalize_census_install() to resolve once it
@@ -1828,15 +1815,10 @@ endfunction()
 #   wired for.
 #
 #   A suite states the inventory its bundle emitted, and a bundle emits for the
-#   architectures it declares -- not for whatever the build selected. The two are
-#   independent: a build may select architectures a bundle never covers, and an
-#   architecture may be selected by a build whose pack target carries a different bundle
-#   entirely. Registering the intersection is what keeps a census addressing a shard its
-#   suite has something to say about; the empty intersection registers nothing, which is
-#   a configuration fact rather than an error, and says so at STATUS.
-#
-#   Naming the keyword with no architecture IS an error: it reads as a narrowed census
-#   while narrowing to nothing, in every configuration, permanently.
+#   architectures it declares -- not for whatever the build selected. Registering the
+#   intersection is what keeps a census addressing a shard its suite has something to say
+#   about; the empty intersection registers nothing, which is a configuration fact rather
+#   than an error, and says so at STATUS.
 # ---------------------------------------------------------------------------
 function(_hkp_census_resolve_arches out_var pack_name requested suites missing_kw)
     set(${out_var} "" PARENT_SCOPE)
@@ -1896,8 +1878,7 @@ endfunction()
 # takes every architecture the pack target was wired for, given takes the intersection
 # with that list, and naming the keyword with no architecture is fatal. A suite covering
 # the whole root omits it; one stating the inventory of a bundle that emits for specific
-# architectures names them, so a build packing others registers nothing rather than
-# censusing an inventory against a shard that never held it.
+# architectures names them.
 # ---------------------------------------------------------------------------
 function(hkp_register_census_tests)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
@@ -1952,8 +1933,8 @@ function(hkp_register_census_tests)
             "so no shard exists to census. Set GPU_TARGETS/AMDGPU_TARGETS.")
     endif()
 
-    # Which of those the suites actually have something to say about. An empty result
-    # has already said why, and registering nothing is the whole point of it.
+    # Which of those the suites actually have something to say about; an empty result has
+    # already said why at STATUS.
     _hkp_census_resolve_arches(_arches "${ARG_PACK_NAME}" "${ARG_ARCHES}"
                                "${ARG_SUITES}" "${ARG_KEYWORDS_MISSING_VALUES}")
     if(NOT _arches)
@@ -2006,9 +1987,9 @@ endfunction()
 #   This module owns the layout, so asking it for the path keeps that string out of the
 #   call sites. The reservation is the other half and is why this is not a plain getter:
 #   hkp_finalize_census_install() only visits architectures listed in
-#   HKP_CENSUS_SHARD_ARCHES, which until now was appended only by census registration. An
-#   architecture carrying engine-pinned external entries but no census would never be
-#   visited and its entries would be dropped without a word.
+#   HKP_CENSUS_SHARD_ARCHES. An architecture carrying engine-pinned external entries but
+#   no census would otherwise never be visited and its entries would be dropped without a
+#   word.
 #
 #   Reserving here rather than at the call sites makes that unforgettable: a caller asking
 #   where a shard lives is about to put something in it, so the two cannot drift apart.
@@ -2039,18 +2020,14 @@ endfunction()
 #   Shard files are written into the test descriptor BUILD tree, which an existing
 #   install(DIRECTORY) already ships wholesale to
 #   <plugin-engine-dir>/test_arch_content/hip-kernel-provider. Their destination is
-#   therefore reached without a second install rule, and -- the point of the whole
-#   arrangement -- an architecture pruned out of an artifact takes its CTest file with it.
+#   therefore reached without a second install rule, and an architecture pruned out of an
+#   artifact takes its CTest file with it.
 #
 #   Discovery is a working-directory-relative glob plus subdirs(), deliberately. It must
 #   survive the prefix being moved, so it cannot hold a configure-time absolute path; and
 #   CMAKE_CURRENT_LIST_DIR and friends are unset when CTest reads these files, so the
 #   relative form is not merely tidier, it is the only one that resolves. Discovery keys
-#   on a materialised CTest file and nothing else: not a configure-time architecture
-#   list, which would name shards the artifact no longer carries; not the GPU in the
-#   machine, which has no bearing on a host census; and not descriptor presence, which
-#   would turn a shard that shipped without its data into a silent absence instead of the
-#   failure it is.
+#   on a materialised CTest file and nothing else.
 # ---------------------------------------------------------------------------
 function(hkp_finalize_census_install)
     cmake_parse_arguments(PARSE_ARGV 0 ARG ""
@@ -2065,8 +2042,7 @@ function(hkp_finalize_census_install)
     endif()
 
     # A prefix that cannot exist, so every offset below is arithmetic on the install
-    # layout alone and nothing resolves against this machine. The same device the
-    # external integration staging uses.
+    # layout alone and nothing resolves against this machine.
     set(_synthetic "/__hipdnn_install_root__")
     set(_census_root
         "${_synthetic}/${ARG_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}/census")
@@ -2132,9 +2108,8 @@ function(hkp_finalize_census_install)
     endforeach()
 
     # Callers supply an entrypoint in both categorization modes, so this is a defect
-    # rather than a configuration. Shipping shards nobody can discover is silent, and
-    # the symptom -- engine-pinned tests simply absent from an install tree -- reads as
-    # them never having been registered, so say it here instead.
+    # rather than a configuration, and shipping shards nobody can discover is otherwise
+    # silent.
     if(NOT ARG_COMMON_TEST_FILE)
         message(WARNING
             "hkp: no common CTest entrypoint was supplied, so the per-architecture census "

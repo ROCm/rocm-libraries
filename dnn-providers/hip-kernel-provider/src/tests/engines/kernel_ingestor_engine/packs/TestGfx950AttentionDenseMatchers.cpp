@@ -38,29 +38,6 @@
  * plausible-but-wrong for if the matcher did not stop it.
  *
  * These are matcher-only: no device, no compile, no launch.
- *
- * gfx950-specific behaviors covered:
- *   - LAYOUT: every operand's stride spelling is set independently, so each tensor's clause
- *     of the layout gate is pinned by a case that flips that tensor and nothing else, and
- *     a stride vector can be written out whole, so each axis's clause is pinned by a case
- *     that perturbs that axis and nothing else. Q, K and V are gated together; O is gated
- *     from the O-dimension conditional instead. All four are gated in graph_match either
- *     way; prepare() re-checks the output as defence in depth for a caller that reaches
- *     the handler without having matched.
- *   - SHAPE: per-operand dimension overrides sit beside the layout fields, so a single
- *     operand can disagree with the problem shape on one axis while staying dense BSHD for
- *     its own extents. That is what makes the cross-operand agreement clauses reachable.
- *   - EXTENT ARITHMETIC: each 32-bit bound is pinned one step either side of its limit,
- *     and every product of graph extents that does not fit in int64_t declines.
- *   - RAGGED: declined. The catalog is aligned-only: a candidate whose `ragged` field is
- *     not 0 is declined at every shape, its own authored one included, and a graph whose
- *     lengths no tile divides admits no candidate at all.
- *   - SLIDING WINDOW: declined. No variant in this catalog carries a non-zero
- *     sliding_window, so a windowed graph has nothing that could serve it.
- *   - TILE: every candidate carries its own completed (block_m, block_n). Applicability is
- *     candidate-relative -- one graph admits some tiles of a cohort and not others -- and
- *     a missing, mistyped or unbuildable tile declines before anything divides by it.
- *     Cold ranking puts the 256/64 baseline first, then ascending (block_m, block_n).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -103,7 +80,6 @@ std::vector<int64_t> bshdStrides(int64_t heads, int64_t sequence, int64_t headSi
     return {sequence * heads * headSize, headSize, heads * headSize, 1};
 }
 
-/// BHSD strides -- the layout a BHSD-strided graph carries.
 std::vector<int64_t> bhsdStrides(int64_t heads, int64_t sequence, int64_t headSize)
 {
     return {heads * sequence * headSize, sequence * headSize, headSize, 1};
@@ -189,14 +165,11 @@ struct GraphSpec
     StrideLayout oLayout = StrideLayout::BSHD;
     bool omitStrides = false;
 
-    // Per-operand dimension overrides, the dimension counterpart of the per-operand
-    // layout fields above. Each falls back to the shared value, so a spec that leaves
-    // them unset builds four operands that agree on every axis.
-    //
-    // They spell the one family of graphs the shared fields cannot: an operand whose
-    // extents disagree with the problem shape the kernel derives from Q and K. Strides
-    // follow the override, so a perturbed operand is still dense BSHD for its own
-    // extents and the layout gate is not what rejects the graph.
+    // Per-operand dimension overrides, each falling back to the shared value. They spell
+    // the one family of graphs the shared fields cannot: an operand whose extents disagree
+    // with the problem shape the kernel derives from Q and K. Strides follow the override,
+    // so a perturbed operand is still dense BSHD for its own extents and the layout gate is
+    // not what rejects the graph.
     std::optional<int64_t> qBatch;
     std::optional<int64_t> kBatch;
     std::optional<int64_t> vBatch;
@@ -216,14 +189,12 @@ struct GraphSpec
     // Per-operand stride vectors, written out instead of derived from the operand's
     // extents. They spell a single-axis stride perturbation the layout fields cannot, and
     // a graph whose extents are too large to multiply together: stridesFor would have to
-    // evaluate the very product the matcher must not evaluate. A spec that sets one
-    // carries it verbatim and the fixture computes nothing from that operand's dims.
+    // evaluate the very product the matcher must not evaluate.
     std::optional<std::vector<int64_t>> qStridesOverride;
     std::optional<std::vector<int64_t>> kStridesOverride;
     std::optional<std::vector<int64_t>> vStridesOverride;
     std::optional<std::vector<int64_t>> oStridesOverride;
 
-    // The operand, by uid, flagged virtual or runtime pass-by-value.
     std::optional<int64_t> virtualUid;
     std::optional<int64_t> passByValueUid;
 
@@ -272,7 +243,6 @@ struct GraphSpec
 
     bool twoNodes = false;
 
-    /// Gives Q, K, V and O the same stride spelling.
     void setEveryLayout(StrideLayout layout)
     {
         qLayout = layout;
@@ -287,7 +257,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     flatbuffers::FlatBufferBuilder builder;
 
     // The output's extents: heads and sequence follow Q, head size follows V, which is
-    // what an SDPA output carries. An override replaces the inherited value.
+    // what an SDPA output carries.
     const int64_t outputHeads = spec.oNumHeads.value_or(spec.numQueryHeads);
     const int64_t outputSeqLen = spec.oSeqLen.value_or(spec.seqLenQ);
     const int64_t outputHeadSize = spec.oHeadSize.value_or(spec.headSizeV);
@@ -520,15 +490,8 @@ std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
     return matcher(context);
 }
 
-/// KernelSpec spells the fields the engine's KMD declares: dtype, head_size,
-/// num_query_heads, num_kv_heads, causal, ragged, sliding_window, batch, seqlen_q,
-/// seqlen_kv, block_m, block_n -- as a completed record carries them, so a spec that
-/// leaves the tile alone is a legacy record completed to 256/64.
-///
-/// The KMD carries only what VARIES between candidates. A knob that starts varying must
-/// be added to the KMD first: without a field of its own, two candidates differing only
-/// in that knob complete to the same catalog key, and the loader keeps one of them and
-/// drops the other.
+/// KernelSpec spells the fields the engine's KMD declares, as a completed record carries
+/// them, so a spec that leaves the tile alone is a legacy record completed to 256/64.
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -746,8 +709,8 @@ GraphSpec d64H32Noncausal(int64_t seqLenQ, int64_t seqLenKv)
     return graph;
 }
 
-/// BF16/D64/H64/8 top-left causal: the semantic cohort of the removed B1/S2016 ragged
-/// record, whose length 2016 is a multiple of 32 but of no block_m.
+/// BF16/D64/H64/8 top-left causal: the semantic cohort of the B1/S2016 ragged record,
+/// whose length 2016 is a multiple of 32 but of no block_m.
 GraphSpec d64H64Kv8Causal(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
 {
     GraphSpec graph;
@@ -761,7 +724,7 @@ GraphSpec d64H64Kv8Causal(int64_t batch, int64_t seqLenQ, int64_t seqLenKv)
     return graph;
 }
 
-/// A ragged record as the removed exact-shape builds were authored: B1, Sq=Skv=2016.
+/// A ragged record as the exact-shape builds author it: B1, Sq=Skv=2016.
 KernelSpec raggedRecord2016()
 {
     KernelSpec spec;
@@ -988,13 +951,12 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdOutput)
 {
-    // O is gated from the O-dimension conditional rather than the Q/K/V layout gate, but
-    // it is gated. The kernel bakes BSHD for the epilogue exactly as it does for the
-    // inputs, so a differently-strided output is outside the capability set and declines
-    // here -- leaving the graph free for another engine rather than being claimed and then
-    // faulted on in prepare(). O's extents are untouched, so the four dimension compares
-    // all pass and the layout clause they short-circuit is the only thing left that can
-    // reject this graph.
+    // O is gated from the O-dimension conditional rather than the Q/K/V layout gate. The
+    // kernel bakes BSHD for the epilogue exactly as it does for the inputs, so a
+    // differently-strided output declines here rather than being claimed and then faulted
+    // on in prepare(). O's extents are untouched, so the four dimension compares all pass
+    // and the layout clause they short-circuit is the only thing left that can reject this
+    // graph.
     GraphSpec spec;
     spec.oLayout = StrideLayout::BHSD;
     EXPECT_FALSE(matchGraph(spec).has_value());
@@ -1328,23 +1290,16 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOutputHeadSizeMismatch)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
 {
-    // Holds the domain that makes the O clause order matter, and pins the decline over
-    // it. O's extents here are positive and rank-4, so the well-formedness predicate
-    // passes them through, but S * H * D for those extents is 2^63 -- one past
-    // INT64_MAX. That product is what hasBshdStrides derives O's batch stride from, and
-    // checkedProduct reports it as not fitting, so evaluating O's layout first would
-    // decline this graph too, with no overflow either way. As ordered, the head-count
-    // compare rejects the graph before O's layout is read.
+    // O's extents here are positive and rank-4, so the well-formedness predicate passes
+    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX. That
+    // product is what hasBshdStrides derives O's batch stride from, and checkedProduct
+    // reports it as not fitting. As ordered, the head-count compare rejects the graph
+    // before O's layout is read; the case exists to keep the overflow-capable domain
+    // reachable and declined.
     //
-    // This case CANNOT distinguish the two orderings, and no case can. Every check
-    // between the layout gate and the O-dimension compare returns nullopt on failure, so
-    // moving O's layout clause changes which check declines a graph and never whether one
-    // does -- the accept sets are identical. What this case is for is keeping the
-    // overflow-capable domain reachable and declined.
-    //
-    // O's strides are the ordinary dense BSHD spelling of the PROBLEM shape, the vector a
-    // real output carries, so no stride value is what rejects this graph -- and, being
-    // written out rather than derived, the fixture forms no oversized product either.
+    // O's strides are written out as the ordinary dense BSHD spelling of the PROBLEM
+    // shape, so no stride value is what rejects this graph and the fixture forms no
+    // oversized product either.
     const GraphSpec spec;
     EXPECT_TRUE(matchGraph(spec).has_value());
 
@@ -1610,10 +1565,8 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyValueExtentsOf2To97Bytes)
 {
     // B = S = H = 2^30 on every operand, D64: K/V is 2^97 bytes and Q is 2^96 elements,
-    // and S * H * D = 2^66 would wrap to the batch stride 0 every operand carries.
-    // hasBshdStrides forms that product through checkedProduct, which removes the
-    // undefined behaviour but is not observable in any verdict: every graph whose
-    // S * H * D overflows also overflows B * S * H * D, which the Q or K/V bound declines.
+    // and S * H * D = 2^66 would wrap to the batch stride 0 every operand carries. As
+    // above, the Q and K/V bounds decline before that product is observable in any verdict.
     constexpr int64_t EXTENT = int64_t{1} << 30;
     const std::vector<int64_t> wrappedStrides{0, 64, EXTENT * 64, 1};
     GraphSpec spec;
@@ -1856,11 +1809,10 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSlidingWindowForCrossAttention)
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsideBound)
 {
-    // A REAL BOUND WINS OVER THE DEPRECATED BOOLEAN, and this case is the reason the
-    // ordering is load-bearing. causal_mask=true alone is served as plain causal; add
-    // left_bound and the graph is asking for a band the catalog cannot supply, so it
-    // must decline. If the boolean won instead, the window would be silently widened
-    // to the full triangle -- accepted, dispatched, and wrong.
+    // A real bound wins over the deprecated boolean. causal_mask=true alone is served as
+    // plain causal; add left_bound and the graph is asking for a band the catalog cannot
+    // supply, so it must decline. If the boolean won instead, the window would be silently
+    // widened to the full triangle -- accepted, dispatched, and wrong.
     GraphSpec spec;
     spec.causalMaskDeprecated = true;
     spec.leftBound = 127;
@@ -1919,8 +1871,7 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesACandidateBakedForAnotherDtype)
 
 TEST(TestGfx950AttentionDenseKernelMatch, AlignedCandidateAcceptsDifferentBatch)
 {
-    // Aligned (ragged=0) kernels are shape-generic: batch/seqlen equality is not
-    // enforced. A KD compiled with batch=BATCH+1 serves a graph with batch=BATCH.
+    // Aligned (ragged=0) kernels are shape-generic: batch/seqlen equality is not enforced.
     KernelSpec kernel;
     kernel.batch = BATCH + 1;
     EXPECT_TRUE(matchesKernel(GraphSpec{}, kernel));
@@ -1929,7 +1880,6 @@ TEST(TestGfx950AttentionDenseKernelMatch, AlignedCandidateAcceptsDifferentBatch)
 TEST(TestGfx950AttentionDenseKernelMatch, AlignedCandidateAcceptsDifferentSeqLen)
 {
     // Same shape-generic rule: seqlen mismatch is not a rejection for aligned kernels.
-    // The graph has seqLenKv=SEQ (default); kernel was compiled with SEQ*2.
     KernelSpec kernel;
     kernel.seqLenKv = SEQ * 2;
     EXPECT_TRUE(matchesKernel(GraphSpec{}, kernel));
@@ -1997,7 +1947,7 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoes
     // The candidate's own block_n must divide Skv. 288 is not a multiple of the baseline's
     // 64, so the baseline declines; the BN32 neighbour that does serve it is pinned below.
     GraphSpec graph;
-    graph.seqLenKv = 288; // not a multiple of 64
+    graph.seqLenKv = 288;
     KernelSpec kernel;
     kernel.seqLenKv = 288;
     EXPECT_FALSE(matchesKernel(graph, kernel));
@@ -2005,8 +1955,7 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAnAlignedCandidateWhoseTileDoes
 
 TEST(TestGfx950AttentionDenseKernelMatch, AlignedKernelAcceptsDifferentBatch)
 {
-    // Aligned (ragged=0) KDs are shape-generic: a KD compiled with B=1 must
-    // serve a graph with B=4. shape_generic=true, so batch equality is skipped.
+    // The shape-generic rule in the other direction: the graph's batch moves, not the KD's.
     GraphSpec graph;
     graph.batch = 4;
 
@@ -2352,16 +2301,11 @@ TEST(TestGfx950AttentionDenseScore, BestApplicableAlternativeLeadsWhenTheBaselin
 
 TEST(TestGfx950AttentionDenseScore, ScoresEveryTileDeterministicallyAsAPositiveFiniteWeight)
 {
-    // The properties the selector relies on beyond the order itself:
-    //
-    //   DETERMINISM -- one candidate scored twice under the same context yields the same
-    //   number. A scorer that drifts between calls makes plan selection unreproducible.
-    //
-    //   POSITIVITY -- the number is usable as a ranking weight rather than read as a
-    //   refusal. Applicability is kernel_match's job; score ranks what already matched.
-    //
-    //   FINITENESS -- NaN compares false against everything, so a single NaN score turns
-    //   the ranking into whatever order the sort happened to visit the candidates in.
+    // The properties the selector relies on beyond the order itself: a scorer that drifts
+    // between calls makes plan selection unreproducible; a non-positive weight would read
+    // as a refusal, but applicability is kernel_match's job and score only ranks what
+    // already matched; and a NaN compares false against everything, so one of them turns
+    // the ranking into whatever order the sort happened to visit the candidates in.
     for(const auto& candidate : d64H32Cohort())
     {
         SCOPED_TRACE(std::to_string(candidate.blockM) + "/" + std::to_string(candidate.blockN));

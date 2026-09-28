@@ -126,19 +126,15 @@ packs:
 - name: gfx950_attention_dense
   arch:
   - gfx950
-  # The kernel source shared by every kernel the `variants` groups below generate.
   kernel_defaults:
     kind: rocke
     source: kernels/gfx950/attention_dense.py
     builder: build_attention_dense
   variants:
-  # The complete catalog: every instance built for this engine is listed here.
   # Each group crosses its shape rows with its knob set's tiles:
   #   D64:  12 head configurations x {bf16, fp16} x {causal, non-causal} x 7 tiles = 336
   #   D128: 21 head configurations x {bf16, fp16} x {causal, non-causal} x 6 tiles = 504
   #   total 840
-  # 256/64 is the default tile: a record omitting block_m/block_n completes to it, and
-  # with no tile knob set, cold selection prefers it when applicable.
   # Legal tiles: block_m in {128, 256}, block_n a positive multiple of 32,
   # block_m % block_n == 0 and block_n % (block_m / 32) == 0. D128 omits 256/256,
   # whose static LDS (1184 * block_n = 303,104 bytes) exceeds gfx950's 163,840.

@@ -19,18 +19,10 @@
  * @brief Pins gfx950AttentionDenseGeometry() and the tile rules term for term against
  *        their Python originals.
  *
- * The engine relaunches a binary Python launched; a geometry that disagrees with the
- * Python does not fault, it computes something else. Nothing else in the suite compares
- * the two halves, so every expected number below is read off the Python and written as a
- * literal. Deriving one from the C++ expression under test would assert only that the
- * expression equals itself.
- *
- * Sources for the expectations:
- *   attention_dense_grid  (rocke/library/kernels/gfx950/attention_dense.py:2046-2054)
- *   attention_dense_block (rocke/library/kernels/gfx950/attention_dense.py:2057-2059)
- *   num_waves, block_m    (rocke/library/kernels/common/attention_dense_spec.py:25,213-214)
- *   tile rules            (attention_dense_spec.py:88, :399; attention_dense.py:301-313)
- *   LDS budget            (build_attention_dense's K/V slabs; gfx950 163840 bytes)
+ * A geometry that disagrees with the Python does not fault, it computes something else,
+ * and nothing else in the suite compares the two halves. Every expected number below is
+ * read off the Python and written as a literal; deriving one from the expression under
+ * test would assert only that the expression equals itself.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -39,16 +31,14 @@ namespace
 
 using hipdnn_plugin_sdk::HipdnnPluginException;
 
-/// Only reaches the diagnostic string; no case asserts on it except the one that pins
-/// that the diagnostic names the kernel.
 constexpr const char* KERNEL_NAME = "hipkernel:Gfx950AttentionDense/unit";
 
 /// The two block_m values gfx950 builds (DENSE_TILE_GEOMETRIES).
 constexpr int64_t BM256 = 256;
 constexpr int64_t BM128 = 128;
 
-/// attention_dense_block is `(spec.num_waves * 64, 1, 1)` and `num_waves = block_m // 32`
-/// (attention_dense_spec.py:213-214): (256 / 32) * 64 = 512 and (128 / 32) * 64 = 256.
+/// attention_dense_block is `(spec.num_waves * 64, 1, 1)` and `num_waves = block_m // 32`:
+/// (256 / 32) * 64 = 512 and (128 / 32) * 64 = 256.
 constexpr unsigned PYTHON_BLOCK_X_BM256 = 512U;
 constexpr unsigned PYTHON_BLOCK_X_BM128 = 256U;
 
@@ -62,18 +52,15 @@ Gfx950AttentionDenseGeometry
 
 // =============================================================================
 // gridX -- ceil(seqlen_q / block_m), as the Python writes it. kernel_match only serves
-// multiples of block_m, where the ceiling is the quotient; the non-multiple cases pin
-// that the function still matches the Python outside that contract rather than
-// truncating to a grid that skips rows.
+// multiples of block_m, where the ceiling is the quotient; the non-multiple cases pin the
+// behaviour outside that contract.
 // =============================================================================
 
 TEST(TestGfx950AttentionDenseGeometry, AlignedSeqLenQIsOneBlockPerWholeTile)
 {
-    // 256 / 256 = 1, 512 / 256 = 2, 4096 / 256 = 16 -- exact, no partial block.
     EXPECT_EQ(geometryFor(BM256, 256, 1, 1).gridX, 1U);
     EXPECT_EQ(geometryFor(BM256, 512, 1, 1).gridX, 2U);
     EXPECT_EQ(geometryFor(BM256, 4096, 1, 1).gridX, 16U);
-    // The same lengths at block_m 128 are twice as many blocks.
     EXPECT_EQ(geometryFor(BM128, 256, 1, 1).gridX, 2U);
     EXPECT_EQ(geometryFor(BM128, 512, 1, 1).gridX, 4U);
     EXPECT_EQ(geometryFor(BM128, 4096, 1, 1).gridX, 32U);
@@ -86,16 +73,14 @@ TEST(TestGfx950AttentionDenseGeometry, NonMultipleSeqLenQKeepsThePartialFinalBlo
     // ceil(257 / 256) = 2: one whole tile plus a single-row partial block. Truncating
     // gives 1 and the last row is never written.
     EXPECT_EQ(geometryFor(BM256, 257, 1, 1).gridX, 2U);
-    // ceil(513 / 256) = 3 and ceil(769 / 256) = 4 -- same one-row remainder, further out.
     EXPECT_EQ(geometryFor(BM256, 513, 1, 1).gridX, 3U);
     EXPECT_EQ(geometryFor(BM256, 769, 1, 1).gridX, 4U);
     // ceil(384 / 256) = 2: a half-full final block, not a one-row one.
     EXPECT_EQ(geometryFor(BM256, 384, 1, 1).gridX, 2U);
-    // ceil(255 / 256) = 1 and ceil(1 / 256) = 1. Truncating gives 0 here, which is an
-    // empty grid: the kernel returns having written nothing and reports success.
+    // Truncating gives 0 here, which is an empty grid: the kernel returns having written
+    // nothing and reports success.
     EXPECT_EQ(geometryFor(BM256, 255, 1, 1).gridX, 1U);
     EXPECT_EQ(geometryFor(BM256, 1, 1, 1).gridX, 1U);
-    // block_m 128: ceil(129 / 128) = 2, ceil(197 / 128) = 2, ceil(127 / 128) = 1.
     EXPECT_EQ(geometryFor(BM128, 129, 1, 1).gridX, 2U);
     EXPECT_EQ(geometryFor(BM128, 197, 1, 1).gridX, 2U);
     EXPECT_EQ(geometryFor(BM128, 127, 1, 1).gridX, 1U);
@@ -107,8 +92,8 @@ TEST(TestGfx950AttentionDenseGeometry, NonMultipleSeqLenQKeepsThePartialFinalBlo
 
 TEST(TestGfx950AttentionDenseGeometry, GridYIsQueryHeadsAndGridZIsBatch)
 {
-    // ceil(1024 / 256) = 4 query blocks; heads and batch pass through untouched and
-    // are mutually distinct, so an exchanged pair cannot read as correct.
+    // Heads and batch pass through untouched and are mutually distinct, so an exchanged
+    // pair cannot read as correct.
     const auto geometry = geometryFor(BM256, 1024, 16, 3);
     EXPECT_EQ(geometry.gridX, 4U);
     EXPECT_EQ(geometry.gridY, 16U);
@@ -151,8 +136,6 @@ TEST(TestGfx950AttentionDenseGeometry, WitnessLaunchesDependOnTheSelectedBlockM)
 
 TEST(TestGfx950AttentionDenseGeometry, BlockXIsNumWavesWave64Waves)
 {
-    // (256 / 32) * 64 = 512 and (128 / 32) * 64 = 256 threads. Not seqlen-dependent:
-    // the CTA is the same whatever the query length.
     for(const int64_t seqLenQ : {4096, 257, 1})
     {
         EXPECT_EQ(geometryFor(BM256, seqLenQ, 8, 4).blockX, PYTHON_BLOCK_X_BM256) << seqLenQ;
@@ -162,9 +145,8 @@ TEST(TestGfx950AttentionDenseGeometry, BlockXIsNumWavesWave64Waves)
 
 TEST(TestGfx950AttentionDenseGeometry, BlockMIsTheTileTheCtaAndTheGridAgreeOn)
 {
-    // The same block_m divides the query grid and sizes the CTA. A shape of exactly one
-    // tile is the shape where both readings are visible on one call: one query block,
-    // num_waves * 64 lanes.
+    // The same block_m divides the query grid and sizes the CTA; a shape of exactly one
+    // tile makes both readings visible on one call.
     const auto large = geometryFor(BM256, BM256, 1, 1);
     EXPECT_EQ(large.gridX, 1U);
     EXPECT_EQ(large.blockX, PYTHON_BLOCK_X_BM256);
@@ -217,8 +199,6 @@ TEST(TestGfx950AttentionDenseGeometry, UnbuiltBlockMThrowsBeforeDividingByIt)
 
 TEST(TestGfx950AttentionDenseGeometry, SmallestPositiveLaunchIsAccepted)
 {
-    // The other side of the guard: 1 is positive, so the smallest real launch must
-    // pass and produce a single CTA at either tile.
     EXPECT_NO_THROW(geometryFor(BM256, 1, 1, 1));
     const Gfx950AttentionDenseGeometry expectedBm256{1U, 1U, 1U, PYTHON_BLOCK_X_BM256};
     EXPECT_TRUE(geometryFor(BM256, 1, 1, 1) == expectedBm256);
@@ -229,7 +209,7 @@ TEST(TestGfx950AttentionDenseGeometry, SmallestPositiveLaunchIsAccepted)
 TEST(TestGfx950AttentionDenseGeometry, RejectionNamesTheKernel)
 {
     // The diagnostic exists so a failure identifies the descriptor that declared the
-    // shape; a message without the name leaves the caller nothing to look up.
+    // shape.
     for(const int64_t blockM : {BM256, int64_t{0}})
     {
         try

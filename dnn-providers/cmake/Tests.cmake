@@ -320,8 +320,7 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # add_test(<target> "../<target>") apiece. That is the same unfiltered invocation the
     # raw add_test() below would be, just in the installed tree, so EXPLICIT_REGISTRATION
     # has to withhold both or the entry it suppresses in the build tree reappears in the
-    # artifact. The check lifecycle and name validation above are deliberately NOT
-    # conditional: the binary is still built, installed and name-checked like any other.
+    # artifact.
     if(NOT ARG_EXPLICIT_REGISTRATION)
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_TEST_TARGETS ${TARGET})
     endif()
@@ -366,13 +365,9 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     # actually creates.
     #
     # EXPLICIT_REGISTRATION reaches the same point from the other direction: a binary
-    # whose suites are only meaningful under state a caller supplies -- the descriptor
-    # census, which hands one shard and one architecture to one filtered suite -- has no
-    # correct bare invocation, so running the whole target proves nothing and fails or
-    # skips wholesale. The caller registers the entries that ARE meaningful. Everything
-    # above this point still applies to such a target: it installs, carries its RPATH and
-    # its Windows DLL staging, and counts toward the check-target lifecycle exactly like
-    # any other test binary. Only the unfiltered add_test() is withheld.
+    # whose suites are only meaningful under state a caller supplies has no correct bare
+    # invocation, so running the whole target proves nothing and fails or skips
+    # wholesale. The caller registers the entries that are meaningful instead.
     if(DNN_PROVIDER_TEST_CATEGORY_YAMLS OR ARG_EXPLICIT_REGISTRATION)
         set(${TARGET}_TEST_ENVIRONMENT "${_MERGED_TEST_ENVIRONMENT}" PARENT_SCOPE)
         return()

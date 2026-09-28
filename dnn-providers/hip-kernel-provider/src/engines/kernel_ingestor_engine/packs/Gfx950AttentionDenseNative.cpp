@@ -38,8 +38,8 @@
 
 /**
  * @file Gfx950AttentionDenseNative.cpp
- * @brief The hipkernel:Gfx950AttentionDense engine's native half: matching, scoring,
- *        dispatch, and the one function that registers them.
+ * @brief The hipkernel:Gfx950AttentionDense engine's native half: matching, scoring and
+ *        dispatch.
  *
  * The kernel is `rocke/library/kernels/gfx950/attention_dense.py`'s
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Its
@@ -50,24 +50,6 @@
  * batch/seqlen_q/seqlen_kv. Each candidate carries its own (block_m, block_n) tile and
  * serves any valid B/Sq/Skv with Sq divisible by ITS block_m and Skv divisible by ITS
  * block_n. A graph whose lengths no shipped tile divides is not served by this engine.
- * A candidate whose `ragged` field is not 0 -- an exact-shape boundary-padding build --
- * is declined, whatever its authored shape.
- *
- * Key invariants:
- *
- *  a. **The kernel is BSHD.** The builder computes strides from `Hq * D` / `Hkv * D`
- *     and takes no stride kernargs; a BHSD graph reads the wrong elements in bounds.
- *  b. **All variants are non-persistent.** Every variant takes (q,k,v,o,scale,
- *     batch,seqlen_q,seqlen_kv) -- eight kernel arguments. There is no persistent grid.
- *  c. **Shape-generic.** The shape is a runtime argument, so the metadata's batch/
- *     seqlen_q/seqlen_kv are canonical build inputs and are never compared to the graph.
- *  d. **hipDNN has no `causal` boolean.** Derive from left_bound/right_bound/deprecated
- *     booleans via maskTypeFor(). The deprecated booleans are wrong for shipped bundles.
- *  e. **The tile is per candidate.** block_m/block_n are completed KMD fields (legacy
- *     records omit them and complete to 256/64). They are validated against the tile
- *     rules before anything divides by them; a candidate without a supported tile is
- *     declined, never launched with a substituted one. block_m sizes the launch;
- *     block_n only decides applicability.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -87,8 +69,7 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.d
 // KMD fields (12-field schema). The KMD carries only what varies between candidates, so
 // waves_per_eu/persistent/num_persistent/wide_lds_dma are absent: every shipped variant
 // holds them at one value. A variant that moved any of them would have to add it here
-// first, or the candidates collide on the catalog key and the loader drops one. The
-// schema's batch/seqlen_q/seqlen_kv are canonical build inputs this file never reads.
+// first, or the candidates collide on the catalog key and the loader drops one.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -198,13 +179,14 @@ bool isWellFormedOperand(const data_objects::TensorAttributes& tensor)
 /**
  * @brief Is this tensor's memory BSHD -- token-major, head varying fastest?
  *
- * The kernel bakes this layout and there are no stride kernargs, so a
- * differently-strided tensor is read as if it were this one.
+ * The kernel bakes this layout and there are no stride kernargs -- the builder computes
+ * strides from `Hq * D` and `Hkv * D` -- so a differently-strided tensor is read as if it
+ * were this one.
  *
  * Unit-extent axes are exempt: a stride multiplies an index that is always 0 when the
  * extent is 1. A single-head tensor is byte-identically BSHD and BHSD while the two
- * spellings disagree on strides[H] -- a strict compare would decline a graph the kernel
- * serves perfectly, and graph_match returning nullopt empties the WHOLE engine catalog.
+ * spellings disagree on strides[H], so a strict compare would decline a graph the kernel
+ * serves perfectly.
  *
  * An expected stride too large for int64_t is one no stride can equal, so that axis
  * fails unless it is unit-extent.
@@ -227,10 +209,8 @@ bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
-/// The mask kinds this engine serves. Narrower than
-/// asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType, which also classifies windowed
-/// masks: no variant in this catalog carries a non-zero sliding_window, so a windowed
-/// graph has no spelling here and is declined outright.
+/// The mask kinds this engine serves. No variant in this catalog carries a non-zero
+/// sliding_window, so a windowed mask has no spelling here.
 enum class MaskType : int
 {
     NO_MASK = 0,
@@ -241,8 +221,8 @@ enum class MaskType : int
 /**
  * @brief Which mask the graph is asking for.
  *
- * A REAL BOUND WINS OVER THE DEPRECATED BOOLEANS. A graph that sets a boolean AND
- * carries a bound is asking for a windowed mask and must be reported as such.
+ * A real bound wins over the deprecated booleans: a graph that sets a boolean AND
+ * carries a bound is asking for a windowed mask.
  */
 std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attributes)
 {
@@ -269,8 +249,7 @@ std::optional<MaskType> maskTypeFor(const data_objects::SdpaAttributes& attribut
 
     // A bounded left edge is a window whatever the booleans say, and no shipped variant
     // carries a non-zero sliding_window. Serving one on a causal binary would apply the
-    // wrong mask with no error, so a windowed graph is declined here rather than left to
-    // fall through to a kernel comparison it could only fail.
+    // wrong mask with no error.
     if(left != UNBOUNDED)
     {
         return std::nullopt;
@@ -384,17 +363,8 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
     //
-    // Three operands here: Q, K and V. O is held to the same rule, but at §5, on the
-    // conditional that compares its extents against the problem shape, so that an output
-    // whose extents disagree declines on the disagreement. hasBshdStrides derives the
-    // strides it expects through checkedProduct, so its arithmetic is defined on any
-    // extents and the placement decides only which check declines a graph.
-    //
-    // The answer is the same wherever the clause sits: the kernel bakes BSHD for the
-    // epilogue exactly as it does for the inputs, so a differently-strided output is
-    // outside the capability set and a DECLINE is the honest answer -- another engine may
-    // serve the graph, whereas accepting it and faulting later would claim a graph this
-    // engine cannot execute.
+    // O is held to the same rule at §5, so that an output whose extents disagree declines
+    // on the disagreement instead.
     if(!hasBshdStrides(*q) || !hasBshdStrides(*k) || !hasBshdStrides(*v))
     {
         return std::nullopt;
@@ -403,7 +373,6 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // --- 5. Cross-tensor consistency.
     const auto problem = problemFor(*q, *k);
 
-    // One dtype across every operand.
     if(k->data_type() != problem.dataType || v->data_type() != problem.dataType
        || o->data_type() != problem.dataType)
     {
@@ -422,14 +391,12 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     {
         return std::nullopt;
     }
-    // K must agree with Q on batch, and on head size.
     if(k->dims()->Get(BATCH_AXIS) != problem.batch
        || k->dims()->Get(HEAD_SIZE_AXIS) != problem.headSize)
     {
         return std::nullopt;
     }
-    // O is Q's shape: the epilogue reuses the query base and stride verbatim. O's layout
-    // clause rides on the same conditional, AFTER the four dimension compares -- see §4.
+    // O is Q's shape: the epilogue reuses the query base and stride verbatim.
     if(o->dims()->Get(BATCH_AXIS) != problem.batch
        || o->dims()->Get(HEAD_AXIS) != problem.numQueryHeads
        || o->dims()->Get(SEQ_AXIS) != problem.seqLenQ
@@ -477,10 +444,9 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
 
     int64_t causal = 0;
 
-    // Windowed graphs are declined in maskTypeFor, so every mask that reaches here is a
-    // full-length one. The zero is still bound and compared against the kernel's
-    // sliding_window field below, so a variant built with a window cannot be matched by a
-    // graph that does not ask for one.
+    // Bound even though it is always zero: kernelMatches compares it against the
+    // candidate's sliding_window field, so a variant built with a window cannot be
+    // matched by a graph that does not ask for one.
     const int64_t slidingWindow = 0;
 
     switch(*mask)
@@ -493,7 +459,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
         break;
     case MaskType::BOTTOM_RIGHT_CAUSAL:
         // The kernel's causal clamp is TOP-LEFT. Bottom-right coincides EXACTLY when
-        // Sq == Skv -- and every shipped quick/SdpaFwd causal bundle is that shape.
+        // Sq == Skv.
         if(problem.seqLenQ != problem.seqLenKv)
         {
             return std::nullopt;
@@ -506,7 +472,6 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     }
 
     // --- 8. Every optional attribute this kernel cannot honour, declined explicitly.
-    // Worked from sdpa_attributes.fbs field by field.
 
     // Additive attention bias.
     if(attributes.attn_mask_tensor_uid().has_value())
@@ -524,7 +489,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     {
         return std::nullopt;
     }
-    // Dropout: five spellings.
+    // Dropout.
     if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
        || attributes.dropout_mask_tensor_uid().has_value()
        || attributes.dropout_scale_tensor_uid().has_value()
@@ -545,7 +510,7 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     {
         return std::nullopt;
     }
-    // FP8 quantization: six scale UIDs plus two amax outputs.
+    // FP8 quantization.
     if(attributes.descale_q_tensor_uid().has_value()
        || attributes.descale_k_tensor_uid().has_value()
        || attributes.descale_v_tensor_uid().has_value()
@@ -572,9 +537,8 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     // graph's own fp16/bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
     // describe what it runs. The mode is not compared with the graph dtype: HALF is
     // accepted on bf16 graphs too, because the cuDNN-compat shim writes HALF whenever the
-    // caller leaves the field unset. FLOAT and every FP8 mode ask for operands it never
-    // forms, so they decline. An allow-list, so an enum value added later declines until
-    // judged.
+    // caller leaves the field unset. An allow-list, so an enum value added later declines
+    // until judged.
     const auto mmaCoreMode = attributes.mma_core_mode();
     if(mmaCoreMode != data_objects::DataType::UNSET && mmaCoreMode != data_objects::DataType::HALF
        && mmaCoreMode != data_objects::DataType::BFLOAT16)
@@ -601,7 +565,6 @@ std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& 
     bound[std::string(O_TOKEN)] = attributes.o_tensor_uid();
     bound[std::string(CAUSAL_TOKEN)] = causal;
     bound[std::string(SLIDING_WINDOW_TOKEN)] = slidingWindow;
-    // BoundTokens carry int64_t, so the scale travels as its IEEE-754 bit pattern.
     int32_t scaleBits = 0;
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
@@ -664,15 +627,13 @@ struct AttentionDenseTile
 /**
  * @brief The candidate's tile, or nullopt when it has none this engine can launch.
  *
- * Both fields must be present, hold an integer, and together with the candidate's own
- * head_size satisfy isSupportedGfx950AttentionDenseTile -- which includes the LDS budget,
- * so a D128 block_n 256 record is declined like any other unbuildable tile. Legacy
- * records omit block_m/block_n in their raw form and reach here completed to 256/64, so
- * an absent field means an uncompleted or malformed record: it is declined rather than
- * given a default here, because a substituted tile launches a binary with another
- * binary's grid.
+ * Validated against isSupportedGfx950AttentionDenseTile, which includes the LDS budget,
+ * so a D128 block_n 256 record is declined like any other unbuildable tile.
  *
- * Every reader that divides by a tile goes through this first.
+ * Legacy records omit block_m/block_n in their raw form and reach here completed to
+ * 256/64, so an absent field means an uncompleted or malformed record: it is declined
+ * rather than given a default here, because a substituted tile launches a binary with
+ * another binary's grid.
  */
 std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel)
 {
@@ -687,7 +648,6 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel)
     return AttentionDenseTile{*blockM, *blockN};
 }
 
-/// Does @p tile divide both of the graph's sequence lengths?
 bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& problem)
 {
     return problem.seqLenQ % tile.blockM == 0 && problem.seqLenKv % tile.blockN == 0;
@@ -696,19 +656,16 @@ bool tileDivides(const AttentionDenseTile& tile, const AttentionDenseProblem& pr
 /**
  * @brief Kernel-scoped applicability: does THIS candidate's baked metadata fit?
  *
- * Only shape-generic candidates are served: `ragged` must be present, an integer, and 0.
- * A ragged build bakes its exact shape and pads boundary tiles on-chip; this catalog
- * ships none, and one arriving from elsewhere is declined even at its authored shape
- * rather than matched on metadata equality.
+ * Only shape-generic candidates are served. A ragged build bakes its exact shape and pads
+ * boundary tiles on-chip; this catalog ships none, and one arriving from elsewhere is
+ * declined even at its authored shape rather than matched on metadata equality.
  *
  * A served candidate receives batch/seqlen_q/seqlen_kv as runtime kernel arguments, so
  * one binary serves any valid shape for the same head/dtype/mask configuration; the
  * metadata's shape fields are canonical build inputs and are not compared.
  *
- * THE TILE IS THE CANDIDATE'S OWN. It is validated before anything divides by it; a
- * candidate without a supported tile declines. The candidate then requires
- * `Sq % block_m == 0` and `Skv % block_n == 0` for ITS tile, so one graph can admit
- * some tiles of a cohort and not others, and a graph no tile divides admits none.
+ * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
+ * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -736,7 +693,6 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // Shape-generic builds only.
     const auto ragged = integerMetadata(kernel, RAGGED_FIELD);
     if(!ragged.has_value() || *ragged != 0)
     {
@@ -760,7 +716,6 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // The mask the graph derived to, against the mask this variant was compiled for.
     const auto causal = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CAUSAL_TOKEN);
     if(!causal.has_value() || intField(CAUSAL_FIELD) != *causal)
     {
@@ -775,7 +730,6 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // Tile divisibility against THIS candidate's tile.
     return tileDivides(*tile, problem);
 }
 
@@ -798,13 +752,11 @@ constexpr double UNSUPPORTED_TILE_SCORE = 0.0;
  *
  * A stable fallback order for cold selection, not a performance model:
  *
- *  1. The baseline 256/64 tile -- every legacy record's -- above every alternative, so
- *     untuned selection is unchanged wherever the baseline applies.
- *  2. The alternatives in ascending lexicographic (block_m, block_n) order: 128/32,
- *     128/64, 128/128, 256/32, 256/128, 256/256.
+ *  1. The baseline 256/64 tile -- every legacy record's -- above every alternative.
+ *  2. The alternatives in ascending lexicographic (block_m, block_n) order.
  *
  * Every distinct tile gets a distinct score, so the selector's descriptor-id tie-break
- * never decides between two tiles. Exhaustive benchmarking still times every candidate.
+ * never decides between two tiles.
  */
 double scoreKernel(const MatchContext& /*context*/,
                    const BoundTokens& /*bound*/,
@@ -832,13 +784,12 @@ double scoreKernel(const MatchContext& /*context*/,
 /// All variants are non-persistent. use_sinks=False so no sink_ptr slot.
 /// ABI: (q_ptr, k_ptr, v_ptr, o_ptr, scale, batch, seqlen_q, seqlen_kv) -- 8 args.
 ///
-/// NAMES ARE LOAD-BEARING, not decoration. requireSignatureMatch compares kind and size
-/// always, but names only when BOTH sides carry one. Kind and size alone cannot tell the
-/// four pointers apart, nor `scale` (f32) from `batch` (i32) -- both are by_value/4 -- so
-/// without names an operand permutation passes the check and the kernel reads the wrong
-/// buffers with no error and no status code. hkp_pack lowers these names into the kpack
-/// descriptor from the rocKE builder's own parameter list, so the recorded side carries
-/// them and the comparison is live. Keep these spellings identical to the Python
+/// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
+/// only when BOTH sides carry one. Kind and size alone cannot tell the four pointers
+/// apart, nor `scale` (f32) from `batch` (i32) -- both are by_value/4 -- so without names
+/// an operand permutation passes the check and the kernel reads the wrong buffers with no
+/// error and no status code. hkp_pack lowers the recorded names out of the rocKE builder's
+/// own parameter list, so keep these spellings identical to the Python
 /// (kernels/gfx950/attention_dense.py, the attention_dense_signature parameter list); a
 /// divergence here fails every dispatch rather than silently weakening the check.
 ///
@@ -897,7 +848,7 @@ private:
 };
 
 /**
- * @brief The native dispatch behind this engine's UDD: sizes, prepares and launches.
+ * @brief The native dispatch behind this engine's UDD.
  */
 class Gfx950AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
@@ -973,7 +924,6 @@ public:
         const compilation::KernelCompileOptions options(standIn,
                                                         context.deviceProperties.gcnArchName);
 
-        // All variants are non-persistent: every variant takes runtime batch/seqlen_q/seqlen_kv.
         auto code = buildIngestorKernelCode(_kernelCompiler,
                                             _kpackLoader,
                                             context,
@@ -1000,8 +950,6 @@ public:
         return std::make_unique<PreparedGfx950AttentionDense>(std::move(code), binding, problem);
     }
 
-    /// ABI: (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- 8 args, all variants.
-    /// use_sinks=False; no sink_ptr slot.
     void launch(const Handle& handle,
                 const PreparedDispatch& prepared,
                 const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -1021,7 +969,6 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
         const auto& p = preparedDense.problem();
-        // (q,k,v,o,scale,batch,seqlen_q,seqlen_kv) -- every variant's ABI.
         preparedDense.kernelForStream(handle.getStream())
             .launch(handle.getStream(),
                     q.ptr,

@@ -20,9 +20,8 @@ namespace
 {
 
 /// The report a glob-selected validator produces when it cannot grade the tensor the
-/// glob caught. Shared by every such validator so an operator is told the same three
-/// things — which tensor, which config section, and what to change — whichever one
-/// over-matched.
+/// glob caught. Shared by every such validator so an operator is told the same thing
+/// whichever one over-matched.
 ///
 /// `validatorName` is the TOML spelling, because the config line is what the reader
 /// has to edit.
@@ -46,12 +45,11 @@ std::string validatorNotApplicable(const std::string& label,
 
 /// The report a glob-selected validator produces when it has no implementation at the
 /// site the comparison runs on. Distinct from validatorNotApplicable because the data
-/// type is fine here and naming it would send the reader to the wrong config field: it
-/// is the site that cannot serve the request.
+/// type is fine here and naming it would send the reader to the wrong config field.
 ///
-/// Refusing is the point. Falling back to the host validator would read device memory
-/// through host pointers, and silently grading to a validator the config did not ask
-/// for is the miscompare this whole mechanism exists to prevent.
+/// Falling back to the host validator would read device memory through host pointers,
+/// and silently grading to a validator the config did not ask for is the miscompare
+/// this whole mechanism exists to prevent.
 std::string validatorNotApplicableAtSite(const std::string& label,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                          const char* validatorName)
@@ -135,8 +133,7 @@ ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType 
 
     case ValidatorKind::ALLCLOSE_MATCHING_INFINITIES:
         // There is no device implementation of this kind, so a DEVICE-site request is
-        // refused rather than served by the host validator: the tensors live in device
-        // memory, and grading them through host pointers is undefined, not merely slow.
+        // refused rather than served by the host validator.
         if(site == ValidationSite::DEVICE)
         {
             return {nullptr,

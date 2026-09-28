@@ -118,8 +118,6 @@ TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesKeepsTheCallersTolerance)
     EXPECT_FLOAT_EQ(grading.rtol, 2e-3f);
 }
 
-// A [[tolerance_overrides]] entry applies to a matching-infinities tensor exactly as it
-// does to an allclose one.
 TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesAppliesTheToleranceOverride)
 {
     const ValidatorOverride matchingInfinities{ValidatorOverrideKind::ALLCLOSE_MATCHING_INFINITIES,

@@ -43,28 +43,13 @@
  * only the causal and sliding_window tokens, so the four operand uids and the scale could
  * hold anything and every matcher case would still pass.
  *
- * ROUTE. Two seams, both device-free:
- *
- *  1. The graph matcher, resolved out of GraphMatchRegistry by the symbol the installed
- *     descriptors name. It is the sole producer of bound tokens, so reading its result is
- *     reading exactly what a plan build hands the dispatch handler.
- *  2. The dispatch handler's prepare(), reached through DispatchRegistry with a descriptor
- *     pointing at an archive that is not there -- the technique
- *     TestGfx950AttentionDenseSignature.cpp establishes. Everything prepare() checks
- *     before buildIngestorKernelCode is therefore reachable on any machine, and the
- *     archive's absence is the failure that arrives when those checks pass.
- *
- * WHAT IS NOT REACHABLE HERE. prepare() calls gfx950AttentionDenseGeometry() AFTER
- * buildIngestorKernelCode has loaded the code object, and applies the result through
- * IngestorKernelCode::setGridSize / setBlockSize onto an IRunnableKernel held inside a
- * PreparedDispatch subclass that lives in the pack's own anonymous namespace. The base
- * class hipdnn_plugin_sdk::ingestor::PreparedDispatch declares nothing but a destructor,
- * so a prepared dispatch is opaque to a test even where one can be produced. The call
- * site's ARGUMENTS -- (block_m, seqLenQ, numQueryHeads, batch) -- are consequently not
- * observable without a real archive and a real gfx950 device. The geometry file pins what
- * the function computes; nothing here pins what prepare() passes it. What IS reachable is
- * the tile check prepare() makes before loading: a candidate with no supported tile is
- * refused by name rather than launched with a substituted one.
+ * The launch geometry is not reachable here. prepare() calls
+ * gfx950AttentionDenseGeometry() after buildIngestorKernelCode has loaded the code object,
+ * and applies the result onto a PreparedDispatch subclass in the pack's own anonymous
+ * namespace whose base class declares nothing but a destructor, so a prepared dispatch is
+ * opaque to a test even where one can be produced. TestGfx950AttentionDenseGeometry.cpp
+ * pins what the function computes; what prepare() passes it needs a real archive and a
+ * real gfx950.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -88,11 +73,10 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.d
 // The token names, restated
 // ---------------------------------------------------------------------------
 //
-// The pack's own spellings live in the anonymous namespace of
-// Gfx950AttentionDenseNative.cpp, so no test translation unit can name them. Written out
-// again here deliberately: these strings are the contract between the matcher that writes
-// a token and the dispatch that reads it, and a test sharing the constant would keep
-// passing through a rename that broke nothing but also pinned nothing.
+// Written out again rather than shared with the pack: these strings are the contract
+// between the matcher that writes a token and the dispatch that reads it, and a test
+// sharing the constant would keep passing through a rename that broke nothing but also
+// pinned nothing.
 
 constexpr std::string_view Q_TOKEN = "gfx950_attention_dense.q.uid";
 constexpr std::string_view K_TOKEN = "gfx950_attention_dense.k.uid";
@@ -126,7 +110,6 @@ constexpr int64_t O_UID = 44;
 /// bound O token can be made to name a real but wrongly-strided tensor.
 constexpr int64_t BHSD_UID = 55;
 
-/// A uid no tensor in the graph carries.
 constexpr int64_t ABSENT_UID = 99;
 
 constexpr int64_t BATCH = 2;
@@ -148,8 +131,6 @@ std::vector<int64_t> bhsdStrides()
     return {HEADS * SEQ * HEAD_SIZE, SEQ * HEAD_SIZE, HEAD_SIZE, 1};
 }
 
-/// One bf16 operand of the fixture shape. The fields no case here varies -- name, dtype
-/// and the virtual flag -- are fixed.
 flatbuffers::Offset<data_objects::TensorAttributes>
     addTensor(flatbuffers::FlatBufferBuilder& builder,
               int64_t uid,
@@ -160,7 +141,6 @@ flatbuffers::Offset<data_objects::TensorAttributes>
         builder, uid, nullptr, data_objects::DataType::BFLOAT16, &strides, &dims, false);
 }
 
-/// Which mask the built graph asks for.
 enum class Mask
 {
     /// right_bound 0 with TOP_LEFT alignment: the causal corner, causal token 1.
@@ -169,9 +149,8 @@ enum class Mask
     UNMASKED
 };
 
-/// bf16, D128, B=2, Hq=Hkv=4, Sq=Skv=512, dense BSHD throughout -- a shape the engine
-/// accepts. The applicability rules are TestGfx950AttentionDenseMatchers.cpp's subject;
-/// here the graph only has to be one that matches, so the tokens it binds can be read.
+/// The graph only has to be one the engine matches, so the tokens it binds can be read;
+/// the applicability rules are TestGfx950AttentionDenseMatchers.cpp's subject.
 flatbuffers::FlatBufferBuilder buildGraph(float scale, Mask mask, bool withBhsdTensor)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -297,8 +276,7 @@ int64_t tokenValue(const BoundTokens& bound, std::string_view token)
 
 /// @p value's IEEE-754 storage, the way BoundTokens must carry a float.
 ///
-/// Used only for a scale whose bit pattern is impractical to write as a literal; the two
-/// cases that pin the encoding use literals read off the format, since a helper that
+/// Used only where a bit pattern is impractical to write as a literal: a helper that
 /// repeats what the pack does would assert only that the two agree.
 int64_t ieee754Bits(float value)
 {
@@ -312,10 +290,9 @@ int64_t ieee754Bits(float value)
 // A descriptor prepare() can be driven with
 // ---------------------------------------------------------------------------
 
-/// The ABI the rocKE builder declares: four `ptr<dtype, global>`, then `scale` as f32,
-/// then `batch`, `seqlen_q`, `seqlen_kv` as i32 -- named, as hkp_pack records it. Recorded
-/// so the signature comparison agrees and the failure below is the archive's, not a
-/// signature mismatch; TestGfx950AttentionDenseSignature.cpp owns that comparison.
+/// The ABI the rocKE builder declares, named as hkp_pack records it, so the signature
+/// comparison agrees and the failure below is the archive's rather than a mismatch;
+/// TestGfx950AttentionDenseSignature.cpp owns that comparison.
 std::vector<KernelArgument> recordedSignature()
 {
     constexpr uint32_t POINTER_BYTES = 8;

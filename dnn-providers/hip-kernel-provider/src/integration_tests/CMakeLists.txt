@@ -182,8 +182,6 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
-# Register the gfx950 dense attention kpack engine integration test target.
-#
 # Gated on the same predicate as the census and the external integration target: the
 # feature flags say the engine could be built, the authored content says whether this
 # configuration ships it for gfx950. Pinned by ENGINE_NAME, so a build that does not
@@ -201,8 +199,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
     # prunes by the first gfx directory in the path, so the entry goes when the engine
     # does. Left in the common file it survives into a gfx942-only package, where the
     # engine ranks nothing, every case declines and the entry reports success having run
-    # nothing. An engine present but ranking nothing produces that same shape, measured
-    # on gfx90a as 8 registered, 0 run, 8 skipped and a green entry.
+    # nothing.
     #
     # hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
     # in both YAML modes: src/ hands it whichever common entrypoint that configuration
