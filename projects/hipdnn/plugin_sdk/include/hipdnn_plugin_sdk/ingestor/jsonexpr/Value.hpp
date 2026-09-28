@@ -89,9 +89,9 @@ public:
         : _v(std::move(s))
     {
     }
-    /// Stores an array in shared, read-only storage. Lvalues are copied; rvalues
-    /// transfer ownership. After moving an array here, discard pointers, references,
-    /// or iterators that allow changes to its elements.
+    /// Stores the array in shared, read-only storage. Lvalues are copied and rvalues
+    /// are moved. Don't keep mutable pointers into an array you move in: its buffer
+    /// now backs the shared storage.
     Value(Array a)
         : _v(std::make_shared<const Array>(std::move(a)))
     {
@@ -100,7 +100,9 @@ public:
     Value(const Value&) = default;
     Value& operator=(const Value&) = default;
 
-    /// Moves leave the source null; self-move assignment leaves it unchanged.
+    /// A defaulted move would leave the source holding a null ArrayStorage, so
+    /// isArray() would still be true and asArray() would dereference null. Moves
+    /// leave the source null instead. Self-move assignment is a no-op.
     Value(Value&& other) noexcept
         : _v(std::move(other._v))
     {
@@ -268,9 +270,11 @@ public:
         }
         if(isArray() && o.isArray())
         {
-            // Compare elements, not pointers: NaN is not equal to itself.
+            // Compare elements rather than storage pointers, so a copy of an array
+            // holding NaN still compares unequal, just like the NaN itself.
             return asArray() == o.asArray();
         }
+        // Arrays were handled above, so this never compares storage pointers.
         return _v == o._v;
     }
     bool operator!=(const Value& o) const

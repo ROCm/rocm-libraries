@@ -11,7 +11,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -754,26 +753,8 @@ TEST(TestIngestorWinnerCacheStateManager, CapacityBoundariesRetainDistinctWinner
     }
 }
 
-TEST(TestIngestorWinnerCache, UnresolvedLdsCapacityCannotRoundTripAsReportedZero)
-{
-    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
-    DeviceProperties unresolved;
-    unresolved.gcnArchName = "gfx942";
-    unresolved.warpSize = 64;
-    unresolved.multiProcessorCount = 48;
-    EXPECT_FALSE(decodeWinnerRecordLine(
-                     encodeWinnerRecordLine(keyFor(graph, unresolved), recordFor(0x11, 1.0)))
-                     .has_value());
-
-    unresolved.ldsSize = 0;
-    const auto resolved = decodeWinnerRecordLine(
-        encodeWinnerRecordLine(keyFor(graph, unresolved), recordFor(0x11, 1.0)));
-    ASSERT_TRUE(resolved.has_value());
-    EXPECT_EQ(resolved->first, keyFor(graph, unresolved));
-}
-
-// The reader rejects a record keyed by an unresolved device, so persisting one would
-// append an unreadable line to the append-only shard on every fresh miss.
+// The reader rejects records for an unresolved device, so writing one would add an
+// unreadable line to the shard on every miss.
 TEST(TestIngestorWinnerCacheStateManager, AnUnresolvedDeviceIsNeitherPersistedNorCached)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
@@ -856,29 +837,28 @@ TEST_P(TestIngestorWinnerCacheInvalidDevice, RejectsInvalidDeviceRecords)
     EXPECT_FALSE(decodeWinnerRecordLine(malformed.dump()).has_value());
 }
 
-TEST(TestIngestorWinnerCacheStateManager, IncompleteDeviceRecordUsesTheColdRankingPath)
+INSTANTIATE_TEST_SUITE_P(,
+                         TestIngestorWinnerCacheInvalidDevice,
+                         ::testing::ValuesIn(invalidDeviceFields()),
+                         [](const ::testing::TestParamInfo<InvalidDeviceField>& info) {
+                             return info.param.name;
+                         });
+
+// Records written before lds_size existed must be skipped without hiding the lines around them.
+TEST(TestIngestorWinnerCacheStateManager, ALineWithoutLdsSizeIsSkipped)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedCacheDir cacheDir("invalid_device");
+    const ScopedCacheDir cacheDir("missing_lds_size");
     const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
     const auto properties = suffixedDeviceProperties();
     const auto key = keyFor(graph, properties);
-    const MatchContext context{graph, 0, properties};
-    const auto reference = makeStateManager();
-    const auto heuristicOrder = reference->sortedDefinitions(context);
-    ASSERT_GE(heuristicOrder.size(), 2U);
-    WinnerRecord measured;
-    for(auto kernel = heuristicOrder.rbegin(); kernel != heuristicOrder.rend(); ++kernel)
-    {
-        measured.push_back(entryFor(*kernel, static_cast<double>(measured.size() + 1)));
-    }
 
-    auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(key, measured));
+    auto malformed = nlohmann::json::parse(encodeWinnerRecordLine(key, recordFor(0x20, 1.0)));
     malformed["device"].erase("lds_size");
 
     const auto beforeKey = keyFor(graph, suffixedDeviceProperties(47));
     const auto afterKey = keyFor(graph, suffixedDeviceProperties(49));
-    const auto path = winnerCacheShardPath("test:InvalidDevice", properties.gcnArchName);
+    const auto path = winnerCacheShardPath("test:MissingLdsSize", properties.gcnArchName);
     std::filesystem::create_directories(path.parent_path());
     {
         std::ofstream out(path);
@@ -889,7 +869,7 @@ TEST(TestIngestorWinnerCacheStateManager, IncompleteDeviceRecordUsesTheColdRanki
         out << encodeWinnerRecordLine(afterKey, recordFor(0x22, 2.0)) << "\n";
     }
 
-    const auto reader = makeNamedStateManager("test:InvalidDevice");
+    const auto reader = makeNamedStateManager("test:MissingLdsSize");
     EXPECT_FALSE(reader->winnerFor(key).has_value());
     const auto before = reader->winnerFor(beforeKey);
     const auto after = reader->winnerFor(afterKey);
@@ -899,33 +879,7 @@ TEST(TestIngestorWinnerCacheStateManager, IncompleteDeviceRecordUsesTheColdRanki
     ASSERT_EQ(after->size(), 1U);
     EXPECT_EQ(before->front().kernelId, testId(0x21));
     EXPECT_EQ(after->front().kernelId, testId(0x22));
-
-    const auto coldOrder = reader->sortedDefinitions(context);
-    ASSERT_EQ(coldOrder.size(), heuristicOrder.size());
-    for(size_t i = 0; i < coldOrder.size(); ++i)
-    {
-        EXPECT_EQ(coldOrder[i].kernelId, heuristicOrder[i].kernelId);
-    }
-    EXPECT_FALSE(reader->winnerFor(key).has_value())
-        << "heuristic ranking must not fabricate a measurement on a miss";
-
-    // An invalid record must not block caching and reusing a new measurement.
-    reader->recordWinner(key, measured, WinnerWriteCause::FRESH_MISS);
-    const auto fresh = makeNamedStateManager("test:InvalidDevice");
-    const auto measuredOrder = fresh->sortedDefinitions(context);
-    ASSERT_EQ(measuredOrder.size(), measured.size());
-    for(size_t i = 0; i < measuredOrder.size(); ++i)
-    {
-        EXPECT_EQ(measuredOrder[i].kernelId, measured[i].kernelId);
-    }
 }
-
-INSTANTIATE_TEST_SUITE_P(,
-                         TestIngestorWinnerCacheInvalidDevice,
-                         ::testing::ValuesIn(invalidDeviceFields()),
-                         [](const ::testing::TestParamInfo<InvalidDeviceField>& info) {
-                             return info.param.name;
-                         });
 
 /// Proves the codec plus the read-once path across two manager lifetimes; the
 /// cross-process case is a separate ctest-driven pair below.

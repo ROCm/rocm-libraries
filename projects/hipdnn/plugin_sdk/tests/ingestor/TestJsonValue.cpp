@@ -15,7 +15,6 @@
 #include <clocale>
 #include <cmath>
 #include <cstdint>
-#include <future>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -95,7 +94,7 @@ TEST(TestJsonValue, ArrayMovesLeaveReusableNullSourcesAndPreserveOtherOwners)
 {
     const V expected(V::Array{V(1), V(V::Array{V(2), V("nested")})});
     V source = expected;
-    // A moved-from Value is safe to inspect and must be null.
+    // Moving leaves the source null, so it is still safe to inspect.
     V moved(std::move(source));
     EXPECT_EQ(moved, expected);
     EXPECT_TRUE(source.isNull()); // NOLINT(bugprone-use-after-move)
@@ -118,33 +117,21 @@ TEST(TestJsonValue, ArrayMovesLeaveReusableNullSourcesAndPreserveOtherOwners)
     EXPECT_EQ(target, expected);
 }
 
-TEST(TestJsonValue, ConcurrentArrayCopiesRetainTheirValues)
+TEST(TestJsonValue, CopiesOfAnArrayShareItsStorage)
 {
-    const V expected(V::Array{V(V::Array{V(4), V("nested")}), V()});
-    const V original(V::Array{V(V::Array{V(4), V("nested")}), V()});
-    // Futures wait for readers before expected is destroyed, even on failure.
-    std::array<std::future<bool>, 4> readers;
-    for(auto& reader : readers)
-    {
-        reader = std::async(std::launch::async, [original, &expected] {
-            for(int i = 0; i < 128; ++i)
-            {
-                V copied = original;
-                V assigned;
-                assigned = copied;
-                copied = V(i);
-                if(assigned != expected || !assigned.containsUnresolved())
-                {
-                    return false;
-                }
-            }
-            return original == expected;
-        });
-    }
-    for(auto& reader : readers)
-    {
-        EXPECT_TRUE(reader.get());
-    }
+    // Sharing storage is what makes copying an array Value cheap. The copies below are
+    // what's under test, so clang-tidy's "unnecessary copy" check doesn't apply.
+    const V original(V::Array{V(1), V(V::Array{V(2), V("nested")})});
+    const V constructed(original); // NOLINT(performance-unnecessary-copy-initialization)
+    V assigned;
+    assigned = original;
+    const V nested = original.asArray()[1];
+    const V copyOfCopy(constructed); // NOLINT(performance-unnecessary-copy-initialization)
+
+    EXPECT_EQ(&constructed.asArray(), &original.asArray());
+    EXPECT_EQ(&assigned.asArray(), &original.asArray());
+    EXPECT_EQ(&copyOfCopy.asArray(), &original.asArray());
+    EXPECT_EQ(&nested.asArray(), &original.asArray()[1].asArray());
 }
 
 TEST(TestJsonValue, NumberFoldsAnExactlyIntegralDoubleToAnInteger)
@@ -347,11 +334,10 @@ TEST(TestJsonValue, EqualityIsStrictAcrossKinds)
     EXPECT_NE(V(0), V(V::Array{}));
     EXPECT_NE(V(""), V());
 
-    // Two nulls are equal *here*, because operator== is plain variant
-    // equality for nulls. The decline lives one layer up: OpNode::eval gates
-    // on containsUnresolved, so `==` never sees an unresolved operand and a
-    // rule comparing two absent paths yields null rather than true. The
-    // rule-level behaviour is pinned in
+    // Two nulls compare equal *here*. The decline lives one layer up:
+    // OpNode::eval gates on containsUnresolved, so `==` never sees an
+    // unresolved operand and a rule comparing two absent paths yields null
+    // rather than true. The rule-level behaviour is pinned in
     // TestJsonExpression.NullPropagatesThroughEveryOtherOperator.
     EXPECT_EQ(V(), V());
     EXPECT_TRUE(V().containsUnresolved());

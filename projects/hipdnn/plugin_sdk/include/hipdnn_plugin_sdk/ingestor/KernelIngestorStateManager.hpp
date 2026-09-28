@@ -207,10 +207,10 @@ public:
     /// `rank()` is never called; otherwise the heuristic orders it.
     Catalog sortedCatalog(const MatchContext& context) const
     {
-        // Mirrors catalogFor's own reject guard: cacheKey() below only reads graph and
-        // device ordinal, not the device facts, so without this an unresolved context
-        // would cache an empty catalog under the SAME key a later, resolved call for this
-        // device reuses -- permanently hiding that device's real catalog.
+        // catalogFor() rejects this context too, but cacheKey() below only reads the graph
+        // and device ordinal. Without this check an unresolved context would cache an empty
+        // catalog under the key a later resolved call for the same device uses, hiding that
+        // device's real catalog.
         if(context.deviceId == NO_DEVICE || !isResolved(context.deviceProperties))
         {
             return catalogFor(context);
@@ -284,9 +284,9 @@ public:
 
         if(!isResolved(key.device.properties()))
         {
-            // A persisted record for an unresolved device is rejected on read, so writing
-            // one would append an unreadable line on every fresh miss. Lookups for such a
-            // key never succeed either, so an in-memory entry would be unreachable.
+            // The reader rejects records for an unresolved device, so persisting one would
+            // add an unreadable line on every miss. winnerFor() never finds such a key, so
+            // an in-memory entry would be unreachable too.
             HIPDNN_PLUGIN_LOG_INFO("ingestor: a benchmarked ranking could not be cached "
                                    "because its device facts are unresolved");
             return;
@@ -319,8 +319,8 @@ public:
     {
         if(!isResolved(key.device.properties()))
         {
-            // recordWinner() never stores these, and reading the shard would only
-            // create it.
+            // recordWinner() never stores these keys, and opening the shard would only
+            // create its file.
             return std::nullopt;
         }
 

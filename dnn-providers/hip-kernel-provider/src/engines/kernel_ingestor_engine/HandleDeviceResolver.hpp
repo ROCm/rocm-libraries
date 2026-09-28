@@ -73,9 +73,6 @@ public:
         }
 
         hipDeviceProp_t properties{};
-        // Zero is valid, so use a sentinel to detect an unwritten capacity.
-        properties.sharedMemPerBlock
-            = std::numeric_limits<decltype(properties.sharedMemPerBlock)>::max();
         const auto status = queryDeviceProperties(&properties, deviceId);
         if(status != hipSuccess)
         {
@@ -83,9 +80,7 @@ public:
                             + ": " + hipGetErrorString(status));
         }
 
-        // Each fact is checked on its own so the message names the offending field and the
-        // value behind it. This fires on a machine the reporter cannot rebuild, so the message
-        // is the whole diagnosis. A new fact adds a check here, not a term to a condition.
+        // Check each fact separately so the error names the bad field and its value.
         const auto rejectFact = [deviceId](const std::string& fact) {
             failDeviceQuery("hipGetDeviceProperties returned an invalid device fact for device "
                             + std::to_string(deviceId) + ": " + fact);
@@ -120,7 +115,6 @@ public:
                        + " byte limit");
         }
 
-        // Cache only complete, validated properties.
         hipdnn_plugin_sdk::ingestor::DeviceProperties resolved{
             std::string(std::begin(properties.gcnArchName), archEnd),
             properties.warpSize,

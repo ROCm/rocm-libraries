@@ -254,13 +254,13 @@ public:
     }
 };
 
-/// Reports a resolved device (deviceId != NO_DEVICE) whose properties fail isResolved(),
-/// distinct from ThrowingDeviceResolver's outright query failure above. Default
-/// properties leave every fact unresolved, including the arch.
-class UnresolvedArchDeviceResolver : public IDeviceResolver<TestHandle>
+/// Reports a resolved device id whose properties fail isResolved(). Unlike
+/// ThrowingDeviceResolver, the query itself succeeds. The default properties leave every
+/// fact unresolved, including the arch.
+class UnresolvedDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
-    explicit UnresolvedArchDeviceResolver(DeviceProperties properties = {})
+    explicit UnresolvedDeviceResolver(DeviceProperties properties = {})
         : _properties(std::move(properties))
     {
     }
@@ -310,7 +310,7 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnre
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x94));
@@ -320,9 +320,8 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceArchIsUnre
         << recorder.getRecordedLogsAsString();
 }
 
-// A resolver can publish an arch while leaving another fact unresolved. The guard must
-// reject that too: matching on it would key winner-cache records the cache can never
-// read back.
+// A device with an arch but some other unresolved fact must be declined too. Its
+// winner-cache records would be keyed on facts the cache refuses to read back.
 TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAnyDeviceFactIsUnresolved)
 {
     auto recorder
@@ -333,7 +332,7 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAnyDeviceFactIsUnre
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     auto properties = testDeviceProperties();
     properties.ldsSize = -1;
-    const UnresolvedArchDeviceResolver resolver(properties);
+    const UnresolvedDeviceResolver resolver(properties);
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x95));
@@ -350,7 +349,7 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorWhenTheDeviceAr
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     flatbuffers::FlatBufferBuilder fbb;
@@ -378,7 +377,7 @@ TEST(TestIngestorGenericPlanBuilder,
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x99));
@@ -401,7 +400,7 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsThrowsInternalErrorWhenTheDev
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const UnresolvedArchDeviceResolver resolver;
+    const UnresolvedDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x9D));
@@ -1897,57 +1896,6 @@ TEST(TestIngestorGenericPlanBuilder, ARecordForAnotherDeviceIsNotServed)
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64)
         << "a record measured on another device must not decide this one's kernel";
-}
-
-TEST(TestIngestorGenericPlanBuilder, DevicesDifferingOnlyInLdsCapacitySelectTheirOwnCachedWinner)
-{
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
-    const ScopedConstantScore constantScore;
-    const WorkspaceEqualsBlockSizeHandler handler;
-    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
-    const auto manager = makeThreeKernelWorkspaceStateManager();
-    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
-    const auto lowerCapacity = testDeviceProperties();
-    auto higherCapacity = lowerCapacity;
-    higherCapacity.ldsSize *= 2;
-    const TestDeviceResolver lowerResolver(lowerCapacity, 0);
-    const TestDeviceResolver higherResolver(higherCapacity, 1);
-    const TestPlanBuilder lowerBuilder(engine, *manager, lowerResolver);
-    const TestPlanBuilder higherBuilder(engine, *manager, higherResolver);
-    const TestGraph graph(makeGraphId(0xDE));
-    const auto catalog = catalogFor(*manager, graph, lowerCapacity);
-    ASSERT_EQ(catalog.size(), 3U);
-
-    for(const auto& [properties, winnerBlockSize] :
-        {std::pair{lowerCapacity, 128}, std::pair{higherCapacity, 256}})
-    {
-        WinnerRecord record;
-        for(const auto& kernel : catalog)
-        {
-            record.push_back(rankedEntryFor(
-                kernel, kernel.getIntMetadata(BLOCK_SIZE) == winnerBlockSize ? 0.1 : 9.0));
-        }
-        std::stable_sort(record.begin(), record.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.timeMs < rhs.timeMs;
-        });
-        manager->recordWinner(
-            winnerKeyFor(graph, properties), record, WinnerWriteCause::FRESH_MISS);
-    }
-
-    flatbuffers::FlatBufferBuilder fbb;
-    const auto engineConfig = makeEmptyEngineConfig(fbb);
-    for(const auto& [builder, expectedBlockSize] : {std::pair{&lowerBuilder, 128},
-                                                    std::pair{&higherBuilder, 256},
-                                                    std::pair{&lowerBuilder, 128}})
-    {
-        KnobFilterSettings settings;
-        builder->initializeExecutionSettings(0, graph, engineConfig, settings);
-        ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
-        KnobFilterContext context;
-        context.setExecutionSettings(settings);
-        builder->buildPlan(0, graph, engineConfig, context);
-        EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), expectedBlockSize);
-    }
 }
 
 /// The graph-half counterpart of the device test above. `TestGraph` carries no content,

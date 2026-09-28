@@ -276,16 +276,9 @@ struct TestHandle
 class TestDeviceResolver : public IDeviceResolver<TestHandle>
 {
 public:
-    explicit TestDeviceResolver(DeviceProperties properties = testDeviceProperties(),
-                                DeviceId deviceId = 0)
-        : _properties(std::move(properties))
-        , _deviceId(deviceId)
-    {
-    }
-
     DeviceId deviceId(const TestHandle& /*handle*/) const override
     {
-        return _deviceId;
+        return 0;
     }
 
     const DeviceProperties& deviceProperties(DeviceId /*deviceId*/) const override
@@ -294,8 +287,7 @@ public:
     }
 
 private:
-    DeviceProperties _properties;
-    DeviceId _deviceId;
+    DeviceProperties _properties = testDeviceProperties();
 };
 
 inline DescriptorId testId(uint8_t seed)

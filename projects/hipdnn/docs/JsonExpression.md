@@ -184,9 +184,6 @@ Array equality compares elements, not pointers. Concurrent reads and copies
 are safe, but moving or reassigning the same `Value` while another thread uses
 it requires synchronization.
 
-Creating arrays, converting JSON, and evaluating expressions can still allocate.
-Shared storage does not cache source lookups or array literal results.
-
 Numeric results are stored as integers when exactly integral, so `1 + 1` is `2`,
 not `2.0`.
 
@@ -649,18 +646,13 @@ Unit tests live in
 an unorderable result), and
 [`TestJsonDataSource.cpp`](../plugin_sdk/tests/ingestor/TestJsonDataSource.cpp)
 (the sample data source).
-They build into the `hipdnn_plugin_sdk_tests` GTest binary.
-[`TestJsonValueAllocations.cpp`](../plugin_sdk/tests/ingestor/TestJsonValueAllocations.cpp)
-checks that copying an array `Value` does not allocate. It replaces the global
-`operator new`, so it builds into its own `hipdnn_plugin_sdk_allocation_tests`
-binary. Like the rest of `ingestor/`, these tests are compiled only when
-`HIPDNN_ENABLE_KERNEL_INGESTOR` is set.
+They build into the `hipdnn_plugin_sdk_tests` GTest binary. Like the rest of
+`ingestor/`, they are compiled only when `HIPDNN_ENABLE_KERNEL_INGESTOR` is set.
 
 Run them with:
 
 ```bash
-ctest -R 'hipdnn_plugin_sdk_(allocation_)?tests'
+ctest -R hipdnn_plugin_sdk_tests
 # or, filtered directly on the binary:
 ./hipdnn_plugin_sdk_tests --gtest_filter='TestJsonExpression.*:TestJsonValue.*:TestJsonDataSource.*'
-./hipdnn_plugin_sdk_allocation_tests
 ```

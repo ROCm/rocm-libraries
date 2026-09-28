@@ -916,8 +916,8 @@ TEST(TestJsonExpression, DeeplyNestedRulesAreRejectedNotFatal)
     EXPECT_THROW(jexpr::compile<jexpr::JsonDataSource>(nest(jexpr::MAX_EXPRESSION_DEPTH + 1)),
                  jexpr::JsonExpressionCompileError);
 
-    // Unlike the scalar chain above, array literals build nested Values.
-    // Depth starts at zero and uses MAX_EXPRESSION_DEPTH, not MAX_VALUE_DEPTH.
+    // Array literals build nested Values, but the rule's depth limit
+    // (MAX_EXPRESSION_DEPTH) is what applies here, not MAX_VALUE_DEPTH.
     json nestedArray = 1;
     for(std::size_t i = 0; i < jexpr::MAX_EXPRESSION_DEPTH; ++i)
     {

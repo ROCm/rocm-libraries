@@ -163,15 +163,18 @@ inline double scoreKernel(const PackSymbols& pack,
 /// A fixed, warp-64 device, for CPU-only matcher tests that never compile or launch.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
 {
-    return {"gfx000", 64, 48, 65536};
+    hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
+    properties.gcnArchName = "gfx000";
+    properties.warpSize = 64;
+    properties.multiProcessorCount = 48;
+    properties.ldsSize = 65536;
+    return properties;
 }
 
 /// The current device's validated facts.
 ///
-/// Returns unresolved values when no device is current. Throws
-/// hipdnn_plugin_sdk::HipdnnPluginException when a device is current but the HIP query
-/// fails or reports an invalid fact, so a caller running on a device is asserting that
-/// device works.
+/// Returns unresolved properties when no device is current. Throws if a device is current
+/// but HIP fails the query or reports an invalid fact.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
     const HandleDeviceResolver resolver;

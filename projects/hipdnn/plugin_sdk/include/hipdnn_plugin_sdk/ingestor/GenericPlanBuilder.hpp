@@ -446,10 +446,8 @@ private:
     /// regardless of device identity, so the catalog can be non-empty with no device
     /// resolved.
     ///
-    /// Resolvers are expected to publish only resolved facts (see IDeviceResolver), so
-    /// for a conforming resolver the isResolved() check below never fires. It stays as
-    /// the backstop for resolvers that do not conform, and it is what guarantees a
-    /// MatchContext is only ever built with a resolved device id and resolved facts.
+    /// Conforming resolvers never return unresolved facts (see IDeviceResolver); the
+    /// isResolved() check below catches ones that do.
     MatchContext contextFor(const THandle& handle, const IGraph& opGraph) const
     {
         const auto deviceId = _deviceResolver.deviceId(handle);

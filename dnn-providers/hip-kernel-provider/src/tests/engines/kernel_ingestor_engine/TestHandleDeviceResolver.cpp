@@ -43,14 +43,13 @@ hipDeviceProp_t validHipProperties()
     return properties;
 }
 
-/// Supplies test device properties and counts queries without a GPU.
+/// Supplies fake device properties and counts queries, so no GPU is needed.
 class FakeQueryResolver : public HandleDeviceResolver
 {
 public:
     hipDeviceProp_t properties = validHipProperties();
     hipError_t status = hipSuccess;
     bool distinguishDevices = false;
-    bool omitLds = false;
     mutable std::atomic<int> queryCount{0};
 
     hipError_t queryDeviceProperties(hipDeviceProp_t* result,
@@ -62,13 +61,8 @@ public:
             return status;
         }
 
-        const auto unwrittenLds = result->sharedMemPerBlock;
         *result = properties;
-        if(omitLds)
-        {
-            result->sharedMemPerBlock = unwrittenLds;
-        }
-        else if(distinguishDevices)
+        if(distinguishDevices)
         {
             result->sharedMemPerBlock += static_cast<size_t>(deviceId);
         }
@@ -286,12 +280,12 @@ TEST(TestGpuHandleDeviceResolver, CachesCompletePropertiesFromTheCurrentDevice)
     EXPECT_EQ(first.ldsSize, static_cast<int64_t>(reported.sharedMemPerBlock));
 }
 
-TEST(TestHandleDeviceResolver, CachesSuccessfulQueriesWithoutRepublishingProperties)
+TEST(TestHandleDeviceResolver, ACacheHitDoesNotQueryHipAgain)
 {
     FakeQueryResolver resolver;
     const auto& first = resolver.deviceProperties(7);
 
-    // A cache hit must not query HIP again.
+    // Make a second query fail, so only a cache hit can succeed.
     resolver.status = hipErrorInvalidDevice;
     resolver.properties.sharedMemPerBlock = 32768;
     const auto& second = resolver.deviceProperties(7);
@@ -351,7 +345,7 @@ TEST(TestHandleDeviceResolver, RejectsInvalidDeviceFactsAndRetries)
         {"negative warp", "gfx000", -1, 48, 65536},
         {"zero count", "gfx000", 64, 0, 65536},
         {"negative count", "gfx000", 64, -1, 65536},
-        {"capacity outside signed Int64", "gfx000", 64, 48, uint64_t{1} << 63},
+        {"capacity above int64 max", "gfx000", 64, 48, uint64_t{1} << 63},
     }};
     for(const auto& invalid : cases)
     {
@@ -390,8 +384,7 @@ TEST(TestHandleDeviceResolver, RejectsUnterminatedIdentityAndRetries)
 
 TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
 {
-    // The terminator search spans the whole buffer, so an identity reaching its last byte
-    // is complete rather than truncated.
+    // The terminator may sit in the last byte, so a name filling the buffer is complete.
     FakeQueryResolver resolver;
     const auto archBufferSize = sizeof(resolver.properties.gcnArchName);
     std::memset(resolver.properties.gcnArchName, 'x', archBufferSize);
@@ -400,29 +393,20 @@ TEST(TestHandleDeviceResolver, AcceptsIdentityFillingTheArchBuffer)
     EXPECT_EQ(resolver.deviceProperties(7).gcnArchName, std::string(archBufferSize - 1, 'x'));
 }
 
-TEST(TestHandleDeviceResolver, RejectsUnwrittenLdsWithoutLosingReportedZero)
+TEST(TestHandleDeviceResolver, AcceptsLdsCapacityAtBothEndsOfTheRange)
 {
-    FakeQueryResolver resolver;
-    resolver.omitLds = true;
-    EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
-
-    resolver.omitLds = false;
-    resolver.properties.sharedMemPerBlock = 0;
-    const auto& resolved = resolver.deviceProperties(7);
-    EXPECT_EQ(resolved.ldsSize, 0);
-    EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
-    EXPECT_EQ(resolver.queryCount.load(), 2);
-}
-
-TEST(TestHandleDeviceResolver, AcceptsMaximumSignedLdsCapacity)
-{
-    FakeQueryResolver resolver;
-    resolver.properties.sharedMemPerBlock = std::numeric_limits<int64_t>::max();
-    const auto& resolved = resolver.deviceProperties(7);
-    EXPECT_EQ(resolved.ldsSize, std::numeric_limits<int64_t>::max());
-    EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
-    EXPECT_EQ(resolver.queryCount.load(), 1);
+    const std::array<uint64_t, 2> capacities
+        = {0, static_cast<uint64_t>(std::numeric_limits<int64_t>::max())};
+    for(const auto capacity : capacities)
+    {
+        SCOPED_TRACE(capacity);
+        FakeQueryResolver resolver;
+        resolver.properties.sharedMemPerBlock = capacity;
+        const auto& resolved = resolver.deviceProperties(7);
+        EXPECT_EQ(resolved.ldsSize, static_cast<int64_t>(capacity));
+        EXPECT_EQ(&resolver.deviceProperties(7), &resolved);
+        EXPECT_EQ(resolver.queryCount.load(), 1);
+    }
 }
 
 TEST(TestHandleDeviceResolver, NoDeviceStaysUnresolvedWithoutQueryingHip)
@@ -439,7 +423,7 @@ TEST(TestHandleDeviceResolver, NoDeviceStaysUnresolvedWithoutQueryingHip)
 
 TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
 {
-    // Use different capacities to detect results from the wrong device.
+    // Give each device a different LDS size so a result from the wrong device shows up.
     FakeQueryResolver resolver;
     resolver.distinguishDevices = true;
     std::atomic<int> mismatches{0};

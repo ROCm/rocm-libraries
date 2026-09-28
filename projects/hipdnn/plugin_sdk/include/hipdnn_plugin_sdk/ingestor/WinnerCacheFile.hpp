@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -78,12 +79,14 @@ inline bool isPlainArchComponent(std::string_view arch)
     });
 }
 
-/// Reads a JSON integer representable as @p T, or returns nullopt. nlohmann's get<T>()
-/// accepts a float and static-casts an out-of-range value, which is UB for the latter.
-/// Representability only: whether the value is a valid device fact is isResolved()'s call.
+/// Reads a JSON integer that fits in @p T, or returns nullopt. nlohmann's get<T>() accepts
+/// a float and static-casts an out-of-range value, which is UB.
+/// This only checks the value fits; isResolved() decides whether it is a valid device fact.
 template <typename T>
 std::optional<T> readRepresentableInteger(const nlohmann::json& parent, const char* field)
 {
+    static_assert(std::is_signed_v<T>, "the range checks below assume a signed type");
+
     const auto found = parent.find(field);
     if(found == parent.end() || !found->is_number_integer())
     {
@@ -266,8 +269,8 @@ inline std::optional<std::pair<WinnerKey, WinnerRecord>>
         properties.warpSize = *warpSize;
         properties.multiProcessorCount = *multiProcessorCount;
         properties.ldsSize = *ldsSize;
-        // The same rule every device-keyed path applies, so a record the state manager
-        // would refuse to write is also one it refuses to read.
+        // The write path uses the same check, so a record the state manager refuses to
+        // write is also refused on read.
         if(!isResolved(properties))
         {
             return std::nullopt;
