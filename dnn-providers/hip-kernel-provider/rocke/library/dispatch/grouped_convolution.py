@@ -204,6 +204,28 @@ _GFX942_WARP_N = 2
 _GFX942_WARP_TILE_MN = 16
 _GFX942_WARP_TILE_K = 16
 
+# gfx950 wgrad, scalar-B variant — wave64, MFMA 16x16x32, 8 waves per CTA.
+#
+# Taken when the X (B-operand) free-axis load cannot vectorise at all, i.e.
+# ``cpg`` is odd so ``vec_b == 1`` -- the small-channel "stem" convs (C=1, C=3).
+# There every B element costs its own full coordinate decode (unmerge k_wg into
+# (n, ho, wo) with two magic divides, embed to (h, w), bounds-check), so the
+# wgrad hot loop is address arithmetic, not memory or MFMA.  The cost per thread
+# scales with the B elements it owns, ``tile_n * tile_k / block_size``, so the
+# lever is to halve the B tile (the padded ``tile_n=64`` is mostly waste when
+# ``wg_N = Y*X*cpg`` is small anyway) and double the threads.  The 16-wide atom
+# is what makes 8 waves fit a 64x32 tile; the 32-wide one caps it at 2x2.
+_GFX950_WGRAD_SCALARB_TILE_M = 64
+_GFX950_WGRAD_SCALARB_TILE_N = 32
+_GFX950_WGRAD_SCALARB_TILE_K = 64
+_GFX950_WGRAD_SCALARB_WARP_M = 4
+_GFX950_WGRAD_SCALARB_WARP_N = 2
+_GFX950_WGRAD_SCALARB_WARP_TILE_MN = 16
+_GFX950_WGRAD_SCALARB_WARP_TILE_K = 32
+# The MFMA-clustering schedule. Worth ~1.3x here and nothing on the vectorised
+# tile, which is why it rides with the variant rather than replacing _PIPELINE.
+_GFX950_WGRAD_SCALARB_PIPELINE = "compv3"
+
 # gfx1250 — wave32, WMMA 16x16x32; pipeline must be "mem", groups=1 only
 _GFX1250_TILE_M = 32
 _GFX1250_TILE_N = 32
@@ -251,7 +273,6 @@ class ConvGroupedRequest(OperatorRequest):
     dilation_d: Optional[int] = None
     # optional vec_size_c override; None = let the candidate decide
     vec_size_c: Optional[int] = None
-    force_deterministic: bool = False
     op: str = "conv_grouped"
     algorithm: str = "auto"
     spec_id: str = "auto"
@@ -470,7 +491,6 @@ class ConvGroupedSpec:
     arch: str
     split_k: int = 1  # wgrad only
     lds_k_outer: bool = False  # wgrad only
-    force_deterministic: bool = False  # wgrad only
     name: str = "rocke_conv_grouped"
 
     def kernel_name(self) -> str:
@@ -492,14 +512,8 @@ class ConvGroupedSpec:
         # instance-level WgradConvSpec.kernel_name() already tags both.
         #   lds_k_outer: different LDS tile shape and a transpose-read operand
         #     fetch rather than a transpose-on-store.
-        #   force_deterministic: to_wgrad_spec promotes it to two_stage when the
-        #     resolved split_k > 1, which adds the `ws` workspace pointer to the
-        #     signature and a second (reduce) kernel -- an ABI change, not just a
-        #     codegen one.
         if self.direction in ("wgrad", "dgrad") and self.lds_k_outer:
             parts.append("kouter")
-        if self.direction == "wgrad" and self.force_deterministic:
-            parts.append("det")
         return kernel_name_join(self.name, *parts)
 
     def to_fwd_spec(self, problem: "ConvProblem") -> "ImplicitGemmConvSpec":
@@ -562,7 +576,6 @@ class ConvGroupedSpec:
             epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
-            force_deterministic=self.force_deterministic,
         )
 
     def to_dgrad_spec(self, problem: "ConvProblem") -> "DgradConvSpec":
@@ -636,9 +649,8 @@ def _resolve_wgrad_split_k(
     on block_id_z alongside the K-slice (z = groups*split_k), so grouped
     split-K is valid on MFMA.
 
-    The result is then held under the workspace cap: when it bites, split_k
-    falls back to 1 (a plain store, already deterministic) so callers
-    requesting force_deterministic still get a correct result. Shared by
+    The result is then held under the scratch cap: when it bites, split_k
+    falls back to 1 (a plain store, no scratch needed). Shared by
     ``to_wgrad_spec`` and ``_wgrad_grid`` so the spec and the launch grid can
     never disagree on split_k.
 
@@ -682,16 +694,18 @@ def _resolve_wgrad_split_k(
     # The helper already keeps groups*split_k inside the z limit on the auto
     # path; this clamp still has to run for an explicitly requested split_k.
     split_k = max(1, min(requested, _MAX_GRID_DIM_Z // max(1, p.groups)))
-    # When the packed-atomic epilogue cannot represent this problem, two-stage
-    # is the only way to keep split_k > 1. Delegate rather than re-deriving the
-    # rule: a local copy is exactly how the dispatcher came to hand the builder
-    # a spec the builder then rejected. force_deterministic asks for the same
-    # path for a different reason (bitwise reproducibility).
+    # When the packed 16-bit atomic cannot represent this problem, the f32
+    # scratch path is the only way to keep split_k > 1. Delegate rather than
+    # re-deriving the rule: a local copy is exactly how the dispatcher came to
+    # hand the builder a spec the builder then rejected.
     # vector_size_c is None here by construction: to_wgrad_spec never sets it,
     # so the epilogue derives the store width from the channel dims.
     _atomic_ok, _ = _wgrad_atomic_epilogue_available(p, spec.dtype.lower(), None)
-    two_stage = (spec.force_deterministic or not _atomic_ok) and split_k > 1
-    if two_stage and p.groups * split_k * wg_M * wg_N * 4 > _MAX_WGRAD_WS_BYTES:
+    two_stage = (not _atomic_ok) and split_k > 1
+    # The scratch is dW-sized now (no split_k factor), so this cap is
+    # effectively unreachable -- kept because it is the one place that bounds
+    # an allocation derived from a request.
+    if two_stage and p.groups * wg_M * wg_N * 4 > _MAX_WGRAD_WS_BYTES:
         two_stage = False
         split_k = 1
     return split_k, two_stage, requested
@@ -1144,7 +1158,6 @@ def _make_gfx942_wgrad_candidate() -> KernelCandidate:
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
-            force_deterministic=req.force_deterministic,
             name=name,
         )
 
@@ -1211,18 +1224,59 @@ def _wgrad_lds_k_outer(req: "ConvGroupedRequest", warp_tile_mn: int) -> bool:
     )
 
 
+def _wgrad_b_is_scalar(req: "ConvGroupedRequest") -> bool:
+    """Whether the X (B-operand) free-axis load degenerates to one element.
+
+    ``vec_b`` is the widest power-of-two width that divides ``cpg`` (X is NHWC,
+    so the free-axis run is the channel dim), which is 1 exactly when ``cpg``
+    is odd. Asks :meth:`WgradConvSpec.default_vector_sizes` rather than testing
+    parity directly so the two cannot drift apart if the width ladder changes.
+
+    Depthwise (``cpg == kpg == 1`` with real groups) is excluded even though it
+    is the extreme of the scalar-B case. There the CTA count comes from the
+    group axis, not from the tile, so the "fewer B elements per thread" argument
+    the variant rests on does not drive it -- and measurement agrees: the
+    narrow tile is a win on some depthwise shapes and a loss on others, with no
+    predictor separating them. Depthwise keeps the tile it was tuned on.
+    """
+    p = _problem(req)
+    cpg = p.C // max(int(p.groups), 1)
+    if cpg == 1 and p.kpg == 1 and p.groups > 1:
+        return False
+    _va, vec_b, _vc = WgradConvSpec.default_vector_sizes(cpg, p.kpg, req.dtype.lower())
+    return vec_b == 1
+
+
 def _make_gfx950_wgrad_candidate() -> KernelCandidate:
     """Backward-weight conv for gfx950: 64×64×64, 2×2, 32×32×16 MFMA.
 
     Epilogue derived from vec_size_c (cshuffle when >1, default otherwise).
     Split-K forwarded from request (1=disabled, -1=auto CK formula, >1=fixed).
     gfx1250 wgrad is handled by ``_make_gfx1250_wgrad_candidate`` (WMMA 16x16x32).
+
+    Two geometries, selected per request by :func:`_wgrad_b_is_scalar`: the
+    64×64 default, and the 64×32 / 8-wave variant for the odd-``cpg`` shapes
+    whose B load cannot vectorise (see the ``_GFX950_WGRAD_SCALARB_*``
+    constants). One candidate rather than two because the choice is a pure
+    function of the request with no overlap -- a second candidate would need
+    the same predicate in its ``support`` anyway, and priorities to break a tie
+    that cannot occur.
     """
     name = "implicit_gemm_conv_wgrad"
     spec_id = "igemm_conv_wgrad_64x64"
     algorithm = "implicit_gemm_wgrad"
 
     def _tile(req: ConvGroupedRequest):
+        if _wgrad_b_is_scalar(req):
+            return (
+                _GFX950_WGRAD_SCALARB_TILE_M,
+                _GFX950_WGRAD_SCALARB_TILE_N,
+                _GFX950_WGRAD_SCALARB_TILE_K,
+                _GFX950_WGRAD_SCALARB_WARP_M,
+                _GFX950_WGRAD_SCALARB_WARP_N,
+                _GFX950_WGRAD_SCALARB_WARP_TILE_MN,
+                _GFX950_WGRAD_SCALARB_WARP_TILE_K,
+            )
         return (
             _GFX950_TILE_M,
             _GFX950_TILE_N,
@@ -1232,6 +1286,9 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             _GFX950_WARP_TILE_MN,
             _GFX950_WARP_TILE_K,
         )
+
+    def _pipeline(req: ConvGroupedRequest) -> str:
+        return _GFX950_WGRAD_SCALARB_PIPELINE if _wgrad_b_is_scalar(req) else _PIPELINE
 
     def _build_instance_spec(req: ConvGroupedRequest) -> WgradConvSpec:
         tm, tn, tk, wm, wn, wtmn, wtk = _tile(req)
@@ -1250,7 +1307,7 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_tile_n=wtmn,
             warp_tile_k=wtk,
             wave_size=ArchTarget.from_gfx(req.arch).wave_size,
-            pipeline=_PIPELINE,
+            pipeline=_pipeline(req),
             epilogue=_ep,
             split_k=_sk,
         )
@@ -1288,13 +1345,12 @@ def _make_gfx950_wgrad_candidate() -> KernelCandidate:
             warp_n=wn,
             warp_tile_mn=wtmn,
             warp_tile_k=wtk,
-            pipeline=_PIPELINE,
+            pipeline=_pipeline(req),
             epilogue=_ep,
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
             dtype=req.dtype.lower(),
             arch=req.arch,
             split_k=_sk,
-            force_deterministic=req.force_deterministic,
             name=name,
         )
 
@@ -1543,7 +1599,6 @@ def _make_gfx1250_wgrad_candidate() -> KernelCandidate:
             arch=req.arch,
             split_k=1,
             lds_k_outer=_wgrad_lds_k_outer(req, wtmn),
-            force_deterministic=req.force_deterministic,
             name=name,
         )
 
@@ -1697,9 +1752,9 @@ def dispatch_conv_grouped(
         split_k, _two_stage, requested = _resolve_wgrad_split_k(spec, _problem(req))
         if split_k != requested:
             explanation.append(
-                f"split_k {requested} -> {split_k}: the two-stage workspace would "
+                f"split_k {requested} -> {split_k}: the two-stage scratch would "
                 f"exceed the {_MAX_WGRAD_WS_BYTES}-byte i32 limit, so the "
-                f"deterministic plain store is used instead"
+                f"plain store is used instead"
             )
     return DispatchResult(
         request=req,

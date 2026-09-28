@@ -2169,7 +2169,7 @@ rocke_implicit_gemm_conv_wgrad_spec_t conv_wgrad_build_spec(const py::dict& d,
     s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.split_k = dict_int(d, "split_k", s.split_k);
     s.two_stage = dict_bool(d, "two_stage", s.two_stage);
-    s.force_deterministic = dict_bool(d, "force_deterministic", s.force_deterministic);
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -3740,7 +3740,7 @@ PYBIND11_MODULE(rocke_engine, m)
         py::arg("spec"),
         "Return workspace bytes for the two-stage deterministic wgrad path.\n"
         "Formula: groups * split_k * wg_M * wg_N * 4 (always f32).\n"
-        "Returns 0 when two_stage=false and force_deterministic=false, or split_k <= 1.");
+        "Returns 0 when two_stage=false, or split_k <= 1.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */
     register_attention(m);

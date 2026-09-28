@@ -7,29 +7,25 @@
  *   rocke/instances/common/conv_wgrad_workspace_reduce.py
  *   (WgradReduceSpec + build_conv_wgrad_workspace_reduce)
  *
- * This is Stage 2 of the deterministic two-stage wgrad path.  It reads the
- * f32 partial sums written by Stage 1 (two_stage=True wgrad kernel) from a
- * workspace buffer of shape [split_k, wg_M, wg_N] and reduces them along the
- * split_k axis in a fixed sequential order (k_id = 0, 1, ..., split_k - 1),
- * then stores the result as dtype_d to the dW output tensor.
- *
- * The fixed loop order is what guarantees bit-exact, deterministic output:
- * floating-point summation order is fully determined by the memory layout.
+ * This is Stage 2 of the two-stage wgrad path.  Stage 1 (two_stage=true)
+ * f32-atomic-added its partial sums into a scratch of shape
+ * [groups * R, wg_M, wg_N], so the reduction over split_k is already complete
+ * when this runs.  This kernel folds the R replica slabs and converts
+ * f32 -> dtype_d into dW.
  *
  * Kernel signature:
- *   ws_ptr  : f32 global ptr (readonly)  -- workspace [groups * split_k * wg_M * wg_N]
+ *   ws_ptr  : f32 global ptr (readonly)  -- scratch [groups * R * wg_M * wg_N]
  *   dw_ptr  : dtype_d global ptr (writeonly) -- weight gradient output [groups * wg_M * wg_N]
  *   wg_M    : i32  -- per-group K dimension
  *   wg_N    : i32  -- per-group Y*X*C dimension
- *   split_k : i32  -- K partitions per group
  *   ws_bytes: i32  -- ABI boundary; not used for bounds checking in the kernel body
  *   dw_bytes: i32  -- ABI boundary; not used for bounds checking in the kernel body
  *   groups  : i32  -- number of convolution groups (1 for non-grouped)
  *
  * Grid: (ceil(wg_N / tile_n), ceil(wg_M / tile_m), groups)
  * Block: (tile_m * tile_n, 1, 1)
- * block_id_z encodes the group index; each CTA reduces split_k slices for
- * its group and writes into the corresponding per-group dW slab.
+ * block_id_z encodes the group index; each CTA folds its group's R scratch
+ * slabs and writes into the corresponding per-group dW slab.
  */
 #ifndef ROCKE_INSTANCE_CONV_WGRAD_WORKSPACE_REDUCE_H
 #define ROCKE_INSTANCE_CONV_WGRAD_WORKSPACE_REDUCE_H
@@ -53,8 +49,9 @@ extern "C" {
  *   dtype_d: str = "fp16"
  *   tile_m:  int = 4
  *   tile_n:  int = 64
- *   name:    str = "conv_wgrad_ws_reduce"
+ *   name:    str = "conv_wgrad_ws_cast"
  *   groups:  int = 1             -- number of convolution groups
+ *   ws_replicas: int = 8         -- scratch replica slabs to fold
  */
 typedef struct rocke_wgrad_reduce_spec
 {
@@ -66,8 +63,12 @@ typedef struct rocke_wgrad_reduce_spec
     const char* dtype_d; /* default "fp16" -- output dtype for dW */
     int tile_m; /* default 4 */
     int tile_n; /* default 64 */
-    const char* name; /* default "conv_wgrad_ws_reduce" */
+    const char* name; /* default "conv_wgrad_ws_cast" */
     int groups; /* default 1 -- number of convolution groups; grid z = groups */
+    /* default 8 -- scratch replica slabs to fold.  Must match the Stage 1
+     * spec's ws_replicas: folding fewer than Stage 1 wrote silently drops part
+     * of the sum, folding more reads past the buffer. */
+    int ws_replicas;
 } rocke_wgrad_reduce_spec_t;
 
 /* Default-constructed spec.  Caller must set wg_M, wg_N, problem_short. */
@@ -104,7 +105,7 @@ void rocke_wgrad_reduce_grid(const rocke_wgrad_reduce_spec_t* spec,
                              int* out_gz);
 
 /* Build the kernel signature (8 entries: ws_ptr, dw_ptr, wg_M, wg_N,
- * split_k, ws_bytes, dw_bytes, groups). arena must not be NULL. */
+ * ws_bytes, dw_bytes, groups). arena must not be NULL. */
 rocke_status_t rocke_wgrad_reduce_signature(rocke_arena_t* arena,
                                             const rocke_wgrad_reduce_spec_t* spec,
                                             const rocke_sig_entry_t** out_items,

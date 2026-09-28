@@ -158,20 +158,20 @@ typedef struct rocke_implicit_gemm_conv_wgrad_spec
     /* split_k: -1 = auto, 1 = off, >1 = fixed degree. */
     int split_k; /* default 1 */
 
-    /* two_stage: when true and split_k > 1, Stage 1 writes f32 partial sums
-     * to a workspace buffer (ws_ptr / ws_bytes kernel params) instead of
-     * atomic-adding into dW.  Stage 2 (conv_wgrad_workspace_reduce) then
-     * reduces the workspace slices into dW in a fixed sequential order.
-     * This guarantees bit-exact, deterministic output.
-     * Set automatically by the builder when force_deterministic=true and
-     * split_k > 1; prefer force_deterministic over setting this directly. */
+    /* two_stage: when true and split_k > 1, Stage 1 f32-atomic-adds its
+     * partial sums into a scratch buffer (ws_ptr / ws_bytes kernel params)
+     * instead of 16-bit-atomic-adding into dW.  Stage 2
+     * (conv_wgrad_workspace_reduce) folds the replica slabs and casts to
+     * dtype_d.  This is how split-K reaches a 16-bit dW whose row length
+     * wg_N is odd, which the packed <2 x dtype> atomic cannot address. */
     bool two_stage; /* default false */
 
-    /* force_deterministic: semantic intent flag.  When true and split_k > 1
-     * (or split_k=-1 auto), the builder sets two_stage=true so the kernel
-     * uses the workspace-store epilogue instead of atomic adds.
-     * For split_k == 1 this flag is a no-op (output is always deterministic). */
-    bool force_deterministic; /* default false */
+    /* ws_replicas: number of scratch slabs a group's K-slices spread their
+     * atomics over.  A dW-sized scratch is a few dozen cache lines, so
+     * pointing every CTA at one slab serialises the atomics in L2; R slabs
+     * cut that R-fold and Stage 2 folds them back with a fixed unrolled add.
+     * Scratch size is groups * R * wg_M * wg_N * 4 bytes. */
+    int ws_replicas; /* default 8 */
 } rocke_implicit_gemm_conv_wgrad_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
