@@ -66,6 +66,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal, Tuple, get_args
 
+from rocke.helpers.activations import LN2, LOG2E, SOFTPLUS_THRESHOLD
 from rocke.core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType
 from rocke.helpers.io import (
     io_ir_type,
@@ -94,10 +95,7 @@ DType = Literal["f16", "bf16"]
 # to run, or admitting one it cannot.
 GDN_DTYPES = get_args(DType)
 
-LOG2E = 1.4426950408889634
-LN2 = 0.6931471805599453
 NORM_EPS = 1e-6
-SOFTPLUS_THRESHOLD = 20.0
 EXP2_CLAMP = 126.0  # f32 exp2 argument range; keeps exp2_fast inside its contract
 STATE_VEC = 8  # 16B bf16 vector load/store width
 # State element size in bytes; is_valid_spec bars any state dtype but these.
