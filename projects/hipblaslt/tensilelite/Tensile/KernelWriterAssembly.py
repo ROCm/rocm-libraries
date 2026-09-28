@@ -16034,6 +16034,8 @@ class KernelWriterAssembly(KernelWriter):
 
     processingBackup   = kernel["TileProcessingStrategy"]
     assignmentBackup   = kernel["WorkAssignment"]
+    # GSU0 temporarily clears the policy; adaptive store selection needs the
+    # original persistence state throughout both epilogues.
     persistenceBackup  = kernel["_PersistentLoop"]
     gsuBackup          = kernel["GlobalSplitU"]
     gsuAccumBackup     = kernel["_GlobalAccumulation"]
@@ -16719,7 +16721,7 @@ class KernelWriterAssembly(KernelWriter):
 
       # support dynamic MBSK/MB selection by checking synchronizer after bias write
       if kernel["AdaptiveGemmGSUA"] == 1:
-        if skBackup == 0:
+        if not persistenceBackup:
           if gsuLimit > 1 and gsuLimitIdx == 0:
             if (kernel["_GlobalAccumulation"] == "MultipleBuffer" or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
               module.add(SCmpEQU64(src0=sgpr("Synchronizer", 2), src1=hex(0), comment="Check for synchronizer"))
@@ -16755,8 +16757,8 @@ class KernelWriterAssembly(KernelWriter):
         else:
           if kernel["GlobalSplitUAlgorithm"] == "MultipleBuffer":
             # StreamK and dot2 cannot be enabled with MBSK
-            globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"] if skBackup or kernel["UseDotInstruction"] else ["MBSK", "MB"]
-            hasMultipleGlobalWriteModes = False if noGSUBranch else False if skBackup or kernel["UseDotInstruction"] else True
+            globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"] if persistenceBackup or kernel["UseDotInstruction"] else ["MBSK", "MB"]
+            hasMultipleGlobalWriteModes = False if noGSUBranch else False if persistenceBackup or kernel["UseDotInstruction"] else True
             if kernel["NumElementsPerBatchStore"] == 1:
               # too many store at MultipleBufferSingleKernel direct reject
               globalWriteModes = ["OptNLL_MB"] if noGSUBranch else ["MB"]
