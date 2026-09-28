@@ -1,10 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Native counterpart of runtime.comgr.loaded_compiler_info.
+/* Native AUTO convenience adapter for runtime.comgr.loaded_compiler_info.
  * Paths locate candidate libraries; only the loaded compiler determines the
- * version. Keep the selected handle alive so its dependencies cannot change
- * between automatic flavor selection and subsequent compilation. */
-#include "rocke/lower_llvm.h"
+ * version. Retain the queried candidate for stable AUTO selection. A caller that owns
+ * compilation must pass its compiler's flavor explicitly; this private handle
+ * is not shared with an external compilation stage. */
+#include "compiler_version.h"
 
 #include <cstdint>
 
@@ -224,12 +225,12 @@ bool probe(void* library, unsigned* major, unsigned* minor, unsigned* patch)
     } while(line && *++line);
     return false;
 }
-const rocke_compiler_info_t* loaded_info()
+const ckc::CompilerInfo* loaded_info()
 {
     static std::mutex mutex;
     // Retained for process lifetime, matching Python's lazy COMGR handle.
     static void* library = nullptr;
-    static rocke_compiler_info_t info{};
+    static ckc::CompilerInfo info{};
     static std::string requested, comgr_path, query_path;
     static bool queried = false;
     std::lock_guard<std::mutex> lock(mutex);
@@ -270,7 +271,7 @@ const rocke_compiler_info_t* loaded_info()
 }
 } // namespace
 
-const rocke_compiler_info_t* rocke_loaded_compiler_info(void)
+const ckc::CompilerInfo* ckc::candidate_compiler_info()
 {
     try
     {
@@ -278,7 +279,7 @@ const rocke_compiler_info_t* rocke_loaded_compiler_info(void)
     }
     catch(const std::exception&)
     {
-        // Introspection is best-effort, including at the C ABI boundary.
+        // Candidate introspection is best-effort; unavailable keeps the offline default.
         return nullptr;
     }
 }

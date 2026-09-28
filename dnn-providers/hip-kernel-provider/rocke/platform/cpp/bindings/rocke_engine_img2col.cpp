@@ -15,6 +15,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "llvm_flavor.hpp"
+
 #include <cstdlib>
 #include <deque>
 #include <string>
@@ -137,13 +139,14 @@ rocke_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& stor
 
 std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
+    const auto llvm_flavor = resolve_python_llvm_flavor();
     std::deque<std::string> store;
     rocke_img2col_spec_t s = build_spec(d, store);
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t st = rocke_img2col_lower_to_llvm(
-        &s, i2c_arch(arch), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    rocke_status_t st
+        = rocke_img2col_lower_to_llvm(&s, i2c_arch(arch), llvm_flavor, &ll, err, sizeof err);
     if(st != ROCKE_OK || !ll)
     {
         if(ll)

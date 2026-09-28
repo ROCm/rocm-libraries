@@ -68,34 +68,14 @@ const char* rocke_llvm_flavor_at(int index);
 /* True for a concrete flavor; false for AUTO or an out-of-range value. */
 bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
 
-/* Compiler evidence from native AUTO detection. All strings and the returned
- * record are borrowed, immutable after the query, and valid for process
- * lifetime. llvm_major==0 means the loaded compiler could not be queried;
- * NULL paths mean the dynamic loader could not report their origin.
- * requested_comgr is the loader input, not necessarily the resolved path. */
-typedef struct rocke_compiler_info
-{
-    unsigned llvm_major;
-    unsigned llvm_minor;
-    unsigned llvm_patch;
-    const char* source;
-    const char* requested_comgr;
-    const char* comgr_path;
-    const char* query_library_path;
-} rocke_compiler_info_t;
-
-/* Load/query the native COMGR candidate once. Returns NULL if loading fails.
- * Explicit emission flavors do not call this function automatically. */
-const rocke_compiler_info_t* rocke_loaded_compiler_info(void);
-
 /* ------------------------------------------------------------ entry point */
 
 /* Lower `kernel` to AMDGPU LLVM IR text.
  *
  *   flavor : ROCKE_LLVM_FLAVOR_AUTO resolves via $ROCKE_LLVM_FLAVOR, then
- *            the loaded COMGR compiler's LLVM version, then defaults to LLVM22
- *            if no compiler can be queried. Query provenance is available via
- *            rocke_loaded_compiler_info().
+ *            a natively discovered COMGR candidate's LLVM version, then defaults
+ *            to LLVM22 if no compiler can be queried. When compilation is owned
+ *            by the caller, pass an explicit flavor matching that compiler.
  *   arch   : ISA backend gfx string ("gfx942","gfx950",...). NULL => "gfx950"
  *            (the byte-identical baseline).
  *   out_text : on ROCKE_OK, receives a malloc'd NUL-terminated string the caller

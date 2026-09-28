@@ -21,6 +21,8 @@
  */
 #include "rocke/lower_llvm_internal.h"
 
+#include "compiler_version.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -141,7 +143,7 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
         if(flavor != ROCKE_LLVM_FLAVOR_AUTO)
             return flavor;
     }
-    const rocke_compiler_info_t* info = rocke_loaded_compiler_info();
+    const ckc::CompilerInfo* info = ckc::candidate_compiler_info();
     if(!info || !info->llvm_major)
         return ROCKE_LLVM_FLAVOR_LLVM22;
     for(int i = ROCKE_LL_FLAVOR_LADDER_COUNT - 1; i >= 0; --i)

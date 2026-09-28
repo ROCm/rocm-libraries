@@ -110,10 +110,25 @@ by an external library or tool.
 
 ### Compiler detection and provenance
 
-Automatic flavor selection queries the COMGR library that will compile the
-kernel. It uses `LLVMGetVersion` from that handle or its loaded dependencies.
-When LLVM symbols are hidden, it preprocesses Clang's built-in version macros
-through the same COMGR. The latter is needed for static LLVM builds (see
+Compiler version information comes from the loaded binary. Distribution layout
+and release metadata describe packaging; they are not compiler-version inputs.
+Existing discovery rules still locate candidate libraries.
+
+```mermaid
+flowchart TD
+    A[Existing library discovery] --> B[Load COMGR]
+    B --> C{LLVMGetVersion available?}
+    C -->|Yes| D[Query LLVM version through the COMGR handle]
+    C -->|No| E[Preprocess Clang version macros through COMGR]
+    D --> F[Compiler version and provenance]
+    E --> F
+    F --> G[Map version to an emission flavor]
+    F --> H[Check runtime IR compatibility]
+```
+
+The query uses `LLVMGetVersion` from COMGR or its loaded dependencies. When LLVM
+symbols are hidden, it preprocesses Clang's built-in version macros through the
+same COMGR. The latter supports static LLVM builds (see
 [COMGR_STATIC_LLVM](https://github.com/ROCm/llvm-project/commit/772c38832056cb31d9fcbfdbe6c799af97f22d7f)).
 Neither path launches a compiler executable or reads a ROCm release file.
 Both are host-only queries and require no GPU.
@@ -122,19 +137,27 @@ Python exposes `rocke.runtime.comgr.loaded_compiler_info()`. Its immutable
 `CompilerInfo` records `llvm_version`, `source`, `requested_comgr`, `comgr_path`,
 and `query_library_path`; `describe()` formats those fields for diagnostics.
 The paths are reported by the dynamic loader. A missing path remains unknown,
-while `requested_comgr` preserves the original loader input. The native C API
-exposes the same evidence through `rocke_loaded_compiler_info()` in
-`rocke/lower_llvm.h`. A null result means COMGR could not be loaded; a result
-without a version means the loaded compiler could not be queried. No release
-metadata is substituted in either case.
+while `requested_comgr` preserves the original loader input. A null result means
+COMGR could not be loaded; a result without a version means the loaded compiler
+could not be queried. No release metadata is substituted in either case.
 
-Both engines retain the successfully loaded library and query result for the
-process lifetime. Configure library selection before the first automatic
-lowering or compilation. Python-driven C++ lowering passes the Python-resolved
-flavor explicitly. Standalone C++ AUTO uses its native COMGR discovery path.
+Python retains its successfully loaded library and query result for the process
+lifetime. Configure library selection before the first automatic lowering or
+compilation. All Python bindings, including the spec-based family entry points,
+resolve an automatic flavor through Python and pass a concrete flavor to C++.
+This keeps Python emission, native emission through Python, and Python runtime
+validation tied to the same COMGR selection.
+
+Standalone C++ AUTO is a convenience adapter: it discovers and retains a native
+COMGR candidate and queries that binary. Its diagnostics are implementation
+details, not part of the public lowering ABI. A native caller that owns a
+separate compilation stage must pass the flavor for its compiler explicitly;
+the AUTO adapter does not share its private handle with that stage.
+
 `ROCKE_LLVM_FLAVOR` and explicit API flavors support offline emission without
 loading COMGR. The runtime's p8-generation guard still checks against detected
-compiler evidence when compiling, even if emission used an override.
+compiler evidence when compiling, even if emission used an override. If version
+information is unavailable, automatic offline emission defaults to `llvm22`.
 
 The detected LLVM version selects a baseline flavor; it does not prove that
 all builds of that version share an exact DataLayout or intrinsic catalog.
