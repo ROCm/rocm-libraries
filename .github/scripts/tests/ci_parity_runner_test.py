@@ -44,6 +44,18 @@ class ParseGtestTest(unittest.TestCase):
         )
         self.assertEqual(cases, [])
 
+    def test_ctest_result_line_matches_baseline_shape(self):
+        line = ci_parity_runner.ctest_result_line(
+            1, 5, "test_hiprand_api", True, 1.12
+        )
+        self.assertIn("1/5 Test #1: test_hiprand_api", line)
+        self.assertIn("Passed", line)
+        self.assertIn("1.12 sec", line)
+        failed = ci_parity_runner.ctest_result_line(
+            1, 1, "test_hiprand_api", False, 12.25
+        )
+        self.assertIn("***Failed", failed)
+
     def test_unsupported_marker(self):
         self.assertTrue(
             ci_parity_runner.looks_unsupported("fatal: UnimplementedInst V_ADD_CO_U32")
