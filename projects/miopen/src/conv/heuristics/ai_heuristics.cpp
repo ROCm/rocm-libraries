@@ -1112,8 +1112,7 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
         {
             // Combined gfx950+gfx1250 models add a binary arch input (gfx950=0, gfx1250=1). Each
             // per-arch model file serves a single device, so emit that device's arch bit.
-            const bool is_gfx1250 =
-                metadata.GetModelPrefix().find("gfx1250") != std::string::npos;
+            const bool is_gfx1250 = metadata.GetModelPrefix().find("gfx1250") != std::string::npos;
             features.push_back(is_gfx1250 ? 1.0f : 0.0f);
         }
         else
