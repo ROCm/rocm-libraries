@@ -162,14 +162,12 @@ set(INTEGRATION_TESTS_EXE hipdnn_integration_tests)
 add_executable(${INTEGRATION_TESTS_EXE}
     src/main.cpp
     src/harness/ReferenceExecutorPool.cpp
-    src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/FrontendGraphEngineRunner.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/HarnessDependencies.cpp
     src/harness/bundle/IntegrationBundleVerificationHarness.cpp
     src/harness/bundle/OutputComparison.cpp
     src/harness/bundle/ProductionPolicy.cpp
-    src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaimWriter.cpp
     src/harness/bundle/SupportClaims.cpp
@@ -194,15 +192,18 @@ set(GOLDEN_DATA_TESTS_EXE hipdnn_golden_data_tests)
 add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/golden_data_main.cpp
     src/harness/ReferenceExecutorPool.cpp
-    src/harness/bundle/BundleReferenceValidationHarness.cpp
     src/harness/bundle/GraphSession.cpp
     src/harness/bundle/OutputComparison.cpp
-    src/harness/bundle/ReferenceOpCoverage.cpp
     src/harness/bundle/SupportClaimReport.cpp
     src/harness/bundle/SupportClaims.cpp
     src/harness/bundle/SupportVerdict.cpp
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/reference-validation/BundleReferenceValidationHarness.cpp
+    src/harness/reference-validation/GoldenDataRegistration.cpp
+    src/harness/reference-validation/GoldenOutputProbe.cpp
+    src/harness/reference-validation/ReferenceLaneVerdict.cpp
+    src/harness/reference-validation/ReferenceOpCoverage.cpp
 )
 
 target_include_directories(${GOLDEN_DATA_TESTS_EXE} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

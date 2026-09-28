@@ -532,7 +532,8 @@ The pieces this harness is assembled from, and the one question each answers.
 | `IVerificationReporter` | Every verdict, coverage update and unverifiable reason the run publishes. |
 | `SupportClaimReport` | The end-of-run summary and the coverage counters behind it. |
 | `BundleReferenceValidationHarness` | The other job entirely: our golden data vs a reference. No engine, no claims, no skip path. |
-| `BundleRegistration` | Discovery and eager load, then one of two registration entry points — engine tests or golden-data tests. |
+| `BundleRegistration` | Discovery and eager load, shared by both binaries, then the engine-test registration entry point. |
+| `GoldenDataRegistration` | The golden-data binary's test registration. Its decisions live in `ReferenceLaneVerdict` (per-lane verdicts, the cross-lane `_Unvalidated` check) and `GoldenOutputProbe` (which bundles to load). |
 
 ## See Also
 

@@ -17,9 +17,9 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <nlohmann/json.hpp>
 
-#include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include "harness/bundle/ReferenceOpCoverage.hpp"
+#include "harness/reference-validation/ReferenceLaneVerdict.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 using hipdnn_integration_tests::ReferenceExecutorType;
 using hipdnn_integration_tests::bundle::findKnownReferenceGap;

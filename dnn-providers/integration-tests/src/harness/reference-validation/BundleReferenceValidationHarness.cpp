@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "harness/bundle/BundleReferenceValidationHarness.hpp"
+#include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
 
 #include <string>
 
@@ -12,8 +12,8 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/OutputComparison.hpp"
-#include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle

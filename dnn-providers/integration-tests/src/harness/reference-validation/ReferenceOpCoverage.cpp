@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "harness/bundle/ReferenceOpCoverage.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 #include <algorithm>
 #include <stdexcept>

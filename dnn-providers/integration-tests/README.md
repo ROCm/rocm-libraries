@@ -263,10 +263,12 @@ device. Comparisons run on the host, where the golden data is loaded, unless
 `--validator gpu` moves them to the device — which then makes the CPU suite need a
 device too.
 
-It has no skip path: a test is registered only when the bundle has golden data and
-every node type in its graph is in that reference's required-op set, so a reference
-that cannot run the graph is a failure. Bundles outside the set are absent from the
-suite, and the counts — plus the ops responsible — are printed at registration.
+A registered test has no skip path in its body: a test is registered only when the
+bundle has golden data and every node type in its graph is in that reference's
+required-op set, so a reference that cannot run the graph is a failure. Bundles
+outside a lane's set are absent from that lane, and the counts — plus the ops
+responsible — are printed at registration. With both lanes selected, a golden
+bundle that neither lane registered a test for fails as `<bundle>_Unvalidated`.
 
 Golden `.bin` blobs are DVC-managed, so a tree that has not run `dvc pull` in
 `integration-test-bundles/` registers nothing and says so.

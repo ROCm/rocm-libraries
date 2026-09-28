@@ -3,12 +3,14 @@
 
 #pragma once
 
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <memory>
-#include <set>
-#include <stdexcept>
+#include <optional>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -17,50 +19,16 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "harness/ReferenceExecutorPool.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
-#include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/HarnessDependencies.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
-#include "harness/bundle/ReferenceOpCoverage.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
-
-// What one reference lane did with one loaded bundle. REGISTERED and
-// UNCOVERED_ON_COST put a test under the bundle's name; the other three do not.
-// That difference is what bundlesNoLaneAccountsFor() checks across lanes.
-enum class ReferenceLaneVerdict
-{
-    NO_GOLDEN_OUTPUTS, ///< Nothing to validate.
-    OUTSIDE_OP_SET, ///< The reference does not implement every op in the graph.
-    EXCLUDED_ON_COST, ///< Too costly here; a GPU lane runs this session.
-    UNCOVERED_ON_COST, ///< Too costly here and no GPU lane runs: a skipping test stands in.
-    REGISTERED, ///< A validation test is registered (known-gap tests included).
-};
-
-inline const char* toString(ReferenceLaneVerdict verdict)
-{
-    switch(verdict)
-    {
-    case ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS:
-        return "carries no golden outputs";
-    case ReferenceLaneVerdict::OUTSIDE_OP_SET:
-        return "outside its supported-op set";
-    case ReferenceLaneVerdict::EXCLUDED_ON_COST:
-        return "excluded on cost (see referenceShapeIsAffordable)";
-    case ReferenceLaneVerdict::UNCOVERED_ON_COST:
-        return "excluded on cost, registered as a skipping test";
-    case ReferenceLaneVerdict::REGISTERED:
-        return "registered";
-    default:
-        return "unknown";
-    }
-}
 
 namespace detail
 {
@@ -133,49 +101,6 @@ inline void registerFailedBundleLoad(const std::string& suiteName,
         __FILE__,
         __LINE__,
         [message]() -> ::testing::Test* { return new FailedBundleLoadTest(message); });
-}
-
-// A GTest test body that immediately skips with a stored diagnostic message.
-//
-// Used for a bundle the cost gate excluded on a run where no other reference
-// lane will cover it. Running it is not an option -- these are the shapes the
-// scalar CPU reference needs tens of minutes for, which is what the gate exists
-// to avoid -- but dropping it silently is what this whole binary is about not
-// doing. A skip carrying the reason lands in the GTest and ctest reports under
-// the bundle's own name, so "nothing validated this today" is a line someone can
-// read, at no runtime cost.
-class UncoveredBundleTest : public ::testing::Test
-{
-public:
-    explicit UncoveredBundleTest(std::string message)
-        : _message(std::move(message))
-    {
-    }
-
-    void TestBody() override
-    {
-        GTEST_SKIP() << _message;
-    }
-
-private:
-    std::string _message;
-};
-
-// Registers a synthetic skipping test for a bundle no reference validated this
-// run. Same shape as registerFailedBundleLoad(), different verdict: this is a
-// declared coverage gap, not a broken bundle.
-inline void registerUncoveredBundle(const std::string& suiteName,
-                                    const std::string& testName,
-                                    const std::string& message)
-{
-    ::testing::RegisterTest(
-        suiteName.c_str(),
-        testName.c_str(),
-        nullptr,
-        nullptr,
-        __FILE__,
-        __LINE__,
-        [message]() -> ::testing::Test* { return new UncoveredBundleTest(message); });
 }
 
 // A bundle that failed to load, carrying enough information to register a
@@ -287,281 +212,6 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles,
     }
 }
 
-// The per-bundle decision behind registerReferenceValidationTests(). Split out so
-// it registers nothing and reaches no executor.
-//
-// `gpuLaneWillRun` says whether a GPU reference lane will actually execute in this
-// process -- selected by --reference *and* backed by a device. It does not change
-// *whether* the cost gate excludes a shape, only what the exclusion leaves behind:
-// with that lane running, the GPU lane is expected to validate the bundle (and
-// bundlesNoLaneAccountsFor() fails the run if it does not); without it nothing
-// validates the bundle, so a skipping test is registered in its place to say so.
-inline ReferenceLaneVerdict referenceLaneVerdict(const IntegrationTestBundle& bundle,
-                                                 const std::string& bundleId,
-                                                 ReferenceExecutorType referenceType,
-                                                 bool gpuLaneWillRun)
-{
-    if(!bundle.hasGoldenOutputs)
-    {
-        return ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS;
-    }
-    if(!referenceCoversGraph(referenceType, bundle.graphBuffer.data(), bundle.graphBuffer.size()))
-    {
-        return ReferenceLaneVerdict::OUTSIDE_OP_SET;
-    }
-    // Deliberate cost exclusion. It applies unconditionally: these are the shapes
-    // the scalar CPU reference needs tens of minutes for -- a 4096-token GQA bundle
-    // measured 19.6 min on a CI runner and blew the ctest timeout -- so running
-    // them is never the right answer, whatever else is or isn't covering them.
-    if(!referenceShapeIsAffordable(
-           referenceType, bundleId, bundle.graphBuffer.data(), bundle.graphBuffer.size()))
-    {
-        return gpuLaneWillRun ? ReferenceLaneVerdict::EXCLUDED_ON_COST
-                              : ReferenceLaneVerdict::UNCOVERED_ON_COST;
-    }
-    return ReferenceLaneVerdict::REGISTERED;
-}
-
-// A lane accounts for a bundle when it puts a test under the bundle's name: one
-// that validates, one that asserts a known gap, or one that skips naming why
-// nothing could validate it.
-inline bool laneAccountsFor(ReferenceLaneVerdict verdict)
-{
-    return verdict == ReferenceLaneVerdict::REGISTERED
-           || verdict == ReferenceLaneVerdict::UNCOVERED_ON_COST;
-}
-
-// Indices of golden-bearing bundles that neither lane accounts for. Such a bundle
-// was loaded, carries golden data, and ends the run with no test under its name
-// in either lane -- outside both op sets, or dropped on cost by the CPU lane on
-// the assumption that a GPU lane that does not implement it would cover it. It
-// shows up only as a stderr counter, which is the silent drop this binary exists
-// to prevent.
-//
-// Cross-lane because no single lane can see it: every bundle a lane is handed
-// ends in exactly one verdict, so "this lane registered nothing" is always
-// explained by that lane's own counters. Whether *some* lane covered the bundle
-// is the only question with a wrong answer.
-//
-// Both vectors are verdicts for the same bundles, in the same order.
-inline std::vector<size_t>
-    bundlesNoLaneAccountsFor(const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
-                             const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
-{
-    if(cpuVerdicts.size() != gpuVerdicts.size())
-    {
-        throw std::invalid_argument("bundlesNoLaneAccountsFor: lanes judged different bundle sets");
-    }
-
-    std::vector<size_t> unaccounted;
-    for(size_t i = 0; i < cpuVerdicts.size(); ++i)
-    {
-        // Both lanes read golden-ness off the same loaded bundle, so either view will do.
-        if(cpuVerdicts[i] == ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS)
-        {
-            continue;
-        }
-        if(!laneAccountsFor(cpuVerdicts[i]) && !laneAccountsFor(gpuVerdicts[i]))
-        {
-            unaccounted.push_back(i);
-        }
-    }
-    return unaccounted;
-}
-
-// The failing test owed to every golden-bearing bundle no lane accounted for,
-// under the bundle's own name so the tier prefix (and with it the ctest category)
-// is kept. A FailedLoad, not a skip: nothing validated data we ship, and that
-// must turn the run red. Split from the registration so it can be tested --
-// ::testing::RegisterTest cannot run once RUN_ALL_TESTS() has started.
-inline std::vector<FailedLoad>
-    unaccountedGoldenBundleFailures(const std::vector<LoadedBundle>& bundles,
-                                    const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
-                                    const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
-{
-    if(bundles.size() != cpuVerdicts.size())
-    {
-        throw std::invalid_argument(
-            "unaccountedGoldenBundleFailures: verdicts do not match the bundles");
-    }
-
-    std::vector<FailedLoad> failures;
-    for(const size_t index : bundlesNoLaneAccountsFor(cpuVerdicts, gpuVerdicts))
-    {
-        const auto& bundle = bundles[index];
-        failures.push_back(FailedLoad{
-            bundle.suiteName + "_Unvalidated",
-            bundle.testName,
-            std::string("This bundle carries golden data, but no reference lane registered a test "
-                        "for it, so nothing validated it. CpuRef: ")
-                + toString(cpuVerdicts[index]) + "; GpuRef: " + toString(gpuVerdicts[index])
-                + ".\n  bundle: " + bundle.jsonPath.string()});
-    }
-    return failures;
-}
-
-inline void registerUnaccountedGoldenBundles(const std::vector<LoadedBundle>& bundles,
-                                             const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
-                                             const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
-{
-    for(const auto& failure : unaccountedGoldenBundleFailures(bundles, cpuVerdicts, gpuVerdicts))
-    {
-        registerFailedBundleLoad(failure.suiteName, failure.testName, failure.message);
-    }
-}
-
-// Registers one validation test per bundle this reference is *required* to handle
-// and for which golden data exists. Both conditions are checked here rather than in
-// the body precisely so the harness has no skip path: if a test exists, it must run
-// and pass.
-//
-// Bundles that fall outside the reference's supported-op set are absent from this
-// lane's suite, and the count is logged so the gap is visible. Whether another lane
-// picked them up is checked across lanes by registerUnaccountedGoldenBundles().
-//
-// Returns this lane's verdict for each bundle, in the order of `bundles`.
-inline std::vector<ReferenceLaneVerdict>
-    registerReferenceValidationTests(const std::vector<LoadedBundle>& bundles,
-                                     ReferenceExecutorType referenceType,
-                                     bool gpuLaneWillRun)
-{
-    const char* label = BundleReferenceValidationHarness::referenceLabel(referenceType);
-
-    std::vector<ReferenceLaneVerdict> verdicts;
-    verdicts.reserve(bundles.size());
-    size_t registered = 0;
-    size_t noGolden = 0;
-    size_t uncovered = 0;
-    size_t knownGaps = 0;
-    size_t tooCostly = 0;
-    size_t uncoveredOnCost = 0;
-    std::set<std::string> uncoveredOps;
-
-    for(const auto& bundle : bundles)
-    {
-        const std::string bundleId = bundle.suiteName + "." + bundle.testName;
-        const auto verdict
-            = referenceLaneVerdict(*bundle.bundle, bundleId, referenceType, gpuLaneWillRun);
-        verdicts.push_back(verdict);
-
-        switch(verdict)
-        {
-        case ReferenceLaneVerdict::NO_GOLDEN_OUTPUTS:
-            // Belt and braces: loadGoldenDataBundles() already filtered on this, so a
-            // bundle without golden outputs reaching here is a filter bug, not data.
-            // Counted rather than assumed away so it surfaces instead of skewing the
-            // registered-of-total line below.
-            noGolden++;
-            break;
-        case ReferenceLaneVerdict::OUTSIDE_OP_SET:
-            uncovered++;
-            // Name the ops responsible, not just the tally. The op set is a
-            // commitment (see ReferenceOpCoverage.hpp): "7 bundles excluded" says a
-            // gap exists, "7 excluded: ConvolutionBwdData, Reduction" says which one
-            // to close.
-            for(auto& nodeType : uncoveredNodeTypes(referenceType,
-                                                    bundle.bundle->graphBuffer.data(),
-                                                    bundle.bundle->graphBuffer.size()))
-            {
-                uncoveredOps.insert(std::move(nodeType));
-            }
-            break;
-        case ReferenceLaneVerdict::EXCLUDED_ON_COST:
-            tooCostly++;
-            break;
-        case ReferenceLaneVerdict::UNCOVERED_ON_COST:
-            // `--reference cpu`, or a device-less runner where the GPU harness
-            // SKIP_IF_NO_DEVICES()s in SetUp(): nothing validates this bundle, so it
-            // gets a skipping test under its own name rather than vanishing into a
-            // counter.
-            tooCostly++;
-            uncoveredOnCost++;
-            registerUncoveredBundle(
-                bundle.suiteName + "_" + label,
-                bundle.testName,
-                std::string("Excluded from the ") + label
-                    + " lane on cost (see referenceShapeIsAffordable), and no GpuRef lane "
-                      "runs this session to cover it -- so nothing validated this bundle "
-                      "against its golden data.\n  bundle: "
-                    + bundle.jsonPath.string());
-            break;
-        case ReferenceLaneVerdict::REGISTERED:
-            if(findKnownReferenceGap(referenceType, bundleId) != nullptr)
-            {
-                knownGaps++;
-            }
-            ::testing::RegisterTest(
-                (bundle.suiteName + "_" + label).c_str(),
-                bundle.testName.c_str(),
-                nullptr,
-                nullptr,
-                __FILE__,
-                __LINE__,
-                [loaded = bundle.bundle,
-                 path = bundle.jsonPath,
-                 bundleId,
-                 referenceType,
-                 validator = TestConfig::get().getValidatorDevice()]() -> ::testing::Test* {
-                    // Only the GPU reference — or a forced GPU validator — touches a
-                    // device. Passing true for a plain CPU lane made SetUp() run
-                    // SKIP_IF_NO_DEVICES() on work that reads and writes host memory, so
-                    // CPU golden-data validation silently skipped on any runner without a
-                    // GPU.
-                    const bool requiresDevice = referenceType == ReferenceExecutorType::GPU
-                                                || validator == ValidatorDevice::GPU;
-                    auto* test = new BundleReferenceValidationHarness(
-                        referenceType, requiresDevice, sharedReferenceExecutors(), validator);
-                    test->setBundle(loaded, path, bundleId);
-                    return test;
-                });
-            registered++;
-            break;
-        default:
-            throw std::logic_error("registerReferenceValidationTests: unhandled lane verdict");
-        }
-    }
-
-    // knownGaps is a subset of registered, not a third bucket: those tests still run,
-    // they just assert the reference declines. Printing it separately keeps "38
-    // registered" from reading as "38 validated against golden data".
-    std::cerr << "Golden-data validation (" << label << "): " << registered << " of "
-              << bundles.size() << " golden-bearing bundle(s) registered, " << uncovered
-              << " outside this reference's supported-op set" << formatUncoveredOps(uncoveredOps);
-    if(tooCostly > 0)
-    {
-        std::cerr << "\n       " << tooCostly
-                  << " excluded as too costly for this reference (see "
-                     "referenceShapeIsAffordable); ";
-        if(uncoveredOnCost > 0)
-        {
-            std::cerr << uncoveredOnCost
-                      << " of those are covered by NO reference this session (no GpuRef lane) "
-                         "and are registered as skipping tests naming the gap";
-        }
-        else
-        {
-            std::cerr << "the GpuRef lane runs this session and must cover them (any it does "
-                         "not fails as <bundle>_Unvalidated)";
-        }
-    }
-    if(knownGaps > 0)
-    {
-        std::cerr << "\n       " << knownGaps << " of the " << registered
-                  << " registered are known reference gaps (see knownReferenceGaps()): they assert "
-                     "the reference declines the graph, and are NOT validated against golden data";
-    }
-    if(noGolden > 0)
-    {
-        std::cerr << "\n       " << noGolden
-                  << " loaded bundle(s) turned out to carry no golden outputs: the pre-load probe "
-                     "cannot always tell, and on a tree where `dvc pull` has not run every bundle "
-                     "lands here";
-    }
-    std::cerr << "\n";
-
-    return verdicts;
-}
-
 } // namespace detail
 
 // Resolves the bundle data root: an explicit CLI/env override from the shared
@@ -600,149 +250,16 @@ inline std::optional<LoadedEngine> resolveEngineUnderTest()
 namespace detail
 {
 
-// Answers "could this bundle possibly carry golden outputs?" without parsing its
-// graph, expanding its sweep template, or building a flatbuffer.
-//
-// The golden-data binary validates only bundles that have golden data, and in the
-// checked-in tree that is 50 of 5711. Deciding it at registration time means
-// paying the full load for the other 5661 first, which is the bulk of that
-// binary's startup.
-//
-// The answers here are exact, not heuristic, because both sides of the real test
-// bottom out in the same fact -- whether an output blob is on disk:
-//
-//   * a sweep case whose case entry declares no `golden` resolves no golden
-//     directory (resolveSweepGoldenDirectory), and one that declares a directory
-//     holding no tensor*.bin has nothing for blobsPresentFor() to find;
-//   * a direct bundle with no `<stem>.tensor*.bin` sibling likewise.
-//
-// Both therefore end with hasGoldenOutputs == false, which is exactly what the
-// registration-time filter drops. Testing the sweep case's *declaration* alone is
-// not enough: `golden` lives in sweep.json and is checked into git, so on a tree
-// where `dvc pull` has not run every declaring case would survive the probe, load
-// in full, and then report no golden outputs -- which is precisely what happened
-// in multi-arch CI, where six cases were counted as golden-bearing on a tree that
-// had no blobs at all.
-//
-// It errs toward loading whenever it cannot tell -- an unparseable or absent sweep
-// manifest, a case id that is not there -- so a bundle that would report a load
-// error still reaches classifyBundle() and still reports it. In particular
-// UNVALIDATABLE_GOLDEN_DATA is unreachable from anything this skips: that error
-// requires golden blobs to be present, and presence is what the probe tests.
-class GoldenOutputProbe
+// The bundle root and every bundle discovered under it.
+struct DiscoveredBundleSet
 {
-public:
-    bool mayCarryGoldenOutputs(const DiscoveredBundle& disc)
-    {
-        return disc.isTemplateSweepCase() ? sweepCaseHasGoldenBlobs(disc)
-                                          : hasOutputBlobSibling(disc.jsonPath);
-    }
-
-private:
-    // Parsed once per sweep.json rather than once per case: a single manifest can
-    // carry thousands of cases, and re-parsing it for each is the cost this probe
-    // exists to avoid.
-    const nlohmann::json* sweepManifest(const std::filesystem::path& path)
-    {
-        const auto it = _manifests.find(path);
-        if(it != _manifests.end())
-        {
-            return it->second.has_value() ? &*it->second : nullptr;
-        }
-
-        auto parsed = detail::parseJsonFile(path);
-        const auto inserted = _manifests.emplace(path, std::move(parsed)).first;
-        return inserted->second.has_value() ? &*inserted->second : nullptr;
-    }
-
-    bool sweepCaseHasGoldenBlobs(const DiscoveredBundle& disc)
-    {
-        const auto* manifest = sweepManifest(disc.jsonPath);
-        if(manifest == nullptr)
-        {
-            return true;
-        }
-        const auto* caseJson = detail::findSweepCase(*manifest, disc.sweep->caseId);
-        if(caseJson == nullptr)
-        {
-            return true;
-        }
-
-        std::optional<std::filesystem::path> goldenDirectory;
-        try
-        {
-            goldenDirectory = detail::resolveSweepGoldenDirectory(disc.jsonPath, *caseJson);
-        }
-        catch(const std::exception&)
-        {
-            // A malformed `golden` block is an authoring error the loader reports
-            // as INVALID_SWEEP_CASE. Let it through so it says so.
-            return true;
-        }
-        if(!goldenDirectory.has_value())
-        {
-            return false;
-        }
-        return directoryHasTensorBlob(*goldenDirectory);
-    }
-
-    static bool directoryHasTensorBlob(const std::filesystem::path& directory)
-    {
-        std::error_code error;
-        for(const auto& entry : std::filesystem::directory_iterator(directory, error))
-        {
-            if(entry.path().extension() == ".bin"
-               && entry.path().filename().string().rfind("tensor", 0) == 0)
-            {
-                return true;
-            }
-        }
-        // An unreadable or absent directory is not evidence of absence.
-        return static_cast<bool>(error);
-    }
-
-    static bool hasOutputBlobSibling(const std::filesystem::path& jsonPath)
-    {
-        const auto prefix = jsonPath.stem().string() + ".tensor";
-        std::error_code error;
-        for(const auto& entry : std::filesystem::directory_iterator(jsonPath.parent_path(), error))
-        {
-            if(entry.path().extension() != ".bin")
-            {
-                continue;
-            }
-            const auto name = entry.path().filename().string();
-            if(name.rfind(prefix, 0) == 0)
-            {
-                return true;
-            }
-        }
-        // An unreadable directory is not evidence of absence.
-        return static_cast<bool>(error);
-    }
-
-    std::map<std::filesystem::path, std::optional<nlohmann::json>> _manifests;
+    std::filesystem::path dataDir;
+    std::vector<DiscoveredBundle> bundles;
 };
 
-// Discovery plus the eager load, shared by both entry points below. Returns
-// nullopt when there is nothing to register; the reason is already on stderr.
-//
-// `countFound` seeds graphsFound and `countClaims` seeds graphsWithClaims as bundles
-// load. Only the engine binary enforces or authors claims, so the golden-data binary
-// passes false for both rather than seeding counters no one will ever satisfy.
-//
-// `requireGoldenOutputs` drops, before loading them, the bundles that cannot carry
-// golden data (see GoldenOutputProbe). The golden-data binary passes true: those
-// bundles are ones it would load in full and then discard, and they outnumber the
-// ones it validates by roughly a hundred to one. The engine binary passes false --
-// it tests every bundle, golden data or not.
-//
-// Note this also stops the golden-data binary reporting load failures for bundles
-// it has no business validating; those keep surfacing in the engine binary, which
-// still loads everything. UNVALIDATABLE_GOLDEN_DATA is unaffected, since a bundle
-// carrying golden blobs is never dropped by the probe.
-inline std::optional<std::vector<LoadedBundle>>
-    discoverAndLoadBundles(bool countFound, bool countClaims, bool requireGoldenOutputs)
+// Discovery, shared by both binaries. Returns nullopt when bundles are switched off
+// or there is nothing to discover; the reason is already on stderr.
+inline std::optional<DiscoveredBundleSet> discoverDataDirBundles()
 {
     if(!TestConfig::get().allowBundles())
     {
@@ -775,6 +292,18 @@ inline std::optional<std::vector<LoadedBundle>>
         return std::nullopt;
     }
 
+    return DiscoveredBundleSet{std::move(dataDir), std::move(discovered)};
+}
+
+// The eager load, shared by both binaries. Returns nullopt when nothing loaded; the
+// reason is already on stderr.
+//
+// `countFound` seeds graphsFound and `countClaims` seeds graphsWithClaims as bundles
+// load. Only the engine binary enforces or authors claims, so the golden-data binary
+// passes false for both rather than seeding counters no one will ever satisfy.
+inline std::optional<std::vector<LoadedBundle>>
+    loadDiscoveredBundles(const DiscoveredBundleSet& discovered, bool countFound, bool countClaims)
+{
     // Load all bundles eagerly, once, at registration time. A bundle that
     // fails to load because of the runtime-pass-by-value invariant (see
     // RuntimePassByValueInvariantError in IntegrationTestBundle.hpp) gets a
@@ -789,19 +318,10 @@ inline std::optional<std::vector<LoadedBundle>>
     // whose .bin blobs are absent loads with tensors == nullopt; its test
     // registers normally and the harness SKIPs it at run time.
     std::vector<LoadedBundle> bundles;
-    bundles.reserve(discovered.size());
+    bundles.reserve(discovered.bundles.size());
 
-    GoldenOutputProbe goldenProbe;
-    size_t skippedWithoutGolden = 0;
-
-    for(const auto& disc : discovered)
+    for(const auto& disc : discovered.bundles)
     {
-        if(requireGoldenOutputs && !goldenProbe.mayCarryGoldenOutputs(disc))
-        {
-            skippedWithoutGolden++;
-            continue;
-        }
-
         auto outcome = classifyBundle(disc);
 
         if(auto* failed = std::get_if<FailedLoad>(&outcome))
@@ -834,19 +354,9 @@ inline std::optional<std::vector<LoadedBundle>>
         bundles.push_back(std::move(std::get<LoadedBundle>(outcome)));
     }
 
-    if(skippedWithoutGolden > 0)
-    {
-        // "loaded" rather than "with golden data": these are the bundles that passed
-        // the pre-load probe, which is conservative and lets through anything it
-        // cannot decide. Whether they really carry golden outputs is settled during
-        // the load, and reported per lane below.
-        std::cerr << "Bundle discovery: " << bundles.size() << " bundle(s) loaded, "
-                  << skippedWithoutGolden << " skipped as carrying no golden data\n";
-    }
-
     if(bundles.empty())
     {
-        std::cerr << "WARNING: No bundles could be loaded from " << dataDir << "\n";
+        std::cerr << "WARNING: No bundles could be loaded from " << discovered.dataDir << "\n";
         return std::nullopt;
     }
 
@@ -873,12 +383,18 @@ inline void registerBundleTests()
     const bool writing = TestConfig::get().writeSupportClaims();
     const bool observing = engineUnderTest.has_value() && !writing;
 
+    const auto discovered = detail::discoverDataDirBundles();
+    if(!discovered.has_value())
+    {
+        return;
+    }
+
     // Write mode needs `graphsFound` as the denominator for what the observer
     // saw: SetUp() can skip a bundle before the observer runs, and such a graph
     // is invisible to the observation log.
-    auto bundles = detail::discoverAndLoadBundles(/*countFound=*/observing || writing,
-                                                  /*countClaims=*/observing,
-                                                  /*requireGoldenOutputs=*/false);
+    auto bundles = detail::loadDiscoveredBundles(*discovered,
+                                                 /*countFound=*/observing || writing,
+                                                 /*countClaims=*/observing);
     if(!bundles.has_value())
     {
         return;
@@ -887,51 +403,6 @@ inline void registerBundleTests()
     detail::registerBundles(*bundles, engineUnderTest);
 
     HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles->size() << " bundle test(s)");
-}
-
-/// The bundles hipdnn_golden_data_tests validates: those carrying golden data.
-///
-/// Loaded once and handed to each reference lane, rather than rediscovered per
-/// lane. Discovery plus load dominates this binary's startup, and doing it twice
-/// also registered every failing-load test twice under the same name.
-///
-/// Returns nullopt when there is nothing to validate; the reason is already on
-/// stderr.
-inline std::optional<std::vector<detail::LoadedBundle>> loadGoldenDataBundles()
-{
-    return detail::discoverAndLoadBundles(/*countFound=*/false,
-                                          /*countClaims=*/false,
-                                          /*requireGoldenOutputs=*/true);
-}
-
-/// Registers the golden-data validation suite for one reference executor, and
-/// returns that lane's verdict for each bundle, in the order of `bundles`.
-///
-/// Two harnesses, never both: verifying an engine and validating our own golden
-/// data are different jobs, so they live in different binaries. This one is the
-/// entry point for hipdnn_golden_data_tests, which loads no plugin and creates no
-/// handle -- see the binary's main() for why that separation is structural rather
-/// than a flag.
-///
-/// `gpuLaneWillRun` is the caller's answer to "will a GPU reference lane actually
-/// execute this session" -- selected by --reference and backed by a device. It
-/// decides what the CPU lane's cost exclusion means, not whether it applies.
-inline std::vector<ReferenceLaneVerdict>
-    registerGoldenDataValidationTests(const std::vector<detail::LoadedBundle>& bundles,
-                                      ReferenceExecutorType referenceType,
-                                      bool gpuLaneWillRun)
-{
-    return detail::registerReferenceValidationTests(bundles, referenceType, gpuLaneWillRun);
-}
-
-/// Fails every golden-bearing bundle that neither lane registered a test for.
-/// Call after both lanes have registered, with the verdicts each returned.
-inline void
-    registerUnvalidatedGoldenDataFailures(const std::vector<detail::LoadedBundle>& bundles,
-                                          const std::vector<ReferenceLaneVerdict>& cpuVerdicts,
-                                          const std::vector<ReferenceLaneVerdict>& gpuVerdicts)
-{
-    detail::registerUnaccountedGoldenBundles(bundles, cpuVerdicts, gpuVerdicts);
 }
 
 } // namespace hipdnn_integration_tests::bundle

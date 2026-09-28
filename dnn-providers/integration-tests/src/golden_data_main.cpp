@@ -29,7 +29,7 @@
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "harness/TestConfig.hpp"
-#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/reference-validation/GoldenDataRegistration.hpp"
 
 int main(int argc, char** argv) noexcept
 {

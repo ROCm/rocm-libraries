@@ -24,9 +24,9 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
-#include "harness/bundle/ReferenceOpCoverage.hpp"
+#include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
 
 using namespace hipdnn_integration_tests;
