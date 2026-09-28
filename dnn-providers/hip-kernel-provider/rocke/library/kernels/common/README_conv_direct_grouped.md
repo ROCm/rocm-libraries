@@ -265,7 +265,7 @@ class DirectConvWgradSpec:
 | `wo_block`          | `mfma_k`                                 |
 | `n_wo_tiles()`      | `ceil(Wo / wo_block)`                    |
 | `n_q_blocks()`      | `ceil(n_wo_tiles / waves_q)`             |
-| `n_ho_blocks()`     | `ceil(Ho / ho_per_block)`                |
+| `n_ho_blocks()`     | `ceil(H / ho_per_block)`                 |
 
 `mfma_k` picks the atom and everything derived from it:
 
@@ -375,10 +375,10 @@ n        = bz // n_q_blocks         # z: flattened (batch, q_block)
 q_block  = bz %  n_q_blocks
 ```
 
-At the supported stride-1 geometry `Ho == H`, so the `y` extent is equally
-`spec.n_ho_blocks()`.  A wave whose `wo_tile` lands past `n_wo_tiles` runs the
-loop but has its epilogue atomics suppressed, so an over-provisioned `z` extent
-is safe.
+The `y` extent is `spec.n_ho_blocks()`, which is sized on the **input** height
+— the row loop walks `hi`, and `Ho == H` only when `2 * PAD == KH - 1`.  A wave
+whose `wo_tile` lands past `n_wo_tiles` runs the loop but has its epilogue
+atomics suppressed, so an over-provisioned `z` extent is safe.
 
 ---
 
@@ -497,10 +497,11 @@ ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py --only conv_direct
 ```
 
 The gate drives the sampled spec configs in
-`tests/instances/parity/conv_direct_grouped_emit.{py,c}` — configs 0-8 are the
-forward variants, 9-13 the wgrad variant (9 `mfma_k=32`, 10 `mfma_k=16`, 11
-multi-wave K/C/Q, 12-13 the two gfx942 rejection paths).  Add a config to
-**both** emitters when you add a variant.
+`tests/instances/parity/conv_direct_grouped_emit.{py,c}` — configs 0-24 are the
+existing direct-conv variants, 25-31 the wgrad variant (25 `mfma_k=32`, 26
+`mfma_k=16`, 27 multi-wave K/C/Q, 28-29 the two gfx942 rejection paths, 30-31
+bf16 at `mfma_k=32` / `16`).  Add a config to **both** emitters when you add a
+variant.
 
 | Python | C++ |
 |--------|-----|

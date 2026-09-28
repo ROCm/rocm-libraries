@@ -1035,7 +1035,7 @@ def _run_wgrad_sweep(
         n_k_tiles = (p.kpg + spec.block_k - 1) // spec.block_k
         n_c_tiles = (p.cpg + spec.block_c - 1) // spec.block_c
         n_q_blocks = spec.n_q_blocks()  # ceil(n_wo_tiles / waves_q)
-        n_hi_blocks = (p.H + spec.ho_per_block - 1) // spec.ho_per_block
+        n_hi_blocks = spec.n_ho_blocks()  # ceil(H / ho_per_block)
         grid = (p.groups * n_k_tiles * n_c_tiles, n_hi_blocks, p.N * n_q_blocks)
         block_dim = (spec.threads_per_block, 1, 1)
         values = {

@@ -3256,9 +3256,15 @@ class DirectConvWgradSpec:
         return self.mfma_k
 
     def n_ho_blocks(self) -> int:
-        p = self.problem
-        Ho = (p.H + 2 * p.PAD - p.KH) // p.stride + 1
-        return (Ho + self.ho_per_block - 1) // self.ho_per_block
+        """Grid ``y`` extent: ``ceil(H / ho_per_block)``.
+
+        The kernel decodes ``by`` as an INPUT-row block (``hi_block_start =
+        by * ho_per_block``) and the row loop walks ``hi``, so the extent is
+        driven by ``H``, not ``Ho``. The two coincide only when
+        ``2 * PAD == KH - 1``; at e.g. ``PAD=0, KH=3`` we have ``Ho == H - 2``,
+        and sizing on ``Ho`` would leave the last input rows unvisited.
+        """
+        return (self.problem.H + self.ho_per_block - 1) // self.ho_per_block
 
     def n_wo_tiles(self) -> int:
         p = self.problem
@@ -3302,10 +3308,22 @@ class DirectConvWgradSpec:
             raise ValueError("wave_tile_k must be 16")
         if self.wave_tile_c != 16:
             raise ValueError("wave_tile_c must be 16")
+        if p.KH < 1 or p.KH > _WGRAD_MAX_KH:
+            raise ValueError(f"KH must be in 1..{_WGRAD_MAX_KH} (got {p.KH})")
+        if p.KW < 1 or p.KW > _WGRAD_MAX_KW:
+            raise ValueError(f"KW must be in 1..{_WGRAD_MAX_KW} (got {p.KW})")
+        # Checked before the product: waves_k=0 would sail through
+        # ``waves_k * waves_c <= 16`` and then divide by a zero block_k.
+        if self.waves_k < 1:
+            raise ValueError("waves_k must be >= 1")
+        if self.waves_c < 1:
+            raise ValueError("waves_c must be >= 1")
         if self.waves_k * self.waves_c > 16:
             raise ValueError("waves_k * waves_c must be <= 16")
         if self.waves_q < 1:
             raise ValueError("waves_q must be >= 1")
+        if self.wave_size != 64:
+            raise ValueError(_WGRAD_WAVE64_WHY.format(wave_size=self.wave_size))
         if self.ho_per_block <= 0:
             raise ValueError("ho_per_block must be > 0")
         if self.mfma_k not in (16, 32):
@@ -3322,6 +3340,22 @@ _WGRAD_STRIDE_WHY = (
     "direct wgrad is a stride-1 algorithm (input-row iteration + shifted S-row "
     "strip); got stride={stride}"
 )
+
+# The lane->fragment mapping is the wave64 MFMA one (``c4 = lane // 16`` picks
+# the accumulator row group, ``lane % 16`` the column), and ds_read_tr16_b64
+# hands back a 64-lane fragment. There is no wave32 variant of either.
+_WGRAD_WAVE64_WHY = (
+    "direct wgrad needs wave_size 64 (wave64 MFMA fragment + ds_read_tr16_b64 "
+    "lane mapping); got wave_size={wave_size}"
+)
+
+# The C++ engine stores the per-tap accumulators and the delta ring in
+# fixed-size arrays sized by ``ROCKE_DCONV_WGRAD_MAX_K{H,W}``
+# (``platform/cpp/include/rocke/instance_conv_direct_grouped.h``), so the cap is
+# part of the spec contract rather than a C-side implementation detail: both
+# engines reject above it, or a KH=9 spec would build here and fail there.
+_WGRAD_MAX_KH = 8
+_WGRAD_MAX_KW = 8
 
 
 def is_valid_wgrad_spec(
@@ -3343,8 +3377,30 @@ def is_valid_wgrad_spec(
         return False, f"cpg {p.cpg} must be >= wave_tile_c {spec.wave_tile_c}"
     if spec.wave_tile_k != 16 or spec.wave_tile_c != 16:
         return False, "wave_tile_k and wave_tile_c must be 16"
+    if p.KH < 1 or p.KH > _WGRAD_MAX_KH:
+        return False, f"KH must be in 1..{_WGRAD_MAX_KH} (got {p.KH})"
+    if p.KW < 1 or p.KW > _WGRAD_MAX_KW:
+        return False, f"KW must be in 1..{_WGRAD_MAX_KW} (got {p.KW})"
+    if spec.waves_k < 1:
+        return False, "waves_k must be >= 1"
+    if spec.waves_c < 1:
+        return False, "waves_c must be >= 1"
     if spec.waves_k * spec.waves_c > 16:
         return False, "waves_k * waves_c must be <= 16"
+    if spec.waves_q < 1:
+        return False, "waves_q must be >= 1"
+    if spec.wave_size != target.wave_size:
+        return False, (
+            f"wave_size {spec.wave_size} does not match the {arch} wave size "
+            f"{target.wave_size}"
+        )
+    if spec.wave_size != 64:
+        return False, _WGRAD_WAVE64_WHY.format(wave_size=spec.wave_size)
+    if spec.threads_per_block > target.max_threads_per_block:
+        return False, (
+            f"threads_per_block {spec.threads_per_block} > "
+            f"{target.max_threads_per_block} (hardware cap) on {arch}"
+        )
     if spec.ho_per_block <= 0:
         return False, "ho_per_block must be > 0"
     if spec.mfma_k not in (16, 32):
@@ -3726,6 +3782,18 @@ def build_direct_conv_wgrad(
     # ``oob_sentinel`` as its buffer offset, and a buffer load past num_records
     # returns zero. The extra ``select`` per vector cost VEC_CH/2 v_cndmask per
     # load for nothing.
+    #
+    # The CHANNEL tail needs no masking either, and that is a property of wgrad
+    # specifically. Each lane pulls a contiguous VEC_CH run starting at
+    # ``c_ld_ch``, so at a ragged ``kpg``/``cpg`` (17, say) the last tile does
+    # read the next group's channels -- or past the tensor, where the buffer
+    # returns zero. Neither contaminates a live result: k and c are the MFMA's
+    # M and N axes here (the reduction runs over the SPATIAL axis n/ho/wo), so
+    # channel j of a staged tile feeds accumulator row/column j and nothing
+    # else. The epilogue drops exactly those rows/columns -- ``k_valid`` and
+    # ``c_valid_guard`` below -- so the garbage dies with them. Contrast the
+    # forward variants, where c is the reduction axis and a tail lane WOULD
+    # need masking because its junk lands in a live sum.
     def _lds_run(part_off: "Value", row: "Value") -> "Value":
         """Flat f16 index of this lane's VEC_CH-wide run in ``row`` of a tile."""
         return b.add(part_off, b.add(b.mul(row, c_TR_N), c_ld_ch))

@@ -479,6 +479,14 @@ typedef struct rocke_direct_conv_wgrad_spec
     int mfma_k; /* default 32 -- MFMA K-inner: 16 or 32             */
 } rocke_direct_conv_wgrad_spec_t;
 
+/* Largest filter this variant accepts. The C++ engine holds the per-tap
+ * accumulators and the delta ring in fixed-size arrays sized by these, so the
+ * cap is part of the SPEC contract and is enforced by both validators (Python:
+ * _WGRAD_MAX_KH / _WGRAD_MAX_KW) -- otherwise a KH=9 spec would build under
+ * Python and fail to build here. */
+#define ROCKE_DCONV_WGRAD_MAX_KH 8
+#define ROCKE_DCONV_WGRAD_MAX_KW 8
+
 rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void);
 
 /* @property block_k -> waves_k * wave_tile_k. */
@@ -489,7 +497,11 @@ int rocke_direct_conv_wgrad_block_c(const rocke_direct_conv_wgrad_spec_t* spec);
 int rocke_direct_conv_wgrad_threads_per_block(const rocke_direct_conv_wgrad_spec_t* spec);
 /* @property wo_block -> mfma_k (output columns per MFMA chunk). */
 int rocke_direct_conv_wgrad_wo_block(const rocke_direct_conv_wgrad_spec_t* spec);
-/* n_ho_blocks() -> ceil(Ho / ho_per_block). */
+/* n_ho_blocks() -> ceil(problem.H / ho_per_block).
+ * Sized on the INPUT height: the builder decodes `by` as an input-row block
+ * (hi_block_start = by * ho_per_block) and the row loop walks hi. H and Ho
+ * coincide only when 2*PAD == KH-1, so sizing on Ho would leave the last input
+ * rows unvisited. */
 int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* spec);
 /* n_wo_tiles() -> ceil(Wo / wo_block). */
 int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spec);

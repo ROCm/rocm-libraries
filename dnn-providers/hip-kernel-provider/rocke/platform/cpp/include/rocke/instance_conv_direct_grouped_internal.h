@@ -673,8 +673,8 @@ rocke_kernel_def_t* rocke_dconv32c_stream_h_loop(rocke_dconv_32c_ctx_t* ctx);
  *  wave-private LDS partitions, and the epilogue atomically adds the KH*KW
  *  accumulators into an fp32 dW.
  * ===================================================================== */
-#define ROCKE_DCONV_WGRAD_MAX_KH 8
-#define ROCKE_DCONV_WGRAD_MAX_KW 8
+/* ROCKE_DCONV_WGRAD_MAX_KH / _MAX_KW live in the public header: they bound the
+ * ctx arrays below AND are enforced by both validators. */
 /* STRIP_PASSES = ceil((WO_BLOCK + KW - 1) / WO_BLOCK) is 2 for every legal
  * (WO_BLOCK >= 16, KW <= 8) combination, and STRIP_PASSES_PER_WAVE <=
  * STRIP_PASSES; 8 is generous headroom. */

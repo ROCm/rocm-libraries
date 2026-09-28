@@ -107,7 +107,10 @@ static rocke_value_t* rocke_dconv_wgrad__lds_run(rocke_dconv_wgrad_ctx_t* ctx,
 /* _issue_delta(ho_val, ho_ok): start the DRAM read of one dY row.
  *
  * No OOB masking of the loaded value: an out-of-range lane gets oob_sentinel as
- * its buffer offset and a buffer load past num_records returns zero. */
+ * its buffer offset and a buffer load past num_records returns zero. The
+ * CHANNEL tail is unmasked too -- k and c are the MFMA M/N axes here, so a
+ * ragged kpg/cpg only pollutes accumulator rows/columns the epilogue already
+ * drops. See the long note in the Python loader block for the argument. */
 static rocke_value_t* rocke_dconv_wgrad__issue_delta(rocke_dconv_wgrad_ctx_t* ctx,
                                                      rocke_value_t* ho_val,
                                                      rocke_value_t* ho_ok)
@@ -289,6 +292,9 @@ bool rocke_dconv_wgrad_prologue(rocke_dconv_wgrad_ctx_t* ctx)
     ctx->Wo = (ctx->p.W + 2 * ctx->p.PAD - ctx->p.KW) / ctx->p.stride + 1;
     ctx->KH = ctx->p.KH;
     ctx->KW = ctx->p.KW;
+    /* Unreachable: both validators above already gate KH/KW on the same caps,
+     * so Python and C++ agree on which specs are buildable. Kept as a hard stop
+     * in front of the fixed-size ctx arrays. */
     if(ctx->KH > ROCKE_DCONV_WGRAD_MAX_KH || ctx->KW > ROCKE_DCONV_WGRAD_MAX_KW)
     {
         if(b->status == ROCKE_OK)

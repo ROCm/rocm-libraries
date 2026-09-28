@@ -1778,6 +1778,14 @@ bool rocke_direct_depthwise_dgrad_is_valid_spec(const rocke_direct_depthwise_dgr
     "direct wgrad is a stride-1 algorithm (input-row iteration + shifted S-row " \
     "strip); got stride=%d"
 
+/* The lane->fragment mapping is the wave64 MFMA one (c4 = lane / 16 picks the
+ * accumulator row group, lane % 16 the column) and ds_read_tr16_b64 hands back
+ * a 64-lane fragment. There is no wave32 variant of either.
+ * Python: _WGRAD_WAVE64_WHY. */
+#define ROCKE_WGRAD_WAVE64_WHY                                                  \
+    "direct wgrad needs wave_size 64 (wave64 MFMA fragment + ds_read_tr16_b64 " \
+    "lane mapping); got wave_size=%d"
+
 rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void)
 {
     rocke_direct_conv_wgrad_spec_t spec;
@@ -1817,8 +1825,10 @@ int rocke_direct_conv_wgrad_wo_block(const rocke_direct_conv_wgrad_spec_t* spec)
 
 int rocke_direct_conv_wgrad_n_ho_blocks(const rocke_direct_conv_wgrad_spec_t* spec)
 {
-    int Ho = rocke_direct_conv_problem_Ho(&spec->problem);
-    return (Ho + spec->ho_per_block - 1) / spec->ho_per_block;
+    /* INPUT height: the builder decodes `by` as an input-row block
+     * (hi_block_start = by * HPB) and the row loop walks hi. Mirrors
+     * DirectConvWgradSpec.n_ho_blocks. */
+    return (spec->problem.H + spec->ho_per_block - 1) / spec->ho_per_block;
 }
 
 int rocke_direct_conv_wgrad_n_wo_tiles(const rocke_direct_conv_wgrad_spec_t* spec)
@@ -1923,6 +1933,24 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
     {
         ROCKE_DCONV_WGRAD_RAISE("wave_tile_c must be 16");
     }
+    if(p->KH < 1 || p->KH > ROCKE_DCONV_WGRAD_MAX_KH)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("KH must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KH, p->KH);
+    }
+    if(p->KW < 1 || p->KW > ROCKE_DCONV_WGRAD_MAX_KW)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("KW must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KW, p->KW);
+    }
+    /* Checked before the product: waves_k=0 would sail through
+     * `waves_k * waves_c <= 16` and then divide by a zero block_k. */
+    if(spec->waves_k < 1)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("waves_k must be >= 1");
+    }
+    if(spec->waves_c < 1)
+    {
+        ROCKE_DCONV_WGRAD_RAISE("waves_c must be >= 1");
+    }
     if(spec->waves_k * spec->waves_c > 16)
     {
         ROCKE_DCONV_WGRAD_RAISE("waves_k * waves_c must be <= 16");
@@ -1930,6 +1958,10 @@ rocke_status_t rocke_direct_conv_wgrad_validate(const rocke_direct_conv_wgrad_sp
     if(spec->waves_q < 1)
     {
         ROCKE_DCONV_WGRAD_RAISE("waves_q must be >= 1");
+    }
+    if(spec->wave_size != 64)
+    {
+        ROCKE_DCONV_WGRAD_RAISE(ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
     }
     if(spec->ho_per_block <= 0)
     {
@@ -2006,9 +2038,48 @@ bool rocke_direct_conv_wgrad_is_valid_spec(const rocke_direct_conv_wgrad_spec_t*
     {
         ROCKE_DCONV_WGRAD_REJECT("wave_tile_k and wave_tile_c must be 16");
     }
+    if(p->KH < 1 || p->KH > ROCKE_DCONV_WGRAD_MAX_KH)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("KH must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KH, p->KH);
+    }
+    if(p->KW < 1 || p->KW > ROCKE_DCONV_WGRAD_MAX_KW)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("KW must be in 1..%d (got %d)", ROCKE_DCONV_WGRAD_MAX_KW, p->KW);
+    }
+    if(spec->waves_k < 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_k must be >= 1");
+    }
+    if(spec->waves_c < 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_c must be >= 1");
+    }
     if(spec->waves_k * spec->waves_c > 16)
     {
         ROCKE_DCONV_WGRAD_REJECT("waves_k * waves_c must be <= 16");
+    }
+    if(spec->waves_q < 1)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("waves_q must be >= 1");
+    }
+    if(spec->wave_size != target->wave_size)
+    {
+        ROCKE_DCONV_WGRAD_REJECT("wave_size %d does not match the %s wave size %d",
+                                 spec->wave_size,
+                                 arch,
+                                 target->wave_size);
+    }
+    if(spec->wave_size != 64)
+    {
+        ROCKE_DCONV_WGRAD_REJECT(ROCKE_WGRAD_WAVE64_WHY, spec->wave_size);
+    }
+    if(rocke_direct_conv_wgrad_threads_per_block(spec)
+       > rocke_archtarget_max_threads_per_block(target))
+    {
+        ROCKE_DCONV_WGRAD_REJECT("threads_per_block %d > %d (hardware cap) on %s",
+                                 rocke_direct_conv_wgrad_threads_per_block(spec),
+                                 rocke_archtarget_max_threads_per_block(target),
+                                 arch);
     }
     if(spec->ho_per_block <= 0)
     {

@@ -1122,17 +1122,12 @@ def _run_wgrad_one(
     rt.memcpy_h2d(dY_dev, _u8(dY), dY.nbytes)
     rt.memset(dW_dev, 0, dW.nbytes)  # caller must zero dW
 
-    # dW uses fp32 — need a different signature
-    import ctypes as _ct
+    # Same (A, B, D, A_bytes, B_bytes, D_bytes) shape as the fwd/bwd kernels,
+    # except D is the fp32 dW accumulator rather than an io-typed tensor.
+    from rocke.helpers.manifest import conv_args_signature
 
-    sig_wg = {
-        "A": _ct.c_void_p,
-        "B": _ct.c_void_p,
-        "D": _ct.c_void_p,
-        "A_bytes": _ct.c_int,
-        "B_bytes": _ct.c_int,
-        "D_bytes": _ct.c_int,
-    }
+    sig_wg = conv_args_signature(dtype)
+    sig_wg[2] = {"name": "D", "type": "ptr<f32, global>", "size_bytes": 8}
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -1151,7 +1146,7 @@ def _run_wgrad_one(
     #   bz = n * n_q_blocks + q_block
     n_k_tiles = (p.kpg + spec.block_k - 1) // spec.block_k
     n_c_tiles = (p.cpg + spec.block_c - 1) // spec.block_c
-    n_hi_blocks = (p.H + spec.ho_per_block - 1) // spec.ho_per_block
+    n_hi_blocks = spec.n_ho_blocks()  # ceil(H / ho_per_block)
     grid = (
         p.groups * n_k_tiles * n_c_tiles,
         n_hi_blocks,
