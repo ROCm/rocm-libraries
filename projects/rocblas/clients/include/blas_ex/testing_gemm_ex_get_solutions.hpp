@@ -25,18 +25,6 @@
 #define ROCBLAS_BETA_FEATURES_API
 #include "testing_common.hpp"
 
-// Largest absolute element magnitude in a host matrix, used to scale the
-// per-solution numeric tolerance to the result magnitude. rocblas_abs handles
-// real, half, bfloat16 and complex element types (returning a real magnitude).
-template <typename T>
-double max_abs_element(const host_matrix<T>& mat)
-{
-    double max_abs = 0.0;
-    for(size_t i = 0; i < mat.size(); i++)
-        max_abs = std::max(max_abs, double(rocblas_abs(mat.data()[i])));
-    return max_abs;
-}
-
 template <typename Ti, typename To, typename Tc>
 void testing_gemm_ex_get_solutions(const Arguments& arg)
 {
@@ -180,12 +168,11 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
                                  ldd,
                                  rocblas_bfloat16::rocblas_truncate_t::rocblas_round_near_even);
 
-        // Magnitude-scaled tolerance. Each solution reduces in its own order, so valid
-        // results differ from the reference by roughly K*eps relative to the result
-        // magnitude. Scale an absolute near_check bound by the largest reference element
-        // so these small precision differences are ignored, while a gross error (e.g. a
-        // dropped alpha or beta term) stays well above the bound and still fails.
-        check_tol = max_abs_element(hD_gold) * K * sum_error_tolerance<Tc>;
+        // Per-element near_check tolerance, matching the reduction path in
+        // testing_gemm/testing_gemm_ex. Absorbs each solution's own accumulation-order
+        // rounding, while a gross error (e.g. a dropped alpha or beta term) stays well
+        // above the bound and still fails.
+        check_tol = K * sum_error_tolerance<Tc>;
     }
 
 #define GEMM_EX_ARGS                                                                        \

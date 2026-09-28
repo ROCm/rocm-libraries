@@ -42,10 +42,9 @@ Tests:
   ldb: 100
   ldc: 128
   ldd: 128
-  alpha: 1.2
-  beta: 1.0
+  alpha: 2
+  beta: 3
   math_mode: 1
-  initialization: rand_int
   pointer_mode_device: false
 
 - name: gemm_strided_batched_ex_get_solutions
