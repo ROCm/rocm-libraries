@@ -17,7 +17,7 @@ subtrees:
   entries:
   - file: how-to/rpp-run-tensor-augmentation.rst
     title: Run a tensor augmentation
-    
+
 - caption: Examples
   entries:
   - url: https://github.com/ROCm/rocm-examples/tree/amd-staging/Libraries/RPP
