@@ -549,7 +549,7 @@ void stedc_initData(const rocblas_handle handle,
         {
             // to test poorly scaled matrices, divide all elements by 2^{10*singular}
             using S = decltype(std::real(T{}));
-            S scl = 1.0 / (1 << (10 * singular)); 
+            S scl = std::ldexp(S(1), -10 * singular);
             for(auto i = 0; i < n - 1; ++i)
             {
                 hD[0][i] *= scl;
