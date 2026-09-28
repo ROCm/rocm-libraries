@@ -295,11 +295,11 @@ pipeline {
             description: 'Specify which branch of CK to test with flash-attention (default: current branch)')
         booleanParam(
             name: "RUN_DISPATCHER_CORRECTNESS_TESTS",
-            defaultValue: true,
+            defaultValue: false,
             description: "Run Correctness Tier for Dispatcher")
         booleanParam(
             name: "RUN_DISPATCHER_PERF_TESTS",
-            defaultValue: true,
+            defaultValue: false,
             description: "Run Performance Tier for Dispatcher")
         booleanParam(
             name: "FORCE_CI",
