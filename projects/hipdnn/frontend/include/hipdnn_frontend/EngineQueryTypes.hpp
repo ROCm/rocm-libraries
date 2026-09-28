@@ -5,8 +5,9 @@
 
 /// @file
 /// Internal generation-tool types. These decode the ENGINE/ENGINECFG inspection
-/// attributes read by hipdnn_frontend::detail::getEngineCandidates and
-/// hipdnn_frontend::detail::getEnginePrediction. They are not part of the public
+/// attributes read by hipdnn_frontend::detail::getEngineCandidates,
+/// hipdnn_frontend::detail::getEnginePrediction and
+/// hipdnn_frontend::detail::getPredictionCapabilities. They are not part of the public
 /// Graph API and carry no Python bindings: consumers select engines through the
 /// heuristic descriptor, not by walking a kernel catalog (RFC 0017 §2,
 /// RFC 0019 Open Question 12).
@@ -33,8 +34,8 @@ enum class PredictionKind
 /** @brief Availability of a prediction, independent of engine applicability. */
 enum class PredictionStatus
 {
-    UNAVAILABLE = 0, ///< No applicable calibrated model is deployed.
-    AVAILABLE = 1, ///< A finite nonnegative calibrated TFLOPS estimate is available.
+    UNAVAILABLE = 0, ///< No applicable calibrated model is deployed for the requested metric.
+    AVAILABLE = 1, ///< A valid calibrated value in the requested metric's units is available.
     INVALID = 2, ///< The model or its binding is invalid or incompatible.
 };
 
@@ -44,12 +45,23 @@ struct EnginePrediction
     int64_t engineId = -1; ///< Queried engine.
     PredictionKind kind = PredictionKind::ENGINE; ///< Prediction scope.
     PredictionStatus status = PredictionStatus::UNAVAILABLE; ///< Model availability.
-    std::optional<double> tflops; ///< Physical TFLOPS, present only when available.
+    std::string metric; ///< Registered ranking metric the query named (RFC 0019 §4.4).
+    std::optional<double> value; ///< Value in @c metric's units, present only when available.
     std::string model; ///< UHD model identity, empty if none is bound.
     std::string reason; ///< Explanation when the prediction is not available.
     nlohmann::json binding = nlohmann::json::object(); ///< Provenance; describe to request it.
     nlohmann::json features = nlohmann::json::object(); ///< Feature map; describe to request it.
     std::optional<EngineVariant> configuration; ///< Exact scored configuration, if available.
+};
+
+/// One prediction an engine can answer on this graph: a model is bound for this
+/// (kind, metric) pair. Describes a binding; says nothing about whether evaluating it
+/// would currently succeed.
+struct PredictionCapability
+{
+    PredictionKind kind = PredictionKind::ENGINE;
+    std::string metric;
+    std::string model; ///< UHD model identity bound for this kind and metric.
 };
 
 /// One catalog candidate. Enroll `variant` through add_engine_variants(); the

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -38,11 +39,15 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
     return {ErrorCode::OK, ""};
 }
 
+/// @p rankingMetric names the registered metric the prediction policies rank by and the
+/// result configurations carry into plan build (RFC 0019 §11.4). Empty leaves the attribute
+/// unset, so HIPDNN_HEUR_RANKING_METRIC and the backend default keep deciding.
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
                                             const std::vector<HeuristicMode>& modes,
-                                            bool findFirst = false)
+                                            bool findFirst = false,
+                                            std::string_view rankingMetric = {})
 {
     engineHeuristicDesc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
 
@@ -131,6 +136,17 @@ inline Error
                                                  1,
                                                  &findFirstValue),
             "Failed to set find first on the engine heuristic descriptor.");
+    }
+
+    if(!rankingMetric.empty())
+    {
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
+                                                 HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT,
+                                                 HIPDNN_TYPE_CHAR,
+                                                 static_cast<int64_t>(rankingMetric.size()),
+                                                 rankingMetric.data()),
+            "Failed to set ranking metric on the engine heuristic descriptor.");
     }
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineHeuristicDesc.get()),

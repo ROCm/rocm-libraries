@@ -739,11 +739,21 @@ void graphBindings(nb::module_& m)
         .def("set_preferred_engine_id_ext",
              nb::overload_cast<const std::string&>(&graph::Graph::set_preferred_engine_id_ext),
              nb::rv_policy::reference_internal)
+        .def("set_ranking_metric",
+             &graph::Graph::set_ranking_metric,
+             nb::arg("metric"),
+             "Choose the registered ranking metric ('tflops' or 'time') engine selection and "
+             "kernel choice optimize. Returns an Error whose is_bad() is set, leaving the "
+             "metric unchanged, for an unregistered name. HIPDNN_HEUR_RANKING_METRIC "
+             "overrides it for heuristic selection.")
         .def("get_name", &graph::Graph::get_name)
         .def("get_compute_data_type", &graph::Graph::get_compute_data_type)
         .def("get_intermediate_data_type", &graph::Graph::get_intermediate_data_type)
         .def("get_io_data_type", &graph::Graph::get_io_data_type)
         .def("get_preferred_engine_id_ext", &graph::Graph::get_preferred_engine_id_ext)
+        .def("get_ranking_metric",
+             &graph::Graph::get_ranking_metric,
+             "The requested ranking metric; 'tflops' unless set_ranking_metric() chose another.")
         .def_static("tensor",
                     static_cast<std::shared_ptr<graph::TensorAttributes> (*)(
                         const graph::TensorAttributes&)>(&graph::Graph::tensor),

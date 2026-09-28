@@ -30,6 +30,7 @@
 #include "descriptors/ExecutionPlanDescriptor.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/VariantDescriptor.hpp"
+#include "heuristics/RankingMetric.hpp"
 #include "logging/Logging.hpp"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
@@ -618,13 +619,20 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     const auto it = _engineIdToHandle.find(engineId);
     THROW_IF_TRUE(
         it == _engineIdToHandle.end(), HIPDNN_STATUS_BAD_PARAM, "Prediction engine is not loaded");
+    // RFC 0019 §11.4: the request names its metric in the config; an unregistered one is
+    // refused here rather than handed to a plugin that cannot rank by it.
+    const auto* requestedName = config.getEngineConfig().ranking_metric();
+    const auto& metric = heuristics::resolveRankingMetric(
+        requestedName == nullptr ? std::string_view{} : requestedName->string_view());
     fb::EnginePredictionT result;
     result.engine_id = engineId;
     result.kind = static_cast<fb::PredictionKind>(kind);
+    result.metric = std::string(metric.name);
     const auto invalid = [&](const std::string& reason) {
         fb::EnginePredictionT failure;
         failure.engine_id = engineId;
         failure.kind = result.kind;
+        failure.metric = result.metric;
         failure.status = fb::PredictionStatus::INVALID;
         failure.reason = reason;
         HIPDNN_BACKEND_LOG_WARN("Engine {} prediction rejected: {}", engineId, reason);
@@ -679,6 +687,15 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     {
         return invalid("Prediction engine or layer does not match the request");
     }
+    // An answer in another metric is a claim about a different quantity, never something
+    // to convert (RFC 0019 §4.4): it is invalid whatever its status.
+    const auto answered
+        = response->metric() == nullptr ? std::string_view{} : response->metric()->string_view();
+    if(answered != metric.name)
+    {
+        return invalid("Prediction answered in metric '" + std::string(answered)
+                       + "' instead of the requested '" + result.metric + "'");
+    }
     if(response->status() != fb::PredictionStatus::UNAVAILABLE
        && response->status() != fb::PredictionStatus::AVAILABLE
        && response->status() != fb::PredictionStatus::INVALID)
@@ -687,11 +704,11 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
     }
     if(response->status() == fb::PredictionStatus::AVAILABLE)
     {
-        if(!evaluate || !std::isfinite(response->tflops()) || response->tflops() < 0.0
+        if(!evaluate || !hipdnn_data_sdk::utilities::isValidMetricValue(metric, response->value())
            || response->uhd_id() == nullptr || response->uhd_id()->size() == 0)
         {
-            return invalid(
-                "Available prediction needs an evaluated UHD and finite nonnegative TFLOPS");
+            return invalid("Available prediction needs an evaluated UHD and a valid '"
+                           + result.metric + "' value");
         }
         const auto* selected = response->engine_config();
         if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
@@ -703,16 +720,24 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         {
             return invalid("Engine-level prediction must not select a configuration");
         }
+        if(selected != nullptr && selected->ranking_metric() != nullptr
+           && selected->ranking_metric()->size() != 0
+           && selected->ranking_metric()->string_view() != metric.name)
+        {
+            return invalid("Configuration prediction selected a configuration by another metric");
+        }
     }
     response->UnPackTo(&result);
     if(result.status != fb::PredictionStatus::AVAILABLE)
     {
-        result.tflops = 0.0;
+        result.value = 0.0;
         result.engine_config.reset();
         return result;
     }
     if(result.engine_config != nullptr)
     {
+        // The configuration was chosen by this metric, so it builds by it too (§11.4).
+        result.engine_config->ranking_metric = result.metric;
         const auto& requested = config.getEngineConfig();
         if(requested.knobs() != nullptr)
         {

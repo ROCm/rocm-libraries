@@ -10,9 +10,11 @@
 namespace hipdnn_data_sdk::utilities
 {
 
-/// Engine-level TFLOPS policy; no configuration prediction during ranking.
+/// Quick policy: ranks by the engine-level (L1) prediction in the request's ranking metric
+/// only; never asks for a configuration-level prediction (RFC 0019 §11.2).
 inline constexpr const char* MODE_A_POLICY_NAME = "SelectionHeuristic::ModeA";
-/// Best available configuration-level TFLOPS, with engine-level fallback.
+/// Thorough policy: per engine, the configuration-level (L2) prediction in the request's
+/// ranking metric, falling back to the engine-level (L1) one (RFC 0019 §11.2).
 inline constexpr const char* MODE_B_POLICY_NAME = "SelectionHeuristic::ModeB";
 
 /**

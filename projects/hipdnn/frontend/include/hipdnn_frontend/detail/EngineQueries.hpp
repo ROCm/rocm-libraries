@@ -11,6 +11,7 @@
 /// descriptor, never by walking a kernel catalog.
 
 #include <HipdnnBackendFlatbufferData.h>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_frontend/EngineQueryTypes.hpp>
@@ -21,8 +22,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <map>
 #include <set>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -108,13 +111,17 @@ inline Error
     decodeEnginePrediction(const hipdnn_flatbuffers_sdk::data_objects::EnginePrediction& source,
                            int64_t engineId,
                            PredictionKind kind,
+                           const hipdnn_data_sdk::utilities::RankingMetric& metric,
                            EnginePrediction& prediction)
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
+    // The metric is part of the answer's identity: an engine answers in the metric the
+    // query named or not at all, so a value in any other metric is never converted.
     const auto expectedKind = kind == PredictionKind::ENGINE ? fb::PredictionKind::ENGINE
                                                              : fb::PredictionKind::CONFIGURATION;
-    if(source.engine_id() != engineId || source.kind() != expectedKind)
+    if(source.engine_id() != engineId || source.kind() != expectedKind || source.metric() == nullptr
+       || source.metric()->string_view() != metric.name)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Prediction identity does not match query"};
     }
@@ -122,12 +129,13 @@ inline Error
     EnginePrediction decoded;
     decoded.engineId = engineId;
     decoded.kind = kind;
+    decoded.metric = std::string(metric.name);
     switch(source.status())
     {
     case fb::PredictionStatus::AVAILABLE:
         decoded.status = PredictionStatus::AVAILABLE;
-        decoded.tflops = source.tflops();
-        if(!std::isfinite(*decoded.tflops) || *decoded.tflops < 0.0)
+        decoded.value = source.value();
+        if(!hipdnn_data_sdk::utilities::isValidMetricValue(metric, *decoded.value))
         {
             return {ErrorCode::HIPDNN_BACKEND_ERROR, "Invalid calibrated prediction"};
         }
@@ -230,14 +238,18 @@ inline Error
 
 /// Generation-tool surface. Reads a calibrated prediction from the descriptor that
 /// defines its kind: the engine descriptor for an engine-level estimate, an engine
-/// config descriptor for the exact configuration its knobs describe. Missing models
-/// report UNAVAILABLE; they never affect engine applicability.
+/// config descriptor for the exact configuration its knobs describe. The answer is in
+/// @p metric's registered units; an engine with no model for that metric reports
+/// UNAVAILABLE rather than substituting another. Missing models never affect engine
+/// applicability.
 inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
                                  int64_t engineId,
                                  EnginePrediction& prediction,
                                  PredictionKind kind = PredictionKind::ENGINE,
                                  bool evaluate = true,
-                                 const std::vector<KnobSetting>& constraints = {})
+                                 const std::vector<KnobSetting>& constraints = {},
+                                 std::string_view metric
+                                 = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC)
 {
     prediction = {};
     if(graphDesc == nullptr
@@ -250,6 +262,13 @@ inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
         return {ErrorCode::INVALID_VALUE,
                 "Engine-level predictions take no knob constraints; query the configuration kind"};
     }
+    const auto* rankingMetric = hipdnn_data_sdk::utilities::findRankingMetric(metric);
+    if(rankingMetric == nullptr)
+    {
+        return {ErrorCode::INVALID_VALUE,
+                "Unregistered ranking metric '" + std::string(metric) + "'"};
+    }
+    const std::string metricName(rankingMetric->name);
 
     const int64_t evaluateFlag = evaluate ? 1 : 0;
     ScopedHipdnnBackendDescriptor engineDesc;
@@ -261,6 +280,10 @@ inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
                                                    HIPDNN_TYPE_INT64,
                                                    evaluateFlag,
                                                    "prediction evaluate"));
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(engineDesc.get(),
+                                                   HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT,
+                                                   metricName,
+                                                   "prediction metric"));
     }
     HIPDNN_CHECK_ERROR(finalizeDescriptor(engineDesc.get(), "inspection engine descriptor"));
 
@@ -289,6 +312,10 @@ inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
                                                    HIPDNN_TYPE_INT64,
                                                    evaluateFlag,
                                                    "prediction evaluate"));
+        HIPDNN_CHECK_ERROR(setDescriptorAttrString(config.get(),
+                                                   HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                                                   metricName,
+                                                   "prediction metric"));
         // Knob-only and deliberately unfinalized: no engine metadata, catalog, or
         // workspace query is performed for a prediction configuration.
         HIPDNN_CHECK_ERROR(readFlatbufferAttribute(config.get(),
@@ -303,7 +330,36 @@ inline Error getEnginePrediction(hipdnnBackendDescriptor_t graphDesc,
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Invalid engine prediction buffer"};
     }
-    return decodeEnginePrediction(*fb::GetEnginePrediction(data.ptr), engineId, kind, prediction);
+    return decodeEnginePrediction(
+        *fb::GetEnginePrediction(data.ptr), engineId, kind, *rankingMetric, prediction);
+}
+
+/// Generation-tool surface. Lists the predictions an engine can answer on this graph:
+/// every registered metric at both kinds is described without evaluating a model, and a
+/// (kind, metric) pair is reported when a model is bound to it and the binding is not
+/// INVALID. Nothing new crosses the ABI; this is the description query run per metric.
+inline Error getPredictionCapabilities(hipdnnBackendDescriptor_t graphDesc,
+                                       int64_t engineId,
+                                       std::vector<PredictionCapability>& capabilities)
+{
+    capabilities.clear();
+    std::vector<PredictionCapability> found;
+    for(const auto kind : {PredictionKind::ENGINE, PredictionKind::CONFIGURATION})
+    {
+        for(const auto& metric : hipdnn_data_sdk::utilities::RANKING_METRICS)
+        {
+            EnginePrediction description;
+            HIPDNN_CHECK_ERROR(getEnginePrediction(
+                graphDesc, engineId, description, kind, /*evaluate=*/false, {}, metric.name));
+            if(!description.model.empty() && description.status != PredictionStatus::INVALID)
+            {
+                found.push_back(
+                    {kind, std::move(description.metric), std::move(description.model)});
+            }
+        }
+    }
+    capabilities = std::move(found);
+    return {};
 }
 
 /// Generation-tool surface. Enumerates actual applicable catalog entries, not guessed

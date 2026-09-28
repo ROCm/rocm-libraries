@@ -76,9 +76,9 @@ inline std::vector<int64_t> rowMajorStrides(const std::vector<int64_t>& dims)
 }
 
 /// Binds a problem point as `$q.*` variables for the §6.2 evaluator.
-inline hipdnn_plugin_sdk::uhd::expression::VariableContext contextFor(const ProblemPoint& point)
+inline hipdnn_plugin_sdk::uhd::VariableContext contextFor(const ProblemPoint& point)
 {
-    hipdnn_plugin_sdk::uhd::expression::VariableContext context;
+    hipdnn_plugin_sdk::uhd::VariableContext context;
     for(const auto& entry : point)
     {
         // entry rather than a structured binding: capturing one in a lambda is C++20.
@@ -129,9 +129,8 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
             {
                 try
                 {
-                    auto work = argument.expressions.workspace();
-                    resolved.value = hipdnn_plugin_sdk::uhd::expression::Program::number(
-                        argument.expressions.evaluate(0, context, work));
+                    resolved.value = hipdnn_plugin_sdk::uhd::ExpressionSet::number(
+                        argument.expressions.resolve(0, context));
                 }
                 catch(const std::exception& error)
                 {
@@ -141,44 +140,31 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
                 break;
             }
 
-            // All dimension expressions share a compiled descriptor program.
             std::vector<int64_t> dims;
             dims.reserve(argument.elementCount);
             try
             {
-                auto work = argument.expressions.workspace();
                 for(size_t i = 0; i < argument.elementCount; ++i)
                 {
                     if(i < argument.elementConditions.size()
-                       && argument.elementConditions[i].has_value())
+                       && argument.elementConditions[i].has_value()
+                       && !hipdnn_plugin_sdk::uhd::ExpressionSet::truth(
+                           argument.expressions.resolve(*argument.elementConditions[i], context)))
                     {
-                        const auto& when
-                            = argument.expressions.evaluate(*argument.elementConditions[i],
-                                                            context,
-                                                            work);
-                        const auto* flag = std::get_if<bool>(&when.raw);
-                        const bool present
-                            = flag != nullptr
-                                  ? *flag
-                                  : hipdnn_plugin_sdk::uhd::expression::Program::number(when)
-                                        != 0.0;
-                        if(!present)
-                        {
-                            continue;
-                        }
+                        continue;
                     }
-                    const auto& value = argument.expressions.evaluate(i, context, work);
-                    if(const auto* integer = std::get_if<int64_t>(&value.raw))
+                    const auto value = argument.expressions.resolve(i, context);
+                    if(value.isInt())
                     {
-                        dims.push_back(*integer);
+                        dims.push_back(value.asInt());
                         continue;
                     }
                     const double number
-                        = std::floor(hipdnn_plugin_sdk::uhd::expression::Program::number(value));
+                        = std::floor(hipdnn_plugin_sdk::uhd::ExpressionSet::number(value));
                     if(number < static_cast<double>(std::numeric_limits<int64_t>::min())
                        || number >= -static_cast<double>(std::numeric_limits<int64_t>::min()))
                     {
-                        throw hipdnn_plugin_sdk::uhd::expression::Error(
+                        throw hipdnn_plugin_sdk::uhd::JsonLogicError(
                             "Dimension exceeds signed 64-bit range");
                     }
                     dims.push_back(static_cast<int64_t>(number));

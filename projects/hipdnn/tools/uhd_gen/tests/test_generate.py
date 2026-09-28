@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: MIT
 """Collection must never associate a timing with an unaddressed candidate."""
 import copy
+import json
+from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pandas")
-from uhd_gen.generate import collect_graph
+pd = pytest.importorskip("pandas")
+from uhd_gen.generate import _catalog_label, collect_graph
+from uhd_gen.provenance import snapshot_provenance
 
 
 def _page():
@@ -245,3 +248,93 @@ def test_a_sweep_that_times_fewer_candidates_than_it_enumerated_is_not_a_corpus(
 
     with pytest.raises(ValueError, match="whole catalog|exactly the catalog it reported"):
         _collect(monkeypatch, tmp_path, [_sweep(page, only_one)])
+
+
+def _catalog(**columns):
+    return pd.DataFrame({"robustMeanMs": [2.5, 3.0], "avgTimeMs": [2.6, 3.1], **columns})
+
+
+def test_each_catalog_metric_takes_its_own_label_and_is_calibrated_on_the_mean():
+    """RFC 0019 §13.4: `tflops` from FLOPs over avgTimeMs, `time` from avgTimeMs itself."""
+    usable = _catalog(tflops=[1.5, 1.3])
+    assert _catalog_label("tflops", usable, False, "sort_kernel_catalog") == ("tflops", "tflops", True, "avgTimeMs")
+    assert _catalog_label("time", usable, False, "sort_kernel_catalog") == ("time", "avgTimeMs", True, "avgTimeMs")
+
+
+def test_an_unpublished_work_count_falls_back_only_when_no_metric_was_asked_for():
+    """The default run keeps today's metric-less robustMeanMs ranker; a run that NAMED
+    tflops gets an error rather than a model that estimates something else."""
+    usable = _catalog()
+    assert _catalog_label("tflops", usable, True, "sort_kernel_catalog") == (
+        None, "robustMeanMs", False, "robustMeanMs")
+    with pytest.raises(ValueError, match="graph.flops"):
+        _catalog_label("tflops", usable, False, "sort_kernel_catalog")
+
+
+UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
+KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
+
+
+def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(monkeypatch, tmp_path, evaluator):
+    """`--metric tflops time`: each metric's labels are measured under that metric (the
+    engine's kernel choice follows it), each trains and evaluates its own UHD, and both
+    land in the arch's role list rather than the second replacing the first."""
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    from uhd_gen.__main__ import main
+
+    tree = tmp_path / "descriptors"
+    tree.mkdir()
+    (tree / "engine.ued.json").write_text(json.dumps(
+        {"version": "1.0", "id": UED, "name": "provider:engine7", "metadata": KMD}), encoding="utf-8")
+    (tree / "metadata.kmd.json").write_text(json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8")
+    provenance = snapshot_provenance(tree)
+    graphs = tmp_path / "graphs"
+    graphs.mkdir()
+    for index in range(16):
+        (graphs / f"{index}.json").write_text(json.dumps({"id": f"graph-{index}", "size": index}),
+                                              encoding="utf-8")
+    requested = []
+
+    def bench(command, environment, log_dir, ordinal, commands):
+        commands.append({"argv": command})
+        metric = command[command.index("--ranking-metric") + 1]
+        requested.append(metric)
+        graph = json.loads(Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8"))
+        # A `time` request lets the engine's time ranker pick a faster kernel.
+        average = (1.0 + graph["size"] / 10) * (0.8 if metric == "time" else 1.0)
+        return {"engine_id": 7, "engine_name": "provider:engine7", "graph_id": graph["id"],
+                "device_id": "board", "arch": "gfx942", "metric": metric,
+                "binding": {"engine": "provider:engine7", "role": "predict_engine", "arch": "gfx942",
+                            "selector_revision": "provider-1", "trained_against": provenance},
+                "features": {"graph.flops": 2e9 * (graph["size"] + 1), "device.cu_count": 120},
+                "avgTimeMs": average, "robustMeanMs": average * 0.9, "stddevMs": 0.01, "iters": 30,
+                "is_valid": True, "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    output = tmp_path / "out"
+    common = ["generate", "--graphs", str(graphs), "--descriptor-tree", str(tree), "--engine-id", "7",
+              "--role", "predict_engine", "--features", "graph.flops", "--num-boost-round", "4",
+              "--early-stopping", "2", "--eval-fraction", "0.25", "--arch", "gfx942",
+              "--feature-evaluator", evaluator, "--output-dir", str(output)]
+    # One id cannot name two UHDs.
+    assert main([*common, "--metric", "tflops", "time", "--uhd-id", UED]) == 1
+    assert not requested
+    assert main([*common, "--metric", "tflops", "--metric", "time"]) == 0
+
+    assert requested.count("tflops") == requested.count("time") == 16
+    tflops_corpus = json.loads((output / "corpus_tflops.json").read_text(encoding="utf-8"))
+    time_corpus = json.loads((output / "corpus_time.json").read_text(encoding="utf-8"))
+    assert time_corpus[0]["avgTimeMs"] == pytest.approx(0.8 * tflops_corpus[0]["avgTimeMs"])
+    emitted = {}
+    for metric, objective in (("tflops", "max"), ("time", "min")):
+        uhd = json.loads((output / f"model_{metric}" / "heuristic.uhd.json").read_text(encoding="utf-8"))
+        report = json.loads((output / f"model_{metric}" / "eval_report.json").read_text(encoding="utf-8"))
+        assert (uhd["score"]["metric"], uhd["score"]["calibrated"], uhd["objective"]) == (metric, True, objective)
+        assert (report["metric"], report["objective"]) == (metric, objective)
+        emitted[metric] = uhd["id"]
+    manifest = json.loads((output / "generation_manifest.json").read_text(encoding="utf-8"))
+    assert [model["metric"] for model in manifest["models"]] == ["tflops", "time"]
+    ued = json.loads((tree / "engine.ued.json").read_text(encoding="utf-8"))
+    assert ued["predict_engine"] == {"gfx942": [emitted["tflops"], emitted["time"]]}

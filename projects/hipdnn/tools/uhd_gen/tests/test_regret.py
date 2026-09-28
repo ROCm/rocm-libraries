@@ -9,7 +9,6 @@ backwards.
 """
 from __future__ import annotations
 
-import logging
 
 import numpy as np
 import pandas as pd
@@ -162,51 +161,57 @@ def test_a_corpus_too_small_to_split_is_refused():
         )
 
 
-def test_negative_prediction_is_reported(caplog):
-    """A model predicting a target its units cannot take must say so at training time.
+def test_no_prediction_is_a_score_the_runtime_discards():
+    """Trained on log(target) and inverted with exp, every prediction is positive.
 
-    The runtime bounds this regardless, but by then the only recourse is to discard the score.
-    Training is where it can still be fixed, and a model doing it on its own training data will
-    do it worse in the field.
+    The runtime refuses a recovered score that is not strictly positive
+    (UhdKernelHeuristic::scoreFromRaw). The corpus has the shape that broke the log1p model
+    this replaced: throughput flat and tiny below a work threshold and steep above it, the
+    decode/prefill split. That model's boosted leaf sums undershoot below zero among the
+    tiny targets, and expm1 turns that into a negative throughput -- 229 of these 1600
+    rows, on the data it was trained on. On gfx950 it was 4 of 200 unseen AITER graphs.
     """
-    lgb = pytest.importorskip("lightgbm")
-    np = pytest.importorskip("numpy")
-
-    from uhd_gen.train_uhd import _report_out_of_range_predictions
-
-    class _AlwaysNegative:
-        """Stands in for a booster; the check only calls predict()."""
-
-        @staticmethod
-        def predict(features):
-            return np.full(len(features), -0.75)
-
-    features = np.zeros((4, 2))
-    with caplog.at_level(logging.ERROR):
-        count = _report_out_of_range_predictions(_AlwaysNegative(), features, "tflops")
-
-    assert count == 4
-    assert "negative tflops" in caplog.text
-    assert "4 of 4" in caplog.text
-
-
-def test_a_wholly_positive_model_reports_nothing(caplog):
-    """The quiet path, so the check cannot become noise that gets ignored."""
     pytest.importorskip("lightgbm")
     np = pytest.importorskip("numpy")
+    pd = pytest.importorskip("pandas")
 
-    from uhd_gen.train_uhd import _report_out_of_range_predictions
+    from uhd_gen.train_uhd import build_feature_matrix, predict, train_model
 
-    class _AlwaysPositive:
-        @staticmethod
-        def predict(features):
-            return np.full(len(features), 1.5)
+    rng = np.random.default_rng(0)
+    x, y = rng.integers(1, 257, 1600), rng.integers(1, 65, 1600)
+    work = (x * y).astype(float)
+    tflops = np.where(work < 2000, 0.005, work / 50.0) * rng.lognormal(0, 0.1, 1600)
+    frame = pd.DataFrame({"q.x": x, "q.y": y, "tflops": tflops})
+    model = train_model(frame, ["q.x", "q.y"], "tflops", num_boost_round=800, early_stopping_rounds=50)
 
-    with caplog.at_level(logging.ERROR):
-        count = _report_out_of_range_predictions(_AlwaysPositive(), np.zeros((3, 2)), "tflops")
+    predicted = predict(model, build_feature_matrix(frame, ["q.x", "q.y"]))
+    assert np.isfinite(predicted).all() and (predicted > 0).all(), predicted.min()
 
-    assert count == 0
-    assert caplog.text == ""
+
+def test_a_label_the_runtime_would_refuse_is_refused_at_training():
+    """Zero is no measurement (RFC 0019 §8.3), and log of it is undefined."""
+    pytest.importorskip("lightgbm")
+    pd = pytest.importorskip("pandas")
+
+    from uhd_gen.train_uhd import train_model
+
+    frame = pd.DataFrame({"q.M": [1, 2, 3, 4, 5, 6], "tflops": [1.0, 2.0, 0.0, 4.0, 5.0, 6.0]})
+    with pytest.raises(ValueError, match="strictly positive"):
+        train_model(frame, ["q.M"], "tflops", num_boost_round=5, early_stopping_rounds=2)
+
+
+def test_a_rejected_score_stays_rejected_through_every_inverse():
+    """-inf marks a candidate the ranking threw out; exp(-inf) is 0 and expm1(-inf) is -1,
+    finite values that would outrank a real score."""
+    np = pytest.importorskip("numpy")
+
+    from uhd_gen import score_transform
+
+    raw = np.array([-np.inf, 0.0, 1.0])
+    for transform in score_transform.INVERTIBLE:
+        recovered = score_transform.inverse(raw, transform)
+        assert recovered[0] == -np.inf, transform
+        assert np.isfinite(recovered[1:]).all(), transform
 
 
 def test_regret_measures_a_corpus_with_a_categorical_feature():

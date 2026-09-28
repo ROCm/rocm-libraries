@@ -162,10 +162,15 @@ TEST_F(TestUhdGenArtifact, TheRuntimeLoadsWhatTheToolWrote)
         << "the descriptor loader rejected a descriptor uhd_gen produced";
 
     EXPECT_EQ(config.adapterType, "tree_data");
+    // `--target tflops` trains a throughput model, and the metric is what the runtime keys the
+    // model by (RFC 0019 §3.1): a descriptor the tool wrote without it would bind as the
+    // metric-less ranker and never answer a tflops request as that metric's own.
+    EXPECT_EQ(config.scoreMetric, "tflops");
     EXPECT_EQ(config.objective, "max");
-    // uhd_gen trains on log1p(target) and says so, which is what lets a consumer recover
-    // the declared units.
-    EXPECT_EQ(config.scoreTransform, "log1p");
+    // uhd_gen trains on log(target) and says so, which is what lets a consumer recover the
+    // value in the metric's units -- and exp, its inverse, cannot yield a score the runtime
+    // refuses as non-positive, which expm1 (log1p's) could (uhd_gen/score_transform.py).
+    EXPECT_EQ(config.scoreTransform, "log");
     EXPECT_EQ(config.featuresSignature.size(), 2U);
 }
 
@@ -215,8 +220,8 @@ TEST_F(TestUhdGenArtifact, TheModelScoresAndOrdersByTheFeatureItWasTrainedOn)
 /// ordering to find that layer 1 alone could not produce.
 TEST(TestUhdGenArtifactGrouped, TheRuntimeGroupsWhatTheToolTrained)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
-        std::filesystem::temp_directory_path() / "hipdnn_uhd_gen_grouped");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(std::filesystem::temp_directory_path()
+                                                          / "hipdnn_uhd_gen_grouped");
 
     const auto csv = dir.path() / "corpus.csv";
     {

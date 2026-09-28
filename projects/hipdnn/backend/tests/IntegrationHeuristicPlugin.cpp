@@ -625,13 +625,14 @@ TEST_F(IntegrationHeuristicPluginLoadedNoOptional, PluginWithoutOptionalCanStill
 
     int calls = 0;
     const hipdnnHeuristicHostCallbacks_t host{
-        1,
+        2,
         sizeof(hipdnnHeuristicHostCallbacks_t),
         &calls,
         [](void* context, int64_t, hipdnnEnginePredictionKind_t, hipdnnPluginConstData_t*) {
             ++*static_cast<int*>(context);
             return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
-        }};
+        },
+        "tflops"};
     const bool applied = plugin().finalizeWithHost(descGuard.get(), &host);
     EXPECT_EQ(calls, 0);
     EXPECT_EQ(plugin().getEngineConfig(descGuard.get(), inputIds.front()), nullptr);

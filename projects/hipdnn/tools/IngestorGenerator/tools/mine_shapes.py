@@ -126,7 +126,19 @@ def from_published_csv(path: Path, arch: str, include_windowed: bool) -> list[di
 def _mask_from_attributes(
     attrs: dict, path: Path, seqlen_q: int, seqlen_k: int
 ) -> dict:
-    """Normalize the graph dialect to AttentionRequest's top-left causal/window form."""
+    """Normalize the graph dialect to a mask kind, a window, and an anchor.
+
+    The anchor is REPORTED rather than normalized away. Folding bottom-right onto
+    top-left is safe only where Sq == Sk, and a UHD corpus deliberately contains the
+    case where it is not: `sdpa_fwd.opmeta.json` declares `alignment` as an axis so an
+    engine whose table is bottom-right-only is exercised (AITER's gfx942 forward table
+    has no top-left causal kernel, and a single-anchor corpus had it serving none of
+    its 15 causal graphs). Refusing those made this reader unable to read the corpus
+    the UHD trains on.
+
+    Consumers that only ever see Sq == Sk keep reading `mask_type` and `sliding_window`
+    and are unaffected; `alignment` is additive.
+    """
     alignment = attrs.get("diagonal_alignment", "TOP_LEFT")
     if alignment not in ("TOP_LEFT", "BOTTOM_RIGHT"):
         raise SystemExit(f"FAIL: {path}: unsupported diagonal_alignment {alignment!r}")
@@ -146,8 +158,10 @@ def _mask_from_attributes(
     left = -1 if left is None else left
     right = -1 if right is None else right
     if left == -1 and right == -1:
-        return {"mask_type": 0, "sliding_window": 0}
-    if right != 0 or (alignment == "BOTTOM_RIGHT" and seqlen_q != seqlen_k):
+        return {"mask_type": 0, "sliding_window": 0, "alignment": "top_left"}
+    if right != 0:
+        # A right bound other than 0 is not a causal mask at all, and there is no
+        # anchor that makes it one. Still refused.
         raise SystemExit(
             f"FAIL: {path}: unsupported translation of bounds ({left}, {right}), "
             f"alignment {alignment}, Sq={seqlen_q}, Sk={seqlen_k} to AttentionRequest"
@@ -155,6 +169,7 @@ def _mask_from_attributes(
     return {
         "mask_type": 1 if left == -1 else 2,
         "sliding_window": 0 if left == -1 else left + 1,
+        "alignment": "bottom_right" if alignment == "BOTTOM_RIGHT" else "top_left",
     }
 
 
@@ -209,11 +224,11 @@ def from_graph_corpus(root: Path) -> list[dict]:
             graph = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        # A shape directory holds more than graphs -- a published `model_shapes.json`
-        # is a LIST of records, and `.get` on it raises rather than mining nothing.
-        # A tree that mixes the two is the ordinary case for `~/model-shapes`, so a
-        # document that is not a graph object is skipped exactly like an unparseable
-        # one: this reader mines graphs, and says nothing about anything else.
+        # A document that is not a graph object is skipped exactly like an unparseable
+        # one: this reader mines graphs and says nothing about anything else. Load-bearing
+        # for `from_shape_dir`, which points it at a published shape directory holding CSV,
+        # record-style JSON arrays and key=value files beside the graphs -- all of which
+        # parse as JSON and none of which carry tensors.
         if not isinstance(graph, dict):
             continue
         tensors = {
@@ -784,10 +799,12 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
     is dropped by name and counted, because a model pool that silently shrinks is
     indistinguishable from a miner nobody pointed at anything.
 
-    `q.alignment` is always `top_left`: `MASK_TYPE` deliberately carries no
-    `bottom_right` spelling, so no source here can say bottom-right, and writing the
-    column at all keeps the row buildable (the declaration's argument resolution is
-    strict about a parameter it reads being present). `q.generate_stats` is always
+    `q.alignment` is the causal anchor the source recorded. A graph reports its own
+    (`_mask_from_attributes` keeps bottom-right rather than folding it onto top-left,
+    which is only equivalent where Sq == Sk); a tabular source cannot say bottom-right
+    -- `MASK_TYPE` deliberately has no spelling for it -- so it defaults to `top_left`.
+    The column is always written because the declaration's argument resolution is
+    strict about a parameter it reads being present. `q.generate_stats` is always
     `false` for the same reason: every source here records inference forwards, and
     none says whether a shape also ran as a training forward.
     """
@@ -810,12 +827,14 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
             if reason is not None:
                 dropped[reason] = dropped.get(reason, 0) + 1
                 continue
+            causal = shape["mask_type"] == MASK_TYPE["causal"]
             writer.writerow([
                 _shape_name(shape, index), "sdpa_fwd",
                 shape["batch"], shape["nhead_q"], shape["nhead_k"],
                 shape["seqlen_q"], shape["seqlen_k"], shape["hdim_q"],
-                "true" if shape["mask_type"] == MASK_TYPE["causal"] else "false",
-                "top_left", "false", shape["dtype"],
+                "true" if causal else "false",
+                shape.get("alignment", "top_left") if causal else "top_left",
+                "false", shape["dtype"],
             ])
             written += 1
     return {"written": written, "dropped": dropped}

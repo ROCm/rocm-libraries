@@ -12,8 +12,8 @@
 #include "KnobDescriptor.hpp"
 #include "KnobSettingDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "heuristics/RankingMetric.hpp"
 #include "logging/Logging.hpp"
-#include "plugin/EnginePluginResourceManager.hpp"
 
 #include <algorithm>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 namespace hipdnn_backend
 {
@@ -170,6 +171,15 @@ void EngineDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
     case HIPDNN_ATTR_ENGINE_PREDICTION_EXT:
         getPrediction(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT:
+        // The effective metric: an unset one reads back as the default it means.
+        getString(std::string(heuristics::resolveRankingMetric(_predictionMetric).name),
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "EngineDescriptor::getAttribute()");
+        break;
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
     case HIPDNN_ATTR_ENGINE_LAYOUT_INFO:
     case HIPDNN_ATTR_ENGINE_CU_COUNT_TARGET_EXT:
@@ -261,6 +271,9 @@ void EngineDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT:
         setCandidateScope(attributeType, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT:
+        setPredictionMetric(attributeType, elementCount, arrayOfElements);
         break;
     case HIPDNN_ATTR_ENGINE_KNOB_INFO:
     case HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE:
@@ -510,6 +523,21 @@ void EngineDescriptor::setInspectionScalar(hipdnnBackendAttributeName_t attribut
     }
 }
 
+void EngineDescriptor::setPredictionMetric(hipdnnBackendAttributeType_t attributeType,
+                                           int64_t elementCount,
+                                           const void* arrayOfElements)
+{
+    std::string metric;
+    setString(metric,
+              attributeType,
+              elementCount,
+              arrayOfElements,
+              "EngineDescriptor failed to set the prediction metric");
+    // Refused where the request is made (RFC 0019 §4.4), not when the engine is asked.
+    std::ignore = heuristics::resolveRankingMetric(metric);
+    _predictionMetric = std::move(metric);
+}
+
 void EngineDescriptor::setCandidateScope(hipdnnBackendAttributeType_t attributeType,
                                          int64_t elementCount,
                                          const void* arrayOfElements)
@@ -612,6 +640,7 @@ const flatbuffers::DetachedBuffer& EngineDescriptor::ensurePrediction() const
     std::call_once(_predictionOnce, [this] {
         hipdnn_flatbuffers_sdk::data_objects::EngineConfigT request;
         request.engine_id = _engineId;
+        request.ranking_metric = _predictionMetric;
         flatbuffers::FlatBufferBuilder configBuilder;
         configBuilder.Finish(
             hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(configBuilder, &request));

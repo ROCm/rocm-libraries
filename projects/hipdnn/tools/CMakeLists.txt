@@ -3,14 +3,12 @@
 
 add_subdirectory(bench)
 
-# corpus_gen builds the UHD training corpora. It was once gated on HIPDNN_ENABLE_KERNEL_INGESTOR
-# because its JsonLogic evaluator lived under plugin_sdk's `ingestor/`, which preprocesses to
-# nothing when that option is OFF. The evaluator is now
-# `plugin_sdk/heuristics/uhd/DescriptorExpression.hpp` -- unconditional, like the rest of common
-# UHD prediction -- so the gate only kept corpus building out of a default build.
-add_subdirectory(corpus_gen)
-
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # corpus_gen builds the UHD training corpora, and hipdnn_uhd_features is the one
+    # implementation of their features_hash. Both evaluate the descriptor expression language
+    # through plugin_sdk's heuristics/uhd/, which exists only with the kernel ingestor.
+    add_subdirectory(corpus_gen)
+
     add_executable(hipdnn_uhd_features uhd_gen/UhdFeatures.cpp)
     target_link_libraries(hipdnn_uhd_features PRIVATE hipdnn_plugin_sdk)
     target_compile_definitions(hipdnn_uhd_features PRIVATE HIPDNN_ENABLE_KERNEL_INGESTOR)

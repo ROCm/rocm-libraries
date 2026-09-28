@@ -819,7 +819,7 @@ def test_a_perfectly_ranking_model_can_still_be_wrong_about_its_absolute_scale()
         _scaled_scorer(1.5),
         target="tflops",
         objective="max",
-        score_declaration={"units": "tflops", "calibrated": True},
+        score_declaration={"metric": "tflops", "calibrated": True},
     )
     metrics = result.report["metrics"]
 
@@ -843,19 +843,44 @@ def test_the_bias_warning_names_the_direction():
         _scaled_scorer(1.5),
         target="tflops",
         objective="max",
-        score_declaration={"units": "tflops", "calibrated": True},
+        score_declaration={"metric": "tflops", "calibrated": True},
     ).report["warnings"]
     under = evaluate_all(
         _calibration_corpus(),
         _scaled_scorer(0.5),
         target="tflops",
         objective="max",
-        score_declaration={"units": "tflops", "calibrated": True},
+        score_declaration={"metric": "tflops", "calibrated": True},
     ).report["warnings"]
 
     assert any("OVER-predicts by 50.0%" in warning for warning in over)
     assert not any("UNDER-predicts" in warning for warning in over)
     assert any("UNDER-predicts by 50.0%" in warning for warning in under)
+
+
+def test_a_time_score_that_reads_low_is_favoured_not_avoided():
+    # Under `time` lower wins, so the arbitration consequence of a bias flips with the
+    # metric: an engine whose predicted time reads LOW wins work it would do slower.
+    corpus = make_corpus(
+        [
+            {"benchmark": "g1", "kernel": "k1", "avgTimeMs": 1.0},
+            {"benchmark": "g1", "kernel": "k2", "avgTimeMs": 2.0},
+            {"benchmark": "g2", "kernel": "k1", "avgTimeMs": 4.0},
+            {"benchmark": "g2", "kernel": "k2", "avgTimeMs": 8.0},
+        ]
+    )
+    report = evaluate_all(
+        corpus,
+        lambda frame: pd.to_numeric(frame["avgTimeMs"]).to_numpy(dtype=float) * 0.5,
+        target="avgTimeMs",
+        objective="min",
+        score_declaration={"metric": "time", "calibrated": True},
+    ).report
+
+    assert (report["metric"], report["metrics"]["top1_regret"]["mean"]) == ("time", pytest.approx(0.0))
+    assert "warning" not in report["metrics"]["calibration"]
+    assert any("UNDER-predicts by 50.0%" in warning and "will favour" in warning
+               for warning in report["warnings"])
 
 
 def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
@@ -864,7 +889,7 @@ def test_a_score_within_the_advisory_band_is_measured_but_not_warned_about():
         _scaled_scorer(1.02),
         target="tflops",
         objective="max",
-        score_declaration={"units": "tflops", "calibrated": True},
+        score_declaration={"metric": "tflops", "calibrated": True},
     ).report
 
     assert result["metrics"]["calibration"]["all_candidates"][
@@ -883,7 +908,7 @@ def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
         _scaled_scorer(1.5),
         target="tflops",
         objective="max",
-        score_declaration={"units": "ms", "calibrated": False},
+        score_declaration={"calibrated": False},
     ).report
 
     assert report["metrics"]["calibration"]["status"] == "not applicable"

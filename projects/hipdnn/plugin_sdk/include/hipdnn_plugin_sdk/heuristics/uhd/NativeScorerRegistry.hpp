@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <hipdnn_plugin_sdk/NativeRegistry.hpp>
 
 #include <cstddef>
@@ -40,8 +42,8 @@ namespace hipdnn_plugin_sdk::uhd
 ///                   (RFC 0019 §7.1 makes `features_signature` optional for
 ///                   this adapter).
 /// @param numFeatures Number of entries in @p features.
-/// @return The candidate's score, in the units the UHD's `score` metadata
-///         declares. Implementations must be thread-safe.
+/// @return The candidate's raw score: the UHD's `score.metric` value with its
+///         `score.transform` still applied. Implementations must be thread-safe.
 using UhdScoreFn = double (*)(const double* features, size_t numFeatures);
 
 /// @brief Process-wide registry of compiled UHD scorers, keyed by symbol name.
@@ -81,3 +83,5 @@ private:
 };
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include "IUhdAdapter.hpp"
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/NativeScorerRegistry.hpp>
@@ -149,3 +151,5 @@ inline double NativeAdapter::score(const std::vector<double>& features) const
 }
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

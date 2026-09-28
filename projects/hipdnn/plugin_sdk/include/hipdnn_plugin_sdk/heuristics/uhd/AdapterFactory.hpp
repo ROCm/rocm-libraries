@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <memory>
 #include <string>
 
@@ -77,3 +79,5 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
 }
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

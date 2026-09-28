@@ -53,6 +53,12 @@ class TestUuidThreading:
         ued = build_ued(scale_add_config, ids)
         assert ued["metadata"] == ids["kmd"]
 
+    def test_ued_sort_kernel_catalog_references_uhd_id(self, scale_add_config):
+        ids = mint_ids(scale_add_config)
+        ued = build_ued(scale_add_config, ids)
+        assert ued["sort_kernel_catalog"] == {"default": ids["uhd"]}
+        assert "heuristic" not in ued
+
     def test_kdp_engine_references_ued_id(self, scale_add_config):
         ids = mint_ids(scale_add_config)
         pack = scale_add_config.packs[0]
@@ -383,10 +389,8 @@ class TestAllowListedKeys:
     }
     _UMD_KEYS = {"version", "id", "name", "scope", "match_symbol"}
     _UDD_KEYS = {"version", "id", "name", "dispatch_symbol"}
-    # RFC 0019 §4's header, plus the adapter-scoped body whose key equals `adapter`.
-    # `kind`/`payload` was the shape before the UHD became a whole descriptor rather
-    # than a stub naming a binary; a generator still emitting it produces a heuristic
-    # the loader drops.
+    # `kind`/`payload` was the shape before the UHD became a whole descriptor; a
+    # generator still emitting it produces a heuristic the loader drops.
     _UHD_KEYS = {"version", "id", "name", "adapter", "objective", "native"}
     _KDP_KEYS = {
         "version",

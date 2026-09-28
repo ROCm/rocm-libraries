@@ -19,29 +19,31 @@ add_library(hipdnn_plugin_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_plugin_sdk)
 
-# CMAKE_DL_LIBS because CustomLibraryAdapter.hpp calls dlopen/dlsym/dlclose (RFC 0019 §7.2's
-# escape hatch). A header-only target has to propagate what its headers use: this links today
-# only because glibc 2.34+ folds libdl into libc and the current consumers happen to link it
-# themselves, neither of which is a guarantee.
-target_link_libraries(hipdnn_plugin_sdk
-    INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk ${CMAKE_DL_LIBS})
+target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk)
 
-# The ingestor headers are wholly inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, and they
-# are installed whenever it is set. Carrying the definition on the exported target is what
+# The ingestor and UHD headers are wholly inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, and
+# they are installed whenever it is set. Carrying the definition on the exported target is what
 # makes them usable: without it a consumer that find_package()s this SDK gets the headers
 # on disk and they preprocess to nothing, so the types are simply absent with no
 # diagnostic naming the cause. INTERFACE propagates to both the build tree and the
 # installed hipdnn_plugin_sdkTargets.cmake, so in-tree and out-of-tree consumers agree.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hipdnn_plugin_sdk INTERFACE HIPDNN_ENABLE_KERNEL_INGESTOR)
-endif()
 
-# Common UHD prediction is available without the ingestor and directly consumes JSON,
-# including when the FlatBuffers SDK's optional JSON helpers are disabled.
-if(NOT TARGET nlohmann_json::nlohmann_json)
-    hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+    # CMAKE_DL_LIBS because CustomLibraryAdapter.hpp calls dlopen/dlsym/dlclose (RFC 0019
+    # §7.2's escape hatch). A header-only target has to propagate what its headers use: this
+    # links today only because glibc 2.34+ folds libdl into libc and the current consumers
+    # happen to link it themselves, neither of which is a guarantee.
+    target_link_libraries(hipdnn_plugin_sdk INTERFACE ${CMAKE_DL_LIBS})
+
+    # The descriptor loader and UHD parser include <nlohmann/json.hpp> directly, including
+    # when the FlatBuffers SDK's optional JSON helpers are disabled, so this target carries
+    # its own dependency rather than relying on a sibling's implementation detail.
+    if(NOT TARGET nlohmann_json::nlohmann_json)
+        hipdnn_add_dependency(nlohmann_json VERSION ${HIPDNN_NLOHMANN_JSON_VERSION})
+    endif()
+    hipdnn_add_dependency_includes(hipdnn_plugin_sdk nlohmann_json::nlohmann_json)
 endif()
-hipdnn_add_dependency_includes(hipdnn_plugin_sdk nlohmann_json::nlohmann_json)
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 
@@ -66,13 +68,14 @@ install(TARGETS hipdnn_plugin_sdk EXPORT hipdnn_plugin_sdk_targets COMPONENT Dev
 
 # cmake-lint: disable=E1122
 #
-# ingestor/ headers are WIP (RFC 0017); this glob is unconditional, so exclude them
-# explicitly unless the feature is enabled.
+# ingestor/ headers are WIP (RFC 0017), and heuristics/uhd/ (RFC 0019) is built on them; this
+# glob is unconditional, so exclude both explicitly unless the feature is enabled.
 set(HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS "")
 if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Matches the directory itself (not "ingestor/*"): under FILES_MATCHING, excluding
     # only the contents still creates the empty directory in the install tree.
-    list(APPEND HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS PATTERN "ingestor" EXCLUDE)
+    list(APPEND HIP_DNN_PLUGIN_SDK_INSTALL_EXCLUDE_PATTERNS PATTERN "ingestor" EXCLUDE
+         PATTERN "uhd" EXCLUDE)
 endif()
 
 install(

@@ -81,7 +81,7 @@
       "additionalProperties": false,
       "patternProperties": {"^(x-|_)": {}},
       "properties": {
-        "units": {"type": "string", "minLength": 1},
+        "metric": {"enum": ["tflops", "time"]},
         "calibrated": {"type": "boolean"},
         "transform": {"enum": ["identity", "log1p", "log", "exp", "sqrt"]}
       }
@@ -140,6 +140,14 @@
     {"if": {"required": ["score"],
             "properties": {"score": {"required": ["calibrated"],
                                      "properties": {"calibrated": {"const": true}}}}},
-     "then": {"required": ["objective"], "properties": {"objective": {"const": "max"}}}}
+     "then": {"properties": {"score": {"required": ["metric"]}}}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["metric"],
+                                     "properties": {"metric": {"const": "tflops"}}}}},
+     "then": {"required": ["objective"], "properties": {"objective": {"const": "max"}}}},
+    {"if": {"required": ["score"],
+            "properties": {"score": {"required": ["metric"],
+                                     "properties": {"metric": {"const": "time"}}}}},
+     "then": {"required": ["objective"], "properties": {"objective": {"const": "min"}}}}
   ]
 }

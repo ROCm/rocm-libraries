@@ -11,12 +11,15 @@
 #include "HipdnnException.hpp"
 #include "KnobSettingDescriptor.hpp"
 #include "handle/Handle.hpp"
+#include "heuristics/RankingMetric.hpp"
 
 #include <cmath>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/KnobSettingWrapper.hpp>
 #include <limits>
+#include <string>
+#include <tuple>
 #include <unordered_set>
 
 namespace hipdnn_backend
@@ -66,8 +69,10 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
                                           void* arrayOfElements) const
 {
     // A prediction configuration carries constraints only: it is deliberately never
-    // finalized, so no engine metadata, catalog, or workspace query is performed.
-    THROW_IF_FALSE(isFinalized() || attributeName == HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT,
+    // finalized, so no engine metadata, catalog, or workspace query is performed. Its
+    // ranking metric is plain stored input and is readable on the same terms.
+    THROW_IF_FALSE(isFinalized() || attributeName == HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT
+                       || attributeName == HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
                    HIPDNN_STATUS_NOT_INITIALIZED,
                    "EngineConfigDescriptor::getAttribute() failed: Not finalized.");
 
@@ -81,6 +86,16 @@ void EngineConfigDescriptor::getAttribute(hipdnnBackendAttributeName_t attribute
         break;
     case HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT:
         getPrediction(attributeType, requestedElementCount, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT:
+        // The effective metric: an unset one reads back as the default it means.
+        getString(
+            std::string(heuristics::resolveRankingMetric(_engineConfigData->ranking_metric).name),
+            attributeType,
+            requestedElementCount,
+            elementCount,
+            arrayOfElements,
+            "EngineConfigDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     case HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES:
@@ -257,6 +272,20 @@ void EngineConfigDescriptor::setAttribute(hipdnnBackendAttributeName_t attribute
         _predictionEvaluate = value != 0;
         break;
     }
+    case HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT:
+    {
+        std::string metric;
+        setString(metric,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "EngineConfigDescriptor failed to set ranking metric");
+        // Refused where the request is made (RFC 0019 §4.4), not when a plugin later
+        // finds it cannot rank by it.
+        std::ignore = heuristics::resolveRankingMetric(metric);
+        _engineConfigData->ranking_metric = std::move(metric);
+        break;
+    }
     case HIPDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO:
     case HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE:
     default:
@@ -380,6 +409,9 @@ void EngineConfigDescriptor::validateEngineConfig(
                            "Engine config has a non-finite knob value");
         }
     }
+    // An unregistered metric would reach the plugin as a plan-build or prediction request
+    // it can only refuse; a heuristic plugin's config is untrusted and gets the same check.
+    std::ignore = heuristics::resolveRankingMetric(config.ranking_metric);
 }
 
 void EngineConfigDescriptor::setEngineConfig(

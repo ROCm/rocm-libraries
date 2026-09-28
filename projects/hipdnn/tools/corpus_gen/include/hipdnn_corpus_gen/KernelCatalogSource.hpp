@@ -44,7 +44,7 @@
 /// geometries. Such a floor both drops problems the engine serves and admits problems L2 will
 /// exclude anyway. The question is answered downstream where it is cheap and exact, from the
 /// candidates that were actually timed. Those measurements are not wasted when a catalog turns
-/// out to be deterministic -- they are exactly the labels `predict_engine_tflops` needs, which
+/// out to be deterministic -- they are exactly the labels `predict_engine` needs, which
 /// is the whole reason a deterministic engine gets a corpus.
 ///
 /// `maxBytes` remains, because it is a different kind of rule: a geometry whose tensors do not

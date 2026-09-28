@@ -38,7 +38,7 @@ namespace hipdnn_corpus_gen
 /// mutual exclusivity would force every clause to restate its predecessors' negations, which
 /// is how a stratification acquires a gap nobody notices.
 ///
-/// A clause that throws or yields a non-boolean is treated as not matching, matching
+/// A clause that does not resolve or yields a non-boolean is treated as not matching, matching
 /// `detail::satisfiesConstraints`' reading of a malformed relation: a label is a report about
 /// a problem, and reporting one population as another is worse than falling through to the
 /// axis' declared `otherwise`.
@@ -52,22 +52,13 @@ regimeFacets(const std::vector<RegimeAxis>& axes, const ProblemPoint& point)
     for(const auto& axis : axes)
     {
         auto chosen = axis.otherwise;
-        auto work = axis.clauses.workspace();
         for(size_t i = 0; i < axis.clauses.size(); ++i)
         {
-            try
+            const auto value = axis.clauses.evaluate(i, context);
+            if(value.isBool() && value.asBool())
             {
-                const auto& value = axis.clauses.evaluate(i, context, work);
-                const auto* held = std::get_if<bool>(&value.raw);
-                if(held != nullptr && *held)
-                {
-                    chosen = i < axis.labels.size() ? axis.labels[i] : axis.otherwise;
-                    break;
-                }
-            }
-            catch(const std::exception&)
-            {
-                continue;
+                chosen = i < axis.labels.size() ? axis.labels[i] : axis.otherwise;
+                break;
             }
         }
 

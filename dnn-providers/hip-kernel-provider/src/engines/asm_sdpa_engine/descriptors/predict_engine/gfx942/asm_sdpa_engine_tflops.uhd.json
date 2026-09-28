@@ -108,7 +108,7 @@
   },
   "objective": "max",
   "score": {
-    "units": "tflops",
+    "metric": "tflops",
     "calibrated": true,
     "transform": "log1p"
   },

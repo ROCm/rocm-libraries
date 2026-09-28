@@ -34,7 +34,7 @@
   "categorical_encoding": {},
   "target": "tflops",
   "objective": "max",
-  "score_units": "tflops",
+  "score_metric": "tflops",
   "score_calibrated": false,
   "score_transform": "log1p",
   "group_by": [],

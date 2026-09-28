@@ -71,7 +71,7 @@ protected:
                 {"features_signature", signature},
                 {"features_hash", FeatureExtractor::computeHash(signature)},
                 {"objective", "max"},
-                {"score", {{"units", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}},
+                {"score", {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}}},
                 {"trained_against",
                  {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
                   {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
@@ -100,10 +100,21 @@ protected:
         predictWith(const UhdConfig& cfg,
                     const std::shared_ptr<const Model>& compiled,
                     bool evaluate = true,
-                    const std::string& arch = "gfx942") const
+                    const std::string& arch = "gfx942",
+                    const std::string& metric = "tflops") const
     {
         return predictEngine(
-            17, "test:opaque", "selector-1", arch, _features, evaluate, cfg, compiled);
+            17, "test:opaque", "selector-1", metric, arch, _features, evaluate, cfg, compiled);
+    }
+
+    /// A calibrated time model on the same scorer: objective `min` is what the metric fixes.
+    UhdConfig timeConfig() const
+    {
+        auto doc = document();
+        doc["id"] = "01112233-4455-6677-8899-aabbccddeeff";
+        doc["objective"] = "min";
+        doc["score"] = {{"metric", "time"}, {"calibrated", true}, {"transform", "identity"}};
+        return config(doc);
     }
 };
 
@@ -112,7 +123,8 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     auto native = config(document());
     const auto nativeResult = predict(native);
     ASSERT_EQ(nativeResult.status, PredictionStatus::AVAILABLE);
-    EXPECT_NEAR(nativeResult.tflops, 42.0, 1e-12);
+    EXPECT_EQ(nativeResult.metric, "tflops");
+    EXPECT_NEAR(nativeResult.value, 42.0, 1e-12);
 
     auto custom = native;
     custom.adapterType = "custom_library";
@@ -124,7 +136,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
     custom.customLibrarySymbol = "test_linear_scorer";
     const auto customResult = predict(custom);
     ASSERT_EQ(customResult.status, PredictionStatus::AVAILABLE);
-    EXPECT_NEAR(customResult.tflops, nativeResult.tflops, 1e-12);
+    EXPECT_NEAR(customResult.value, nativeResult.value, 1e-12);
 
     auto tree = native;
     tree.adapterType = "tree_data";
@@ -136,7 +148,7 @@ TEST_F(TestEnginePredictor, NativeCustomAndTreeRecoverTheSamePhysicalThroughput)
                     .buildToFile(tree.modelArtifactPath));
     const auto treeResult = predict(tree);
     ASSERT_EQ(treeResult.status, PredictionStatus::AVAILABLE);
-    EXPECT_NEAR(treeResult.tflops, nativeResult.tflops, 1e-12);
+    EXPECT_NEAR(treeResult.value, nativeResult.value, 1e-12);
 }
 
 /// RFC 0019 §7.2's digest is the adapter's to verify, and this is the L1 half of that.
@@ -164,7 +176,10 @@ TEST_F(TestEnginePredictor, ACustomLibraryWhoseDeclaredHashIsNotItsBytesYieldsNo
     // answer, and the answer is bad". A library present under a digest it does not match is
     // the second, and reporting it as merely absent would hide a substituted artifact.
     EXPECT_EQ(result.status, PredictionStatus::INVALID);
-    EXPECT_DOUBLE_EQ(result.tflops, 0.0);
+    EXPECT_DOUBLE_EQ(result.value, 0.0);
+    // Every answer names the metric it was asked in, a refusal included, so the host can
+    // tell a wrong-metric answer from a right-metric refusal.
+    EXPECT_EQ(result.metric, "tflops");
 }
 
 TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
@@ -177,7 +192,8 @@ TEST_F(TestEnginePredictor, DescriptionPublishesBindingWithoutLoadingOrScoring)
     EXPECT_EQ(scorerCalls, 0U);
     const auto binding = nlohmann::json::parse(description.binding_json);
     EXPECT_EQ(binding.at("engine"), "test:opaque");
-    EXPECT_EQ(binding.at("role"), "predict_engine_tflops");
+    EXPECT_EQ(binding.at("role"), "predict_engine");
+    EXPECT_EQ(binding.at("metric"), "tflops");
     EXPECT_EQ(binding.at("selector_revision"), "selector-1");
     EXPECT_EQ(binding.at("uhd_id"), cfg.uhdId);
     // A description says what a model collected from it would be trained against. For an
@@ -200,7 +216,7 @@ TEST_F(TestEnginePredictor, EngineWithNoResolvedRoleDescribesItsBindingAndDeclin
     const UhdConfig unbound;
     const auto evaluated = predictWith(unbound, nullptr);
     EXPECT_EQ(evaluated.status, PredictionStatus::UNAVAILABLE);
-    EXPECT_EQ(evaluated.reason, "no engine UHD is deployed");
+    EXPECT_EQ(evaluated.reason, "no predict_engine UHD for metric 'tflops' on arch 'gfx942'");
     EXPECT_TRUE(evaluated.binding_json.empty());
     EXPECT_EQ(scorerCalls, 0U);
 
@@ -220,7 +236,7 @@ TEST_F(TestEnginePredictor, LoaderBackfilledAttachmentMustAgreeWithTheAskingEngi
 {
     auto cfg = config(document());
     cfg.engineName = "test:opaque";
-    cfg.role = "predict_engine_tflops";
+    cfg.role = "predict_engine";
     cfg.arch = "default";
     ASSERT_EQ(predict(cfg).status, PredictionStatus::AVAILABLE);
 
@@ -229,9 +245,76 @@ TEST_F(TestEnginePredictor, LoaderBackfilledAttachmentMustAgreeWithTheAskingEngi
     cfg.engineName = "test:opaque";
     cfg.role = "sort_kernel_catalog";
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
-    cfg.role = "predict_engine_tflops";
+    cfg.role = "predict_engine";
     cfg.arch = "gfx950";
     EXPECT_EQ(predict(cfg).status, PredictionStatus::INVALID);
+}
+
+/// RFC 0019 §4.4: metrics never substitute for one another. A model of one metric asked a
+/// question in another is a binding that does not match -- the number would be in the wrong
+/// units -- so it is refused rather than reported, and the refusal still names the metric
+/// that was asked.
+TEST_F(TestEnginePredictor, AModelIsNeverAnsweredInAnotherMetric)
+{
+    const auto tflops = config(document());
+    ASSERT_EQ(predict(tflops).status, PredictionStatus::AVAILABLE);
+    const auto asTime
+        = predictWith(tflops, prediction_detail::model(tflops), true, "gfx942", "time");
+    EXPECT_EQ(asTime.status, PredictionStatus::INVALID);
+    EXPECT_EQ(asTime.metric, "time");
+    EXPECT_DOUBLE_EQ(asTime.value, 0.0);
+}
+
+/// One engine may bind one model per metric (RFC 0019 §3.1), and the arch fallback stays
+/// inside the requested metric: (gfx950, time) falls back to (default, time) and never to
+/// (gfx950, tflops), because that would report a throughput as a time.
+TEST_F(TestEnginePredictor, BindingSelectsByMetricAndFallsBackWithinIt)
+{
+    EngineModelBinding binding;
+    binding.bind("tflops", "default", config(document()));
+    binding.bind("time", "gfx942", timeConfig());
+    const auto ask = [&](const std::string& metric, const std::string& arch) {
+        return binding.predict(17, "test:opaque", "selector-1", metric, arch, _features, true);
+    };
+
+    const auto tflops = ask("tflops", "gfx942");
+    ASSERT_EQ(tflops.status, PredictionStatus::AVAILABLE);
+    EXPECT_EQ(tflops.metric, "tflops");
+    EXPECT_NEAR(tflops.value, 42.0, 1e-12);
+
+    // The time model scores the same feature through an identity transform, so its value is
+    // distinguishable from the throughput model's.
+    const auto time = ask("time", "gfx942");
+    ASSERT_EQ(time.status, PredictionStatus::AVAILABLE);
+    EXPECT_EQ(time.metric, "time");
+    EXPECT_NEAR(time.value, std::log1p(42.0), 1e-12);
+    EXPECT_EQ(time.uhd_id, "01112233-4455-6677-8899-aabbccddeeff");
+
+    const auto otherArch = ask("time", "gfx950");
+    EXPECT_EQ(otherArch.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(otherArch.metric, "time");
+    EXPECT_EQ(otherArch.reason, "no predict_engine UHD for metric 'time' on arch 'gfx950'");
+
+    // A refusal is per metric too: refusing time on gfx942 leaves the tflops model answering.
+    binding.markUnusable("time", "gfx942", PredictionStatus::INVALID, "refused");
+    EXPECT_EQ(ask("time", "gfx942").status, PredictionStatus::INVALID);
+    EXPECT_EQ(ask("tflops", "gfx942").status, PredictionStatus::AVAILABLE);
+}
+
+/// A time is valid only when strictly positive (RFC 0019 §11.4), where a throughput of 0 is
+/// merely the worst one: validity is the metric's, not a single rule for every number.
+TEST_F(TestEnginePredictor, ValidityIsTheRequestedMetrics)
+{
+    const auto cfg = timeConfig();
+    _features.bind("graph.work", 0.0);
+    const auto zero = predictWith(cfg, prediction_detail::model(cfg), true, "gfx942", "time");
+    EXPECT_EQ(zero.status, PredictionStatus::INVALID);
+    EXPECT_EQ(zero.metric, "time");
+
+    _features.bind("graph.work", 0.5);
+    const auto positive = predictWith(cfg, prediction_detail::model(cfg), true, "gfx942", "time");
+    ASSERT_EQ(positive.status, PredictionStatus::AVAILABLE);
+    EXPECT_DOUBLE_EQ(positive.value, 0.5);
 }
 
 /// RFC 0019 §4.1: `trained_against` names the descriptor set and only that. The engine
@@ -272,7 +355,7 @@ TEST_F(TestEnginePredictor, MissingFeatureDeclinesButLazyDefaultRetainsCoverage)
     cfg.featuresHash = FeatureExtractor::computeHash(cfg.featuresSignature);
     const auto withDefault = predict(cfg);
     ASSERT_EQ(withDefault.status, PredictionStatus::AVAILABLE);
-    EXPECT_NEAR(withDefault.tflops, 7.0, 1e-12);
+    EXPECT_NEAR(withDefault.value, 7.0, 1e-12);
 }
 
 TEST_F(TestEnginePredictor, InvalidScoreAndTransformNeverBecomeAvailable)
@@ -285,7 +368,7 @@ TEST_F(TestEnginePredictor, InvalidScoreAndTransformNeverBecomeAvailable)
     // An uninvertible transform, not merely an unusual one. `sqrt` stood here while
     // validateBinding kept its own {identity, log1p} list; it now asks
     // score_transform::isSupported, which accepts every transform this runtime can invert --
-    // so pinning the gate needs a name no inverse exists for. Recovering TFLOPS from a
+    // so pinning the gate needs a name no inverse exists for. Recovering the metric from a
     // z-score needs the training distribution's mean and variance, which no UHD carries.
     cfg.scoreTransform = "zscore";
     _features.bind("graph.work", 2.0);
@@ -314,7 +397,7 @@ TEST_F(TestEnginePredictor, LoadedModelIsImmutableAndTrainingArchitectureLimitsC
     ASSERT_TRUE(std::filesystem::remove(cfg.modelArtifactPath));
     const auto cached = predictWith(cfg, compiled);
     ASSERT_EQ(cached.status, PredictionStatus::AVAILABLE);
-    EXPECT_NEAR(cached.tflops, 9.0, 1e-12);
+    EXPECT_NEAR(cached.value, 9.0, 1e-12);
     EXPECT_EQ(predictWith(cfg, compiled, true, "gfx950").status, PredictionStatus::UNAVAILABLE);
 }
 

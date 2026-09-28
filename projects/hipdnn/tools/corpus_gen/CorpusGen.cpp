@@ -29,6 +29,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -511,7 +512,11 @@ int runGenerator(const std::vector<std::string>& args)
     // query. Set only when the caller has not, so it can still be turned back on.
     if(options.haveEngineId)
     {
-        setenv("MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK", "0", /*overwrite=*/0);
+        // Portable (POSIX `setenv` does not exist on Windows); an empty value counts as unset.
+        if(hipdnn_data_sdk::utilities::getEnv("MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK").empty())
+        {
+            hipdnn_data_sdk::utilities::setEnv("MIOPEN_DEBUG_ENABLE_AI_IMMED_MODE_FALLBACK", "0");
+        }
     }
 
     hipdnnHandle_t handle = nullptr;

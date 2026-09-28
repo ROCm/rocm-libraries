@@ -38,27 +38,29 @@ namespace miopen_plugin
 // ============================================================================
 
 // ============================================================================
-// L1 throughput models (RFC 0019 Open Question 7, RESOLVED)
+// L1 engine models (RFC 0019 Open Question 7, RESOLVED)
 // ============================================================================
-// MIOpen ships no UED, so it cannot bind a `predict_engine_tflops` UHD through a role
-// map (RFC 0019 §3.1). It binds one the other sanctioned way instead: by naming that
-// UHD's UUID here, in the provider's own engine definition. The loader resolves the id
-// out of the descriptor catalog it already parses and validates provenance exactly as it
+// MIOpen ships no UED, so it cannot bind a `predict_engine` UHD through a role map (RFC
+// 0019 §3.1). It binds them the other sanctioned way instead: by naming those UHDs'
+// UUIDs here, in the provider's own engine definition. The loader resolves each id out
+// of the descriptor catalog it already parses and validates provenance exactly as it
 // does for a UED role reference; the UHD keeps §4.1's shape and carries no `engine`,
 // `role` or `arch` member, so no document can attach itself to an engine by claiming one.
 //
-// One id per engine, not one per provider: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC
-// run different solvers over different operations and perform differently, so a single
-// model cannot answer for both. `default` covers every architecture with one model;
-// splitting an engine per architecture is an edit to its map here, nothing else.
+// Ids per engine, not per provider: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC run
+// different solvers over different operations and perform differently, so a single
+// model cannot answer for both. `default` covers every architecture; splitting an engine
+// per architecture is an edit to its map here, nothing else. Each architecture lists at
+// most one model per ranking metric (§4.4); the metric is the model's own `score.metric`,
+// so adding a `time` model is appending its id to the list.
 //
 // Nothing is deployed for these ids today. An unresolved id is UNAVAILABLE -- no
 // estimate, engine unaffected, static ordering as before (§11.2's "no declared model"
 // row) -- so the ids can ship ahead of the models they name.
-const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS{
-    {"default", "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"}};
-const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS{
-    {"default", "2d95f8e7-16c4-4b03-a8f1-7be25390c4da"}};
+const std::map<std::string, std::vector<std::string>> MIOPEN_ENGINE_L1_MODELS{
+    {"default", {"c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"}}};
+const std::map<std::string, std::vector<std::string>> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS{
+    {"default", {"2d95f8e7-16c4-4b03-a8f1-7be25390c4da"}}};
 
 const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngineDefinitions()
 {

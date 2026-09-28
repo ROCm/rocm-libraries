@@ -13,8 +13,11 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include <hipdnn_plugin_sdk/heuristics/DeviceFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
+#endif
 
 namespace hipdnn_plugin_sdk::heuristics
 {
@@ -36,6 +39,10 @@ inline std::optional<int64_t>
     }
     return setting.valueAs<IntValue>().value();
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+// Everything below publishes UHD feature symbols, which exist only with the kernel ingestor:
+// the feature extractor evaluates the descriptor expression language it ships.
 
 namespace detail
 {
@@ -420,5 +427,7 @@ inline uhd::FeatureExtractionContext
     }
     return features;
 }
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
 
 } // namespace hipdnn_plugin_sdk::heuristics

@@ -61,7 +61,6 @@
   },
   "objective": "min",
   "score": {
-    "units": "ms",
     "calibrated": false,
     "transform": "log1p"
   },

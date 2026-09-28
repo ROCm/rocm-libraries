@@ -7,7 +7,7 @@ Adapts the training pipeline from CK dispatcher heuristics (train.py) for
 hipDNN's UHD system. Key differences:
 - Output is FlatBuffer GbdtModel (not .lgbm file)
 - Features come from input data columns (not hardcoded per-op)
-- Uses log1p(target) for scale-invariant training
+- Uses log(target) for scale-invariant training (see score_transform.py)
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import lightgbm as lgb
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
+from . import score_transform
 from .features import (
     derive_categorical_encoding,
     encode_feature_value,
@@ -113,7 +114,7 @@ def train_model(
     categorical_encoding: dict[str, dict[str, int]] | None = None,
     feature_matrix: np.ndarray | None = None,
 ) -> lgb.Booster:
-    """Train LightGBM regressor on log1p(target).
+    """Train LightGBM regressor on log(target) -- score_transform.TRAINED.
 
     Uses GroupKFold cross-validation when group_cols is provided to prevent
     problem leakage (same problem appearing in both train and validation).
@@ -138,9 +139,12 @@ def train_model(
     """
     X = build_feature_matrix(df, feature_cols, categorical_encoding) if feature_matrix is None else feature_matrix
     target = df[target_col].to_numpy(dtype=np.float64)
-    if not np.isfinite(target).all() or (target < 0).any():
-        raise ValueError(f"target {target_col!r} must contain finite nonnegative values")
-    y = np.log1p(target)
+    if not np.isfinite(target).all() or (target <= 0).any():
+        # RFC 0019 §8.3: a zero or negative measurement is no measurement, and the runtime
+        # refuses a score that recovers to one. A label the model could only learn to
+        # reproduce as an unusable score is an error in the corpus, not a data point.
+        raise ValueError(f"target {target_col!r} must contain finite, strictly positive values")
+    y = score_transform.forward(target)
 
     if params is None:
         params = dict(_DEFAULT_PARAMS)
@@ -179,48 +183,7 @@ def train_model(
 
     model = lgb.train(params, train_data, num_boost_round=best_iter)
     logger.info("Trained model with %d trees", model.num_trees())
-
-    _report_out_of_range_predictions(model, X, target_col)
-
     return model
-
-
-def _report_out_of_range_predictions(
-    model: "lgb.Booster", features: np.ndarray, target_col: str
-) -> int:
-    """Report training rows where the model predicts a target it could never have seen.
-
-    The model is fitted on ``log1p(target)`` and the runtime inverts that with ``expm1`` to
-    recover the declared units. ``expm1`` is negative for any prediction below zero, so a
-    negative prediction here means a negative throughput -- a quantity the target cannot take.
-
-    Caught at training time because that is the cheapest place to catch it and the only place
-    it can be fixed: once the model ships, the runtime can do nothing but discard the score.
-    It is not fatal, because a partially-trained model is a legitimate intermediate state
-    during corpus development, and because the runtime bounds it regardless. It is loud
-    because a model doing this on its *own training data* will do it worse in the field.
-
-    Returns the number of offending rows, so a caller can decide to fail on it.
-    """
-    predictions = model.predict(features)
-    offending = predictions < 0.0
-    count = int(np.count_nonzero(offending))
-    if count == 0:
-        return 0
-
-    worst = float(np.expm1(predictions[offending].min()))
-    logger.error(
-        "Model predicts a negative %s for %d of %d training rows (worst: %.4g). "
-        "The target cannot be negative, so the runtime will discard these scores and rank "
-        "on declared order instead. This usually means the corpus contains rows whose "
-        "measured target is at or near zero, or that the feature set does not separate the "
-        "problems it is being asked to rank.",
-        target_col,
-        count,
-        len(predictions),
-        worst,
-    )
-    return count
 
 
 def _problem_groups(df: pd.DataFrame, problem_cols: list[str]) -> np.ndarray:
@@ -317,7 +280,7 @@ def evaluate_regret(
             params,
             lgb.Dataset(
                 features[train_idx],
-                label=np.log1p(measured[train_idx]),
+                label=score_transform.forward(measured[train_idx]),
                 feature_name=[f"f{index}" for index in range(features.shape[1])],
             ),
             num_boost_round=num_boost_round,
@@ -367,7 +330,7 @@ def evaluate_regret(
 
 
 def predict(model: lgb.Booster, X: np.ndarray) -> np.ndarray:
-    """Predict using trained model, inverting log1p transform.
+    """Predict using trained model, inverting the trained transform.
 
     Args:
         model: Trained LightGBM Booster.
@@ -376,5 +339,4 @@ def predict(model: lgb.Booster, X: np.ndarray) -> np.ndarray:
     Returns:
         Predictions in original scale (TFLOPS).
     """
-    log_pred = model.predict(X)
-    return np.expm1(log_pred)
+    return score_transform.inverse(model.predict(X), score_transform.TRAINED)

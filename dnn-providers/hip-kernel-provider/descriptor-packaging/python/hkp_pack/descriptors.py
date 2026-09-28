@@ -416,25 +416,64 @@ def _validate_ued(desc):
     where = f"UED {desc.path.name}"
     if "heuristic" in desc.doc:
         raise HkpPackError(f"{where}: legacy heuristic is not supported; use role/arch maps")
+    # Mirrors the loader's requireKnownKeys: a misspelled role is absent rather than
+    # wrong, and an absent role is legal, so the engine would silently lose its model.
+    unknown = sorted(key for key in desc.doc
+                     if key not in _UED_KEYS and not key.startswith(("x-", "_"))
+                     and key != "provenance")
+    if unknown:
+        raise HkpPackError(f"{where} has unknown fields {unknown}; "
+                           "extension keys must start with 'x-' or '_'")
     for role in _UHD_ROLES:
         if role not in desc.doc:
             continue
         entries = desc.doc[role]
         if not isinstance(entries, dict) or not entries:
             raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
-        for arch, identity in entries.items():
+        for arch, value in entries.items():
             if arch != "default":
                 _reject_nonbare_arch([arch], where)
-            _validate_uuid(identity, f"{where}.{role}.{arch}")
+            entry_where = f"{where}.{role}.{arch}"
+            if isinstance(value, str) or role not in _METRIC_ROLES:
+                _validate_uuid(value, entry_where)
+                continue
+            # RFC 0019 §3.1: a scoring role names one UHD per metric, so its value may
+            # be a list. The list names models, not metrics -- each UHD declares its own.
+            if not isinstance(value, list) or not value:
+                raise HkpPackError(f"{entry_where} must be a UUID or a nonempty list of UUIDs")
+            seen = set()
+            for identity in value:
+                _validate_uuid(identity, entry_where)
+                if identity.lower() in seen:
+                    raise HkpPackError(f"{entry_where} lists {identity} twice")
+                seen.add(identity.lower())
+
+
+def _role_references(doc, role):
+    """Every UHD id a UED role names, flattening the list form of a scoring role."""
+    for value in doc.get(role, {}).values():
+        if isinstance(value, list):
+            yield from value
+        else:
+            yield value
 
 
 # The loader's enum vocabularies, mirrored so a bad spelling is a pack-time
 # error rather than a runtime file-drop. Loader is authoritative:
 # DescriptorLoader.hpp matchScopeFromString / heuristicKindFromString /
-# metadataTypeFromString.
+# metadataTypeFromString / parseEngineDescriptor.
 _MATCH_SCOPES = ("graph", "kernel")
 _UHD_ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
-_UHD_ROLES = ("sort_kernel_catalog", "predict_engine_tflops", "predict_applicable_kernels")
+_UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
+# The roles that map an architecture to one UHD per ranking metric. A candidate
+# generator produces the set a ranker scores, so it has no metric and stays single.
+_METRIC_ROLES = ("sort_kernel_catalog", "predict_engine")
+_UED_KEYS = ("version", "revision", "id", "name", "sdk_version", *_UHD_ROLES, "metadata",
+             "knobs", "behavior_notes", "numerical_notes", "graph_match")
+# RFC 0019 §4.4's closed ranking-metric registry, mirrored from
+# hipdnn_data_sdk/utilities/RankingMetrics.hpp: each metric fixes the UHD
+# `objective` a model of it must declare.
+_RANKING_METRIC_OBJECTIVES = {"tflops": "max", "time": "min"}
 _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
 
 # The adapters whose body names a file the packed tree has to carry. `static_order`
@@ -575,12 +614,28 @@ def _validate_uhd(desc, source_root):
                 raise HkpPackError(f"{where}.categorical_encoding.{name} must map values to integer codes")
     if "score" in doc:
         score = doc["score"]
-        _known_keys(score, ("units", "calibrated", "transform"), f"{where}.score")
-        for key in ("units", "transform"):
-            if key in score:
-                _string(score[key], f"{where}.score.{key}")
+        _known_keys(score, ("metric", "calibrated", "transform"), f"{where}.score")
+        if "transform" in score:
+            _string(score["transform"], f"{where}.score.transform")
+        if "metric" in score and (not isinstance(score["metric"], str)
+                                  or score["metric"] not in _RANKING_METRIC_OBJECTIVES):
+            raise HkpPackError(
+                f"{where}.score.metric {score['metric']!r} is not a registered ranking "
+                f"metric (expected one of {', '.join(_RANKING_METRIC_OBJECTIVES)})")
         if "calibrated" in score and not isinstance(score["calibrated"], bool):
             raise HkpPackError(f"{where}.score.calibrated must be a boolean")
+        # A calibrated score claims to be comparable across engines, which a number is
+        # only in a named quantity (RFC 0019 §4.4).
+        if score.get("calibrated") and "metric" not in score:
+            raise HkpPackError(f"{where}: a calibrated score requires score.metric")
+        # The metric fixes the direction and `objective` only restates it; disagreeing,
+        # the model ranks one way while engine selection compares the other.
+        if "metric" in score:
+            expected = _RANKING_METRIC_OBJECTIVES[score["metric"]]
+            if doc.get("objective") != expected:
+                raise HkpPackError(
+                    f"{where}: score.metric '{score['metric']}' requires objective "
+                    f"'{expected}', got {doc.get('objective')!r}")
     body = doc[adapter]
     if adapter == "static_order":
         _known_keys(body, ("order",), f"{where}.{adapter}")
@@ -862,15 +917,43 @@ def _validate_references(flat):
                     f"subset of KDP {kdp.path.name} arch {doc.get('arch')}"
                 )
     typed_ids = {kind: {d.id for d in flat.by_type(kind)} for kind in ("kmd", "uhd")}
+    uhd_by_id = {d.id: d for d in flat.by_type("uhd")}
     for ued in flat.by_type("ued"):
         references = [(ued.doc.get("metadata"), "kmd")]
         references += [(ref, "uhd") for role in _UHD_ROLES
-                       for ref in ued.doc.get(role, {}).values()]
+                       for ref in _role_references(ued.doc, role)]
         for ref, kind in references:
             if ref is not None and ref not in typed_ids[kind]:
                 raise HkpPackError(
                     f"UED {ued.path.name} references unknown {kind.upper()} descriptor Id '{ref}'"
                 )
+        _validate_role_metrics(ued, uhd_by_id)
+
+
+def _validate_role_metrics(ued, uhd_by_id):
+    """At most one model per metric for each architecture a scoring role names.
+
+    RFC 0019 §3.1: a scoring role's list is keyed by the metric each UHD declares, so two
+    models in one metric leave the loader no way to choose and it disables that metric for
+    that architecture -- the engine keeps working and silently stops using both models.
+    The same holds for two metric-less rankers. A `predict_engine` model with no metric
+    answers in no registered units, so nothing could consume it. All three are authoring
+    errors the pack reports against the source tree.
+    """
+    for role in _METRIC_ROLES:
+        for arch, value in ued.doc.get(role, {}).items():
+            where = f"UED {ued.path.name}.{role}.{arch}"
+            by_metric = {}
+            for ref in [value] if isinstance(value, str) else value:
+                metric = (uhd_by_id[ref].doc.get("score") or {}).get("metric")
+                if metric is None and role == "predict_engine":
+                    raise HkpPackError(f"{where} names UHD '{ref}', which declares no "
+                                       "score.metric; an engine prediction needs one")
+                if metric in by_metric:
+                    what = f"metric '{metric}'" if metric else "no metric"
+                    raise HkpPackError(f"{where} names two UHDs with {what}: "
+                                       f"'{by_metric[metric]}' and '{ref}'")
+                by_metric[metric] = ref
 
 
 def reachable_generic_ids(flat, surviving_kdps):
@@ -894,5 +977,5 @@ def reachable_generic_ids(flat, surviving_kdps):
         gdesc = by_id[rid]
         if gdesc.type == "ued":
             pending.append(gdesc.doc.get("metadata"))
-            pending += [ref for role in _UHD_ROLES for ref in gdesc.doc.get(role, {}).values()]
+            pending += [ref for role in _UHD_ROLES for ref in _role_references(gdesc.doc, role)]
     return reachable

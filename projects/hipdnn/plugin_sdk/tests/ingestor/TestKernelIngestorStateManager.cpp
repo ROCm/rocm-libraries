@@ -714,14 +714,13 @@ std::unique_ptr<StateManager> makeCalibratedStateManager()
     pack.dispatchId = DISPATCH_ID;
     // No matchers, so every kernel reaches the catalog and the only narrowing in these
     // tests is the one the test performs itself.
-    pack.kernels = {
-        makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
-        makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/10),
-        makeKernel(UNSCORABLE_ID,
-                   "unscorable",
-                   DegradesOnAnUnscorableCandidate::UNSCORABLE_BLOCK_SIZE,
-                   "FLOAT",
-                   /*priority=*/0)};
+    pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
+                    makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/10),
+                    makeKernel(UNSCORABLE_ID,
+                               "unscorable",
+                               DegradesOnAnUnscorableCandidate::UNSCORABLE_BLOCK_SIZE,
+                               "FLOAT",
+                               /*priority=*/0)};
 
     return std::make_unique<StateManager>(makeSchema(),
                                           std::vector<MatchDescriptor>{},
@@ -736,12 +735,11 @@ std::vector<KernelDefinition> withoutKernel(const std::vector<KernelDefinition>&
                                             const DescriptorId& excluded)
 {
     std::vector<KernelDefinition> kept;
-    std::copy_if(entries.begin(),
-                 entries.end(),
-                 std::back_inserter(kept),
-                 [&excluded](const KernelDefinition& kernel) {
-                     return kernel.kernelId != excluded;
-                 });
+    std::copy_if(
+        entries.begin(),
+        entries.end(),
+        std::back_inserter(kept),
+        [&excluded](const KernelDefinition& kernel) { return kernel.kernelId != excluded; });
     return kept;
 }
 
@@ -834,6 +832,57 @@ TEST(TestKernelIngestorStateManager, AColdPinnedCalibratedRankingAgreesWithAnUnp
            "rankings are static order";
     EXPECT_DOUBLE_EQ(pinned.front().score, 0.0)
         << "a subset ranking of its own would have scored `fastest` at 512";
+}
+
+/// Ranks by block size for a throughput request and by the inverse for a time request, so
+/// the two metrics pick different winners over the same catalog.
+class RanksByTheRequestedMetric : public IKernelHeuristic
+{
+public:
+    double score(const MatchContext& context,
+                 const BoundTokens& /*bound*/,
+                 const KernelDefinition& kernel) const override
+    {
+        const auto blockSize = static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+        return context.rankingMetric == "time" ? -blockSize : blockSize;
+    }
+};
+
+/// RFC 0019 §11.4: "Every cache of a ranked order is keyed by metric as well as by model;
+/// otherwise a `time` request could be served an order computed for `tflops`." The sorted
+/// catalog is memoized per (graph, device), so the second request below is a cache hit on
+/// every key component but the metric.
+///
+/// Falsifying mutation: drop the metric from CatalogKey, and the time request returns the
+/// tflops order, `fastest` first.
+TEST(TestKernelIngestorStateManager, ASortedCatalogIsCachedPerRankingMetric)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "metric pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeKernel(FASTEST_ID, "fastest", 512, "FLOAT", /*priority=*/0),
+                    makeKernel(PREFERRED_ID, "preferred", 128, "FLOAT", /*priority=*/0)};
+    const auto manager
+        = std::make_unique<StateManager>(makeSchema(),
+                                         std::vector<MatchDescriptor>{},
+                                         makeTestDispatches(),
+                                         std::vector<KernelDescriptorPack>{std::move(pack)},
+                                         std::make_shared<RanksByTheRequestedMetric>(),
+                                         "test.graph");
+    const TestGraph graph(makeGraphId(0x7D));
+    const auto properties = testDeviceProperties();
+
+    const auto tflops = manager->sortedDefinitions(MatchContext{graph, 0, properties, "tflops"});
+    const auto time = manager->sortedDefinitions(MatchContext{graph, 0, properties, "time"});
+
+    ASSERT_EQ(tflops.size(), 2U);
+    ASSERT_EQ(time.size(), 2U);
+    EXPECT_EQ(tflops.front().kernelId, FASTEST_ID);
+    EXPECT_EQ(time.front().kernelId, PREFERRED_ID)
+        << "the time request was served the order cached for tflops";
 }
 
 // A pack whose kernel matchers reject everything contributes nothing, so it must read

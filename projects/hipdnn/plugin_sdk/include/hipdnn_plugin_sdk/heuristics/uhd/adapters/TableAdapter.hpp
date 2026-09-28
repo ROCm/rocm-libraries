@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include "IUhdAdapter.hpp"
 
 #include <algorithm>
@@ -12,6 +14,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/table_model_generated.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -39,8 +42,8 @@ struct VectorHash
 ///
 /// Maps feature vectors to kernel IDs via bucketing and table lookup. Features are
 /// quantized into discrete buckets, then the bucket combination is looked up in a
-/// precomputed table. Falls back to score=0.0 when no exact match exists (caller
-/// then uses priority/id ordering).
+/// precomputed table. A feature vector no bucket covers is declined (-infinity), which
+/// the consumer orders last under either objective, behind every candidate the table scores.
 class TableAdapter : public IUhdAdapter
 {
 public:
@@ -67,7 +70,7 @@ public:
 
     /// Score a candidate by bucketing features and looking up in the table.
     /// @param features Feature vector (must match expected count).
-    /// @returns Score from table if bucket match found, 0.0 otherwise (fallback to priority).
+    /// @returns Score from table if bucket match found, -infinity (declined) otherwise.
     double score(const std::vector<double>& features) const override;
 
     UhdAdapterType type() const override
@@ -346,7 +349,7 @@ inline double TableAdapter::score(const std::vector<double>& features) const
     if(key.empty())
     {
         // Bucketing failed (invalid model or feature vector)
-        return 0.0;
+        return -std::numeric_limits<double>::infinity();
     }
 
     // Lookup in the prebuilt table
@@ -356,8 +359,9 @@ inline double TableAdapter::score(const std::vector<double>& features) const
         return it->second;
     }
 
-    // No exact match - return 0.0 (fallback to priority ordering)
-    return 0.0;
+    // No exact match: the table has nothing to say about this candidate. 0.0 would read as
+    // a real prediction, and under `objective: min` a zero cost outranks every covered one.
+    return -std::numeric_limits<double>::infinity();
 }
 
 inline bool TableAdapter::isTrainedForArch(const std::string& arch) const
@@ -374,3 +378,5 @@ inline bool TableAdapter::isTrainedForArch(const std::string& arch) const
 }
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

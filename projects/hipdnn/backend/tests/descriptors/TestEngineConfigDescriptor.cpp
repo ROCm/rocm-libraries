@@ -17,7 +17,9 @@
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 
+#include <array>
 #include <memory>
+#include <string>
 
 using namespace hipdnn_backend;
 using namespace plugin;
@@ -188,6 +190,52 @@ TEST_F(TestEngineConfigDescriptor, RejectsForeignOrAmbiguousScoredConfigurations
     config.knobs.push_back(std::make_unique<KnobSettingT>(*knob));
     config.knobs.push_back(std::move(knob));
     EXPECT_THROW(getEngineConfigDescriptor()->setEngineConfig(config), HipdnnException);
+    // A heuristic plugin's config naming an unregistered metric cannot reach plan build.
+    config.knobs.pop_back();
+    config.ranking_metric = "flops";
+    EXPECT_THROW(getEngineConfigDescriptor()->setEngineConfig(config), HipdnnException);
+}
+
+// RFC 0019 §11.4: the configuration's ranking metric becomes EngineConfig.ranking_metric,
+// the field prediction and plan build read. It is refused when unregistered, readable before
+// finalize, and an unset one reads back as the default it means.
+TEST_F(TestEngineConfigDescriptor, RankingMetricRoundTripsIntoTheSerializedConfig)
+{
+    EXPECT_CALL(*getMockEngine(), getEngineId()).WillRepeatedly(Return(1));
+    setEngine();
+    auto config = getEngineConfigDescriptor();
+
+    std::array<char, 16> readBack{};
+    int64_t count = 0;
+    config->getAttribute(HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                         HIPDNN_TYPE_CHAR,
+                         static_cast<int64_t>(readBack.size()),
+                         &count,
+                         readBack.data());
+    EXPECT_STREQ(readBack.data(), "tflops");
+
+    const std::string unregistered = "flops";
+    ASSERT_THROW_HIPDNN_STATUS(config->setAttribute(HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                                                    HIPDNN_TYPE_CHAR,
+                                                    static_cast<int64_t>(unregistered.size()),
+                                                    unregistered.data()),
+                               HIPDNN_STATUS_BAD_PARAM);
+
+    const std::string metric = "time";
+    config->setAttribute(HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                         HIPDNN_TYPE_CHAR,
+                         static_cast<int64_t>(metric.size()),
+                         metric.data());
+    config->getAttribute(HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT,
+                         HIPDNN_TYPE_CHAR,
+                         static_cast<int64_t>(readBack.size()),
+                         &count,
+                         readBack.data());
+    EXPECT_STREQ(readBack.data(), "time");
+    const auto bytes = config->getSerializedEngineConfig();
+    const auto* serialized = hipdnn_flatbuffers_sdk::data_objects::GetEngineConfig(bytes.ptr);
+    ASSERT_NE(serialized->ranking_metric(), nullptr);
+    EXPECT_EQ(serialized->ranking_metric()->string_view(), "time");
 }
 
 TEST_F(TestEngineConfigDescriptor, EngineConfigRejectsEngineCatalogInspectionAttributes)

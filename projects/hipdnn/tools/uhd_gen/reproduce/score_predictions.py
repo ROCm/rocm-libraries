@@ -56,8 +56,8 @@ def main() -> int:
     predicted: dict[str, dict[str, float]] = collections.defaultdict(dict)
     for row in json.loads(args.predictions.read_text(encoding="utf-8")):
         label = ENGINE_LABELS.get(row["engine"])
-        if label and row.get("tflops") is not None:
-            predicted[row["graph"]][label] = float(row["tflops"])
+        if label and row.get("metric") == "tflops" and row.get("value") is not None:
+            predicted[row["graph"]][label] = float(row["value"])
 
     rows = []
     for name, scores in measured.items():

@@ -17,9 +17,9 @@ fail differently on one:
     report comes back empty. That is the right arithmetic paired with an unhelpful
     diagnosis: an empty report reads as a broken corpus or a bad split, and an operator
     will go and debug one.
-  - `predict_engine_tflops` is unaffected, and is the role such an engine actually
-    wants. The kernel is already chosen; what nobody knows is how fast it will run, and
-    that number is exactly what cross-engine arbitration compares.
+  - `predict_engine` is unaffected, and is the role such an engine actually wants. The
+    kernel is already chosen; what nobody knows is how fast it will run, and that number
+    is exactly what cross-engine arbitration compares.
 
 So determinism is not a defect to route around. It is a property to detect and report,
 so that the operator is sent to the role with something to learn rather than left
@@ -102,9 +102,9 @@ class CatalogDensity:
             "the problem and there is nothing for a ranking model to order. This is a "
             "property of the engine, not a defect in the corpus -- a matcher that pins "
             "every distinguishing field leaves a singleton, and the engine's own score "
-            "hook is inert by construction. Train --role predict_engine_tflops instead: "
-            "the kernel is already chosen, and its throughput is the quantity "
-            "cross-engine arbitration actually compares."
+            "hook is inert by construction. Train --role predict_engine instead: "
+            "the kernel is already chosen, and its measured throughput or time is the "
+            "quantity cross-engine arbitration actually compares."
         )
 
     def near_deterministic_warning(self, threshold: float = 0.95) -> str | None:

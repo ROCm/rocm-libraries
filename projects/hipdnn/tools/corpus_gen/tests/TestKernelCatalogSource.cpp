@@ -111,7 +111,7 @@ TEST(TestKernelCatalogSource, ADeterministicPackContributesEveryGeometryItCarrie
 {
     // The regression. Four geometries, one kernel each: the matcher pins every distinguishing
     // field, so kernel identity is a total function of the problem. That is precisely the engine
-    // `predict_engine_tflops` exists for, and it cannot be measured on a corpus that excludes it.
+    // `predict_engine` exists for, and it cannot be measured on a corpus that excludes it.
     TempTree tree("deterministic");
     const auto path = tree.pack("dense.kdp.json",
                                 nlohmann::json::array({

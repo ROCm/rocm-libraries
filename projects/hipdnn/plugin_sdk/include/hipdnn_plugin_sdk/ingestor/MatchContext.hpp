@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <variant>
 
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
@@ -61,11 +62,15 @@ struct CatalogKey
     /// ranking is not a wrong answer today only because nothing hands entries across that
     /// boundary; keying it makes that a property of the key rather than of the call graph.
     hipdnn_data_sdk::utilities::Version engineVersion{};
+    /// The ranking metric the order was computed for (RFC 0019 §11.4): every cache of a
+    /// ranked order is keyed by metric, or a `time` request is served a `tflops` order.
+    /// Always a registered name, so it views the registry's static storage.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 
     bool operator==(const CatalogKey& other) const noexcept
     {
         return graphId == other.graphId && deviceId == other.deviceId
-               && engineVersion == other.engineVersion;
+               && engineVersion == other.engineVersion && rankingMetric == other.rankingMetric;
     }
 };
 
@@ -89,6 +94,7 @@ struct CatalogKeyHash
         mix(static_cast<size_t>(key.engineVersion.major));
         mix(static_cast<size_t>(key.engineVersion.minor));
         mix(static_cast<size_t>(key.engineVersion.patch));
+        mix(std::hash<std::string_view>{}(key.rankingMetric));
         return hash;
     }
 };
@@ -118,6 +124,11 @@ struct MatchContext
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
     DeviceId deviceId;
     const DeviceProperties& deviceProperties;
+    /// The registered ranking metric the request ranks by (RFC 0019 §11.4), which selects
+    /// the `sort_kernel_catalog` UHD and keys every ranked-order cache. Matching and
+    /// dispatch never read it. A view like the references above, so it must outlive the
+    /// context; a cache keys on the registry's own copy of the name, never on this view.
+    std::string_view rankingMetric = hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC;
 };
 
 /// nullopt when absent or non-v4 (both mean "cannot cache").

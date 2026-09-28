@@ -22,8 +22,9 @@ from .catalog import DeterministicCatalogError, candidate_density
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import build_features_signature, signature_references
-from .provenance import snapshot_provenance
+from .provenance import ROLES, snapshot_provenance
 from .immediate import LABEL_STATISTIC, ROLE, normalize_row, normalize_corpus, training_binding, validate_signature
+from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", default="Generated UHD")
     parser.add_argument("--uhd-id")
     parser.add_argument("--arch", help="Promotion arch; otherwise infer one observed architecture")
-    parser.add_argument("--role", default="sort_kernel_catalog", choices=["sort_kernel_catalog", "predict_engine_tflops", "predict_applicable_kernels"])
+    parser.add_argument("--role", default="sort_kernel_catalog", choices=ROLES)
+    parser.add_argument("--metric", nargs="+", action="extend", choices=tuple(RANKING_METRICS),
+                        help="Ranking metric(s) to train, one UHD per metric from the same "
+                             f"collection (repeatable; default: {DEFAULT_RANKING_METRIC})")
     parser.add_argument("--no-promote", action="store_true", help="Validate installation but leave shipping descriptors untouched")
 
 
@@ -283,16 +287,57 @@ def collect_graph(command: list[str], environment: dict, log_dir: Path, commands
 
 
 def collect_immediate_graph(command: list[str], environment: dict, log_dir: Path,
-                            commands: list) -> tuple[list[dict], set[str]]:
-    """Measure one engine's ordinary no-search selection without inspecting its catalog."""
+                            commands: list, *, metric: str) -> tuple[list[dict], set[str]]:
+    """Measure one engine's ordinary no-search selection without inspecting its catalog.
+
+    The engine chooses its kernel at plan build with its ranker for the request's metric
+    (RFC 0019 §11.4), so an L1 label for `metric` is a measurement of the selection a
+    request for `metric` actually gets -- which is why the metric is part of the request.
+    """
     if "--knob" in command or "enumerate" in command:
         raise ValueError("L1 collection cannot pin knobs or enumerate candidates")
-    response = _run_json([*command, "--collect-immediate", "--json"],
+    response = _run_json([*command, "--collect-immediate", "--ranking-metric", metric, "--json"],
                          environment, log_dir, len(commands), commands)
+    if response.get("metric") != metric:
+        raise ValueError(f"immediate measurement was taken for metric {response.get('metric')!r}, "
+                         f"not the requested {metric!r}")
     row = normalize_row(response)
     if str(row["engine"]) != command[command.index("--engine-id") + 1]:
         raise ValueError("immediate measurement returned another engine")
     return [row], set(json.loads(row["features"]))
+
+
+def _catalog_label(metric: str, usable: pd.DataFrame, defaulted: bool, role: str) -> tuple:
+    """(declared metric, target, calibrated, timing statistic) for a catalog ranker.
+
+    RFC 0019 §13.4: each metric fixes its label, so the only choice left is whether the
+    corpus can supply it.
+    """
+    label = ranking_metric(metric).label
+    if label in usable.columns and bool(pd.to_numeric(usable[label], errors="coerce").gt(0).all()):
+        # RFC 0019 §11.1 (:1501-1506) gives `sort_kernel_catalog` a cross-engine
+        # role, and §11.2's `B only` ranking row exists only for a score that is a
+        # comparable absolute quantity. `avgTimeMs` rather than the robust mean -- as the
+        # label itself, or as the time `tflops` is derived from -- because §11.2 (:2003)
+        # pins a calibrated score to the mean.
+        return metric, label, True, LABEL_STATISTIC
+    if not defaulted:
+        raise ValueError(
+            f"--metric {metric} needs a positive {label!r} on every measured candidate, and "
+            "this corpus does not carry one (tflops needs the engine to publish graph.flops)")
+    # A millisecond score ranks this engine's own catalog just as well and forfeits the
+    # cross-engine role -- legal under RFC 0019.13 §2.5 (:122-123) and §15.1 (:2387-2390),
+    # but a smaller model than the role is. It declares no metric: it estimates none, and
+    # is the engine's metric-less default ranker (RFC 0019 §3.1).
+    logger.warning(
+        "Not every measured candidate carries a positive graph.flops and avgTimeMs, so "
+        "%s is trained on robustMeanMs/min with no score.metric and score.calibrated=false. "
+        "That ranks this engine's catalog correctly (RFC 0019.13 §2.5, §15.1) but forfeits "
+        "the cross-engine role RFC 0019 §11.1 gives it: the score is not comparable with "
+        "another engine's, so §11.2's `B only` ranking row does not apply and the thorough "
+        "policy falls back to this engine's L1 prediction instead of its configuration score.",
+        role)
+    return None, "robustMeanMs", False, "robustMeanMs"
 
 
 def run_generate(args: argparse.Namespace) -> int:
@@ -302,9 +347,16 @@ def run_generate(args: argparse.Namespace) -> int:
     stage = None
     immediate = args.role == ROLE
     if args.workspace_limit is not None and (not immediate or args.workspace_limit < 0):
-        logger.error("--workspace-limit requires predict_engine_tflops and a nonnegative byte count")
+        logger.error("--workspace-limit requires %s and a nonnegative byte count", ROLE)
         return 1
+    # One timing run, one UHD per metric (RFC 0019 §13.4). Order is kept so the first
+    # metric named is the one whose collection proposes the shared feature recipe.
+    metrics = list(dict.fromkeys(args.metric or [DEFAULT_RANKING_METRIC]))
+    single = len(metrics) == 1
     try:
+        if args.uhd_id and not single:
+            raise ValueError("--uhd-id names one UHD, and this run emits one per metric; omit it "
+                             "and each metric's UHD is minted its own id")
         output = Path(args.output_dir).resolve()
         tree = Path(args.descriptor_tree).resolve()
         if output.exists():
@@ -364,7 +416,13 @@ def run_generate(args: argparse.Namespace) -> int:
             _write_json(stage / "shipping_ued.json", ued)
             environment["HIPDNN_DESCRIPTOR_DIR"] = str(collection_tree)
             environment.pop("HIPDNN_DESCRIPTOR_RUNTIME_DIR", None)
-        rows, commands, graph_inputs = [], [], []
+        # The catalog sweep times every candidate once, whatever the metric: one timing
+        # run feeds every metric's label (RFC 0019 §13.4). An immediate run measures the
+        # engine's own kernel choice, which follows the requested metric, so each metric
+        # is its own measurement.
+        sources = metrics if immediate else [None]
+        rows = {source: [] for source in sources}
+        commands, graph_inputs = [], []
         published = set()
         for graph_index, graph in enumerate(sorted(graphs)):
             payload = graph.read_bytes()
@@ -401,25 +459,38 @@ def run_generate(args: argparse.Namespace) -> int:
                 run_env = dict(environment)
                 if device is not None:
                     run_env["HIP_VISIBLE_DEVICES"] = device
-                if immediate:
-                    collected, names = collect_immediate_graph(command, run_env, stage / "commands", commands)
-                else:
-                    collected, names = collect_graph(command, run_env, stage / "commands", commands,
-                                                     addressing_table=ordinals,
-                                                     engine_descriptor_id=ued["id"])
-                rows.extend(collected)
-                published.update(names)
-        frame = pd.DataFrame(rows)
-        if immediate:
-            frame, binding = training_binding(normalize_corpus(frame))
-            provenance = binding["trained_against"]
-            if args.engine and args.engine not in (binding["engine"], provenance.get("ued", {}).get("id")):
-                raise ValueError("--engine does not match the collected engine binding")
-        elif frame.duplicated(["benchmark", "device", "kernel"]).any():
-            raise ValueError("the graph/device corpus contains duplicate candidate measurements")
+                for source in sources:
+                    if immediate:
+                        collected, names = collect_immediate_graph(command, run_env, stage / "commands",
+                                                                   commands, metric=source)
+                    else:
+                        collected, names = collect_graph(command, run_env, stage / "commands", commands,
+                                                         addressing_table=ordinals,
+                                                         engine_descriptor_id=ued["id"])
+                    rows[source].extend(collected)
+                    published.update(names)
+
+        # One corpus per source, named plainly when there is only one.
+        def staged(stem: str, source) -> str:
+            return stem if len(sources) == 1 else f"{stem}_{source}"
+
+        frames, corpora = {}, {}
+        for source in sources:
+            frame = pd.DataFrame(rows[source])
+            if immediate:
+                frame, binding = training_binding(normalize_corpus(frame))
+                if provenance is not None and binding["trained_against"] != provenance:
+                    raise ValueError("the engine's descriptor provenance changed between metric collections")
+                provenance = binding["trained_against"]
+                if args.engine and args.engine not in (binding["engine"], provenance.get("ued", {}).get("id")):
+                    raise ValueError("--engine does not match the collected engine binding")
+            elif frame.duplicated(["benchmark", "device", "kernel"]).any():
+                raise ValueError("the graph/device corpus contains duplicate candidate measurements")
+            frame.to_csv(stage / f"{staged('corpus', source)}.csv", index=False)
+            corpora[source] = stage / f"{staged('corpus', source)}.json"
+            _write_json(corpora[source], _absent_as_null(rows[source]))
+            frames[source] = frame
         _write_json(stage / "provenance.json", provenance)
-        frame.to_csv(stage / "corpus.csv", index=False)
-        _write_json(stage / "corpus.json", _absent_as_null(rows))
         # Three conditions, because they are three different facts about a candidate and
         # §13.2 keeps them apart: `succeeded` says the engine ran it, `is_valid` says a
         # measurement came back, and `numerically_valid is not False` says nothing showed
@@ -430,10 +501,11 @@ def run_generate(args: argparse.Namespace) -> int:
         # check against (Open Question 19). Gating on it would train on nothing at all.
         # The row itself is not dropped -- it is already in `corpus.json`/`corpus.csv` above,
         # with its measurement suppressed and its marker, which is what §13.2 asks for.
-        usable = (frame.copy() if immediate else
-                  frame[frame["is_valid"] & frame["succeeded"].eq(True)
-                        & frame["numerically_valid"].ne(False)].copy())
-        if usable.empty:
+        usable = {source: (frame.copy() if immediate else
+                           frame[frame["is_valid"] & frame["succeeded"].eq(True)
+                                 & frame["numerically_valid"].ne(False)].copy())
+                  for source, frame in frames.items()}
+        if any(candidates.empty for candidates in usable.values()):
             raise ValueError("the benchmark produced no successful valid timings")
         # Checked here, the first moment it is knowable, rather than at the
         # `problems_scored` gate below. Without this the run trains a model and evaluates
@@ -447,38 +519,30 @@ def run_generate(args: argparse.Namespace) -> int:
         # L1 run needs, so the sweep is not wasted, only the role was.
         density = None
         if not immediate:
-            density = candidate_density(usable)
+            density = candidate_density(usable[None])
             if density.deterministic:
                 raise DeterministicCatalogError(density.diagnosis(args.engine))
             thin = density.near_deterministic_warning()
             if thin:
                 logger.warning("%s", thin)
-        if immediate:
-            target, objective, units, calibrated, statistic = "tflops", "max", "tflops", True, LABEL_STATISTIC
-        elif "tflops" in usable.columns and bool(usable["tflops"].gt(0).all()):
-            # RFC 0019 §11.1 (:1501-1506) gives `sort_kernel_catalog` a cross-engine
-            # role, and §11.2's `B only` ranking row exists only for a score that is a
-            # comparable absolute quantity. A millisecond score ranks this engine's own
-            # catalog just as well and forfeits both -- legal under RFC 0019.13 §2.5
-            # (:122-123) and §15.1 (:2387-2390), but a smaller model than the role is.
-            # `avgTimeMs` rather than the robust mean because §11.2 (:2003) pins a
-            # calibrated score to the mean.
-            target, objective, units, calibrated, statistic = "tflops", "max", "tflops", True, LABEL_STATISTIC
-        else:
-            target, objective, units, calibrated, statistic = "robustMeanMs", "min", "ms", False, "robustMeanMs"
-            logger.warning(
-                "Not every measured candidate carries a positive graph.flops and avgTimeMs, so "
-                "%s is trained on robustMeanMs/min with score.calibrated=false. That ranks this "
-                "engine's catalog correctly (RFC 0019.13 §2.5, §15.1) but forfeits the "
-                "cross-engine role RFC 0019 §11.1 gives it: the score is not comparable with "
-                "another engine's, so §11.2's `B only` ranking row does not apply and Mode B "
-                "falls back to this engine's L1 prediction instead of its configuration score.",
-                args.role)
-        grouping = resolve_grouping(frame)
-        split = split_problems(problem_keys(frame, grouping), args.eval_fraction, args.seed)
-        train_frame = usable[~problem_keys(usable, grouping).isin(split.eval_problems)]
-        if len(set(problem_keys(train_frame, grouping))) < 5:
-            raise ValueError("generation needs at least five training graph/device groups plus held-out problems")
+        # (declared metric, target, calibrated, timing statistic, source) per UHD emitted.
+        # L1 is always calibrated, and every calibrated label comes from `avgTimeMs`.
+        labels = []
+        for metric in metrics:
+            if immediate:
+                labels.append((metric, ranking_metric(metric).label, True, LABEL_STATISTIC, metric))
+            else:
+                labels.append((*_catalog_label(metric, usable[None], args.metric is None, args.role), None))
+        grouping = resolve_grouping(frames[sources[0]])
+        train_frames = {}
+        for source in sources:
+            split = split_problems(problem_keys(frames[source], grouping), args.eval_fraction, args.seed)
+            candidates = usable[source]
+            train_frames[source] = candidates[~problem_keys(candidates, grouping).isin(split.eval_problems)]
+            if len(set(problem_keys(train_frames[source], grouping))) < 5:
+                raise ValueError("generation needs at least five training graph/device groups plus held-out problems")
+        # The first source proposes and checks the one feature recipe every metric shares.
+        train_frame = train_frames[sources[0]]
         pairs = []
         for pair in args.dim_tile:
             parts = pair.split("=", 1)
@@ -506,74 +570,85 @@ def run_generate(args: argparse.Namespace) -> int:
             raise ValueError(f"features are not published by this engine: {sorted(unknown)}")
         coverage = device_field_coverage(train_frame)
         enforce_device_coverage(signature, coverage)
-        arches = sorted(usable["arch"].unique())
+        arches = sorted(usable[sources[0]]["arch"].unique())
         if args.arch not in (None, "default") and args.arch not in arches:
             raise ValueError("promotion arch is absent from the observed device architectures")
         if args.arch is None and len(arches) != 1:
             raise ValueError("multiple observed architectures require an explicit --arch promotion target")
         _write_json(stage / "features.json", signature)
-        train_frame.to_csv(stage / "train.csv", index=False)
-        _write_json(stage / "train.json", _absent_as_null(train_frame.to_dict(orient="records")))
-        train_args = ["train", "--input", str(stage / "train.json"), "--feature-signature", str(stage / "features.json"),
-                      "--provenance", str(stage / "provenance.json"),
-                      "--target", target, "--objective", objective, "--score-units", units,
-                      "--timing-statistic", statistic,
-                      "--role", args.role, "--group-by", *grouping.columns, "--output-dir", str(stage / "model"),
-                      "--name", args.name, "--num-boost-round", str(args.num_boost_round),
-                      "--early-stopping", str(args.early_stopping), "--training-arches", *arches]
-        if calibrated:
-            train_args.append("--calibrated")
-        if immediate:
-            train_args.extend(["--arch", args.arch or arches[0]])
-        if args.uhd_id:
-            train_args.extend(["--uhd-id", args.uhd_id])
-        if args.feature_evaluator:
-            train_args.extend(["--feature-evaluator", args.feature_evaluator])
-        if main(train_args):
-            raise ValueError("training failed; no generated model was published")
-        eval_args = ["evaluate", "--input", str(stage / "corpus.json"), "--model-dir", str(stage / "model"),
-                     "--eval-fraction", str(args.eval_fraction), "--seed", str(args.seed), "--include-per-problem"]
-        if args.feature_evaluator:
-            eval_args.extend(["--feature-evaluator", args.feature_evaluator])
-        if main(eval_args):
-            raise ValueError("artifact evaluation failed; no generated model was published")
-        report_path = stage / "model" / "eval_report.json"
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-        if not report["metrics"]["problems_scored"]:
-            # The density check above already refused a wholly deterministic catalog, so
-            # reaching here that way means the holdout alone came out single-candidate --
-            # a thin corpus rather than an inert engine. Say which, because the remedies
-            # differ and this message has historically been read as the other one.
-            if report["metrics"].get("deterministic_catalog"):
-                raise DeterministicCatalogError(
-                    "every held-out problem has a single candidate, though the corpus as a "
-                    "whole does not: the evaluation slice landed entirely on problems with "
-                    "nothing to rank. Collect more contested problems, or -- if this engine "
-                    "pins its kernel choice by design -- train --role predict_engine_tflops.")
-            raise ValueError("held-out corpus has no evaluable immediate predictions" if immediate
-                             else "held-out corpus has no evaluable candidate ranking")
-        evaluated_keys = {tuple(key) for key in report["split"]["eval_problem_keys"]}
-        training_keys = set(problem_keys(train_frame, grouping))
-        if training_keys & evaluated_keys:
-            raise ValueError("evaluation includes a problem seen during training")
-        report["holdout_integrity"] = {"status": "held_out", "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices"}
-        _write_json(report_path, report)
+        models = []
+        # Each directory is named for the metric requested, which a metric-less fallback
+        # still answers to.
+        for requested, (declared, target, calibrated, statistic, source) in zip(metrics, labels):
+            model_dir = stage / ("model" if single else f"model_{requested}")
+            source_train = train_frames[source]
+            train_path = stage / f"{staged('train', source)}.json"
+            source_train.to_csv(stage / f"{staged('train', source)}.csv", index=False)
+            _write_json(train_path, _absent_as_null(source_train.to_dict(orient="records")))
+            train_args = ["train", "--input", str(train_path), "--feature-signature", str(stage / "features.json"),
+                          "--provenance", str(stage / "provenance.json"),
+                          *(["--metric", declared] if declared else ["--target", target, "--objective", "min"]),
+                          "--timing-statistic", statistic,
+                          "--role", args.role, "--group-by", *grouping.columns, "--output-dir", str(model_dir),
+                          "--name", args.name if single else f"{args.name} ({requested})",
+                          "--num-boost-round", str(args.num_boost_round),
+                          "--early-stopping", str(args.early_stopping), "--training-arches", *arches]
+            if calibrated:
+                train_args.append("--calibrated")
+            if immediate:
+                train_args.extend(["--arch", args.arch or arches[0]])
+            if args.uhd_id:
+                train_args.extend(["--uhd-id", args.uhd_id])
+            if args.feature_evaluator:
+                train_args.extend(["--feature-evaluator", args.feature_evaluator])
+            if main(train_args):
+                raise ValueError(f"training {requested} failed; no generated model was published")
+            eval_args = ["evaluate", "--input", str(corpora[source]), "--model-dir", str(model_dir),
+                         "--eval-fraction", str(args.eval_fraction), "--seed", str(args.seed), "--include-per-problem"]
+            if args.feature_evaluator:
+                eval_args.extend(["--feature-evaluator", args.feature_evaluator])
+            if main(eval_args):
+                raise ValueError(f"{requested} artifact evaluation failed; no generated model was published")
+            report_path = model_dir / "eval_report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if not report["metrics"]["problems_scored"]:
+                # The density check above already refused a wholly deterministic catalog, so
+                # reaching here that way means the holdout alone came out single-candidate --
+                # a thin corpus rather than an inert engine. Say which, because the remedies
+                # differ and this message has historically been read as the other one.
+                if report["metrics"].get("deterministic_catalog"):
+                    raise DeterministicCatalogError(
+                        "every held-out problem has a single candidate, though the corpus as a "
+                        "whole does not: the evaluation slice landed entirely on problems with "
+                        "nothing to rank. Collect more contested problems, or -- if this engine "
+                        f"pins its kernel choice by design -- train --role {ROLE}.")
+                raise ValueError("held-out corpus has no evaluable immediate predictions" if immediate
+                                 else "held-out corpus has no evaluable candidate ranking")
+            evaluated_keys = {tuple(key) for key in report["split"]["eval_problem_keys"]}
+            training_keys = set(problem_keys(source_train, grouping))
+            if training_keys & evaluated_keys:
+                raise ValueError("evaluation includes a problem seen during training")
+            report["holdout_integrity"] = {"status": "held_out", "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices"}
+            _write_json(report_path, report)
+            models.append({"metric": declared, "requested_metric": requested,
+                           "model_dir": str(model_dir), "corpus": str(corpora[source]),
+                           "training_arguments": train_args, "evaluation_arguments": eval_args,
+                           "training_problem_keys": sorted(training_keys),
+                           "eval_problem_keys": sorted(evaluated_keys)})
         _write_json(stage / "generation_manifest.json", {
-            "schema": "uhd_gen.generation/1", "trained_against": provenance, "graphs": graph_inputs,
+            "schema": "uhd_gen.generation/2", "trained_against": provenance, "graphs": graph_inputs,
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
-            "training_arguments": train_args, "evaluation_arguments": eval_args,
-            "device_coverage": coverage, "training_problem_keys": sorted(training_keys),
+            # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
+            # was trained, and the exact commands that trained and evaluated it.
+            "models": models,
+            "device_coverage": coverage,
             # How much of this corpus the ranker could actually learn from. A run that
             # reaches here had *some* contested problems, but "some" spans a model fitted
             # on every problem and one fitted on four of them, and the metrics beside it
             # report only the second without saying so.
             "catalog_density": density.as_dict() if density else None,
-            "eval_problem_keys": sorted(evaluated_keys), "seed": args.seed, "eval_fraction": args.eval_fraction,
+            "seed": args.seed, "eval_fraction": args.eval_fraction,
             "shipping_knobs": ued.get("knobs", []), "collection_knobs": exposed.get("knobs", []),
-            # The runtime derives the same tables from the same inventory, so this is recorded
-            # for reading rather than for use: an ordinal in a stored row means nothing without
-            # the value set it indexes, and a disagreement between the two sides should be
-            # visible here rather than only in a kernel that was addressed wrongly.
             # What each knob's pinned integer addressed, as the engine reported it on the
             # candidates this corpus enumerated. Recorded for reading, not for use: the
             # runtime derives its own numbering, and an ordinal in a stored row is
@@ -583,7 +658,12 @@ def run_generate(args: argparse.Namespace) -> int:
             "promotion_arch": args.arch or arches[0],
         })
         # Validate installation against the original tree before publishing any artifacts.
-        build_plan(stage / "model", tree, args.engine, role=args.role, arch=args.arch or arches[0])
+        for model in models:
+            build_plan(Path(model["model_dir"]), tree, args.engine, role=args.role,
+                       arch=args.arch or arches[0], corpus=Path(model["corpus"]))
+        # Where each model and its corpus land once the stage is renamed into place.
+        published_models = [(output / Path(model["model_dir"]).relative_to(stage),
+                             output / Path(model["corpus"]).relative_to(stage)) for model in models]
         # Recorded paths must refer to the final output rather than the staging directory.
         old_root = str(stage)
         for path in stage.rglob("*.json"):
@@ -604,13 +684,18 @@ def run_generate(args: argparse.Namespace) -> int:
         if not args.no_promote:
             parser = argparse.ArgumentParser()
             add_promote_arguments(parser)
-            promote_args = ["--model-dir", str(output / "model"), "--descriptor-tree", str(tree),
-                            "--role", args.role, "--arch", args.arch or arches[0]]
-            if args.engine:
-                promote_args.extend(["--engine", args.engine])
-            if run_promote(parser.parse_args(promote_args)):
-                raise ValueError(f"promotion failed; validated model and reproducible collection remain at {output}")
-        print(f"Generated {'installable' if args.no_promote else 'installed'} UHD: {output / 'model'}")
+            # In sequence, each against the role map the previous one wrote: promotion adds a
+            # UHD beside the other metrics' and replaces only its own metric's.
+            for model_dir, corpus in published_models:
+                promote_args = ["--model-dir", str(model_dir), "--descriptor-tree", str(tree),
+                                "--role", args.role, "--arch", args.arch or arches[0],
+                                "--corpus", str(corpus)]
+                if args.engine:
+                    promote_args.extend(["--engine", args.engine])
+                if run_promote(parser.parse_args(promote_args)):
+                    raise ValueError(f"promotion failed; validated model and reproducible collection remain at {output}")
+        for model_dir, _ in published_models:
+            print(f"Generated {'installable' if args.no_promote else 'installed'} UHD: {model_dir}")
         return 0
     except (OSError, TypeError, ValueError, KeyError, PromoteError) as error:
         # The stage holds hours of benchmarking -- the collected corpus, the captured

@@ -9,9 +9,9 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <variant>
-#include <string>
 #include <vector>
 
 /// @file TestShippedDescriptorSets.cpp
@@ -142,8 +142,7 @@ TEST(TestShippedDescriptorSets, TheStagedTreeContainsDescriptorsAtAll)
     ASSERT_TRUE(std::filesystem::exists(shippedDescriptorRoot()))
         << "no staged descriptor tree at " << shippedDescriptorRoot()
         << ". Build hkp_descriptor_staging first.";
-    EXPECT_FALSE(ShippedSets::sets().empty())
-        << "the staged tree parsed to zero engines";
+    EXPECT_FALSE(ShippedSets::sets().empty()) << "the staged tree parsed to zero engines";
 }
 
 TEST(TestShippedDescriptorSets, EveryEngineResolvesItsMetadataSchema)
@@ -186,12 +185,12 @@ TEST(TestShippedDescriptorSets, EveryHeuristicReferenceResolves)
     // using the model it shipped. Nothing downstream can tell those two apart.
     for(const auto& set : ShippedSets::sets())
     {
-        if(!set.engine.heuristicId.has_value())
+        if(set.engine.sortKernelCatalog.empty())
         {
             continue; // shipping no model is a legitimate choice; §5 step 7 covers it
         }
 
-        EXPECT_TRUE(set.heuristic.has_value() || !set.heuristicsByArch.empty())
+        EXPECT_TRUE(set.heuristic.has_value() || !set.heuristicsByMetric.empty())
             << "engine '" << set.engine.name << "' names a heuristic that did not resolve";
     }
 }
@@ -207,9 +206,12 @@ TEST(TestShippedDescriptorSets, EveryHeuristicDeclaresSomethingToScoreWith)
         {
             all.push_back(&*set.heuristic);
         }
-        for(const auto& [arch, heuristic] : set.heuristicsByArch)
+        for(const auto& [metric, byArch] : set.heuristicsByMetric)
         {
-            all.push_back(&heuristic);
+            for(const auto& [arch, heuristic] : byArch)
+            {
+                all.push_back(&heuristic);
+            }
         }
 
         for(const auto* heuristic : all)
@@ -279,10 +281,9 @@ TEST(TestShippedDescriptorSets, NoTwoKernelsOfAPackShareAMetadataTuple)
             {
                 const auto tuple = metadataTuple(set.schema, kernel.metadata);
                 const auto [entry, inserted] = seen.emplace(tuple, kernel.name);
-                EXPECT_TRUE(inserted)
-                    << "engine '" << set.engine.name << "' pack '" << pack.name << "': kernels '"
-                    << entry->second << "' and '" << kernel.name << "' share metadata tuple "
-                    << tuple;
+                EXPECT_TRUE(inserted) << "engine '" << set.engine.name << "' pack '" << pack.name
+                                      << "': kernels '" << entry->second << "' and '" << kernel.name
+                                      << "' share metadata tuple " << tuple;
             }
         }
     }

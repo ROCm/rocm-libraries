@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "BackendDescriptor.hpp"
@@ -36,8 +37,16 @@ private:
     std::vector<int64_t> _policyOrder; // descriptor-level policy IDs
     bool _policyOrderSet = false;
 
+    // RFC 0019 §11.4 ranking metric: the attribute as set (empty = unset/default) and the
+    // effective metric resolved at finalize (env > attribute > default).
+    std::string _rankingMetric;
+    std::string _effectiveRankingMetric;
+
     // Resolve policy order from descriptor/handle/env/default
     std::vector<int64_t> resolveHeuristicPolicyOrder();
+
+    // Resolve the ranking metric from env/descriptor/default; throws for an unregistered one
+    std::string resolveRankingMetric() const;
 
     // Ensure policy slots match orderedPolicyIds
     void syncPolicySlots(const std::vector<int64_t>& orderedPolicyIds);
@@ -82,6 +91,10 @@ private:
                         int64_t requestedElementCount,
                         int64_t* elementCount,
                         void* arrayOfElements) const;
+
+    void setRankingMetric(hipdnnBackendAttributeType_t attributeType,
+                          int64_t elementCount,
+                          const void* arrayOfElements);
 
 public:
     void finalize() override;

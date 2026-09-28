@@ -437,14 +437,15 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
     // outrank priority, which is the one signal an engine without a model still has.
     // It reports 0 -- RFC 0019 §5 step 7's value for "no measurement" -- so a fallback and a
     // model that scored zero describe themselves the same way. traceDecidedBy() is what tells
-    // them apart, and estimateTflops needs one rule rather than two sentinels.
+    // them apart, and calibratedRanking needs one rule rather than two sentinels.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)), 0.0);
+    EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
+                     0.0);
     EXPECT_DOUBLE_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)),
                      0.0);
 
@@ -510,8 +511,8 @@ TEST(TestIngestorKernelHeuristic, AThrowingScorerIsReportedRatherThanSwallowed)
 {
     // Degrading silently would leave an engine that looks like it ranks on a model while
     // ranking on declared order -- the failure RFC 0019 §12 exists to make visible.
-    auto recorder = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(
-        HIPDNN_SEV_INFO);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
 
     const TestGraph graph;
     const auto properties = testDeviceProperties();

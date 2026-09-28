@@ -19,6 +19,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/HipEngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 
 #include "version.h"
 
@@ -92,6 +93,7 @@ void initializeMiopenSettings(
     }
 }
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// What this build of @p engineName was, for a model that claims to have measured it.
 ///
 /// `<provider>/<provider version>/<selector>/<library>`. MIOpen picks its own solution,
@@ -127,7 +129,6 @@ std::string selectorRevision(const std::string& engineName)
            + "/miopen-" + library;
 }
 
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Every descriptor file this provider reads, parsed once for the process.
 ///
 /// MIOpen ships no descriptor tree of its own, so the only roots are the ones an operator
@@ -155,28 +156,34 @@ const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& descriptorCatalog()
 
 /// Resolves the ids this engine's container declared for it. Never throws: an id nothing
 /// deploys, a model whose provenance fails, and no descriptor tree at all are all
-/// "no estimate", never a failure to construct the engine.
+/// "no estimate", never a failure to construct the engine. Each resolved model binds
+/// under the metric its own `score.metric` declares.
 void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
                           const std::string& engineName,
                           const std::string& selectorRevision,
-                          const std::map<std::string, std::string>& l1ModelIds)
+                          const std::map<std::string, std::vector<std::string>>& l1ModelIds)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
-    std::map<std::string, ingestor::DescriptorId> declared;
-    for(const auto& [arch, id] : l1ModelIds)
+    std::map<std::string, std::vector<ingestor::DescriptorId>> declared;
+    for(const auto& [arch, ids] : l1ModelIds)
     {
-        try
+        for(const auto& id : ids)
         {
-            declared.emplace(arch, hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
-        }
-        catch(const std::exception& error)
-        {
-            // A compiled-in literal, so this is an authoring bug in MiopenContainer rather
-            // than anything a deployment can cause. Logged and skipped rather than thrown:
-            // a throw here would cost the whole provider over one unusable model.
-            HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '" << engineName << "' declared L1 model id '"
-                                                       << id << "' for arch '" << arch
-                                                       << "' is not a UUID: " << error.what());
+            try
+            {
+                declared[arch].push_back(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+            }
+            catch(const std::exception& error)
+            {
+                // A compiled-in literal, so this is an authoring bug in MiopenContainer
+                // rather than anything a deployment can cause. Logged and skipped rather
+                // than thrown: a throw here would cost the whole provider over one
+                // unusable model.
+                HIPDNN_PLUGIN_LOG_ERROR("miopen: engine '" << engineName
+                                                           << "' declared L1 model id '" << id
+                                                           << "' for arch '" << arch
+                                                           << "' is not a UUID: " << error.what());
+            }
         }
     }
     if(declared.empty())
@@ -186,13 +193,19 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
 
     const auto resolved = ingestor::resolveDeclaredEnginePredictions(
         descriptorCatalog(), engineName, selectorRevision, declared);
-    for(const auto& [arch, model] : resolved.byArch)
+    for(const auto& [metric, byArch] : resolved.byMetric)
     {
-        binding.bind(arch, ingestor::UhdKernelHeuristic::configFrom(model));
+        for(const auto& [arch, model] : byArch)
+        {
+            binding.bind(metric, arch, ingestor::UhdKernelHeuristic::configFrom(model));
+        }
     }
-    for(const auto& [arch, refusal] : resolved.refused)
+    for(const auto& [metric, byArch] : resolved.refused)
     {
-        binding.markUnusable(arch, refusal.status, refusal.reason);
+        for(const auto& [arch, refusal] : byArch)
+        {
+            binding.markUnusable(metric, arch, refusal.status, refusal.reason);
+        }
     }
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
@@ -201,15 +214,17 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
 
 MiopenEngine::MiopenEngine(int64_t id,
                            std::string name,
-                           std::map<std::string, std::string> l1ModelIds)
+                           std::map<std::string, std::vector<std::string>> l1ModelIds)
     : _id(id)
     , _name(std::move(name))
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     , _selectorRevision(selectorRevision(_name))
+#endif
 {
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     bindDeclaredL1Models(_l1Models, _name, _selectorRevision, l1ModelIds);
 #else
-    // Without the ingestor there is no loader to resolve a declared id through, so the
+    // Without the ingestor there is no UHD runtime to bind a declared model into, so the
     // engine reports no estimate -- the same outcome as an id nothing deploys.
     static_cast<void>(l1ModelIds);
 #endif
@@ -293,6 +308,9 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
     result.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION ? PredictionKind::CONFIGURATION
                                                                  : PredictionKind::ENGINE;
     result.status = PredictionStatus::UNAVAILABLE;
+    // Outside the try below: an unregistered metric is a bad request (BAD_PARAM), not a
+    // missing answer, and must not be reported as one.
+    result.metric = std::string(hipdnn_plugin_sdk::heuristics::rankingMetric(config).name);
     if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
     {
         // RFC 0019 §11.2's "A only (opaque)" row: MIOpen runs its own solver, so it has
@@ -300,12 +318,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
         result.reason = "MIOpen selects its own solution and predicts no exact configuration";
         return result;
     }
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
         const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
         return _l1Models.predict(
-            _id, _name, _selectorRevision, device.gcnArchName, features, evaluate);
+            _id, _name, _selectorRevision, result.metric, device.gcnArchName, features, evaluate);
     }
     catch(const std::exception& error)
     {
@@ -314,6 +333,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
         result.reason = error.what();
         return result;
     }
+#else
+    static_cast<void>(handle);
+    static_cast<void>(graph);
+    static_cast<void>(evaluate);
+    result.reason = "UHD engine prediction requires a build with HIPDNN_ENABLE_KERNEL_INGESTOR";
+    return result;
+#endif
 }
 
 size_t MiopenEngine::getMaxWorkspaceSize(

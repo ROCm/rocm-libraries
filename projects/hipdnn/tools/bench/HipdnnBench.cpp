@@ -32,6 +32,7 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
@@ -107,6 +108,10 @@ struct Options
     bool enumerate = false;
     bool json = false;
     EngineMode engineMode = EngineMode::NONE;
+    /// Registered metric the prediction is asked in and immediate collection's engine
+    /// selects its kernel by. A label is only comparable with predictions in its metric.
+    std::string rankingMetric{hipdnn_data_sdk::utilities::DEFAULT_RANKING_METRIC};
+    bool haveRankingMetric = false;
     bool havePageOptions = false;
     int64_t offset = 0;
     int64_t limit = 10000;
@@ -135,9 +140,11 @@ void printHelp(const char* program)
         << "  --engine-id <id>       Same, by id; decimal or 0x-prefixed hex\n"
         << "  --plugin-dir <dir>     Engine plugin directory (repeatable)\n"
         << "  enumerate              Emit a matched-catalog JSON page; do not benchmark\n"
-        << "  --predict-engine       Evaluate the engine-level TFLOPS prediction as JSON\n"
+        << "  --predict-engine       Evaluate the engine-level prediction as JSON\n"
         << "  --describe-engine-prediction  Describe binding/features without model evaluation\n"
         << "  --collect-immediate    Time the requested engine without tuning; emit JSON\n"
+        << "  --ranking-metric <m>   Metric to predict in and select the immediate kernel by:\n"
+        << "                         tflops (default) or time\n"
         << "  --workspace-limit <n>  Set global.workspace_size_limit in bytes\n"
         << "  --offset <n>           Enumeration page offset (default 0)\n"
         << "  --limit <n>            Enumeration page size (1..10000, default 10000)\n"
@@ -202,6 +209,16 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
                                      ? EngineMode::DESCRIBE
                                      : EngineMode::COLLECT_IMMEDIATE;
             options.json = true;
+        }
+        else if(arg == "--ranking-metric")
+        {
+            options.rankingMetric = next();
+            options.haveRankingMetric = true;
+            if(hipdnn_data_sdk::utilities::findRankingMetric(options.rankingMetric) == nullptr)
+            {
+                throw std::invalid_argument("Unregistered ranking metric '" + options.rankingMetric
+                                            + "'");
+            }
         }
         else if(arg == "--json")
         {
@@ -295,6 +312,12 @@ bool parseArguments(const std::vector<std::string>& args, Options& options)
     if(options.limit < 1 || options.limit > 10000)
     {
         throw std::invalid_argument("--limit must be in [1, 10000]");
+    }
+    if(options.haveRankingMetric && options.engineMode == EngineMode::NONE)
+    {
+        // Swept and enumerated candidates pin every knob, so no ranker chooses among them.
+        throw std::invalid_argument("--ranking-metric requires --predict-engine, "
+                                    "--describe-engine-prediction or --collect-immediate");
     }
     if(options.engineMode != EngineMode::NONE)
     {
@@ -595,11 +618,9 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_frontend::graph::Graph& grap
         {
             continue;
         }
-        HIPDNN_CHECK_ERROR(hipError(hipMemcpy(buffer->second,
-                                              image.data(),
-                                              image.size(),
-                                              hipMemcpyHostToDevice),
-                                    "Could not fill a candidate's input"));
+        HIPDNN_CHECK_ERROR(
+            hipError(hipMemcpy(buffer->second, image.data(), image.size(), hipMemcpyHostToDevice),
+                     "Could not fill a candidate's input"));
     }
     return {};
 }
@@ -626,19 +647,19 @@ hipdnn_frontend::Error fillGraphInputs(const hipdnn_frontend::graph::Graph& grap
 /// Untimed and outside the measurement loop: this execution never contributes to a row's
 /// timing, so the fill cannot move a number either, and its cost is one extra launch beside
 /// the warmup plus up to `--max-iterations` timed launches the same candidate already pays.
-hipdnn_frontend::Error captureCandidateOutput(hipdnnHandle_t handle,
-                                              const std::vector<uint8_t>& graphBytes,
-                                              bool looksLikeJson,
-                                              int64_t engineId,
-                                              const std::vector<KnobSetting>& settings,
-                                              std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
-                                              std::map<int64_t, std::vector<uint8_t>>& images)
+hipdnn_frontend::Error
+    captureCandidateOutput(hipdnnHandle_t handle,
+                           const std::vector<uint8_t>& graphBytes,
+                           bool looksLikeJson,
+                           int64_t engineId,
+                           const std::vector<KnobSetting>& settings,
+                           std::map<int64_t, hipdnn_bench::TensorDescription>& tensors,
+                           std::map<int64_t, std::vector<uint8_t>>& images)
 {
     BenchGraph graph;
-    HIPDNN_CHECK_ERROR(looksLikeJson ? graph.deserialize(handle,
-                                                         std::string(graphBytes.begin(),
-                                                                     graphBytes.end()))
-                                     : graph.deserialize(handle, graphBytes));
+    HIPDNN_CHECK_ERROR(
+        looksLikeJson ? graph.deserialize(handle, std::string(graphBytes.begin(), graphBytes.end()))
+                      : graph.deserialize(handle, graphBytes));
     HIPDNN_CHECK_ERROR(graph.create_execution_plan_ext(engineId, settings));
     HIPDNN_CHECK_ERROR(graph.build_plans());
 
@@ -650,8 +671,8 @@ hipdnn_frontend::Error captureCandidateOutput(hipdnnHandle_t handle,
     DeviceBuffers buffers;
     std::unordered_map<int64_t, void*> variantPack;
     HIPDNN_CHECK_ERROR(allocateVariantPack(graph, buffers, variantPack));
-    HIPDNN_CHECK_ERROR(fillGraphInputs(
-        graph, plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes)));
+    HIPDNN_CHECK_ERROR(
+        fillGraphInputs(graph, plan, variantPack, hipdnn_bench::detail::graphFillSeed(graphBytes)));
     int64_t workspaceSize = 0;
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     void* workspace = workspaceSize > 0 ? buffers.add(workspaceSize) : nullptr;
@@ -662,18 +683,16 @@ hipdnn_frontend::Error captureCandidateOutput(hipdnnHandle_t handle,
                     + " byte validation workspace"};
     }
     HIPDNN_CHECK_ERROR(graph.execute(handle, variantPack, workspace));
-    HIPDNN_CHECK_ERROR(
-        hipError(hipDeviceSynchronize(), "Validation execution did not complete"));
+    HIPDNN_CHECK_ERROR(hipError(hipDeviceSynchronize(), "Validation execution did not complete"));
 
     for(const auto& tensor : plan.tensors)
     {
         tensors[tensor.uid] = {tensor.name, tensor.dataType};
         std::vector<uint8_t> image(static_cast<size_t>(tensor.bytes));
-        HIPDNN_CHECK_ERROR(hipError(hipMemcpy(image.data(),
-                                              variantPack.at(tensor.uid),
-                                              image.size(),
-                                              hipMemcpyDeviceToHost),
-                                    "Could not read a candidate's output back to the host"));
+        HIPDNN_CHECK_ERROR(hipError(
+            hipMemcpy(
+                image.data(), variantPack.at(tensor.uid), image.size(), hipMemcpyDeviceToHost),
+            "Could not read a candidate's output back to the host"));
         images[tensor.uid] = std::move(image);
     }
     return {};
@@ -686,6 +705,8 @@ hipdnn_frontend::Error collectImmediate(hipdnnHandle_t handle,
                                         hipStream_t stream,
                                         nlohmann::json& output)
 {
+    // The engine's ordinary selection for this metric is what an L1 label in it measures.
+    HIPDNN_CHECK_ERROR(graph.set_ranking_metric(options.rankingMetric));
     HIPDNN_CHECK_ERROR(graph.create_execution_plan_ext(options.engineId, settings));
     HIPDNN_CHECK_ERROR(graph.build_plans());
 
@@ -793,6 +814,7 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
            {"prediction_kind",
             kind == hipdnn_frontend::PredictionKind::ENGINE ? "ENGINE" : "CONFIGURATION"},
            {"evaluate", evaluate},
+           {"metric", options.rankingMetric},
            {"constraints", knobJson(toVariantKnobs(settings))}};
     if(collect)
     {
@@ -814,7 +836,8 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
                                                               description,
                                                               kind,
                                                               /*evaluate=*/false,
-                                                              queryConstraints);
+                                                              queryConstraints,
+                                                              options.rankingMetric);
     hipdnn_frontend::EnginePrediction prediction;
     if(error.is_good())
     {
@@ -829,12 +852,32 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
                                                                  prediction,
                                                                  kind,
                                                                  /*evaluate=*/true,
-                                                                 queryConstraints);
+                                                                 queryConstraints,
+                                                                 options.rankingMetric);
         }
         else
         {
             prediction = std::move(description);
         }
+    }
+    if(error.is_good() && options.engineMode == EngineMode::DESCRIBE)
+    {
+        // Which other (kind, metric) pairs this engine could answer, so a caller asking in
+        // one metric learns about the rest without guessing.
+        std::vector<hipdnn_frontend::PredictionCapability> capabilities;
+        error = hipdnn_frontend::detail::getPredictionCapabilities(
+            graph.get_raw_graph_descriptor(), options.engineId, capabilities);
+        nlohmann::json published = nlohmann::json::array();
+        for(const auto& capability : capabilities)
+        {
+            published.push_back(nlohmann::json{
+                {"prediction_kind",
+                 capability.kind == hipdnn_frontend::PredictionKind::ENGINE ? "ENGINE"
+                                                                            : "CONFIGURATION"},
+                {"metric", capability.metric},
+                {"model", capability.model}});
+        }
+        output["capabilities"] = std::move(published);
     }
     hipStream_t stream = nullptr;
     if(error.is_good())
@@ -844,8 +887,8 @@ int runEngineMode(hipdnnHandle_t handle, BenchGraph& graph, const Options& optio
         output["reason"] = prediction.reason;
         if(!collect)
         {
-            output["tflops"]
-                = prediction.tflops ? nlohmann::json(*prediction.tflops) : nlohmann::json(nullptr);
+            output["value"]
+                = prediction.value ? nlohmann::json(*prediction.value) : nlohmann::json(nullptr);
         }
         error = engineIdentity(handle, graph, options.engineId, stream, output);
     }
@@ -1307,8 +1350,8 @@ int runBench(const std::vector<std::string>& args)
                   << hipdnn_bench::verdictText(verdicts[index].verdict) << ","
                   << hipdnn_bench::csvField(verdicts[index].reason) << ","
                   << hipdnn_bench::csvField(skipReason) << "," << result.minTimeMs << ","
-                  << result.avgTimeMs << "," << result.robustTimeMs << "," << result.stddevMs
-                  << "," << result.iterationsRun << "," << (result.converged ? 1 : 0) << ","
+                  << result.avgTimeMs << "," << result.robustTimeMs << "," << result.stddevMs << ","
+                  << result.iterationsRun << "," << (result.converged ? 1 : 0) << ","
                   << result.workspaceSize << "\n";
     }
 

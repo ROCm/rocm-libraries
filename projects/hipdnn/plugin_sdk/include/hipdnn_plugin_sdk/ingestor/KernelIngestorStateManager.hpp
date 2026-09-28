@@ -749,15 +749,19 @@ private:
     /// Device comes from the context, not a separate argument, so one device's catalog
     /// never caches under another's key. The engine revision comes from this manager, not
     /// the context: the catalog is this engine's kernels ranked by this engine's heuristic,
-    /// and a context knows nothing about either.
+    /// and a context knows nothing about either. The ranking metric comes from the context,
+    /// because the sorted order and the calibrated ranking both depend on it (RFC 0019
+    /// §11.4); the key holds the registry's own view of the name, never the caller's, since
+    /// the key outlives the request.
     std::optional<CatalogKey> cacheKey(const MatchContext& context) const
     {
         const auto graphId = tryGetGraphId(context.graph);
-        if(!graphId.has_value())
+        const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
+        if(!graphId.has_value() || metric == nullptr)
         {
             return std::nullopt;
         }
-        return CatalogKey{*graphId, context.deviceId, _engine.version};
+        return CatalogKey{*graphId, context.deviceId, _engine.version, metric->name};
     }
 
     Catalog catalogFor(const MatchContext& context) const
@@ -998,7 +1002,6 @@ private:
         return ordered;
     }
 
-
     /// Loads the on-disk shard covering @p gcnArchName into `_winnerCache` once, tracked
     /// by `_loadedWinnerShards`. File I/O runs with `_winnerCacheMutex` UNHELD, so a slow
     /// disk read never blocks an unrelated call.
@@ -1061,27 +1064,25 @@ private:
             }
         }
 
+        // The latch and the merge happen under one hold of `_winnerCacheMutex`. Publishing
+        // the latch first and merging after would let a concurrent lookup see the shard as
+        // loaded, find its key not yet merged, and miss a persisted measured winner.
+        // `_winnerCache` takes its own lock inside, and calls no code that could take this
+        // mutex, so the lock order stays total.
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        if(!attemptSettled)
         {
-            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-            if(!attemptSettled)
-            {
-                return;
-            }
-            if(!_loadedWinnerShards.insert(shardArch).second)
-            {
-                // Another thread's read-through raced this one and already merged.
-                return;
-            }
+            return;
+        }
+        if(!_loadedWinnerShards.insert(shardArch).second)
+        {
+            // Another thread's read-through raced this one and already merged.
+            return;
         }
 
         // Walk in reverse and never overwrite: within the file the last line for a key
         // wins, and a key already in memory was put there by this process's own
         // measurement, which is newer than anything the file can offer.
-        //
-        // Merged outside `_winnerCacheMutex` now that `_winnerCache` locks itself. The latch
-        // above is already claimed, so no second thread reaches this loop for this shard, and
-        // a concurrent recordWinner() for one of these keys wins on its own merits --
-        // putIfAbsent declines to overwrite it, which is the rule this loop always had.
         for(auto it = decoded.rbegin(); it != decoded.rend(); ++it)
         {
             if(!it->first.graph.isUsable())
