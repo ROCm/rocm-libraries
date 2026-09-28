@@ -293,7 +293,7 @@ def hasCustomSchedule(kernel):
 
         if isTN and TLDS == 1:
             optSchedule = {
-                'SYNC'   : [[19,20, 50,51, 67,68, 104, 105]],
+                'SYNC'   : [[19,20, 50,51, 67,68, 104, 105, 127]],
                 'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
                 'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
                 'LRA0'   : [[0,2,4,6,8,10,12,14],
@@ -320,8 +320,9 @@ def hasCustomSchedule(kernel):
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=-1, vlcnt=(2 + 8 + 8), vscnt=-1, comment="Wait for previous GRA to completely"),
                         SBarrier(comment=""),
-                        SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous GRA to completely"),
-                        SBarrier(comment="")]
+                        SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous GRB to completely"),
+                        SBarrier(comment=""),
+                        SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 and 3/8 LRB1 to complete")]
         elif isNT and not useLDSTr and TLDS == 0:
             kernel["UsePLRPack"] = True
 
