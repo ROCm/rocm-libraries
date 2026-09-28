@@ -102,7 +102,11 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
     assert result.path == root
     assert result.version == "10.1.0"
     assert result.source == "test"
-    assert result.executable_search_paths == (root / "bin", root / "lib" / "llvm" / "bin")
+    assert result.executable_search_paths == (
+        root / "bin",
+        root / "lib" / "llvm" / "bin",
+        root / "libexec" / "hipblaslt" / "tensilelite",
+    )
 def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
     root = _root(tmp_path, "7.3.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
@@ -425,6 +429,29 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
 
     assert _runtime.client_executable() == configured
     assert validated == [(configured, "5.0.0+rocm10.1.0a20260813")]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
+def test_system_rocm_client_request_uses_prefix_client(tmp_path, monkeypatch):
+    root = _root(tmp_path)
+    client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
+    client.parent.mkdir(parents=True)
+    client.write_text(
+        "#!/bin/sh\nprintf '5.0.0+rocm7.2.4\\n'\n",
+        encoding="utf-8",
+    )
+    client.chmod(0o755)
+
+    monkeypatch.setattr(_runtime, "_client", None)
+    monkeypatch.setattr(_runtime, "_installation", None)
+    monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
+    monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: None)
+    _set_tensilelite_version(monkeypatch, "5.0.0+rocm7.2.4")
+
+    _runtime.initialize()
+
+    assert _runtime.client_executable() == client
 
 
 @pytest.fixture(autouse=True)
