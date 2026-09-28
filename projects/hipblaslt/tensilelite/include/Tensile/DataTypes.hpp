@@ -354,8 +354,7 @@ namespace TensileLite
                                          BFloat6x32,
                                          Float4x2,
 #endif // !_WIN32
-                                         E8
-                                        >;
+                                         E8>;
 
     // Convert variants to type T
     template <typename T>
