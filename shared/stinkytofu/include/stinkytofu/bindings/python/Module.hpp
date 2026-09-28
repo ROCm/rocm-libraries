@@ -343,6 +343,17 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
                        IntrusiveListIterator<IRBase> last);
 
     /**
+     * @brief Move a group endpoint off a node that is about to be deleted.
+     *
+     * ScopeAdaptor erases TEXTBLOCK comments while extracting a region. Another
+     * group's stored first/last may be that comment (an epilogue anchor can sit
+     * inside an earlier noLoadLoopBody span). Point the endpoint at a neighbor
+     * that stays alive: \p ifFirst when this node is the group's first, \p ifLast
+     * when it is the group's last. A null replacement leaves that side unchanged.
+     */
+    void retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast);
+
+    /**
      * @brief Get the ModuleOptions
      * @return ModuleOptions
      */
