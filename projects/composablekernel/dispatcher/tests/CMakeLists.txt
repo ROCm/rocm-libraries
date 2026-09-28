@@ -227,6 +227,79 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# gfx1250 comp_async / comp_tdm / comp_tdm_v2 pipelines and the tdm epilogue:
+# ArchFilter, codegen and gemm_utils gates, LDS budget and codegen output.
+# CPU-only.
+add_test(
+    NAME dispatcher_test_gfx1250_tdm_pipelines
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gfx1250_tdm_pipelines.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gfx1250_tdm_pipelines PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 300
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# The Tile Engine and dispatcher gfx1250 pipeline gates must accept exactly
+# the same trait x tile configs. CPU-only enumeration.
+add_test(
+    NAME dispatcher_test_gfx1250_gate_equivalence
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gfx1250_gate_equivalence.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gfx1250_gate_equivalence PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# arch_specs_generated.py/.hpp must equal a fresh regeneration from
+# arch_specs.json (timestamp ignored), so the JSON stays the source of truth.
+add_test(
+    NAME dispatcher_test_arch_specs_regeneration
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_arch_specs_regeneration.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_arch_specs_regeneration PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Explicit unsupported run status (ctypes run() == -1): GemmResult exposes
+# it and the search-space sweep counts it as a skip. ctypes lib is mocked.
+add_test(
+    NAME dispatcher_test_gemm_result_status
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_result_status.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_result_status PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# MX bridge host tests and CMake configuration tests. Report missing host build
+# tools as a skipped CMake test rather than an all-skipped pass.
+foreach(_mx_test bridge cmake)
+    add_test(
+        NAME dispatcher_test_mx_gemm_${_mx_test}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_unittest_77.py test_mx_gemm_${_mx_test}.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_test_mx_gemm_${_mx_test} PROPERTIES
+        LABELS "dispatcher;python;bridge;validation"
+        TIMEOUT 120
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
+
 # =============================================================================
 # Bridge on-device GPU correctness tests (merged ops). Each builds the op's
 # dispatcher .so, runs on-device via its Gpu*Runner, and checks output vs a
@@ -876,6 +949,37 @@ set_tests_properties(dispatcher_test_gemm_rowcolquant_gpu_correctness PROPERTIES
     SKIP_RETURN_CODE 77
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
+
+# Same shape, for the NON-GROUPED gemm_{a,ab,b}quant bridges. The GROUPED
+# counterparts are registered above in the _quant_gpu_test foreach as
+# dispatcher_test_{a,ab,b}quant_gpu_correctness -- distinct tests, distinct
+# files, distinct bridges. The names differ by one token; deleting a
+# "duplicate-looking" entry here silently drops a whole operator.
+#
+# No --gfx argument, deliberately: ctest must autodetect via rocminfo so the
+# JIT build matches the physical GPU (see the note above the C++ GPU tests).
+# --gfx is for the Jenkins lane only, where the arch is known from the node
+# label. Each script self-skips with 77 on an unsupported arch -- gfx942/gfx950
+# for aquant and abquant, gfx950 only for bquant.
+foreach(_gemm_quant_gpu_test
+        test_gemm_aquant_gpu_correctness
+        test_gemm_abquant_gpu_correctness
+        test_gemm_bquant_gpu_correctness)
+    add_test(
+        NAME dispatcher_${_gemm_quant_gpu_test}
+        # Run the script directly rather than under pytest: pytest exits 0 when
+        # every test skips, so a CPU-only or non-fp8 runner would report a green
+        # PASS for work that never reached the GPU. main() exits 77 instead.
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${_gemm_quant_gpu_test}.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_${_gemm_quant_gpu_test} PROPERTIES
+        LABELS "dispatcher;python;bridge;gpu"
+        TIMEOUT 600
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
 
 # =============================================================================
 # Block-scale quant bridge tests (per-op unit tests + self-tests)

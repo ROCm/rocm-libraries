@@ -283,9 +283,18 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
-    if(auto unavailable = prepareInputs())
+    // A graph the engine declined never reads its inputs: every mode below reaches
+    // runEngine() -- which reports the decline -- before anything touches
+    // _bundle->tensors. Filling first made a declined graph pay the full host-side
+    // allocation and RNG fill for its tensors, which on a 57M-element sweep case is
+    // seconds per skip, and left those inputs cached on the bundle for the rest of
+    // the run.
+    if(session.engines.accepted)
     {
-        return *unavailable;
+        if(auto unavailable = prepareInputs())
+        {
+            return *unavailable;
+        }
     }
 
     switch(_deps.policy.mode)
@@ -385,7 +394,7 @@ VerificationOutcome
                                            refLabel(type) + " errored (verification-mode="
                                                + refLabel(type) + "): " + result.message);
     case RefStatus::RAN:
-        return compareOutputs(engine.outputs, refOutputs);
+        return compareOutputs(engine.outputs, refOutputs, result.site);
     default:
         return VerificationOutcome::failed(
             VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -413,7 +422,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
             = runReferenceCapturingOutputs(ReferenceExecutorType::GPU, refOutputs);
         if(gpu.status == RefStatus::RAN)
         {
-            return compareOutputs(engine.outputs, refOutputs);
+            return compareOutputs(engine.outputs, refOutputs, gpu.site);
         }
         if(gpu.status == RefStatus::RUNTIME_ERROR)
         {
@@ -446,7 +455,7 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
                                                "CPU reference errored (auto mode, last resort): "
                                                    + cpu.message);
         case RefStatus::RAN:
-            return compareOutputs(engine.outputs, refOutputs);
+            return compareOutputs(engine.outputs, refOutputs, cpu.site);
         default:
             return VerificationOutcome::failed(
                 VerificationDepth::EXECUTED, FailureOrigin::HARNESS, "Unknown RefStatus");
@@ -596,7 +605,7 @@ IntegrationBundleVerificationHarness::RefRunResult
     }
 
     detail::markOutputsModified(refOutputs, useDevice);
-    return {RefStatus::RAN, {}};
+    return {RefStatus::RAN, {}, useDevice ? ValidationSite::DEVICE : ValidationSite::HOST};
 }
 
 void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& outputs) const
@@ -609,23 +618,25 @@ void IntegrationBundleVerificationHarness::markOutputsModified(OutputTensors& ou
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
-    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *_bundle->tensors->at(uid);
-    });
+    return compareAgainst(
+        engineOutputs,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
+            return *_bundle->tensors->at(uid);
+        },
+        ValidationSite::HOST);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::compareOutputs(OutputTensors& engineOutputs,
-                                                         OutputTensors& expected)
+VerificationOutcome IntegrationBundleVerificationHarness::compareOutputs(
+    OutputTensors& engineOutputs, OutputTensors& expected, ValidationSite site)
 {
-    return compareAgainst(engineOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-        return *expected.at(uid);
-    });
+    return compareAgainst(
+        engineOutputs,
+        [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *expected.at(uid); },
+        site);
 }
 
-VerificationOutcome
-    IntegrationBundleVerificationHarness::compareAgainst(OutputTensors& engineOutputs,
-                                                         const ExpectedTensorLookup& expectedFor)
+VerificationOutcome IntegrationBundleVerificationHarness::compareAgainst(
+    OutputTensors& engineOutputs, const ExpectedTensorLookup& expectedFor, ValidationSite site)
 {
     auto wrapper = _bundle->graphWrapper();
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
@@ -637,12 +648,14 @@ VerificationOutcome
               return gradingForTensor(currentTestName(), label, value, value);
           };
 
-    const auto mismatches = bundle::compareOutputs(wrapper,
-                                                   _bundle->outputTensorUids,
-                                                   engineOutputs,
-                                                   expectedFor,
-                                                   toleranceFor,
-                                                   "Bundle: " + _bundlePath.string());
+    const auto mismatches
+        = bundle::compareOutputs(wrapper,
+                                 _bundle->outputTensorUids,
+                                 engineOutputs,
+                                 expectedFor,
+                                 toleranceFor,
+                                 resolveValidationSite(_deps.policy.validator, site),
+                                 "Bundle: " + _bundlePath.string());
 
     // Reported one per tensor so each diff lands next to the tensor it describes;
     // the outcome carries no message because of it.
