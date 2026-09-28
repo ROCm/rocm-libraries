@@ -15,6 +15,46 @@ from dispatch.attention import (
 )
 from dispatch.attention.common import ATTENTION_FEATURES
 
+# Frozen map of every registered candidate to the feature set its Capability
+# declares. Generated once from the registry; a new candidate (or a features
+# edit on an existing one) fails ``test_declared_features_are_frozen`` until it
+# is listed here, so a widening like fp8 can never silently reach a path that
+# does not implement it.
+_GFX950_DENSE_FEATURES = {"causal", "sinks", "sliding_window"}
+_GFX950_DENSE_GRID_FEATURES = _GFX950_DENSE_FEATURES | {"causal_bottom_right"}
+EXPECTED_FEATURES = {
+    "attention_gfx942_dense": {"causal", "sliding_window"},
+    "attention_gfx950_dense": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_grid_default": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_persist_default": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_grid_bm128": set(_GFX950_DENSE_GRID_FEATURES),
+    "attention_gfx950_dense_persist_bm128": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist_widedma_bm128": set(_GFX950_DENSE_FEATURES),
+    "attention_d256_decode": {"causal", "causal_bottom_right"},
+    "attention_gfx1250_wmma": {"causal"},
+    "attention_gfx942_dense_pipe": {
+        "causal",
+        "causal_bottom_right",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_gfx950_d256": {"causal", "causal_bottom_right"},
+    "attention_unified_2d": {
+        "causal",
+        "causal_bottom_right",
+        "fp8",
+        "sinks",
+        "sliding_window",
+    },
+    "attention_unified_3d": {
+        "causal",
+        "causal_bottom_right",
+        "fp8",
+        "sinks",
+        "sliding_window",
+    },
+}
+
 # Request kwargs that turn each attention feature on. Keyed by the vocabulary so
 # a feature added to ATTENTION_FEATURES forces an entry here (KeyError until
 # listed) rather than inheriting silence.
@@ -250,6 +290,24 @@ class TestAttentionDispatch(unittest.TestCase):
                         use_fp8=True,
                         fp8_fnuz=fnuz,
                     )
+                )
+
+    def test_declared_features_are_frozen(self):
+        # A new candidate, or a features edit on an existing one, must be listed
+        # in EXPECTED_FEATURES -- it cannot inherit a widened set unnoticed.
+        actual = {
+            c.name: set(c.capability.supports_features)
+            for c in attention_candidates()
+            if c.algorithm != "unified_tuning"
+        }
+        self.assertEqual(actual, EXPECTED_FEATURES)
+        tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
+        self.assertTrue(tuning)
+        for candidate in tuning:
+            with self.subTest(candidate=candidate.name):
+                self.assertEqual(
+                    set(candidate.capability.supports_features),
+                    set(ATTENTION_FEATURES),
                 )
 
     def test_feature_changes_spec_identity(self):

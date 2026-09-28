@@ -498,6 +498,21 @@ def descriptor_count(arm):
     return count
 
 
+def _from_plugin_dir(reported, plugin_dir):
+    """True when a result row's plugin_path attributes it to this arm's engines dir.
+
+    `plugin_dir` is the resolved engines directory the provenance gate also uses.
+
+    Benchmarks spell the same fact two ways: some report the individual plugin they
+    loaded, whose parent is the engines directory, and some echo back the directory
+    they were handed. Both mean "this row came from this arm"; nothing looser does, so
+    a sibling tree sharing a name prefix and a plugin nested below the engines
+    directory both fail attribution.
+    """
+    resolved = Path(reported).resolve()
+    return resolved == plugin_dir or resolved.parent == plugin_dir
+
+
 def _positive(value):
     return type(value) in (int, float) and math.isfinite(value) and value > 0
 
@@ -543,7 +558,9 @@ def evaluate_phase(
         gates["descriptors"] = descriptor_count(arm) == arm["expected_descriptors"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         errors.append(f"descriptor census: {exc}")
-    plugin_dir = Path(arm["install_tree"]) / "lib" / "hipdnn_plugins" / "engines"
+    plugin_dir = (
+        Path(arm["install_tree"]) / "lib" / "hipdnn_plugins" / "engines"
+    ).resolve()
     try:
         loaded = re.findall(r"load plugin from \[([^\]]+)\]", Path(hip_log).read_text())
         gates["provenance"] = any(
@@ -631,9 +648,8 @@ def evaluate_phase(
                 or (observed_id & ((1 << 64) - 1)) != engine_id
             ):
                 entry.update(outcome="ambiguous", reason="engine name/ID disagreement")
-            elif (
-                row.get("plugin_path")
-                and Path(row["plugin_path"]).resolve().parent != plugin_dir
+            elif row.get("plugin_path") and not _from_plugin_dir(
+                row["plugin_path"], plugin_dir
             ):
                 entry.update(
                     outcome="ambiguous",

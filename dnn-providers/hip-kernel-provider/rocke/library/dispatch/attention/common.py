@@ -44,10 +44,10 @@ bind to until phase 6 moves the routing policy up.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from enum import IntEnum
 from operator import index
-from typing import Tuple
+from typing import Any, Tuple
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
@@ -120,6 +120,10 @@ class AttentionRequest(OperatorRequest):
     dtype: str = "fp16"
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # Concrete micro-configuration returned by a unified_tuning candidate.
+    # "auto" selects that geometry candidate's baseline; sweep APIs enumerate
+    # every valid value and persist this id with the result.
+    attention_tuning_id: str = "auto"
     use_fp8: bool = False
     fp8_fnuz: bool = False
     # --- standalone attention_dense knobs (only consumed by the opt-in
@@ -132,8 +136,16 @@ class AttentionRequest(OperatorRequest):
     #     supports only qb-major/hkv-major ordering. ---
     dense_persistent: str = "auto"  # "auto" | "on" | "off"
     dense_num_persistent: int = 256
+    # 0 keeps the architecture's shipped policy; 1..8 pins the emitted
+    # amdgpu-waves-per-eu attribute. Dense sweeps expand an unpinned request.
+    dense_waves_per_eu: int = 0
     # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
     dense_persist_decode: str = "auto"
+    # gfx950 dense variant pins. ``auto`` does not filter that axis; the
+    # ranker / ``dense_spec_for_request`` still apply the historical policy.
+    # ``dense_tile`` names a DENSE_TILE_GEOMETRIES key (``default`` / ``bm128``).
+    dense_tile: str = "auto"  # "auto" | "default" | "bm128"
+    dense_wide_lds_dma: str = "auto"  # "auto" | "on" | "off"
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -175,6 +187,19 @@ class AttentionRequest(OperatorRequest):
         if bool(self.use_fp8):
             active.add("fp8")
         return frozenset(active)
+
+
+def _resolve_dense_waves_per_eu(req: AttentionRequest, default: int) -> int:
+    """Resolve the dense WPE request without changing the shipped default policy."""
+    value = int(req.dense_waves_per_eu)
+    if value == 0:
+        value = int(default)
+    if not 1 <= value <= 8:
+        raise ValueError(
+            "dense_waves_per_eu must be 0 (auto) or in [1, 8], "
+            f"got {req.dense_waves_per_eu}"
+        )
+    return value
 
 
 ATTENTION_DIM_VOCABULARY = (
@@ -370,3 +395,107 @@ class AttentionSpec:
         if self.use_fp8:
             parts.append("fp8fnuz" if self.fp8_fnuz else "fp8")
         return kernel_name_join(*parts)
+
+
+@dataclass(frozen=True)
+class AttentionTuningSpec:
+    """Concrete dispatcher-owned tiled spec used by exhaustive sweeps.
+
+    Generic production candidates intentionally return :class:`AttentionSpec`
+    and defer geometry.  A tuning candidate returns this wrapper instead: the
+    exact arch spec, builder choice, compile backend, and optional 3D reduce
+    spec are serializable and therefore participate in dispatch/cache identity.
+
+    It is also the whole launch contract the runtime needs:
+    ``run_unified_attention_torch(tuning_spec=...)`` compiles :meth:`build`
+    under :meth:`cache_key` and launches with :meth:`launch_grid` /
+    :meth:`launch_block`, so the runtime never decodes ``builder_kind``.
+    ``allow_unsupported`` skips the runtime's problem-shape support check.
+    """
+
+    path: str
+    arch: str
+    builder_kind: str
+    compile_backend: str
+    candidate_name: str
+    tuning_id: str
+    kernel_spec: Any
+    fp8_fnuz: bool = False
+    num_kv_blocks: int = 0
+    reduce_spec: Any = None
+    tuning_id_prefix: str = ""
+    allow_unsupported: bool = False
+
+    def kernel_name(self) -> str:
+        return self.kernel_spec.kernel_name()
+
+    def cache_key(self) -> Tuple:
+        """Field-complete launcher-cache identity of the kernel(s) built."""
+
+        def items(spec):
+            if spec is None:
+                return None
+            if not is_dataclass(spec):
+                raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
+            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+
+        return (
+            "explicit",
+            self.arch,
+            self.builder_kind,
+            self.compile_backend,
+            items(self.kernel_spec),
+            items(self.reduce_spec),
+        )
+
+    def build(self, arch: str | None = None):
+        """IR for this spec: one kernel for 2D, ``(segment, reduce)`` for 3D."""
+        from .tuning_specs import (
+            build_explicit_attention_2d,
+            build_explicit_attention_3d,
+        )
+
+        arch = arch or self.arch
+        if self.path == "3d":
+            return build_explicit_attention_3d(
+                self.kernel_spec, self.reduce_spec, arch=arch
+            )
+        if self.builder_kind == "gfx942_4warp_gqa":
+            from kernels.gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
+
+            return build_gfx942_4warp_gqa(self.kernel_spec, arch=arch)
+        return build_explicit_attention_2d(self.kernel_spec, arch=arch)
+
+    def launch_grid(self, problem: UnifiedAttentionProblem) -> Tuple[int, int, int]:
+        ks = self.kernel_spec
+        if self.path == "3d":
+            block_q = max(1, 16 // problem.num_queries_per_kv)
+            qblocks = problem.total_q // block_q + problem.num_seqs
+            return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
+        if self.builder_kind == "gfx942_4warp_gqa":
+            from kernels.common.attention_unified import gfx942_4warp_launch_grid
+
+            return gfx942_4warp_launch_grid(problem)
+        block_m = int(ks.block_m)
+        block_q = (
+            block_m // problem.num_queries_per_kv
+            if problem.num_queries_per_kv <= block_m
+            else 1
+        )
+        qblocks = int(problem.total_q // block_q + problem.num_seqs)
+        if bool(getattr(ks, "use_q_major_grid", False)):
+            return (qblocks, int(problem.num_kv_heads), 1)
+        return (int(problem.num_kv_heads), qblocks, 1)
+
+    def launch_block(self) -> Tuple[int, int, int]:
+        if self.path == "3d":
+            return (64, 1, 1)
+        if self.builder_kind == "gfx942_4warp_gqa":
+            return (256, 1, 1)
+        return (64 * int(self.kernel_spec.num_warps), 1, 1)
+
+    def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
+        """Refresh runtime-addressing state after the paged cache is known."""
+        from .tuning_common import retarget_tuning_spec
+
+        return retarget_tuning_spec(self, num_kv_blocks=int(num_kv_blocks))
