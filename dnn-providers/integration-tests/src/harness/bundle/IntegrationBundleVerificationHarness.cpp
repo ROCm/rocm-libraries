@@ -467,11 +467,27 @@ VerificationOutcome IntegrationBundleVerificationHarness::runAutoMode(GraphSessi
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepareInputs()
 {
-    if(_bundle->tensors.has_value())
+    if(!_bundle->tensors.has_value())
     {
-        return std::nullopt;
+        return fillBundleInputs();
     }
-    return fillBundleInputs();
+
+    // Tensors that are already present are unpacked, but the engine reads sub-byte
+    // operands packed, and only fillBundleInputs() builds the packed set
+    // (ALMIOPEN-2724).
+    const auto wrapper = _bundle->graphWrapper();
+    const std::set<int64_t> outputUids(_bundle->outputTensorUids.begin(),
+                                       _bundle->outputTensorUids.end());
+    for(const auto& [uid, attrs] : wrapper.getTensorMap())
+    {
+        if(!attrs->virtual_() && outputUids.count(uid) == 0
+           && hipdnn_test_sdk::detail::isSubByteDataType(attrs->data_type()))
+        {
+            return unverifiable("sub-byte input " + std::to_string(uid)
+                                + " has no packed copy for the engine (ALMIOPEN-2724)");
+        }
+    }
+    return std::nullopt;
 }
 
 std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBundleInputs()
