@@ -14,8 +14,11 @@
 #endif
 
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -266,6 +269,7 @@ namespace
 #ifndef TENSILE_YAML
         msgpack::zone zone;
 #endif
+        std::filesystem::path temporaryDirectory;
         ObjectMap     size;
         ObjectMap     internalArgs;
         ObjectMap     problem;
@@ -355,7 +359,14 @@ namespace
                                       object(ObjectMap{{"type", object(std::string("Single"))},
                                                        {"index", object(17)}})}};
             auto bytes = libraryBytes(library);
-            auto loaded = LoadLibraryData<ContractionProblemGemm, ContractionSolution>(bytes);
+            auto path = temporaryDirectory / "policy-library";
+            std::ofstream file;
+            file.exceptions(std::ios::failbit | std::ios::badbit);
+            file.open(path, std::ios::binary);
+            file.write(reinterpret_cast<const char*>(bytes.data()),
+                       static_cast<std::streamsize>(bytes.size()));
+            file.close();
+            auto loaded = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(path.string());
             auto master = std::dynamic_pointer_cast<MasterContractionLibrary>(loaded);
             if(!master)
                 throw std::runtime_error("Persistent policy library failed to deserialize");
@@ -384,6 +395,13 @@ namespace
 
         void SetUp() override
         {
+            std::random_device random;
+            auto directory = std::filesystem::temp_directory_path()
+                             / ("tensilelite-policy-" + std::to_string(random()) + "-"
+                                + std::to_string(random()));
+            ASSERT_TRUE(std::filesystem::create_directory(directory));
+            temporaryDirectory = directory;
+
             SizeMapping defaults{};
             defaults.waveNum           = 4;
             defaults.workGroupSize     = {256, 1, 1};
@@ -399,6 +417,16 @@ namespace
             problem                  = output(type);
             CustomKernel kernel;
             custom = output(kernel);
+        }
+
+        void TearDown() override
+        {
+            if(!temporaryDirectory.empty())
+            {
+                std::error_code error;
+                std::filesystem::remove_all(temporaryDirectory, error);
+                EXPECT_FALSE(error) << error.message();
+            }
         }
     };
 

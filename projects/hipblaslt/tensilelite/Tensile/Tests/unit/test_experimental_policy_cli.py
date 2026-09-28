@@ -130,15 +130,17 @@ def test_augmentation_preserves_group_correlations_and_later_overrides(tmp_path)
     assert len(solutions) == len(expected)
 
 
-def test_every_problem_size_group_receives_policy_override():
+def test_every_problem_size_group_receives_policy_and_tuning_overrides():
     config = _config()
     problem = config["BenchmarkProblems"][0]
     problem.append(deepcopy(problem[1]))
     config["BenchmarkProblems"].append(deepcopy(problem))
-    augment_config(config, [parse_set_arg("StreamKForceDPOnly=0,1")])
+    augment_config(config, [parse_set_arg("StreamKForceDPOnly=0,1"), parse_set_arg("DepthU=32")])
     for problem in config["BenchmarkProblems"]:
         for group in problem[1:]:
-            assert {s["TileProcessingStrategy"] for s in _candidates(group)} == {"DataParallel", "StreamK"}
+            candidates = _candidates(group)
+            assert {s["TileProcessingStrategy"] for s in candidates} == {"DataParallel", "StreamK"}
+            assert {s["DepthU"] for s in candidates} == {32}
 
 
 @pytest.mark.parametrize("legacy", [False, True])
