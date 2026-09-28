@@ -131,6 +131,18 @@ add_test(
 set_tests_properties(${FMHA_FWD_TUNE_CONFIG_PY_TEST}
     PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
 
+# Codegen test: on gfx950 the d128 kM0=64 qr_async tile is left to qr_async_trload for batch-mode
+# problems without a mask, bias, dropout, logits soft-cap or skip, and kept everywhere else.
+# Pure Python, no GPU required.
+set(FMHA_FWD_GFX950_TILE_PY_TEST test_ck_tile_fmha_fwd_gfx950_tile_selection)
+add_test(
+    NAME ${FMHA_FWD_GFX950_TILE_PY_TEST}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_fmha_fwd_gfx950_tile_selection.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(${FMHA_FWD_GFX950_TILE_PY_TEST}
+    PROPERTIES LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
+
 # Umbrella target to build and run all ck_tile fmha tests
 # Usage: ninja ck_tile_fmha_tests
 add_custom_target(ck_tile_fmha_tests
