@@ -21,17 +21,30 @@
 # Comprehensive* variant, so every tier runs the same coverage -- matching
 # HIP_MLOPS_ENGINE_test_categories.yaml's convention for suites without
 # tiered coverage yet.
+#
+# rocke_library_conv_gpu_pytest runs GPU numeric correctness suites (conv
+# fwd/bwd/wgrad/direct) that self-skip when no GPU or torch is present, so
+# it is safe to include unconditionally -- CPU-only runners still pass.
 test_categories:
   quick:
     description: "rocKE pre-registered smoke/golden/unit checks (C++ + Python)"
     test_patterns:
       - "rocke_arch_target_identity"
-      - "rocke_ir_serialize_roundtrip"
-      - "rocke_mma_frag_ssot"
-      - "rocke_tiled_attention_2d_reentrancy"
-      - "rocke_python_import_smoke"
+      - "rocke_dtypes"
+      - "rocke_flavor_datalayout_ssot"
+      - "rocke_future_intrinsic_lowering"
       - "rocke_golden_static"
+      - "rocke_ir_serialize_roundtrip"
+      - "rocke_library_conv_gpu_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_mma_catalog_lookup"
+      - "rocke_mma_frag_ssot"
+      - "rocke_moe_fused_mega_spec_guards"
+      - "rocke_portable_ir_dom_decoders"
+      - "rocke_portable_ir_recipe_vm_replay"
+      - "rocke_python_import_smoke"
+      - "rocke_tanh_lowering"
+      - "rocke_tiled_attention_2d_reentrancy"
     labels:
       - "quick"
       - "pre-commit"
@@ -41,11 +54,20 @@ test_categories:
     description: "Fast-feedback mechanism (FFM) rocKE smoke/golden/unit checks"
     test_patterns:
       - "rocke_arch_target_identity"
-      - "rocke_ir_serialize_roundtrip"
-      - "rocke_mma_frag_ssot"
-      - "rocke_tiled_attention_2d_reentrancy"
-      - "rocke_python_import_smoke"
+      - "rocke_dtypes"
+      - "rocke_flavor_datalayout_ssot"
+      - "rocke_future_intrinsic_lowering"
       - "rocke_golden_static"
+      - "rocke_ir_serialize_roundtrip"
+      - "rocke_library_conv_gpu_pytest"
       - "rocke_library_conv_pytest"
+      - "rocke_mma_catalog_lookup"
+      - "rocke_mma_frag_ssot"
+      - "rocke_moe_fused_mega_spec_guards"
+      - "rocke_portable_ir_dom_decoders"
+      - "rocke_portable_ir_recipe_vm_replay"
+      - "rocke_python_import_smoke"
+      - "rocke_tanh_lowering"
+      - "rocke_tiled_attention_2d_reentrancy"
     labels:
       - "ffm-full"

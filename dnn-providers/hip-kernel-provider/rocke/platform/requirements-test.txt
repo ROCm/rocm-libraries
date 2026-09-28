@@ -1,0 +1,8 @@
+# rocKE test-time Python requirements (installed by TheRock CI).
+#
+# Keep this minimal: it is fetched by every hipkernelprovider test job via
+# additional_requirements_files in fetch_test_configurations.py.
+#
+# Build-time requirements (pybind11, etc.) belong in requirements.txt.
+# Torch is a system/ROCm dependency and cannot be pip-installed here.
+numpy>=1.24

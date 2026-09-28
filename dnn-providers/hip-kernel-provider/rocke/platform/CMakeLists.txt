@@ -263,6 +263,13 @@ if(ROCKE_INSTALL_PYTHON_PACKAGE)
 endif()
 
 if(ROCKE_INSTALL_TESTS)
+  # Test-time Python requirements (numpy). TheRock CI installs this via
+  # additional_requirements_files in fetch_test_configurations.py before
+  # invoking CTest.
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/requirements-test.txt"
+          DESTINATION ${ROCKE_TEST_INSTALL_DIR}
+          RENAME rocke-requirements-test.txt)
+
   if(ROCKE_INSTALL_PYTHON_TESTS)
     # The Python import smoke (placeholder for the rocke Python CI test) installs
     # next to the CTestTestfile in both modes: provider mode -> bin/<subdir>/,
