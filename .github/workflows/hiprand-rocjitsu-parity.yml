@@ -106,22 +106,33 @@ jobs:
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ${{ needs.gate.outputs.build_runs_on }}
     timeout-minutes: 180
-    # This runner's container hook invokes steps with dash. pipefail is a bash option.
+    # No nested container. The ubuntu:24.04 job container ignored
+    # --cap-add=SYS_PTRACE (CapEff had no sys_ptrace bit), and rocminfo then
+    # ran with no simulated GPU. This job uses the build-runner image itself.
     defaults:
       run:
         shell: bash
-    # Phase 0 needed SYS_PTRACE and an unconfined seccomp profile so the kmd
-    # daemon can interpose on the test process. --user 0:0 matches the
-    # rocjitsu corpus workflow on the CPU scale set.
-    container:
-      image: ubuntu:24.04
-      options: --user 0:0 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || 'hiprand_32/hiprand_api_32.hiprand_generate_test/0' }}
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       ROCM_SYSTEMS_REF: 1f44cb5afa5e6dec03d57609e5dfba43d4f31c3c
     steps:
+      - name: Require SYS_PTRACE on the build runner
+        run: |
+          set -euo pipefail
+          cap=$(awk '/CapEff/ {print $2}' /proc/self/status)
+          echo "CapEff ${cap}"
+          id
+          uname -a
+          cat /etc/os-release || true
+          python3 - "$cap" << 'PY'
+          import sys
+          cap = int(sys.argv[1], 16)
+          if cap & (1 << 19) == 0:
+              sys.exit("build runner has no CAP_SYS_PTRACE; rocJITsu cannot interpose")
+          PY
+
       - name: Install build tools
         run: |
           apt-get update
