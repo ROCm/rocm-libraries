@@ -586,7 +586,7 @@ I hseqr_aed_window_cap(const I nh, const bool hybrid)
         if(nh >= 7500)
             cap = std::max(cap, I(96));
         if(nh >= 15000)
-            cap = std::max(cap, I(128));
+            cap = std::max(cap, I(160));
         if(nh >= 30000)
             cap = std::max(cap, I(192));
     }
