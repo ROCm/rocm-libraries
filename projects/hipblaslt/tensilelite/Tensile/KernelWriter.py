@@ -1161,7 +1161,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           macItems = []
         iterCode.add(pointerLWCode)
         iterCode.add(pointerLRCode)
-        if kernel["PrefetchGlobalRead"] >= 2: 
+        if kernel["PrefetchGlobalRead"] >= 2:
           iterCode.add(globalReadCode)
         # add rest of the mac here
         iterCode.addItems(macItems)
@@ -4579,7 +4579,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
       self.codes.gl2Prefetch.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      
+
 
     if not kernel["NoLdsWriteCode"]:
       self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
@@ -5091,10 +5091,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
              kernel["PrefetchGlobalRead"] == 2:
             pointerLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, \
               "wait for local read before cross-wave TDM swap sync"))
+            # The barrier orders the waves; naming the loop-carried WAR also lets
+            # StinkyTofu drain this wave's own reads of the buffer about to be
+            # refilled. Those reads carry the tag one back-edge step away, since a
+            # memtoken names a physical buffer only for its own trip. No rotation
+            # means an empty map and nothing to name.
+            warToken = self._ldsTokenBackEdgeMap().get(self.states.ldsWriteTokenIdx)
             pointerLWCode.add(self._syncThreads(
               kernel,
               "Waiting current LR finish for next GR(TDM), sync LDS%d"%self.states.ldsWriteTokenIdx,
-              memoryToken=[self.states.ldsWriteTokenIdx]))
+              memoryToken=[self.states.ldsWriteTokenIdx],
+              warTokens=[] if warToken is None else [warToken],
+              warDistance=0 if warToken is None else 1))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
           if kernel["enableTDMA"]:
@@ -7304,6 +7312,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+                               # Per-pass wall-time report on stderr once the pipeline has run.
+                               # Forced on while profiling kernel-generation time; restore
+                               #"TimePasses": bool(globalParameters.get("StinkyTofuTimePasses") or True),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
@@ -7643,7 +7654,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
        kernel["UseSubtileImpl"] or \
        clusterEnabled(kernel["ClusterDim"]):
       self.states.staggerUCode = False
-    
+
     self.states.tailloopInNllmaxUnit = 1
     if self.states.tailloopInNll:
       tluA = kernel["ProblemType"]["TLUA"]
@@ -9775,7 +9786,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx += 1
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
-  
+
       if kernel["PrefetchGL2"]:
         vgprIdx = int((vgprIdx + 1) / 2) * 2
         self.states.a.startVgprGL2PrefetchAddr = vgprIdx
@@ -9787,7 +9798,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
         if kernel["ProblemType"]["MXBlockB"]:
           self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
-          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga      
+          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
         if kernel["enableTDMMetadata"]:
           tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
           self.states.m.startVgprGL2PrefetchAddr = vgprIdx
@@ -9805,7 +9816,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       agprLimit = self.states.regCaps["PhysicalMaxVgpr"] - self.states.regCaps["MaxVgpr"]
       if self.states.totalAgprs > agprLimit:
         raise RuntimeError("Generating asm kernel error: total agpr: %u not in [0, %u].\n" % (self.states.totalAgprs, agprLimit) )
-  
+
       # VGPR alloc marker
 
 
@@ -11857,9 +11868,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   # SyncThreads
   ##############################################################################
-  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None):
+  def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False, memoryToken=None,
+                   warTokens=None, warDistance=0):
     if self.do["Sync"]:
-      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
+      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken,
+                         warTokens=warTokens, warDistance=warDistance)
     return Module("SyncThreads (Empty)")
 
   def _tailLoopBarrierTokens(self, kernel):
@@ -11902,6 +11915,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     removedCount = 0
     insertedCount = 0
+    annotatedRawCount = 0
+
+    # The StreamK persistent-loop barrier guards a real cross-tile LDS hazard and
+    # pass-2 cannot rebuild it: it carries no memtoken, and the
+    # label_PersistentLoopStart back edge is not modelled at all.
+    #
+    # Preserving it is only safe where the main loop's tensor state is LIVE. A
+    # barrier is a CK_Tensor consumer, so it drains and trims the queue in solver
+    # sweep 0. Where restoreTensorState freezes that snapshot, it is what every
+    # downstream block sees for the rest of the solve, and those blocks' tensorcnt
+    # becomes an artifact of where the snapshot was taken rather than a derived
+    # fact -- adding this barrier DELETED the s_wait_tensorcnt inside a
+    # TDMPlusLdsBuf=0 StreamK kernel's own main loop.
+    #
+    # TDMPlusLdsBuf=1 is the case where the reads carry mod.loopcarriedraw, which
+    # makes needsLiveTensorState true for the loop block: the queue survives the
+    # back edge, the in-loop wait is derived, and an upstream barrier cannot
+    # delete it. Verified -- sk-tdm3 keeps every wait and gains the barrier, and
+    # every other kernel is untouched. Widen this only once the freeze is gone.
+    preserveStreamKBarrier = kernel.get("TDMPlusLdsBuf", 0) == 1
+    streamKBarrierComment = "For stream-k / persistent loop"
 
     # Pass-1: remove existing barriers first.
     modulesToScan = [rootModule]
@@ -11912,7 +11946,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0]:
+        elif isinstance(item, SBarrier) and "-3" not in str(item).split("//", 1)[0] \
+             and not (preserveStreamKBarrier and streamKBarrierComment in str(item)):
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
@@ -12101,9 +12136,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           phase = _accessPhase(access)
           for token in tokens:
             if token not in info:
-              info[token] = [access, phase]  # [firstAccess, tailState]
+              info[token] = [access, phase, False]  # [firstAccess, tailState, wroteInBody]
             else:
-              info[token][1] = phase          # update tail to the last access
+              info[token][1] = phase                # update tail to the last access
+            if access == "write":
+              info[token][2] = True
         headInfo[beginName] = info
       return headInfo
 
@@ -12117,6 +12154,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # wrong buffer and misses every loop-carried hazard.
     ldsTokenBackEdgeMap = self._ldsTokenBackEdgeMap()
     loopEntryOverride = {}
+    # token -> the token whose tail phase the back edge carried in. Differs from
+    # the token itself only under rotation, and that difference is the whole
+    # loop-carried WAR: the aliasing reads ran on the previous trip under the
+    # other tag.
+    loopEntryCarriedFrom = {}
+    # token -> (writerToken, distance) for a read whose producing fill ran
+    # `distance` trips ago under the tag `writerToken`. The RAW mirror of
+    # loopEntryCarriedFrom, and the reason it needs its own map: WAR resolves in
+    # one back-edge step, RAW does not.
+    loopEntryRawFrom = {}
     loopPendingTokens = set()
     loopHeadInfo = _detectLoopHeadInfo() \
       if kernel["PrefetchGlobalRead"] < 2 or ldsTokenBackEdgeMap else {}
@@ -12127,6 +12174,34 @@ class KernelWriter(metaclass=abc.ABCMeta):
     rapLoopEntryTokenState = {}
     rapIterNLabel = Label.getFormatting("RAP_IterN")
     rapLoopEntryLabel = Label.getFormatting("PersistentLoopStart")
+
+    def _carriedWriterOf(token, writtenTokens):
+      """Tag and trip distance of the fill that produced what `token` reads now.
+
+      A tag names a physical buffer only for its own trip, and the back-edge map
+      renames one trip at a time: buffer(t, k) == buffer(map[t], k-1). So after d
+      steps, map^d(token) is the tag that named this buffer d trips ago, and the
+      first such tag that the body writes is the producing fill.
+
+      Walking more than one step is the whole point. A 3-buffer ring reading at
+      generation 0 and filling at generation 2 puts the fill TWO trips back; the
+      single-step lookup the WAR path uses lands on a tag the body never touches
+      and sees nothing, which is exactly how the RAW went unguarded.
+
+      Only the nearest writer is reported. CK_Tensor retires in order, so a wait
+      for the fill at distance d has already retired every older one.
+      """
+      carried = token
+      for distance in range(1, len(ldsTokenBackEdgeMap) + 1):
+        carried = ldsTokenBackEdgeMap.get(carried)
+        # Ring closed without finding a writer, or the tag does not rotate at
+        # all -- in which case plain token overlap already sees the dependence
+        # and no annotation is needed.
+        if carried is None or carried == token:
+          return None
+        if carried in writtenTokens:
+          return (carried, distance)
+      return None
 
     plannedBarriers = []
     # Open wave-divergent regions, outermost first.
@@ -12163,7 +12238,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # label) instead of one that re-fires every iteration.
           prologueBarrierTokens = []
           tailStates = {token: info[1] for token, info in loopHeadInfo[labelName].items()}
-          for token, (firstAccess, _) in loopHeadInfo[labelName].items():
+          writtenTokens = {token for token, info in loopHeadInfo[labelName].items() if info[2]}
+          for token, info in loopHeadInfo[labelName].items():
+            firstAccess = info[0]
             # Next iteration this token names the buffer that
             # ldsTokenBackEdgeMap[token] names now, so the phase the back edge
             # carries in is that token's tail phase. Without rotation the map is
@@ -12173,7 +12250,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
             carriedState = tailStates.get(carriedToken, "standby")
             preState = tokenState.get(token, "standby")
             loopEntryOverride[token] = carriedState
+            loopEntryCarriedFrom[token] = carriedToken
             loopPendingTokens.add(token)
+            # A read is fed by a fill from an earlier trip under another tag.
+            # The barrier this pass emits orders the waves; naming the fill
+            # lets StinkyTofu make it land.
+            if firstAccess == "read":
+              rawRelation = _carriedWriterOf(token, writtenTokens)
+              if rawRelation is not None:
+                loopEntryRawFrom[token] = rawRelation
             if _conflicts(firstAccess, preState) and not _conflicts(firstAccess, carriedState):
               prologueBarrierTokens.append(token)
           if prologueBarrierTokens:
@@ -12184,7 +12269,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                    "the loop prologue barrier for %s has to stay on the loop label, "
                    "which is inside a wave-divergent region" % labelName))
             plannedBarriers.append((owner, pos, sorted(set(prologueBarrierTokens)),
-                                    "auto token transition barrier (loop prologue)"))
+                                    "auto token transition barrier (loop prologue)", []))
         continue
 
       if not isinstance(item, Instruction):
@@ -12197,6 +12282,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if branchLabelName in loopHeadInfo:
         # Reached the loop back-branch: drop any stale loop-entry overrides.
         loopEntryOverride.clear()
+        loopEntryCarriedFrom.clear()
+        loopEntryRawFrom.clear()
         loopPendingTokens.clear()
       if idx in guardEndByIndex:
         openGuards.append([guardEndByIndex[idx], idx, owner, pos, set()])
@@ -12209,21 +12296,39 @@ class KernelWriter(metaclass=abc.ABCMeta):
         continue
 
       barrierTokens = []
+      warTokens = []
+      rawByDistance = {}
       for token in tokens:
+        carriedFrom = None
         if token in loopPendingTokens:
           # First access of this token inside the loop body: evaluate it
           # against the back-edge (loop-tail) state.
           state = loopEntryOverride.get(token, tokenState.get(token, "standby"))
+          carriedFrom = loopEntryCarriedFrom.get(token)
+          # The first read of a token is the one that consumes the carried
+          # fill; later reads this trip sit behind it on an in-order counter.
+          if access == "read" and token in loopEntryRawFrom:
+            writerToken, distance = loopEntryRawFrom[token]
+            rawByDistance.setdefault(distance, []).append(writerToken)
           loopPendingTokens.discard(token)
         else:
           state = tokenState.get(token, "standby")
-        if _conflicts(access, state):
-          barrierTokens.append(token)
+        if not _conflicts(access, state):
+          continue
+        barrierTokens.append(token)
+        # A read->write conflict resolved against the BACK EDGE is a
+        # loop-carried WAR, and under rotation the reads it names ran under
+        # `carriedFrom`. Naming it lets StinkyTofu drain this wave's own
+        # outstanding reads; the barrier alone only orders the waves.
+        if access == "write" and carriedFrom is not None and carriedFrom != token:
+          warTokens.append(carriedFrom)
 
       if barrierTokens:
         uniqueTokens = sorted(set(barrierTokens))
+        uniqueWarTokens = sorted(set(warTokens))
         if not openGuards:
-          plannedBarriers.append((owner, pos, uniqueTokens, "auto token transition barrier"))
+          plannedBarriers.append((owner, pos, uniqueTokens,
+                                  "auto token transition barrier", uniqueWarTokens))
         else:
           outer = openGuards[0]
           blockers = sorted(outer[4].intersection(uniqueTokens))
@@ -12235,12 +12340,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
             reason = None
           if reason is None:
             plannedBarriers.append((outer[2], outer[3], uniqueTokens,
-                                    "auto token transition barrier (ahead of a wave-divergent branch)"))
+                                    "auto token transition barrier (ahead of a wave-divergent branch)",
+                                    uniqueWarTokens))
           else:
             unsafeBarriers.append(
                 (uniqueTokens,
                  "the barrier for tokens %s cannot leave the wave-divergent region it "
                  "falls in, because %s" % (uniqueTokens, reason)))
+
+      if rawByDistance:
+        # Nearest partner only, and only the tags at that distance: a tag
+        # further back is already covered by the wait for the nearer one.
+        rawDistance = min(rawByDistance)
+        rawTokens = sorted(set(rawByDistance[rawDistance]))
+        memTokenObj = item.getMemToken()
+        item.setMemToken(MemTokenData(list(memTokenObj.tokens),
+                                      list(memTokenObj.warTokens),
+                                      memTokenObj.warDistance,
+                                      rawTokens, rawDistance))
+        annotatedRawCount += 1
 
       nextState = _accessPhase(access)
       for token in tokens:
@@ -12259,16 +12377,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Two transitions relocated to the same point want one barrier, not two
     # adjacent ones. plannedBarriers is in program order, so they are adjacent.
     mergedBarriers = []
-    for owner, pos, tokens, prefix in plannedBarriers:
+    for owner, pos, tokens, prefix, warTokens in plannedBarriers:
       if mergedBarriers and mergedBarriers[-1][0] is owner and mergedBarriers[-1][1] == pos:
         mergedBarriers[-1][2] = sorted(set(mergedBarriers[-1][2]) | set(tokens))
+        mergedBarriers[-1][4] = sorted(set(mergedBarriers[-1][4]) | set(warTokens))
         continue
-      mergedBarriers.append([owner, pos, tokens, prefix])
+      mergedBarriers.append([owner, pos, tokens, prefix, warTokens])
 
     # Insert from highest index downward; reverse equal-index entries to preserve order.
     barriersByOwner = {}
-    for order, (owner, pos, tokens, prefix) in enumerate(mergedBarriers):
-      barriersByOwner.setdefault(id(owner), (owner, []))[1].append((pos, order, tokens, prefix))
+    for order, (owner, pos, tokens, prefix, warTokens) in enumerate(mergedBarriers):
+      barriersByOwner.setdefault(id(owner), (owner, []))[1].append(
+          (pos, order, tokens, prefix, warTokens))
     # Reject barriers targeting an aliased module: one index names multiple positions.
     ambiguousOwners = sorted({owner.name for ownerId, (owner, _entries)
                               in barriersByOwner.items() if ownerId in aliasedModules})
@@ -12281,15 +12401,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     for owner, entries in barriersByOwner.values():
       items = list(owner.items())
-      for pos, _order, tokens, prefix in sorted(entries, key=lambda e: (e[0], e[1]), reverse=True):
+      for pos, _order, tokens, prefix, warTokens in sorted(entries, key=lambda e: (e[0], e[1]), reverse=True):
         syncComments = ", ".join([f"sync LDS{token}" for token in tokens])
+        if warTokens:
+          syncComments += ", WAR d=1 on " + ", ".join([f"LDS{t}" for t in warTokens])
         barrier = SBarrier(comment=f"{prefix}, {syncComments}")
-        barrier.setMemToken(MemTokenData(tokens))
+        barrier.setMemToken(MemTokenData(tokens, warTokens, 1 if warTokens else 0))
         items.insert(pos, barrier)
         insertedCount += 1
       owner.setItems(items)
 
-    print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers")
+    print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers, annotated {annotatedRawCount} loop-carried RAW reads")
     return
 
   ##############################################################################
@@ -12635,19 +12757,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
-  
+
   @abc.abstractmethod
   def gl2PrefetchInit(self, kernel, tPA, tPB):
     return ""
-  
+
   @abc.abstractmethod
   def gl2PrefetchCalcAddr(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
   @abc.abstractmethod
   def gl2PrefetchIssueLoad(self, kernel, tPA, tPB) -> Module:
     return ""
-  
+
   @abc.abstractmethod
   def gl2PrefetchIncrementAddr(self, kernel, tPA, tPB) -> Module:
     return ""

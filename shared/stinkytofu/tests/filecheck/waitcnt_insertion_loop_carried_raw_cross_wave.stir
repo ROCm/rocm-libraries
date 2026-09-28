@@ -1,0 +1,96 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=4 --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The multi-wave counterpart of waitcnt_insertion_loop_carried_raw_distance2.
+# Same ring and same d = 2 RAW, but with the barrier the real kernel has and
+# NumWaves > 1, which is what the gfx1250 TDM + TDMPlusLdsBuf main loop looks
+# like at SIA4. Reduced from the sk-tdm3 StreamK kernel.
+#
+# Ring 3, one step per trip, with Read(k) = blk(k) and Write(k) = blk(k+2):
+#
+#                           prologue   iter 0   iter 1   iter 2   iter 3
+#   ds_load     (Read,  [0])     -      LDS0     LDS1     LDS2     LDS0
+#   tensor_load (Write, [2]) LDS0,LDS1  LDS2     LDS0     LDS1     LDS2
+#
+# Read(k) = Write(k-d) gives d = 2, so the reads carry mod.loopcarriedraw with
+# distance 2. Without it nothing in the loop waits on tensorcnt at all: the
+# static tags [0] and [2] never move, token overlap finds nothing, and the
+# CK_Tensor queue does not survive the back edge because restoreTensorState
+# freezes it. That combination is the shipped SIA4 miscompile.
+#
+# THE WAIT IS tlcnt = 0, AND THAT IS NOT OVER-DRAINING.
+#
+# It is tempting to read the distance-2 annotation as asking for tlcnt = 1 (as
+# waitcnt_insertion_loop_carried_raw_distance2 gets at NumWaves=1) and to treat
+# the barrier's full drain as the conservative fallback to remove. It is not.
+# tensor_load_to_lds is split across waves -- even waves fill A, odd waves fill
+# B -- while every wave reads both, so the fill must land in the FILLING wave
+# before the last barrier the READING wave passes on its way to the consuming
+# read. s_wait_tensorcnt retires only this wave's own ops, so a wait placed at
+# the reads cannot discharge that no matter its immediate.
+#
+# With one barrier per trip, the last rendezvous before trip k's reads is the
+# barrier at the end of trip k-1, and fill(k-2) is the newest fill outstanding
+# there -- so "fill(k-2) has landed" is exactly tlcnt = 0. A tlcnt = 1 there
+# would leave the other wave's fill(k-2) in flight and race. Buying back the
+# overlap needs a second barrier in the body (what SIA0 emits), not a looser
+# immediate.
+#
+# The annotation is still what makes this work: it sets needsLiveTensorState,
+# which opts the block out of the CK_Tensor freeze so the barrier can see the
+# fills at all. Drop it and the loop goes back to no tensorcnt.
+#
+# CHECK-LABEL: @waitcnt_insertion_loop_carried_raw_cross_wave
+#
+# Prologue: both fills, then the loop-entry barrier makes the one it is tagged
+# for land. Only fill [0] is named, so this one DOES relax -- tlcnt = 1 leaves
+# fill [1] in flight for the next trip. Nothing is rotating yet here, so the
+# barrier's token means what it says and the queue position is usable.
+#
+# This is the one place the reduction diverges from the kernel, which emits
+# tlcnt = 0 here. There the second fill sits behind `s_cbranch_scc1
+# label_skipPGR2_1` (PGR=2 with a single loop skips it), so the barrier's block
+# has two predecessors and the max-over-preds lands on the path where fill [0]
+# is the only thing outstanding. Straight-line prologue here, so it relaxes.
+# CHECK: ^entry:
+# CHECK: tensor_load_to_lds{{.*}}tokens = [0]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 1
+# CHECK-NEXT: s_barrier_wait{{.*}}tokens = [0]
+#
+# Loop body: reads first, no tensorcnt among them, then the cross-wave drain
+# ahead of the barrier that publishes this trip's fill.
+# CHECK: ^loop:
+# CHECK-NEXT: ds_load_b64{{.*}}tokens = [0]
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: s_wait_dscnt{{.*}}dlcnt = 0
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+# CHECK-NEXT: s_wait_tensorcnt{{.*}}tlcnt = 0
+# CHECK-NEXT: s_barrier_signal{{.*}}tokens = [2]
+# CHECK-NEXT: s_barrier_wait{{.*}}tokens = [2]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [2]
+
+st.func @waitcnt_insertion_loop_carried_raw_cross_wave() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[8:15]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[16:23]) { mod.memtoken = { tokens = [1] } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  # trip k on entry: WP=blk(k+2)%3  RP=blk(k)%3
+  v[20:21] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] }, mod.loopcarriedraw = { tokens = [2], distance = 2 } }
+  v[40:41] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] }, mod.loopcarriedraw = { tokens = [2], distance = 2 } }
+  v[60:61] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] }, mod.loopcarriedraw = { tokens = [2], distance = 2 } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[80:87], a[10:17])
+  a[18:25] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[80:87], a[18:25])
+  a[26:33] = "st.v_wmma_f32_16x16x32_bf16"(v[60:67], v[80:87], a[26:33])
+  # ROTATE WP / RP are plain address arithmetic; elided. The tags below are
+  # already post-rotate, which is why the fill says [2] and the reads say [0].
+  "st.s_barrier_signal"(-1) { mod.memtoken = { tokens = [2] }, mod.loopcarriedwar = { tokens = [0], distance = 1 } }
+  "st.s_barrier_wait"(-1) { mod.memtoken = { tokens = [2] } }
+  "st.tensor_load_to_lds"(s[0:3], s[24:31]) { mod.memtoken = { tokens = [2] } }
+  SCC0 = "st.s_cmp_eq_u32"(s60, 0x1)
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
