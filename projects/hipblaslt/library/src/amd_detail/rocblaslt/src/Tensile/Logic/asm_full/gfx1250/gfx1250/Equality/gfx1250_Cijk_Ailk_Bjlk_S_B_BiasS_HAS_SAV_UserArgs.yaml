@@ -338,7 +338,7 @@ Solutions:
   LdsOffsetMXSB_Blk: 196864
   LdsOffsetMetadata: 65792
   LdsOffsetMetadata_Blk: 196864
-  LdsPadA: 1
+  LdsPadA: 2
   LdsPadB: 0
   LdsPadMXSA: 0
   LdsPadMXSB: 0
@@ -551,8 +551,8 @@ Solutions:
   LdsOffsetMXSB_Blk: 196864
   LdsOffsetMetadata: 65792
   LdsOffsetMetadata_Blk: 196864
-  LdsPadA: 1
-  LdsPadB: 1
+  LdsPadA: 2
+  LdsPadB: 2
   LdsPadMXSA: 0
   LdsPadMXSB: 0
   LocalReadVectorWidthA: 2
@@ -764,7 +764,7 @@ Solutions:
   LdsOffsetMetadata: 28672
   LdsOffsetMetadata_Blk: 108800
   LdsPadA: 0
-  LdsPadB: 3
+  LdsPadB: 4
   LdsPadMXSA: 0
   LdsPadMXSB: 0
   LocalReadVectorWidthA: 2
@@ -976,7 +976,7 @@ Solutions:
   LdsOffsetMXSB_Blk: 135680
   LdsOffsetMetadata: 65792
   LdsOffsetMetadata_Blk: 135680
-  LdsPadA: 1
+  LdsPadA: 2
   LdsPadB: 0
   LdsPadMXSA: 0
   LdsPadMXSB: 0
@@ -1188,7 +1188,7 @@ Solutions:
   LdsOffsetMXSB_Blk: 135680
   LdsOffsetMetadata: 65792
   LdsOffsetMetadata_Blk: 135680
-  LdsPadA: 1
+  LdsPadA: 2
   LdsPadB: 0
   LdsPadMXSA: 0
   LdsPadMXSB: 0
