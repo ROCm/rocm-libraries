@@ -106,38 +106,26 @@ jobs:
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ${{ needs.gate.outputs.build_runs_on }}
     timeout-minutes: 180
-    # No nested container. The ubuntu:24.04 job container ignored
-    # --cap-add=SYS_PTRACE (CapEff had no sys_ptrace bit), and rocminfo then
-    # ran with no simulated GPU. This job uses the build-runner image itself.
+    # The build-runner process has CapEff 0 and no docker socket, and a nested
+    # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
+    # build and the nightly unpack already succeeded. The test uses the non-kmd
+    # config in local mode, which is how the rocJITsu corpus job runs on a CPU
+    # scale set without ptrace.
     defaults:
       run:
         shell: bash
+    container:
+      image: ubuntu:24.04
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
       GTEST_FILTER: ${{ github.event.inputs.gtest_filter || 'hiprand_32/hiprand_api_32.hiprand_generate_test/0' }}
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       ROCM_SYSTEMS_REF: 1f44cb5afa5e6dec03d57609e5dfba43d4f31c3c
     steps:
-      - name: Require docker with SYS_PTRACE
-        run: |
-          set -euo pipefail
-          echo "host CapEff $(awk '/CapEff/ {print $2}' /proc/self/status)"
-          id
-          sudo -n true
-          docker info >/dev/null
-          cap=$(docker run --rm --cap-add=SYS_PTRACE --security-opt seccomp=unconfined ubuntu:24.04 awk '/CapEff/ {print $2}' /proc/self/status)
-          echo "container CapEff ${cap}"
-          python3 - "$cap" << 'PY'
-          import sys
-          cap = int(sys.argv[1], 16)
-          if cap & (1 << 19) == 0:
-              sys.exit("docker run did not grant CAP_SYS_PTRACE")
-          PY
-
       - name: Install build tools
         run: |
-          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get update
-          sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             build-essential ca-certificates cmake curl git ninja-build pkg-config python3
 
       - name: Checkout rocm-libraries
@@ -183,38 +171,22 @@ jobs:
           test -x "$root/bin/test_hiprand_api"
           echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
 
-      - name: Confirm the simulated agent is gfx942
-        run: |
-          set -euo pipefail
-          mkdir -p parity
-          docker run --rm \
-            --cap-add=SYS_PTRACE \
-            --security-opt seccomp=unconfined \
-            -v "${GITHUB_WORKSPACE}:/work" \
-            -v "${ROCM_ROOT}:/rocm" \
-            -w /work \
-            -e ROCM_PATH=/rocm \
-            -e LD_LIBRARY_PATH=/rocm/lib \
-            ubuntu:24.04 \
-            /work/rj-build/tools/rocjitsu/rocjitsu --daemon \
-            --config /work/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json \
-            -- /rocm/bin/rocminfo > parity/rocminfo.txt 2>&1
-          grep -q gfx942 parity/rocminfo.txt
-
       - name: Run the hipRAND filter under rocJITsu
         run: |
           set -euo pipefail
-          docker run --rm \
-            --cap-add=SYS_PTRACE \
-            --security-opt seccomp=unconfined \
-            -v "${GITHUB_WORKSPACE}:/work" \
-            -v "${ROCM_ROOT}:/rocm" \
-            -w /work \
-            -e ROCM_PATH=/rocm \
-            -e LD_LIBRARY_PATH=/rocm/lib \
-            ubuntu:24.04 \
-            bash -lc 'apt-get update && apt-get install -y --no-install-recommends python3 && python3 /work/.github/scripts/ci_parity_runner.py --daemon --rocjitsu /work/rj-build/tools/rocjitsu/rocjitsu --config /work/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3_kmd.json --rocm-root /rocm --rocm-version "$0" --runner-label "$1" --binary /rocm/bin/test_hiprand_api --gtest-filter "$2" --out /work/parity/emu.json' \
-            "$ROCM_VERSION" "$BUILD_RUNS_ON" "$GTEST_FILTER"
+          export ROCM_PATH="$ROCM_ROOT"
+          export PATH="$ROCM_ROOT/bin:$PATH"
+          export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          mkdir -p parity
+          python3 .github/scripts/ci_parity_runner.py \
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json" \
+            --rocm-root "$ROCM_ROOT" \
+            --rocm-version "$ROCM_VERSION" \
+            --runner-label "$BUILD_RUNS_ON" \
+            --binary "$ROCM_ROOT/bin/test_hiprand_api" \
+            --gtest-filter "$GTEST_FILTER" \
+            --out parity/emu.json
 
       - name: Diff against the hardware baseline
         if: always()
