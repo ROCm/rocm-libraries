@@ -283,9 +283,18 @@ VerificationOutcome IntegrationBundleVerificationHarness::runComparison(GraphSes
         return unverifiable("bundle has no output tensors to compare");
     }
 
-    if(auto unavailable = prepareInputs())
+    // A graph the engine declined never reads its inputs: every mode below reaches
+    // runEngine() -- which reports the decline -- before anything touches
+    // _bundle->tensors. Filling first made a declined graph pay the full host-side
+    // allocation and RNG fill for its tensors, which on a 57M-element sweep case is
+    // seconds per skip, and left those inputs cached on the bundle for the rest of
+    // the run.
+    if(session.engines.accepted)
     {
-        return *unavailable;
+        if(auto unavailable = prepareInputs())
+        {
+            return *unavailable;
+        }
     }
 
     switch(_deps.policy.mode)
