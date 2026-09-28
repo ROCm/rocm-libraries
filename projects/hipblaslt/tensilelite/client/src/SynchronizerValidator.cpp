@@ -97,7 +97,17 @@ namespace TensileLite
                                                     TimingEvents const&            startEvents,
                                                     TimingEvents const&            stopEvents)
         {
-            checkInputs(inputs, "warmup");
+            try
+            {
+                checkInputs(inputs, "warmup");
+            }
+            catch(...)
+            {
+                // main catches checker errors, so preserve a failing verdict
+                // for postSolution and the client's exit status before rethrowing.
+                m_dirtyInSolution = true;
+                throw;
+            }
         }
 
         void SynchronizerValidator::checkInputs(std::shared_ptr<ProblemInputs> inputs,
@@ -149,6 +159,18 @@ namespace TensileLite
             return m_staging;
         }
 
+        uint8_t* SynchronizerValidator::readBuffer(void* device, size_t bytes)
+        {
+            auto host = stagingBuffer(bytes);
+            HIP_CHECK_EXC(hipMemcpy(host, device, bytes, hipMemcpyDeviceToHost));
+            return host;
+        }
+
+        void SynchronizerValidator::clearBuffer(void* device, size_t bytes)
+        {
+            HIP_CHECK_EXC(hipMemset(device, 0, bytes));
+        }
+
         bool SynchronizerValidator::checkBuffer(ContractionProblemGemm const& problem,
                                                 void*                         deviceSynchronizer,
                                                 char const*                   stage,
@@ -184,8 +206,7 @@ namespace TensileLite
 
             // Once per solution, so the copy is hot: pinned staging avoids the
             // pageable bounce buffer.
-            uint8_t* host = stagingBuffer(bytes);
-            HIP_CHECK_EXC(hipMemcpy(host, deviceSynchronizer, bytes, hipMemcpyDeviceToHost));
+            uint8_t* host = readBuffer(deviceSynchronizer, bytes);
 
             SynchronizerResidue residue;
             if(!scanSynchronizerResidue(host, bytes, residue))
@@ -201,7 +222,7 @@ namespace TensileLite
             // resetOutput skips the Synchronizer (it is not an output tensor),
             // so clear the residue here to report it once rather than for every
             // solution that follows.
-            HIP_CHECK_EXC(hipMemset(deviceSynchronizer, 0, bytes));
+            clearBuffer(deviceSynchronizer, bytes);
 
             return false;
         }

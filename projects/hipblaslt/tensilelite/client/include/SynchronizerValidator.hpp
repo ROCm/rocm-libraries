@@ -4,12 +4,12 @@
 /*! \file
  * \brief Post-launch dirty-buffer check for the shared Synchronizer buffer.
  *
- * Two kernel families share one Synchronizer allocation across launches and
- * must leave it at zero on exit: StreamK (work-queue / fixup Flags) and GSU
- * MultipleBufferSingleKernel. Residue is silent -- it corrupts a later launch,
- * not the one that left it -- so this listener reads the buffer back, fails the
- * run on any nonzero int, and clears it so it is reported once. It also fails
- * when the buffer is declared too narrow to scan in full.
+ * StreamK, GSU MultipleBufferSingleKernel, and output-amax kernels share one
+ * Synchronizer allocation across launches and must leave it at zero on exit.
+ * Residue is silent -- it corrupts a later launch, not the one that left it --
+ * so this listener reads the buffer back, fails the run on any nonzero int,
+ * and clears it so it is reported once. Buffers declared too narrow to scan
+ * in full produce a warning and are skipped.
  *
  * On by default (GlobalParameters CheckSynchronizer); --check-synchronizer=0
  * turns it off. A default must not change what a config does, so the listener
@@ -148,6 +148,10 @@ namespace TensileLite
             size_t              m_stagingBytes = 0;
 
         protected:
+            // Keep device transfers overridable for host-only lifecycle tests.
+            virtual uint8_t* readBuffer(void* device, size_t bytes);
+            virtual void clearBuffer(void* device, size_t bytes);
+
             /// Whether the check should do anything right now: switched on, and
             /// the solution in hand actually touches the Synchronizer.
             bool active() const

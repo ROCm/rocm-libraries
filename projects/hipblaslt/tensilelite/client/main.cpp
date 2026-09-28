@@ -272,7 +272,7 @@ namespace TensileLite
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
                 ("check-synchronizer",       po::value<bool>()->default_value(true),
-                "Fail the run if a StreamK or GSU MBSK kernel leaves the shared Synchronizer buffer nonzero on exit."
+                "Fail the run if a StreamK, GSU MBSK or output-amax kernel leaves the shared Synchronizer buffer nonzero on exit."
                 " Solutions that do not use the buffer are skipped, so this is free for them.")
                 ("bounds-check",             po::value<BoundsCheckMode>()->default_value(BoundsCheckMode::Disable),
                 "1:Use sentinel values to check memory boundaries."

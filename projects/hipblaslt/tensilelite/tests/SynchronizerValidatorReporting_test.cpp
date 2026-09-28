@@ -3,12 +3,15 @@
 
 #include <gtest/gtest.h>
 
+#include "MetaRunListener.hpp"
 #include "ResultReporter.hpp"
 #include "SynchronizerValidator.hpp"
 
 #include <Tensile/ContractionSolution.hpp>
 
+#include <algorithm>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -232,3 +235,93 @@ TEST(SynchronizerValidatorReporting, DirtySolutionReportsFailureOnce)
     EXPECT_EQ(validator.error(), 1);
     EXPECT_EQ(reporter->stringReports.size(), 1u);
 }
+
+namespace
+{
+    enum class TransferFailure { None, Readback, Clear };
+
+    class HostBufferValidator : public SynchronizerValidator
+    {
+    public:
+        HostBufferValidator() : SynchronizerValidator(enabledArgs()) {}
+        TransferFailure failure = TransferFailure::None;
+
+    protected:
+        uint8_t* readBuffer(void* device, size_t) override
+        {
+            if(failure == TransferFailure::Readback)
+                throw std::runtime_error("readback failed");
+            return static_cast<uint8_t*>(device);
+        }
+        void clearBuffer(void* device, size_t bytes) override
+        {
+            if(failure == TransferFailure::Clear)
+                throw std::runtime_error("clear failed");
+            std::fill_n(static_cast<uint8_t*>(device), bytes, uint8_t{0});
+        }
+    };
+
+    // Models the reference listener's successful verdict at postSolution.
+    class PassingReferenceListener : public FakeResultReporter
+    {
+        void setReporter(std::shared_ptr<ResultReporter> reporter) override
+        {
+            RunListener::setReporter(reporter);
+        }
+        void postSolution() override
+        {
+            m_reporter->report(ResultKey::Validation, "PASSED");
+        }
+    };
+
+    class SynchronizerValidatorLifecycle : public ::testing::TestWithParam<TransferFailure> {};
+}
+
+TEST_P(SynchronizerValidatorLifecycle, FailureSurvivesReferenceVerdictAndNextSolutionIsClean)
+{
+    auto validator = std::make_shared<HostBufferValidator>();
+    auto reporter = std::make_shared<FakeResultReporter>();
+    MetaRunListener listeners;
+    // Match main: postSolution visits these in reverse order.
+    listeners.addListener(validator);
+    listeners.addListener(std::make_shared<PassingReferenceListener>());
+    listeners.setReporter(reporter);
+
+    TensileLite::ContractionProblemGemm problem;
+    problem.setSynchronizer(rocisa::DataType::Int32, 4);
+    std::vector<uint32_t> buffer{0, 1, 0, 0};
+    auto inputs = std::make_shared<TensileLite::ContractionInputs>();
+    inputs->Synchronizer = buffer.data();
+    TimingEvents events(0, 0);
+    listeners.preProblem(&problem);
+    listeners.preSolution(nullptr);
+    validator->failure = GetParam();
+
+    if(GetParam() == TransferFailure::None)
+        EXPECT_NO_THROW(listeners.validateWarmups(inputs, events, events));
+    else
+        EXPECT_THROW(listeners.validateWarmups(inputs, events, events), std::runtime_error);
+    listeners.postSolution();
+
+    EXPECT_EQ(listeners.error(), 1);
+    ASSERT_EQ(reporter->stringReports.size(), 2u);
+    EXPECT_EQ(reporter->stringReports.back(),
+              std::make_pair(std::string(ResultKey::Validation), std::string("FAILED")));
+    EXPECT_EQ(buffer[1], GetParam() == TransferFailure::None ? 0u : 1u);
+
+    // A later successful check must not inherit the earlier solution's verdict.
+    validator->failure = TransferFailure::None;
+    std::fill(buffer.begin(), buffer.end(), 0);
+    listeners.preSolution(nullptr);
+    listeners.validateWarmups(inputs, events, events);
+    listeners.postSolution();
+    EXPECT_EQ(listeners.error(), 1);
+    ASSERT_EQ(reporter->stringReports.size(), 3u);
+    EXPECT_EQ(reporter->stringReports.back().second, "PASSED");
+}
+
+INSTANTIATE_TEST_SUITE_P(Transfers,
+                        SynchronizerValidatorLifecycle,
+                        ::testing::Values(TransferFailure::None,
+                                          TransferFailure::Readback,
+                                          TransferFailure::Clear));
