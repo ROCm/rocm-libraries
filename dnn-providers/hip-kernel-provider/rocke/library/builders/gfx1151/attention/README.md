@@ -43,6 +43,21 @@ Python 3.12, NumPy 2.5.1, ml_dtypes 0.5.4, and checksum-pinned AOTriton runtime
 and image archives. Runtime artifacts and absolute performance results stay
 outside the source tree. On Windows, use Git Bash rather than the WSL launcher.
 
+### Dense forward dtype support
+
+`WmmaFmhaFwdSpec` accepts `fp16` (including the `f16` spelling) and `bf16`.
+The selected WMMA atom and all Q/K/V/output pointer types follow that dtype.
+FP16 kernel-cache names remain unchanged; BF16 has distinct names, preventing
+cross-dtype cache collisions. Both causal and noncausal paths and the optional
+V-LDS staging path support the dtype selection. Query and KV lengths still
+require complete 16-token tiles; this dtype change does not add paging, ragged
+inputs, or score features.
+
+The C `rocke_wmma_fmha_fwd_spec_t` now includes `dtype`, initialized to `"fp16"`
+by `rocke_wmma_fmha_fwd_spec_default()`. Native callers must rebuild against
+the updated header and archive; the pybind spec adapter also carries the field.
+The parity emitters cover both dtypes, head sizes, masks, GQA, and V staging.
+
 The sections below are a historical campaign, not results for this comparator.
 
 ## TL;DR (executive summary)

@@ -26,8 +26,8 @@ class RockeKernels:
         # Unsupported rows remain mandatory in the frozen coverage corpus.
         if case.layout != "dense":
             raise UnsupportedCase("gfx1151 has no paged/packed attention adapter")
-        if case.dtype != "fp16" or case.kv_dtype not in ("", "fp16"):
-            raise UnsupportedCase("existing WMMA attention adapter is fp16-only")
+        if case.dtype not in ("fp16", "bf16") or case.kv_dtype:
+            raise UnsupportedCase("WMMA adapter requires matching fp16/bf16 Q/K/V storage")
         if case.seqlen_q % 16 or case.seqlen_k % 16:
             raise UnsupportedCase("existing WMMA adapter requires complete 16-token tiles")
         if case.mask not in ("none", "causal_topleft"):
@@ -38,6 +38,7 @@ class RockeKernels:
             head_size=case.head_dim, num_query_heads=case.heads_q,
             num_kv_heads=case.heads_kv,
             mask_mode="causal" if case.mask == "causal_topleft" else "none",
+            dtype=case.dtype,
         )
         key = spec.kernel_name()
         if key not in self.cache:

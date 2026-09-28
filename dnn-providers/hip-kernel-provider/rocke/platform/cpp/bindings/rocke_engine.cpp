@@ -3260,6 +3260,8 @@ rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<st
         std::string v;
         if(dict_str(d, "mask_mode", v))
             s.mask_mode = parse_fmha_mask(v);
+        if(dict_str(d, "dtype", v))
+            s.dtype = keep(v);
         if(dict_str(d, "name", v))
             s.name = keep(v);
     }

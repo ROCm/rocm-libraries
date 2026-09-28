@@ -38,6 +38,18 @@ static void wmma_set_reason(char* reason, size_t reason_cap, const char* msg)
     rocke_spec_set_reason(reason, reason_cap, msg);
 }
 
+/* Canonical helper dtype, or NULL for an unsupported spec dtype. */
+static const char* wmma_dtype(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    if(spec == NULL || spec->dtype == NULL)
+        return NULL;
+    if(strcmp(spec->dtype, "fp16") == 0 || strcmp(spec->dtype, "f16") == 0)
+        return "f16";
+    if(strcmp(spec->dtype, "bf16") == 0)
+        return "bf16";
+    return NULL;
+}
+
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
 static int wmma_kv_heads(const rocke_wmma_fmha_fwd_spec_t* spec)
 {
@@ -71,6 +83,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.v_lds_stage = false;
     s.sliding_window = 0;
     s.name = WMMA_FMHA_DEFAULT_NAME;
+    s.dtype = "fp16";
     return s;
 }
 
@@ -78,7 +91,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
  * WmmaFmhaFwdSpec.kernel_name()
  *
  * kernel_name_join(name, "wmma16x16x16", "H{hd}", "HQ{hq}", "HK{kv_heads}",
- *   "fp16", mask_mode, "vlds" if v_lds_stage else "vgather").
+ *   canonical dtype, mask_mode, "vlds" if v_lds_stage else "vgather").
  * --------------------------------------------------------------------------- */
 rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t* spec,
                                                char* out,
@@ -88,8 +101,9 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     const char* mask;
     char h[32], hq[32], hk[32];
     const char* parts[7];
+    const char* dtype = wmma_dtype(spec);
 
-    if(spec == NULL || out == NULL)
+    if(spec == NULL || out == NULL || dtype == NULL)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -108,7 +122,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     parts[1] = h;
     parts[2] = hq;
     parts[3] = hk;
-    parts[4] = "fp16";
+    parts[4] = strcmp(dtype, "bf16") == 0 ? "bf16" : "fp16";
     parts[5] = mask;
     parts[6] = spec->v_lds_stage ? "vlds" : "vgather";
 
@@ -148,6 +162,12 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     {
         arch = WMMA_FMHA_DEFAULT_ARCH;
     }
+    const char* dtype = wmma_dtype(spec);
+    if(dtype == NULL)
+    {
+        wmma_set_reason(reason, reason_cap, "WMMA FMHA dtype must be fp16/f16 or bf16");
+        return false;
+    }
 
     /* target = ArchTarget.from_gfx(arch) -- KeyError path. */
     target = rocke_archtarget_from_gfx(arch);
@@ -158,11 +178,12 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
         return false;
     }
 
-    /* op = target.mma.by_op_id(_wmma_op_id_for_arch(arch)); reject if absent or
-     * not "wmma". gfx1201 (RDNA4) selects the split-K wmma_gfx12_* atom; gfx11
-     * (RDNA3/3.5) the cross-half-duplicated atom. */
-    const char* op_id = (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16"
-                                                       : ROCKE_WMMA_FMHA_FWD_OP_ID;
+    const bool bf16 = strcmp(dtype, "bf16") == 0;
+    const char* op_id = strcmp(arch, "gfx1201") == 0
+                           ? (bf16 ? "wmma_gfx12_f32_16x16x16_bf16"
+                                   : "wmma_gfx12_f32_16x16x16_f16")
+                           : (bf16 ? "wmma_f32_16x16x16_bf16"
+                                   : "wmma_f32_16x16x16_f16");
     op = rocke_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
@@ -212,8 +233,7 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
         return false;
     }
 
-    /* LDS budget: one 16x16 f16 P-staging tile, plus (with V-LDS staging) one
-     * 16 x head_size f16 V tile. */
+    /* Both fp16 and bf16 use two bytes per P/V staging element. */
     bytes_lds = (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * ROCKE_WMMA_FMHA_FWD_BLOCK_K * 2;
     if(spec->v_lds_stage)
     {
@@ -236,12 +256,13 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
  * Q/K/V/O ptrs, scale_log2/seqlen_q/seqlen_k scalars, then the four (token,
  * head) element-stride pairs, in the exact Python declaration order. The named
  * params are recovered later via rocke_b_get_param. */
-static void wmma_declare_params(rocke_ir_builder_t* b)
+static void wmma_declare_params(rocke_ir_builder_t* b, const char* dtype)
 {
     rocke_param_opts_t opts;
-    const rocke_type_t* ptr_f16 = rocke_ptr_type(b, rocke_f16(), "global");
+    const rocke_type_t* ptr_io
+        = rocke_ptr_type(b, rocke_mfma_attn_ir_type_for_dtype(b, dtype), "global");
 
-    /* Q/K/V = param(ptr<f16,global>, noalias, readonly, align16). */
+    /* Q/K/V share the selected 16-bit input type. */
     memset(&opts, 0, sizeof(opts));
     opts.noalias = true;
     opts.noalias_set = true;
@@ -249,11 +270,11 @@ static void wmma_declare_params(rocke_ir_builder_t* b)
     opts.readonly_set = true;
     opts.align = 16;
     opts.align_set = true;
-    (void)rocke_b_param(b, "Q", ptr_f16, &opts);
-    (void)rocke_b_param(b, "K", ptr_f16, &opts);
-    (void)rocke_b_param(b, "V", ptr_f16, &opts);
+    (void)rocke_b_param(b, "Q", ptr_io, &opts);
+    (void)rocke_b_param(b, "K", ptr_io, &opts);
+    (void)rocke_b_param(b, "V", ptr_io, &opts);
 
-    /* O = param(ptr<f16,global>, noalias, writeonly, align16). */
+    /* O has the same storage type as Q/K/V. */
     memset(&opts, 0, sizeof(opts));
     opts.noalias = true;
     opts.noalias_set = true;
@@ -261,7 +282,7 @@ static void wmma_declare_params(rocke_ir_builder_t* b)
     opts.writeonly_set = true;
     opts.align = 16;
     opts.align_set = true;
-    (void)rocke_b_param(b, "O", ptr_f16, &opts);
+    (void)rocke_b_param(b, "O", ptr_io, &opts);
 
     /* scalars */
     (void)rocke_b_param(b, "scale_log2", rocke_f32(), NULL);
@@ -326,7 +347,7 @@ static rocke_status_t
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", wave);
 
     /* _declare_params(b) */
-    wmma_declare_params(b);
+    wmma_declare_params(b, wmma_dtype(spec));
 
     c16 = rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M);
 
@@ -381,7 +402,7 @@ static rocke_status_t
     p.stride_o_token = rocke_b_get_param(b, "stride_o_token");
     p.stride_o_head = rocke_b_get_param(b, "stride_o_head");
     p.scale_log2 = rocke_b_get_param(b, "scale_log2");
-    p.dtype = "f16";
+    p.dtype = wmma_dtype(spec);
     p.mask_mode = wmma_to_attn_mask(spec->mask_mode);
     p.sliding_window = spec->sliding_window;
     p.causal_ctx_offset = rocke_b_const_i32(b, 0);
@@ -475,8 +496,9 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
     int n;
     int i;
     int k;
+    const char* dtype = wmma_dtype(spec);
 
-    if(spec == NULL || arena == NULL || out_items == NULL || out_count == NULL)
+    if(spec == NULL || arena == NULL || out_items == NULL || out_count == NULL || dtype == NULL)
     {
         return ROCKE_ERR_VALUE;
     }
@@ -486,7 +508,7 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
     {
         return st;
     }
-    wmma_declare_params(&b);
+    wmma_declare_params(&b, dtype);
 
     n = b.kernel->num_params;
     items = (rocke_sig_entry_t*)rocke_arena_alloc(arena, (size_t)n * sizeof(rocke_sig_entry_t));
@@ -495,8 +517,7 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
         return ROCKE_ERR_OOM;
     }
 
-    /* The first four params are the Q/K/V/O global pointers (ptr<f16,global>);
-     * the rest are scalars (f32 scale_log2, i32 seqlen/strides). */
+    /* Q/K/V/O are typed global pointers; the remaining entries are scalars. */
     k = 0;
     for(i = 0; i < n; ++i)
     {
@@ -504,7 +525,7 @@ rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* s
         items[k].name = pr->name;
         if(i < 4)
         {
-            items[k].type = "ptr<f16, global>";
+            items[k].type = strcmp(dtype, "bf16") == 0 ? "ptr<bf16, global>" : "ptr<f16, global>";
         }
         else if(i == 4)
         {

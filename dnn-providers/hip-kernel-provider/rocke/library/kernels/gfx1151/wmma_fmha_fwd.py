@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""WMMA FMHA forward for gfx1151 (RDNA3.5 / Strix Halo) — the first RDNA attention.
+"""FP16/BF16 WMMA attention forward for gfx1151.
 
 RDNA has no MFMA, so the QK^T and PV matmuls are built around the gfx11
-``wmma_f32_16x16x16_f16`` instruction with a **wave32** thread mapping.
+``wmma_f32_16x16x16_f16`` / ``wmma_f32_16x16x16_bf16`` with a **wave32** mapping.
 
 **Unification status (folded).** The wave32 QK -> online-softmax -> PV loop is
 no longer hand-written here: it now lives in the *single* common FMHA-forward
@@ -19,7 +19,7 @@ byte-for-byte identical to before the unification.
 Everything physical about the WMMA fragments — which lane holds which
 ``(row, k)`` / ``(k, col)`` / ``(row, col)`` element — is read inside the common
 body from the MMA contract's verified gfx1151 layout maps (``op.a_layout()`` /
-``op.b_layout()`` / ``op.c_layout()`` on the ``wmma_f32_16x16x16_f16``
+``op.b_layout()`` / ``op.c_layout()`` on the dtype-matched WMMA
 ``MmaOp``), and the matmul itself is emitted through the target-neutral
 ``b.mma(op, a, b, c)``. The wave size and the reduction stage count come from
 the contract so the kernel never hard-codes wave32 magic numbers.
@@ -60,7 +60,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType
 
 __all__ = [
     "WmmaFmhaFwdSpec",
@@ -69,17 +69,15 @@ __all__ = [
     "is_valid_spec",
 ]
 
-_WMMA_OP_ID = "wmma_f32_16x16x16_f16"  # RDNA3/3.5 (gfx11) atom
-_WMMA_OP_ID_GFX12 = "wmma_gfx12_f32_16x16x16_f16"  # RDNA4 (gfx12) split-K atom
 _BLOCK_M = 16  # Q rows per wave per CTA
 _BLOCK_K = 16  # K positions per K-tile (WMMA N dim of QK^T)
 
 
-def _wmma_op_id_for_arch(arch: str) -> str:
-    """The f16 WMMA attention atom op_id for ``arch``: the RDNA4 split-K atom on
-    gfx1201, else the RDNA3/3.5 cross-half-duplicated atom. Mirrors
-    :func:`rocke.helpers.mfma_attention._wmma_attn_op_id`."""
-    return _WMMA_OP_ID_GFX12 if arch == "gfx1201" else _WMMA_OP_ID
+def _wmma_op_id_for_arch(arch: str, dtype: str) -> str:
+    """Select the dtype-matched WMMA atom, including the gfx1201 split-K layout."""
+    elem = "bf16" if dtype == "bf16" else "f16"
+    prefix = "wmma_gfx12" if arch == "gfx1201" else "wmma"
+    return f"{prefix}_f32_16x16x16_{elem}"
 
 
 @dataclass(frozen=True)
@@ -100,20 +98,14 @@ class WmmaFmhaFwdSpec:
     dtype: str = "fp16"
     mask_mode: str = "none"  # "none" | "causal"
     sliding_window: int = 0
-    # Opt lever (see examples/gfx1151/attention case study): staging the K-tile's
-    # V rows through LDS for the PV B-operand cuts global loads ~3.3x but is a
-    # consistent 1.5-1.8x *regression* on gfx1151 -- the PV B-operand is an
-    # inherently column-strided V[k, d_col] gather, so LDS only relocates the
-    # strided reads while adding a barrier this single-wave-per-CTA kernel has no
-    # occupancy to hide, whereas the baseline gather stays cache-resident.
-    # Default off (the measured winner); kept togglable for the A/B study.
+    # Optional V staging through LDS; benchmark it per shape and dtype.
     v_lds_stage: bool = False
     name: str = "rocke_wmma_fmha_fwd"
 
     def __post_init__(self) -> None:
-        if self.dtype not in ("fp16", "f16"):
+        if self.dtype not in ("fp16", "f16", "bf16"):
             raise ValueError(
-                f"WmmaFmhaFwdSpec currently supports fp16 only, got {self.dtype!r}"
+                f"WmmaFmhaFwdSpec supports fp16/bf16, got {self.dtype!r}"
             )
         if self.head_size % 16 != 0:
             raise ValueError(
@@ -149,22 +141,21 @@ class WmmaFmhaFwdSpec:
             f"H{self.head_size}",
             f"HQ{self.num_query_heads}",
             f"HK{self.kv_heads}",
-            "fp16",
+            "bf16" if self.dtype == "bf16" else "fp16",
             self.mask_mode,
             "vlds" if self.v_lds_stage else "vgather",
         )
 
 
 def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
-    """Return ``(ok, reason)``. The WMMA 16x16x16 f16 atom must exist on ``arch``
-    and the target must be wave32 (WMMA is an RDNA/gfx11 instruction)."""
+    """Return ``(ok, reason)`` for a dtype-matched WMMA atom on a wave32 target."""
     from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
-    op_id = _wmma_op_id_for_arch(arch)
+    op_id = _wmma_op_id_for_arch(arch, spec.dtype)
     op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
         return False, (
@@ -179,8 +170,7 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
         )
     if spec.head_size % 16 != 0:
         return False, f"head_size must be a multiple of 16 (got {spec.head_size})"
-    # LDS budget: one 16x16 f16 P-staging tile, plus (when V-LDS staging is on)
-    # one 16 x head_size f16 V tile.
+    # One 16-bit P-staging tile, plus an optional 16-bit V tile.
     bytes_lds = _BLOCK_M * _BLOCK_K * 2
     if spec.v_lds_stage:
         bytes_lds += _BLOCK_M * spec.head_size * 2
@@ -191,7 +181,7 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
     return True, "ok"
 
 
-def _declare_params(b: IRBuilder):
+def _declare_params(b: IRBuilder, dtype: str):
     """Kernel ABI (shared between build + grid helpers).
 
     Dense self-attention layout: Q/K/V/O are ``[seqlen, num_heads, head_size]``
@@ -199,11 +189,12 @@ def _declare_params(b: IRBuilder):
     via ``seqlen`` * the batch index. Strides are passed explicitly so the same
     kernel serves both MHA and GQA (kv_head stride differs).
     """
-    Q = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    K = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    V = b.param("V", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
+    elem = BF16 if dtype == "bf16" else F16
+    Q = b.param("Q", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
+    K = b.param("K", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
+    V = b.param("V", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
     out_ptr = b.param(
-        "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
+        "O", PtrType(elem, "global"), noalias=True, writeonly=True, align=16
     )
     scale_log2 = b.param("scale_log2", F32)
     seqlen_q = b.param("seqlen_q", I32)
@@ -265,7 +256,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = wave
-    p = _declare_params(b)
+    p = _declare_params(b, spec.dtype)
 
     c16 = b.const_i32(16)
 
@@ -316,7 +307,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         stride_o_token=p["stride_o_token"],
         stride_o_head=p["stride_o_head"],
         scale_log2=p["scale_log2"],
-        dtype="f16",
+        dtype="bf16" if spec.dtype == "bf16" else "f16",
         mask_mode=spec.mask_mode,
         sliding_window=spec.sliding_window,
         causal_ctx_offset=b.const_i32(0),

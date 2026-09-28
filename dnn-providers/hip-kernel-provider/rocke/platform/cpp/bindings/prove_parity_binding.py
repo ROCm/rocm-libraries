@@ -648,7 +648,8 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (64, 6, 0, "none", True),
     ]
     return [
-        dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v)
+        dict(head_size=h, num_query_heads=q, num_kv_heads=k, mask_mode=m, v_lds_stage=v, dtype=dtype)
+        for dtype in ("fp16", "bf16")
         for (h, q, k, m, v) in rows
     ]
 

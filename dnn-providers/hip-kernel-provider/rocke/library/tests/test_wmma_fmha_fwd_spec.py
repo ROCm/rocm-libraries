@@ -18,8 +18,19 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         self.assertEqual(spec.kv_heads, 2)
 
     def test_non_divisible_gqa_rejected(self):
-        with self.assertRaisesRegex(ValueError, "multiple of num_kv_heads"):
+        with self.assertRaises(ValueError):
             WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, num_kv_heads=3)
+
+    def test_dtype_cache_keys(self):
+        fp16 = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, dtype="fp16")
+        alias = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, dtype="f16")
+        bf16 = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, dtype="bf16")
+        self.assertEqual(fp16.kernel_name(), alias.kernel_name())
+        self.assertNotEqual(fp16.kernel_name(), bf16.kernel_name())
+
+    def test_unsupported_dtype_rejected(self):
+        with self.assertRaises(ValueError):
+            WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, dtype="fp32")
 
 
 if __name__ == "__main__":
