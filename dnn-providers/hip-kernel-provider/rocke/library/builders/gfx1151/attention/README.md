@@ -1,5 +1,50 @@
 # gfx1151 WMMA FMHA-forward: an optimization case study
 
+## Inference coverage and AOTriton comparison
+
+The current inference harness is
+[`benchmarks/gfx1151/attention`](../../../benchmarks/gfx1151/attention/).
+It runs a fixed, seeded 54-case matrix covering FP16/BF16, head dimensions
+64/128/256, MHA/GQA/MQA, causal alignment, sequence tails, decode, paged and
+ragged inputs, sliding windows, softcap, sinks, ALiBi, FP32 QQ-bias, FP8 KV
+storage, and feature combinations. This is ordinary SDPA coverage, not an
+absorbed-attention or backward benchmark.
+
+- `cases.py` defines the immutable workload and an independent CPU oracle.
+  The oracle reads the already-rounded input storage, computes in FP64, and
+  returns FP32. The numerical gates are max-absolute error `2e-2` for FP16 and
+  `4e-2` for BF16; nonfinite or unwritten outputs fail.
+- `candidate.py` selects the real rocKE implementation. The starting adapter
+  uses `WmmaFmhaFwdSpec` directly; unsupported rows remain required, and direct
+  kernel coverage does not imply unified-dispatch support.
+- `aotriton.py` / `aotriton_bridge.cpp` call the native
+  [AOTriton 0.14.2b](https://github.com/ROCm/aotriton/releases/tag/0.14.2b) API
+  with its published gfx115x images, not a PyTorch math fallback. Its only
+  available forward backend on gfx1151 is Triton. Unsupported features and
+  precision mismatches remain N/A; FP32 QQ-bias is not silently rounded to
+  AOTriton's Q-matched bias dtype. Finite window diagonals preserve both the
+  requested width and causal alignment.
+- Correctness is checked before and after timing. Both arms use one HIP stream,
+  graph replays of 32 operations, seven alternating timing batches, and the
+  median batch duration. Required AOTriton scheduling-counter resets are
+  included. Compilation, allocation, transfers, and the oracle are not timed.
+- Every run prints a per-case record, a grouped comparison table, provenance,
+  and `METRIC` lines. `coverage_passed` is the coverage-phase primary metric;
+  speedups use only identical cases where both arms pass. Coverage growth can
+  change the compared subset, so aggregate speedups are not a fixed-cohort
+  tuning score until the required coverage is complete.
+
+From the repository root, `bash autoresearch.sh` uses a private site file
+selected by `ROCKE_SDPA_SITE` (default `~/.rocke/gfx1151-sdpa-site.json`).
+`run_remote.py` documents its site fields and creates a content-addressed
+source snapshot, then submits one exclusive, time-bounded Slurm job. The GPU
+workload is offline; SSH only transports source and results. The setup uses
+Python 3.12, NumPy 2.5.1, ml_dtypes 0.5.4, and checksum-pinned AOTriton runtime
+and image archives. Runtime artifacts and absolute performance results stay
+outside the source tree. On Windows, use Git Bash rather than the WSL launcher.
+
+The sections below are a historical campaign, not results for this comparator.
+
 ## TL;DR (executive summary)
 
 A native WMMA flash-attention-forward kernel for **gfx1151** (Strix Halo, Radeon
