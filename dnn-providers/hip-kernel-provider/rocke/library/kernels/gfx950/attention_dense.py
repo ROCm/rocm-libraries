@@ -77,7 +77,11 @@ from types import MappingProxyType
 from typing import Optional, Tuple
 
 from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64, FP8E4M3
-from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
+from rocke.helpers.attention import (
+    mfma_32x32x16_for_dtype,
+    pv32_v_load_paired,
+    dequant_fp8x8_to_dtype,
+)
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
@@ -132,12 +136,18 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 f"elements (16 bytes), got {self.lds_v_row_pad}"
             )
         if self.kv_storage_dtype == "fp8e4m3":
-            # First-cut fp8 KV lands on the default-grid contiguous/ragged builder
-            # only. The persistent + paged paths are follow-ups.
+            # First-cut fp8 KV lands on the default-grid, aligned contiguous builder.
+            # The sync-dequant loader uses a plain in-bounds global load, so ragged /
+            # varlen / paged (partial-tile or indirected KV) are follow-ups, as are
+            # the persistent-grid and paged paths.
             if self.persistent:
                 raise ValueError("fp8 KV is not yet supported with persistent=True")
             if self.paged:
                 raise ValueError("fp8 KV is not yet supported with paged KV")
+            if self.ragged:
+                raise ValueError("fp8 KV is not yet supported with ragged=True")
+            if self.varlen:
+                raise ValueError("fp8 KV is not yet supported with varlen=True")
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
             # that implements the compile-time shifted diagonal.
@@ -407,10 +417,10 @@ def build_attention_dense(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
     k = b.param(
-        "k_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "k_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     v = b.param(
-        "v_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "v_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     o = b.param(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
@@ -592,7 +602,11 @@ def build_attention_dense(
     # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
     # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
     # batch/seqlen param declaration was.
-    if spec.paged:
+    if KV_FP8:
+        # The fp8 sync-dequant loader reads K/V with plain in-bounds global loads
+        # (aligned KV only), so no bounds-checked buffer resource is built here.
+        k_rsrc = v_rsrc = None
+    elif spec.paged:
         # The paged bound is the WHOLE page cache. Pages are addressed through
         # block_tables at page_id*block_size, so any page id the table can name must
         # be in range -- batch*seqlen_kv is only the logical KV length of one
@@ -720,10 +734,47 @@ def build_attention_dense(
             v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
         )
 
+    THREADS = WAVES * 64
+
+    def _sync_fp8_load(ptr, lds, buf_val, tile_key0, scale_p, packed_k):
+        """Aligned fp8 KV: flat n=8 global load -> unfused-scale dequant -> bf16 LDS
+        store, into the same K_lds/V_lds layout the bf16 path fills. Every key in
+        [0, BN) is in-bounds (aligned KV only), so a plain global load is safe."""
+        total = BN * D
+        assert total % (THREADS * 8) == 0, (
+            f"fp8 sync loader: BN*D={total} must be divisible by THREADS*8="
+            f"{THREADS * 8}"
+        )
+        for it in range(total // (THREADS * 8)):
+            e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
+            key = b.div(e0, b.const_i32(D))
+            d0 = b.mod(e0, b.const_i32(D))
+            addr = b.add(
+                b.add(k_base, b.mul(b.add(tile_key0, key), b.const_i32(stride_k_tok))),
+                d0,
+            )
+            deq = dequant_fp8x8_to_dtype(
+                b, b.global_load_vN(ptr, addr, kv_dtype, 8), scale_p, dtype
+            )
+            if packed_k:
+                row = b.div(key, b.const_i32(K_GROUP))
+                col = b.add(b.mul(b.mod(key, b.const_i32(K_GROUP)), b.const_i32(D)), d0)
+            else:
+                row = key
+                col = d0
+            b.smem_store_vN(lds, [buf_val, row, col], deq, 8)
+
     def load_tile(buf_val, tile_idx):
         tk0 = b.mul(tile_idx, b.const_i32(BN))
-        async_load_k(K_lds_addr, buf_val, tk0)
-        async_load_v(V_lds_addr, buf_val, tk0)
+        if KV_FP8:
+            # Sync-dequant fp8: fill K_lds/V_lds with bf16, then drain the LDS stores
+            # so the following barrier publishes them before the compute reads.
+            _sync_fp8_load(k, K_lds, buf_val, tk0, k_scale, K_GROUP > 1)
+            _sync_fp8_load(v, V_lds, buf_val, tk0, v_scale, False)
+            b.s_waitcnt(lgkmcnt=0)
+        else:
+            async_load_k(K_lds_addr, buf_val, tk0)
+            async_load_v(V_lds_addr, buf_val, tk0)
 
     # ---- per-tile compute closures ----
 
@@ -2134,11 +2185,12 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
+    kv_ptr_dtype = spec.kv_storage_dtype or spec.dtype
     sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
+        .ptr("k_ptr", kv_ptr_dtype)
+        .ptr("v_ptr", kv_ptr_dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
