@@ -26,10 +26,25 @@ using SoftmaxTunableSolver =
 struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
 {
     int local_size;
+    bool vectorized;
+    bool separate_stride;
     bool initialized = false;
-    PerformanceConfigSoftmax(int _local_size) : local_size(_local_size) {}
-    PerformanceConfigSoftmax() : local_size(start_local_size) {}
-    PerformanceConfigSoftmax(bool) : local_size(start_local_size) {}
+    PerformanceConfigSoftmax(int _local_size, bool _vectorized, bool _separate_stride)
+        : local_size(_local_size), vectorized(_vectorized), separate_stride(_separate_stride)
+    {
+    }
+    PerformanceConfigSoftmax()
+        : local_size(static_cast<int>(start_local_size)),
+          vectorized(start_vectorized),
+          separate_stride(start_separate_stride)
+    {
+    }
+    PerformanceConfigSoftmax(bool)
+        : local_size(static_cast<int>(start_local_size)),
+          vectorized(start_vectorized),
+          separate_stride(start_separate_stride)
+    {
+    }
     void HeuristicInit(const miopen::softmax::ProblemDescription& problem);
     bool SetNextValue(const miopen::softmax::ProblemDescription& problem);
     bool IsValidValue() const;
@@ -40,6 +55,8 @@ struct PerformanceConfigSoftmax : PerfConfigBase<PerformanceConfigSoftmax>
     static void Visit(Self&& s, F f)
     {
         f(s.local_size, "local_size");
+        f(s.vectorized, "vectorized");
+        f(s.separate_stride, "separate_stride");
     }
     bool operator==(const PerformanceConfigSoftmax& other) const;
 
@@ -47,6 +64,13 @@ public:
     static constexpr auto default_local_size = 1024;
     static constexpr auto max_local_size     = 1024;
     static constexpr auto start_local_size   = 1;
+    static constexpr auto default_vectorized(const miopen::softmax::ProblemDescription& problem)
+    {
+        return problem.stride == 1;
+    }
+    static constexpr auto start_vectorized        = false;
+    static constexpr auto default_separate_stride = false;
+    static constexpr auto start_separate_stride   = false;
 };
 
 struct Softmax final : SoftmaxTunableSolver<PerformanceConfigSoftmax>
@@ -115,6 +139,25 @@ struct AttnSoftmax final : SoftmaxSolver
 
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::softmax::ProblemDescription& problem) const override;
+};
+
+struct SoftmaxNoncontiguous final : SoftmaxSolver
+{
+    const std::string& SolverDbId() const override { return GetSolverDbId<SoftmaxNoncontiguous>(); }
+
+    bool IsApplicable(const ExecutionContext& context,
+                      const miopen::softmax::ProblemDescription& problem) const override;
+
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::softmax::ProblemDescription& problem) const override;
+
+    std::size_t GetWorkspaceSize(const ExecutionContext&,
+                                 const miopen::softmax::ProblemDescription&) const override
+    {
+        return 0;
+    }
+
+    bool MayNeedWorkspace() const override { return false; }
 };
 
 } // namespace softmax

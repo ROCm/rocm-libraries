@@ -23,7 +23,7 @@
 from rocisa import rocIsa
 from rocisa.code import Module
 from rocisa.container import vgpr, sgpr,SDWAModifiers, VOP3PModifiers
-from rocisa.enum import DataTypeEnum, SelectBit, UnusedBit, SaturateCastType
+from rocisa.enum import DataTypeEnum, SelectBit, UnusedBit, SaturateCastType, HighBitSel
 from rocisa.instruction import VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VCmpUF32, VCndMaskB32, VCvtPkF32toFP8, VCvtPkF32toBF8, \
                             VCmpClassF32, VOrB32, VPackF16toB32, \
@@ -36,7 +36,7 @@ from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common.DataType import DataType
 from ..Component import PackData
-from rocisa.instruction import ECvtF32toF16
+from rocisa.instruction import ECvtF32toF16, t16
 
 def formatting(idx, inputPrefix, prefixOffset):
     if inputPrefix:
@@ -51,7 +51,8 @@ class PackData_F16(PackData):
         ti = rocIsa.getInstance()
         if gwvw == 1:
             formatVgpr = formatting(elementSumIdx, inputPrefix, prefixOffset)
-            module.add(ECvtF32toF16(dst=vgpr(destIdx), src=vgpr(formatVgpr), comment="convert C to fp16"))
+            # sel=LOW writes vD.l (required on true16, SDWA WORD_0 on legacy).
+            module.add(ECvtF32toF16(dst=vgpr(destIdx), src=vgpr(formatVgpr), sel=HighBitSel.LOW, comment="convert C to fp16"))
             return module
 
         assert (gwvw % 2 == 0)
@@ -72,7 +73,8 @@ class PackData_F16(PackData):
                     d = destIdx + vi//2
                     module.add(VCvtPkF32toF16(dst=vgpr(d), src0=vgpr(formatVgpr_1), src1=vgpr(formatVgpr), comment="convert C to fp16 and pack with neighbor"))
             else:
-                module.add(ECvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to fp16"))
+                # sel=LOW writes vD.l (VPackF16toB32 below reads the low 16 bits).
+                module.add(ECvtF32toF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), sel=HighBitSel.LOW, comment="convert C to fp16"))
                 if vi%2 == 1:
                     d = destIdx + vi//2
                     module.add(VPackF16toB32(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
@@ -320,8 +322,8 @@ class PackData_INT8(PackData):
                 d = destIdx + vi//4
                 for i in reversed(range(0, 4)):
                     module.add(VSaturateCastInt(vgpr(formatting(sumIdxV-i, inputPrefix, prefixOffset)), vgprI8Temp0, tmpS01, -128, 127, type=SaturateTypeInt8, initGpr=(i%4 == 3)))
-                module.add(VLShiftLeftB16(dst=vgpr(formatting(sumIdxV-2, inputPrefix, prefixOffset)), shiftHex=8, src=vgpr(formatting(sumIdxV-2, inputPrefix, prefixOffset))))
-                module.add(VLShiftLeftB16(dst=vgpr(formatting(sumIdxV-0, inputPrefix, prefixOffset)), shiftHex=8, src=vgpr(formatting(sumIdxV-0, inputPrefix, prefixOffset))))
+                module.add(VLShiftLeftB16(dst=t16(vgpr(formatting(sumIdxV-2, inputPrefix, prefixOffset)), HighBitSel.LOW), shiftHex=8, src=t16(vgpr(formatting(sumIdxV-2, inputPrefix, prefixOffset)), HighBitSel.LOW)))
+                module.add(VLShiftLeftB16(dst=t16(vgpr(formatting(sumIdxV-0, inputPrefix, prefixOffset)), HighBitSel.LOW), shiftHex=8, src=t16(vgpr(formatting(sumIdxV-0, inputPrefix, prefixOffset)), HighBitSel.LOW)))
                 if ti.getArchCaps()["NoSDWA"]:
                     module.add(VMovB32(vgpr(vgprI8Mask0), "0xFF", comment="bits 7:0")) # src0_sel=SelectBit.BYTE_0
                     module.add(VAndB32(dst=vgpr(vgprI8Temp0), src0=vgpr(formatting(sumIdxV-3, inputPrefix, prefixOffset)), \
@@ -371,7 +373,7 @@ class PackData_INT8(PackData):
             if vi%2 == 1:
                 for i in reversed(range(0, 2)):
                     module.add(VSaturateCastInt(vgpr(formatting(sumIdxV-i, inputPrefix, prefixOffset)), vgprI8Temp0, tmpS01, -128, 127, type=SaturateTypeInt8, initGpr=(i%2 == 1)))
-                module.add(VLShiftLeftB16(dst=vgpr(formatVgpr), shiftHex=8, src=vgpr(formatVgpr)))
+                module.add(VLShiftLeftB16(dst=t16(vgpr(formatVgpr), HighBitSel.LOW), shiftHex=8, src=t16(vgpr(formatVgpr), HighBitSel.LOW)))
                 if ti.getArchCaps()["NoSDWA"]:
                     module.add(VMovB32(vgpr(vgprI8Mask0), "0xFF", comment="bits 7:0")) # src0_sel=SelectBit.BYTE_0
                     module.add(VAndB32(dst=vgpr(vgprI8Temp0), src0=vgpr(formatting(sumIdxV-1, inputPrefix, prefixOffset)), \

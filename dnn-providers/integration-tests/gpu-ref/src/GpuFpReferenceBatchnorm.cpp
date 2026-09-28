@@ -115,6 +115,72 @@ std::pair<std::array<unsigned int, 3>, std::array<unsigned int, 3>>
     return std::make_pair(localSize, gridSize);
 }
 
+bool isChannelLastLayout(const std::vector<int64_t>& strides)
+{
+    if(strides.size() < 3)
+    {
+        throw std::invalid_argument(
+            "Batchnorm forward requires tensor rank to be at least 3 for layout validation.");
+    }
+
+    const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(strides);
+    return strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NLC.strideOrder
+           || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NHWC.strideOrder
+           || strideOrder == hipdnn_data_sdk::utilities::TensorLayout::NDHWC.strideOrder;
+}
+
+struct BatchnormLaunchGeometry
+{
+    int64_t c, hw, batchSize, cStride, hwStride, batchStride;
+    std::array<unsigned int, 3> localSize, gridSize;
+};
+
+BatchnormLaunchGeometry computeFwdInfGeometry(const std::vector<int64_t>& dims,
+                                              const std::vector<int64_t>& strides,
+                                              std::vector<std::string>& defines)
+{
+
+    BatchnormLaunchGeometry geometry{};
+    geometry.batchSize = dims[0];
+    geometry.c = dims[1];
+    geometry.batchStride = strides[0];
+    geometry.cStride = strides[1];
+    int64_t h = 0;
+    int64_t w = 0;
+    int64_t wStride = 0;
+
+    if(dims.size() == 3)
+    {
+        h = dims[2];
+        w = 1;
+        wStride = strides[2];
+    }
+    else if(dims.size() == 4)
+    {
+        h = dims[2];
+        w = dims[3];
+        wStride = strides[3];
+    }
+    else if(dims.size() == 5)
+    {
+        // For 5D, combine D*H*W into spatial dimension
+        auto d = dims[2];
+        h = d * dims[3];
+        w = dims[4];
+        wStride = strides[4];
+    }
+    geometry.hw = h * w;
+    geometry.hwStride = wStride;
+
+    const bool isLayoutNhwc = isChannelLastLayout(strides);
+    std::tie(geometry.localSize, geometry.gridSize)
+        = calculateGrid(geometry.c, geometry.hw, geometry.batchSize, isLayoutNhwc);
+
+    defines.emplace_back(std::string("-DLOCAL_SIZE_X=") + std::to_string(geometry.localSize[0]));
+    defines.emplace_back(std::string("-DLOCAL_SIZE_Y=") + std::to_string(geometry.localSize[1]));
+    return geometry;
+}
+
 } // namespace
 
 // --- Kernel launchers ---
@@ -129,25 +195,91 @@ void GpuFpReferenceBatchnorm::launchFwdInf(const void* inputPtr,
                                            void* outputPtr,
                                            std::vector<std::string>& defines)
 {
-    const int64_t n = inputDims[0];
-    const int64_t c = inputDims[1];
-    const int64_t nStride = inputStrides[0];
-    const int64_t cStride = inputStrides[1];
+    auto geometry = computeFwdInfGeometry(inputDims, inputStrides, defines);
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto& kernel
+        = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfRef");
+
+    BatchnormFwdInfArgs args{};
+    args.common.input = inputPtr;
+    args.common.scale = scalePtr;
+    args.common.bias = biasPtr;
+    args.common.estMean = estMeanPtr;
+    args.common.output = outputPtr;
+    args.common.c = static_cast<long long>(geometry.c);
+    args.common.hw = static_cast<long long>(geometry.hw);
+    args.common.batchSize = static_cast<long long>(geometry.batchSize);
+    args.common.cStride = static_cast<long long>(geometry.cStride);
+    args.common.hwStride = static_cast<long long>(geometry.hwStride);
+    args.common.batchStride = static_cast<long long>(geometry.batchStride);
+    args.invVar = invVarPtr;
+
+    launchKernel(kernel.function(), geometry.localSize, geometry.gridSize, &args, sizeof(args));
+}
+
+void GpuFpReferenceBatchnorm::launchFwdInfWithVar(const void* inputPtr,
+                                                  const std::vector<int64_t>& inputDims,
+                                                  const std::vector<int64_t>& inputStrides,
+                                                  const void* scalePtr,
+                                                  const void* biasPtr,
+                                                  const void* estMeanPtr,
+                                                  const void* estVarPtr,
+                                                  void* outputPtr,
+                                                  double epsilon,
+                                                  std::vector<std::string>& defines)
+{
+    auto geometry = computeFwdInfGeometry(inputDims, inputStrides, defines);
+    auto& compiler = detail::GpuRefKernelCompiler::instance();
+    const auto& kernel
+        = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfWithVarRef");
+
+    BatchnormFwdInfWithVarArgs args{};
+    args.common.input = inputPtr;
+    args.common.scale = scalePtr;
+    args.common.bias = biasPtr;
+    args.common.estMean = estMeanPtr;
+    args.common.output = outputPtr;
+    args.common.c = static_cast<long long>(geometry.c);
+    args.common.hw = static_cast<long long>(geometry.hw);
+    args.common.batchSize = static_cast<long long>(geometry.batchSize);
+    args.common.cStride = static_cast<long long>(geometry.cStride);
+    args.common.hwStride = static_cast<long long>(geometry.hwStride);
+    args.common.batchStride = static_cast<long long>(geometry.batchStride);
+    args.estVar = estVarPtr;
+    args.epsilon = epsilon;
+
+    launchKernel(kernel.function(), geometry.localSize, geometry.gridSize, &args, sizeof(args));
+}
+
+void GpuFpReferenceBatchnorm::launchFwdTrain(const void* inputPtr,
+                                             const std::vector<int64_t>& inputDims,
+                                             const std::vector<int64_t>& inputStrides,
+                                             const void* scalePtr,
+                                             const void* biasPtr,
+                                             void* outputPtr,
+                                             double epsilon,
+                                             double momentum,
+                                             void* meanPtr,
+                                             void* invVariancePtr,
+                                             const void* prevRunningMeanPtr,
+                                             const void* prevRunningVariancePtr,
+                                             void* nextRunningMeanPtr,
+                                             void* nextRunningVariancePtr,
+                                             std::vector<std::string>& defines)
+{
+    auto n = inputDims[0];
+    auto c = inputDims[1];
     int64_t h = 0;
     int64_t w = 0;
-    int64_t wStride = 0;
-
     if(inputDims.size() == 3)
     {
         h = inputDims[2];
         w = 1;
-        wStride = inputStrides[2];
     }
     else if(inputDims.size() == 4)
     {
         h = inputDims[2];
         w = inputDims[3];
-        wStride = inputStrides[3];
     }
     else if(inputDims.size() == 5)
     {
@@ -155,34 +287,42 @@ void GpuFpReferenceBatchnorm::launchFwdInf(const void* inputPtr,
         auto d = inputDims[2];
         h = d * inputDims[3];
         w = inputDims[4];
-        wStride = inputStrides[4];
+    }
+    else
+    {
+        throw std::invalid_argument(
+            "Batchnorm forward training requires input tensor rank to be 3, 4, or 5.");
     }
 
-    const int64_t inCstride = h * w;
-    const bool isLayoutNhwc = isChannelLastLayout(inputStrides);
-    auto [localSize, gridSize] = calculateGrid(c, inCstride, n, isLayoutNhwc);
+    constexpr unsigned int BLOCK_SIZE = 256;
+    const auto isLayoutNhwc = isChannelLastLayout(inputStrides);
+    defines.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(BLOCK_SIZE));
+    defines.emplace_back(std::string("-DIS_CHANNEL_LAST_LAYOUT=")
+                         + std::to_string(isLayoutNhwc ? 1 : 0));
 
-    defines.emplace_back(std::string("-DLOCAL_SIZE_X=") + std::to_string(localSize[0]));
-    defines.emplace_back(std::string("-DLOCAL_SIZE_Y=") + std::to_string(localSize[1]));
     auto& compiler = detail::GpuRefKernelCompiler::instance();
     const auto& kernel
-        = compiler.getOrCompile("GpuRefBatchnormFwdInf.cpp", defines, "BatchnormFwdInfRef");
+        = compiler.getOrCompile("GpuRefBatchnormFwdTrain.cpp", defines, "BatchnormFwdTrainRef");
 
-    BatchnormFwdArgs args{};
+    BatchnormFwdTrainArgs args{};
     args.input = inputPtr;
     args.scale = scalePtr;
     args.bias = biasPtr;
-    args.estMean = estMeanPtr;
-    args.invVar = invVarPtr;
     args.output = outputPtr;
+    args.epsilon = epsilon;
+    args.momentum = momentum;
+    args.mean = meanPtr;
+    args.invVariance = invVariancePtr;
+    args.prevResultRunningMean = prevRunningMeanPtr;
+    args.prevResultRunningVariance = prevRunningVariancePtr;
+    args.nextResultRunningMean = nextRunningMeanPtr;
+    args.nextResultRunningVariance = nextRunningVariancePtr;
+    args.n = static_cast<long long>(n);
     args.c = static_cast<long long>(c);
-    args.hw = static_cast<long long>(inCstride);
-    args.batchSize = static_cast<long long>(n);
-    args.cStride = static_cast<long long>(cStride);
-    args.hwStride = static_cast<long long>(wStride);
-    args.batchStride = static_cast<long long>(nStride);
+    args.hw = static_cast<long long>(h) * static_cast<long long>(w);
 
-    launchKernel(kernel.function(), localSize, gridSize, &args, sizeof(args));
+    launchKernel(
+        kernel.function(), {BLOCK_SIZE, 1, 1}, {checkedNarrowToUInt(c), 1, 1}, &args, sizeof(args));
 }
 
 } // namespace hipdnn_gpu_ref

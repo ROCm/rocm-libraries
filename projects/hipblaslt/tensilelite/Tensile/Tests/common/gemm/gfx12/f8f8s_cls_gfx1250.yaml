@@ -121,6 +121,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  1, 1,  2, 1 ]
         - AssertFree0ElementMultiple: [2]
@@ -140,7 +141,8 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - LdsBlockSizePerPadA: [-1]
@@ -151,7 +153,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [false]
         - ActivationFuncCall: [true]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - StaggerU: [32]
         - StaggerUMapping: [0]
         - StaggerUStride: [-1]
@@ -189,6 +191,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  2, 2,  1, 2 ]
         - DepthU: [64]
@@ -208,7 +211,8 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
@@ -219,7 +223,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [true]
         - ActivationFuncCall: [true]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - StaggerU: [32]
         - StaggerUMapping: [0]
         - StaggerUStride: [-1]
@@ -258,6 +262,7 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
+        - LDSTrInst: [True, False]
         - MatrixInstruction:
           - [16, 16, 64, 1,  1,  8, 2,  2, 2]
         - AssertFree0ElementMultiple: [2]
@@ -278,7 +283,8 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
         - ExpandPointerSwap: [False]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
@@ -289,7 +295,7 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - SourceSwap: [False]
         - ActivationFuncCall: [false]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
         - StaggerU: [32]
         - StaggerUMapping: [0]
         - StaggerUStride: [256]

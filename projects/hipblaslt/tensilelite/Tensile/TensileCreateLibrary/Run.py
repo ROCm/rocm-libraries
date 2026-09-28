@@ -24,14 +24,17 @@
 
 import rocisa
 
+import atexit
 import copy
 import functools
+import gc
 import glob
 import itertools
 import os
 import shutil
 import pickle
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from timeit import default_timer as timer
 from typing import Collection, Dict, List, NamedTuple, Optional, Union
@@ -168,6 +171,7 @@ class KernelCodeGenResult(NamedTuple):
     cuoccupancy: int
     pgr: int
     mathclk: int
+    customKernelDef: Optional[dict] = None
 
 class KernelMinResult(NamedTuple):
     err: int
@@ -241,18 +245,21 @@ def memCompress(obj):
 def memDecompress(byt):
     return pickle.loads(zlib.decompress(byt))
 
-_GFX1250 = (12, 5)
-
-
-def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> KernelCodeGenResult:
-    """Run codegen on a single kernel after rocisa state has been set up."""
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
+    """
+    Generate source for a single kernel.
+    Returns (error, source, header, kernelName).
+    """
+    kernelWriter = kernelWriterAssembly
+    kernelWriter.setRocIsa(data, outOptions)
     asmFilename = getKernelFileBase(splitGSU, kernel)
-    err, src = kernelWriterAssembly.getSourceFileString(kernel)
+    err, src = kernelWriter.getSourceFileString(kernel)
     if compress:
         src = memCompress(src)
-    header = kernelWriterAssembly.getHeaderFileString(kernel)
+    header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
+    customKernelDef = kernel._state.get("CustomKernel", None)
     cuocc = kernel["CUOccupancy"]
     if cuocc <= 0 and getVerbosity() >= 2:
         print2(
@@ -260,37 +267,11 @@ def _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress=False) -> Kerne
             f"runtime will clamp to 1."
         )
     return KernelCodeGenResult(
-        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]),
-        kernel["WavefrontSize"], cuocc,
-        pgr, kernel["MathClocksUnrolledLoop"]
+        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
+        kernel["WavefrontSize"], cuocc, \
+        pgr, kernel["MathClocksUnrolledLoop"], \
+        customKernelDef
     )
-
-
-def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel, compress = False) -> KernelCodeGenResult:
-    """Generate source for a single kernel."""
-    kernelWriterAssembly.setRocIsa(data, outOptions)
-    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
-
-
-def processKernelSourceNativeInit(
-    kernelWriterAssembly, assemblerPath, outputNoComment, splitGSU, kernel, compress=False
-) -> KernelCodeGenResult:
-    """Generate source for a non-gfx1250 kernel using native rocisa.
-
-    Workers importing native rocisa (``ROCISA_BACKEND=rocisa``) call this
-    instead of ``processKernelSource`` so they initialise the rocisa
-    singleton from scratch rather than accepting pickled adapter data.
-    Each ISA is initialised at most once per worker process.
-    """
-    import rocisa as _ri
-    ti = _ri.rocIsa.getInstance()
-    isa = tuple(kernel["ISA"])
-    if isa not in ti.getData():
-        ti.init(isa, assemblerPath, False)
-    outOpts = ti.getOutputOptions()
-    outOpts.outputNoComment = outputNoComment
-    kernelWriterAssembly.setRocIsa(ti.getData(), outOpts)
-    return _emitKernel(kernelWriterAssembly, splitGSU, kernel, compress)
 
 def _checkInvalidSolutionsAndKernels(errorTolerant, result, kernel):
     if result.err != 0:
@@ -357,6 +338,18 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
             solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            if result.customKernelDef is not None:
+                solution._state["CustomKernel"] = result.customKernelDef
+
+def _applyCustomKernelDefToSol(sol, result):
+    """Copy codegen-emitted CustomKernel definition from a KernelCodeGenResult to a
+    Contractions.Solution, updating both the originalSolution state and the
+    Contractions-level customKernel attribute."""
+    ckDef = getattr(result, 'customKernelDef', None)
+    if ckDef is not None:
+        sol.originalSolution._state["CustomKernel"] = ckDef
+        from Tensile.Contractions import CustomKernel as CK
+        sol.customKernel = CK.FromOriginalState(ckDef)
 
 def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: bool):
     resultDict = {}
@@ -382,6 +375,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                     sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                     sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                    _applyCustomKernelDefToSol(sol, result)
                 except KeyError:
                     print(f"\n{'='*80}")
                     print(f"ERROR: KeyError in masterLibrary.solutions")
@@ -412,6 +406,7 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.UnrollLoopSwapGlobalReadOrder = sol.originalSolution._state['UnrollLoopSwapGlobalReadOrder']
                         sol.sizeMapping.DirectToVgprA = bool(sol.originalSolution._state['DirectToVgprA'])
                         sol.sizeMapping.DirectToVgprB = bool(sol.originalSolution._state['DirectToVgprB'])
+                        _applyCustomKernelDefToSol(sol, result)
                     except KeyError:
                         print(f"\n{'='*80}")
                         print(f"ERROR: KeyError in lazyLibrary")
@@ -701,87 +696,13 @@ def writeSolutionsAndKernelsTCL(
             return processed_kernel
         return composed_function
 
-    # --- Backend-aware kernel batching ---
-    # When the stinkytofu adapter is active (gfx1250 auto-detected), split
-    # kernels so gfx1250 uses the adapter and non-gfx1250 uses native rocisa
-    # in a fresh worker pool.
-    _stinkytofu_active = getattr(rocisa, "_BACKEND", "") == "stinkytofu"
-
-    if _stinkytofu_active:
-        gfx1250_kernels = [k for k in uniqueAsmKernels if tuple(k["ISA"])[:2] == _GFX1250]
-        native_kernels  = [k for k in uniqueAsmKernels if tuple(k["ISA"])[:2] != _GFX1250]
-    else:
-        gfx1250_kernels = []
-        native_kernels  = []
-
-    if not native_kernels:
-        # Common path: single-backend (all stinkytofu or all native).
-        results = ParallelMap2(
-            compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-            uniqueAsmKernels,
-            "Generating assembly kernels",
-            multiArg=False,
-            return_as="list"
-        )
-    else:
-        results = []
-        # Batch 1: gfx1250 kernels with stinkytofu adapter workers.
-        if gfx1250_kernels:
-            results.extend(ParallelMap2(
-                compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
-                gfx1250_kernels,
-                "Generating assembly kernels (gfx1250, stinkytofu)",
-                multiArg=False,
-                return_as="list"
-            ))
-
-        # Batch 2: non-gfx1250 kernels with fresh native-rocisa workers.
-        # Shut down the existing worker pool so new workers inherit the
-        # updated ROCISA_BACKEND env and import native rocisa.
-        try:
-            from joblib.externals.loky import get_reusable_executor
-            get_reusable_executor().shutdown(wait=True)
-        except Exception:
-            pass
-
-        _orig_backend = os.environ.get("ROCISA_BACKEND")
-        _orig_threads = globalParameters["CpuThreads"]
-        os.environ["ROCISA_BACKEND"] = "rocisa"
-        # Force at least 2 threads so joblib spawns a subprocess.
-        # Running in-process would reuse the already-imported stinkytofu
-        # adapter from sys.modules instead of loading native rocisa.
-        if _orig_threads >= 0 and _orig_threads < 2:
-            globalParameters["CpuThreads"] = 2
-        try:
-            assemblerPath = str(asmToolchain.assembler._component_path)
-            unaryProcessNative = functools.partial(
-                processKernelSourceNativeInit,
-                kernelWriterAssembly,
-                assemblerPath,
-                not disableAsmComments,
-                splitGSU,
-                compress=memcompress,
-            )
-            results.extend(ParallelMap2(
-                compose(unaryAssemble, unaryWriteAssembly, unaryProcessNative),
-                native_kernels,
-                "Generating assembly kernels (native rocisa)",
-                multiArg=False,
-                return_as="list"
-            ))
-        finally:
-            # Shut down native workers before restoring env so joblib won't
-            # reuse them for subsequent stinkytofu codegen.
-            try:
-                from joblib.externals.loky import get_reusable_executor
-                get_reusable_executor().shutdown(wait=True)
-            except Exception:
-                pass
-            globalParameters["CpuThreads"] = _orig_threads
-            if _orig_backend is None:
-                os.environ.pop("ROCISA_BACKEND", None)
-            else:
-                os.environ["ROCISA_BACKEND"] = _orig_backend
+    results = ParallelMap2(
+        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
+        uniqueAsmKernels,
+        "Generating assembly kernels",
+        multiArg=False,
+        return_as="list"
+    )
 
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
@@ -927,6 +848,49 @@ def renameFallbacksPerArch(masterLibraries) -> None:
         _renameFallbackPlaceholders(master.library, arch)
 
 
+@contextmanager
+def deferCyclicGC():
+    """Suspend cyclic garbage collection while a large object graph is loaded.
+
+    Note that this operates under the premise that the objects loaded during
+    the lifetime of the context manager are needed later in the program and
+    should not be freed when the context manager exits.
+
+    On entering the context manager, we "freeze" garbage collection, which
+    means that the garbage collector will consider all currently existing
+    objects as permanent residents. It will also improve memory sharing with
+    child processes in some situations, see
+    https://docs.python.org/3/library/gc.html#gc.freeze. Then, we disable
+    garbage collection.
+
+    The `finally` block is entered after the code wrapped by this context
+    manager has finished (or raised an exception).
+    We freeze the currently existing objects again and re-enable garbage
+    collection in case it was enabled before. This converts the objects that
+    got added in the meantime to permanent residents, and, thus, avoids them to
+    be analyzed by garbage collection now (remember that they shouldn't be
+    freed at this point, anyway).
+    We also register an exit hook, such that we "unfreeze" the "frozen" objects
+    on program exit and make them available to be garbage collected. This makes
+    leak checking tooling happy.
+    """
+    wasEnabled = gc.isenabled()
+    gc.freeze()
+    gc.disable()
+    try:
+        yield
+    finally:
+        gc.freeze()
+        if wasEnabled:
+            gc.enable()
+        # Frozen objects survive even the collection CPython runs during
+        # interpreter shutdown, so extension leak checkers -- nanobind, via
+        # rocisa -- report every surviving instance and spray "leaked N
+        # instances" over the build log. Unfreeze at exit: teardown is then
+        # clean, and a collection at that point costs nothing we care about.
+        atexit.register(gc.unfreeze)
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -988,38 +952,51 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # replace the global collector with this clean aggregate so
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
-    parsedLibraries = ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
-    )
-    for library in parsedLibraries:
-        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
-        mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
+    skippedGemmA2AFusion = 0
+    # Every library pulled out of the generator below is retained for the rest
+    # of the run, which makes the cyclic collector the dominant cost of this
+    # phase (5x) if left running. See deferCyclicGC.
+    with deferCyclicGC():
+        parsedLibraries = ParallelMap2(
+            LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
+        )
+        for library in parsedLibraries:
+            scheduleName, architectureName, problemType, _, _, newLibrary, typeMismatches = library
+            if not _includeGemmA2AFusionProblemType(
+                problemType, args.get("EnableGemmA2AFusion", False)
+            ):
+                skippedGemmA2AFusion += 1
+                continue
+            mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
-        if architectureName == "":
-            continue
+            if architectureName == "":
+                continue
 
-        # A silicon stepping cannot label a library. This name keys masterLibraries,
-        # while the writes are keyed by the ISA-derived name, so a stepping-named
-        # file is dropped there without a word and the build reports success having
-        # written nothing for it. Honoring the name instead would be no better: the
-        # runtime resolves libraries by the architecture the driver reports, so
-        # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
-        # records the architecture; the stepping is a build-time capability
-        # distinction, selected by --architecture.
-        if architectureName in ARCH_COMPILER_TARGET:
-            raise ValueError(
-                f"Library logic '{scheduleName}' declares ArchitectureName "
-                f"'{architectureName}', which names a silicon stepping rather than an "
-                f"architecture. Record it as "
-                f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
-                f"at build time with --architecture={architectureName}."
-            )
+            # A silicon stepping cannot label a library. This name keys masterLibraries,
+            # while the writes are keyed by the ISA-derived name, so a stepping-named
+            # file is dropped there without a word and the build reports success having
+            # written nothing for it. Honoring the name instead would be no better: the
+            # runtime resolves libraries by the architecture the driver reports, so
+            # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
+            # records the architecture; the stepping is a build-time capability
+            # distinction, selected by --architecture.
+            if architectureName in ARCH_COMPILER_TARGET:
+                raise ValueError(
+                    f"Library logic '{scheduleName}' declares ArchitectureName "
+                    f"'{architectureName}', which names a silicon stepping rather than an "
+                    f"architecture. Record it as "
+                    f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
+                    f"at build time with --architecture={architectureName}."
+                )
 
-        if architectureName in masterLibraries:
-            nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
-        else:
-            masterLibraries[architectureName] = newLibrary
-            masterLibraries[architectureName].version = args["CodeObjectVersion"]
+            if architectureName in masterLibraries:
+                nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
+            else:
+                masterLibraries[architectureName] = newLibrary
+                masterLibraries[architectureName].version = args["CodeObjectVersion"]
+
+    if skippedGemmA2AFusion:
+        print1(f"# GEMM+A2A fusion: disabled; filtered {skippedGemmA2AFusion} logic files")
 
     # After all YAML files have been parsed and Solution objects created,
     # fail on any type mismatches that were collected.
@@ -1098,6 +1075,17 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of unique solutions: {len(solutions)}")
 
     return solutions, masterLibraries, codeObjectFilesIndex
+
+
+def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
+    """Return whether this build admits one library logic's GEMM+A2A solutions.
+
+    Only an explicit True excludes one: a missing key, or no problem type at all,
+    names a logic file that is not fused. Erring this way keeps a problem type that
+    cannot answer the question from emptying the library, which fails far more
+    quietly than building the solutions the gate meant to skip.
+    """
+    return enabled or (problemType or {}).get("FusedGemmA2A", False) is not True
 
 
 ################################################################################

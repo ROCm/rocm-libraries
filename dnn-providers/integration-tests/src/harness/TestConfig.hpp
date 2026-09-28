@@ -17,6 +17,7 @@
 
 #include "common/PlatformUtils.hpp"
 #include "harness/TestSettings.hpp"
+#include "harness/ValidationSite.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -110,6 +111,24 @@ inline std::optional<VerificationMode>
     return std::nullopt;
 }
 
+// Resolve the requested validator: CLI value wins, then HIPDNN_TEST_VALIDATOR, then
+// nullopt (AUTO). Kept separate from TestConfig::initialize() so the precedence logic is
+// independently testable.
+inline std::optional<ValidatorDevice>
+    resolveValidatorDevice(std::optional<ValidatorDevice> cliValue)
+{
+    if(cliValue.has_value())
+    {
+        return cliValue;
+    }
+    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VALIDATOR");
+    if(!envVal.empty())
+    {
+        return parseValidatorDevice(envVal);
+    }
+    return std::nullopt;
+}
+
 // Resolve golden data dir: CLI value wins, then env var, then nullopt.
 inline std::optional<std::filesystem::path>
     resolveGoldenDataDir(std::optional<std::filesystem::path> cliValue)
@@ -137,8 +156,10 @@ struct TestConfigOptions
     bool allowBundles = true;
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
+    std::optional<ValidatorDevice> validatorDevice;
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
+    bool writeSupportClaims = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -205,6 +226,9 @@ public:
             instance._testSettings.emplace(*opts.configPath);
         }
 
+        instance._enforceSupportClaims = opts.enforceSupportClaims;
+        instance._writeSupportClaims = opts.writeSupportClaims;
+
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
         auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
@@ -217,10 +241,20 @@ public:
             instance._allowBundles = true;
         }
 
+        // Bundles are the only thing that carries a support claim, so a write run
+        // with bundle registration off would walk zero graphs, write zero files and
+        // still exit 0 — a silent no-op that reads as success. This sits after the
+        // env override so that neither an omitted --allow-bundles nor a stray
+        // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
+        if(instance._writeSupportClaims)
+        {
+            instance._allowBundles = true;
+        }
+
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
+        instance._validatorDevice = resolveValidatorDevice(opts.validatorDevice);
         instance._captureDir = std::move(opts.captureDir);
-        instance._enforceSupportClaims = opts.enforceSupportClaims;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -326,6 +360,20 @@ public:
         return _testSettings->findToleranceOverride(testName);
     }
 
+    // Find a validator override for one output tensor of the given test.
+    // Returns std::nullopt if no config loaded or nothing matches, which means the
+    // default allclose comparison.
+    std::optional<ValidatorOverride> findValidatorOverride(std::string_view testName,
+                                                           std::string_view tensorLabel) const
+    {
+        throwIfNotInitialized();
+        if(!_testSettings.has_value())
+        {
+            return std::nullopt;
+        }
+        return _testSettings->findValidatorOverride(testName, tensorLabel);
+    }
+
     // Raw gcnArchName for device 0 detected at init time (e.g.
     // "gfx942:sramecc+:xnack-"). Empty if detection failed.
     const std::string& getCurrentArch() const
@@ -401,10 +449,24 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    // Where comparisons run. Resolved once at init: CLI flag > HIPDNN_TEST_VALIDATOR
+    // env var > AUTO default (follow the reference).
+    ValidatorDevice getValidatorDevice() const
+    {
+        throwIfNotInitialized();
+        return _validatorDevice.value_or(ValidatorDevice::AUTO);
+    }
+
     bool enforceSupportClaims() const
     {
         throwIfNotInitialized();
         return _enforceSupportClaims;
+    }
+
+    bool writeSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _writeSupportClaims;
     }
 
     bool hasCaptureDir() const
@@ -441,6 +503,7 @@ private:
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
+    std::optional<ValidatorDevice> _validatorDevice;
     std::optional<std::filesystem::path> _captureDir;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
@@ -449,6 +512,7 @@ private:
     bool _skipGraphValidation = false;
     bool _allowBundles = false;
     bool _enforceSupportClaims = false;
+    bool _writeSupportClaims = false;
     bool _initialized = false;
 };
 
