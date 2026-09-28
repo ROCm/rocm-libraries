@@ -1125,6 +1125,12 @@ TEST(rocfft_UnitTest, rtc_test_harness)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+// Plan capacity tests are stress tests and aren't really adding
+// extra code path coverage over other test cases.  ASAN can hit
+// problems with address space fragmentation with a huge number of
+// plans, so disable these test cases in that build.
+#if !__has_feature(address_sanitizer) && !defined(__SANITIZE_ADDRESS__)
+
 // Create M identical Bluestein plans concurrently to stress the
 // hipModule refcount cache.  Plans destroyed before returning.
 static void run_plan_capacity_test(size_t M)
@@ -1196,3 +1202,5 @@ TEST(rocfft_UnitTest, DISABLED_plan_capacity_1m)
     PROB_SKIP_UNITTEST();
     run_plan_capacity_test(1'000'000);
 }
+
+#endif
