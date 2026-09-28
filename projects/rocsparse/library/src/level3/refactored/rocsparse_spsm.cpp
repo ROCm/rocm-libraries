@@ -137,14 +137,6 @@ namespace rocsparse
 
             switch(matA->format)
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            case rocsparse_format_csc:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-
-#else
-
             case rocsparse_format_csc:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsm_buffer_size(handle,
@@ -158,7 +150,7 @@ namespace rocsparse
                                                                        nullptr));
                 break;
             }
-#endif
+
             case rocsparse_format_csr:
             {
 
@@ -234,25 +226,17 @@ namespace rocsparse
 
             switch(matA->format)
             {
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-            case rocsparse_format_csc:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-
-#else
             case rocsparse_format_csc:
             {
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 
-                const rocsparse_operation op_csr = (trans_A == rocsparse_operation_none)
-                                                       ? rocsparse_operation_transpose
-                                                       : rocsparse_operation_none;
+                const auto op_csr = (trans_A == rocsparse_operation_none)
+                                        ? rocsparse_operation_transpose
+                                        : rocsparse_operation_none;
 
-                const rocsparse_operation fill_mode_csr
-                    = (matA->descr->fill_mode == rocsparse_fill_mode_lower)
-                          ? rocsparse_fill_mode_upper
-                          : rocsparse_fill_mode_lower;
+                const auto fill_mode_csr = (matA->descr->fill_mode == rocsparse_fill_mode_lower)
+                                               ? rocsparse_fill_mode_upper
+                                               : rocsparse_fill_mode_lower;
 
                 auto csrsm_info = matA->info->get_csrsm_info();
 
@@ -281,7 +265,6 @@ namespace rocsparse
                 }
                 return rocsparse_status_success;
             }
-#endif
 
             case rocsparse_format_csr:
             {
@@ -427,14 +410,6 @@ namespace rocsparse
                 break;
             }
 
-#ifndef ROCSPARSE_WITH_CSC_TRSM
-
-            case rocsparse_format_csc:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-
-#else
             case rocsparse_format_csc:
             {
 
@@ -452,7 +427,6 @@ namespace rocsparse
 
                 break;
             }
-#endif
 
             case rocsparse_format_coo_aos:
             case rocsparse_format_bsr:
