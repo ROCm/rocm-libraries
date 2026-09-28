@@ -499,9 +499,12 @@ The same gap exists on the WMMA side, and §4C.3 alone would understate it.
 gfx1201 provides `V_WMMA_I32_16X16X16_IU8` and `V_WMMA_I32_16X16X16_IU4` (plus a
 K32 `IU4` form and the matching `V_SWMMAC_*` sparse variants); gfx1250 provides
 `V_WMMA_I32_16X16X64_IU8` and `V_SWMMAC_I32_16X16X128_IU8`. rocKE declares no
-integer atom on either arch. Combined with §4C.3, **no integer matrix atom is
-declared on any of the seven architectures** — which is the single fact behind
-`i8`'s C5=1 score, not a CDNA-specific limitation.
+integer atom on either arch. Together with §4C.3, the declaration gaps are
+**CDNA integer MFMA and gfx1201/gfx1250 integer WMMA**. `gfx1151` and
+`gfx11-generic` do declare both `wmma_i32_16x16x16_iu8` and
+`wmma_i32_16x16x16_iu4` (§4B). The existing integer WMMA GEMM builders (§5)
+and quant epilogues give `i8` some family coverage; its C5=1 score reflects
+limited target and packed-input API coverage, as explained in §2.5.
 
 #### 4C.5 Sparse (SMFMAC / SWMMAC) is entirely undeclared
 Structured sparsity is available on gfx942, gfx950, gfx1201 and gfx1250. The

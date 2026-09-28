@@ -423,18 +423,21 @@ formats, and adds **F8F6F4/FP4** with per-block scaling (`V_WMMA_SCALE*` /
 | 121 | V_SWMMAC_F16_16X16X128_BF8_FP8 |
 | 122 | V_SWMMAC_F16_16X16X128_BF8_BF8 |
 
-### Scaled WMMA (F8F6F4 / FP4 microscaling — VOP3PX2 two-dword encoding)
+### Scaled WMMA (F8F6F4 / FP4 microscaling — VOP3PX2 128-bit encoding)
 
 These are matrix instructions in their own right, not helpers. They use the
-two-dword **VOP3PX2** encoding: the first dword carries the base WMMA opcode and
-the second carries the scale opcode, so a single instruction names both.
+**VOP3PX2** encoding: **four 32-bit dwords / two 64-bit halves**. The first
+half, bits **[63:0]**, is the load-scale portion; the second, bits **[127:64]**,
+is the WMMA portion. The scale opcode byte is at **[23:16]** (the first dword),
+and the base WMMA opcode is at **[87:80]** (the third dword), counting from the
+start of the instruction.
 
-| Base opcode (dword 1) | Scale opcode (dword 2) | Instruction |
+| Scale opcode byte [23:16] | Base WMMA opcode [87:80] | Instruction |
 |---|---|---|
-| 0x033 | 0x35 `SCALE` | V_WMMA_SCALE_F32_16X16X128_F8F6F4 |
-| 0x088 | 0x35 `SCALE` | V_WMMA_SCALE_F32_32X16X128_F4 |
-| 0x033 | 0x3a `SCALE16` | V_WMMA_SCALE16_F32_16X16X128_F8F6F4 |
-| 0x088 | 0x3a `SCALE16` | V_WMMA_SCALE16_F32_32X16X128_F4 |
+| 0x35 `SCALE` | 0x33 | V_WMMA_SCALE_F32_16X16X128_F8F6F4 |
+| 0x35 `SCALE` | 0x88 | V_WMMA_SCALE_F32_32X16X128_F4 |
+| 0x3a `SCALE16` | 0x33 | V_WMMA_SCALE16_F32_16X16X128_F8F6F4 |
+| 0x3a `SCALE16` | 0x88 | V_WMMA_SCALE16_F32_32X16X128_F4 |
 
 ### WMMA scale-load helpers
 
