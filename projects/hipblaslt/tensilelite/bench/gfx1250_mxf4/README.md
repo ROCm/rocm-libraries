@@ -39,7 +39,7 @@ cd bench/gfx1250_mxf4
 # Pins physical GPU 2 via HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES (override with GPU_ID=N).
 ./run.sh tensile          # compile + one timed launch, ISA under tensile/ (KeepBuildTmp)
 ./run.sh att              # ATT on the latest ClientParameters.ini
-./run.sh pmc              # SQC_LDS_BANK_CONFLICT-style counters (names may differ on gfx1250)
+./run.sh pmc              # TX_VMW LDS bank / address / segment-conflict counters
 ./run.sh att --tensile    # wrap the whole Tensile process instead of the client
 ```
 
@@ -57,15 +57,20 @@ so setting it *and* `HIP_VISIBLE_DEVICES=2` filters the filtered list and the cl
 That held across `att_target_cu` 0/2/4, `att_shader_engine_mask` 0x1/0xF/0xFF, and
 `att_simd_select` 0x0/0xF. `--att-perfcounters` is gfx9-only.
 
-For counters, gfx1250 exposes **no** LDS bank-conflict event — `SQ_LDS_BANK_CONFLICT` and
-`SQC_LDS_BANK_CONFLICT` are gfx9/gfx10-11 only. Check what this part has:
+`SQ_LDS_BANK_CONFLICT` / `SQC_LDS_BANK_CONFLICT` are gfx9/gfx12 only. On gfx1250 the LDS
+conflict events live on the TCP/VMW perf selects (`TX_PERF_SEL_VMW_*` in the Arcadia headers).
+`configs/rocprof_pmc.yaml` collects:
+
+| Counter | Event | What it counts |
+| --- | --- | --- |
+| `TX_VMW_LDS_BANK_CONFLICT` | 0x84 | Cycles LDS is stalled by a bank conflict |
+| `TX_VMW_LDS_ADDR_CONFLICT` | 0x87 | Cycles LDS is stalled by an address conflict |
+| `TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES` | 0xa4 | Cycles LDS is stalled because both read ports hit the same segment |
+
+`SQ_INST_CYCLES_LDS / SQ_INSTS_LDS` is still collected. On the current subtile kernel both
+read **0** — the TDM path may not increment `SQ_INSTS_LDS` — so use the `TX_VMW_LDS_*` counters
+and `SQ_BUSY_CYCLES` / kernel time. Confirm the names on the box with:
 
 ```bash
-rocprofv3-avail info --pmc | rg -i 'lds|bank'
+rocprofv3-avail info --pmc | rg -i 'vmw_lds|segment_conflict'
 ```
-
-`configs/rocprof_pmc.yaml` therefore uses `SQ_INST_CYCLES_LDS / SQ_INSTS_LDS` (average cycles
-per LDS instruction) as the conflict proxy. Note that on the current subtile kernel both read
-**0**, so this proxy is not yet usable — the TDM path may not increment `SQ_INSTS_LDS`.
-Until that is resolved, compare `SQ_BUSY_CYCLES` / kernel time across LdsPad variants and read
-`ds_read` offsets directly from the ISA that `KeepBuildTmp` leaves in `logs/<stamp>/tensile/`.

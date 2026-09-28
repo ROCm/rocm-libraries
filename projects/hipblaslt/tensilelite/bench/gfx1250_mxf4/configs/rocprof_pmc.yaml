@@ -1,15 +1,22 @@
-# rocprofv3 kernel dispatch + LDS counters.
+# rocprofv3 kernel dispatch + LDS conflict counters.
 #
-# gfx1250 exposes no SQ_LDS_BANK_CONFLICT / SQC_LDS_BANK_CONFLICT (those are gfx9/gfx10-11).
-# Verify with: rocprofv3-avail info --pmc | rg -i 'lds|bank'
+# gfx1250 LDS conflicts are TCP/VMW events (Arcadia TX_PERF_SEL_VMW_*), not the
+# gfx9 SQ_LDS_* / gfx12 SQC_LDS_* counters. Names below drop the TX_PERF_SEL_ prefix:
+#   TX_VMW_LDS_BANK_CONFLICT                              event 0x84
+#   TX_VMW_LDS_ADDR_CONFLICT                              event 0x87
+#   TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES event 0xa4
+# Segment conflict: two LDS read ports hitting the same segment in one cycle.
+# ROW0/ROW1 splits exist for bank and address; the unsuffixed counters are both rows.
 #
-# Bank-conflict proxy: SQ_INST_CYCLES_LDS / SQ_INSTS_LDS is the average cycles spent per
-# LDS instruction. A conflict-free ds_read is a fixed cost, so a rise in this ratio between
-# two macrotile/LdsPad variants is the conflict signal.
+# SQ_INST_CYCLES_LDS / SQ_INSTS_LDS is the average cycles per LDS instruction.
+# On the current subtile kernel both have read 0 (TDM may not increment SQ_INSTS_LDS).
 jobs:
   - kernel_trace: true
     kernel_include_regex: "Cijk"
     pmc:
+      - TX_VMW_LDS_BANK_CONFLICT
+      - TX_VMW_LDS_ADDR_CONFLICT
+      - TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES
       - SQ_INSTS_LDS
       - SQ_INST_CYCLES_LDS
       - SQ_WAVES

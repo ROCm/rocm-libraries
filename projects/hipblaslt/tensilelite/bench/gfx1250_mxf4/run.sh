@@ -3,7 +3,7 @@
 #
 #   ./run.sh tensile          # generate + run the Tensile client (fills logs/<stamp>/tensile)
 #   ./run.sh att              # ATT on the latest ClientParameters.ini (builds first if needed)
-#   ./run.sh pmc              # PMC / kernel-trace on the latest client config
+#   ./run.sh pmc              # PMC: TX_VMW LDS bank/addr/segment conflict + kernel trace
 #   ./run.sh att --tensile    # wrap the whole Tensile process (compile + client)
 set -euo pipefail
 
