@@ -1,4 +1,4 @@
 interface:
-  display_name: "hipDNN Integration Testing Reference"
-  short_description: "Domain reference for the cross-provider integration test suite"
-  default_prompt: "Use $hipdnn-integration-testing for how the cross-provider integration test suite (bundles, YAML tiers, per-engine TOML config, CMake/CTest wiring) works, how to run hipdnn_integration_tests against an engine, and how to spot a run that looks green but silently lost coverage."
+  display_name: "hipDNN Integration Testing"
+  short_description: "Doc-driven guide to running and extending the cross-provider integration suite"
+  default_prompt: "Use $hipdnn-integration-testing to load the integration-test docs (dnn-providers/integration-tests/docs/) and apply them: run hipdnn_integration_tests against an engine, read its coverage and support-claim summaries, add bundles, and update .support.json claims when a run reports unclaimed_support."

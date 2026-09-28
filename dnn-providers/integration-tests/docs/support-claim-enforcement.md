@@ -32,7 +32,7 @@ it is published.
 **That the engine accepts the graph — not that the graph produces correct output.**
 
 Correctness is the job of the ordinary comparison against golden data or a
-reference executor (see [Verification modes](../README.md#verification-modes)).
+reference executor (see [Verification modes](running-tests.md#verification-modes)).
 Claims are a separate axis: they catch an engine *dropping* support for a graph it
 previously advertised, which otherwise shows up as a skip nobody notices.
 
@@ -536,7 +536,8 @@ The pieces this harness is assembled from, and the one question each answers.
 
 ## See Also
 
-- [`README.md`](../README.md) — the integration test suite, bundle formats, tiers,
-  and provider wiring.
-- [`integration-test-bundles/README.md`](../integration-test-bundles/README.md) —
-  on-disk bundle layout and the DVC workflow.
+- [`README.md`](README.md) — index of the integration-test documentation.
+- [File Formats](file-formats.md) — bundle layout, sidecar schemas, and test naming.
+- [Running the Tests](running-tests.md) — lanes, flags, tiers, and reading the summary.
+- [Adding Tests and Updating Claims](adding-tests.md) — the DVC workflow and
+  `--write-support-claims`.

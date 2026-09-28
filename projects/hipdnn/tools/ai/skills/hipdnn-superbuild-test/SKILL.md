@@ -101,13 +101,14 @@ Infer options from the user request:
      ```bash
      python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
      ```
-   - **Before reporting the result, read the `hipdnn-integration-testing`
+   - **Before reporting the result, load the `hipdnn-integration-testing`
      skill.** This suite is the one place where exit code 0 is routinely
      meaningless: a run that skips every test still exits 0, and `ctest -L`
      with a label that matches nothing prints `No tests were found!!!` and
-     also exits 0. That skill documents which of those outcomes are expected
-     (a tracked provider limitation) and which are a real regression, plus
-     the tier/TOML/`exclude_gpu` layers that decide what ran at all.
+     also exits 0. That skill applies the suite's own documentation to the
+     output, including the support-claim summary (for example
+     `unclaimed_support`, which means the `.support.json` sidecars need
+     updating).
 
 9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY" — never the exit code alone; a 100%-skipped run is green and is not evidence the engine still works.
 
@@ -175,12 +176,11 @@ If a requested component has no matching target, say that it was not present in 
 
 ## See also
 
-- `hipdnn-integration-testing` skill — the domain reference behind the
-  `external-integration` scope: what the cross-provider
-  `hipdnn_integration_tests` binary actually runs (bundles/sweeps vs C++
-  tests), how YAML tiers, `exclude_gpu`, `ctest -L`, `--gtest_filter` and the
-  per-engine TOML compose into what executes, and the failure modes that make
-  a run report green with no coverage — "zero tests ran", an all-skip run, a
-  `ctest -L <typo>` that exits 0. **Read it before interpreting any result
-  from step 8, and before concluding an engine did or did not regress.** This
-  skill executes; that one explains.
+- `hipdnn-integration-testing` skill — the doc-driven reference behind the
+  `external-integration` scope. It loads the suite's documentation
+  (`dnn-providers/integration-tests/docs/`) and applies it: what
+  `hipdnn_integration_tests` runs, how tiers, `exclude_gpu`, `ctest -L`,
+  `--gtest_filter` and the per-engine TOML decide what executes, how to read the
+  coverage and support-claim summaries, and which green runs tested nothing.
+  **Load it before interpreting any result from step 8, and before concluding
+  an engine did or did not regress.** This skill executes; that one explains.
