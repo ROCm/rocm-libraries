@@ -60,7 +60,7 @@ from kernels.common.attention_unified import (
     UNIFIED_DTYPES,
     UNIFIED_HEAD_SIZES,
 )
-from rocke.core.arch import ArchTarget
+from rocke.core.arch import ArchTarget, base_arch_from_target_id
 from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_matches
 
 FAMILY = "attention_unified"
@@ -92,6 +92,32 @@ def _parse_attention_mask_type(value: object) -> AttentionMaskType:
             "mask_type must be an exact integer ordinal in "
             f"{_ATTENTION_MASK_ORDINALS}, got {value!r}"
         ) from exc
+
+
+def canonical_arch(arch: str) -> str:
+    """The single arch authority for the attention family.
+
+    Every arch comparison in this family is an exact string compare against a
+    lowercase base name (``"gfx942"``, ``"gfx950"``). That only holds if the
+    strings agree on case and carry no target-ID decoration, and previously each
+    site defended itself -- some with ``.lower()``, some with ``.strip()``, some
+    not at all. A feature suffix therefore silently failed a gate: a request for
+    ``gfx950:sramecc+`` is a request for gfx950, but ``== "gfx950"`` said no.
+
+    :func:`base_arch_from_target_id` is the platform's existing canonicalizer and
+    is already what :func:`get_device_arch` applies, so the host-resolved arch is
+    canonical by construction and ``request.arch`` was the only uncanonical
+    source. Reusing it here -- rather than writing a second normalizer -- is what
+    makes the two sources comparable.
+
+    A missing arch stays missing. ``None`` must not become the *string*
+    ``"none"`` -- that would turn "no arch was supplied", which callers detect by
+    emptiness, into a plausible-looking arch name that fails much later with a
+    worse message.
+    """
+    if not isinstance(arch, str) or not arch.strip():
+        return ""
+    return base_arch_from_target_id(arch.strip().lower())
 
 
 @dataclass(frozen=True)
@@ -146,6 +172,16 @@ class AttentionRequest(OperatorRequest):
     # ``dense_tile`` names a DENSE_TILE_GEOMETRIES key (``default`` / ``bm128``).
     dense_tile: str = "auto"  # "auto" | "default" | "bm128"
     dense_wide_lds_dma: str = "auto"  # "auto" | "on" | "off"
+
+    def __post_init__(self) -> None:
+        # The one place ``arch`` is canonicalized. The class calls itself
+        # "Normalized" -- this is what makes that true of the arch, so every
+        # downstream comparison can be an exact ``==`` against a base name
+        # without each site re-normalizing (and disagreeing about how).
+        # ``object.__setattr__`` because the dataclass is frozen; the base
+        # ``OperatorRequest`` defines no ``__post_init__``, so nothing is
+        # shadowed.
+        object.__setattr__(self, "arch", canonical_arch(self.arch))
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -297,7 +333,7 @@ def _resolve_num_cus(req: AttentionRequest) -> int:
     n = int(req.num_cus)
     if n > 0:
         return n
-    arch = req.arch.lower()
+    arch = req.arch
     if arch in _AUTO_RESOLVE_ARCHS:
         try:
             from rocke.runtime.hip_module import get_device_arch
@@ -343,7 +379,6 @@ def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=_resolve_num_cus(req),
         target_ctas=int(req.target_ctas),
-        clamp_arch=req.arch.lower(),
     )
 
 

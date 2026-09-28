@@ -91,9 +91,9 @@ def test_d128_bf16_excluded_from_ring(gfx942, hq, hk):
     # non-ring (the faster T=32 ring needs block_size=32, which prod never sends).
     p = _problem("bf16", hq=hq, hk=hk)
     assert not au._enable_gfx942_flash_k_sliced_ring(
-        p
+        p, "gfx942"
     ), "bf16 D128 must stay on the non-ring path"
-    spec = au._tiled_spec_from_problem(p)
+    spec = au._tiled_spec_from_problem(p, "gfx942")
     assert not spec.use_k_sliced_ring
     assert spec.tile_size == 64
 
@@ -105,9 +105,9 @@ def test_d128_fp16_uses_depth2_ring(gfx942, hq, hk):
     # prefill path (~0.72-1.05x AOTriton flash).
     p = _problem("fp16", hq=hq, hk=hk)
     assert au._enable_gfx942_flash_k_sliced_ring(
-        p
+        p, "gfx942"
     ), "fp16 D128 should use the (correct) depth-2 ring"
-    spec = au._tiled_spec_from_problem(p)
+    spec = au._tiled_spec_from_problem(p, "gfx942")
     assert spec.use_k_sliced_ring
     assert spec.ring_depth == 2, "fp16 D128 ring must be depth-2 (k%2, no slot reuse)"
     assert spec.tile_size == 64
@@ -118,7 +118,7 @@ def test_d128_bf16_ring_force_on_still_off(gfx942, monkeypatch):
     # Even the explicit force-on env must NOT re-enable the bf16 D128 ring: the
     # bf16 head_size==128 guard short-circuits before the env is consulted.
     monkeypatch.setenv("HIPDNN_GFX942_K_SLICED_RING", "1")
-    assert not au._enable_gfx942_flash_k_sliced_ring(_problem("bf16"))
+    assert not au._enable_gfx942_flash_k_sliced_ring(_problem("bf16"), "gfx942")
 
 
 @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
@@ -128,8 +128,8 @@ def test_d128_launch_meta_matches_spec(gfx942, dtype, hq, hk):
     # (ring or non-ring) -- a mismatch silently corrupts output.
     au._2D_LAUNCH_META.clear()
     p = _problem(dtype, hq=hq, hk=hk)
-    spec = au._tiled_spec_from_problem(p)
-    meta = au._get_2d_launch_meta(p, au._tiled_cache_key(p))
+    spec = au._tiled_spec_from_problem(p, "gfx942")
+    meta = au._get_2d_launch_meta(p, au._tiled_cache_key(p, "gfx942"))
     assert meta.block[0] == 64 * spec.num_warps
 
 
@@ -138,7 +138,7 @@ def test_d64_ring_depth_unchanged(gfx942):
     # 2 -> 4); this deliberately does not pin the width -- test_attn_k_slice_hd.py
     # owns it, and asserting it here too would give two places to update.
     for dtype in ("bf16", "fp16"):
-        s = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16))
+        s = au._tiled_spec_from_problem(_problem(dtype, d=64, bs=16), "gfx942")
         assert s.use_k_sliced_ring, f"D64 {dtype} must keep the ring"
         assert s.ring_depth == 3, f"D64 {dtype} ring stays depth-3"
         assert s.num_warps == 4
@@ -256,7 +256,7 @@ def test_d128_numeric_vs_fp32_oracle_at_magnitude(monkeypatch, dtype, tol, hq, h
         )
 
         p = _problem(dtype, sq=sq, hq=hq, hk=hk)
-        spec = _tiled_spec_from_problem(p)
+        spec = _tiled_spec_from_problem(p, "gfx942")
         # Routing sanity: bf16 D128 is non-ring; fp16 D128 uses the depth-2 ring
         # once past the small-q narrow path (q<=768 -> narrow, no ring). The
         # numeric assert below gates every path on correctness regardless.
