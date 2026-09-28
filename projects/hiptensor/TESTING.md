@@ -33,7 +33,7 @@ cmake --install <build_dir> --component tests
 | Any C++ source | `ctest` | Build tree | No (GPU-dependent tests will fail) |
 | Contraction / elementwise / reduction logic | `ctest -L '^quick$'` | `<prefix>/bin/hiptensor` | Yes |
 | Kernel selection or data types | `ctest -L '^standard$'` | `<prefix>/bin/hiptensor` | Yes |
-| Performance-sensitive path | `ctest -L '^bench$' -V -O bench.log` | `<prefix>/bin/hiptensor` | Yes |
+| Performance-sensitive path | `ctest -V -O bench.log` | `<prefix>/bin/hiptensor/bench` | Yes |
 
 > **Run in parallel:** add `-j$(nproc)` (or `-j <N>`) to any validation run — e.g. `ctest -L '^standard$' -j$(nproc)` — to run test binaries concurrently. Do **not** parallelize the `bench` tier: concurrent runs contend for the GPU and corrupt timing measurements.
 
@@ -134,7 +134,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 | `full` | `validation/full` | Long | Nightly / release |
 | `ffm-quick` | `emulation/quick` | Long | FFM simulator PR |
 | `ffm-full` | `emulation/full` | Long | FFM simulator nightly |
-| `bench` | `bench` | Very Long | Manual / nightly perf |
+| `bench` | `bench` | Very Long | Manual / nightly perf (own `bench/` subdir; excluded from bare `ctest`) |
 
 > See [test_categories.yaml](test_categories.yaml) for the specific timeouts on each category.
 
@@ -165,7 +165,7 @@ Tiers are applied to the installed tree only (`<prefix>/bin/hiptensor/CTestTestf
 |---|---|
 | Stack layer | Expansion SDK |
 | Metrics measured | GFLOP/s per operation type; wall-clock time (hot-run average) |
-| How benchmarks are run | `ctest -L '^bench$' -V -O bench.log` from `<prefix>/bin/hiptensor` (5 hot runs, 1 cold run per config; `-V` prints GFLOP/s output, `-O` saves it to a file); alternatively via `scripts/performance/Benchmark{Contraction,Permutation,Reduction}.sh` |
+| How benchmarks are run | `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` (5 hot runs, 1 cold run per config, validation off via `-v OFF`; `-V` prints GFLOP/s output, `-O` saves it to a file); alternatively via `scripts/performance/Benchmark{Contraction,Permutation,Reduction}.sh` |
 | Baseline stored per architecture | Yes — baselines must not be aggregated across GFX targets |
 | Where results are stored | Log files written by the benchmark scripts; no centralized DB currently (known gap) |
 | Regression threshold | Not automated — manual review (known gap) |
@@ -265,7 +265,7 @@ hipTensor's test coverage surface is wide: 6 tensor ranks × multiple data types
 Beyond PR validation, nightly runs add:
 
 - `comprehensive` and `full` tier validation on all supported ASIC targets (gfx908, gfx90a, gfx942, gfx950, gfx11xx, gfx12xx).
-- Benchmark runs (`ctest -L '^bench$'` from `<prefix>/bin/hiptensor`) with 5 hot runs; results retained for manual comparison. The `scripts/performance/Benchmark*.sh` scripts are an alternative for running benchmarks outside CTest.
+- Benchmark runs (`ctest` from `<prefix>/bin/hiptensor/bench`) with 5 hot runs and validation off (`-v OFF`); results retained for manual comparison. The `scripts/performance/Benchmark*.sh` scripts are an alternative for running benchmarks outside CTest.
 - FFM simulator full suite (`ffm-full`) for pre-silicon targets.
 - Cross-component smoke: downstream consumers (e.g., libraries built on top of hipTensor) are validated separately by those components' nightly suites.
 
@@ -328,7 +328,7 @@ There is no client-side known-bug list (analogous to `known_bugs.yaml` in other 
 | New or changed GPU operation behavior | Integration test: add a YAML config entry in the appropriate `validation/` tier |
 | Bug fix | A regression test (unit if CPU-side, integration config entry if GPU-side) that fails before the fix |
 | New data type or tensor rank | Config entries across all relevant validation tiers; empty config file for tiers where the test is already covered |
-| Performance-sensitive change | Run `ctest -L '^bench$' -V -O bench.log` from `<prefix>/bin/hiptensor` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
+| Performance-sensitive change | Run `ctest -V -O bench.log` from `<prefix>/bin/hiptensor/bench` before and after; include the comparison in the PR description. The `scripts/performance/Benchmark*.sh` scripts are an alternative. |
 | New GPU architecture | Validate on that target; update the Supported Configurations table |
 
 ---

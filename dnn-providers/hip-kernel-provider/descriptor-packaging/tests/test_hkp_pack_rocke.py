@@ -8,6 +8,7 @@ from typing import Literal, Optional
 
 import pytest
 
+from conftest import _arg, _kernel, _object, requires_msgpack
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.pipeline import run_pipeline
@@ -168,13 +169,30 @@ class _FakeComgrError(Exception):
     pass
 
 
-def _patch_compiler(monkeypatch, name="stub_symbol", data=b"ELF\x00stub_symbol\x00"):
+STUB_ARGUMENTS = [
+    _arg("global_buffer", 8, 0, "in_ptr"),
+    _arg("global_buffer", 8, 8, "out_ptr"),
+    _arg("by_value", 4, 16, "scale"),
+]
+
+
+def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     """Stub the comgr entry, recording the backend the producer requested.
 
     The recorder exists so a test can assert the producer PINS the backend
     rather than merely tolerating one. Without it, dropping the pin would leave
     every one of these tests green.
+
+    The default artifact is a real ELF carrying the AMDGPU metadata note, which
+    is what comgr emits: the packer reads a signature out of every object it
+    packs, so a placeholder that only spells the symbol in its bytes fails
+    before any guard under test is reached. Synthesising that note needs
+    msgpack, so the default -- and only the default -- is gated on it; a caller
+    supplying its own bytes needs nothing.
     """
+    if data is None:
+        requires_msgpack()
+        data = _object([_kernel(name, STUB_ARGUMENTS)])
     from hkp_pack import rocke_compile
 
     seen = {}
@@ -206,7 +224,7 @@ _GOOD_STUB = """
 def test_adapter_import_build_capture(tmp_path, monkeypatch):
     src = _write_stub_pkg(tmp_path, _GOOD_STUB)
     name, data, seen = _patch_compiler(monkeypatch)
-    co, symbol = compile_rocke_variant(
+    co, symbol, _observations = compile_rocke_variant(
         src, "build_stub", {"n": 3, "label": "y"}, ARCH, tmp_path / "co"
     )
     assert symbol == name
@@ -223,7 +241,7 @@ def test_adapter_source_dotted_derivation(tmp_path, monkeypatch):
     # source path with a nested folder resolves via the derived dotted module.
     src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg="stubpkg2", sub="deep", mod="k")
     _patch_compiler(monkeypatch)
-    co, symbol = compile_rocke_variant(
+    co, symbol, _observations = compile_rocke_variant(
         src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
     )
     assert symbol == "stub_symbol"
@@ -511,7 +529,7 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
         build_attention_dense,
     )
 
-    co, symbol = compile_rocke_variant(
+    co, symbol, _observations = compile_rocke_variant(
         rocke_ukd.source,
         rocke_ukd.builder,
         dict(rocke_ukd.spec),
@@ -544,6 +562,30 @@ def test_rocke_compiles_and_packs(
     assert blob is not None
     assert hashlib.sha256(blob).hexdigest() == ks["sha256"]
     assert ks["symbol"].encode("ascii") in blob
+    # Read off the object comgr actually produced. rocke emits argument names,
+    # which a HIP extern "C" kernel does not, so the dispatch-time comparison
+    # covers names here and not only kind and size.
+    signature = ks["signature"]
+    assert [a["kind"] for a in signature] == [
+        "global_buffer",
+        "global_buffer",
+        "global_buffer",
+        "global_buffer",
+        "by_value",
+        "by_value",
+        "by_value",
+        "by_value",
+    ]
+    assert [a["name"] for a in signature] == [
+        "q_ptr",
+        "k_ptr",
+        "v_ptr",
+        "o_ptr",
+        "scale",
+        "batch",
+        "seqlen_q",
+        "seqlen_kv",
+    ]
 
 
 def test_rocke_symbol_capture_differs_from_builder(
@@ -631,29 +673,26 @@ def test_comgr_error_names_loaded_lib(tmp_path, monkeypatch):
 
 # --- real-corpus guards (rocke importable, no comgr needed) -----------------
 @pytest.mark.quick
-def test_real_gfx942_attention_dense_is_refused(rocke_importable):
-    """The corpus's one genuine unsuppliable-parameter case must be refused.
+def test_real_gfx942_attention_dense_is_accepted(rocke_importable):
+    """gfx942's dense builder must stay packageable.
 
-    gfx942's build_attention_dense takes a keyword-only
-    `tuning: Gfx942DenseTuning = _DEFAULT_TUNING` that no descriptor can set, so
-    packing it would silently freeze a performance knob. This asserts against
-    the real builder rather than a stub, so the guard cannot rot away from the
-    thing it protects.
+    Its sweep knobs are flat fields on the spec, so the signature is the
+    ``(spec, *, arch)`` the gate requires. Asserting against the real builder
+    catches a regression that reintroduces an unsuppliable keyword-only knob.
     """
     from kernels.gfx942 import attention_dense as m
 
     from hkp_pack.rocke_compile import _require_spec_arch_signature
 
-    with pytest.raises(HkpPackError, match="tuning"):
-        _require_spec_arch_signature(m.build_attention_dense, "build_attention_dense")
+    _require_spec_arch_signature(m.build_attention_dense, "build_attention_dense")
 
 
 @pytest.mark.quick
 def test_real_gfx942_tiled_2d_is_accepted(rocke_importable):
     """The builder the example descriptor tree uses must pass the gate.
 
-    Pairs with the refusal above: the gate has to be narrow enough that real
-    kernels remain packageable, not just strict.
+    The gate has to be narrow enough that real kernels remain packageable, not
+    just strict.
     """
     from kernels.gfx942 import attention_tiled_2d as m
 

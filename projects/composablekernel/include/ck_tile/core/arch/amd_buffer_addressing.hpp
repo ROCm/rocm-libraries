@@ -3057,7 +3057,6 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
 #endif
     if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::half_t>)
     {
-        typedef __attribute__((__vector_size__(4 * sizeof(__fp16)))) __fp16 llvm_fp16x4_t;
         auto lds_ptr = reinterpret_cast<__LDS_ADDR llvm_fp16x4_t*>(in_ptr_);
         return bit_cast<thread_buffer<T, N>>(__builtin_amdgcn_ds_read_tr16_b64_v4f16(lds_ptr));
     }

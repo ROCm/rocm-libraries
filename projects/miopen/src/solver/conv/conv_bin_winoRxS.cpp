@@ -268,16 +268,8 @@ bool ConvBinWinogradRxS::IsApplicable(const ExecutionContext& ctx,
     }
     else
     {
-        if(problem.IsDirectionBackwardWrW())
-        {
-            if(!(name == "gfx900" || name == "gfx906" || name == "gfx908"))
-                return false;
-        }
-        else
-        {
-            if(!(name == "gfx803" || name == "gfx900" || name == "gfx906" || name == "gfx908"))
-                return false;
-        }
+        if(!(name == "gfx900" || name == "gfx906" || name == "gfx908"))
+            return false;
     }
 
     // Use IsPossibleLayout4D5D to check actual tensor strides rather than cached layout string

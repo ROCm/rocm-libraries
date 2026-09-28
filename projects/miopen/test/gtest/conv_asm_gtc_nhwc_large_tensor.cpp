@@ -27,19 +27,26 @@
 #include "unit_conv_solver.hpp"
 
 // The ASM-GTC NHWC solvers ConvAsmImplicitGemmGTCDynamic{Fwd,Bwd,Wrw}XdlopsNHWC index
-// global tensor memory with 32-bit BYTE offsets and do not implement large-tensor
-// support. Each solver's IsApplicable() therefore gates off any problem whose tensor
-// size in bytes exceeds INT_MAX, so it cannot be selected for a shape it would silently
-// compute incorrectly. Note the bound is on bytes, not elements: for fp16 the effective
-// element ceiling is half of INT_MAX.
+// global tensor memory with 32-bit BYTE offsets. The bound is on bytes, not elements:
+// for fp16 the effective element ceiling is half the byte ceiling.
+//
+// Forward and backward-data address a full 4 GiB window per dispatch slice and advance
+// the base pointer per batch-split, so activations of any size are handled by the split
+// mechanism. Only the per-group weight size has to fit the window. Backward-weights is
+// held to the stricter int32 bound on all three tensors, because 292 of its 900 kernels
+// ignore the batch-split dimension (ROCm/rocm-libraries#11805).
 //
 // The two cases below share geometry and differ only in batch size N, so the byte
 // count crosses the INT_MAX boundary and isolates the gate. The gate checks the
 // (direction-independent) in/out/weights descriptors; for this shape both the input and
 // output tensors have C*H*W per sample = 1024*162*92 = 15,261,696 elements, and fp16
 // doubles that to bytes:
-//     N=70 -> 2,136,637,440 bytes <= INT_MAX (2,147,483,647): int32-safe, applicable
-//     N=71 -> 2,167,160,832 bytes >  INT_MAX                : gated off, not applicable
+//     N=70 -> 2,136,637,440 bytes <= INT_MAX (2,147,483,647)
+//     N=71 -> 2,167,160,832 bytes >  INT_MAX
+// Backward-weights is gated off at N=71; forward and backward-data stay applicable, since
+// the weights here are only 18 MiB. GetWeightsOverBoundConvCase covers the bound that does
+// still gate forward and backward-data: 16384x16384x3x3 fp16 weights are 4.50 GiB per group,
+// over the 4 GiB window, while its activations stay small so the weight term is isolated.
 
 namespace {
 
@@ -59,6 +66,15 @@ auto GetOverInt32ConvCase()
                         {miopenHalf, miopenTensorNHWC, {1024, 1024, 3, 3}},
                         miopenHalf,
                         {{1, 1}, {1, 1}, {1, 1}}};
+}
+
+auto GetWeightsOverBoundConvCase()
+{
+    using miopen::unit_tests::ConvTestCase;
+    return ConvTestCase{{miopenHalf, miopenTensorNHWC, {1, 16384, 8, 8}},
+                        {miopenHalf, miopenTensorNHWC, {16384, 16384, 3, 3}},
+                        miopenHalf,
+                        {{0, 0}, {1, 1}, {1, 1}}};
 }
 
 // int32-safe shape: the solver keeps its usual device applicability (regression guard).
@@ -96,10 +112,15 @@ INSTANTIATE_TEST_SUITE_P(SmokeInt32Safe,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetInRangeConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeOverInt32,
+INSTANTIATE_TEST_SUITE_P(SmokeActivationsOverInt32,
+                         CPU_UnitTestConvSolverAsmGTCFwdNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetInRangeParams()),
+                                          testing::Values(GetOverInt32ConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(SmokeWeightsOverBound,
                          CPU_UnitTestConvSolverAsmGTCFwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
-                                          testing::Values(GetOverInt32ConvCase())));
+                                          testing::Values(GetWeightsOverBoundConvCase())));
 
 // --- Backward-data -------------------------------------------------------------------
 
@@ -117,10 +138,15 @@ INSTANTIATE_TEST_SUITE_P(SmokeInt32Safe,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetInRangeConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeOverInt32,
+INSTANTIATE_TEST_SUITE_P(SmokeActivationsOverInt32,
+                         CPU_UnitTestConvSolverAsmGTCBwdNHWCLargeTensorDevApplicability_NONE,
+                         testing::Combine(testing::Values(GetInRangeParams()),
+                                          testing::Values(GetOverInt32ConvCase())));
+
+INSTANTIATE_TEST_SUITE_P(SmokeWeightsOverBound,
                          CPU_UnitTestConvSolverAsmGTCBwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
-                                          testing::Values(GetOverInt32ConvCase())));
+                                          testing::Values(GetWeightsOverBoundConvCase())));
 
 // --- Backward-weights ----------------------------------------------------------------
 

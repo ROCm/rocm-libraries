@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
@@ -27,6 +28,7 @@
 
 using namespace hipdnn_integration_tests;
 using namespace hipdnn_integration_tests::bundle;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
 
 namespace
 {
@@ -41,7 +43,7 @@ protected:
     void SetUp() override
     {
         testing_support::ensureTestConfigInitialized();
-        _scopedDir.emplace(scratch::makeDir("vmode_test_"));
+        _scopedDir.emplace(claimScratchDirectory("vmode"));
         _tempDir = _scopedDir->path();
     }
 
@@ -373,7 +375,7 @@ TEST_F(TestVerificationModePathsFixture, CpuModeCapabilityMissSkips)
 // ── Enforcement-level gate ──────────────────────────────────────────────────
 // runComparison() routes on enforcement level alone: a non-FULL bundle reaches
 // enforceAtLevel() regardless of --enforce-support-claims, which only controls
-// what checkSupportClaims() does earlier in TestBody(). enforceAtLevel() is no
+// what observeSupportClaims() does earlier in TestBody(). enforceAtLevel() is no
 // longer stubbable, so these assert its real rung behaviour directly through the
 // engine-runner mock instead of an intercepted EnforcementLevel value.
 //

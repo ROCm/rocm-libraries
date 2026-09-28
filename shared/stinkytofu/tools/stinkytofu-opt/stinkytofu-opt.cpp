@@ -46,6 +46,7 @@
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 using namespace stinkytofu;
 
@@ -173,14 +174,15 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
-                arg == "--verify-each" || arg == "--dump-passes" ||
+                arg == "--verify-each" || arg == "--dump-passes" || arg == "--time-passes" ||
                 arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
                 arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
                 arg.starts_with("--ds-read-throttle-transition-factor=") ||
                 arg.starts_with("--ds-read-throttle-transition-entries=") ||
-                arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--ds-read-per-cap=") ||
+                arg.starts_with("--ds-issue-cap-span-cycles=") ||
                 arg.starts_with("--tensor-load-wmma-space=") ||
                 arg.starts_with("--global-read-queue-depth=") ||
                 arg.starts_with("--global-read-drain-latency=") ||
@@ -320,6 +322,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
         std::cerr << "                   after.txt in the working directory (implied by\n";
         std::cerr << "                   --debug-pass)\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -381,6 +384,7 @@ int main(int argc, char** argv) {
         std::cerr << "  --dump-passes    Dump IR before/after each pass into before.txt and\n";
         std::cerr << "                   after.txt in the working directory (implied by\n";
         std::cerr << "                   --debug-pass)\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -519,8 +523,18 @@ int main(int argc, char** argv) {
         } else if (a.starts_with("--ds-read-throttle-transition-entries=")) {
             passFeatureConfig.dagFeatures.dsReadThrottleTransitionEntries =
                 std::stoi(a.substr(std::string("--ds-read-throttle-transition-entries=").size()));
-        } else if (a.starts_with("--ds-read-per-wmma=")) {
-            passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--ds-read-per-cap=")) {
+            // Length taken from the flag rather than hardcoded: the literal 19
+            // here was the length of the old --ds-read-per-cap=, and renaming
+            // the flag to an 18-character one silently made this parse the '='.
+            passFeatureConfig.dagFeatures.dsReadPerCap =
+                std::stoi(a.substr(std::string("--ds-read-per-cap=").size()));
+        } else if (a.starts_with("--ds-issue-cap-span-cycles=")) {
+            // The other half of the rule (4) cap: the ceiling is
+            // dsReadPerCap ds_loads per this many cycles. Neither number means
+            // anything alone, so both are reachable from the CLI.
+            passFeatureConfig.dagFeatures.dsIssueCapSpanCycles =
+                std::stoi(a.substr(std::string("--ds-issue-cap-span-cycles=").size()));
         } else if (a.starts_with("--tensor-load-wmma-space=")) {
             passFeatureConfig.dagFeatures.tensorLoadWmmaSpace = std::stoi(a.substr(25));
         } else if (a.starts_with("--global-read-queue-depth=")) {
@@ -577,6 +591,7 @@ int main(int argc, char** argv) {
     // eagerly, so installing it unconditionally littered the working directory of every
     // run. Mirrors the needsFileOutput gate the pipeline path already has.
     bool dumpPasses = false;
+    bool timePasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -588,6 +603,7 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--verify-each") verifyEach = true;
         if (std::string(argv[i]) == "--dump-passes") dumpPasses = true;
+        if (std::string(argv[i]) == "--time-passes") timePasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
@@ -795,6 +811,22 @@ int main(int argc, char** argv) {
             moduleOpts.OptLevel = optLevel;
             moduleOpts.EnableRemarks = enableRemarks;
             moduleOpts.VerifyEach = verifyEach;
+            moduleOpts.TimePasses = timePasses;
+            // The --Tile*/--NumGR*/--NumWaves flags are parsed for both modes but
+            // used to be applied only in individual-pass mode, so pipeline mode
+            // silently ran every kernel with a zeroed tile config. Backend's entry
+            // gate now rejects that, which is the right answer for a real kernel
+            // but would make these flags unusable here. Forward them instead.
+            // GemmTileConfig::NumWaves is WaveGroup0 * WaveGroup1 downstream, so a
+            // flat --NumWaves goes in as WaveGroup0 with WaveGroup1 = 1.
+            moduleOpts.TileA0 = static_cast<int>(gemmTileConfig.TileA0);
+            moduleOpts.TileB0 = static_cast<int>(gemmTileConfig.TileB0);
+            moduleOpts.TileM0 = static_cast<int>(gemmTileConfig.TileM0);
+            moduleOpts.NumGRA = gemmTileConfig.NumGRA;
+            moduleOpts.NumGRB = gemmTileConfig.NumGRB;
+            moduleOpts.NumGRM = gemmTileConfig.NumGRM;
+            moduleOpts.WaveGroup0 = static_cast<int>(gemmTileConfig.NumWaves);
+            moduleOpts.WaveGroup1 = 1;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -819,10 +851,17 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
+            // Pipeline mode gets its session from Backend (ModuleOptions.TimePasses);
+            // here there is no module, so the driver owns it.
+            stinkytofu::TimePassesSession timing(timePasses, parsedFunc->funcName, std::cerr);
+
             if (dumpPasses) passManager.addInstrumentation(createDebugPrintInstrumentation());
             if (verifyEach) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
+            }
+            if (auto timer = stinkytofu::getActiveTimePasses()) {
+                passManager.addInstrumentation(std::move(timer));
             }
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;

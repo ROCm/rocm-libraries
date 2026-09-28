@@ -293,7 +293,6 @@ private:
         return best;
     }
 
-protected:
     /// The representative time of BENCHMARK_ITERATIONS timed executes, after
     /// BENCHMARK_WARMUP_RUNS untimed ones. Returns nullopt if the candidate threw or could
     /// not be timed; both score the candidate unusable rather than throwing out of

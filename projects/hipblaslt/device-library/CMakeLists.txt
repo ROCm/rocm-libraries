@@ -67,6 +67,9 @@ endif()
 if(NOT DEFINED HIPBLASLT_ENABLE_LAZY_LOAD OR NOT HIPBLASLT_ENABLE_LAZY_LOAD)
     list(APPEND _codegen_product_args LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}")
 endif()
+if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION)
+    list(APPEND _codegen_product_args GEMM_A2A_FUSION "${HIPBLASLT_ENABLE_GEMM_A2A_FUSION}")
+endif()
 
 # gfx1250's two ASIC revisions (v0/v1) need different tuned kernels; the runtime
 # picks library/gfx1250/ (v1) vs library/gfx1250v0/ by asicRevision. The default

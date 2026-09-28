@@ -38,6 +38,7 @@ class TestGetCapsDynamic(unittest.TestCase):
         self.assertIn("HasWave32", arch)
         self.assertIn("LdsGranularity", arch)
         self.assertIn("MaxVgpr", reg)
+        self.assertIn("PhysicalMaxSgpr", reg)
 
     def test_gfx1250_modifier_caps_present(self):
         asm, _, _, _ = caps.getCaps(_GFX1250)
