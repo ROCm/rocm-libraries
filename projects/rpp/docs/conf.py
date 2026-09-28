@@ -76,3 +76,45 @@ html_theme_options = {
 }
 # Generate llms.txt (https://llmstxt.org/)
 rocm_docs_generate_llms = True
+
+# Breathe's visit_docimage reads only the file name from a Doxygen \image and
+# discards its caption, returning a bare inline image node. Consecutive \image
+# directives then run together on one line with nothing identifying them. Wrap
+# each image in a figure carrying its caption, which matches how Doxygen's own
+# HTML output presents them.
+from breathe.renderer.sphinxrenderer import SphinxRenderer, url_re  # noqa: E402
+from docutils import nodes as _nodes  # noqa: E402
+
+
+def _docimage_caption(node):
+    text = (getattr(node, "valueOf_", "") or "").strip()
+    if text:
+        return text
+    parts = [
+        str(item.value)
+        for item in getattr(node, "content_", [])
+        if getattr(item, "value", None)
+    ]
+    return "".join(parts).strip()
+
+
+def _visit_docimage(self, node):
+    path_to_image = node.name
+    if not url_re.match(path_to_image):
+        path_to_image = self.project_info.sphinx_abs_path_to_file(path_to_image)
+
+    caption = _docimage_caption(node)
+    image = _nodes.image("", uri=path_to_image, alt=caption)
+    if not caption:
+        return [image]
+
+    figure = _nodes.figure("", image)
+    figure += _nodes.caption(caption, "", _nodes.Text(caption))
+    return [figure]
+
+
+# SphinxRenderer.methods binds handler functions when the class body runs, so
+# reassigning the attribute alone leaves the dispatch table pointing at the
+# original. Both have to be replaced.
+SphinxRenderer.visit_docimage = _visit_docimage
+SphinxRenderer.methods["docimage"] = _visit_docimage
