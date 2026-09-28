@@ -626,7 +626,11 @@ void rocke_dconv_wgrad_ring_prologue(rocke_dconv_wgrad_ctx_t* ctx)
         rocke_dconv_wgrad__commit_delta(ctx, vec);
         rocke_b_sync_lds_only(b);
         ctx->delta_ring[slot_pre] = rocke_dconv_wgrad__read_dy(ctx);
-        rocke_b_s_barrier_bare(b);
+        /* Full sync_lds_only, NOT the bare barrier the row loop ends on: this
+         * fragment is not consumed until row-loop iteration 0, so nothing
+         * forces the ds_read to drain before a waves_c sibling's next
+         * _commit_delta overwrites the shared dY partition. Mirrors Python. */
+        rocke_b_sync_lds_only(b);
     }
 }
 

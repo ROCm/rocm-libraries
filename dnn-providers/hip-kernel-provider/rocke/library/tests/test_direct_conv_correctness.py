@@ -988,6 +988,23 @@ class TestDirectConvValidation(unittest.TestCase):
 # Wgrad shapes
 # ---------------------------------------------------------------------------
 
+
+# wgrad needs ds_read_tr16_b64 for its LDS transpose staging, which is gfx950+.
+# It therefore gets its own class gate rather than reusing _SKIP_REASON: that one
+# is empty on gfx942, so every case would come back as a per-subtest validator
+# rejection and the suite would report green without ever compiling or launching
+# a kernel.
+def _wgrad_skip_reason() -> str:
+    if _SKIP_REASON:
+        return _SKIP_REASON
+    if GPU_ARCH != "gfx950":
+        return f"wgrad needs gfx950 (ds_read_tr16_b64), got {GPU_ARCH!r}"
+    return ""
+
+
+_WGRAD_SKIP_REASON = _wgrad_skip_reason()
+
+
 _WGRAD_SHAPES: List[_Shape] = [
     # Grouped, symmetric channels -- the baseline case.
     _Shape("wg_16c_N2H8W8_g8", N=2, H=8, W=8, groups=8, cpg=16),
@@ -1189,9 +1206,15 @@ def _run_wgrad_one(
     return True, ""
 
 
-@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "no GPU")
+@unittest.skipUnless(not _WGRAD_SKIP_REASON, _WGRAD_SKIP_REASON or "no GPU")
 class TestDirectConvWgradCorrectness(unittest.TestCase):
     """Correctness tests for direct conv backward weights (wgrad)."""
+
+    def setUp(self) -> None:
+        # Cases that got past the validator and really compiled and launched.
+        # Every test method asserts this ended non-zero, so a spec rejection can
+        # never quietly stand in for a pass the way the arch gate once let it.
+        self._ran = 0
 
     def _run_wgrad(self, shape: _Shape, dtype: str = "fp16", cfg=None) -> None:
         kwargs = {"dtype": dtype}
@@ -1200,9 +1223,19 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
         passed, reason = _run_wgrad_one(GPU_ARCH, shape, **kwargs)
         if reason.startswith("skip"):
             self.skipTest(reason)
+        # Counted before the assert, so a real failure is reported as itself
+        # rather than as a second "nothing ran" error.
+        self._ran += 1
         self.assertTrue(
             passed,
             f"FAIL wgrad {shape.id} {dtype} cfg={cfg} on {GPU_ARCH}: {reason}",
+        )
+
+    def _assert_ran(self) -> None:
+        self.assertGreater(
+            self._ran,
+            0,
+            f"no wgrad case ran on {GPU_ARCH} -- every spec was rejected",
         )
 
     def test_wgrad(self):
@@ -1210,26 +1243,40 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
         for s in _WGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_wgrad(s)
+        self._assert_ran()
 
     def test_wgrad_bf16(self):
         """Same shapes on the bf16 MFMA atom and bf16 LDS staging."""
         for s in _WGRAD_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_wgrad(s, dtype="bf16")
+        self._assert_ran()
 
     def test_wgrad_wave_configs(self):
         """The wave spread, on the shapes with channels enough to split.
 
         This is the coverage the default-only tests miss: the cross-wave S-strip
         split, the per-c strip partitions, the spatial split and the narrow MFMA
-        atom. A spread the shape cannot afford is rejected by the validator and
+        atom. Run in BOTH dtypes -- otherwise bf16 is only ever seen at the
+        single-wave default, so bf16 x mfma_k=16 (one ds_read_tr per fragment)
+        and bf16 x multi-wave never execute at all. ``wg_16c_N2H8W8_g8`` is in
+        the list for groups > 1, so the group term of the ``bx`` decode is
+        exercised under the spread rather than only at groups=1.
+
+        A spread the shape cannot afford is rejected by the validator and
         skipped, not failed.
         """
-        shapes = [s for s in _WGRAD_SHAPES if s.id in ("wg_g1_c48k192", "wg_oddW37")]
-        for s in shapes:
-            for cfg in _WGRAD_CONFIGS:
-                with self.subTest(shape=s.id, cfg=cfg):
-                    self._run_wgrad(s, cfg=cfg)
+        shapes = [
+            s
+            for s in _WGRAD_SHAPES
+            if s.id in ("wg_16c_N2H8W8_g8", "wg_g1_c48k192", "wg_oddW37")
+        ]
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for cfg in _WGRAD_CONFIGS:
+                    with self.subTest(shape=s.id, dtype=dtype, cfg=cfg):
+                        self._run_wgrad(s, dtype=dtype, cfg=cfg)
+        self._assert_ran()
 
 
 if __name__ == "__main__":

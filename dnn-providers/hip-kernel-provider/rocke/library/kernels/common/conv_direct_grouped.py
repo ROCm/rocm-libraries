@@ -3198,30 +3198,41 @@ class DirectConvWgradSpec:
     where hi = ho * stride + r - PAD  and  wi = wo * stride + s - PAD.
 
     Algorithm:
-      One block handles ALL KH*KW filter taps simultaneously. dY is loaded ONCE
-      per (ho, wo_chunk) and reused for all KH*KW MFMAs. This eliminates the
-      KH*KW × redundant dY loads of the per-tap grid approach.
+      One block owns ALL KH*KW filter taps, and the row loop walks INPUT rows
+      ``hi`` (at stride 1 input row ``hi`` feeds output row ``hi + PAD - r``).
+      Two reuse structures carry it:
 
-      Grid:
-        bx = ho_block * (groups * n_k_tiles) + group * n_k_tiles + k_tile_in_group
-        by = c_tile
-        bz = n  (batch index)
+        - dY register ring: KH slots, one dY row each. A row is loaded once and
+          serves KH consecutive iterations, so dY costs one load per hi instead
+          of KH.
+        - S-row strip: one LDS tile of ``WO_BLOCK + KW - 1`` columns per hi. All
+          KW s-taps read it at a one-column shift, so X costs one strip per hi
+          instead of KW tiles.
 
-      Per block:
-        - Python-unrolled loop over ho_in_block (ho_per_block iterations).
-        - Runtime scf.for over wo_chunk (n_wo_chunks = ceil(Wo / 16) iterations).
-        - Per (ho_in_block, wo_chunk):
-            1. Load dY[n, ho, wo_chunk, k_tile] into dy_lds.
-            2. For each r in 0..KH-1: load X[n, hi=ho*stride+r-PAD, wi_chunk, c_tile]
-               into x_lds[r][s] for each s in 0..KW-1.  (KH*KW separate LDS bufs)
-            3. Single sync barrier.
-            4. KH*KW mfma_f32_16x16x16_f16 calls, one per filter tap.
-            5. Single sync before overwriting LDS in next iteration.
-        - Epilogue: atomic_add KH*KW accumulator tiles to dW[k, r, s, c].
+      The block owns a single ``wo`` tile, so there is no inner wo loop -- the
+      MFMA's K-inner dimension (``mfma_k``, 32 by default) covers the whole
+      tile.
 
-    Benefits vs per-tap grid:
-      - dY loaded once per (ho, wo_chunk): KH*KW × bandwidth savings on dY.
-      - No div/mod in the hot loop (ho and wo iterated directly).
+      Grid (see the launch-grid section of README_conv_direct_grouped.md):
+        bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+        by = hi_block          (input-row block; spec.n_ho_blocks() of them)
+        bz = n * n_q_blocks + q_block
+
+      Per hi iteration:
+        1. Commit the dY row + S strip issued last iteration into LDS.
+        2. Issue the next row's DRAM reads (software-pipelined by one row).
+        3. ``sync_lds_only``.
+        4. Transpose-read the ring slot and the KW S fragments out of LDS.
+        5. KH*KW ``mfma_f32_16x16x{mfma_k}_{f16,bf16}``, one per (r, s) tap.
+        6. Barrier before the next iteration overwrites the LDS tiles.
+
+      Epilogue: atomic_add the KH*KW accumulator tiles into dW[k, r, s, c],
+      with the k/c tails and the over-provisioned wo tiles masked off.
+
+    Benefits vs the per-tap grid this replaced:
+      - dY loaded once per (hi, wo tile) and reused KH× from registers.
+      - One X strip per hi instead of KW separate LDS tiles.
+      - No div/mod in the hot loop (hi and wo are iterated directly).
       - KH*KW = 9 parallel MFMA accumulators per wave → high compute density.
 
     dW output is fp32. The caller must zero-initialise dW before launch.
@@ -3433,19 +3444,21 @@ def build_direct_conv_wgrad(
     Computes dW[k, r, s, c] = sum_{n,ho,wo} dY[n,ho,wo,k] * X[n,hi,wi,c]
     where hi = ho*stride + r - PAD and wi = wo*stride + s - PAD.
 
-    All KH*KW filter taps are handled in ONE block. dY is loaded once per
-      (ho, wo_chunk) and reused for all KH*KW MFMA calls. This eliminates
-      the KH*KW × redundant dY reads of the per-tap-grid approach.
+    All KH*KW filter taps are handled in ONE block. The row loop walks INPUT
+    rows: each dY row is loaded once into a KH-slot register ring and reused KH
+    times, and one S-row strip per input row serves all KW s-taps at a
+    one-column shift.
 
-    LDS (1 + KH*KW buffers, each 256 f16):
-      dy_lds[k=16, sp=16] — loaded once per (ho, wo_chunk).
-      x_lds[r][s][c=16, sp=16] — one per filter tap (r, s).
-    All tiles loaded then ONE sync; KH*KW MFMAs; ONE sync before next load.
+    LDS (2 tiles, spatial-major so the NHWC load lands contiguously):
+      dy_lds[sp = WO_BLOCK][k_ch = 16]       — partitioned per (wave_k, wave_q)
+      s_strip_lds[col = STRIP_COLS][c_ch = 16] — partitioned per (wave_c, wave_q)
+    Both are read back through ``ds_read_tr16_b64``, which delivers the
+    transposed per-lane MFMA fragment directly.
 
     Grid:
-      bx = ho_block * (groups * n_k_tiles) + group * n_k_tiles + k_tile_in_group
-      by = c_tile
-      bz = n  (batch index)
+      bx = (group * n_k_tiles + k_tile) * n_c_tiles + c_tile
+      by = hi_block          (input-row block; spec.n_ho_blocks() of them)
+      bz = n * n_q_blocks + q_block
 
     The caller must zero-initialise dW before launch.
     """
@@ -3887,7 +3900,18 @@ def build_direct_conv_wgrad(
         _commit_delta(_issue_delta(ho_past, ho_past_ok))
         b.sync_lds_only()
         delta_ring[slot_pre] = _read_dy()
-        b.s_barrier_bare()
+        # Full sync_lds_only, NOT the bare barrier the row loop ends on. The
+        # difference is consumption: there, ``delta_ring[slot_fill]`` feeds the
+        # MFMAs before the barrier, so the register dependence already forces
+        # lgkmcnt(0) and the bare form costs nothing. Here the fragment is not
+        # read until row-loop iteration 0, so nothing makes the ds_read drain --
+        # and ``dy_wave_off_f16`` keys only on (wave_k, wave_q), so a waves_c
+        # sibling's next ``_commit_delta`` writes a different dY row over these
+        # very bytes. gfx950's back-off barrier means SIInsertWaitcnts will not
+        # insert the wait for us (see the transpose2d note in lower_llvm.py), so
+        # the read has to be drained here. One instruction, KH-1 times per
+        # workgroup, outside the row loop.
+        b.sync_lds_only()
 
     # ---- Python-unrolled loop over hi_in_block (HPB input rows) ----
     #

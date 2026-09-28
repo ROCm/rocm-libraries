@@ -315,7 +315,7 @@ step the strip by `stride` columns and the row pairing would skip rows.
 ### Usage
 
 ```python
-from rocke.instances.common.conv_direct_grouped import (
+from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     DirectConvWgradSpec,
     build_direct_conv_wgrad,
