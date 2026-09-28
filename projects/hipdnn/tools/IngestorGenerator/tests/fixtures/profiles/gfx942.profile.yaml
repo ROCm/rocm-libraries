@@ -1,0 +1,59 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# A SYNTHETIC authoring profile in the gfx942 shape, read by `test_launch_surface.py`
+# when no override is set: a controlled INPUT to `launch_surface.py --check`, not a
+# claim about any shipped engine's real launch surface. See README.md in this
+# directory.
+#
+# Every path is repo-relative and must exist; `--check` resolves them against the repo
+# root and reports a missing one as a failure.
+#
+# The audited property is the UNION rule: `grid` and `applicability` cite the same
+# mirror and split its two required fields between them, so neither surface alone
+# covers the file.
+
+#: Set on the profile, not on any one surface, so the shape check has a vocabulary to
+#: reject a surface's `kmd_fields` entry against.
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: block_size
+    type: int
+
+#: `python_source` paths resolve under `<provider_root>/rocke/library`, the same base
+#: `dispatch_parity.py` imports kernel modules from.
+provider_root: dnn-providers/hip-kernel-provider
+
+launch_surface:
+  - name: grid
+    python_source: kernels/common/conv_implicit_gemm.py:implicit_gemm_conv_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/ConvNative.cpp:ConvFwdDispatchHandler::prepare
+    kmd_fields: [block_size]
+    guard: prepare() rejects a block size the kernel signature cannot bind
+    test: projects/hipdnn/tools/IngestorGenerator/tests/test_launch_surface.py
+  - name: applicability
+    python_source: kernels/common/conv_implicit_gemm.py:is_valid_spec_for_problem
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/ConvNative.cpp:convFwdKernelMatches
+    kmd_fields: [dtype]
+    guard: convFwdKernelMatches compares the descriptor's dtype against the graph's
+    test: projects/hipdnn/tools/IngestorGenerator/tests/test_launch_surface.py
+  # The two honest admissions this fixture exists to have `--check` report by name.
+  # `guard: none` / `test: none` are written out rather than omitted, so an unguarded
+  # surface is a visible choice; `TestAgainstTheGfx942Profile` asserts the `unguarded`
+  # list is exactly these two.
+  - name: kernargs
+    python_source: kernels/common/conv_implicit_gemm.py:_build_implicit_gemm_conv_impl
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/ConvNative.cpp:convFwdKernelSignature
+    kmd_fields: []
+    guard: none
+    test: none
+  # A prose locator, deliberately: everything after the `:` here begins with
+  # `prepare()`, which is not a bare identifier, so the symbol check declines to run
+  # rather than reporting a phantom missing symbol.
+  - name: spec_resolution
+    python_source: kernels/common/conv_implicit_gemm.py:_resolve_conv_op
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/ConvNative.cpp:prepare() trusts the KMD's own numbers
+    kmd_fields: []
+    guard: none
+    test: none

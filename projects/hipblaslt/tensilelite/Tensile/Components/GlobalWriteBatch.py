@@ -25,14 +25,14 @@ from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOB
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  GlobalLoadB32, SLoadB128, \
+  GlobalLoadB32, GlobalStoreB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
   SAndB64, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBfmB64, SBranch, SCBranchExecNZ, SCBranchExecZ, \
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SCmpLeU32, SMinU32, SEndpgm, \
   SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulHIU32, SMulI32, \
-  SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
+  SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SStoreB128, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
@@ -2189,6 +2189,18 @@ class GlobalWriteBatchWriter:
             assert 0, "Unsupported gradient type"
 
       scaleDModule = Module("Empty scaleDModule")
+      if self.kernel["ProblemType"]["OutputAmaxD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+        # Amax describes the computed result before ScaleD and destination
+        # conversion. Accumulate every scalar, including packed-store lanes,
+        # even when the caller does not use C/D scaling.
+        for vi in range(0, self.gwvw):
+          vgprIdx = self.ss.elementSumIdx[elementIdx] + vi - self.parentWriter.states.c.startVgprValu
+          if self.edge:
+            activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=vgpr(addrCalc.addrDVgpr), comment=""))
+            activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Zero out-of-bounds amax input"))
+            activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
+          else:
+            activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
       if self.kernel["ProblemType"]["UseScaleCD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         for vi in range(0, self.gwvw):
           sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
@@ -2196,13 +2208,6 @@ class GlobalWriteBatchWriter:
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             # Generate single f32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              if self.kernel["ProblemType"]["OutputAmaxD"]:
-                if self.edge:
-                  activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=(vgpr(addrCalc.addrDVgpr)), comment =""))
-                  activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Check If OOB, put zero if OOB"))
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
-                else:
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
               activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=sgpr("ScaleD"), comment="result *= ScaleD"))
             # Original packed route
             elif vi%2 == 1:
@@ -3331,6 +3336,13 @@ class GlobalWriteBatchWriter:
     module.add(SCBranchVCCNZ(labelName=drainPollLabel.getLabelName(),
                              comment="some peer incomplete -> spin (poll again)"))
 
+    # Still one lane per slot, and vPollOff still holds lane j's byte offset.
+    module.add(VMovB32(dst=vgpr(vPollVal), src=0, comment="fused-A2A: zero for the flag clear"))
+    module.add(GlobalStoreB32(
+      vaddr=vgpr(vPollOff), src=vgpr(vPollVal), saddr=sgpr(drainFlagBase, 2),
+      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=True),
+      comment="clear self flag[lane] (system scope, sc0 sc1)"))
+
     # Back to a single lane so the whole single-writer region has one EXEC width;
     # afterLabel then restores full EXEC for the vector code that follows.
     module.add(self.getEdgeMovInstType()(EXEC(), 1, "fused-A2A: back to lane 0 after the DRAIN poll"))
@@ -3355,6 +3367,13 @@ class GlobalWriteBatchWriter:
     module.add(SCBranchVCCNZ(labelName=sendPollLabel.getLabelName(),
                              comment="some queue incomplete -> spin (poll again)"))
 
+    module.add(VMovB32(dst=vgpr(vPollVal), src=0, comment="fused-A2A: zero for the outbound clear"))
+    module.add(GlobalStoreB32(
+      vaddr=vgpr(vPollOff), src=vgpr(vPollVal), saddr=sgpr(drainFlagBase, 2),
+      modifier=GLOBALModifiers(offset=FUSED_A2A_OUTBOUND_OFFSET, glc=True, slc=True,
+                               scope=CacheScope.SCOPE_NONE, isStore=True),
+      comment="clear the outbound counter (system scope, sc0 sc1)"))
+
     module.add(skipSendLabel)
     module.add(skipDrainLabel)
     kw.sgprPool.checkIn(c3WSgpr)
@@ -3372,6 +3391,21 @@ class GlobalWriteBatchWriter:
     kw.sgprPool.checkIn(counterPtrSgpr)
     kw.sgprPool.checkIn(targetSgpr)
     kw.sgprPool.checkIn(myRankSgpr)
+
+    cursorZeroSgpr = kw.sgprPool.checkOutAligned(
+        4, 4, tag="fusedA2A_cursorZero", preventOverflow=False)
+    for i in range(4):
+        module.add(SMovB32(dst=sgpr(cursorZeroSgpr + i), src=0,
+                           comment="fused-A2A: zero pattern for the cursor region"))
+    for off in range(0, FUSED_A2A_COUNTER2_OFFSET, 16):
+        module.add(SStoreB128(src=sgpr(cursorZeroSgpr, 4),
+                              base=sgpr("FusedCounterPtr", 2),
+                              soffset=hex(off),
+                              smem=SMEMModifiers(glc=True),
+                              comment="fused-A2A: clear SDMA cursors [%d:%d)"
+                                      % (off, off + 16)))
+    kw.sgprPool.checkIn(cursorZeroSgpr)
+
     # Restore full EXEC for the CLS look-ahead after the handshake (emit():
     # emitCoord1Advance issues a vector VAddCOU32 on coord1).  It sits AFTER
     # afterLabel because the counter3 tally branches there with EXEC already

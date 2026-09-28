@@ -456,19 +456,16 @@ namespace rocisa
             elif divisor >= 3:
                 shift = 32+1
             */
-            int shift   = 32 + 1;
-            int magic   = ((1ULL << shift) / divisor) + 1;
-            int magicHi = magic >> 16;
-            int magicLo = magic & 0xFFFF;
+            int shift = 32 + 1;
+            int magic = ((1ULL << shift) / divisor) + 1;
 
-            module->addT<SMovB32>(tmpSgpr1, 0, "STATIC_DIV: divisor=" + std::to_string(divisor));
-            module->addT<SMulI32>(tmpSgpr, magicHi, dRegSgpr, "tmp1 = dividend * magic hi");
-            module->addT<SLShiftLeftB64>(tmp2Sgpr, 16, tmp2Sgpr, "left shift 16 bits");
-            module->addT<SMulI32>(qRegSgpr, dRegSgpr, magicLo, "tmp0 = dividend * magic lo");
-            module->addT<SAddU32>(tmpSgpr, qRegSgpr, tmpSgpr, "add lo");
-            module->addT<SAddCU32>(tmpSgpr1, tmpSgpr1, 0, "add hi");
+            // Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+            // product wraps once dividend * magic reaches 2^32.
+            module->addT<SMulHIU32>(
+                tmpSgpr1, dRegSgpr, magic, "STATIC_DIV: divisor=" + std::to_string(divisor));
+            module->addT<SMulI32>(tmpSgpr, dRegSgpr, magic, "tmp = dividend * magic");
             module->addT<SLShiftRightB64>(
-                tmp2Sgpr, shift, tmp2Sgpr, "tmp1 = (dividend * magic) << shift");
+                tmp2Sgpr, shift, tmp2Sgpr, "tmp = (dividend * magic) >> shift");
             module->addT<SMovB32>(qRegSgpr, tmpSgpr, "quotient");
 
             if(doRemainder)
@@ -550,17 +547,14 @@ namespace rocisa
             elif divisor >= 3:
                 shift = 32+1
             */
-            int shift   = 32 + 1;
-            int magic   = ((1ULL << shift) / divisor) + 1;
-            int magicHi = magic >> 16;
-            int magicLo = magic & 0xFFFF;
+            int shift = 32 + 1;
+            int magic = ((1ULL << shift) / divisor) + 1;
 
-            module->addT<SMovB32>(tmpSgpr1, 0, "STATIC_DIV: divisor=" + std::to_string(divisor));
-            module->addT<SMulI32>(tmpSgpr, magicHi, dRegSgpr, "tmp1 = dividend * magic hi");
-            module->addT<SLShiftLeftB64>(tmp2Sgpr, 16, tmp2Sgpr, "left shift 16 bits");
-            module->addT<SMulI32>(qRegSgpr, dRegSgpr, magicLo, "tmp0 = dividend * magic lo");
-            module->addT<SAddU32>(tmpSgpr, qRegSgpr, tmpSgpr, "add lo");
-            module->addT<SAddCU32>(tmpSgpr1, tmpSgpr1, 0, "add hi");
+            // Keep dividend * magic as a full 64-bit product in tmp2Sgpr; a 32-bit
+            // product wraps once dividend * magic reaches 2^32.
+            module->addT<SMulHIU32>(
+                tmpSgpr1, dRegSgpr, magic, "STATIC_DIV: divisor=" + std::to_string(divisor));
+            module->addT<SMulI32>(tmpSgpr, dRegSgpr, magic, "tmp = dividend * magic");
             module->addT<SLShiftRightB64>(tmp2Sgpr, shift, tmp2Sgpr, "tmp0 = quotient");
             module->addT<SMulI32>(tmpSgpr1, tmpSgpr, divisor, "tmp1 = quotient * divisor");
             module->addT<SCmpLgU32>(
