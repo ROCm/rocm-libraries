@@ -4,7 +4,7 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 26 dtype/alignment/tail configs by argv[1] (0..25), builds it
+# Selects one of 42 sampled feature configs by argv[1] (0..41), builds it
 # via build_wmma_fmha_fwd(arch='gfx1151') and prints
 # lower_kernel_to_llvm(kernel, arch='gfx1151') to stdout so it can be
 # byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c.
@@ -15,6 +15,22 @@ from _emit_common import run_emit
 
 
 def _spec(idx: int) -> WmmaFmhaFwdSpec:
+    if 26 <= idx < 42:
+        feature_cases = (
+            (12, dict(sliding_window=128)), (13, dict(sliding_window=128)),
+            (2, dict(use_softcap=True)), (8, dict(use_softcap=True)),
+            (2, dict(use_sinks=True)), (8, dict(use_sinks=True)),
+            (12, dict(use_alibi=True)), (13, dict(use_alibi=True)),
+            (0, dict(use_qq_bias=True)), (6, dict(use_qq_bias=True)),
+            (18, dict(sliding_window=128, use_sinks=True)),
+            (19, dict(sliding_window=128, use_sinks=True)),
+            (24, dict(sliding_window=64, use_softcap=True, use_sinks=True, use_alibi=True, use_qq_bias=True)),
+            (25, dict(sliding_window=64, use_softcap=True, use_sinks=True, use_alibi=True, use_qq_bias=True)),
+            (2, dict(use_softcap=True, use_alibi=True)),
+            (8, dict(use_softcap=True, use_alibi=True)),
+        )
+        base, features = feature_cases[idx - 26]
+        return replace(_spec(base), **features)
     if 18 <= idx < 26:
         bases = (12, 13, 3, 9, 12, 13, 16, 17)
         return replace(
@@ -84,7 +100,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..25>\n",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..41>\n",
         arch="gfx1151",
     )
 

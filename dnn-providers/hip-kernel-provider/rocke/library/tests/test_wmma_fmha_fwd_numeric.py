@@ -152,3 +152,93 @@ def test_sequence_tails_preserve_guards_and_ignore_poison(dtype, v_staging):
         if module is not None:
             module.unload()
         buffers.close()
+
+
+def _run_score_case(case, inputs):
+    from benchmarks.gfx1151.attention.benchmark_sdpa import DeviceBuffers
+    from benchmarks.gfx1151.attention.candidate import RockeKernels
+    from rocke.runtime.hip_module import Runtime
+
+    rt = Runtime()
+    buffers = DeviceBuffers(rt, inputs)
+    kernels = RockeKernels(rt)
+    try:
+        launch, _ = kernels.prepare(case, buffers)
+        launch(0)
+        rt.sync()
+        return buffers.read_output("rocke_out")
+    finally:
+        kernels.close()
+        buffers.close()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+def test_softcap_saturates_large_bf16_logits():
+    bf16 = pytest.importorskip("ml_dtypes").bfloat16
+    from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
+
+    case = SdpaCase("softcap_limit", "softcap", "bf16", 1, 16, 32, 1, 1, 64, mask="none", softcap=30)
+    inputs = CaseInputs(
+        q=np.full((1, 16, 1, 64), 1e15, dtype=bf16),
+        k=np.full((1, 32, 1, 64), -1e15, dtype=bf16),
+        v=np.ones((1, 32, 1, 64), dtype=bf16),
+    )
+    np.testing.assert_array_equal(_run_score_case(case, inputs), np.ones((1, 16, 1, 64), np.float32))
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_sink_adds_denominator_without_value(dtype):
+    from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
+
+    dt = np.float16 if dtype == "fp16" else pytest.importorskip("ml_dtypes").bfloat16
+    case = SdpaCase("sink_mass", "sinks", dtype, 1, 1, 1, 1, 1, 64, mask="none", sinks=True)
+    inputs = CaseInputs(
+        q=np.zeros((1, 1, 1, 64), dtype=dt),
+        k=np.zeros((1, 1, 1, 64), dtype=dt),
+        v=np.ones((1, 1, 1, 64), dtype=dt),
+        sinks=np.zeros(1, dtype=dt),
+    )
+    np.testing.assert_array_equal(_run_score_case(case, inputs), np.full((1, 1, 1, 64), 0.5, np.float32))
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+def test_alibi_context_offset_preserves_sink_mass():
+    from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
+
+    case = SdpaCase(
+        "alibi_sink", "combo", "fp16", 1, 2, 4, 1, 1, 64,
+        mask="causal_bottomright", sinks=True, alibi=True,
+    )
+    inputs = CaseInputs(
+        q=np.zeros((1, 2, 1, 64), np.float16),
+        k=np.zeros((1, 4, 1, 64), np.float16),
+        v=np.ones((1, 4, 1, 64), np.float16),
+        sinks=np.zeros(1, np.float16),
+        alibi_slopes=np.array([math.log(2)], np.float32),
+    )
+    expected = np.broadcast_to(np.array([7 / 11, 15 / 19], np.float32)[None, :, None, None], (1, 2, 1, 64))
+    np.testing.assert_allclose(_run_score_case(case, inputs), expected, atol=1e-3, rtol=0)
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+def test_qq_bias_bounds_compose_with_window():
+    from benchmarks.gfx1151.attention.cases import CaseInputs, SdpaCase
+
+    case = SdpaCase(
+        "qq_window", "combo", "fp16", 1, 3, 5, 1, 1, 64,
+        mask="causal_bottomright", window=2, qq_bias=True,
+    )
+    values = np.repeat(np.arange(5, dtype=np.float16)[:, None], 64, axis=1).reshape(1, 5, 1, 64)
+    inputs = CaseInputs(
+        q=np.zeros((1, 3, 1, 64), np.float16),
+        k=np.zeros((1, 5, 1, 64), np.float16),
+        v=values,
+        qq_bias=np.array([[math.log(3)]], np.float32),
+    )
+    expected = np.broadcast_to(np.array([1.75, 2.5, 3.5], np.float32)[None, :, None, None], (1, 3, 1, 64))
+    np.testing.assert_allclose(_run_score_case(case, inputs), expected, atol=1e-3, rtol=0)

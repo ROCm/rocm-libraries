@@ -662,10 +662,24 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (12, True, True), (13, True, True),
         (16, True, True), (17, True, True),
     )
-    return configs + [
+    configs += [
         dict(configs[index], query_tail=query_tail, kv_tail=kv_tail)
         for index, query_tail, kv_tail in tails
     ]
+    features = (
+        (12, dict(sliding_window=128)), (13, dict(sliding_window=128)),
+        (2, dict(use_softcap=True)), (8, dict(use_softcap=True)),
+        (2, dict(use_sinks=True)), (8, dict(use_sinks=True)),
+        (12, dict(use_alibi=True)), (13, dict(use_alibi=True)),
+        (0, dict(use_qq_bias=True)), (6, dict(use_qq_bias=True)),
+        (18, dict(sliding_window=128, use_sinks=True)),
+        (19, dict(sliding_window=128, use_sinks=True)),
+        (24, dict(sliding_window=64, use_softcap=True, use_sinks=True, use_alibi=True, use_qq_bias=True)),
+        (25, dict(sliding_window=64, use_softcap=True, use_sinks=True, use_alibi=True, use_qq_bias=True)),
+        (2, dict(use_softcap=True, use_alibi=True)),
+        (8, dict(use_softcap=True, use_alibi=True)),
+    )
+    return configs + [dict(configs[index], **flags) for index, flags in features]
 
 
 def cfgs_attention_unified():

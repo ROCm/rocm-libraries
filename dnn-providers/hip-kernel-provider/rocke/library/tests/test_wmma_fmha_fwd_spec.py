@@ -71,6 +71,22 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
 
+    def test_window_requires_causal_mask(self):
+        for mask, width in (("none", 1), ("causal", -1)):
+            with self.subTest(mask=mask, width=width), self.assertRaises(ValueError):
+                WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode=mask, sliding_window=width)
+
+    def test_score_features_have_distinct_cache_keys(self):
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, mask_mode="causal")
+        variants = [base]
+        variants += [
+            replace(base, **{flag: True})
+            for flag in ("use_softcap", "use_sinks", "use_alibi", "use_qq_bias")
+        ]
+        variants += [replace(base, sliding_window=width) for width in (1, 64)]
+        for left, right in combinations(variants, 2):
+            self.assertNotEqual(left.kernel_name(), right.kernel_name())
+
 
 if __name__ == "__main__":
     unittest.main()

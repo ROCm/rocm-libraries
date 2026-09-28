@@ -273,7 +273,7 @@ def mfma_attention_fwd_inner_body(
     k_tile_start: Optional[Value] = None,
     k_tile_stop: Optional[Value] = None,
     extra_score_transform: Optional[
-        Callable[[IRBuilder, Value, Value, int], Value]
+        Callable[[IRBuilder, Value, Value, int, Value, Value], Value]
     ] = None,
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]] = None,
@@ -289,6 +289,7 @@ def mfma_attention_fwd_inner_body(
     mask_neg_inf: Optional[Value] = None,
     wmma_seqlen_q: Optional[Value] = None,
     wmma_kv_tail: bool = False,
+    sink_log2: Optional[Value] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -306,6 +307,9 @@ def mfma_attention_fwd_inner_body(
     ``mask_neg_inf`` supplies true negative infinity for masked scores and the
     initial row maximum. Empty rows use a zero exponential shift, avoiding
     inf-inf without excluding large finite negative logits.
+
+    ``sink_log2`` is an optional always-visible logit with no value vector.
+    It initializes the row maximum to that logit and denominator to one.
 
     ``wmma_seqlen_q`` bounds query loads and output stores on wave32.
     ``wmma_kv_tail`` includes and masks a final partial KV tile. Both default
@@ -327,10 +331,9 @@ def mfma_attention_fwd_inner_body(
     kernel so a single CTA handles one K segment.
 
     ``extra_score_transform``: callback
-    ``(b, score_log2_per_lane, k_tile_idx, row_in_atom) ->
-    score_log2`` invoked after the QK reduction and ``scale_log2``
-    multiply, before the mask. Used by sage attention to apply
-    per-block Q + K scales.
+    ``(b, score_log2, k_tile_idx, row_in_atom, query_pos, key_pos) -> score_log2``
+    after QK scaling and before masks. The positions are the same coordinates
+    used by masking; existing per-tile scale callbacks can ignore them.
 
     ``extra_mask_predicate``: callback ``(b, k_tile_idx) -> i1``
     returning a per-K-tile keep flag. When false, the whole K-tile
@@ -506,6 +509,7 @@ def mfma_attention_fwd_inner_body(
             mask_neg_inf=mask_neg_inf,
             query_length=wmma_seqlen_q,
             kv_tail=wmma_kv_tail,
+            sink_log2=sink_log2,
         )
         return
     if wmma_seqlen_q is not None or wmma_kv_tail:
@@ -584,11 +588,13 @@ def mfma_attention_fwd_inner_body(
     neg_inf = mask_neg_inf if mask_neg_inf is not None else b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
     acc_zero = b.zero_vec_f32(atom.c_per_lane)
+    initial_m = sink_log2 if sink_log2 is not None else neg_inf
+    initial_l = b.const_f32(1.0) if sink_log2 is not None else zero_f
 
     iter_args = []
     for r in range(atom.c_per_lane):
-        iter_args.append((f"m{r}", neg_inf))
-        iter_args.append((f"l{r}", zero_f))
+        iter_args.append((f"m{r}", initial_m))
+        iter_args.append((f"l{r}", initial_l))
     for n in range(n_pv_atoms):
         iter_args.append((f"acc{n}", acc_zero))
 
@@ -725,6 +731,8 @@ def mfma_attention_fwd_inner_body(
                     s_r_scaled,
                     kt,
                     r,
+                    row_q_pos,
+                    k_col_pos,
                 )
             s_r_scaled = apply_attention_mask(
                 b,
@@ -973,7 +981,7 @@ def _wmma_attention_fwd_inner_body(
     v_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]],
     k_tile_start: Optional[Value],
     k_tile_stop: Optional[Value],
-    extra_score_transform: Optional[Callable[[IRBuilder, Value, Value, int], Value]],
+    extra_score_transform: Optional[Callable[[IRBuilder, Value, Value, int, Value, Value], Value]],
     extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
@@ -984,6 +992,7 @@ def _wmma_attention_fwd_inner_body(
     mask_neg_inf: Optional[Value] = None,
     query_length: Optional[Value] = None,
     kv_tail: bool = False,
+    sink_log2: Optional[Value] = None,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1086,10 +1095,12 @@ def _wmma_attention_fwd_inner_body(
     )
 
     # ---- Online-softmax + PV accumulator iter-args ----
+    initial_m = sink_log2 if sink_log2 is not None else neg_inf
+    initial_l = b.const_f32(1.0) if sink_log2 is not None else zero_f
     iter_args = []
     for r in range(c_frag):
-        iter_args.append((f"m{r}", neg_inf))
-        iter_args.append((f"l{r}", zero_f))
+        iter_args.append((f"m{r}", initial_m))
+        iter_args.append((f"l{r}", initial_l))
     for d in range(n_dk):
         iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
 
@@ -1168,7 +1179,7 @@ def _wmma_attention_fwd_inner_body(
             row_q_pos = b.add(q_pos_for_mask, row_rel)
             k_col_pos = b.add(k_tile_base, col_k)
             if extra_score_transform is not None:
-                s_r = extra_score_transform(b, s_r, kt, r)
+                s_r = extra_score_transform(b, s_r, kt, r, row_q_pos, k_col_pos)
             s_r = apply_attention_mask(
                 b,
                 s_r,
@@ -1179,6 +1190,12 @@ def _wmma_attention_fwd_inner_body(
                 context_len=causal_ctx_offset,
                 neg_inf=mask_neg_inf,
             )
+            if mask_mode == "causal" and sliding_window > 0:
+                s_r = apply_attention_mask(
+                    b, s_r, mask_mode="sliding_window", k_idx=k_col_pos,
+                    query_pos=row_q_pos, sliding_window=sliding_window,
+                    context_len=causal_ctx_offset, neg_inf=mask_neg_inf,
+                )
             if kv_tail:
                 s_r = b.select(b.cmp_lt(k_col_pos, seqlen_k), s_r, neg_inf)
             if keep_tile is not None:

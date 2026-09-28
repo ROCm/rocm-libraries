@@ -108,6 +108,10 @@ class WmmaFmhaFwdSpec:
     causal_bottom_right: bool = False
     query_tail: bool = False
     kv_tail: bool = False
+    use_softcap: bool = False
+    use_sinks: bool = False
+    use_alibi: bool = False
+    use_qq_bias: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16", "bf16"):
@@ -124,6 +128,8 @@ class WmmaFmhaFwdSpec:
             )
         if self.causal_bottom_right and self.mask_mode != "causal":
             raise ValueError("bottom-right alignment requires causal masking")
+        if self.sliding_window < 0 or (self.sliding_window and self.mask_mode != "causal"):
+            raise ValueError("sliding-window attention requires a nonnegative width and causal masking")
         if self.num_kv_heads and self.num_query_heads % self.num_kv_heads != 0:
             raise ValueError(
                 "num_query_heads must be a multiple of num_kv_heads for GQA "
@@ -153,7 +159,12 @@ class WmmaFmhaFwdSpec:
             "bf16" if self.dtype == "bf16" else "fp16",
             "causal_br" if self.causal_bottom_right else self.mask_mode,
             "vlds" if self.v_lds_stage else "vgather",
-            flags={"qtail": self.query_tail, "kvtail": self.kv_tail},
+            f"sw{self.sliding_window}" if self.sliding_window else "",
+            flags={
+                "qtail": self.query_tail, "kvtail": self.kv_tail,
+                "softcap": self.use_softcap, "sinks": self.use_sinks,
+                "alibi": self.use_alibi, "qqbias": self.use_qq_bias,
+            },
         )
 
 
@@ -191,7 +202,7 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
     return True, "ok"
 
 
-def _declare_params(b: IRBuilder, dtype: str):
+def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     """Kernel ABI (shared between build + grid helpers).
 
     Dense self-attention layout: Q/K/V/O are ``[seqlen, num_heads, head_size]``
@@ -199,7 +210,7 @@ def _declare_params(b: IRBuilder, dtype: str):
     via ``seqlen`` * the batch index. Strides are passed explicitly so the same
     kernel serves both MHA and GQA (kv_head stride differs).
     """
-    elem = BF16 if dtype == "bf16" else F16
+    elem = BF16 if spec.dtype == "bf16" else F16
     Q = b.param("Q", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
     K = b.param("K", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
     V = b.param("V", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
@@ -218,7 +229,7 @@ def _declare_params(b: IRBuilder, dtype: str):
     stride_v_head = b.param("stride_v_head", I32)
     stride_o_token = b.param("stride_o_token", I32)
     stride_o_head = b.param("stride_o_head", I32)
-    return {
+    params = {
         "Q": Q,
         "K": K,
         "V": V,
@@ -235,6 +246,75 @@ def _declare_params(b: IRBuilder, dtype: str):
         "stride_o_token": stride_o_token,
         "stride_o_head": stride_o_head,
     }
+    if spec.use_softcap:
+        params["softcap"] = b.param("softcap", F32)
+    if spec.use_sinks:
+        params["sink_ptr"] = b.param("sink_ptr", PtrType(elem, "global"), readonly=True, align=2)
+    if spec.use_alibi:
+        params["alibi_slopes_ptr"] = b.param(
+            "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4,
+        )
+    if spec.use_qq_bias:
+        params["qq_bias_ptr"] = b.param(
+            "qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4,
+        )
+        params["qq_bias_rows"] = b.param("qq_bias_rows", I32)
+        params["qq_bias_cols"] = b.param("qq_bias_cols", I32)
+        params["qq_bias_stride"] = b.param("qq_bias_stride", I32)
+    return params
+
+
+def _score_features(b, spec, params, head, context):
+    if not (spec.use_softcap or spec.use_sinks or spec.use_alibi or spec.use_qq_bias):
+        return None, None
+    log2e = b.const_f32(1.4426950408889634)
+    cap = b.fmul(params["softcap"], log2e) if spec.use_softcap else None
+    sink = None
+    if spec.use_sinks:
+        elem = BF16 if spec.dtype == "bf16" else F16
+        sink = b.fmul(b.cast_to_f32(b.global_load(params["sink_ptr"], head, elem, align=2)), log2e)
+    slope = None
+    if spec.use_alibi:
+        slope = b.fmul(b.global_load(params["alibi_slopes_ptr"], head, F32, align=4), log2e)
+    zero_f = b.const_f32(0.0) if spec.use_qq_bias else None
+    zero_i = b.const_i32(0) if spec.use_qq_bias else None
+
+    def transform(builder, score, _kt, _row, query_pos, key_pos):
+        if cap is not None:
+            score = builder.fmul(cap, builder.tanh(builder.fdiv(score, cap)))
+        relative_k = builder.sub(key_pos, context) if slope is not None or spec.use_qq_bias else None
+        if slope is not None:
+            score = builder.fadd(score, builder.fmul(slope, builder.sitofp_f32(relative_k)))
+        if spec.use_qq_bias:
+            q_ok = builder.cmp_lt(query_pos, params["qq_bias_rows"])
+            k_lo = builder.cmp_ge(relative_k, zero_i)
+            k_hi = builder.cmp_lt(relative_k, params["qq_bias_cols"])
+            keep = builder.land(q_ok, builder.land(k_lo, k_hi))
+            index = builder.add(builder.mul(query_pos, params["qq_bias_stride"]), relative_k)
+            bias = builder.masked_global_load(params["qq_bias_ptr"], index, keep, zero_f, F32, align=4)
+            score = builder.fadd(score, builder.fmul(bias, log2e))
+        return score
+
+    return transform if spec.use_softcap or spec.use_alibi or spec.use_qq_bias else None, sink
+
+
+def _window_tiles(b, width, query_start, query_length, key_length, context, tile):
+    if not width:
+        return None, None
+    zero = b.const_i32(0)
+    one = b.const_i32(1)
+    last = b.const_i32(15)
+    lower = b.sub(b.add(query_start, context), b.const_i32(width - 1))
+    lower = b.select(b.cmp_lt(lower, zero), zero, lower)
+    q_last = b.add(query_start, last)
+    q_limit = b.sub(query_length, one)
+    q_last = b.select(b.cmp_gt(q_last, q_limit), q_limit, q_last)
+    upper = b.add(b.add(q_last, context), one)
+    upper = b.select(b.cmp_gt(upper, key_length), key_length, upper)
+    upper = b.select(b.cmp_lt(upper, zero), zero, upper)
+    start = b.div(lower, tile)
+    stop = b.div(b.add(upper, last), tile)
+    return start, stop
 
 
 def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelDef:
@@ -266,7 +346,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = wave
-    p = _declare_params(b, spec.dtype)
+    p = _declare_params(b, spec)
 
     c16 = b.const_i32(16)
 
@@ -293,6 +373,18 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     batch_row_q = b.mul(batch, seqlen_q)  # batch shift in Q rows
     batch_off_k = b.mul(b.mul(batch, seqlen_k), p["stride_k_token"])
     batch_off_v = b.mul(b.mul(batch, seqlen_k), p["stride_v_token"])
+    q_global = b.add(q_row0, batch_row_q)
+    context = b.sub(seqlen_k, seqlen_q) if spec.causal_bottom_right else b.const_i32(0)
+    strict = (
+        spec.causal_bottom_right or spec.dtype == "bf16" or spec.kv_tail
+        or spec.sliding_window or spec.use_softcap or spec.use_sinks
+        or spec.use_alibi or spec.use_qq_bias
+    )
+    masked = b.const_f32(float("-inf")) if strict else None
+    score_transform, sink = _score_features(b, spec, p, head, context)
+    tile_start, tile_stop = _window_tiles(
+        b, spec.sliding_window, q_row0, seqlen_q, seqlen_k, context, c16,
+    )
 
     mfma_attention_fwd_inner_body(
         b,
@@ -304,7 +396,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         seqlen_k=seqlen_k,
         # Global Q/O row index folds the batch shift in; the within-batch q
         # position used by the mask is q_pos_base = q_row0.
-        q_tile_base=b.add(q_row0, batch_row_q),
+        q_tile_base=q_global,
         head_idx=head,
         kv_head_idx=kv_head,
         q_pos_base=q_row0,
@@ -320,20 +412,18 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         dtype="bf16" if spec.dtype == "bf16" else "f16",
         mask_mode=spec.mask_mode,
         sliding_window=spec.sliding_window,
-        causal_ctx_offset=(
-            b.sub(seqlen_k, seqlen_q)
-            if spec.causal_bottom_right else b.const_i32(0)
-        ),
-        mask_neg_inf=(
-            b.const_f32(float("-inf"))
-            if spec.causal_bottom_right or spec.dtype == "bf16" or spec.kv_tail else None
-        ),
+        causal_ctx_offset=context,
+        mask_neg_inf=masked,
         k_token_offset_elems=batch_off_k,
         v_token_offset_elems=batch_off_v,
         wmma_v_lds_stage=spec.v_lds_stage,
         arch=arch,
         wmma_seqlen_q=seqlen_q if spec.query_tail else None,
         wmma_kv_tail=spec.kv_tail,
+        extra_score_transform=score_transform,
+        sink_log2=sink,
+        k_tile_start=tile_start,
+        k_tile_stop=tile_stop,
     )
     b.ret()
     return b.kernel

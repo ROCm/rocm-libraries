@@ -156,8 +156,8 @@ rocke_value_t* rocke_softmax_row_reduce(rocke_ir_builder_t* b,
  *
  *   k_row_base_fn / v_row_base_fn : Callable[[IRBuilder, Value], Value]
  *       (b, row_idx) -> i32 element offset for one K/V row.
- *   extra_score_transform         : Callable[[IRBuilder, Value, Value, int], Value]
- *       (b, score_log2, kt, row_in_atom) -> score_log2.
+ *   extra_score_transform:
+ *       (b, score_log2, kt, row_in_atom, query_pos, key_pos, user) -> score_log2.
  *   extra_mask_predicate          : Callable[[IRBuilder, Value], Value]
  *       (b, kt) -> i1 per-K-tile keep flag.
  *   extra_skip_predicate          : Callable[[IRBuilder, Value], Value]
@@ -171,6 +171,8 @@ typedef rocke_value_t* (*rocke_attn_score_transform_fn)(rocke_ir_builder_t* b,
                                                         rocke_value_t* score_log2,
                                                         rocke_value_t* kt,
                                                         int row_in_atom,
+                                                        rocke_value_t* query_pos,
+                                                        rocke_value_t* key_pos,
                                                         void* user);
 typedef rocke_value_t* (*rocke_attn_predicate_fn)(rocke_ir_builder_t* b,
                                                   rocke_value_t* kt,
@@ -245,6 +247,7 @@ typedef struct rocke_mfma_attn_params
     rocke_value_t* mask_neg_inf; /* NULL => legacy sentinel; true -inf permits fully masked rows */
     rocke_value_t* wmma_seqlen_q; /* NULL => complete query tiles */
     bool wmma_kv_tail; /* include and mask the final partial KV tile */
+    rocke_value_t* sink_log2; /* optional always-visible softmax logit; no value contribution */
 } rocke_mfma_attn_params_t;
 
 /* ---------------------------------------------- mfma_attention_fwd_inner_body *

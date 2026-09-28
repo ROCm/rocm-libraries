@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 26 dtype/alignment/tail
- * configs by argv[1] (0..25), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 42 feature
+ * configs by argv[1] (0..41), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,17 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 26 && idx < 42)
+    {
+        static const int bases[] = {12, 13, 2, 8, 2, 8, 12, 13, 0, 6, 18, 19, 24, 25, 2, 8};
+        const int feature = (idx - 26) / 2;
+        spec->sliding_window = feature == 0 || feature == 5 ? 128 : feature == 6 ? 64 : 0;
+        spec->use_softcap = feature == 1 || feature == 6 || feature == 7;
+        spec->use_sinks = feature == 2 || feature == 5 || feature == 6;
+        spec->use_alibi = feature == 3 || feature == 6 || feature == 7;
+        spec->use_qq_bias = feature == 4 || feature == 6;
+        idx = bases[idx - 26];
+    }
     if(idx >= 18 && idx < 26)
     {
         static const int bases[] = {12, 13, 3, 9, 12, 13, 16, 17};
@@ -101,7 +112,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..25>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..41>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

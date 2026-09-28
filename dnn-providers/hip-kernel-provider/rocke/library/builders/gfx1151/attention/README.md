@@ -91,6 +91,29 @@ output canaries to detect leaked padding values or out-of-range stores.
 The benchmark adapter selects these flags from each case's true lengths.
 Aligned configurations retain their previous code and cache names.
 
+### Dense score features
+
+`sliding_window=W` intersects the causal mask with the last W keys. The builder
+bounds the KV tile loop to the relevant window rather than scanning masked
+cache blocks. `use_softcap`, `use_sinks`, `use_alibi`, and `use_qq_bias` are
+independent compile-time feature switches; they compose with both dtypes,
+causal alignments, and tail specializations.
+
+The score order is scaled QK, softcap, ALiBi, QQ-bias, then masking. Softcap
+uses the stable AMDGPU-lowerable `tanh` operation. ALiBi uses
+`slope[head] * (key_position - context)`, including in combinations with sinks.
+QQ-bias is FP32 and uses query-local rows and context-relative key columns;
+out-of-bounds bias entries contribute zero. A sink is an always-visible
+softmax logit with no value-vector contribution, so it adds denominator mass
+without being multiplied into the output.
+
+Enabled features append arguments to the base ABI, in order: a positive FP32
+`softcap`; an input-dtype `sink_ptr`; FP32 `alibi_slopes_ptr`; FP32 `qq_bias_ptr`
+and its I32 row count, column count, and element row stride. Disabled features
+add no arguments. Use the actual `KernelDef.params` or native signature API,
+and the standard kernarg packer, rather than packing mixed pointers/scalars
+without alignment. Native signatures own their names/types in the caller arena.
+
 The sections below are a historical campaign, not results for this comparator.
 
 ## TL;DR (executive summary)

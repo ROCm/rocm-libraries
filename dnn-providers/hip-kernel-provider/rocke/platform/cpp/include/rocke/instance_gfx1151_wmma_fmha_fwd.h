@@ -64,6 +64,7 @@ extern "C" {
  *   name             : NULL => "rocke_wmma_fmha_fwd".
  *   causal_bottom_right : shift the causal diagonal by Sk-Sq; requires CAUSAL.
  *   query_tail/kv_tail : independent partial-tile specializations; default false.
+ *   use_softcap/use_sinks/use_alibi/use_qq_bias : optional runtime score inputs.
  *
  * dtype is referenced as-is; keep it alive while using the spec. */
 typedef struct rocke_wmma_fmha_fwd_spec
@@ -79,6 +80,10 @@ typedef struct rocke_wmma_fmha_fwd_spec
     bool causal_bottom_right; /* default false; causal diagonal is seqlen_k - seqlen_q */
     bool query_tail; /* default false */
     bool kv_tail; /* default false */
+    bool use_softcap; /* runtime softcap scalar when enabled */
+    bool use_sinks;
+    bool use_alibi;
+    bool use_qq_bias;
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -127,10 +132,10 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
                                         int batch,
                                         int out[3]);
 
-/* The kernel ABI signature (Q/K/V/O ptrs, scale_log2/seqlen_q/seqlen_k
- * scalars, q/k/v/o stride pairs). On ROCKE_OK *out_items / *out_count hold the
- * arena-owned array; `arena` backs the storage. On failure the out-params are
- * untouched and the status is returned. */
+/* The specialized kernel ABI signature: Q/K/V/O, scale, lengths and strides,
+ * followed by enabled feature arguments. Names and type strings are owned by
+ * `arena` and remain valid after the internal probe builder is freed.
+ * Failure leaves the output pointers untouched. */
 rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* spec,
                                              rocke_arena_t* arena,
                                              const rocke_sig_entry_t** out_items,
