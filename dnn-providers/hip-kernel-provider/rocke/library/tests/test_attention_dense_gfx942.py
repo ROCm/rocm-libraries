@@ -31,6 +31,7 @@ what keeps the gfx950 goldens untouched by anything in this file.
 
 import dataclasses
 import hashlib
+import inspect
 
 import pytest
 
@@ -80,6 +81,66 @@ def _spec(**kw) -> Gfx942AttentionDenseSpec:
     )
     base.update(kw)
     return Gfx942AttentionDenseSpec(**base)
+
+
+def test_bottom_right_field_is_keyword_only_without_shifting_concrete_signatures():
+    """Adding a shared semantic flag must not move existing positional callers."""
+    from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+    shared_positionals = (
+        "batch",
+        "seqlen_q",
+        "seqlen_kv",
+        "num_query_heads",
+        "num_kv_heads",
+        "head_size",
+        "causal",
+        "dtype",
+        "sliding_window",
+        "ragged",
+        "varlen",
+        "block_m",
+        "block_n",
+        "waves_per_eu",
+        "lds_k_group_pad",
+        "persistent",
+        "num_persistent",
+        "interleave",
+        "persist_decode",
+        "lazy_rescale",
+        "paged",
+        "block_size",
+        "num_kv_blocks",
+        "use_sinks",
+    )
+    concrete_suffixes = {
+        Gfx942AttentionDenseSpec: (
+            "lds_row_pad",
+            "v_row_pad",
+            "use_cfvst",
+            "use_v_swizzle",
+            "use_exp2_fast",
+            "iglp",
+        ),
+        Gfx950AttentionDenseSpec: ("lds_v_row_pad", "wide_lds_dma"),
+    }
+
+    for spec_type, suffix in concrete_suffixes.items():
+        params = inspect.signature(spec_type).parameters
+        assert (
+            params["causal_bottom_right"].kind is inspect.Parameter.KEYWORD_ONLY
+        ), spec_type.__name__
+        assert params["causal_bottom_right"].default is False
+        positionals = tuple(
+            name
+            for name, param in params.items()
+            if param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        )
+        assert positionals == shared_positionals + suffix, spec_type.__name__
 
 
 def _lower(kd) -> str:
@@ -189,11 +250,11 @@ _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
         "varlen",
         "ragged",
-        "sliding_window",
         "paged",
         "block_size",
         "num_kv_blocks",
         "use_sinks",
+        "causal_bottom_right",
     }
 )
 
@@ -219,8 +280,9 @@ _SPEC_PERTURBATIONS = {
     "num_kv_heads": (8, 2),
     "head_size": (64, 128),
     "causal": (False, True),
+    "causal_bottom_right": (),  # unbuildable on gfx942
     "dtype": ("bf16", "fp16"),
-    "sliding_window": (),  # unbuildable -- see _UNBUILDABLE_SPEC_FIELDS
+    "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
     "varlen": (),  # unbuildable
     "paged": (),  # unbuildable (not yet supported)
@@ -460,11 +522,11 @@ def test_supports_rejects_non_gfx942():
 @pytest.mark.parametrize(
     "kw,marker",
     [
-        # persistent is NOT here anymore -- it is supported (P4). See the persistent
-        # build/decode tests below.
+        # persistent and sliding_window are NOT here anymore -- both are supported
+        # (persistent P4; sliding_window via start_tile prune + window mask). See
+        # the persistent build/decode tests and the SWA coverage below.
         (dict(varlen=True), "varlen"),
         (dict(seqlen_q=1000, seqlen_kv=1000, ragged=True), "ragged"),
-        (dict(sliding_window=64), "sliding_window"),
         (dict(use_sinks=True), "sinks"),
     ],
 )
@@ -476,6 +538,27 @@ def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     ok, why = supports_attention_dense(_spec(**kw), arch="gfx942")
     assert not ok, f"{marker} must be rejected at the supports layer"
     assert marker in why
+
+
+def test_shared_bottom_right_field_is_rejected_by_support_and_build():
+    """The reflected common field is outside gfx942's concrete contract."""
+    spec = AttentionDenseSpec(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=4096,
+        num_query_heads=128,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+        block_n=64,
+        causal_bottom_right=True,
+    )
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert not ok
+    assert "causal_bottom_right" in why
+    with pytest.raises(ValueError, match="causal_bottom_right"):
+        build_attention_dense(spec, arch="gfx942")
 
 
 @pytest.mark.parametrize("block_n", [96, 160, 224])
@@ -495,6 +578,24 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
         _spec(block_n=512, seqlen_kv=2048), arch="gfx942"
     )
     assert not ok and "block_n" in why
+
+
+def test_supports_rejects_sliding_window_past_seqlen_kv():
+    """SWA + causal where the last query block's window starts past seqlen_kv:
+    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
+    as the block_n zero-trip guards above."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+    )
+    assert not ok and "sliding_window" in why
+
+
+def test_supports_accepts_sliding_window_in_range():
+    """SWA + causal where the window stays within seqlen_kv is accepted."""
+    ok, why = supports_attention_dense(
+        _spec(seqlen_q=2048, seqlen_kv=2048, sliding_window=128), arch="gfx942"
+    )
+    assert ok, why
 
 
 def test_supports_rejects_over_budget_lds():
@@ -672,7 +773,10 @@ _CONTRACT_GRID = [
     dict(persistent=True, num_persistent=228),
     dict(varlen=True),
     dict(seqlen_q=1000, seqlen_kv=1000, ragged=True),
-    dict(sliding_window=64),
+    dict(sliding_window=64),  # accepted: SWA on the default grid
+    dict(
+        sliding_window=128, persistent=True, num_persistent=304
+    ),  # accepted: SWA persistent
     dict(batch=4),
     dict(batch=64, seqlen_q=16384, seqlen_kv=16384, num_kv_heads=8),
     dict(waves_per_eu=4),
