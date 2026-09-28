@@ -123,7 +123,12 @@ profile_client() {
   local rocprof_input="$1"
   local label="$2"
   local wrap_tensile="${3:-0}"
+  local extra="${4:-}"
   local dest ini client
+  local extra_args=()
+  if [[ -n "$extra" ]]; then
+    extra_args=(-E "$extra")
+  fi
 
   need_rocprof
   dest="$(stamp_dir)"
@@ -133,6 +138,7 @@ profile_client() {
     echo "==> rocprofv3 $label wrapping Tensile (compile + client)"
     "$ROCPROFV3" \
       --input "$rocprof_input" \
+      "${extra_args[@]}" \
       --output-directory "$dest/rocprof" \
       --output-file "$label" \
       -- \
@@ -169,6 +175,7 @@ profile_client() {
   echo "    ini=$ini"
   "$ROCPROFV3" \
     --input "$rocprof_input" \
+    "${extra_args[@]}" \
     --output-directory "$dest/rocprof" \
     --output-file "$label" \
     -- \
@@ -196,7 +203,7 @@ case "$cmd" in
     if [[ "${1:-}" == "--tensile" ]]; then
       wrap=1
     fi
-    profile_client "$PMC_YAML" "pmc" "$wrap"
+    profile_client "$PMC_YAML" "pmc" "$wrap" "$CONFIGS/extra_counters.yaml"
     ;;
   *)
     usage

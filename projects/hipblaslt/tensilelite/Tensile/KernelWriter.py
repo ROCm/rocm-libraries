@@ -5459,16 +5459,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(SMovB64(dst=sgpr("AddressMXSB", 2), src=sgpr("AddressMXSBBase", 2),
                            comment="re-base MXSB to tensor base"))
     if hasTDM:
+      # Addresses are consumed by the per-load descriptor refresh. Only the LDS
+      # base and swap mask have to exist before the first tensor_load_to_lds.
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
-      module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
+      module.add(initTDMLdsTrackingSubtile(self, kernel, tensorParametersA))
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB))
-      module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
+      module.add(initTDMLdsTrackingSubtile(self, kernel, tensorParametersB))
       if kernel["ProblemType"]["MXBlockA"] and "MX" in tensorParametersA:
         module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA["MX"]))
-        module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA["MX"]))
+        module.add(initTDMLdsTrackingSubtile(self, kernel, tensorParametersA["MX"]))
       if kernel["ProblemType"]["MXBlockB"] and "MX" in tensorParametersB:
         module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB["MX"]))
-        module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB["MX"]))
+        module.add(initTDMLdsTrackingSubtile(self, kernel, tensorParametersB["MX"]))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))

@@ -307,16 +307,17 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(tensorLoadToLds)
         return mod
 
-    def initOperands(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str]) -> Module:
+    def initOperands(self, group0: int | str, group1: int | str, group2: Optional[int | str], group3: Optional[int | str], clearGroup1: bool = True) -> Module:
         mod = Module("tdmInit")
-        for i in range(self.GROUP0_NUM_SGPR):
-            val = 1 if i == 0 else 0
-            mod.add(SMovB32(sgpr(f"{group0}+{i}"), val))
+        # +0 stays 1. +1 is replaced by setLdsAddr, and +2/+3 are replaced by
+        # setGlobalAddr, which also sets the image type field.
+        mod.add(SMovB32(sgpr(f"{group0}+0"), 1))
 
-        mod.add(SOrB32(sgpr(f"{group0}+3"), sgpr(f"{group0}+3"), hex(2 << 30), "set type field to 2(image)"))
-
-        for i in range(self.GROUP1_NUM_SGPR):
-            mod.add(SMovB32(sgpr(f"{group1}+{i}"), 0))
+        if clearGroup1:
+            for i in range(self.GROUP1_NUM_SGPR):
+                mod.add(SMovB32(sgpr(f"{group1}+{i}"), 0))
+        # clearGroup1=False: the subtile path writes +0..+5 in full and finishes
+        # +6/+7 with one s_mov_b64. Nothing else may leave those words stale.
 
         if group2 is not None:
             for i in range(self.GROUP2_NUM_SGPR):
@@ -337,6 +338,23 @@ class TensorDataMoverLoad(TensorDataMover):
         if numBytes <= 8:
             return int(log2(numBytes))
         raise AssertionError(f"unsupported dtype for TDM data_size: {dtype}")
+
+    def group1ControlWord(self, dtype: DataType, ldsBlockSizePerPad: int, ldsPadSize: int,
+                          iterateEnabled: bool = False, isMetadata: bool = False) -> int:
+        """Final Group1+0 value: data_size, iterate_enable, and padding."""
+        value = self.dataSizeShift(dtype, isMetadata) << 16
+        if iterateEnabled:
+            value |= 1 << 19
+        if ldsBlockSizePerPad and ldsPadSize:
+            padInterval = self.calPadInterval(ldsBlockSizePerPad)
+            padAmount = self.calPadAmount(ldsPadSize)
+            value |= (1 << 20) | (padInterval << 22) | (padAmount << 25)
+        return value
+
+    def setGroup1Control(self, group1: str | int, value: int) -> Module:
+        mod = Module()
+        mod.add(SMovB32(dst=sgpr(group1), src=hex(value), comment="TDM Group1 control"))
+        return mod
 
     def setDataType(self, dtype: DataType, group1: str | int, isMetadata: bool = False) -> Module:
         mod = Module()
@@ -437,20 +455,30 @@ class TensorDataMoverLoad(TensorDataMover):
 
         return mod
 
-    def setTensorDim0(self, group1: int | str, sgprDim0: int | str, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: int=0, isMetadata: bool=False) -> Module:
+    @staticmethod
+    def _writeField(dst, src, overwrite: bool, comment: str = ""):
+        """MOV a fully owned descriptor word, or OR a field into a preserved word."""
+        if overwrite:
+            return SMovB32(dst, src, comment=comment)
+        return SOrB32(dst, dst, src, comment)
+
+    def setTensorDim0(self, group1: int | str, sgprDim0: int | str, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: int=0, isMetadata: bool=False, overwrite: bool=False) -> Module:
         mod = Module()
         mod.addComment("TDM set tensor dim 0")
-        mod.add(SAndB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), hex(0x0000FFFF)))
-        mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), hex(0xFFFF0000)))
+        # overwrite writes both words in full. The low half of +1 and the high
+        # half of +2 are zero in that result; dim1 fills the high half of +2.
+        if not overwrite:
+            mod.add(SAndB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), hex(0x0000FFFF)))
+            mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), hex(0xFFFF0000)))
 
         with writer.allocTmpSgpr(1, tag="setTensorDim0_tmpSgpr") as tmpSgpr:
             if isMXS:
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim0)))
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
-                mod.add(SOrB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx), overwrite))
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim0)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
-                mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx), overwrite))
             elif isSparseTrack or isMetadata:
                 # lo 16 bits
                 mod.add(SMovB32(sgpr(tmpSgpr.idx), sgpr(sgprDim0)))
@@ -460,7 +488,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 if constShifter:
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(tmpSgpr.idx)))
                 mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
-                mod.add(SOrB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx), overwrite))
                 # hi 16 bits
                 mod.add(SMovB32(sgpr(tmpSgpr.idx), sgpr(sgprDim0)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(1), sgpr(tmpSgpr.idx), "sizeL /= 2 for sparse matrix"))
@@ -469,28 +497,31 @@ class TensorDataMoverLoad(TensorDataMover):
                 if constShifter:
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(tmpSgpr.idx)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
-                mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx), overwrite))
             else:
                 if constShifter:
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim0)))
                     mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
                 else:
                     mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim0)))
-                mod.add(SOrB32(sgpr(f"{group1}+1"), sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+1"), sgpr(tmpSgpr.idx), overwrite))
                 if constShifter:
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim0)))
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
                 else:
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim0)))
-                mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx), overwrite))
 
         return mod
 
-    def setTensorDim1(self, group1: int | str, sgprDim1: int | str, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: int=0, isMetadata: bool=False) -> Module:
+    def setTensorDim1(self, group1: int | str, sgprDim1: int | str, writer: "KernelWriterAssembly", constShifter: int=0, isMXS: bool=False, isSparseTrack: int=0, isMetadata: bool=False, overwrite: bool=False) -> Module:
         mod = Module()
         mod.addComment("TDM set tensor dim 1")
-        mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), hex(0x0000FFFF)))
-        mod.add(SAndB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), hex(0xFFFF0000)))
+        # +2 high half is merged onto dim0's low half, so it stays an OR.
+        # overwrite makes +3 a full write (high half stays 0 for tile0).
+        if not overwrite:
+            mod.add(SAndB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), hex(0x0000FFFF)))
+            mod.add(SAndB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), hex(0xFFFF0000)))
         with writer.allocTmpSgpr(1, tag="setTensorDim1_tmpSgpr") as tmpSgpr:
             if isMXS:
                 tmp = (1 << constShifter) - 1
@@ -500,7 +531,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim1)))
                 mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
-                mod.add(SOrB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx)))
+                mod.add(self._writeField(sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx), overwrite))
             else:
                 if isSparseTrack or isMetadata:
                     # lo 16 bits
@@ -520,7 +551,7 @@ class TensorDataMoverLoad(TensorDataMover):
                     if constShifter:
                         mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(tmpSgpr.idx)))
                     mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
-                    mod.add(SOrB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx)))
+                    mod.add(self._writeField(sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx), overwrite))
                 else:
                     if constShifter:
                         mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim1)))
@@ -528,31 +559,40 @@ class TensorDataMoverLoad(TensorDataMover):
                     else:
                         mod.add(SLShiftLeftB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim1)))
                     mod.add(SOrB32(sgpr(f"{group1}+2"), sgpr(f"{group1}+2"), sgpr(tmpSgpr.idx)))
-        
+
                     if constShifter:
                         mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(constShifter), sgpr(sgprDim1)))
                         mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(tmpSgpr.idx)))
                     else:
                         mod.add(SLShiftRightB32(sgpr(tmpSgpr.idx), hex(16), sgpr(sgprDim1)))
-                    mod.add(SOrB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx)))
+                    mod.add(self._writeField(sgpr(f"{group1}+3"), sgpr(tmpSgpr.idx), overwrite))
 
         return mod
 
-    def setTensorTile0(self, group1: int | str, tile0: int, writer: "KernelWriterAssembly", constShifter: int=0) -> Module:
+    def setTensorTile0(self, group1: int | str, tile0: int, writer: "KernelWriterAssembly", constShifter: int=0, overwrite: bool=False) -> Module:
         mod = Module()
         mod.addComment("TDM set tensor tile 0")
-        mod.add(SAndB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), hex(0x0000FFFF)))
+        # Tile0 lives in the high half of +3. overwrite leaves dim1 in the low
+        # half and relies on that high half already being 0.
+        if not overwrite:
+            mod.add(SAndB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), hex(0x0000FFFF)))
         mod.add(SOrB32(sgpr(f"{group1}+3"), sgpr(f"{group1}+3"), hex(((tile0 >> constShifter) & 0xFFFF) << 16), f"set tile0 to {tile0 >> constShifter}"))
         return mod
 
-    def setTensorTile1(self, group1: int | str, tile1, writer: "KernelWriterAssembly", constShifter: int=0) -> Module:
+    def setTensorTile1(self, group1: int | str, tile1, writer: "KernelWriterAssembly", constShifter: int=0, overwrite: bool=False) -> Module:
         mod = Module()
         mod.addComment("TDM set tensor tile 1")
-        mod.add(SAndB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"), hex(0xFFFF0000)))
-        mod.add(SOrB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"), hex((tile1 >> constShifter) & 0xFFFF), f"set tile1 to {tile1 >> constShifter}"))
+        tileValue = hex((tile1 >> constShifter) & 0xFFFF)
+        comment = f"set tile1 to {tile1 >> constShifter}"
+        if overwrite:
+            # High half of +4 is reserved. A full mov clears it.
+            mod.add(SMovB32(sgpr(f"{group1}+4"), tileValue, comment=comment))
+        else:
+            mod.add(SAndB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"), hex(0xFFFF0000)))
+            mod.add(SOrB32(sgpr(f"{group1}+4"), sgpr(f"{group1}+4"), tileValue, comment))
         return mod
 
-    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer, constShifter: int=0, isMXS: bool=False) -> Module:
+    def setTensorStride0(self, group1: int | str, sgprStride0: int | str | RegisterContainer, constShifter: int=0, isMXS: bool=False, zeroHigh: bool=True) -> Module:
         mod = Module()
         if isMXS:
             mod.add(SLShiftLeftB32(sgpr(f"{group1}+5"), hex(constShifter), sgpr(sgprStride0)))
@@ -567,7 +607,9 @@ class TensorDataMoverLoad(TensorDataMover):
             else:
                 mod.add(SMovB32(sgpr(f"{group1}+5"), sgpr(sgprStride0)))
         #TODO: support 48-bit stride
-        mod.add(SMovB32(sgpr(f"{group1}+6"), 0))
+        # zeroHigh=False lets the subtile path cover +6 and +7 with one s_mov_b64.
+        if zeroHigh:
+            mod.add(SMovB32(sgpr(f"{group1}+6"), 0))
         return mod
 
     def setTensorStride0Metadata(self, group1: int | str, sgprMetadataStride0I: str) -> Module:
