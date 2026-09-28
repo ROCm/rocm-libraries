@@ -73,6 +73,11 @@ def _forward_true16(rocisa_item: Any, logical: Any) -> None:
 # the persistent prefetch prologue + main loop. Must match the registered gfx125x
 # group name (see Gfx1250Backend.cpp) and native's kPGR literal.
 _PGR_GROUP = "loopWithPrefetch"
+# Synthetic region EpilogueStoreSinkPass runs on. Must match Gfx1250Backend's
+# "globalWriteEpilogue" adaptor and native's kEpilogue literal. The anchor is
+# the Tensile submodule name, not the group name the pipeline looks up.
+_EPILOGUE_GROUP = "globalWriteEpilogue"
+_EPILOGUE_ANCHOR = "GlobalWriteElements"
 
 
 def _contains_prefetch_load(item: Any) -> bool:
@@ -112,6 +117,42 @@ def _detect_pgr_range(items: Sequence[Any]) -> Optional[tuple]:
             loop_body_idx = i
     if pgr_start != -1 and loop_body_idx != -1 and pgr_start <= loop_body_idx:
         return (pgr_start, loop_body_idx)
+    return None
+
+
+def _contains_named_module(item: Any, name: str) -> bool:
+    """True if *item* is, or recursively contains, a ``Module`` named *name*.
+
+    Mirrors native ``containsModule`` in ``ToStinkyTofuUtils.cpp``.
+    """
+    if isinstance(item, Module) and getattr(item, "name", "") == name:
+        return True
+    sub = getattr(item, "itemList", None)
+    if sub:
+        for child in sub:
+            if _contains_named_module(child, name):
+                return True
+    return False
+
+
+def _detect_epilogue_range(items: Sequence[Any]) -> Optional[tuple]:
+    """Positional ``globalWriteEpilogue`` range over top-level *items*.
+
+    Returns ``(start, end)`` = [first item whose subtree contains
+    ``Module("GlobalWriteElements")``, last such item], or ``None`` when
+    absent. Items between those two endpoints are included, matching native:
+    both the main store epilogue and a later GSU-split OptNLL store stay in
+    one region so ``EpilogueStoreSinkPass`` sees the same stores as
+    ``toStinkyTofuModule``.
+    """
+    start = end = -1
+    for i, it in enumerate(items):
+        if _contains_named_module(it, _EPILOGUE_ANCHOR):
+            if start == -1:
+                start = i
+            end = i
+    if start != -1 and start <= end:
+        return (start, end)
     return None
 
 
@@ -1419,11 +1460,14 @@ class Module(Item):
         lm_label = logical_name if logical_name is not None else (self.name or "kernel")
         lm = _st.LogicalModule(lm_label)
         pgr_range = _detect_pgr_range(self.itemList)
-        self._populate_logical_module(lm, pgr_range)
+        epilogue_range = _detect_epilogue_range(self.itemList)
+        self._populate_logical_module(lm, pgr_range, epilogue_range)
 
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch), options))
 
-    def _populate_logical_module(self, lm: Any, pgr_range: Any = None) -> None:
+    def _populate_logical_module(
+        self, lm: Any, pgr_range: Any = None, epilogue_range: Any = None
+    ) -> None:
         """In-order walk adding instructions and .set directives to *lm*.
 
         Preserves source ordering: when a ``ValueSet`` appears between two
@@ -1436,17 +1480,37 @@ class Module(Item):
         lowering pipeline can reconstruct instruction-group ranges (used by
         ScopeAdaptor passes like ESM2, RegionClone, DAG scheduler).
 
-        ``pgr_range`` (root call only): ``(pgrStartIdx, loopBodyIdx)`` over
-        ``self.itemList``. Items in that inclusive index range are wrapped in a
-        synthetic ``loopWithPrefetch`` group, replicating native's positional
-        group injection so the DAG-scheduler region spans the same instructions.
+        ``pgr_range`` / ``epilogue_range`` (root call only): inclusive index
+        pairs over ``self.itemList``. Those spans are wrapped in synthetic
+        ``loopWithPrefetch`` and ``globalWriteEpilogue`` groups, replicating
+        native's positional injection. Open epilogue before PGR and close PGR
+        before epilogue so a shared boundary matches native's push order
+        (``kEpilogue`` then ``kPGR``). Recursive walks pass neither range.
+
+        The epilogue span is bracketed by empty text blocks. Group endpoints
+        are recorded on the logical IR, and ``ToStinkyAsmPass`` then unlinks
+        every Python-owned logical (``safeErase`` only removes it). A group
+        whose first node was that logical starts ``ScopeAdaptor`` on a
+        detached ``LogicalInstruction``, which is neither a
+        ``StinkyInstruction`` nor an ``AsmDirective``. An empty
+        ``TEXTBLOCK`` stays linked and emits no bytes, so it can be the
+        endpoint instead. A later ``noLoadLoopBody`` copy can extend the
+        earlier multi-region extract past that opening anchor; the extract
+        deletes the comment and retargets any group still pointing at it
+        onto the neighboring instruction before ``EpilogueStoreSinkPass``.
         """
         for idx, it in enumerate(self.itemList):
+            if epilogue_range is not None and idx == epilogue_range[0]:
+                lm.begin_group(_EPILOGUE_GROUP)
+                lm.add_textblock("")
             if pgr_range is not None and idx == pgr_range[0]:
                 lm.begin_group(_PGR_GROUP)
             self._populate_one_item(lm, it)
             if pgr_range is not None and idx == pgr_range[1]:
                 lm.end_group(_PGR_GROUP)
+            if epilogue_range is not None and idx == epilogue_range[1]:
+                lm.add_textblock("")
+                lm.end_group(_EPILOGUE_GROUP)
 
     def _populate_one_item(self, lm: Any, it: Any) -> None:
         """Emit a single ``itemList`` entry into *lm* (see ``_populate_logical_module``)."""
@@ -1969,6 +2033,7 @@ class _SignatureKernelDescriptor(Item):
         "vectorWidthA", "vectorWidthB",
         "globalReadVectorWidthA", "globalReadVectorWidthB",
         "directToLdsA", "directToLdsB", "useSgprForGRO",
+        "totalInstructionBytes",
     )
 
     def __init__(
@@ -2000,6 +2065,9 @@ class _SignatureKernelDescriptor(Item):
         self.directToLdsA = False
         self.directToLdsB = False
         self.useSgprForGRO = 0
+        # -1 until AccumulateInstructionSizePass fills the module total and
+        # emit copies it here. Matches C++ SignatureKernelDescriptor.
+        self.totalInstructionBytes = -1
         self._apply_gpr_layout(int(totalVgprs), int(totalAgprs))
 
     def _apply_gpr_layout(self, total_vgprs: int, total_agprs: int) -> None:
@@ -2057,12 +2125,20 @@ class _SignatureKernelDescriptor(Item):
         self.directToLdsB = bool(d2lB)
         self.useSgprForGRO = int(useSgprForGRO)
 
+    def setTotalInstructionBytes(self, totalBytes: int) -> None:
+        self.totalInstructionBytes = int(totalBytes)
+
     def toString(self) -> str:
         kd_indent = "  "
         isa = self.kernel().isa
         if isa is None:
             raise RuntimeError("kernel ISA is not set")
         out = _sig_block3line("Begin Kernel")
+        if self.totalInstructionBytes >= 0:
+            out += (
+                "/* STINKY_TOTAL_INST_BYTES: "
+                f"{self.totalInstructionBytes} */\n"
+            )
         out += f'.amdgcn_target "amdgcn-amd-amdhsa--{_isa_to_gfx(isa)}"\n'
         out += ".text\n"
         out += f".protected {self.name}\n"
@@ -2121,6 +2197,9 @@ class _SignatureKernelDescriptor(Item):
         )
         out += f"{kd_indent}.amdhsa_float_denorm_mode_32 3\n"
         out += f"{kd_indent}.amdhsa_float_denorm_mode_16_64 3\n"
+        if self.totalInstructionBytes >= 0:
+            pref = min(self.totalInstructionBytes // 128, 255)
+            out += f"{kd_indent}.amdhsa_inst_pref_size {pref}\n"
         if self.numSgprPreload:
             # kernArg ptr (2 sgprs) is preloaded in user sgpr, but not counted
             # in preload_length (rocisa code.hpp SignatureKernelDescriptor).
@@ -2317,6 +2396,9 @@ class SignatureBase(Item):
     def setGprs(self, totalVgprs: int, totalAgprs: int, totalSgprs: int) -> None:
         self.kernelDescriptor.setGprs(totalVgprs, totalAgprs, totalSgprs)
         self.codeMeta.setGprs(totalVgprs, totalSgprs)
+
+    def setTotalInstructionBytes(self, totalBytes: int) -> None:
+        self.kernelDescriptor.setTotalInstructionBytes(totalBytes)
 
     def setOptimizationConfig(
         self,
