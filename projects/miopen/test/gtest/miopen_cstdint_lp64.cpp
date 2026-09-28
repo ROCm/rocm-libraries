@@ -20,7 +20,14 @@
 
 static std::string CstdintKernelSource()
 {
-    return "#include \"miopen_cstdint.hpp\"\n"
+    // Deliberately include <stdint.h> before miopen_cstdint.hpp to reproduce
+    // the original conflict: system uint64_t (unsigned long) vs the MIOpen
+    // typedef (previously unsigned long long via __hip_internal).
+    return "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
+           "#include <hip/hip_runtime.h>\n"
+           "#endif\n"
+           "#include <stdint.h>\n"
+           "#include \"miopen_cstdint.hpp\"\n"
            "extern \"C\" {\n"
            "__global__ void cstdint_write(uint64_t* data) {\n"
            "    if(threadIdx.x == 0 && blockIdx.x == 0)\n"
