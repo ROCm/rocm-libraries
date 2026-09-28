@@ -27,6 +27,7 @@ NB_MODULE(origami, m) {
       .value("gfx1200", hardware_t::architecture_t::gfx1200)
       .value("gfx1201", hardware_t::architecture_t::gfx1201)
       .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1101", hardware_t::architecture_t::gfx1101)
       .value("gfx1150", hardware_t::architecture_t::gfx1150)
       .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .value("gfx1152", hardware_t::architecture_t::gfx1152)
@@ -87,6 +88,16 @@ NB_MODULE(origami, m) {
       .export_values();
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
+
+  nanobind::enum_<origami::hybrid_mode_t>(m, "hybrid_mode_t")
+      .value("static_", origami::hybrid_mode_t::static_)
+      .value("dynamic", origami::hybrid_mode_t::dynamic)
+      .value("none", origami::hybrid_mode_t::none)
+      .export_values();
+
+  m.def("hybrid_mode_to_string",
+        &origami::hybrid_mode_to_string,
+        "Convert hybrid_mode_t to string.");
 
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
@@ -203,6 +214,7 @@ NB_MODULE(origami, m) {
       .def_rw("splitting_factor", &origami::gemm::context_t::splitting_factor)
       .def_rw("num_wgs", &origami::gemm::context_t::num_wgs)
       .def_rw("num_timesteps", &origami::gemm::context_t::num_timesteps)
+      .def_rw("tile_schedule", &origami::gemm::context_t::tile_schedule)
       .def_rw("active_cus", &origami::gemm::context_t::active_cus)
       .def_rw("mem_bw_limited", &origami::gemm::context_t::mem_bw_limited)
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
@@ -401,6 +413,11 @@ NB_MODULE(origami, m) {
         "Compute latency per K-complete MT wave");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
+        nanobind::arg("non_temporal_a_available") = true,
+        nanobind::arg("non_temporal_b_available") = true,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions

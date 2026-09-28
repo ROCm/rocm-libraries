@@ -51,6 +51,28 @@ def test_parse_cli_args_search_default_keep_thr(tmp_path: Path) -> None:
     assert args.keep_thr == 0.1
 
 
+def test_parse_cli_args_custom_lib_flags(tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    args = cli.parse_cli_args(
+        [
+            "--bench",
+            "--workload-log",
+            str(workload),
+            "--devices",
+            "0",
+            "--custom-lib-src",
+            "/tmp/src_lib",
+            "--custom-lib-dir",
+            "/tmp/custom_build",
+        ]
+    )
+
+    assert args.custom_lib_src == "/tmp/src_lib"
+    assert args.custom_lib_dir == "/tmp/custom_build"
+
+
 def test_parse_cli_args_requires_arch_for_tune(tmp_path: Path) -> None:
     workload = tmp_path / "wkld.yaml"
     workload.write_text("[]\n")
@@ -198,10 +220,13 @@ def test_dispatch_bench_workflow_calls_run_bench(monkeypatch: pytest.MonkeyPatch
         n_slots=1,
         keep_thr=0.0,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )
@@ -210,6 +235,51 @@ def test_dispatch_bench_workflow_calls_run_bench(monkeypatch: pytest.MonkeyPatch
     assert rc == 0
     assert called["log"] == str(workload)
     assert called["kwargs"]["devices"] == [0]
+
+
+def test_dispatch_bench_forwards_custom_lib_params(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    called = {}
+
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+
+    def _fake_run_bench(_hip_path, _log_path, _run_root, **kwargs):
+        called["kwargs"] = kwargs
+        return 0
+
+    monkeypatch.setattr(cli, "run_bench", _fake_run_bench)
+
+    args = cli.CliArgs(
+        tune=False,
+        bench=True,
+        search=False,
+        workload=str(workload),
+        gemm_config=None,
+        inline=None,
+        arch=None,
+        hipblaslt=str(tmp_path),
+        verbose=0,
+        devices=[0],
+        n_slots=1,
+        keep_thr=0.0,
+        backend="ductile",
+        search_space=None,
+        workdir=str(tmp_path / "run"),
+        up_thr=1.03,
+        duration=0.04,
+        benchmark_duration=0.5,
+        custom_lib_src="/tmp/src_lib",
+        custom_lib_dir="/tmp/custom_build",
+        retry=True,
+        bench_freq=False,
+    )
+
+    rc = cli.dispatch(args, anchor=str(tmp_path))
+    assert rc == 0
+    assert called["kwargs"]["custom_lib_src"] == "/tmp/src_lib"
+    assert called["kwargs"]["custom_lib_dir"] == "/tmp/custom_build"
 
 
 def test_dispatch_search_uses_generated_workload_from_list(
@@ -248,10 +318,13 @@ def test_dispatch_search_uses_generated_workload_from_list(
         n_slots=1,
         keep_thr=0.1,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )
@@ -263,6 +336,48 @@ def test_dispatch_search_uses_generated_workload_from_list(
     with generated.open() as f:
         data = yaml.safe_load(f)
     assert data[0]["M"] == 16
+
+
+def test_dispatch_search_forwards_custom_lib_src(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workload = tmp_path / "wkld.yaml"
+    workload.write_text("[]\n")
+
+    monkeypatch.setattr(cli, "resolve_hipblaslt_path", lambda **_kwargs: tmp_path)
+    captured = {}
+
+    def _fake_run_search(_hip, _workload, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cli, "run_search", _fake_run_search)
+
+    args = cli.CliArgs(
+        tune=False,
+        bench=False,
+        search=True,
+        workload=str(workload),
+        gemm_config=None,
+        inline=None,
+        arch=None,
+        hipblaslt=str(tmp_path),
+        verbose=0,
+        devices=[0],
+        n_slots=1,
+        keep_thr=0.1,
+        backend="ductile",
+        search_space=None,
+        workdir=str(tmp_path / "run"),
+        up_thr=1.03,
+        duration=0.04,
+        benchmark_duration=0.5,
+        custom_lib_src="/tmp/src_lib",
+        custom_lib_dir="/tmp/custom_build",
+        retry=True,
+        bench_freq=False,
+    )
+
+    rc = cli.dispatch(args, anchor=str(tmp_path))
+    assert rc == 0
+    assert captured["kwargs"]["custom_lib_src"] == "/tmp/src_lib"
 
 
 def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -296,10 +411,13 @@ def test_dispatch_tune_runs_configure_and_optimize(monkeypatch: pytest.MonkeyPat
         n_slots=1,
         keep_thr=0.0,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )
@@ -339,10 +457,13 @@ def test_dispatch_list_loader_error_returns_one(monkeypatch: pytest.MonkeyPatch,
         n_slots=1,
         keep_thr=0.1,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )
@@ -368,10 +489,13 @@ def test_dispatch_inline_value_error_returns_one(monkeypatch: pytest.MonkeyPatch
         n_slots=1,
         keep_thr=0.0,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )
@@ -396,10 +520,13 @@ def test_dispatch_returns_one_for_missing_workload_source(monkeypatch: pytest.Mo
         n_slots=1,
         keep_thr=0.0,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )
@@ -427,10 +554,13 @@ def test_dispatch_raises_when_mode_is_missing(monkeypatch: pytest.MonkeyPatch, t
         n_slots=1,
         keep_thr=0.0,
         backend="ductile",
+        search_space=None,
         workdir=str(tmp_path / "run"),
         up_thr=1.03,
         duration=0.04,
         benchmark_duration=0.5,
+        custom_lib_src=None,
+        custom_lib_dir=None,
         retry=True,
         bench_freq=False,
     )

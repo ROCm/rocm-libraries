@@ -30,9 +30,9 @@ from typing import List, Tuple
 
 
 try:
-    DEFAULT_YAML_LOADER = yaml.CSafeLoader
+    SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
-    DEFAULT_YAML_LOADER = yaml.SafeLoader
+    SafeLoader = yaml.SafeLoader
 
 
 __all__ = [
@@ -255,7 +255,7 @@ def estimate_workload(conf_fl: str | Path, pop_size: int = 512) -> float:
         ValueError: If input YAML format is not correct.
     """
     with open(conf_fl, "r") as f:
-        conf = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        conf = yaml.load(f, Loader=SafeLoader)
     
     # Superficial YAML structure validation
     required_keys = ["GlobalParameters", "BenchmarkProblems"]

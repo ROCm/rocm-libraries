@@ -66,7 +66,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.7.0")
+set(VERSION_STRING "3.8.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -89,6 +89,9 @@ option(BUILD_VERBOSE "Output additional build information" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
 option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
+
+# Feature flags
+option(HIPSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
@@ -187,6 +190,8 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             -DBUILD_LAPACK_DEPRECATED=OFF
             -DBUILD_TESTING=OFF
             -DBUILD_BENCHMARKS=OFF
+            # Use OpenBLAS's suppression of unused/uninitialized C warnings.
+            -DQUIET_MAKE=ON
             -DUSE_OPENMP=OFF
             -DUSE_THREAD=OFF
             -DCMAKE_C_VISIBILITY_PRESET=hidden
@@ -212,8 +217,14 @@ if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
             list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
         endif()
 
-        # Force GENERIC target to ensure binaries work on all CPUs
-        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        # Force GENERIC target to ensure binaries work on all CPUs.
+        # OpenBLAS lacks a KERNEL.generic file for POWER, so fall back
+        # to the base POWER target on ppc64le (see OpenBLAS#5987).
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64")
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=POWER8)
+        else()
+            list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+        endif()
 
         # Downgrade incompatible-pointer-types errors to warnings when using Clang
         if(CMAKE_C_COMPILER_ID MATCHES "Clang")
@@ -360,7 +371,7 @@ endif()
 # Package specific CPACK vars
 if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.37.0)
+  set(rocsolver_minimum 3.38.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")

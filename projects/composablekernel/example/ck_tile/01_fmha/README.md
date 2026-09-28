@@ -66,6 +66,7 @@ args:
                 bs or 2, block scale
                 kvbs or 3, Q per-tensor, K/V per-page block scale, only in batch_prefill
                 mx or 4, microscaling (exclusively for mxfp8/mxfp4)
+                ph or 5, per-head scale
       -iperm    permute input (default:1)
                 if true, will be b*h*s*d, else b*s*h*d
       -operm    permute output (default:1)
@@ -165,7 +166,7 @@ We support sequence padding and variable-length processing in both batch and gro
 Both approaches optimize memory access patterns while supporting flexible sequence length requirements commonly found in transformer inference scenarios.
 
 ## FP8 support
-FP8 FMHA kernels are supported on gfx942/gfx950 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:
+FP8 FMHA kernels are supported on gfx942/gfx950/gfx1250 machines with ROCm 6.0+. Three fp8-based precision modes are available via `-prec`:
 
 | `-prec` value | Q/K/V input type | Output type | Description |
 |---|---|---|---|
@@ -182,5 +183,14 @@ The following quantization scale modes are available via `-qscale`:
 | `bs` or `2` | Per-block quantization scale — a scale factor is applied per block of elements |
 | `kvbs` or `3` | Q per-tensor + K/V per-page block scale (batch_prefill only) |
 | `mx` or `4` | Microscaling (MX format), exclusively for `mxfp8` and `mxfp4` data types |
+| `ph` or `5` | Per-head quantization scale — one scale factor per (batch, head) |
 
 Currently only `-vlayout=r` (`seqlen*hdim` for V matrix) is supported for fp8 data types.
+
+### V scale with `bs` on gfx1250
+
+The V scale must be a **power of two**. It rides an E8M0 scale operand and is truncated toward
+zero, so `1.9` is applied as `1.0`.
+
+Round the V scale up to a power of two **at quantization time** and quantize with that same
+value. This is not checked at runtime.

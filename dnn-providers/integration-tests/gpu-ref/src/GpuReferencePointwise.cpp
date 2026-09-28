@@ -1,5 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+#include "hipdnn-gpu-ref/detail/GpuRefHelpers.hpp"
 #include <cstring>
 #include <hipdnn-gpu-ref/GpuReferencePointwise.hpp>
 
@@ -25,17 +26,7 @@ namespace
 
 void launchKernel(hipFunction_t function, int64_t numBlocks, void* argsPtr, size_t argsSize)
 {
-    int deviceId;
-    detail::throwOnHipError(hipGetDevice(&deviceId), "hipGetDevice failed");
-    hipDeviceProp_t deviceProps;
-    detail::throwOnHipError(hipGetDeviceProperties(&deviceProps, deviceId),
-                            "hipGetDeviceProperties failed");
-    if(const auto maxBlocks = static_cast<int64_t>(deviceProps.maxGridSize[0]);
-       numBlocks > maxBlocks)
-    {
-        throw std::runtime_error("Grid size exceeds device limit: " + std::to_string(numBlocks)
-                                 + " > " + std::to_string(maxBlocks));
-    }
+    detail::assertValidGridSize(numBlocks, 1, 1);
     if(numBlocks > static_cast<int64_t>(std::numeric_limits<unsigned>::max()))
     {
         throw std::runtime_error("Grid size exceeds hipModuleLaunchKernel limit");

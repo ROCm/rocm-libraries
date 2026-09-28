@@ -4,6 +4,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <utility>
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
@@ -41,9 +42,9 @@ class ErrorRecorder
         return static_cast<Derived&>(*this);
     }
 
-    Derived& recordError(error_code_t code, const char* message)
+    Derived& recordError(error_code_t code, std::string message)
     {
-        return recordError(error_t{code, message});
+        return recordError(error_t{code, std::move(message)});
     }
 
     bool hasRecordedError() const

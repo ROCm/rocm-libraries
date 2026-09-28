@@ -1,0 +1,102 @@
+{
+  "claims": {
+    "HIP_MLOPS_ENGINE": [
+      {
+        "cases": [
+          "2_1_1_1_bfp16_nchw_1b2edf",
+          "2_1_1_1_bfp16_nchw_1b2edf_2",
+          "2_1_1_1_fp16_nchw_a20c08",
+          "2_1_1_1_fp16_nchw_a20c08_2",
+          "2_1_1_1_fp32_nchw_19d9e9",
+          "2_1_1_1_fp32_nchw_19d9e9_2",
+          "2_1_1_1_fp32_nchw_1c9e8e",
+          "2_1_1_1_fp32_nchw_1c9e8e_2",
+          "2_1_1_1_fp32_nchw_7ed8d8",
+          "2_1_1_1_fp32_nchw_7ed8d8_2",
+          "2_3_4_2_2_bfp16_ncdhw_88d800",
+          "2_3_4_2_2_bfp16_ncdhw_b62adb",
+          "2_3_4_2_2_bfp16_ncdhw_bc262c",
+          "2_3_4_2_2_bfp16_ncdhw_c52162",
+          "2_3_4_2_2_bfp16_ndhwc_2aa401",
+          "2_3_4_2_2_bfp16_ndhwc_2bab11",
+          "2_3_4_2_2_bfp16_ndhwc_3c76c1",
+          "2_3_4_2_2_bfp16_ndhwc_bc9f3c",
+          "2_3_4_2_2_fp16_ncdhw_3a2474",
+          "2_3_4_2_2_fp16_ncdhw_3dd3d0",
+          "2_3_4_2_2_fp16_ncdhw_6e04c8",
+          "2_3_4_2_2_fp16_ncdhw_7b05c7",
+          "2_3_4_2_2_fp16_ndhwc_5fcf94",
+          "2_3_4_2_2_fp16_ndhwc_62affa",
+          "2_3_4_2_2_fp16_ndhwc_dd321c",
+          "2_3_4_2_2_fp16_ndhwc_deb931",
+          "2_3_4_2_2_fp32_ncdhw_11736d",
+          "2_3_4_2_2_fp32_ncdhw_499f2e",
+          "2_3_4_2_2_fp32_ncdhw_5b073a",
+          "2_3_4_2_2_fp32_ncdhw_669291",
+          "2_3_4_2_2_fp32_ncdhw_884e75",
+          "2_3_4_2_2_fp32_ncdhw_96a0fb",
+          "2_3_4_2_2_fp32_ncdhw_a0fd0f",
+          "2_3_4_2_2_fp32_ncdhw_af8d78",
+          "2_3_4_2_2_fp32_ncdhw_b476b1",
+          "2_3_4_2_2_fp32_ncdhw_cbbacb",
+          "2_3_4_2_2_fp32_ncdhw_e5e7b3",
+          "2_3_4_2_2_fp32_ncdhw_fe707b",
+          "2_3_4_2_2_fp32_ndhwc_0b8810",
+          "2_3_4_2_2_fp32_ndhwc_10f3a3",
+          "2_3_4_2_2_fp32_ndhwc_208cfd",
+          "2_3_4_2_2_fp32_ndhwc_345b96",
+          "2_3_4_2_2_fp32_ndhwc_45e0ee",
+          "2_3_4_2_2_fp32_ndhwc_5271cd",
+          "2_3_4_2_2_fp32_ndhwc_57c6b6",
+          "2_3_4_2_2_fp32_ndhwc_782ddf",
+          "2_3_4_2_2_fp32_ndhwc_85ee7a",
+          "2_3_4_2_2_fp32_ndhwc_9393bb",
+          "2_3_4_2_2_fp32_ndhwc_b1a626",
+          "2_3_4_2_2_fp32_ndhwc_d4dea2",
+          "2_3_4_4_bfp16_nchw_1e145c",
+          "2_3_4_4_bfp16_nchw_775d10",
+          "2_3_4_4_bfp16_nchw_d2b1dc",
+          "2_3_4_4_bfp16_nhwc_572c8a",
+          "2_3_4_4_bfp16_nhwc_9b8b1c",
+          "2_3_4_4_bfp16_nhwc_afb69f",
+          "2_3_4_4_fp16_nchw_401ef6",
+          "2_3_4_4_fp16_nchw_a3fd8c",
+          "2_3_4_4_fp16_nchw_e82c66",
+          "2_3_4_4_fp16_nhwc_352d92",
+          "2_3_4_4_fp16_nhwc_40b06d",
+          "2_3_4_4_fp16_nhwc_e97392",
+          "2_3_4_4_fp32_nchw_1bc14e",
+          "2_3_4_4_fp32_nchw_2683ab",
+          "2_3_4_4_fp32_nchw_356bb1",
+          "2_3_4_4_fp32_nchw_8e5295",
+          "2_3_4_4_fp32_nchw_ccec3f",
+          "2_3_4_4_fp32_nchw_d7b178",
+          "2_3_4_4_fp32_nchw_da71fd",
+          "2_3_4_4_fp32_nchw_e4c9ae",
+          "2_3_4_4_fp32_nchw_f8f537",
+          "2_3_4_4_fp32_nhwc_616b30",
+          "2_3_4_4_fp32_nhwc_694b9f",
+          "2_3_4_4_fp32_nhwc_7930cb",
+          "2_3_4_4_fp32_nhwc_b0ed3b",
+          "2_3_4_4_fp32_nhwc_cb9dae",
+          "2_3_4_4_fp32_nhwc_d7a0ea",
+          "2_3_4_4_fp32_nhwc_dc05a3",
+          "2_3_4_4_fp32_nhwc_e373e1",
+          "2_3_4_4_fp32_nhwc_f30238"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

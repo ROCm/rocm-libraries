@@ -249,4 +249,14 @@ struct formatter<rocsolver_logvalue<rocsolver_norm_type>> : formatter<char>
     }
 };
 
+template <>
+struct formatter<rocsolver_logvalue<rocsolver_cholqr_shift>> : formatter<char>
+{
+    template <typename FormatCtx>
+    auto format(rocsolver_logvalue<rocsolver_cholqr_shift> wrapper, FormatCtx& ctx) ROCSOLVER_FMT_CONST
+    {
+        return formatter<char>::format(rocsolver::rocsolver2char_cholqr_shift(wrapper.value), ctx);
+    }
+};
+
 } // namespace

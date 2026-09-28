@@ -57,6 +57,9 @@ add_executable(
     descriptors/TestMoeGroupedMatmulOperationDescriptor.cpp
     descriptors/TestMoeGroupedMatmulOperationFromNode.cpp
     descriptors/TestGraphDescriptorMoeGroupedMatmul.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmulBwd.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
@@ -104,6 +107,7 @@ add_executable(
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
     TestGraphAndPlanSerializationApi.cpp
+    TestHipdnnBackendWriteRanking.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
@@ -119,6 +123,9 @@ add_executable(
     TestHeuristicPluginManagerValidationPaths.cpp
     TestSelectionHeuristic.cpp
     TestHeuristicPluginResourceManager.cpp
+    heuristics/TestAutotuneCacheEnv.cpp
+    heuristics/TestAutotuneCacheKey.cpp
+    heuristics/TestAutotuneRankingStore.cpp
     heuristics/TestConfigBuiltIn.cpp
     heuristics/TestDeviceProperties.cpp
     heuristics/TestEngineOverrideConfig.cpp
@@ -142,6 +149,38 @@ target_link_libraries(
     ${CMAKE_DL_LIBS}
 )
 
+# Standalone helper process for TestAutotuneRankingStore's cross-process cache cases.
+# Not a gtest binary and not registered via add_hipdnn_test(); hipdnn_backend_tests
+# spawns it and resolves it next to its own executable at runtime.
+#
+# The name ends in `_test` on purpose. TheRock packages hipDNN's test artifact by the
+# glob `bin/*hipdnn_*_test*` (ml-libs/artifact-hipdnn.toml), which requires `_test`
+# AFTER the `hipdnn_` prefix; a name that misses the glob is built but never staged, and
+# the test then fails at runtime because the helper is absent beside the test binary.
+# For the same reason the install stays uncomponented: restricting it to the development
+# component would drop it from the test artifact again.
+#
+# Only the helper's FILENAME is baked in, not $<TARGET_FILE:...>: an absolute path would
+# name the build tree, which does not exist once CI installs the test binaries and runs
+# ctest from the install prefix. This mirrors hipdnn_line_store_lock_helper_test in
+# data_sdk/tests/CMakeLists.txt, which solves the identical problem.
+add_executable(hipdnn_autotune_cross_process_helper_test heuristics/AutotuneCrossProcessHelper.cpp)
+target_link_libraries(hipdnn_autotune_cross_process_helper_test Threads::Threads hipdnn_backend_private)
+target_compile_definitions(hipdnn_autotune_cross_process_helper_test PRIVATE HIPDNN_BACKEND_COMPILATION)
+target_compile_options(hipdnn_autotune_cross_process_helper_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_target_properties(
+    hipdnn_autotune_cross_process_helper_test
+    PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+
+# The test spawns the helper, so it must exist before the test runs and ship alongside it.
+add_dependencies(hipdnn_backend_tests hipdnn_autotune_cross_process_helper_test)
+install(TARGETS hipdnn_autotune_cross_process_helper_test RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+target_compile_definitions(
+    hipdnn_backend_tests PRIVATE
+    HIPDNN_AUTOTUNE_CROSS_PROCESS_HELPER_NAME="$<TARGET_FILE_NAME:hipdnn_autotune_cross_process_helper_test>"
+)
+
 target_compile_definitions(
     hipdnn_backend_tests
     PRIVATE HIPDNN_BACKEND_COMPILATION TEST_PLUGIN1_NAME="${TEST_PLUGIN1_NAME}"
@@ -155,6 +194,8 @@ target_compile_definitions(
             TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            TEST_LYING_ENGINE_NAME_PLUGIN_NAME="${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}"
+            TEST_MISMATCHED_NAME_PLUGIN_NAME="${TEST_MISMATCHED_NAME_PLUGIN_NAME}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -226,7 +267,43 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
-# Add dependencies on heuristic test plugins (built in tests/test_plugins/)
+# A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
+# the only consumer of EnginePluginImpl.inl inside the main build; see
+# plugins/codegen_fixture/CodegenFixturePlugin.hpp for what it pins.
+#
+# It gets its own codegen_fixture/ subdirectory because ${HIPDNN_TEST_PLUGIN_DIR}
+# holds a plugin that deliberately fails to load. Output directory, install
+# destination and rpath origin all take the suffix together, otherwise the
+# isolation holds in the build tree but not in the installed tree.
+set(CODEGEN_FIXTURE_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/codegen_fixture")
+set(CODEGEN_FIXTURE_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/codegen_fixture")
+
+add_library(${TEST_ENGINE_PLUGIN1_NAME} SHARED plugins/codegen_fixture/CodegenFixturePlugin.cpp
+                                               plugins/codegen_fixture/CodegenFixturePluginPublic.cpp
+)
+target_link_libraries(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk
+                                                          hipdnn_plugin_sdk hip::host
+)
+set_target_properties(${TEST_ENGINE_PLUGIN1_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_definitions(${TEST_ENGINE_PLUGIN1_NAME} PRIVATE HIPDNN_COMPONENT_NAME="codegenFixture")
+clang_tidy_check(${TEST_ENGINE_PLUGIN1_NAME})
+add_dependencies(hipdnn_backend_tests ${TEST_ENGINE_PLUGIN1_NAME})
+
+set_target_properties(
+    ${TEST_ENGINE_PLUGIN1_NAME}
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${CODEGEN_FIXTURE_OUTPUT_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${CODEGEN_FIXTURE_INSTALL_DIR}"
+)
+
+install(TARGETS ${TEST_ENGINE_PLUGIN1_NAME} LIBRARY DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+        RUNTIME DESTINATION ${CODEGEN_FIXTURE_INSTALL_DIR}
+)
+
+# Add dependencies on test plugins built in tests/test_plugins/
 # Note: These targets are forward references - they will be created when tests/test_plugins/
 # is processed later. CMake resolves these dependencies at build time.
 add_dependencies(hipdnn_backend_tests
@@ -237,6 +314,8 @@ add_dependencies(hipdnn_backend_tests
     ${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}
     ${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}
     ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
+    ${TEST_LYING_ENGINE_NAME_PLUGIN_NAME}
+    ${TEST_MISMATCHED_NAME_PLUGIN_NAME}
 )
 
 add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})

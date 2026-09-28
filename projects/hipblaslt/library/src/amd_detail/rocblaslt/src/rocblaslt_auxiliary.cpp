@@ -44,7 +44,9 @@
 #include "UserDrivenTuningParser.hpp"
 #include "definitions.h"
 #include "handle.h"
+#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt.h"
+#include "rocblaslt_fused_a2a_validate.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocroller_host.hpp"
 #include "tensile_host.hpp"
@@ -519,7 +521,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         batchMode,
                                         bias_stride,
                                         matmul_descr->streamk_tile_scheduling_ext,
-                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
+                                        effective_sm_count_target(handle, matmul_descr, nullptr),
+                                        effective_uniform_summation_order(handle, matmul_descr)};
 
     if(scaleAlphaVec)
     {
@@ -529,6 +532,13 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
         setTo1(matmul_descr->compute_type, (void*)problem.alpha_owned.data(), &alphaTmp);
         problem.alpha = alphaTmp;
     }
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    problem.fused_epilogue      = matmul_descr->fused_epilogue;
+    problem.fused_a2a_world     = handle ? handle->device_comm_world : 0;
+    problem.fused_a2a_rank      = handle ? handle->device_comm_rank : 0;
+    problem.fused_a2a_peer_flag = handle ? handle->device_comm_peer_flags : nullptr;
+#endif
 
     return problem;
 }
@@ -635,6 +645,48 @@ rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
     }
     *sm_count_target = handle->sm_count_target;
     log_api(__func__, "handle", handle, "sm_count_target", *sm_count_target);
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Set the handle-level uniform-summation-order request.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_set_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t          uniform_summation_order)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(uniform_summation_order < 0 || uniform_summation_order > 1)
+    {
+        log_error(__func__, "invalid uniform_summation_order", uniform_summation_order);
+        return rocblaslt_status_invalid_value;
+    }
+    log_api(__func__, "handle", handle, "uniform_summation_order", uniform_summation_order);
+    handle->uniform_summation_order = uniform_summation_order;
+    return rocblaslt_status_success;
+}
+
+/********************************************************************************
+ * \brief Get the handle-level uniform-summation-order request.
+ *******************************************************************************/
+rocblaslt_status rocblaslt_get_uniform_summation_order(rocblaslt_handle handle,
+                                                       int32_t*         uniform_summation_order)
+{
+    if(handle == nullptr)
+    {
+        log_error(__func__, "handle", handle);
+        return rocblaslt_status_invalid_handle;
+    }
+    if(uniform_summation_order == nullptr)
+    {
+        log_error(__func__, "uniform_summation_order", uniform_summation_order);
+        return rocblaslt_status_invalid_value;
+    }
+    *uniform_summation_order = handle->uniform_summation_order;
+    log_api(__func__, "handle", handle, "uniform_summation_order", *uniform_summation_order);
     return rocblaslt_status_success;
 }
 
@@ -1473,6 +1525,43 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
+                if(sizeof(int32_t) <= sizeInBytes)
+                {
+                    int32_t requested = 0;
+                    memcpy(&requested, buf, sizeof(int32_t));
+                    if(requested < 0 || requested > 1)
+                    {
+                        log_error(__func__,
+                                  "invalid uniform_summation_order value",
+                                  requested);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matmulDesc->uniform_summation_order = requested;
+                }
+                else
+                {
+                    log_error(__func__, "invalid uniform_summation_order buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                // Stored as a non-owning handle. The stage-level validation lives in the
+                // hipBLASLt C-API layer, which is where the descriptor's contents are visible.
+                if(sizeof(const hipblasLtFusedEpilogueDescriptor*) <= sizeInBytes)
+                {
+                    const hipblasLtFusedEpilogueDescriptor* fused = nullptr;
+                    memcpy(&fused, buf, sizeof(fused));
+                    matmulDesc->fused_epilogue = fused;
+                }
+                else
+                {
+                    log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+#endif
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1810,6 +1899,28 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 memcpy(buf, &matmulDesc->streamk_tile_scheduling_ext, sizeof(int32_t));
                 break;
+            case ROCBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid uniform_summation_order buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->uniform_summation_order, sizeof(int32_t));
+                break;
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+            case ROCBLASLT_MATMUL_DESC_FUSED_EPILOGUE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(const hipblasLtFusedEpilogueDescriptor*);
+                if(sizeInBytes < sizeof(const hipblasLtFusedEpilogueDescriptor*))
+                {
+                    log_error(__func__, "invalid fused_epilogue buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->fused_epilogue, sizeof(matmulDesc->fused_epilogue));
+                break;
+#endif
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -2170,6 +2281,24 @@ rocblaslt_status
         auto prob = construct_rocblaslt_problem(
             handle, matmul_desc, matA, matB, matC, matD, &alpha, &beta, pref->max_workspace_bytes);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            return gate;
+        }
+
+        // No match, not an error: the heuristic reports zero algos.
+        if(fused_a2a_lacks_sdma_queues(prob))
+        {
+            if(dummy_bias_address)
+                matmul_desc->bias = nullptr;
+            *returnAlgoCount = 0;
+            return rocblaslt_status_success;
+        }
+#endif
+
         OverrideSingleton& override         = OverrideSingleton::getInstance();
         bool               override_success = false;
         if(override.env_mode)
@@ -2417,6 +2546,7 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
+                                     const bool             uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results)
 {
@@ -2438,6 +2568,10 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
+    applyUniformSummationOrder(gemmData,
+                               gemmType,
+                               uniformSummationOrder
+                                   || (handle && handle->uniform_summation_order));
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -2578,6 +2712,19 @@ std::string rocblaslt_internal_get_arch_name()
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     return ArchName{}(deviceProperties);
+}
+
+// The GEMM library subtree the current device loads; folds in asicRevision, the
+// only signal telling the gfx1250 revisions apart (see rocblaslt_arch_revision.hpp).
+std::string rocblaslt_internal_get_library_arch_name()
+{
+    int deviceId = 0;
+    static_cast<void>(hipGetDevice(&deviceId));
+    // Zero-init: a failed query leaves the arch name empty, so no subtree matches.
+    hipDeviceProp_t deviceProperties{};
+    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
+    const int asicRevision = deviceProperties.asicRevision;
+    return rocblaslt_revisioned_arch_name(ArchName{}(deviceProperties), asicRevision);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)

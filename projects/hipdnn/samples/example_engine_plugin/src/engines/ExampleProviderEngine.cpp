@@ -10,8 +10,9 @@
 namespace example_provider
 {
 
-ExampleProviderEngine::ExampleProviderEngine(int64_t id)
+ExampleProviderEngine::ExampleProviderEngine(int64_t id, std::string_view name)
     : _id(id)
+    , _name(name)
 {
 }
 
@@ -63,8 +64,16 @@ void ExampleProviderEngine::getDetails(
     }
 
     auto knobs = builder.CreateVector(knobsVector);
+
+    // An unnamed engine leaves the field unset rather than writing an empty string.
+    flatbuffers::Offset<flatbuffers::String> name;
+    if(!_name.empty())
+    {
+        name = builder.CreateString(_name);
+    }
+
     auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs, {}, name);
     builder.Finish(engineDetails);
 
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

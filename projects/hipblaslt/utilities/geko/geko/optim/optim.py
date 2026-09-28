@@ -22,7 +22,6 @@ import subprocess
 import re
 import shutil
 import time
-import yaml
 import pandas as pd
 
 import logging
@@ -30,7 +29,7 @@ import logging
 logger = logging.getLogger("GEKO")
 
 from pathlib import Path
-from typing import List, Sequence, Union
+from typing import List, Sequence, Union, Tuple
 from threading import Lock
 from dataclasses import dataclass
 
@@ -126,9 +125,10 @@ def configure(
     gemm_configs: Union[GemmConfig, Sequence[GemmConfig]],
     output_dir: str | Path,
     arch: str = "gfx950",
-    backend: str = "ductile"
+    backend: str = "ductile",
+    search_space: str | None = None,
 ) -> dict:
-    """Generate Tensile optimization configuration for one or more GEMM types.
+    """Generate tuning YAML configs for one or more GEMM types.
 
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via
@@ -143,9 +143,10 @@ def configure(
         output_dir (str | Path): Output directory for generated config files.
         arch (str, optional): Target GPU architecture (gfx-style string written
             into config["ARCH"]). Defaults to "gfx950".
-        backend (str, optional): tensilelite backend; "ductile" (GA) or
-            "tensile" (sets config["GA"] accordingly). Defaults to
-            "ductile".
+        backend (str, optional): "ductile" or "tensile". 
+            Defaults to "ductile".
+        search_space (str, optional): "heuristic", "generic", or None 
+            (auto-inferred from backend).
 
     Returns:
         dict: The fully populated config dict (after defaults and the
@@ -171,7 +172,8 @@ def configure(
 
     config: dict = {
         "ARCH": arch,
-        "GA": backend.lower() == "ductile",
+        "backend": backend.lower(),
+        "search_space": search_space,
     }
     config["GemmProblems"] = gcs
 
@@ -361,6 +363,8 @@ def analyze(
     output_dir: str | Path,
     benchmark_dir: str | Path = Path("benchmarks"),
     custom_lib_dir: str | Path = Path("build"),
+    ref_custom_lib_dir: str | Path | None = None,
+    match_table_path: str | Path | None = None,
     devices: Sequence[int] | None = None,
     error_thr: float = 0.03,
     up_thr: float = 1.03,
@@ -370,7 +374,7 @@ def analyze(
     verify: bool = True,
     bench_freq: bool = False,
     device: int | None = None,
-) -> pd.DataFrame | None:
+) -> Tuple[pd.DataFrame | None, pd.DataFrame]:
     """Benchmark and analyze optimized kernels against reference libraries.
 
     Compares performance of tuned kernels vs reference implementation,
@@ -384,6 +388,12 @@ def analyze(
             Defaults to "benchmarks".
         custom_lib_dir (str | Path, optional): Directory for custom library creation.
             Defaults to "build".
+        ref_custom_lib_dir (str | Path | None, optional): Optional pre-built
+            reference custom library directory for the reference benchmark pass.
+            Defaults to None.
+        match_table_path (str | Path | None, optional): Optional MatchTable.yaml
+            used by bench.compare to annotate reference lib source.
+            Defaults to None.
         devices (Sequence[int], optional): GPU device IDs used by the load
             Defaults to None, which is interpreted as [0] if not specified.
         error_thr (float, optional): Maximum acceptable numerical error threshold.
@@ -402,8 +412,8 @@ def analyze(
             If set, overrides devices.
 
     Returns:
-        pd.DataFrame | None: DataFrame with filtered kernels that meet criteria,
-            or None if no improvements found.
+        Tuple[pd.DataFrame | None, pd.DataFrame]: Tuple containing the final filtered DataFrame 
+            and the full DataFrame with winner column.
 
     Note:
         - Creates raw_results.csv with all benchmark data.
@@ -420,6 +430,8 @@ def analyze(
         hipblaslt_path,
         lib_dir,
         custom_lib_dir=custom_lib_dir,
+        ref_custom_lib_dir=ref_custom_lib_dir,
+        match_table_path=match_table_path,
         benchmark_dir=benchmark_dir,
         verify=verify,
         cache=True,
@@ -480,9 +492,12 @@ def analyze(
     if stats["e2e"].get("e2e_uplift_pct") is not None:
         logger.info(f"Weighted GEMM uplift of {stats['e2e']['e2e_uplift_pct']:.4f}%")
 
+    df["winner"] = "reference"
+    df.loc[mask, "winner"] = "tuned"
+    df = df.drop("valid", axis=1, errors="ignore")
     if mask.sum() == 0:
         logger.info(f"No kernels improve over the base library")
-        return None
+        return None, df
 
     final_enriched.drop(["valid", "lib"], axis=1, errors="ignore").to_csv(
         output_dir / "final_results.csv", index=False
@@ -493,4 +508,4 @@ def analyze(
         output_dir / "dashboard_data.csv", index=False
     )
 
-    return final_df.drop("valid", axis=1, errors="ignore")
+    return final_df.drop("valid", axis=1, errors="ignore"), df

@@ -408,7 +408,7 @@ rocsparse::csric0_kernel_launch_t rocsparse::find_csric0_kernel_binsearch_launch
 {
 
     const bool sleep
-        = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
+        = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908 && //
            handle->asic_rev < 2);
 
     if(sleep)

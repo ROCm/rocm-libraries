@@ -572,7 +572,7 @@ inline __device__ void naive_conv_wrw_nchw(const src_data_t* __restrict__ p_in,
     }
 }
 
-// design block_size 256
+// work loops stride by blockDim.x, so any block size is valid
 
 template <bool ASSUME_PACKED,
           typename src_data_t,
@@ -1059,7 +1059,7 @@ inline __device__ void naive_conv_wrw_ncdhw(const src_data_t* __restrict__ p_in,
 }
 
 /***************************** nhwc *****************************/
-// design block_size 256
+// work loops stride by blockDim.x, so any block size is valid
 
 template <bool ASSUME_PACKED,
           typename src_data_t,
@@ -1292,9 +1292,13 @@ inline __device__ void naive_conv_bwd_nhwc(dst_data_t* __restrict__ p_in,
                 cur_wo /= sx;
                 if(cur_wo >= wo)
                     valid_w &= 0;
-                for(int ik = 0; ik < k_per_group; ik++)
+                // Keep this guard outside the ik loop. It does not depend on ik, and leaving it
+                // inside costs an exec save/restore and two extra branches on every iteration,
+                // splitting the loop across three basic blocks. Hoisting it also skips the loop
+                // entirely for a filter position that reaches no output pixel.
+                if(valid_h & valid_w)
                 {
-                    if(valid_h & valid_w)
+                    for(int ik = 0; ik < k_per_group; ik++)
                     {
                         if constexpr(ASSUME_PACKED)
                         {
@@ -1487,7 +1491,7 @@ inline __device__ void naive_conv_wrw_nhwc(const src_data_t* __restrict__ p_in,
     }
 }
 
-// design block_size 256
+// work loops stride by blockDim.x, so any block size is valid
 
 template <bool ASSUME_PACKED,
           typename src_data_t,
@@ -2264,12 +2268,14 @@ DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, float, double, float, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, float, double, float, 1)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, half, double, half, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, ushort, double, ushort, 0)
+DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, int8_t, int32_t, int8_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, int8_t, int32_t, int32_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ncdhw, int8_t, int32_t, float, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, float, double, float, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, float, double, float, 1)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, half, double, half, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, ushort, double, ushort, 0)
+DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, int8_t, int32_t, int8_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, int8_t, int32_t, int32_t, 0)
 DEFINE_3D_NAIVE_CONV_KERNEL(fwd, ndhwc, int8_t, int32_t, float, 0)
 

@@ -39,24 +39,16 @@ from kernels import UnifiedAttentionProblem
 
 
 def _patch_arch(arch: str):
-    """Pin _resolve_attention_arch in every module that imports it by name."""
-    patches = [mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)]
-    if getattr(_asb, "_resolve_attention_arch", None) is not None:
-        patches.append(
-            mock.patch.object(_asb, "_resolve_attention_arch", return_value=arch)
-        )
+    """Pin ``_resolve_attention_arch`` on the module that defines it.
 
-    class _Multi:
-        def __enter__(self):
-            for p in patches:
-                p.start()
-            return self
-
-        def __exit__(self, *exc):
-            for p in reversed(patches):
-                p.stop()
-
-    return _Multi()
+    That is sufficient because the spec builder reaches the resolver through its
+    ``attention_unified`` module handle -- a bound import there would freeze the
+    reference and silently leave the builder on the real device arch, so these
+    cases would test the host, not ``arch``. That invariant is pinned, statically
+    and behaviourally, by ``test_arch_binding_guard.py``; it is not re-asserted
+    here.
+    """
+    return mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)
 
 
 def _spec(problem: UnifiedAttentionProblem, arch: str = "gfx950") -> dict:
@@ -123,7 +115,9 @@ def _combo_prob(**overrides) -> UnifiedAttentionProblem:
 
 
 class TestEnableCombo2d(unittest.TestCase):
-    """_enable_combo_2d fires only for the exact gfx950+bf16+d64/b32+GQA-8+S>256 cohort."""
+    """_enable_combo_2d fires for the gfx950 d64/b32/GQA-8/S>256 cohort: bf16
+    (sinks or not), or fp16 only when use_sinks (the fp16 widening was measured
+    on sink prefill)."""
 
     _BIAS_BUG = (
         "PR #9220: Python _enable_combo_2d missing bias guard (C++ still refuses bias)"
@@ -149,8 +143,13 @@ class TestEnableCombo2d(unittest.TestCase):
     def test_softcap_blocks_combo(self):
         self.assertFalse(self._gate(_combo_prob(softcap=50.0)), self._BIAS_BUG)
 
-    def test_fp16_blocks_combo(self):
+    def test_fp16_no_sinks_blocks_combo(self):
+        # fp16 combo is sink-prefill only; non-sink fp16 stays off the combo path.
         self.assertFalse(self._gate(_combo_prob(dtype="fp16")))
+
+    def test_fp16_sinks_enables_combo(self):
+        # fp16 + sinks is the one fp16 shape the widening admits to combo.
+        self.assertTrue(self._gate(_combo_prob(dtype="fp16", use_sinks=True)))
 
     def test_wrong_head_size_blocks_combo(self):
         self.assertFalse(self._gate(_prob(128, 32, 64, 8)))
@@ -338,16 +337,14 @@ class TestSingleBatchCombo(unittest.TestCase):
         self.assertFalse(s["use_early_v_schedule"])
         self.assertTrue(s["use_v_double_buffer"])
 
-    def test_single_batch_d128_no_v_schedule(self):
-        # d128 single-batch now triggers softmax-MFMA interleave (PR #9403)
-        # which sets num_warps=4 → block_m=128. Combined with use_k_single_buffer
-        # and tile_size=64, this violates "block_m <= tile_size" until
-        # use_q_direct_reg is wired for this path.
-        with self.assertRaises(ValueError) as ctx:
-            _spec(_prob(128, 32, 32, 32, num_seqs=1, max_seqlen_q=512))
-        self.assertIn(
-            "use_k_single_buffer requires block_m <= tile_size", str(ctx.exception)
-        )
+    def test_single_batch_d128_ksingle_off_not_raise(self):
+        # d128 single-batch triggers the softmax-MFMA interleave -> num_warps=4
+        # (block_m=128). With tile_size=64 the geometry guard block_m <= tile_size
+        # fails, so _enable_k_single_buffer derives K-single OFF and the spec
+        # BUILDS (previously the stale block_size>=32 proxy left K-single ON here,
+        # raising an uncaught ValueError at spec build).
+        s = _spec(_prob(128, 32, 32, 32, num_seqs=1, max_seqlen_q=512))
+        self.assertFalse(s["use_k_single_buffer"])
 
 
 # ---------------------------------------------------------------------------

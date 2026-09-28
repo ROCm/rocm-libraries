@@ -20,6 +20,10 @@
 #include "LayernormGraphUtils.hpp"
 #include "LayernormTensorBundles.hpp"
 #include "MatmulGraphUtils.hpp"
+#include "MoeGroupedMatmulBwdGraphUtils.hpp"
+#include "MoeGroupedMatmulBwdTensorBundles.hpp"
+#include "MoeGroupedMatmulGraphUtils.hpp"
+#include "MoeGroupedMatmulTensorBundles.hpp"
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 #include "RMSNormGraphUtils.hpp"
@@ -35,6 +39,9 @@
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmul.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceMoeGroupedMatmulBwd.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleBwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceResampleFwd.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
@@ -275,6 +282,123 @@ public:
             serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
+    template <typename InputType, typename OutputType, typename ComputeType>
+    static void
+        runMoeGroupedMatmulTest(hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode mode,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType,
+                                hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        using MoeMode = hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode;
+        const unsigned int seed = getGlobalTestSeed();
+
+        constexpr int64_t EXPERTS = 2;
+        constexpr int64_t HIDDEN_K = 3;
+        constexpr int64_t WEIGHT_N = 4;
+        constexpr int64_t TOKEN_ROWS = 6;
+        const int64_t routedRows = (mode == MoeMode::GATHER) ? 7 : TOKEN_ROWS;
+        const int32_t topK = (mode == MoeMode::SCATTER) ? 2 : 0;
+
+        MoeGroupedMatmulTensorBundle<InputType> execBundle(
+            EXPERTS, HIDDEN_K, WEIGHT_N, TOKEN_ROWS, routedRows, mode, topK, seed);
+        MoeGroupedMatmulTensorBundle<InputType> directBundle(
+            EXPERTS, HIDDEN_K, WEIGHT_N, TOKEN_ROWS, routedRows, mode, topK, seed);
+
+        auto graphTuple = buildMoeGroupedMatmulGraph(
+            execBundle, inputDataType, outputDataType, computeDataType);
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        // The bundle's own output buffer is always InputType; when OutputType
+        // differs (HALF/FLOAT, BFLOAT16/FLOAT), wire a correctly-typed buffer in
+        // its place instead.
+        Tensor<OutputType> execOutput(execBundle.outputTensor.dims(),
+                                      execBundle.outputTensor.strides());
+        variantPack[6] = execOutput.memory().hostData();
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+        executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        Tensor<OutputType> directOutput(directBundle.outputTensor.dims(),
+                                        directBundle.outputTensor.strides());
+        CpuFpReferenceMoeGroupedMatmul::forward<InputType, InputType, OutputType, ComputeType>(
+            directBundle.tokenTensor,
+            directBundle.weightTensor,
+            directBundle.firstTokenOffsetTensor,
+            directOutput,
+            mode,
+            topK,
+            directBundle.tokenIndexTensor.has_value() ? &(*directBundle.tokenIndexTensor) : nullptr,
+            directBundle.tokenKsTensor.has_value() ? &(*directBundle.tokenKsTensor) : nullptr);
+
+        const CpuFpReferenceValidation<OutputType> validator(0.0F, 0.0F);
+        EXPECT_TRUE(validator.allClose(directOutput, execOutput));
+    }
+
+    template <typename InputType, typename DweightType, typename ComputeType>
+    static void
+        runMoeGroupedMatmulBwdTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType,
+                                   bool rowMajorDweight = false)
+    {
+        constexpr int64_t EXPERTS = 2;
+        constexpr int64_t HIDDEN_K = 3;
+        constexpr int64_t OUTPUT_N = 4;
+        constexpr int64_t TOKEN_ROWS = 8;
+
+        const unsigned int seed = getGlobalTestSeed();
+
+        // Column-major is only the layout the node infers for an unset dweight, not a
+        // requirement of the operation. Running the executor through a row-major dweight
+        // while the direct reference keeps the column-major default makes the comparison
+        // below cross-layout: allClose() indexes logically, so the values have to land in
+        // the same logical positions either way.
+        const std::vector<int64_t> execDweightStrides
+            = rowMajorDweight ? generateStrides({EXPERTS, HIDDEN_K, OUTPUT_N})
+                              : std::vector<int64_t>{};
+
+        // Two bundles from the same seed: the executor writes through the first
+        // one's buffers, leaving the second with pristine inputs for the direct
+        // reference call.
+        MoeGroupedMatmulBwdTensorBundle<InputType, DweightType> execBundle(
+            EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed, execDweightStrides);
+        MoeGroupedMatmulBwdTensorBundle<InputType, DweightType> directBundle(
+            EXPERTS, HIDDEN_K, OUTPUT_N, TOKEN_ROWS, seed);
+
+        auto graphTuple = buildMoeGroupedMatmulBwdGraph(execBundle, inputDataType, computeDataType);
+
+        auto& graph = std::get<0>(graphTuple);
+        auto& variantPack = std::get<1>(graphTuple);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+        CpuReferenceGraphExecutor executor;
+        ASSERT_TRUE(executor.isApplicable(serializedGraph.data(), serializedGraph.size()));
+        executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        CpuFpReferenceMoeGroupedMatmulBwd::backward<InputType, InputType, DweightType, ComputeType>(
+            directBundle.doutputTensor,
+            directBundle.tokenTensor,
+            directBundle.firstTokenOffsetTensor,
+            directBundle.dweightTensor);
+
+        // Both sides run the same deterministic reference code over identical
+        // seeded inputs, so the comparison is bit-exact.
+        const CpuFpReferenceValidation<DweightType> validator(0.0F, 0.0F);
+        EXPECT_TRUE(validator.allClose(directBundle.dweightTensor, execBundle.dweightTensor));
+    }
+
     static void
         runLayernormTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                          hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
@@ -309,7 +433,8 @@ public:
     }
 
     static void runLayernormBackwardTest(
-        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType dxDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
         hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
@@ -317,7 +442,8 @@ public:
         const unsigned int seed = getGlobalTestSeed();
         const std::vector<int64_t> dims = {1, 3, 14, 14};
 
-        auto graph = buildLayernormBpropGraph(inputDataType,
+        auto graph = buildLayernormBpropGraph(dyDataType,
+                                              dxDataType,
                                               scaleBiasDataType,
                                               meanInvVarianceDataType,
                                               computeDataType,
@@ -443,6 +569,62 @@ public:
             EXPECT_EQ(indexTensor.memory().hostData()[2], directIndexTensor.memory().hostData()[2]);
             EXPECT_EQ(indexTensor.memory().hostData()[3], directIndexTensor.memory().hostData()[3]);
         }
+    }
+
+    static void runResampleBwdTest(hipdnn_flatbuffers_sdk::data_objects::ResampleMode resampleMode)
+    {
+        auto builder = createValidResampleBwdGraph(true, resampleMode);
+        const GraphWrapper graphWrapper(builder.GetBufferPointer(), builder.GetSize());
+
+        Tensor<float> dyTensor({1, 1, 2, 2});
+        Tensor<float> directDyTensor({1, 1, 2, 2});
+        Tensor<float> dxTensor({1, 1, 4, 4});
+        Tensor<float> directDxTensor({1, 1, 4, 4});
+
+        for(size_t i = 0; i < dyTensor.elementCount(); ++i)
+        {
+            const auto val = static_cast<float>(i + 1);
+            dyTensor.memory().hostData()[i] = val;
+            directDyTensor.memory().hostData()[i] = val;
+        }
+        dyTensor.memory().markHostModified();
+        directDyTensor.memory().markHostModified();
+
+        Tensor<int32_t> indexTensor({1, 1, 2, 2});
+        Tensor<int32_t> directIndexTensor({1, 1, 2, 2});
+
+        const std::unordered_map<int64_t, void*> variantPack{{1, dyTensor.memory().hostData()},
+                                                             {2, dxTensor.memory().hostData()},
+                                                             {3, indexTensor.memory().hostData()}};
+
+        if(resampleMode == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+        {
+            // maxpool indices with a 2x2 window on a 4x4 input of linear elements
+            const std::vector<int32_t> sampleIndices = {5, 7, 13, 15};
+            for(size_t i = 0; i < sampleIndices.size(); ++i)
+            {
+                indexTensor.memory().hostData()[i] = sampleIndices[i];
+                directIndexTensor.memory().hostData()[i] = sampleIndices[i];
+            }
+
+            indexTensor.memory().markHostModified();
+            directIndexTensor.memory().markHostModified();
+        }
+
+        CpuReferenceGraphExecutor().execute(
+            builder.GetBufferPointer(), builder.GetSize(), variantPack);
+
+        CpuFpReferenceResampleBwd::backward<float>(directDyTensor,
+                                                   directDxTensor,
+                                                   {0, 0},
+                                                   {2, 2},
+                                                   {2, 2},
+                                                   resampleMode,
+                                                   PaddingMode::ZERO_PAD,
+                                                   &directIndexTensor);
+
+        const CpuFpReferenceValidation<float> validator(0.0f, 0.0f);
+        EXPECT_TRUE(validator.allClose(directDxTensor, dxTensor));
     }
 
 #ifdef HIPDNN_ENABLE_SDPA
@@ -626,6 +808,155 @@ TEST(TestCpuReferenceGraphExecutor, MatmulAllBFloat16)
                                                                   DataType::FLOAT);
 }
 
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, float, float>(
+        MoeGroupedMatmulMode::NONE, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<half, half, float>(
+        MoeGroupedMatmulMode::NONE, DataType::HALF, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, bfloat16, float>(
+        MoeGroupedMatmulMode::NONE, DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneHalfInputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<half, float, float>(
+        MoeGroupedMatmulMode::NONE, DataType::HALF, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneBFloat16InputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, float, float>(
+        MoeGroupedMatmulMode::NONE, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, half, float>(
+        MoeGroupedMatmulMode::NONE, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulNoneFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
+        MoeGroupedMatmulMode::NONE, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, float, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<half, half, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::HALF, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, bfloat16, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherHalfInputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<half, float, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::HALF, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherBFloat16InputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, float, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, half, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulGatherFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
+        MoeGroupedMatmulMode::GATHER, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, float, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<half, half, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::HALF, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, bfloat16, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterHalfInputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<half, float, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::HALF, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterBFloat16InputFloatOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<bfloat16, float, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterFloatInputHalfOutput)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, half, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::FLOAT, DataType::HALF, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulScatterFloatInputBFloat16Output)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulTest<float, bfloat16, float>(
+        MoeGroupedMatmulMode::SCATTER, DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, float, float>(DataType::FLOAT,
+                                                                                   DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<half, half, float>(DataType::HALF,
+                                                                                 DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<bfloat16, bfloat16, float>(
+        DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdHalfInputFloatDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<half, float, float>(DataType::HALF,
+                                                                                  DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdBFloat16InputFloatDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<bfloat16, float, float>(
+        DataType::BFLOAT16, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdFloatInputHalfDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, half, float>(DataType::FLOAT,
+                                                                                  DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdFloatInputBFloat16Dweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, bfloat16, float>(
+        DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, MoeGroupedMatmulBwdRowMajorDweight)
+{
+    TestCpuReferenceGraphExecutor::runMoeGroupedMatmulBwdTest<float, float, float>(
+        DataType::FLOAT, DataType::FLOAT, /*rowMajorDweight=*/true);
+}
+
 TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
 {
     const std::vector<int64_t> inputDims = {1, 3, 2, 2};
@@ -722,17 +1053,20 @@ TEST(TestCpuReferenceGraphExecutor, LayernormAllBFloat16)
 TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllFloats)
 {
     TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 }
 TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllHalfs)
 {
     TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
-        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
 }
 TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllBFloat16)
 {
-    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
-        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(DataType::BFLOAT16,
+                                                            DataType::BFLOAT16,
+                                                            DataType::BFLOAT16,
+                                                            DataType::BFLOAT16,
+                                                            DataType::BFLOAT16);
 }
 
 TEST(TestCpuReferenceGraphExecutor, RMSNormAllFloats)
@@ -776,6 +1110,24 @@ TEST(TestCpuReferenceGraphExecutor, ResampleFwdAllFloats)
 TEST(TestCpuReferenceGraphExecutor, ResampleFwdWithIndexAllFloats)
 {
     TestCpuReferenceGraphExecutor::runResampleFwdTest(true);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ResampleBwdMaxpool)
+{
+    TestCpuReferenceGraphExecutor::runResampleBwdTest(
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ResampleBwdAvgExcludePadding)
+{
+    TestCpuReferenceGraphExecutor::runResampleBwdTest(
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ResampleBwdAvgIncludePadding)
+{
+    TestCpuReferenceGraphExecutor::runResampleBwdTest(
+        hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING);
 }
 
 #ifdef HIPDNN_ENABLE_SDPA

@@ -28,6 +28,7 @@ import pandas as pd
 from geko import bench, library, logger, optim, search, _set_log_level
 from geko.config_generator.load_input_config import gemm_configs_from_gemm_dataframe
 from geko.bench.utils import update_lib_source
+from geko.config_generator.constants import VALID_BACKENDS
 from geko.constants import SUPPORTED_ARCH
 from geko.schemas import GemmConfig, RunState
 from geko.utils import parse_devices
@@ -71,6 +72,8 @@ def run_bench(
     benchmark_duration: float = 0.5,
     bench_freq: bool = False,
     device: int | None = None,
+    custom_lib_src: str | Path | None = None,
+    custom_lib_dir: str | Path | None = None,
 ) -> int:
     """Summarize a workload log into output_dir (benchmark path only; no tuning).
 
@@ -85,6 +88,11 @@ def run_bench(
         benchmark_duration: Target seconds per cold and per timed phase for standard_benchmark.
         bench_freq: Passed to bench.standard_benchmark (HIPBLASLT_BENCH_FREQ).
         device: Backward-compatible single-device alias. If set, overrides devices.
+        custom_lib_src: Optional source library directory to build into
+            output_dir/ref_build and use as reference custom library.
+        custom_lib_dir: Optional pre-built custom library directory. If both
+            custom_lib_src and custom_lib_dir are provided, this one takes
+            precedence.
 
     Returns:
         0 on success; 1 if hipBLASLt or workload path is missing (logged).
@@ -106,20 +114,44 @@ def run_bench(
         devices = [0]  # Default to device 0 if not specified
     devices = parse_devices(devices)
 
+    if custom_lib_src is not None and custom_lib_dir is not None:
+        logger.warning(
+            "Both custom_lib_src and custom_lib_dir were provided; "
+            "using custom_lib_dir and ignoring custom_lib_src"
+        )
+
+    if custom_lib_dir is not None:
+        custom_lib_dir = Path(custom_lib_dir)
+    elif custom_lib_src is not None:
+        custom_lib_src = Path(custom_lib_src)
+        if not custom_lib_src.is_dir():
+            logger.error(f"custom_lib_src not found: '{custom_lib_src}'")
+            return 1
+        custom_lib_dir = out / "ref_build"
+        logger.info(
+            f"Building reference custom library from '{custom_lib_src}' into '{custom_lib_dir}'"
+        )
+        library.operations.create(hip_path, custom_lib_src, custom_lib_dir)
+
     data = bench.log.update(bench.log.parse(log_path, as_df=False))[0]
     logger.info(f"Working on '{log_path}' with {len(data)} GEMMs...")
     bench_yaml = out / f"{log_path.stem}.yaml"
     bench.log.dump(data, bench_yaml)
     bench_out = bench_yaml.with_suffix(".out")
-    _ = bench.standard_benchmark(
+    df = bench.standard_benchmark(
         hip_path,
         bench_yaml,
         bench_out,
+        custom_lib_dir=custom_lib_dir,
         devices=devices,
         duration=benchmark_duration,
         bench_freq=bench_freq,
     )
     logger.info(f"Benchmark outputs under '{out.resolve()}'")
+
+    csv_path = out / f"{log_path.stem}.csv"
+    df.to_csv(csv_path, index=False)
+    logger.info(f"Benchmark results saved to '{csv_path}'")
     return 0
 
 
@@ -134,6 +166,7 @@ def run_search(
     verbose: int = 1,
     duration: float = 0.04,
     bench_freq: bool = False,
+    custom_lib_src: str | Path | None = None,
 ) -> None:
     """Run the dense search workflow end-to-end.
 
@@ -166,6 +199,9 @@ def run_search(
         bench_freq (bool, optional): Forwarded to bench.log.summarize,
             search.run, and optim.analyze (controls HIPBLASLT_BENCH_FREQ).
             Defaults to False.
+        custom_lib_src (str | Path | None, optional): Optional source library
+            directory used to build a reference custom library under
+            workdir/ref_build for analysis-time comparisons.
 
     Raises:
         FileNotFoundError: If hipblaslt_path or log_file is missing.
@@ -177,15 +213,40 @@ def run_search(
     if devices is None:
         devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
-    output_dir = workdir / "final_libs"
+    final_output_dir = workdir / "final_libs"
+    full_output_dir = workdir / "full_libs"
+    ref_custom_lib_dir = None if custom_lib_src is None else workdir / "ref_build"
 
     logger.info("Starting search...")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
     logger.info(f"Log file: '{log_file}'")
     logger.info(f"Working directory: '{workdir}'")
-    logger.info(f"Output directory: '{output_dir}'")
+    logger.info(f"Final output directory: '{final_output_dir}'")
+    logger.info(f"Full output directory: '{full_output_dir}'")
     logger.info(f"Keep threshold: {keep_thr}")
     logger.info(f"Performance threshold: {up_thr}")
+
+    match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
+    if custom_lib_src is not None:
+        custom_lib_src = Path(custom_lib_src)
+        if not custom_lib_src.is_dir():
+            raise FileNotFoundError(f"custom_lib_src not found: '{custom_lib_src}'")
+
+        logger.info(
+            f"Building reference custom library from '{custom_lib_src}' into '{ref_custom_lib_dir}'"
+        )
+        library.operations.create(hipblaslt_path, custom_lib_src, ref_custom_lib_dir)
+
+        cwd_match_table = Path.cwd() / "MatchTable.yaml"
+        if not cwd_match_table.is_file():
+            raise FileNotFoundError(
+                f"Expected MatchTable.yaml in current working directory '{Path.cwd()}' "
+                "after building reference custom library"
+            )
+
+        match_table_path = workdir / "ref_matchtable.yaml"
+        shutil.copyfile(cwd_match_table, match_table_path)
+        logger.info(f"Copied reference MatchTable to '{match_table_path}'")
 
     summary_df, uniq_df = bench.log.summarize(
         hipblaslt_path,
@@ -195,6 +256,7 @@ def run_search(
         keep_thr=keep_thr,
         cache=True,
         bench_freq=bench_freq,
+        custom_lib_dir=ref_custom_lib_dir,
     )
     if uniq_df.empty:
         logger.warning("No GEMM operations found after filtering. Consider lowering keep_thr")
@@ -214,6 +276,7 @@ def run_search(
         hipblaslt_path,
         configs,
         workdir / "search",
+        custom_lib_dir=ref_custom_lib_dir,
         devices=devices,
         bench_freq=bench_freq,
     )
@@ -238,23 +301,26 @@ def run_search(
 
     winners.to_csv(winners_file, index=False)
 
-    match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
     libs = library.operations.extract_solutions(winners, match_table_path)
     libs.dump(lib_dir)
     logger.info(f"Extracted library available in: '{lib_dir}'")
 
     if results_dir.is_dir():
         shutil.rmtree(results_dir)
-    if output_dir.is_dir():
-        shutil.rmtree(output_dir)
+    if final_output_dir.is_dir():
+        shutil.rmtree(final_output_dir)
+    if full_output_dir.is_dir():
+        shutil.rmtree(full_output_dir)
 
     logger.info("Analyzing results...")
-    res = optim.analyze(
+    res, full_df = optim.analyze(
         hipblaslt_path,
         lib_dir,
         results_dir,
         benchmark_dir=benchmarks_dir,
         custom_lib_dir=custom_lib_dir,
+        ref_custom_lib_dir=ref_custom_lib_dir,
+        match_table_path=match_table_path,
         devices=devices,
         up_thr=up_thr,
         verify=False,
@@ -264,8 +330,16 @@ def run_search(
 
     if res is not None:
         logger.info("Creating remapped libraries...")
-        library.from_dataframe(res, lib_dir).dump(output_dir)
-        logger.info(f"Final remapped library available in: '{output_dir}'")
+        library.from_dataframe(res, lib_dir, type_override="Equality").dump(final_output_dir)
+        logger.info(f"Final remapped library available in: '{final_output_dir}'")
+
+    logger.info("Creating full optimized libraries...")
+    library.from_full_dataframe(
+        full_df, lib_dir, 
+        match_table_path,
+        type_override="Equality"
+    ).dump(full_output_dir)
+    logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
     logger.info("Search workflow completed successfully!")
     state.optimized = True
@@ -279,6 +353,7 @@ def run_configure(
     keep_thr: float = 0,
     arch: str = "gfx950",
     backend: str = "ductile",
+    search_space: str | None = None,
     workdir: str = "workdir",
     verbose: int = 1,
     bench_freq: bool = False,
@@ -297,6 +372,7 @@ def run_configure(
         keep_thr: Minimum grouped % of total time to keep a GEMM row.
         arch: Target gfx string in constants.SUPPORTED_ARCH.
         backend: "ductile" or "tensile".
+        search_space: "heuristic", "generic", or None (auto from backend).
         workdir: Created if missing; holds run_state.json and outputs above.
         verbose: Logger level via _set_log_level.
         bench_freq: Forwarded to bench.log.summarize when keep_thr > 0
@@ -324,8 +400,8 @@ def run_configure(
     if arch not in SUPPORTED_ARCH:
         raise ValueError(f"Must be one of {SUPPORTED_ARCH}")
 
-    if backend.lower() not in ("ductile", "tensile"):
-        raise ValueError("'backend' must be one of ('ductile', 'tensile')")
+    if backend.lower() not in VALID_BACKENDS:
+        raise ValueError(f"'backend' must be one of {VALID_BACKENDS}")
 
     hipblaslt_path, log_file, workdir, state, state_path = _prepare_workflow_context(
         hipblaslt_path, log_file, workdir, verbose
@@ -337,6 +413,7 @@ def run_configure(
     logger.info(f"Backend: '{backend}'")
     logger.info(f"Working directory: '{workdir}'")
     logger.info(f"Keep threshold: {keep_thr}")
+    logger.info(f"Search space: {search_space}")
 
     _, uniq_df = bench.log.summarize(
         hipblaslt_path,
@@ -365,6 +442,7 @@ def run_configure(
         tuning_dir,
         arch=arch,
         backend=backend,
+        search_space=search_space,
     )
     n_configs = len(gemm_configs)
 
@@ -431,12 +509,14 @@ def run_optimize(
     if devices is None:
         devices = list(range(8))  # Default to all 8 devices if not specified
     devices = parse_devices(devices)
-    output_dir = workdir / "final_libs"
+    final_output_dir = workdir / "final_libs"
+    full_output_dir = workdir / "full_libs"
 
     logger.info("Starting optimization phase...")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
     logger.info(f"Working directory: '{workdir}'")
-    logger.info(f"Output directory: '{output_dir}'")
+    logger.info(f"Final output directory: '{final_output_dir}'")
+    logger.info(f"Full output directory: '{full_output_dir}'")
     logger.info(f"Devices: {devices}")
     logger.info(f"Jobs per device: {n_slots}")
     logger.info(f"Performance threshold: {up_thr}")
@@ -501,13 +581,15 @@ def run_optimize(
     if results_dir.is_dir():
         shutil.rmtree(results_dir)
 
-    if output_dir.is_dir():
-        shutil.rmtree(output_dir)
+    if final_output_dir.is_dir():
+        shutil.rmtree(final_output_dir)
+    if full_output_dir.is_dir():
+        shutil.rmtree(full_output_dir)
 
     log_summary = workdir / "summary.csv"
 
     logger.info("Analyzing results...")
-    res = optim.analyze(
+    res, full_df = optim.analyze(
         hipblaslt_path,
         lib_dir,
         results_dir,
@@ -527,8 +609,18 @@ def run_optimize(
 
     if res is not None:
         logger.info("Creating optimized libraries...")
-        library.from_dataframe(res, lib_dir, type_override="Equality").dump(output_dir)
-        logger.info(f"Final optimized library available in: '{output_dir}'")
+        library.from_dataframe(res, lib_dir, type_override="Equality").dump(final_output_dir)
+        logger.info(f"Final optimized library available in: '{final_output_dir}'")
+
+    logger.info("Creating full optimized libraries...")
+    match_table_path = hipblaslt_path / "build/release/device-library/MatchTable.yaml"
+    library.from_full_dataframe(
+        full_df, 
+        lib_dir,
+        match_table_path,
+        type_override="Equality"
+    ).dump(full_output_dir)
+    logger.info(f"Full optimized library available in: '{full_output_dir}'")
 
     logger.info("Optimization workflow completed successfully!")
 

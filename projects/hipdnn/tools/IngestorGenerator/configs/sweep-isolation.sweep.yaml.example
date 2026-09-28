@@ -1,0 +1,133 @@
+# Example sweep config. Copy, edit, and run:
+#
+#   <venv-python> $GEN/tools/sweep.py --config my-sweep.yaml
+#
+# Paths, architecture/engine IDs, counts and run settings below are illustrative,
+# not defaults to copy blindly. Replace them with real inputs for your run.
+#
+# DATA, NOT CODE: read with a safe YAML loader that refuses duplicate and non-string
+# keys, never sourced, expanded or executed. Paths resolve relative to THIS FILE's
+# directory, and commands are argument ARRAYS -- no quoting, no word splitting, no
+# shell. `tools/README-sweeps.md` specifies every key's full contract and the gates.
+
+# One root holding everything this sweep reads and writes. Must already exist and be
+# visible on the local execution host, or on the execution node for scheduled/remote
+# runs: a submit-host-only path fails when the job lands elsewhere.
+sweep_root: /shared/sweeps/ingestor
+
+# Where this run's evidence lands: a dedicated child of sweep_root overlapping no input
+# root, since the driver hashes every input to decide whether a phase may be resumed.
+output_dir: /shared/sweeps/ingestor/results
+
+# Existing root holding one directory per corpus; every corpus path must be inside it.
+corpus_dir: /shared/sweeps/ingestor/corpora
+
+# The exact architecture this sweep claims, checked against rocminfo on the running
+# machine and the benchmark's reported gpu_arch. A family or marketing name is refused.
+arch: gfx950
+
+# engine_name is the identity the BENCHMARK RESULT rows carry, matched exactly; a prefix
+# match would credit a sibling engine's work to this one. engine_ued_name is what the
+# INSTALLED ENGINE registry advertises, which discovery resolves to a numeric engine ID.
+# Usually the same string, declared separately because a mismatch is the finding.
+engine_name: hipkernel:AttentionDenseGfx950
+engine_ued_name: hipkernel:AttentionDenseGfx950
+
+# Corpora are measured separately and never merged: published is what the kernel team
+# judges themselves on, servable is what this integration generated for.
+#
+# expected_graphs is a gate: a corpus that grew or shrank between runs is not the same
+# experiment, and resume binds the CONTENT of every graph file.
+corpora:
+  - name: published
+    path: /shared/sweeps/ingestor/corpora/published
+    expected_graphs: 142
+  - name: servable
+    path: /shared/sweeps/ingestor/corpora/servable
+    expected_graphs: 283
+
+# ARMS RUN IN THIS ORDER, EVERY ROUND, NEVER ROTATED. If clocks cannot be pinned,
+# drift may penalise whichever arm runs later; with the BASELINE FIRST, an effect moving
+# the opposite way to that penalty cannot be explained by position. For an isolation
+# sweep these are the arms `knob_sweep.py --isolate` emitted.
+#
+# expected_descriptors is the count each install tree MUST have. An isolation arm has the
+# SAME count as parity by construction, so a different number means a different corpus.
+arms:
+  - name: parity
+    install_tree: /shared/sweeps/ingestor/arm-parity
+    expected_descriptors: 91
+  - name: block_n32
+    install_tree: /shared/sweeps/ingestor/arm-block_n32
+    expected_descriptors: 91
+  - name: use_exp2_fastFalse
+    install_tree: /shared/sweeps/ingestor/arm-exp2off
+    expected_descriptors: 91
+  - name: lazy_rescaleFalse
+    install_tree: /shared/sweeps/ingestor/arm-lazyoff
+    expected_descriptors: 91
+
+# The arm to run once and DISCARD, so round 1 does not measure a cool device. Name an arm
+# above or an explicit null; an absent key is refused rather than defaulted.
+warmup_arm: parity
+
+# Three rounds make drift measurable: round 1 against round N on the same arm reads it
+# directly. Group deviation and per-shape spread differ by an order of magnitude, so say
+# which you mean when reporting.
+rounds: 3
+
+# A phase serving fewer than this many graphs through the ingestor FAILS. This catches a
+# dropped engine; the descriptor count cannot, being a property of files on disk while
+# the engine is rejected at load. Set it near the expected served count.
+min_served: 60
+
+# Tensor names whose presence makes a graph UNSERVABLE by the kernel under test.
+# Unsupported graphs may fall through to another engine, and a device fault invalidates
+# subsequent measurements. For attention that class is backward graphs, marked by their
+# gradient tensors; the filename is not authoritative.
+#
+# BOTH spellings are required -- `sample_sdpa_backward` names its gradients
+# `dq`/`dk`/`dv`/`do` -- and this value must always match `tools/mine_shapes.py`'s
+# `BACKWARD_GRADIENT_TENSOR_NAMES`, enforced by `tests/test_sweep_configs.py`.
+#
+# REQUIRED, with no default: defaulting to attention's names would silently no-op the
+# gate for any other op. An op with no such class must say the string `none`.
+exclude_tensors:
+  - d_query
+  - d_key
+  - d_value
+  - d_output
+  - dq
+  - dk
+  - dv
+  - do
+
+# The benchmark as an argument array. argv[0] must be a real executable, not a shell
+# launcher: "the config named a program" and "the config named a script that runs
+# programs" are different claims about what was measured.
+#
+# The driver OWNS --graph, --plugin-path, --engine, --warmup, --iters, -o/--output,
+# --validate and --backend, and refuses a config passing any of them.
+benchmark:
+  argv:
+    - /shared/sweeps/ingestor/bench-venv/bin/dnn-benchmark
+  warmup: 25
+  iters: 200
+
+# A SEPARATE phase against a real reference provider, run after timing so a comparison
+# never perturbs a measurement; its warmup/iters are lower because it compares numbers
+# rather than timing them. Enabled, a phase passes only if the reference provider ran and
+# every served graph carries a genuine tolerance match -- a skipped reference leaves a
+# null tolerance_match, which the benchmark suite counts as a pass. `enabled: false`
+# leaves the run reporting SWEEP_TIMING_ONLY: publishable, but not a correctness claim.
+correctness:
+  enabled: true
+  reference: pytorch
+  warmup: 3
+  iters: 10
+
+# Optional argument array pinning the comparand environment (library shas, versions) into
+# the log and the resume fingerprint. Absent, the run is valid but cannot answer "which
+# build produced this number" later. Delete the key entirely to omit it.
+# probe_env:
+#   - /shared/sweeps/ingestor/probe-env

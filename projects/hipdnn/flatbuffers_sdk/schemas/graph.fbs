@@ -25,6 +25,26 @@ include "reduction_attributes.fbs";
 include "resample_fwd_attributes.fbs";
 include "resample_bwd_attributes.fbs";
 include "moe_grouped_matmul_attributes.fbs";
+include "moe_grouped_matmul_bwd_attributes.fbs";
+
+// Excludes a field from the generated cache-key hash/equality (cachekey_generated.h).
+// Opt-out: an unannotated field always participates; apply only when a benchmark
+// result transfers across every value of the field.
+attribute "cache_ignore";
+
+// A field holding a tensor uid. Folds as the referenced tensor's ordinal in the
+// `cache_uid_domain` vector rather than the raw uid, so renumbering a graph keeps
+// the key unchanged while rewiring or aliasing operands changes it. Apply only to
+// genuine tensor references: `PointwiseAttributes.axis_tensor_uid` is an axis index
+// despite its name.
+attribute "cache_uid";
+
+// The vector whose element order defines those ordinals. Exactly one field carries it.
+attribute "cache_uid_domain";
+
+// The uid a `cache_uid` reference resolves against. Exactly one field of the domain
+// element carries it, and it is not folded: its ordinal is its own position.
+attribute "cache_uid_key";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -50,11 +70,12 @@ union NodeAttributes {
 	ResampleFwdAttributes,
 	LayernormBackwardAttributes,
 	ResampleBwdAttributes,
-	MoeGroupedMatmulAttributes
+	MoeGroupedMatmulAttributes,
+	MoeGroupedMatmulBwdAttributes
 }
 
 table Node {
-	name: string;
+	name: string (cache_ignore);
 	compute_data_type: DataType;
 	attributes: NodeAttributes;
 }
@@ -71,23 +92,38 @@ struct EngineApiVersion {
 	patch: uint;
 }
 
+// Opaque 128-bit value used for graph identities.
+struct Uuid {
+	bytes: [ubyte:16];
+}
+
 // Hipdnn expects that the serialized graph is sorted in topological order, has no cycles,
 // and is fully connected (no orphan nodes). Additionally, all tensors in the graph must have unique uids.
 table Graph {
-	name: string;
-	compute_data_type: DataType;
-	intermediate_data_type: DataType;
-	io_data_type: DataType;
-	tensors: [TensorAttributes];
+	name: string (cache_ignore);
+	// Defaults only: the frontend stamps these onto each node and tensor left unset
+	// (Attributes::fill_from_context), and those per-element types are compared. Folding
+	// them would split the key between an explicit type and the same type defaulted.
+	compute_data_type: DataType (cache_ignore);
+	intermediate_data_type: DataType (cache_ignore);
+	io_data_type: DataType (cache_ignore);
+	tensors: [TensorAttributes] (cache_uid_domain);
 	nodes: [Node];
-	preferred_engine_id: long = null;
+	preferred_engine_id: long = null (cache_ignore);
 	// Graph-level opt-in for execute-time override shapes.
-	is_override_shape_enabled: bool = false;
+	is_override_shape_enabled: bool = false (cache_ignore);
 	// Minimum engine plugin API version required to execute this graph (RFC 0016 §4.2).
 	// Absent on graphs a writer didn't stamp (e.g. hand-built fixtures, JSON-sourced
 	// graphs) -- callers must treat a missing field as the baseline "1.0.0" floor,
 	// exactly like the field's absence used to mean min_reader_version == 0.
-	min_required_engine_api_version: EngineApiVersion;
+	min_required_engine_api_version: EngineApiVersion (cache_ignore);
+	// Stable logical graph identity across serialization round trips. hipDNN mints UUID v4
+	// values at finalization; readers preserve any 128-bit value without enforcing a UUID
+	// version or variant. It is neither a content hash nor a unique live-object token:
+	// distinct IDs may have identical content, while one ID must not represent different
+	// immutable graph content. Absent on legacy and locally constructed, unfinalized graphs;
+	// an ID inherited through deserialization may be present before local finalization.
+	id: Uuid (cache_ignore);
 }
 
 root_type Graph;

@@ -2670,9 +2670,10 @@ class TestWaitCntInstructions(unittest.TestCase):
         m.add(_SWaitCnt(lgkmcnt=0, vmcnt=0))
         m.add(SWaitTensorcnt(cnt=0))
         m.add(SWaitXCnt(cnt=0))
-        # _SWaitCnt(lgkmcnt=0, vmcnt=0) decomposes into 2 typed waits
-        # (dscnt from lgkmcnt + loadcnt from vmcnt) + tensorcnt + xcnt = 4
-        self.assertEqual(len(m._collect_logical_insts()), 4)
+        # _SWaitCnt carries dscnt and loadcnt in one logical wait. The C++
+        # legalization pass splits it into typed waits after collection.
+        # Together with tensorcnt and xcnt, the pre-lowering count is 3.
+        self.assertEqual(len(m._collect_logical_insts()), 3)
 
 
 class TestSWaitAlu(unittest.TestCase):

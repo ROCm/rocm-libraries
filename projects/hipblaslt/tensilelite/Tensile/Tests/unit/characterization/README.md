@@ -7,7 +7,7 @@ Companion docs in this directory:
 - **`DECISIONS.md`** — the running registry: the at-a-glance catalog of modules accepted below the coverage bar, pinned latent bugs, accepted-equivalent mutants, and the few departures from the add-only rule.
 - **`_codegen/GPU-MOCK.md`** — the GPU-less (`--cpu-only`) seam that makes the client/perf and device-probe paths exercisable without a GPU, and the synthetic-perf caveat that comes with it.
 
-Everything you need to understand or extend the suite is in this directory. Per-module provenance — for each characterized module, the public surface by tier, the determinism strategy, before→after coverage, the mutation-testing outcome, and any accepted coverage ceiling or pinned-bug rationale — is recorded in `DECISIONS.md` and the per-module commit history.
+Everything you need to understand or extend the suite is in this directory. Per-module provenance for each characterized module — the public surface by tier, the determinism strategy, before→after coverage, and the mutation-testing outcome — is recorded in `DECISIONS.md` and the per-module commit history. Any accepted coverage ceiling or pinned-bug rationale gets a full writeup in an ADR under `adr/`, with a short pointer row in `DECISIONS.md`.
 
 ## Per-module protocol
 
@@ -16,9 +16,12 @@ Each module was characterized the same way, one atomic commit per module, **add-
 1. **Target.** Pick the next module by coverage-per-effort. Write a short `target.md` (archived) describing the module, the public surface by tier, the determinism strategy, and the before→after coverage goal.
 2. **Pin behavior.** Drive the public API with table-driven parametrization; snapshot each output with [syrupy](https://github.com/syrupy-project/syrupy) into `__snapshots__/*.ambr`. Pin raise paths with `pytest.raises` on the raised type/message. Where a module exposes a real latent bug, **pin the bug** (assert the current crash/wrong result), record an **ADR** under `adr/` with a filed defect, and index it in `DECISIONS.md` — rather than working around it.
 3. **Determinism.** No RNG / clock / network / global-state leakage into a snapshot. Normalize incidental fields *in the test*, never by changing production code to make a golden stable. Deep-copy shared globals and reset `globalParameters` between tests.
-4. **Measure.** Run path-mode coverage (below) for the module; aim ≥95% line. When a module can't reach the bar honestly (real fork/IPC paths, GPU/asm emit, integration-only builders), accept it below the bar and document the ceiling in `DECISIONS.md` — do not fake coverage.
+4. **Measure.** Run path-mode coverage (below) for the module; aim ≥95% line. When a module can't reach the bar honestly (real fork/IPC paths, GPU/asm emit, integration-only builders), accept it below the bar: record an **ADR** under `adr/` explaining the structural reason, and index it with a short pointer row in `DECISIONS.md` — do not fake coverage.
 5. **No regression.** Once per batch, run the full `-m unit` suite and confirm it stays green and whole-project coverage does not drop.
-6. **Mutation (widening).** Once a module is covered, mutation testing certifies the assertions actually *catch* changes; survivors are triaged and killed (see **Mutation testing** below).
+6. **Mutation (gap discovery).** Once a module is covered, optional mutation
+   analysis looks for behavioral changes that its assertions do not detect.
+   Survivors are diagnostic leads; confirmed gaps are closed with focused
+   characterization tests (see **Mutation testing** below).
 
 ### Directory layout
 
@@ -181,7 +184,9 @@ Raising the floors is the ratchet click: a deliberate, reviewed step, never auto
 time it is a genuine rise (new tests pushed coverage up, so you lock the gain in). A per-file drop is
 a signal to decide first. If a file lost coverage because a test is missing, that is a real
 regression; add the test rather than lowering its floor. Only when a drop is intentional (for
-example, code was removed) do you reset that file's floor as part of the same reviewed change.
+example, code was removed) do you reset that file's floor as part of the same reviewed change. The
+tool holds you to that: `update` raises floors on its own, but it will not lower one unless you name
+that file with `--allow-lower`.
 
 A floor-raising PR is a small, behavior-neutral maintenance change. It should touch only
 `coverage-baseline.json` (the per-file floors) and, when you also lift the whole-project floor,
@@ -193,26 +198,42 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    tox -e coverage-unit    # writes coverage.json
    ```
 
-2. **Recompute the per-file floors.** Rewrite the baseline from that report:
+2. **Raise the per-file floors.** Ratchet the baseline against that report:
 
    ```bash
    python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
    ```
 
-   This sets each file's floor to its current coverage (rounded to two decimals). The numbers
-   normally go up.
+   Each file's floor rises to its current coverage (rounded to two decimals), and a file with no
+   floor yet is pinned at its current number. Floors never move down here: if any file measured
+   lower, `update` writes nothing, names those files, and exits non-zero.
 
-3. **Review the baseline diff before you commit it.** Expect rises. If a file dropped, do not just
-   record the lower number: decide first (a missing test means add the test; an intentional code
-   removal means say so in the PR). The diff is the review artifact, so keep it readable.
+3. **Decide about any drop, then name it.** A refusal is the tool asking which of two situations you
+   are in. A missing test is a real regression, so add the test rather than lowering the floor. Only
+   when the drop is intentional (code was removed, say) do you lower that file, and you lower it by
+   naming it:
 
-4. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
+   ```bash
+   python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update \
+       --current coverage.json \
+       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+   ```
+
+   One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made
+   to move one floor from quietly resetting all the others to whatever the coverage run on disk
+   happened to measure.
+
+4. **Review the baseline diff before you commit it.** Expect rises, plus exactly the reductions you
+   named. The diff is the review artifact, so keep it readable, and say in the PR why each lowered
+   floor was accepted.
+
+5. **Optionally raise the whole-project floor.** If combined coverage has climbed with room to
    spare, bump `fail_under` in `pyproject.toml` toward the 80% target. Leave a small margin below the
    measured number (a point or two): the per-file `--tolerance` already absorbs run-to-run wobble for
    the per-file floors, but `fail_under` is an exact cutoff, so a floor set right at the current
    number can trip on normal noise.
 
-5. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
+6. **Commit and open the PR.** Commit the `coverage-baseline.json` (and, if changed, `pyproject.toml`)
    diff with a one-line rationale, for example "raise floors after landing the DataType tests". Never
    widen the tolerance or blank the baseline to go green.
 
@@ -255,18 +276,32 @@ A real mass update (e.g. an intended change to the snapshot format itself) is al
 
 ## Architecture Decision Records (ADRs)
 
-A genuine decision — pinning a known-wrong behavior, accepting a module below the coverage bar for a structural reason, a departure from the add-only rule, or an accepted-equivalent-mutant policy call — is recorded as an **ADR**: one short, append-only file under [`adr/`](adr/) in [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) form (`Status` / `Context` / `Decision` / `Consequences`), numbered (e.g. `adr/0001-pin-results-only-boolop-crash.md`). When the decision pins a behavior that looks wrong, the ADR carries a `Defect:` tracker link, and that defect tracks the eventual fix.
+A genuine decision — **pinning a known-wrong behavior**, **accepting a module below the coverage bar** for a structural reason, or **a departure from the add-only rule** — is recorded as an **ADR**: one short, append-only file under [`adr/`](adr/) in [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) form (`Status` / `Context` / `Decision` / `Consequences`), numbered (e.g. `adr/0001-pin-results-only-boolop-crash.md`). When the decision pins a behavior that looks wrong, the ADR carries a `Defect:` tracker link, and that defect tracks the eventual fix. This applies every time one of those three forks comes up, not just the once-per-module cases called out in steps 2 and 4 above — e.g. a one-off add-only departure (deleting verified-dead source) gets an ADR too, even though it isn't part of the per-module loop.
 
-ADRs are **append-only and superseded, never edited in place**. If a later change flips a pinned-bug golden (the defect is fixed), update the golden in that PR and add a new ADR that supersedes the old one (set the old one's `Status:` to `Superseded by adr/NNNN`).
+ADRs are **append-only and superseded, never edited in place**. If a later change flips a pinned-bug golden (the defect is fixed), update the golden in that PR and add a new ADR that supersedes the old one (set the old one's `Status:` to `Superseded by adr/NNNN`). Never fold a corrected or revised decision back into an existing ADR's body — write a new one and supersede.
 
-`DECISIONS.md` is the **running registry** — the at-a-glance catalog of pinned behaviors, coverage ceilings, and accepted mutants. Keep the per-decision rationale in an ADR; keep the catalog in `DECISIONS.md`. A catalog row is not its own ADR. See [`adr/README.md`](adr/README.md) for the format and template.
+**Accepted-equivalent mutants are the one exception below the ADR bar**: a mutation survivor that's genuinely unkillable is justified with a one-line `# pragma: no mutate` comment plus an entry in `DECISIONS.md`'s **Mutation testing** section (see below) — not an ADR. The rationale for a single equivalent mutant is rarely more than a sentence, so the full Context/Decision/Consequences form would be ceremony without content; if a mutant's justification grows into a real design discussion, that is itself a sign it belongs in an ADR instead.
+
+`DECISIONS.md` is the **running registry**: an at-a-glance catalog with **one short row per decision** — title, `ADR:` link, `Defect:` link if any, and a one-to-two sentence summary — never the full rationale. The rationale (context, alternatives rejected, consequences) lives in the ADR and only the ADR; a catalog row that repeats it has drifted from this contract and should be trimmed back down when noticed. See [`adr/README.md`](adr/README.md) for the ADR format and template.
 
 ## Mutation testing
 
-The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and run through tox:
+Mutation testing is used only as an optional, offline technique for finding gaps
+in characterization coverage. A surviving mutant is not a product failure or a
+CI result. When it exposes an observable gap, the lasting result is a focused
+characterization test in this suite—not a mutation-score gate or a production
+code change made only to improve the score.
+
+The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and can
+be run explicitly through tox:
 
 ```bash
 tox -e mutation-unit
 ```
 
-It is currently a narrow **report-only pilot** (five files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).
+It is not part of tox's default environment list or the project CI workflow.
+The optional maintainer/agent procedure and safety helpers live in the
+[`tensilelite-mutation-rerun` skill](../../../../../skills/tensilelite-mutation-rerun/SKILL.md).
+Accepted equivalent mutants and every `# pragma: no mutate` are justified in
+`DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on
+the mutant, and reverts cleanly).

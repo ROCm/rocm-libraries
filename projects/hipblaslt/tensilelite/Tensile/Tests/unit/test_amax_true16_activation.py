@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Regression test for the true16 (real-true16) activation-clamp defect (ROCM-3994).
+"""Regression test for the true16 (real-true16) activation-clamp defect.
 
 hipBLASLt / TensileLite's ``AMaxKernelGenerator`` emits the ``v_max_f16``
 activation clamp for half inputs. Under a compiler that enforces real16 mode
@@ -18,11 +18,6 @@ operand, with the suffix placed *inside* the closing paren of ``abs(...)``::
 This is a pure host-side codegen assertion: it renders the generator's module to
 a string and checks the emitted text. No GPU and no assembler are required. The
 target arch is forced from a gfx string, so no real device has to be present.
-
-RED on ``origin/develop`` (emits fake16), GREEN on the true16 fix branch (emits
-true16). The test is parametrized across the whole gfx11 family enabled by the
-``NoSDWA`` arch cap (isaVersion 11/12), not a single arch, so it does not repeat
-the original mistake of pinning one target.
 """
 
 import os
@@ -45,8 +40,8 @@ from Tensile.Common.DataType import DataType  # noqa: E402
 import AMaxGenerator  # noqa: E402
 
 
-# gfx11 family covered by the NoSDWA arch cap (checkInList(isaVersion[0], {11, 12})).
-# All of these are wave32 and select the true16 activation path on the fix branch.
+# true16 family covered by the NoSDWA arch cap (checkInList(isaVersion[0], {11, 12})).
+# All of these select the true16 activation path on the fix branch.
 GFX11_TARGETS = [
     "gfx1100",
     "gfx1101",
@@ -58,23 +53,18 @@ GFX11_TARGETS = [
     "gfx1153",
 ]
 
-# ROCM-3994 known-bug quarantine (W-KNOWN-BUG two-PR flow).
-#
-# This reproducer lands ahead of the true16 fix (users/ericwan/true16-patch).
-# On develop the AMax activation clamp is emitted in the fake16 form, so the
-# assertions below fail -> reported as xfailed -> CI stays green. When the fix
-# lands, the emitted text becomes true16, the test passes, and strict=True turns
-# that XPASS into a hard failure -- forcing the fix PR to delete this marker.
-# The test always executes (it is quarantined, not disabled).
-#
-# Time-box: tracked by ROCM-3994; re-evaluate by the next hipBLASLt release if
-# still unfixed. REMOVE this marker in the fix PR.
-_ROCM3994_XFAIL = pytest.mark.xfail(
-    reason="ROCM-3994: fake16 v_max_f16 emitted for the AMax activation clamp; "
-           "real-true16 assemblers reject it. Remove this marker in the true16 fix PR.",
-    strict=True,
-    raises=AssertionError,
-)
+# gfx12 shares the NoSDWA true16 path (isaVersion[0] == 12). The PR targets gfx11
+# and gfx12, so exercise gfx12 too (this is where the downstream gfx125x build breaks).
+GFX12_TARGETS = [
+    "gfx1200",
+    "gfx1201",
+    "gfx1250",
+]
+
+# Carry the arch-family marker per target so gfx11/gfx12 selection still works.
+TRUE16_TARGETS = [pytest.param(t, marks=pytest.mark.gfx11) for t in GFX11_TARGETS] + [
+    pytest.param(t, marks=pytest.mark.gfx12) for t in GFX12_TARGETS
+]
 
 # Matches a v_max_f16 whose destination and both sources carry a true16 half-word
 # selector (.l/.h). Critically, the abs() source suffix is *inside* the paren.
@@ -123,10 +113,8 @@ def _vmax_lines(text: str):
     return [ln.strip() for ln in text.splitlines() if "v_max_f16" in ln]
 
 
-@_ROCM3994_XFAIL
 @pytest.mark.unit
-@pytest.mark.gfx11
-@pytest.mark.parametrize("target", GFX11_TARGETS)
+@pytest.mark.parametrize("target", TRUE16_TARGETS)
 def test_amax_activation_clamp_is_true16(target):
     """max_per_data must emit the true16 v_max_f16 (with abs source)."""
     gen = _make_generator(target)
@@ -144,7 +132,7 @@ def test_amax_activation_clamp_is_true16(target):
         # Negative: reject the bare fake16 form outright.
         assert not _FAKE16_RE.search(ln), (
             f"[{target}] v_max_f16 emitted in fake16 form (no half-word "
-            f"selector) — this is the ROCM-3994 defect: {ln!r}"
+            f"selector) — this is the true16 activation-clamp defect: {ln!r}"
         )
 
     # The abs() source suffix must bind *inside* the paren: abs(v[..].l), never abs(v[..]).l
@@ -154,10 +142,8 @@ def test_amax_activation_clamp_is_true16(target):
     )
 
 
-@_ROCM3994_XFAIL
 @pytest.mark.unit
-@pytest.mark.gfx11
-@pytest.mark.parametrize("target", GFX11_TARGETS)
+@pytest.mark.parametrize("target", TRUE16_TARGETS)
 def test_amax_merge_sum_is_true16(target):
     """merge_sum must emit the true16 v_max_f16 (plain register sources)."""
     gen = _make_generator(target)
@@ -172,5 +158,5 @@ def test_amax_merge_sum_is_true16(target):
         )
         assert not _FAKE16_RE.search(ln), (
             f"[{target}] merge_sum v_max_f16 emitted in fake16 form "
-            f"(ROCM-3994 defect): {ln!r}"
+            f"(true16 activation-clamp defect): {ln!r}"
         )

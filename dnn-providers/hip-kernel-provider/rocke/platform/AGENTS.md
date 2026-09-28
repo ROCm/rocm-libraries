@@ -27,26 +27,53 @@ govern what you commit and how you describe it.
 - **No NPI.** Never report or record New Product Introduction information — unreleased /
   pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
   internal codenames — in any artifact (code, comments, docs, commits, PRs).
-- **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
-  `gfx950`, …) only. No customers or related data shall ever be mentioned (e.g., model architectures, operator shapes, labeling or codenames, IP, confidential data).
-- **No public software-performance data.** No **software-achieved** performance —
-  benchmarks, achieved TFLOP/s, MFU, latencies, or throughputs — in the repo, git
-  history, PRs, or anything that can become public. While in development these numbers
-  are volatile and are **not** guidance, so keep them internal: present them in-session
-  and record them only in a **protected, access-controlled AMD Confluence page**; never
-  paste numbers into the repo, and if asked to, refuse and redirect there. (Published
-  **hardware** spec numbers — e.g. theoretical peak — are governed by AMD marketing, not
-  this rule.)
-- **No legal or marketing claims or comparisons** about AMD or competitor
-  products/software (performance, superiority, availability, roadmap). No marketing
-  language. **Protect AMD.**
+- **Public hardware, model, and workload references.** Refer to AMD hardware targets by
+  device identifier (`gfx942`, `gfx950`, …), not by product or marketing name. Names of
+  publicly released models, public benchmarks/datasets/workloads, public operators, and
+  their publicly documented architecture, tensor-shape, or configuration parameters may
+  appear in code, documentation, and PRs when they explain functional support, test
+  coverage, or benchmark scope. The information must be independently verifiable from a
+  public source. Never identify or imply a customer, deployment, or private workload; never
+  disclose non-public model data, internal codenames, AMD Restricted/Confidential data, or
+  unreleased-product details. When public status is uncertain, treat the information as
+  confidential and escalate.
+- **Public software-performance evidence.** Measured relative results — ratios or percentage
+  changes — may appear only in PR descriptions and qualifying benchmark/result locations.
+  A qualifying location is either (a) a Markdown file whose case-insensitive basename
+  contains `benchmark`, `result`, or `case_study`, and whose title and opening paragraph
+  identify its measured scope; or (b) a `Performance` or `Results` section in a
+  workload-specific README whose opening identifies its measured scope. In either case,
+  recording benchmark methodology or results must be the document's or section's primary
+  purpose.
+  Every compared kernel arm must pass an on-silicon numeric gate in the measured run:
+  outputs and any mutated state against an independent reference, at a declared input
+  dtype and tolerance. Byte-identity, compilation, or successful launch alone is not a
+  correctness gate. State the result, workload and relevant axes, baseline implementation
+  and version, hardware target, measurement method, reproducible provenance, and material
+  caveats. Compare equivalent work or label the mismatch; label diagnostic and
+  non-production configurations; and use bounded statements such as "faster at these
+  measured configurations", never a general superiority claim.
+  **Do not add or update absolute software-achieved benchmark or performance results** in
+  public artifacts, including but not limited to latency, throughput, TFLOP/s, MFU, and
+  bandwidth. Store them only in an approved, access-controlled internal record. This
+  prospective rule supersedes conflicting legacy guidance. Existing public records with
+  absolute values are frozen migration debt, not precedent: do not extend, update, or copy
+  their measurements; migrate them only in a separately reviewed remediation. Source
+  comments and commit messages remain qualitative because measured claims there become
+  stale and are difficult to review in context.
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority,
+- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
+  other products/software. Do not make unsupported marketing, general superiority, performance,
+  rule above are permitted; marketing language is not. **Protect AMD.**
 - **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
   external Git issue links are OK.
 
 **Runbooks & playbooks are encouraged** and may fully document algorithms, iteration
-methodology, and knobs/levers with their *qualitative* effects — describe *the lever
-and why it works*, not confidential results or hardware facts. Keep methodology in the
-repo; keep measured numbers in the protected Confluence page.
+methodology, and knobs/levers with their qualitative effects. Qualifying benchmark/result
+documents, as defined above, may also contain relative evidence that meets the policy. Keep
+all absolute software measurements and any restricted data in the approved access-controlled
+record.
 
 Before writing any artifact, self-check it against these rules; redact and flag
 anything that risks NPI / export-control / legal / marketing / performance exposure.
@@ -229,6 +256,25 @@ GPU node.
   IR builder is side-effecting (`b.const_i32(8)` emits an op even if its handle is
   unused), so F841 autofix silently changes kernels. Lint with `ruff check` (no
   `--fix`).
+- **Builders take exactly `(spec, *, arch)`**: the spec object and the target
+  arch, and nothing else. An arch-specific knob is a **field on the spec** - on an
+  arch-specific subclass of the shared spec when it only applies to one arch -
+  never an extra builder parameter. A third parameter is invisible to anything
+  that has to *describe* a kernel without calling it (the kernel-descriptor
+  format, the downstream packager), so it forces a per-arch file format; the
+  breakage surfaces months later, downstream. Enforced for `library/kernels` by
+  [`library/tests/test_builder_signature_contract.py`](../library/tests/test_builder_signature_contract.py).
+- **A new spec field is defaulted**: only the problem shape may be required. The
+  descriptor stores a spec's fields and the packager hydrates the spec back out of
+  them, so a field added without a default turns every descriptor and AOT pack
+  written before it into `TypeError: missing required argument`. Default it to the
+  currently-shipped value - or to `None` where a policy function resolves it, which
+  lets an old descriptor auto-track what ships instead of freezing whatever the
+  default was the day it was written. Same test freezes the required set per spec
+  class; Python's "no non-defaulted field after a defaulted one" catches only the
+  append case, not an insert. If the field really is problem shape, adding it to
+  `REQUIRED_FIELDS` is a **breaking change**: regenerate the descriptors and AOT
+  packs for that spec and say in the PR that the existing ones are invalidated.
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
   under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.
@@ -278,6 +324,47 @@ invariants.
   they are considered complete; workload-only benchmark scripts should not be
   wired into production dispatch by default.
 
+## Profiling (ATT traces)
+
+Instruction-level profiles come from `rocprofv3 --att`, decoded per dispatch and
+read in the WaveScope viewer. Everything for it lives in
+`dsl_docs/optimization/utilities/tools/wavescope/`, and one command there captures
+a source-correlated trace:
+
+```bash
+python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.py \
+    -- python3 bench.py
+```
+
+- Read `capture_wavescope_trace.py` before capturing by hand. Three things have to
+  line up for the Source tab to work and each fails quietly alone; it does all
+  three and reports which folder to open.
+- That folder's `README.md` covers installing the WaveScope extension (including
+  the remote-SSH case), opening a decoded folder, and what each file in one is
+  for. `dsl_docs/architecture/wavescope_integration.md` covers how the pieces fit
+  together and how to drive the viewer during an optimization pass.
+- Source correlation is **not** a compiler flag, and `compile_kernel()` has no
+  `debug=` parameter. A rocke kernel is Python that builds IR, so there is no C++
+  source for `-g` to point at; locations have to be captured while the kernel
+  builds. That means `ROCKE_DEBUG_LOC=1` on the process that *builds* the kernel
+  (or `IRBuilder(capture_loc=True)`). Without it `code.json`'s Source column is
+  empty and only ISA-level analysis is possible.
+- `emit_inline_frames.py <capture-generation-dir>` in that folder is the step to
+  re-run on its own against an already-decoded trace. Pass one explicit
+  `capture-<trace-id>` generation; the output root is intentionally ambiguous
+  because it can contain several immutable captures. rocprofv3 flattens DWARF to
+  the innermost frame only, so on a kernel assembled from helpers a single
+  one-line loader appears to own most of the stalls. The `inline_frames.json`
+  sidecar it writes restores the inlining call stack, and WaveScope's Source tab
+  gains a `+ inlined` attribution charging each call site with what was inlined
+  into it.
+- Read `code.json` columns 7 and 8 as totals summed over every execution, not
+  per-execution averages. Multiplying them by `Hit` counts each execution `Hit`
+  times and reports stall figures exceeding the kernel's wall-clock.
+- For the underlying rocprofv3 flags, the PMC fallback when the trace decoder is
+  unavailable, and ISA-only analysis, see
+  `dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md`.
+
 ## helpers/ placement
 
 **Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
@@ -317,6 +404,7 @@ dual-engine vs Python-only split.
 |---|---|
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
+| `ROCKE_DEBUG_LOC` | `1` = capture Python source locations while building and emit DWARF, so ATT traces map to source; off by default because it changes the emitted `.ll` |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
 | `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
 | `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |

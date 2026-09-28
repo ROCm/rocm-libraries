@@ -21,6 +21,31 @@ else()
     find_package(amd_smi)
 endif()
 
+# The GPU-initiated SDMA path for fused A2A (SdmaQueue.hpp) needs hsakmt (KFD
+# thunk) + hsa-runtime64. It is OFF by default so the ordinary client build
+# carries no hsakmt/hsa-runtime64/libnuma dependency: environments that never
+# built these can still configure and build the client unchanged. Turn it on
+# with -DTENSILELITE_ENABLE_SDMA=ON.
+option(TENSILELITE_ENABLE_SDMA "Build the GPU-initiated SDMA transport path" OFF)
+
+if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
+    # hsakmt::hsakmt's exported link interface names numa::numa, so libnuma has
+    # to be found as an imported target before that export is loaded. The
+    # project's cmake/FindNUMA.cmake does that and documents when it can be
+    # dropped.
+    find_package(NUMA REQUIRED)
+
+    find_package(hsa-runtime64 REQUIRED)
+    find_package(hsakmt REQUIRED)
+
+    # ROCm 7.x's hsakmtTargets.cmake bakes BUILD-HOST absolute paths into
+    # hsakmt::hsakmt's INTERFACE_LINK_LIBRARIES that do not exist on a fresh
+    # container, so every executable linking hsakmt fails. The repair lives in
+    # cmake/HsakmtLinkInterface.cmake, which documents the two broken forms.
+    include(HsakmtLinkInterface)
+    hipblaslt_sanitize_hsakmt_link_interface()
+endif()
+
 target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
@@ -31,6 +56,18 @@ target_link_libraries(tensilelite-client-common
 )
 if(amd_smi_FOUND)
     target_link_libraries(tensilelite-client-common PUBLIC amd_smi)
+endif()
+# PRIVATE: hsakmt/hsa are needed only by TUs in this target that include the
+# header-only SdmaQueue.hpp -- today just FusedA2AClient.cpp, itself gated on
+# the macro below. The two executables compile one source each and never
+# include it, so they get neither the headers nor the libs.
+if(TENSILELITE_ENABLE_SDMA AND NOT WIN32)
+    target_link_libraries(tensilelite-client-common
+        PRIVATE hsakmt::hsakmt hsa-runtime64::hsa-runtime64)
+    # FusedA2AClient.cpp gates its SdmaQueueSet setup on this macro; without it
+    # the fused run fails fast instead of handing the kernel a null queue array.
+    target_compile_definitions(tensilelite-client-common
+        PRIVATE TENSILELITE_ENABLE_SDMA)
 endif()
 
 # When mxDataGenerator is enabled, hipblaslt::mxdatagen propagates the

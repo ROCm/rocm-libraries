@@ -9,6 +9,11 @@ table EngineDetails {
     engine_id: int64;
     knobs: [Knob];
     behavior_notes: [int32];
+
+    // Records the name an engine carries; it never confers one. Export
+    // hipdnnEnginePluginGetEngineName to name an engine — it is the only channel
+    // load-time admission can reach. See develop-plugins.rst, "Engine names".
+    name: string;
 }
 
 root_type EngineDetails;

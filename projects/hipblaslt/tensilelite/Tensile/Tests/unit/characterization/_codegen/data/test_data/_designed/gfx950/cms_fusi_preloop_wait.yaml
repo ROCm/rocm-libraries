@@ -1,0 +1,53 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Minimal CPU-only code-generation input for the CMS + ForceUnrollSubIter
+# one-time pre-loop local-read drain.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  Device: 0
+
+BenchmarkProblems:
+  - - OperationType: GEMM
+      DataType: F8
+      DestDataType: B
+      ComputeDataType: S
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+        - MaxOccupancy: [40]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 128, 1, 1, 8, 8, 2, 2]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - DirectToLds: [1]
+        - DtlPlusLdsBuf: [0]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - TransposeLDS: [1]
+        - LDSTrInst: [False]
+        - 1LDSBuffer: [0]
+        - UseCustomMainLoopSchedule: [1]
+        - StreamK: [0]
+        - AdaptiveGemmNTAB: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256, 256, 1, 128]

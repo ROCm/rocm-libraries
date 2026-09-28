@@ -31,6 +31,7 @@ The hipThreads project is located at https://github.com/ROCm/rocm-libraries/tree
 
   .. grid-item-card:: Reference
 
+    * :ref:`Testing timeout <testing>`
     * :ref:`std to hip mapping <std-to-hip-mapping>`
     * :ref:`Limitations <limitations>`
     * :ref:`Environment variables <environment-variables>`

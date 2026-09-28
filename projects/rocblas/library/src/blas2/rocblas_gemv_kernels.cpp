@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,8 @@
  * CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  * ************************************************************************ */
+
+#include <algorithm>
 
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
@@ -84,6 +86,116 @@ inline bool rocblas_gemvt_skinny_n(rocblas_operation transA, rocblas_int m, rocb
         return false;
 }
 
+// gemvn_sm is the skinny m optimization, the mirror of gemvt_sn.
+//
+// transA == none reduces over n into an m-long output, and every gemvn launch
+// sizes its grid as (m - 1) / (DIM_X * 4) + 1 -- by the output length alone. A
+// short m therefore leaves the card idle however long the reduction is. gemvt
+// has had a two-stage split since it was added; this is the same idea applied
+// to the non-transposed side, splitting n across gridDim.y.
+//
+// Target columns per split. This determines the split count; the kernel then
+// divides n evenly across that many blocks, so the final slice cannot be empty.
+// Keeping the count independent of the launch shape lets
+// rocblas_internal_gemv_kernel_workspace_size remain a pure function of
+// (transA, m, n, batch_count) and keeps it in agreement with the launcher.
+constexpr int rocblas_gemvn_sm_chunk()
+{
+    return 4096;
+}
+
+// Cap on the split count, which bounds workspace at max_split * m * batch_count.
+constexpr int rocblas_gemvn_sm_max_split()
+{
+    return 256;
+}
+
+inline int rocblas_gemvn_sm_split_count(rocblas_int n)
+{
+    if(n <= 0)
+        return 1;
+    size_t split = (size_t(n) - 1) / rocblas_gemvn_sm_chunk() + 1;
+    return int(std::min(split, size_t(rocblas_gemvn_sm_max_split())));
+}
+
+// Below this the reduction is not long enough to cover a second launch.
+inline size_t rocblas_gemvn_sm_min_elems()
+{
+    return size_t(1) << 20;
+}
+
+// Returns the number of output tiles the skinny-m kernel launches for a given m.
+// This matches the blocks formula in the launcher:
+//   real / complex-float: (m - 1) / (DIM_X * 4) + 1
+//   double-complex:       (m - 1) / DIM_X + 1   (DIM_X * 4 is too wide)
+template <int DIM_X, typename T>
+inline rocblas_int rocblas_gemvn_output_tiles(rocblas_int m)
+{
+    if constexpr(std::is_same_v<T, rocblas_double_complex>)
+        return (m - 1) / DIM_X + 1;
+    return (m - 1) / (DIM_X * 4) + 1;
+}
+
+// Minimum number of column splits required to justify the second launch.
+// Fewer splits means the split adds launch overhead without proportional
+// parallelism — the regression at (m=1024, n=2048) is one such case (n_split=1).
+constexpr int rocblas_gemvn_sm_min_splits()
+{
+    return 2;
+}
+
+// Output length below which the split is always taken (given the element
+// floor), regardless of the split count. This preserves the original crossover
+// behaviour: a short output cannot fill the device, so the split helps even at
+// n_split == 1 on architectures with a high compute-to-bandwidth ratio (e.g.
+// gfx950), where the single-stage kernel leaves the card idle. Real and
+// complex-float share the DIM_X * 4 tiling (crossover 512); double-complex uses
+// DIM_X, so its equivalent crossover is a quarter of that (128).
+template <typename T>
+inline rocblas_int rocblas_gemvn_sm_crossover()
+{
+    using element = std::remove_cv_t<std::remove_pointer_t<T>>;
+    if constexpr(std::is_same_v<element, rocblas_double_complex>)
+        return 128;
+    return 512;
+}
+
+// Gate: use the split path when transA == none, m and n are positive, the
+// operand is large enough to amortise a second launch (m * n >= 2^20), and
+// EITHER of the following holds:
+//   A. the output grid has at most 8 tiles AND the split produces at least
+//      min_splits (2) parallel column blocks — the general n-split win, sized
+//      by the work rather than by the output length; or
+//   B. the output length is at or below the crossover — a short output cannot
+//      fill the device, so the split is worthwhile even with a single column
+//      block. This is the behaviour of the prior m-crossover path and is kept
+//      as a floor so no shape it already accelerated is dropped.
+//
+// The union never splits fewer shapes than the crossover alone did, so it
+// cannot regress against a build that shipped the crossover. Condition A adds
+// the larger-m, long-reduction shapes the crossover missed. The gate stays a
+// pure function of (transA, m, n): workspace sizing and launch selection use
+// it identically and cannot disagree.
+//
+// DIM_X is the skinny-m kernel's block width; the caller passes the same value
+// it launches with so the tile math agrees with the grid.
+template <int DIM_X, typename T>
+inline bool rocblas_gemvn_skinny_m(rocblas_operation transA, rocblas_int m, rocblas_int n)
+{
+    if(transA != rocblas_operation_none || m <= 0 || n <= 0)
+        return false;
+    if(size_t(m) * size_t(n) < rocblas_gemvn_sm_min_elems())
+        return false;
+
+    // B: short output — split even at a single column block.
+    if(m <= rocblas_gemvn_sm_crossover<T>())
+        return true;
+
+    // A: general n-split — enough output tiling headroom and column parallelism.
+    return rocblas_gemvn_output_tiles<DIM_X, T>(m) <= 8
+           && rocblas_gemvn_sm_split_count(n) >= rocblas_gemvn_sm_min_splits();
+}
+
 template <typename T>
 inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
 {
@@ -129,8 +241,19 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE size_t rocblas_internal_gemv_kernel_workspace_s
     if(m <= 0 || n <= 0 || batch_count <= 0)
         return 0;
 
+    // Skinny-m kernel block dimensions; the gate's tile math must use the same
+    // DIM_X the launcher does.
+    static constexpr int GEMVN_DIM_X = 32;
+    static constexpr int GEMVN_DIM_Y = 16;
+
+    if(rocblas_gemvn_skinny_m<GEMVN_DIM_X, To>(transA, m, n))
+    {
+        // one m-long partial per n split
+        return sizeof(To) * size_t(rocblas_gemvn_sm_split_count(n)) * m * batch_count;
+    }
+
     if(!rocblas_gemvt_skinny_n<To>(transA, m, n))
-        return 0; // workspace only used for skinny n kernel transpose/conj. transpose
+        return 0; // workspace only used for the skinny n and skinny m kernels
 
     auto blocks = rocblas_gemvt_sn_kernel_block_count(m);
     return sizeof(To) * blocks * n * batch_count;
@@ -212,6 +335,11 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
 
     if(transA == rocblas_operation_none)
     {
+        // Skinny-m kernel block dimensions. Declared here so both the gate call
+        // (in the else-if condition) and the kernel launch use the same DIM_X.
+        static constexpr int GEMVN_SM_DIM_X = 32;
+        static constexpr int GEMVN_SM_DIM_Y = 16;
+
 #define gemvn_KARGS(alpha_, beta_)                                                             \
     gemvn_grid, gemvn_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
         strideA, x, shiftx, incx, stridex, beta_, stride_beta, y, shifty, incy, stridey,       \
@@ -252,6 +380,63 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                     gemvn_sm_mn_batched_KARGS(*alpha, *beta));
             }
 #undef gemvn_sm_mn_batched_KARGS
+        }
+        else if(workspace && !i64_incs && rocblas_gemvn_skinny_m<GEMVN_SM_DIM_X, To>(transA, m, n))
+        {
+            // Skinny m: split the n reduction across gridDim.y so the launch is
+            // sized by the work rather than by the output length, then reduce.
+            rocblas_int blocks = rocblas_gemvn_output_tiles<GEMVN_SM_DIM_X, Tex>(m);
+
+            const int n_split = rocblas_gemvn_sm_split_count(n);
+
+            dim3 gemvn_sm_grid(blocks, n_split, batches);
+            dim3 gemvn_sm_threads(GEMVN_SM_DIM_X, GEMVN_SM_DIM_Y);
+
+            static constexpr int SM_REDUCE_NB = 256;
+            dim3                 sm_reduce_grid((m - 1) / SM_REDUCE_NB + 1, 1, batches);
+            dim3                 sm_reduce_threads(SM_REDUCE_NB);
+
+#define gemvn_sm_KARGS(alpha_)                                                                  \
+    gemvn_sm_grid, gemvn_sm_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, \
+        lda, strideA, x, shiftx, incx, stridex, (Tex*)workspace, batch_count
+
+#define gemvn_sm_reduce_KARGS(alpha_, beta_)                                                       \
+    sm_reduce_grid, sm_reduce_threads, 0, rocblas_stream, m, n_split, alpha_, stride_alpha, beta_, \
+        stride_beta, y, shifty, incy, stridey, (Tex*)workspace, batch_count
+
+            if(handle->pointer_mode == rocblas_pointer_mode_device)
+            {
+                if(!i64_indices)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvn_sm_kernel<GEMVN_SM_DIM_X, GEMVN_SM_DIM_Y, rocblas_int>),
+                        gemvn_sm_KARGS(alpha));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvn_sm_kernel<GEMVN_SM_DIM_X, GEMVN_SM_DIM_Y, int64_t>),
+                        gemvn_sm_KARGS(alpha));
+
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvn_sm_reduce<SM_REDUCE_NB>),
+                                      gemvn_sm_reduce_KARGS(alpha, beta));
+            }
+            else
+            {
+                if(!*alpha && *beta == 1)
+                    return rocblas_status_success;
+
+                if(!i64_indices)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvn_sm_kernel<GEMVN_SM_DIM_X, GEMVN_SM_DIM_Y, rocblas_int>),
+                        gemvn_sm_KARGS(*alpha));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvn_sm_kernel<GEMVN_SM_DIM_X, GEMVN_SM_DIM_Y, int64_t>),
+                        gemvn_sm_KARGS(*alpha));
+
+                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvn_sm_reduce<SM_REDUCE_NB>),
+                                      gemvn_sm_reduce_KARGS(*alpha, *beta));
+            }
+#undef gemvn_sm_KARGS
+#undef gemvn_sm_reduce_KARGS
         }
         else if(n <= 128 && m >= 2048 * n)
         {

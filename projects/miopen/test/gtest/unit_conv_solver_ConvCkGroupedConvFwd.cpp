@@ -130,9 +130,11 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 
 auto GetTestParams(miopenDataType_t /*datatype*/)
 {
-// Solution requires 64-lane wavefronts and depends on the CK dynamic library
+// Depends on the CK dynamic library. Runs on CDNA (64-lane) and RDNA (32-lane)
+// wavefronts; the matching depthwise instance set is selected per arch at build time.
 #if MIOPEN_BACKEND_HIP
-    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
+    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx110X |
+                           Gpu::gfx115X | Gpu::gfx120X;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif

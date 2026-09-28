@@ -34,6 +34,14 @@
 
 namespace
 {
+#if HIP_FP8_TYPE_FNUZ
+    // Compile-time regression coverage: this conversion must be callable from
+    // device code on architectures with native FNUZ support, including gfx942.
+    __global__ void hipblaslt_bf8_fnuz_to_half(hipblaslt_bf8_fnuz value, _Float16* output)
+    {
+        *output = static_cast<_Float16>(value);
+    }
+#endif
 
     // ----------------------------------------------------------------------------
     // aux
@@ -79,6 +87,8 @@ namespace
                 testing_aux_matmul_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext"))
                 testing_aux_matmul_streamk_tile_scheduling_ext(arg);
+            else if(!strcmp(arg.function, "aux_matmul_uniform_summation_order_ext"))
+                testing_aux_matmul_uniform_summation_order_ext(arg);
             else if(!strcmp(arg.function, "aux_matmul_pref_sm_count_target"))
                 testing_aux_matmul_pref_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init_bad_arg"))
@@ -173,6 +183,7 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
                    || !strcmp(arg.function, "aux_matmul_sm_count_target")
                    || !strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext")
+                   || !strcmp(arg.function, "aux_matmul_uniform_summation_order_ext")
                    || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")
 #ifdef CODE_COVERAGE
                    || !strcmp(arg.function, "aux_auxiliary_func")

@@ -224,7 +224,6 @@ namespace rocsparse
             }
         }
     }
-
 }
 
 template <typename I, typename T>

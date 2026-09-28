@@ -1,0 +1,9 @@
+From abc1234abc1234abc1234abc1234abc1234abc1234 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ren=C3=A9_Dupont?= <rene@example.com>
+Date: Mon, 18 Aug 2026 10:00:00 -0400
+Subject: =?UTF-8?q?Fix_m=C3=A9moire_leak_in_allocator?=
+
+Body of the commit.
+---
+ src/alloc.cpp | 1 +
+ 1 file changed, 1 insertion(+)

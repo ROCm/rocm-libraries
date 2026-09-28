@@ -497,6 +497,9 @@ _defaultProblemType = {
     "ActivationNoGuard": False,
     # AmaxD
     "OutputAmaxD": False,
+    # PUSHes the first AM feature columns to remote peer recv slots from the
+    # GEMM epilogue; the remaining columns store locally.
+    "FusedGemmA2A": False,
     # For kernels putting arguments in workspaces instead of kernel arguments, they can choose to support user arguments input instead.
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
@@ -1007,6 +1010,12 @@ class ProblemType(Mapping):
       self["ActivationComputeDataType"] = self["ComputeDataType"]
 
     if self["ActivationType"] != 'none':
+      if self["OutputAmaxD"] and self["ActivationComputeDataType"] != self["ComputeDataType"]:
+        # Amax reduces activated accumulators before destination rounding.
+        # Select this precision before activation register allocation and calls.
+        printWarning("OutputAmaxD requires activation in ComputeDataType; "
+                     "ActivationComputeDataType will be set to ComputeDataType.")
+        self["ActivationComputeDataType"] = self["ComputeDataType"]
       # This is a dummy guard in case we currently don't have a converter to convert data from compute type to activation compute type
       if self["ActivationComputeDataType"] not in [self["ComputeDataType"], self["DestDataType"]]:
         printWarning("TensileLite currently only supports ActivationComputeDataType (%s) = ComputeDataType (%s) or DestDataType (%s). \
@@ -1344,6 +1353,8 @@ class ProblemType(Mapping):
         name.append(f"Aux{self['DataTypeE'].toChar()}")
     if self["OutputAmaxD"]:
       name.append("AmaxD")
+    if self["FusedGemmA2A"]:
+      name.append("FusedA2A")
     if self["Sparse"]:
       if self["Sparse"] == 2:
         name.append("SPBML%d"%(self["MetadataLayout"]))

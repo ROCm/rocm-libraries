@@ -3,8 +3,8 @@
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from geko.config_generator.constants import LIST_OF_MT_MAX_SIZE
-from geko.config_generator.mi_designer import MIDesign
+from geko.config_generator.constants import get_list_of_mt_max_size
+from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.fork_params.post_processor import BasePostProcessor, mark_post_process
 from geko.config_generator.shared_utils import (
     ForkParameter,
@@ -14,6 +14,7 @@ from geko.config_generator.shared_utils import (
 import logging
 
 logger = logging.getLogger("GEKO")
+
 
 class GFX950PostProcessor(BasePostProcessor):
     """GFX950 heuristic post-processor.
@@ -30,11 +31,10 @@ class GFX950PostProcessor(BasePostProcessor):
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
         """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
-        threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
+        threshold = get_list_of_mt_max_size(self.config.get("search_space"))[dt] // 3
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            if MT0 * MT1 >= threshold:
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            if mfma_params.MT0 * mfma_params.MT1 >= threshold:
                 entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
@@ -48,9 +48,8 @@ class GFX950PostProcessor(BasePostProcessor):
         """usePGR1: if any MI has MT0<64 and MT1<64, add 1 to PGR."""
         use_pgr1 = False
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            use_pgr1 = use_pgr1 or (MT0 < 64 and MT1 < 64)
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            use_pgr1 = use_pgr1 or (mfma_params.MT0 < 64 and mfma_params.MT1 < 64)
         if use_pgr1 and "PrefetchGlobalRead" in fork_params:
             pgr = fork_params["PrefetchGlobalRead"]
             if 1 not in pgr.values:
@@ -68,9 +67,8 @@ class GFX950PostProcessor(BasePostProcessor):
         K = ctx.K
         use_large = False
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            use_large = use_large or (K > 1024 and MT0 * MT1 < 64 * 64)
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            use_large = use_large or (K > 1024 and mfma_params.MT0 * mfma_params.MT1 < 64 * 64)
         if use_large and "DepthU" in fork_params:
             du = fork_params["DepthU"]
             du.values.append(2 * du.values[-1])
@@ -87,9 +85,8 @@ class GFX950PostProcessor(BasePostProcessor):
         """useWGM1: replace 16 with 1 if any MI has MT0<=32 and MT1<=32."""
         use_wgm1 = False
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            use_wgm1 = use_wgm1 or (MT0 <= 32 and MT1 <= 32)
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            use_wgm1 = use_wgm1 or (mfma_params.MT0 <= 32 and mfma_params.MT1 <= 32)
         if use_wgm1 and "WorkGroupMapping" in fork_params:
             wgm = fork_params["WorkGroupMapping"]
             if 16 in wgm.values:
@@ -105,7 +102,7 @@ class GFX950PostProcessor(BasePostProcessor):
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
         """Load CMS kernels and prepend to MI groups.
         When CMS is disabled, set UseCustomMainLoopSchedule=0
-        NOTE - Legacy code doesn't support CMS for non-GA workflows"""
+        NOTE - Legacy code doesn't support CMS for non-Ductile workflows"""
         if not self.config.get("CMS", False):
             fork_params["UseCustomMainLoopSchedule"] = self._make_param(
                 "UseCustomMainLoopSchedule", [0])
@@ -123,7 +120,7 @@ class GFX950PostProcessor(BasePostProcessor):
 
 
 class GFX950GAPostProcessor(BasePostProcessor):
-    """GFX950 GA post-processor.
+    """GFX950 generic search-space post-processor.
 
     Augments MI groups with MIArchVgpr and merges CMS groups.
     """
@@ -137,11 +134,10 @@ class GFX950GAPostProcessor(BasePostProcessor):
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
         """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
-        threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
+        threshold = get_list_of_mt_max_size(self.config.get("search_space"))[dt] // 3
         for entry in mi_groups:
-            mi = entry["MatrixInstruction"].values
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            if MT0 * MT1 >= threshold:
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(entry["MatrixInstruction"].values))
+            if mfma_params.MT0 * mfma_params.MT1 >= threshold:
                 entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
@@ -252,13 +248,10 @@ def load_CMS_groups(
             continue
         entry: Dict[str, ForkParameter] = {}
         mi_values = _reconstruct_matrix_instruction(d)
-
-        MT0, MT1, TT0, TT1, WG0, WG1, MIBlockM = (
-            MIDesign.calculate_mfma_parameters(mi_values)
-        )
+        mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(mi_values))
         mi_comment = (
-            f"CMS — MT {MT0}x{MT1} - TT {TT0}x{TT1} "
-            f"- WG {WG0}x{WG1} - MIBlockM {MIBlockM}"
+            f"CMS — MT {mfma_params.MT0}x{mfma_params.MT1} - TT {mfma_params.TT0}x{mfma_params.TT1} "
+            f"- WG {mfma_params.WG0}x{mfma_params.WG1} - MIBlockM {mfma_params.MIBlockM}"
         )
         
         entry['MatrixInstruction'] = make_param(
@@ -266,7 +259,7 @@ def load_CMS_groups(
             mi_values, 
             comment=mi_comment,
             metadata={
-                "MT": (MT0, MT1),
+                "MT": (mfma_params.MT0, mfma_params.MT1),
                 "wave": (mi_values[7], mi_values[8]),
                 "LSU": 1,
                 "GSU": 1, # TODO For now using GSU=1 for CMS kernels

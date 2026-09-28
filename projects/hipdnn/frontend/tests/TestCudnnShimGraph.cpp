@@ -12,15 +12,19 @@
 
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <type_traits>
-#include <unordered_map>
 #include <vector>
 
 namespace cudnn_frontend = hipdnn_frontend::compatibility::cudnn_frontend;
 
 static_assert(std::is_move_constructible_v<cudnn_frontend::graph::Graph>);
-static_assert(!std::is_copy_constructible_v<cudnn_frontend::graph::Graph>);
+// Upstream's Graph is copyable and samples rely on it; see the aliasing-copy
+// tests below for what a copy actually shares.
+static_assert(std::is_copy_constructible_v<cudnn_frontend::graph::Graph>);
+static_assert(std::is_copy_assignable_v<cudnn_frontend::graph::Graph>);
 static_assert(std::is_same_v<cudnn_frontend::graph::TensorAttributes,
                              hipdnn_frontend::graph::TensorAttributes>);
 static_assert(std::is_same_v<cudnn_frontend::graph::Tensor_attributes,
@@ -292,6 +296,153 @@ TEST(TestCudnnShimGraph, ValidateSurfacesRecordedDevicePropertiesError)
     ASSERT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
     EXPECT_NE(error.get_message().find("Device properties"), std::string::npos);
+}
+
+// print()/operator<< must never throw or crash on a graph that never reached a
+// backend descriptor: 15 upstream samples stream a graph unconditionally.
+TEST(TestCudnnShimGraph, PrintOnGraphWithoutBackendDescriptorYieldsEmptyObject)
+{
+    const fe::graph::Graph graph;
+
+    EXPECT_EQ(graph.print(), "{}");
+
+    std::ostringstream stream;
+    stream << graph;
+    EXPECT_EQ(stream.str(), "{}");
+}
+
+// The native graph is held by shared_ptr, so `*_graph` is non-const even inside
+// a const member: without std::as_const the const print()/serialize() would pick
+// the native auto-lowering overloads and mutate the graph they report on. The
+// backend-descriptor refusal below only comes from the const native overload —
+// the auto-lowering one would have tried (and failed) to build a descriptor.
+TEST(TestCudnnShimGraph, ConstSerializeDoesNotLowerTheNativeGraph)
+{
+    fe::graph::Graph graph;
+    auto a = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 1);
+    auto b = hipdnn_shim_test::makeTensor(graph, {2, 3}, {3, 1}, 2);
+    auto c = graph.pointwise(
+        a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD));
+    ASSERT_NE(c, nullptr);
+    c->set_output(true).set_uid(3);
+
+    const fe::graph::Graph& constGraph = graph;
+    std::vector<uint8_t> data;
+
+    auto error = constGraph.serialize(data);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_NE(error.get_message().find("Graph has no backend descriptor"), std::string::npos);
+    EXPECT_TRUE(data.empty());
+
+    EXPECT_EQ(constGraph.print(), "{}");
+}
+
+TEST(TestCudnnShimGraph, AutotuneWorkspaceSizeIsZeroWithoutPlans)
+{
+    const fe::graph::Graph graph;
+
+    EXPECT_EQ(graph.get_autotune_workspace_size(), 0);
+}
+
+// Runtime shape overrides: an empty override list is the "no override" call and
+// must behave exactly like the plain query; a populated one must be refused
+// rather than answered with a size that ignores the overrides.
+TEST(TestCudnnShimGraph, EmptyShapeOverridesDegradeToPlainWorkspaceQuery)
+{
+    fe::graph::Graph graph;
+    ASSERT_TRUE(graph.build_operation_graph(nullptr).is_good());
+
+    const std::vector<int64_t> uids;
+    const std::vector<std::vector<int64_t>> shapes;
+    const std::vector<std::vector<int64_t>> strides;
+
+    int64_t workspaceSize = -1;
+    EXPECT_TRUE(graph.get_workspace_size(nullptr, workspaceSize, uids, shapes, strides).is_good());
+    EXPECT_EQ(workspaceSize, 0);
+    EXPECT_EQ(graph.get_workspace_size(nullptr, uids, shapes, strides), 0);
+}
+
+TEST(TestCudnnShimGraph, PopulatedShapeOverridesAreRefusedNotIgnored)
+{
+    fe::graph::Graph graph;
+    ASSERT_TRUE(graph.build_operation_graph(nullptr).is_good());
+
+    const std::vector<int64_t> uids{1};
+    const std::vector<std::vector<int64_t>> shapes{{4, 8}};
+    const std::vector<std::vector<int64_t>> strides{{8, 1}};
+
+    int64_t workspaceSize = -1;
+    auto error = graph.get_workspace_size(nullptr, workspaceSize, uids, shapes, strides);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_EQ(workspaceSize, -1);
+
+    auto planError
+        = graph.get_workspace_size_plan_at_index(nullptr, 0, workspaceSize, uids, shapes, strides);
+    ASSERT_TRUE(planError.is_bad());
+    EXPECT_EQ(planError.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
+}
+
+// The corpus shape: a builder lambda configures a Graph and hands it back inside
+// a tuple, which copy-constructs it. This is the whole reason Graph is copyable.
+TEST(TestCudnnShimGraph, CopiesOutOfABuilderIntoATuple)
+{
+    auto build = [] {
+        fe::graph::Graph graph;
+        auto tensor = graph.tensor(fe::graph::Tensor_attributes{}
+                                       .set_dim({1, 2})
+                                       .set_stride({2, 1})
+                                       .set_data_type(fe::DataType_t::FLOAT)
+                                       .set_uid(1));
+        return std::make_tuple(graph, tensor);
+    };
+
+    auto [graph, tensor] = build();
+
+    fe::graph::Tensor_attributes queried;
+    EXPECT_TRUE(graph.query_tensor_attributes_of_uid(1, queried).is_good());
+    EXPECT_EQ(tensor->get_uid(), 1);
+}
+
+// A copy shares the native graph rather than duplicating it. Observable once both
+// sides already hold native state: a node added through the copy is validated by
+// the original. Matches upstream, whose copy shares its nodes and backend
+// descriptors through shared_ptr.
+//
+// Wrapper-side scalars are NOT shared. A copy of a node-less graph still reports
+// Empty after the copy adds its first node, so this test seeds a node before
+// copying. That asymmetry is the documented caveat on Graph's copy constructor,
+// not an accident.
+TEST(TestCudnnShimGraph, CopyOfANativeGraphSharesLaterNodes)
+{
+    constexpr int64_t N = 4;
+    auto squareTensor = [](fe::graph::Graph& g, int64_t uid) {
+        return g.tensor(fe::graph::Tensor_attributes{}
+                            .set_dim({N, N, N, N})
+                            .set_stride({N * N * N, N * N, N, 1})
+                            .set_uid(uid));
+    };
+
+    fe::graph::Graph original;
+    original.set_io_data_type(fe::DataType_t::HALF).set_compute_data_type(fe::DataType_t::FLOAT);
+    auto a = squareTensor(original, 1);
+    auto b = squareTensor(original, 2);
+    original.pointwise(a, b, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD))
+        ->set_output(true)
+        .set_uid(3);
+    ASSERT_TRUE(original.validate().is_good());
+
+    fe::graph::Graph copy = original; // NOLINT(performance-unnecessary-copy-initialization)
+
+    // A second output node whose dims cannot be inferred: invalid on whichever
+    // graph owns it.
+    auto c = squareTensor(copy, 4);
+    copy.pointwise(a, c, fe::graph::Pointwise_attributes{}.set_mode(fe::PointwiseMode_t::ADD))
+        ->set_output(true)
+        .set_uid(5);
+
+    // The original now sees it, which is only possible if the native graph is shared.
+    EXPECT_TRUE(original.validate().is_bad());
 }
 
 // Gaps intentionally not tested host-only (documented, not faked):

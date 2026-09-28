@@ -39,7 +39,8 @@ def test_configure_builds_config_and_calls_generator(monkeypatch: pytest.MonkeyP
 
     cfg = ocore.configure(hip, gc, out_dir, arch="gfx950", backend="ductile")
     assert cfg["ARCH"] == "gfx950"
-    assert cfg["GA"] is True
+    assert cfg["backend"] == "ductile"
+    assert cfg["search_space"] is None
     assert cfg["_defaults_applied"] is True
     assert seen["write_shell_scripts"] is False
     assert seen["target"] == out_dir
@@ -148,8 +149,9 @@ def test_analyze_no_kept_results_returns_none(monkeypatch: pytest.MonkeyPatch, t
     )
     monkeypatch.setattr(ocore._metrics, "write_metrics_json", lambda *_a, **_k: None)
 
-    out = ocore.analyze(tmp_path / "hip", tmp_path / "libs", tmp_path / "o", verify=False)
+    out, full_df = ocore.analyze(tmp_path / "hip", tmp_path / "libs", tmp_path / "o", verify=False)
     assert out is None
+    assert full_df is not None
     assert (tmp_path / "o/raw_results.csv").is_file()
 
 
@@ -201,9 +203,10 @@ def test_analyze_kept_results_writes_outputs(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(ocore.bench.utils, "as_dashboard_format", lambda _d: _Dash())
 
-    out = ocore.analyze(tmp_path / "hip", tmp_path / "libs", tmp_path / "o", verify=True, device=2)
+    out, full_df = ocore.analyze(tmp_path / "hip", tmp_path / "libs", tmp_path / "o", verify=True, device=2)
     assert out is not None
     assert len(out) == 1
+    assert full_df is not None
     assert (tmp_path / "o/final_results.csv").is_file()
     assert dashboard_called["n"] == 1
 

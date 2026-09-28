@@ -22,8 +22,7 @@
 #
 ################################################################################
 
-"""
-Load the known-bugs YAML for TensileLogic --check-all.
+"""Load the known-bugs YAML for TensileLogic --check-all.
 
 Each skip is keyed on (relative_path, solution_name), where solution_name is the
 solution's ``SolutionNameMin`` — a canonical, content-derived name (macro tile,
@@ -40,7 +39,9 @@ argument), using forward slashes — the same form as validation error messages.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import FrozenSet, Optional, Tuple
+from typing import Callable, FrozenSet, Optional, Tuple
+
+from Tensile.resources import known_bugs_text
 
 try:
     import yaml
@@ -49,6 +50,7 @@ except ImportError:  # pragma: no cover
 
 # A known-bug lookup key: (normalized relative path, solution_name).
 KnownBugKey = Tuple[str, str]
+_BUNDLED_SOURCE = "bundled TensileLogic/known_bugs.yaml"
 
 
 def normalize_logic_relative_path(path: Path) -> str:
@@ -56,32 +58,24 @@ def normalize_logic_relative_path(path: Path) -> str:
     return "/".join(Path(path).parts)
 
 
-def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
-    """
-    Parse known-bugs YAML into a set of (relative_path, solution_name).
-
-    If config_path is None or the file is missing, returns an empty frozenset.
-    If a file path is given but PyYAML is not installed, raises RuntimeError.
-    """
-    if config_path is None:
-        return frozenset()
-    if not config_path.is_file():
-        return frozenset()
+def _load_known_bugs(
+    read_text: Callable[[], str], source: str
+) -> FrozenSet[KnownBugKey]:
+    """Read and parse known-bugs YAML from a named source."""
     if yaml is None:
         raise RuntimeError(
             "Known-bugs YAML requires PyYAML. Install with: pip install PyYAML\n"
-            f"  (file was: {config_path})"
+            f"  (source was: {source})"
         )
 
-    with open(config_path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    raw = yaml.safe_load(read_text())
 
     if raw is None:
         return frozenset()
 
     if not isinstance(raw, dict):
         raise ValueError(
-            f"Known-bugs file must be a mapping at the top level: {config_path}"
+            f"Known-bugs file must be a mapping at the top level: {source}"
         )
 
     skips = raw.get("skips")
@@ -89,26 +83,49 @@ def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
         return frozenset()
 
     if not isinstance(skips, list):
-        raise ValueError(f"Known-bugs 'skips' must be a list: {config_path}")
+        raise ValueError(f"Known-bugs 'skips' must be a list: {source}")
 
     out: set[KnownBugKey] = set()
     for i, entry in enumerate(skips):
         if not isinstance(entry, dict):
-            raise ValueError(f"Known-bugs skips[{i}] must be a mapping: {config_path}")
+            raise ValueError(f"Known-bugs skips[{i}] must be a mapping: {source}")
         path_str = entry.get("path")
         if not path_str or not isinstance(path_str, str):
             raise ValueError(
-                f"Known-bugs skips[{i}] requires string 'path': {config_path}"
+                f"Known-bugs skips[{i}] requires string 'path': {source}"
             )
         sol_name = entry.get("solution_name")
         if not sol_name or not isinstance(sol_name, str):
             raise ValueError(
-                f"Known-bugs skips[{i}] requires string 'solution_name': {config_path}"
+                f"Known-bugs skips[{i}] requires string 'solution_name': {source}"
             )
         key = (normalize_logic_relative_path(Path(path_str)), sol_name)
         out.add(key)
 
     return frozenset(out)
+
+
+def load_known_bugs(config_path: Optional[Path]) -> FrozenSet[KnownBugKey]:
+    """Read known-bug pairs from an explicit YAML file, if it exists.
+
+    If config_path is None or the file is missing, returns an empty frozenset.
+    If a file path is given but PyYAML is not installed, raises RuntimeError.
+    """
+    if config_path is None:
+        return frozenset()
+
+    config_path = Path(config_path)
+    if not config_path.is_file():
+        return frozenset()
+
+    return _load_known_bugs(
+        lambda: config_path.read_text(encoding="utf-8"), str(config_path)
+    )
+
+
+def load_bundled_known_bugs() -> FrozenSet[KnownBugKey]:
+    """Load known-bug pairs from the bundled package resource."""
+    return _load_known_bugs(known_bugs_text, _BUNDLED_SOURCE)
 
 
 def is_known_bug(

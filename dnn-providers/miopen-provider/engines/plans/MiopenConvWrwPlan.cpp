@@ -20,9 +20,9 @@ ConvWrwParams::ConvWrwParams(
     bool deterministicEnabled)
     : _spatialDimCount(miopen_utils::getSpatialDimCount(
           miopen_utils::findTensorAttributes(tensorMap, attributes.x_tensor_uid())))
-    , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
-    , _dw(miopen_utils::createTensor(tensorMap, attributes.dw_tensor_uid()))
-    , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
+    , _x(miopen_utils::createPaddedTensor(tensorMap, attributes.x_tensor_uid()))
+    , _dw(miopen_utils::createPaddedTensor(tensorMap, attributes.dw_tensor_uid()))
+    , _dy(miopen_utils::createPaddedTensor(tensorMap, attributes.dy_tensor_uid()))
 {
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());

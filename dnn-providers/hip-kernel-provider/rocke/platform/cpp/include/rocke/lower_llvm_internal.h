@@ -106,9 +106,8 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 
-/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): identical to
- * the LLVM22 set for the declares rocke emits today; split entries here if an
- * LLVM 23 host proves drift. */
+/* The LLVM23 overrides (Python _INTRINSIC_DECLS_LLVM23_OVERRIDES): the LLVM22
+ * set plus declarations whose ABI changed again. */
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
@@ -195,6 +194,13 @@ typedef struct rocke_isa_backend
      * backend fact rather than tested by gfx-string prefix so the capability
      * has one definition site per backend, as in Python. */
     bool has_async_lds_counter;
+    /* Python Gfx1250Backend.blocks_ds_load_tr16: when true, vec==8
+     * smem_load_vN emits `volatile` to block the WMMA-aware backend pass from
+     * substituting ds_load_tr16_b128 (transposed LDS read) for the plain
+     * sequential ds_read_b128. Row-major LDS tiles (stored for coalesced
+     * writes) are mis-read by ds_load_tr16_b128, producing garbage WMMA
+     * inputs. Volatile is opaque to the substitution. True only on gfx1250. */
+    bool blocks_ds_load_tr16;
     /* Python ISABackend.emits_legacy_s_waitcnt. gfx1250 replaced the
      * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
      * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt
@@ -247,6 +253,90 @@ typedef struct rocke_ll_block
     ROCKE_VEC(char*) lines; /* arena-backed; each line includes no trailing \n */
     bool terminated;
 } rocke_ll_block_t;
+
+/* ====================================================================== */
+/* Debug metadata (Python _DebugInfo)                                     */
+/* ====================================================================== */
+
+/* LLVM drops every !dbg attachment in a module that does not carry this flag,
+ * silently and with no diagnostic, so it is not optional. */
+#define ROCKE_LL_DEBUG_INFO_VERSION 3
+
+/* finalize hardcodes low metadata ids for the AMDGPU markers (fp-atomic, agent
+ * scope). Debug nodes start above them and are numbered in a fixed allocation
+ * order, which is what lets this engine reproduce the Python bytes exactly. */
+#define ROCKE_LL_DEBUG_MD_BASE 10
+
+/* IRBuilder caps a captured chain at 16 frames (ir._MAX_LOC_FRAMES). */
+#define ROCKE_LL_DEBUG_MAX_FRAMES 16
+
+/* One authoring call-stack entry parsed out of an Op.loc (Python _Frame). */
+typedef struct rocke_ll_dbg_frame
+{
+    const char* path;
+    int line;
+    int col;
+    const char* func;
+} rocke_ll_dbg_frame_t;
+
+/* path -> metadata id (the _file_ids / _block_ids dicts). */
+typedef struct rocke_ll_dbg_str_id
+{
+    const char* key;
+    int id;
+} rocke_ll_dbg_str_id_t;
+
+/* (path, func) -> DISubprogram id (the _inlined_subprograms dict). */
+typedef struct rocke_ll_dbg_func_id
+{
+    const char* path;
+    const char* func;
+    int id;
+} rocke_ll_dbg_func_id_t;
+
+/* (frame, scope, parent) -> DILocation id (the _locations dict). Keying on the
+ * parent as well is what keeps two call sites of the same helper distinct. */
+typedef struct rocke_ll_dbg_loc
+{
+    const char* path;
+    const char* func;
+    int line;
+    int col;
+    int scope;
+    int parent; /* -1 when this is the outermost frame */
+    int id;
+} rocke_ll_dbg_loc_t;
+
+/* How many lines a block held before an op lowered into it, so only what that
+ * op added gets its location (Python's marks dict, keyed on block identity). */
+typedef struct rocke_ll_dbg_mark
+{
+    const rocke_ll_block_t* block;
+    size_t len;
+} rocke_ll_dbg_mark_t;
+
+/* Line-table debug metadata assembled from the Op.loc of lowered ops. Line
+ * tables only: enough for a profiler to map a program counter back to the
+ * Python line that emitted it, without the variable and type DWARF a
+ * source-level debugger would want. */
+typedef struct rocke_ll_debug
+{
+    const char* kernel_name;
+    int flag_id;
+    int empty_id;
+    int subroutine_id;
+    int primary_file_id;
+    int cu_id;
+    int subprogram_id;
+    int next_id;
+    const char* primary_file; /* NULL until the first location is interned */
+    int primary_line;
+    ROCKE_VEC(rocke_ll_dbg_str_id_t) file_ids;
+    ROCKE_VEC(rocke_ll_dbg_str_id_t) block_ids;
+    ROCKE_VEC(rocke_ll_dbg_func_id_t) inlined;
+    ROCKE_VEC(rocke_ll_dbg_loc_t) locations;
+    ROCKE_VEC(char*) nodes; /* rendered in allocation order, which is id order */
+} rocke_ll_debug_t;
 
 /* ====================================================================== */
 /* Lowerer state (Python _Lowerer)                                        */
@@ -333,6 +423,15 @@ struct rocke_lower
      * points at the specific tile.sync op to skip, or NULL. */
     const rocke_op_t* unroll_elide_sync_op;
 
+    /* DWARF line-table metadata, or NULL when the kernel was built without
+     * location capture (Python self._debug). */
+    rocke_ll_debug_t* debug;
+
+    /* Scratch: per-op block-length marks, reused across ops (Python's marks
+     * dict). Nested lower_op calls append and restore len so they do not
+     * clobber the parent. */
+    ROCKE_VEC(rocke_ll_dbg_mark_t) dbg_marks;
+
     /* sticky error (the lowerer has no builder to carry it). */
     rocke_status_t status;
     char* err; /* arena-owned, ROCKE_ERR_MSG_CAP cap   */
@@ -384,6 +483,29 @@ void rocke_ll_emitf(rocke_lower_t* L, const char* fmt, ...);
  * stable for the lowerer's lifetime. */
 const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint);
 
+/* ====================================================================== */
+/* Debug metadata (Python _DebugInfo) -- DEFINED IN debug.cpp             */
+/* ====================================================================== */
+
+/* Allocate the per-kernel debug state. Called only when the kernel carries the
+ * debug_info attr, so a kernel built without location capture pays nothing. */
+rocke_ll_debug_t* rocke_ll_debug_create(rocke_lower_t* L, const char* kernel_name);
+
+/* Whether any location was interned; false means render nothing and leave the
+ * define line bare (Python has_locations). */
+bool rocke_ll_debug_has_locations(const rocke_ll_debug_t* D);
+
+/* Intern an Op.loc and return the innermost !DILocation id, or -1 when the
+ * location carries no usable frame (Python location_id). */
+int rocke_ll_debug_location_id(rocke_lower_t* L, rocke_ll_debug_t* D, const char* loc);
+
+/* Attach ", !dbg !<id>" to the lines `blk` grew from `start` on (Python
+ * annotate). */
+void rocke_ll_debug_annotate(rocke_lower_t* L, rocke_ll_block_t* blk, size_t start, int dbg);
+
+/* Append the module-level debug metadata block (Python render). */
+void rocke_ll_debug_render(rocke_lower_t* L, const rocke_ll_debug_t* D, rocke_strbuf_t* out);
+
 /* Mark an intrinsic as needed by its canonical key (Python _need). Resolves
  * the decl text now (flavor overrides + dyn_decls) so emit order is the table
  * order and dynamic decls survive. No-op if already present. */
@@ -431,10 +553,6 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
                           const rocke_ll_anyptr_space_t* allowed,
                           int count,
                           const char** out_ptr_ty);
-
-/* Map an IR type-NAME string (from op.attrs, e.g. iter_args metadata) back to
- * LLVM text (Python _llvm_type_from_name). Handles scalars + "vec<exN>". */
-const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name);
 
 /* LLVM aggregate storage type for a SmemType: nested arrays of the element
  * (Python _smem_storage_type). Arena-owned. */

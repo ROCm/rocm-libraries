@@ -7,9 +7,9 @@ VERSION = "2.01"
 # apply value with N_dim <=step
 stepValue_EnqueuesPerSync = [[64*64*8192,200], [256*256*8192,30], [1024*1024*8192,20], [1000000000000000,10]]
 
-dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1,'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4}
+dataSize = {'H': 2, 'B': 2, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 1, 'X': 4, 'F8': 1, 'F8N': 1, 'F8B8': 1, 'B8F8': 1, 'X1': 4, 'F4': 1}
 
-LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7,'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4}
+LIST_OF_MIN_DIM={'H': 7, 'B': 7, 'S': 3, 'D': 1, 'C': 1, 'Z': 1, 'I8': 7, 'X': 3, 'F8': 7, 'F8N': 7, 'F8B8': 7, 'B8F8': 7, 'X1': 4, 'F4': 7}
 
 depthURange = {}  # [for small/mid MT], [for large  MT]
 depthURange['H'] = [[64,128,256,512], [32,64,128,256], [32,64,128], [32,64]]
@@ -25,8 +25,10 @@ depthURange['F8'] = depthURange['I8']
 depthURange['F8N'] = depthURange['I8']
 depthURange['F8B8'] = depthURange['F8']
 depthURange['B8F8'] = depthURange['F8']
+# fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
+depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4,'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4}
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
 
 
 # TODO update for every new arch, or import from tensilelite commons
@@ -41,6 +43,7 @@ validMFMA["Z"] = validMFMA["D"]
 validMFMA["X"] = validMFMA["B"]
 validMFMA["X1"] = validMFMA["B"]
 validMFMA["F8"] = [[32,32,16,1], [16,16,32,1], [32,32,64,1], [16,16,128,1]]
+validMFMA["F4"] = [[16,16,128,1], [32,32,64,1]]
 validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8N"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
@@ -51,23 +54,42 @@ validMFMA["I8"] = validMFMA["H"] + validMFMA["F8"]
 
 MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024
 
-# TODO: check if we can use larger MT0xMT1 for all datatypes
-LARGE_MT0xMT1=256*464
-REGULAR_MT0xMT1=256*256
-LIST_OF_MT_MAX_SIZE = {
-    'H': LARGE_MT0xMT1,
-    'B': LARGE_MT0xMT1,
-    'S': REGULAR_MT0xMT1, # Is larger MT valid for for F32?
-    'D': REGULAR_MT0xMT1,
-    'C': 32768,
-    'Z': 16384,
-    'I8': LARGE_MT0xMT1,
-    'X': LARGE_MT0xMT1, # X3 (3 BF16 implementation)
-    'X1': LARGE_MT0xMT1, # X1 (1 BF16 implementation)
-    'F8': LARGE_MT0xMT1,
-    'F8N': LARGE_MT0xMT1,
-    'F8B8': LARGE_MT0xMT1,
-    'B8F8': LARGE_MT0xMT1}
+_LARGE_MT0xMT1_DEFAULT = 256 * 464
+_REGULAR_MT0xMT1_DEFAULT = 256 * 256
+
+
+def _build_mt_max_size(large: int, regular: int):
+    return {
+        'H': large,
+        'B': large,
+        'S': regular,
+        'D': regular,
+        'C': 32768,
+        'Z': 16384,
+        'I8': large,
+        'X': large,
+        'X1': large,
+        'F8': large,
+        'F8N': large,
+        'F8B8': large,
+        'B8F8': large,
+        'F4': large,
+    }
+
+
+LIST_OF_MT_MAX_SIZE_DEFAULT = _build_mt_max_size(_LARGE_MT0xMT1_DEFAULT, _REGULAR_MT0xMT1_DEFAULT)
+
+
+def get_list_of_mt_max_size(search_space=None):
+    """Return MT-area cap dict for search_space.
+
+    Stage 1 supports heuristic/generic only, both using default caps.
+    """
+    return LIST_OF_MT_MAX_SIZE_DEFAULT
+
+
+# Backward-compatible alias.
+LIST_OF_MT_MAX_SIZE = LIST_OF_MT_MAX_SIZE_DEFAULT
 
 ONLY_INCLUDE_MIs_GFX950 = {
     'H':
@@ -119,6 +141,11 @@ ONLY_INCLUDE_MIs_GFX950 = {
     ],
     'F8':  # similar to I8
 
+    [
+        [16, 16, 128, 1],
+        [32, 32, 64, 1],
+    ],
+    'F4':  # fp4 / MX
     [
         [16, 16, 128, 1],
         [32, 32, 64, 1],
@@ -256,12 +283,12 @@ LIST_OF_WAVEs_TO_INCLUDE = [[4, 1], [2, 2], [1, 4], [1, 2], [2, 1], [1, 1]]
 
 # MT Configs
 MIN_MT0 = 4
-MAX_MT0 = 512
+MAX_MT0 = 1024
 
 MIN_MT1 = 4
-MAX_MT1 = 512
+MAX_MT1 = 1024
 
-MAX_MT_AREA = 464 * 256
+MAX_MT_AREA = 1024 * 1024 # Used by setupMTTuning.py. TODO - This should not be here.
 
 # <<< Controls for number of MIs in the config file
 # these params are only for MI_FILTER = 2
@@ -278,15 +305,16 @@ ROUND3 = 5
 # The  larger the number is, the more MI it keeps
 LSUTHRESHOLD = 65536
 
-# Cap on kernels per config file for non-GA (exhaustive) tuning.
-# In GA mode this is ignored (set to sys.maxsize). User can override via config YAML.
+# Kernel cap for heuristic search space (generic uses sys.maxsize).
 MAX_NUM_KERNELS_PER_CONFIG = 180_000_000
 
 
-# GA VALIDATION PROFILE NUM ELEMENTS TO VALIDATE
-# This is used to cap the number of elements used for GA kernel validation 
-# after the last generation.
-GA_VALIDATION_PROFILE_MAP = {
+VALID_BACKENDS = ("ductile", "tensile")
+VALID_SEARCH_SPACES = ("heuristic", "generic")
+
+
+# Ductile validation profile: caps elements validated after the last generation.
+DUCTILE_VALIDATION_PROFILE_MAP = {
     0: 0, 
     1: 128, 
     2: -1,  # -1 means no cap (use all elements)
@@ -301,7 +329,7 @@ REQUIRED_CONFIG_FIELDS = ["TRANSA", "TRANSB", "DataType", "DestDataType", "Compu
 # To add or change per-ARCH optional defaults, edit ``CONFIG_DEFAULTS_BY_ARCH`` below.
 _CONFIG_OPTIONAL_COMMON = {
     "StreamK": True,
-    "GA": True,
+    "search_space": None,
     "MACROTILE_OPT": False,
     "MT_DU": None,
     "USE_HEURISTICS": False,
@@ -310,14 +338,14 @@ _CONFIG_OPTIONAL_COMMON = {
     "MI_FILTER": 2,
     "EPILOGUES": True,
     "CLUSTER": 0,
-    "GA_VALIDATION_PROFILE": 1,
+    "DUCTILE_VALIDATION_PROFILE": 1,
 }
 
 # Config fields that can be overridden by environment variables (if set). Used in _apply_env_config_overrides.
 ENV_UPDATABLE_KEYS = {
     "StreamK",
     "MI_FILTER",
-    "GA_VALIDATION_PROFILE",
+    "DUCTILE_VALIDATION_PROFILE",
 }
 
 _CMS_DEFAULTS_GFX950 = {"CMS": True, "CMS_PRIORITY": False}

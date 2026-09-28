@@ -73,6 +73,23 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
 }
 
 
+// Fast, CPU-only unit tests (rocsparse-unit-test target). No GPU required, so this
+// runs early as a quick gate before the GPU-dependent gtest / coverage suites.
+// The target is built as part of the standard clients-tests build (install.sh).
+def runUnitTestCommand (platform, project, String dirmode = "release")
+{
+    def command = """#!/usr/bin/env bash
+                set -ex
+                cd ${project.paths.project_build_prefix}/build/${dirmode}
+                export LD_LIBRARY_PATH=/opt/rocm/lib/
+                cmake --build . --target rocsparse-unit-test
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+            """
+
+    platform.runCommand(this, command)
+}
+
+
 def runHipDebugTestCommand (platform, project, gfilter, String dirmode = "release")
 {
     def hmmTestCommand= """GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --test-hip-debug --test-hip-debug-full  --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*"""

@@ -133,6 +133,25 @@ class TestMinimumRequiredVersionSkipped:
         assignGlobalParameters({"MinimumRequiredVersion": __version__}, EMPTY_ISA_INFO)
 
 
+class TestRuntimeLanguage:
+    def test_ocl_runtime_language_exits(self, capsys):
+        with pytest.raises(SystemExit):
+            assignGlobalParameters({"RuntimeLanguage": "OCL"}, EMPTY_ISA_INFO)
+        assert "Unsupported RuntimeLanguage 'OCL'" in capsys.readouterr().out
+
+    def test_supported_runtime_languages_pass(self):
+        for runtimeLanguage in ("HIP", "HSA"):
+            restoreDefaultGlobalParameters()
+            assignGlobalParameters({"RuntimeLanguage": runtimeLanguage}, EMPTY_ISA_INFO)
+            assert globalParameters["RuntimeLanguage"] == runtimeLanguage
+
+
+class TestRemovedOpenCLPlatform:
+    def test_opencl_platform_parameter_is_unknown(self):
+        with pytest.raises(ConfigTypeError, match="Unknown global parameter 'Platform'"):
+            assignGlobalParameters({"Platform": 1}, EMPTY_ISA_INFO)
+
+
 class TestRaisesOnFirstError:
     def test_raises_on_first_bad_key(self):
         with pytest.raises(ConfigTypeError) as exc:
@@ -144,5 +163,3 @@ class TestRaisesOnFirstError:
                 EMPTY_ISA_INFO,
             )
         assert "BoundsCheck" in str(exc.value)
-
-

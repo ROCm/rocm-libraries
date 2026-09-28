@@ -131,6 +131,14 @@ class rocIsa:
     def getKernel(self) -> KernelInfo:
         return _base.getKernel()
 
+    def setKernelInfo(self, info: KernelInfo) -> None:
+        """Restore a raw ``KernelInfo`` captured from ``getKernel()``.
+
+        Unlike ``setKernel``, accepts ``info.isa is None`` -- the "never
+        pinned" state ``setKernel`` cannot express (see ``base.setKernelInfo``).
+        """
+        _base.setKernelInfo(info)
+
     # --- Output options (mutated in main, shipped to workers via pickle). --
 
     def getOutputOptions(self) -> OutputOptions:
@@ -433,6 +441,15 @@ def isSupportedByStinkyTofu(isa) -> bool:
     import stinkytofu
 
     return stinkytofu.isSupportedByStinkyTofu(list(_caps.normalize_isa_key(isa)))
+
+
+def isMnemonicSupportedByStinkyTofu(mnemonic, isa) -> bool:
+    """Return True if StinkyTofu can lower *mnemonic* on *isa*."""
+    import stinkytofu
+
+    if not hasattr(stinkytofu, "isMnemonicSupported"):
+        return True
+    return stinkytofu.isMnemonicSupported(mnemonic, list(_caps.normalize_isa_key(isa)))
 
 
 def getRegisteredArchKeys():

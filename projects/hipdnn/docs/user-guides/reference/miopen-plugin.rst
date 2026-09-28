@@ -77,10 +77,18 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
      - Cross-correlation only², explicit ``dw`` dimensions⁶
+   * - Pointwise Activation (standalone)
+     - ``FP16``, ``FP32``
+     - NCHW, NHWC
+     - Single-node graph
+   * - Pointwise Binary Elementwise (standalone)
+     - ``FP16``, ``FP32``
+     - NCHW, NCDHW
+     - Single-node graph⁷
 
 .. note::
 
-  - For annotations ¹ through ⁴ and ⁶, see :ref:`operations`.
+  - For annotations ¹ through ⁴, ⁶ and ⁷, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -135,7 +143,9 @@ Operation notes
 - ⁴ **Batchnorm Training Running Statistics**: Batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
 - ⁶ **Convolution Backward Output Dimensions**: Convolution Dgrad requires explicit ``dx`` dimensions matching the original forward input tensor. Convolution Wgrad requires explicit ``dw`` dimensions matching the original forward weights tensor. These dimensions aren't inferred from ``dy`` and the other convolution tensors because floor division in the forward spatial formula can make multiple input or kernel shapes map to the same output-gradient shape. Output strides may still be inferred once explicit dimensions are present.
 
-- **Activation Functions**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).
+- **Activation Functions (fused)**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are not supported when fused onto a producer op; use a standalone activation node for those.
+- **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
+- ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs

@@ -28,15 +28,15 @@ import math
 from Tensile.Common.DataType import DataType
 from rocisa.enum import DataTypeEnum
 
-# TDM pad_interval hardware limit (bytes).
-_TDM_PAD_INTERVAL_LIMIT = 1024
+# Largest LdsBlockSizePerPad (bytes) the TDM pad_interval field can encode.
+TDM_PAD_INTERVAL_LIMIT = 1024
 
 def isSubtileIterateMode(state, tc):
     """True when subtile DepthU * bpeGR exceeds the 1024B pad_interval HW limit."""
     return (state.get("UseSubtileImpl", False)
             and state.get("enableTDM%s" % tc, False)
             and state["DepthU"] * state["ProblemType"]["DataType%s" % tc].numBytes()
-                > _TDM_PAD_INTERVAL_LIMIT)
+                > TDM_PAD_INTERVAL_LIMIT)
 
 
 def getMiInputType(kernel: dict):

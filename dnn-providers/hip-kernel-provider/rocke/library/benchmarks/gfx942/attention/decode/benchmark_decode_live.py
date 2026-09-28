@@ -7,7 +7,7 @@ gfx942 sibling of
 ``benchmarks.gfx950.attention.decode.benchmark_decode_live``.
 
 Differences vs gfx950:
-  * ``num_sms`` sweep defaults to ``30 60 80 120`` (gfx942 has 228 CUs).
+  * ``num_cus`` sweep defaults to ``30 60 80 120`` (gfx942 has 228 CUs).
   * No FP8 KV-cache (not supported on gfx942).
   * ``dtype`` defaults to ``bf16``; ``fp16`` is also supported.
 
@@ -19,7 +19,7 @@ Run::
     # or with a custom sweep:
     python -m benchmarks.gfx942.attention.decode.benchmark_decode_live \\
         --shapes shapes.json \\
-        --num-sms-sweep 30 60 120 \\
+        --num-cus-sweep 30 60 120 \\
         --output-json /tmp/decode_gfx942.json
 
     # --flydsl requires FLYDSL_PATH env var set to the ROCm/FlyDSL repo root:
@@ -257,8 +257,8 @@ def _run_triton(
         return None
 
 
-def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters: int):
-    """Time DSL run_unified_attention_torch for one num_sms value (gfx942).
+def _run_dsl(shape: DecodeShape, data: dict, num_cus: int, *, warmup: int, iters: int):
+    """Time DSL run_unified_attention_torch for one num_cus value (gfx942).
 
     Uses :func:`~dispatch.attention.dispatch_attention` to select the
     registered kernel candidate (2d-tiled or 3d split-KV) for this shape,
@@ -292,7 +292,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             arch=arch,
             dtype=shape.dtype,
             kv_block_size=shape.block_size,
-            num_sms=num_sms,
+            num_cus=num_cus,
             use_sinks=shape.use_sinks,
             sliding_window=shape.sliding_window,
         )
@@ -316,7 +316,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             use_qq_bias=data["qq_bias"] is not None,
             use_sinks=data["sinks"] is not None,
             sliding_window=shape.sliding_window,
-            num_sms=num_sms,
+            num_cus=num_cus,
         )
 
         def call_once():
@@ -596,12 +596,12 @@ def main() -> int:
         help="One or more shapes JSON files.",
     )
     ap.add_argument(
-        "--num-sms-sweep",
+        "--num-cus-sweep",
         nargs="+",
         type=int,
         default=[30, 60, 80, 120],
         metavar="N",
-        help="num_sms values to sweep (default: 30 60 80 120).",
+        help="num_cus values to sweep (default: 30 60 80 120).",
     )
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--iterations", type=int, default=50)
@@ -680,15 +680,15 @@ def main() -> int:
     print(f"device : {torch.cuda.get_device_name(0)}")
     print(f"arch   : {ARCH}")
     print(f"shapes : {len(shapes)}")
-    print(f"num_sms sweep: {args.num_sms_sweep}")
+    print(f"num_cus sweep: {args.num_cus_sweep}")
     print(f"bias   : {bias_tag}")
     print()
 
     fly_col = f"  {'fly_us':>10}" if args.flydsl else ""
     header = (
         f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}{fly_col}  "
-        + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
-        + f"  {'best_sms':>8}  {'best_spd':>9}  path  kernel"
+        + "  ".join(f"CUs{s:>4}" for s in args.num_cus_sweep)
+        + f"  {'best_cus':>8}  {'best_spd':>9}  path  kernel"
     )
     print(header)
     print("-" * len(header))
@@ -730,37 +730,37 @@ def main() -> int:
                     fly_error = "runtime error (see stderr)"
 
         dsl_results: Dict[int, Dict] = {}
-        best_sms: Optional[int] = None
+        best_cus: Optional[int] = None
         best_ms: Optional[float] = None
         best_path: str = "n/a"
         best_kernel_name: str = "n/a"
 
-        for sms in args.num_sms_sweep:
+        for cus in args.num_cus_sweep:
             ms, path, kname = _run_dsl(
-                shape, data, sms, warmup=args.warmup, iters=args.iterations
+                shape, data, cus, warmup=args.warmup, iters=args.iterations
             )
             if ms is not None:
-                dsl_results[sms] = {"ms": ms, "path": path}
+                dsl_results[cus] = {"ms": ms, "path": path}
                 if best_ms is None or ms < best_ms:
                     best_ms = ms
-                    best_sms = sms
+                    best_cus = cus
                     best_path = path or "n/a"
                     best_kernel_name = kname or "n/a"
             else:
-                dsl_results[sms] = {"ms": None, "path": None}
+                dsl_results[cus] = {"ms": None, "path": None}
 
         best_spd = (tri_ms / best_ms) if (tri_ms and best_ms) else float("nan")
         best_spd_aot = (aot_ms / best_ms) if (aot_ms and best_ms) else float("nan")
         if math.isfinite(best_spd):
             speedups.append(best_spd)
 
-        sms_cols = "  ".join(
+        cu_cols = "  ".join(
             (
                 f"{dsl_results[s]['ms'] * 1000:>8.1f}u"
                 if dsl_results[s]["ms"]
                 else f"{'ERR':>9}"
             )
-            for s in args.num_sms_sweep
+            for s in args.num_cus_sweep
         )
         aot_spd_str = (
             f"{best_spd_aot:>8.3f}x" if math.isfinite(best_spd_aot) else f"{'N/A':>9}"
@@ -775,8 +775,8 @@ def main() -> int:
             )
         )
         print(
-            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {sms_cols}"
-            f"  {best_sms or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
+            f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}{fly_col_val}  {cu_cols}"
+            f"  {best_cus or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
             f"  {best_path}  {best_kernel_name}"
         )
 
@@ -798,8 +798,8 @@ def main() -> int:
                 "sliding_window": shape.sliding_window,
                 "triton_ms": tri_ms,
                 "aoTriton_ms": aot_ms,
-                "dsl": {str(sms): dsl_results[sms] for sms in args.num_sms_sweep},
-                "best_sms": best_sms,
+                "dsl": {str(cus): dsl_results[cus] for cus in args.num_cus_sweep},
+                "best_cus": best_cus,
                 "best_ms": best_ms,
                 "best_speedup_vs_triton": best_spd if math.isfinite(best_spd) else None,
                 "best_speedup_vs_aoTriton": (

@@ -1,0 +1,34 @@
+# rocke local-only files and build artifacts — never commit these.
+# (Recurring hygiene gap: SANDBOX_NOTES.md / PROBLEM.md / .claude/ have landed
+# inside repo worktrees during agent sessions; egg-info/venvs get created in-tree.)
+
+# --- Claude Code / agent local-only scratch ---
+CLAUDE.md
+.claude/
+SANDBOX_NOTES.md
+PROBLEM.md
+
+# --- Python build/install artifacts ---
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv*/
+venv*/
+/build/
+/build-*/
+_deps/
+
+# --- Compiled objects / archives / modules ---
+*.a
+*.o
+*.so
+*.hsaco
+
+# --- Local scratch: logs, perf JSON dumps, ad-hoc studies ---
+*.log
+logs/
+scratch/
+
+# --- Internal-only working docs kept on disk but not tracked (yet) ---
+library/PROCESS_AUDIT.md

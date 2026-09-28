@@ -21,6 +21,7 @@ GlobalParameters:
   EnqueuesPerSync: 1
   # NumBenchmarks: 10
   SleepPercent: 50
+  StreamKHybridMode: [1]
 
 BenchmarkProblems:
 
@@ -138,3 +139,37 @@ BenchmarkProblems:
           # - Exact: [4096, 4103, 1, 1024]
           # - Exact: [4096, 4096, 1, 1031]
           - Exact: [4103, 4103, 1, 1031]
+
+    - # HGEMM NT - LSU=4 + StreamK 4/5
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16,16,16,1, 1, 2,2, 1,1]
+        - DepthU: [256]
+        - WorkGroup:
+          - [4,4,4]
+        - 1LDSBuffer: [-1]
+        - ClusterLocalRead: [1]
+        - ExpandPointerSwap: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StaggerU: [0]
+        - StreamK: [4, 5]
+        - TransposeLDS: [-1]
+        - UseSgprForGRO: [0]
+        - WorkGroupMapping: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1024, 1024, 1, 16384]
+          - Exact: [513, 513, 1, 4096]
