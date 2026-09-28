@@ -231,28 +231,33 @@ ROCSOLVER_KERNEL void unit_forward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = 0; k < nx - 1; ++k)
-            {
-                __syncthreads();
-                if(x == k)
-                    b[ty] = c;
-                __syncthreads();
+        // solve for all y's
+        for(I k = 0; k < nx - 1; ++k)
+        {
+            __syncthreads();
+            if(active && x == k)
+                b[ty] = c;
+            __syncthreads();
 
+            if(active)
                 c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
-            }
-
-            // move results back to global
-            B[idb] = c;
         }
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
@@ -291,28 +296,33 @@ ROCSOLVER_KERNEL void conj_unit_forward_substitution_kernel(const I nx,
         T* const b = reinterpret_cast<T*>(lmem);
         T c{};
 
-        if(y < ny)
-        {
-            I const ida = x * lda1;
-            I const idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I const ida = x * lda1;
+        I const idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = 0; k < nx - 1; ++k)
-            {
-                __syncthreads();
-                if(x == k)
-                    b[ty] = c;
-                __syncthreads();
+        // solve for all y's
+        for(I k = 0; k < nx - 1; ++k)
+        {
+            __syncthreads();
+            if(active && x == k)
+                b[ty] = c;
+            __syncthreads();
 
+            if(active)
                 c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
-            }
-
-            // move results back to global
-            B[idb] = c;
         }
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         // Shared memory is not overwritten until the next iteration's first substitution barrier.
 
@@ -353,33 +363,38 @@ ROCSOLVER_KERNEL void nonunit_forward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c, d;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = 0; k < nx - 1; ++k)
+        // solve for all y's
+        for(I k = 0; k < nx - 1; ++k)
+        {
+            __syncthreads();
+            if(active && x == k)
             {
-                __syncthreads();
-                if(x == k)
-                {
-                    c = c / A[x * (lda1 + lda2)];
-                    b[ty] = c;
-                }
-                __syncthreads();
-
-                c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
-            }
-            if(x == nx - 1)
                 c = c / A[x * (lda1 + lda2)];
+                b[ty] = c;
+            }
+            __syncthreads();
 
-            // move results back to global
-            B[idb] = c;
+            if(active)
+                c -= (x > k) ? A[ida + k * lda2] * b[ty] : 0;
         }
+        if(active && x == nx - 1)
+            c = c / A[x * (lda1 + lda2)];
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
@@ -418,33 +433,38 @@ ROCSOLVER_KERNEL void conj_nonunit_forward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c, d;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = 0; k < nx - 1; ++k)
+        // solve for all y's
+        for(I k = 0; k < nx - 1; ++k)
+        {
+            __syncthreads();
+            if(active && x == k)
             {
-                __syncthreads();
-                if(x == k)
-                {
-                    c = c / conj(A[x * (lda1 + lda2)]);
-                    b[ty] = c;
-                }
-                __syncthreads();
-
-                c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
-            }
-            if(x == nx - 1)
                 c = c / conj(A[x * (lda1 + lda2)]);
+                b[ty] = c;
+            }
+            __syncthreads();
 
-            // move results back to global
-            B[idb] = c;
+            if(active)
+                c -= (x > k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
         }
+        if(active && x == nx - 1)
+            c = c / conj(A[x * (lda1 + lda2)]);
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
@@ -506,28 +526,33 @@ ROCSOLVER_KERNEL void unit_backward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = nx - 1; k > 0; --k)
-            {
-                __syncthreads();
-                if(x == k)
-                    b[ty] = c;
-                __syncthreads();
+        // solve for all y's
+        for(I k = nx - 1; k > 0; --k)
+        {
+            __syncthreads();
+            if(active && x == k)
+                b[ty] = c;
+            __syncthreads();
 
+            if(active)
                 c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
-            }
-
-            // move results back to global
-            B[idb] = c;
         }
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
@@ -566,28 +591,33 @@ ROCSOLVER_KERNEL void conj_unit_backward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = nx - 1; k > 0; --k)
-            {
-                __syncthreads();
-                if(x == k)
-                    b[ty] = c;
-                __syncthreads();
+        // solve for all y's
+        for(I k = nx - 1; k > 0; --k)
+        {
+            __syncthreads();
+            if(active && x == k)
+                b[ty] = c;
+            __syncthreads();
 
+            if(active)
                 c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
-            }
-
-            // move results back to global
-            B[idb] = c;
         }
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
@@ -626,33 +656,38 @@ ROCSOLVER_KERNEL void nonunit_backward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c, d;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = nx - 1; k > 0; --k)
+        // solve for all y's
+        for(I k = nx - 1; k > 0; --k)
+        {
+            __syncthreads();
+            if(active && x == k)
             {
-                __syncthreads();
-                if(x == k)
-                {
-                    c = c / A[x * (lda1 + lda2)];
-                    b[ty] = c;
-                }
-                __syncthreads();
-
-                c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
-            }
-            if(x == 0)
                 c = c / A[x * (lda1 + lda2)];
+                b[ty] = c;
+            }
+            __syncthreads();
 
-            // move results back to global
-            B[idb] = c;
+            if(active)
+                c -= (x < k) ? A[ida + k * lda2] * b[ty] : 0;
         }
+        if(active && x == 0)
+            c = c / A[x * (lda1 + lda2)];
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
@@ -691,33 +726,38 @@ ROCSOLVER_KERNEL void conj_nonunit_backward_substitution_kernel(const I nx,
         T* b = reinterpret_cast<T*>(lmem);
         T c, d;
 
-        if(y < ny)
-        {
-            I ida = x * lda1;
-            I idb = x * ldb1 + y * ldb2;
+        // NOTE: __syncthreads() must be called the same number of times by
+        // every thread in the block (active or not), so the barriers below
+        // are kept unconditional; only the data operations are guarded by
+        // 'active'.
+        bool const active = (y < ny);
+        I ida = x * lda1;
+        I idb = x * ldb1 + y * ldb2;
 
-            // read data
+        // read data
+        if(active)
             c = B[idb];
 
-            // solve for all y's
-            for(I k = nx - 1; k > 0; --k)
+        // solve for all y's
+        for(I k = nx - 1; k > 0; --k)
+        {
+            __syncthreads();
+            if(active && x == k)
             {
-                __syncthreads();
-                if(x == k)
-                {
-                    c = c / conj(A[x * (lda1 + lda2)]);
-                    b[ty] = c;
-                }
-                __syncthreads();
-
-                c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
-            }
-            if(x == 0)
                 c = c / conj(A[x * (lda1 + lda2)]);
+                b[ty] = c;
+            }
+            __syncthreads();
 
-            // move results back to global
-            B[idb] = c;
+            if(active)
+                c -= (x < k) ? conj(A[ida + k * lda2]) * b[ty] : 0;
         }
+        if(active && x == 0)
+            c = c / conj(A[x * (lda1 + lda2)]);
+
+        // move results back to global
+        if(active)
+            B[idb] = c;
 
         __syncthreads();
     } // end for bid
