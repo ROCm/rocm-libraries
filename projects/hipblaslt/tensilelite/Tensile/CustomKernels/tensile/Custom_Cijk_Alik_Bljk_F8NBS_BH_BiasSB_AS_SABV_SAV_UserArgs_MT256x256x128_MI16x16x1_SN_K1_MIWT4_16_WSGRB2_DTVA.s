@@ -368,7 +368,7 @@ label_ASM_Start:  /// Main body of the asm kernel
 .set SrdShiftLeftB, 16
 /* 2GB limit - set offsets to -1 to exceed this and clamp */
 .set BufferLimit, 0xffffffff
-.set BufferOOB, 0x80000000
+.set BufferOOB, 0xfffff000
 
 /******************************************/
 /* Bits 127:96 of SRD.                    */
@@ -1525,12 +1525,12 @@ s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit // Move shadow t
 label_ShadowInitStart:
 s_mov_b32 s[sgprSrdD+0], s[sgprAddressD+0]         // init SRD base address (lower)
 s_mov_b32 s[sgprSrdD+1], s[sgprAddressD+1]         // init SRD base address (upper) + other fields
-s_mov_b32 s[sgprSrdD+2], 0x80000000
+s_mov_b32 s[sgprSrdD+2], BufferOOB
 s_mov_b32 s[sgprSrdD+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 s_mov_b32 s[sgprSrdC+0], s[sgprAddressC+0]         // init SRD base address (lower)
 s_mov_b32 s[sgprSrdC+1], s[sgprAddressC+1]         // init SRD base address (upper) + other fields
-s_mov_b32 s[sgprSrdC+2], 0x80000000
+s_mov_b32 s[sgprSrdC+2], BufferOOB
 s_mov_b32 s[sgprSrdC+3], Srd127_96                 // Set bits 127_96 in post-loop SRD
 
 

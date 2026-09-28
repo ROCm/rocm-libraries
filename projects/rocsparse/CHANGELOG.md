@@ -6,6 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
+* Added support for the `gfx1250-strict` architecture.
 * Added `rocsparse_hyb_mat_get_info` and `rocsparse_hyb_mat_set_info`, which expose the internal fields of a `HYB` matrix structure through a stable API. This lets callers (e.g. hipSPARSE) inspect or, for test purposes, populate a `rocsparse_hyb_mat` without reinterpreting the opaque handle as a raw struct, which is fragile across any change to the internal layout.
 
 ### Resolved issues

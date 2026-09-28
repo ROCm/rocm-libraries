@@ -28,10 +28,6 @@ class ScalePacking:
     def word_bits(self) -> int:
         return self.count * self.element_bits
 
-    @property
-    def llvm_type(self) -> str:
-        return f"i{self.word_bits}"
-
 
 @dataclass(frozen=True)
 class ScaledWmmaOp:
@@ -49,29 +45,6 @@ class ScaledWmmaOp:
     @property
     def scale16(self) -> bool:
         return self.scales.block_k == 16
-
-    @property
-    def matrix_llvm_types(self) -> tuple[str, str]:
-        return tuple(
-            f"<{n} x i32>" for n in (self.atom.a_frag_len, self.atom.b_frag_len)
-        )
-
-    @property
-    def intrinsic_suffix(self) -> str:
-        atom = self.atom
-        return (
-            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.c_frag_len}f32."
-            f"v{atom.a_frag_len}i32.v{atom.b_frag_len}i32"
-        )
-
-    @property
-    def intrinsic(self) -> str:
-        mode = "scale16" if self.scale16 else "scale"
-        return f"llvm.amdgcn.wmma.{mode}.{self.intrinsic_suffix}"
-
-    @property
-    def declaration_key(self) -> str:
-        return f"wmma.scale.block{self.scales.block_k}.gfx1250.{self.intrinsic_suffix}"
 
 
 def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:

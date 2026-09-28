@@ -420,6 +420,10 @@ namespace TensileLite
 
             mutable KDTree<int32_t, 2>                                  kdTree;
             std::map<std::tuple<int32_t, int32_t>, std::vector<KBEntry>> kSolutionMap;
+
+            // Declared by the logic file (`UseKdTree`) and read at deserialization;
+            // kdTree/kSolutionMap are only populated when true.
+            bool useKdTree = false;
         };
 
         /**
@@ -979,7 +983,11 @@ namespace TensileLite
 
                 Key key = key_orig;
 
-                if(Debug::Instance().gridBasedKDTree())
+                // The index is 2-D (M, N) and models no batch dimension, so batched
+                // problems take the binary path below, which searches B directly. A table
+                // may still declare UseKdTree unconditionally: it applies at B == 1 and is
+                // bypassed otherwise. Batch is key[2] here, matching the b computed below.
+                if(this->useKdTree && (key.size() <= 3 || key[2] == 1))
                 {
                     // roctxRangePush("KDTree");
                     auto compK = [](KBEntry<Value> const& e, int const N) { return e.k < N; };
@@ -1016,6 +1024,16 @@ kd_tree_batch_1_again:
                             }
                             return true;
                         });
+
+                    // The dominance guards above are marginal, not joint, so a query past the N
+                    // ceiling reachable at its own M matches nothing. Retry on M-dominance alone.
+                    if(results.empty())
+                    {
+                        results = this->kdTree.query(
+                            target, numSolutions, [](auto pt, auto best) {
+                                return best.coord[0] >= pt.coord[0];
+                            });
+                    }
 
                     for(auto result : results)
                     {
@@ -1097,7 +1115,14 @@ kd_tree_batch_1_again:
                         }
                     }
                     // roctxRangePop();
-                    return bestmatches;
+                    if(!bestmatches.empty())
+                        return bestmatches;
+
+                    // Every solution in the matched cell failed its predicates; neighbouring
+                    // cells share the kernel family and would fail the same way. Restore the
+                    // caller's key (the b > 1 branch may have folded batch into M or N) and fall
+                    // through to the binary path, which checks predicates as it widens.
+                    key = key_orig;
                 }
 
                 // roctxRangePush("Binary");
