@@ -343,7 +343,8 @@ void testing_csr2hyb(Arguments argus)
         unit_check_general(1, 1, 1, &m, &h_m);
         unit_check_general(1, 1, 1, &n, &h_n);
         unit_check_general(1, 1, 1, &ell_width, &h_ell_width);
-        unit_check_general(1, 1, 1, &ell_nnz, &h_ell_nnz);
+        int64_t ell_nnz_gold = ell_nnz;
+        unit_check_general(1, 1, 1, &ell_nnz_gold, &h_ell_nnz);
         unit_check_general(1, 1, 1, &coo_nnz, &h_coo_nnz);
 
         CHECK_HIP_ERROR(hipMemcpy(

@@ -233,7 +233,7 @@ void testing_hyb2csr(Arguments argus)
                                                      nullptr,
                                                      nullptr));
 
-        double gbyte_count = hyb2csr_gbyte_count<T>(m, nnz, h_ell_nnz, h_coo_nnz);
+        double gbyte_count = hyb2csr_gbyte_count<T>(m, nnz, static_cast<int>(h_ell_nnz), h_coo_nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,

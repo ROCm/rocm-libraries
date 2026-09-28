@@ -283,7 +283,7 @@ void testing_hybmv(Arguments argus)
         host_hybmv(m,
                    n,
                    h_alpha,
-                   ell_nnz,
+                   static_cast<int>(ell_nnz),
                    ell_width,
                    hell_col.data(),
                    hell_val.data(),
