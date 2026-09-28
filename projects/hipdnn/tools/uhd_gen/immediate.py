@@ -14,6 +14,7 @@ from .features import signature_references
 from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
 from .ranking_metrics import RANKING_METRICS, RankingMetric, is_valid_metric_value, ranking_metric
+from .score_transform import INVERTIBLE as INVERTIBLE_TRANSFORMS
 
 ROLE = "predict_engine"
 _ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
@@ -225,13 +226,13 @@ def validate_model(descriptor: dict) -> RankingMetric:
     if descriptor.get("objective") != metric.objective:
         raise ValueError(f"L1 prediction of {metric.name!r} requires objective={metric.objective}")
     # The transform vocabulary belongs to `score_transform::isSupported` on the runtime
-    # side; this narrower pair is not a second opinion about it. `evaluate`'s scorers
-    # implement the identity and log1p inverses only, so a descriptor declaring any
-    # other supported transform is loadable by the engine and not scoreable here --
+    # side; this narrower set is not a second opinion about it. `evaluate`'s scorers
+    # implement only the inverses in score_transform.INVERTIBLE, so a descriptor declaring
+    # any other supported transform is loadable by the engine and not scoreable here --
     # a capability limit of this tool, reported where the scoring happens.
-    if score.get("calibrated") is not True or score.get("transform") not in ("identity", "log1p"):
+    if score.get("calibrated") is not True or score.get("transform") not in INVERTIBLE_TRANSFORMS:
         raise ValueError("L1 prediction requires a calibrated score, and uhd_gen can only "
-                         "score identity or log1p transforms")
+                         f"score {', '.join(INVERTIBLE_TRANSFORMS)} transforms")
     validate_provenance(descriptor.get("trained_against"))
     validate_signature(descriptor.get("features_signature", []))
     return metric
@@ -356,11 +357,12 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
             raise ValueError("L1 model returned the wrong number of predictions")
         # A prediction the metric cannot take is one the RUNTIME refuses: the engine reports
         # INVALID rather than a score (isValidMetricValue), and selection orders it by the
-        # static rules for that graph. The model is fitted on log1p and inverted with expm1,
-        # so a log-space prediction below zero lands in (-1, 0) -- a handful of rows near the
-        # bottom of the range, not a broken artifact. Scoring them as declines here reports
-        # what the runtime will do; failing the whole artifact threw away a trained model
-        # over 4 rows in 495 (run 67929709).
+        # static rules for that graph. A model uhd_gen trains now cannot do this -- it is
+        # fitted on log and inverted with exp (score_transform.py) -- but one trained on
+        # log1p is inverted with expm1, and a log-space prediction below zero lands in
+        # (-1, 0): a handful of rows near the bottom of the range (4 in 495, run 67929709).
+        # Those models still ship, so the rows are scored as the declines the runtime makes
+        # of them rather than failing the artifact.
         impossible = np.array([not is_valid_metric_value(name, float(value)) for value in values], dtype=bool)
         values[impossible] = np.nan
         declined[engine] = int(impossible.sum())
