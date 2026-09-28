@@ -91,12 +91,12 @@ macro(fetch_monorepo_dep)
 
     if(NOT IS_DIRECTORY "${dep_source_dir}")
       # The source directory of the dependency does not exist in the monorepo.
-      # Maybe this is a spare checkout and we need to add it.
+      # Maybe this is a sparse checkout and we need to add it.
       #
       # This requires git!
       find_git()
 
-      # Add the project directory to the spare checkout.
+      # Add the project directory to the sparse checkout.
       execute_process(
         COMMAND
         ${GIT_PATH} "sparse-checkout" "add" "projects/${arg_fetch_PACKAGE}"
