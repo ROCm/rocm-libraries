@@ -42,7 +42,13 @@ from codegen_common import (
 
 # Import architecture filter for GPU-specific validation
 try:
-    from arch_filter import ArchFilter, KernelConfig as ArchKernelConfig, OperatorType
+    from arch_filter import (
+        ArchFilter,
+        KernelConfig as ArchKernelConfig,
+        OperatorType,
+        PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
+        WARP_TILE_SUPPORTED_COMBINATIONS,
+    )
 
     HAS_ARCH_FILTER = True
 except ImportError:
@@ -1646,6 +1652,11 @@ class UnifiedGemmCodegen:
     ):
         self.output_dir = Path(output_dir)
         self.datatype = datatype
+        # (A, B, Acc) dtypes for arch validation. Resolved up front so an
+        # unmapped --datatype fails before any output is written instead of
+        # being validated as another dtype.
+        self.arch_dtypes = TypeMappings.get_arch_dtype_triple(datatype)
+        self._unlisted_warned = set()
         # Support 3-char (rcr) or 4-char (rcrr) layout codes
         # 4th char specifies D tensor layout for multi-d
         self.layout = layout[:3]  # A, B, C layouts
@@ -2117,19 +2128,10 @@ class UnifiedGemmCodegen:
         if not self.arch_filter or not HAS_ARCH_FILTER:
             return True
 
-        # Determine data types based on self.datatype
-        # Note: dtype_c is the ACCUMULATOR type, not output type (which may be fp16)
-        # WMMA instructions on gfx942 always use fp32 accumulator for fp16 inputs
-        dtype_map = {
-            "fp16": ("fp16", "fp16", "fp32"),  # A=fp16, B=fp16, Acc=fp32
-            "bf16": ("bf16", "bf16", "fp32"),  # A=bf16, B=bf16, Acc=fp32
-            "fp8": ("fp8", "fp8", "fp32"),  # A=fp8, B=fp8, Acc=fp32
-            "bf8": ("bf8", "bf8", "fp32"),  # A=bf8, B=bf8, Acc=fp32
-            "int8": ("int8", "int8", "int32"),  # A=int8, B=int8, Acc=int32
-        }
-        dtype_a, dtype_b, dtype_c = dtype_map.get(
-            self.datatype, ("fp16", "fp16", "fp32")
-        )
+        # dtype_c is the ACCUMULATOR type, not the output type (which may be fp16)
+        dtype_a, dtype_b, dtype_c = self.arch_dtypes
+        if self._warp_tiles_unlisted(variant):
+            return False
 
         # Map GEMM variant to operator type for validation
         operator = None
@@ -2194,6 +2196,28 @@ class UnifiedGemmCodegen:
             layout=self.layout,
             operator=operator,
         )
+
+    def _warp_tiles_unlisted(self, variant: Optional["GemmVariant"]) -> bool:
+        """True when this dtype requires an explicit warp-tile entry for the
+        target arch (see WARP_TILE_ENTRY_REQUIRED_DTYPES) and the table the
+        variant is validated against has none, so nothing can be checked."""
+        if self.datatype not in TypeMappings.WARP_TILE_ENTRY_REQUIRED_DTYPES:
+            return False
+        table = (
+            PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS
+            if variant == GemmVariant.PRESHUFFLE
+            else WARP_TILE_SUPPORTED_COMBINATIONS
+        )
+        dtype_key = "_".join(self.arch_dtypes)
+        if dtype_key in table.get(self.gpu_target, {}):
+            return False
+        if variant not in self._unlisted_warned:
+            self._unlisted_warned.add(variant)
+            log.warning(
+                f"No warp tiles listed for {dtype_key} on {self.gpu_target} "
+                f"({variant}); rejecting instead of emitting them unchecked"
+            )
+        return True
 
     def _get_trait_configs(self) -> List[TraitConfig]:
         """Get valid trait configurations, filtered by architecture constraints"""
@@ -2308,6 +2332,10 @@ inline std::size_t get_tile_gemm_kernel_count() {{ return {len(kernel_names)}; }
 
 def _show_arch_info(gpu_target: str, datatype: str):
     """Display supported configurations for a GPU architecture"""
+    # Same "{a}_{b}_{acc}" key the warp-tile tables are indexed by. Resolved
+    # first so an unmapped datatype is an error, not a printout.
+    dtype_key = "_".join(TypeMappings.get_arch_dtype_triple(datatype))
+
     if not HAS_ARCH_FILTER:
         print("Architecture filter module not available")
         return
@@ -2333,15 +2361,6 @@ def _show_arch_info(gpu_target: str, datatype: str):
             print(f"  {cfg}")
 
         # Warp tile configurations for data type
-        dtype_map = {
-            "fp16": "fp16_fp16_fp16",
-            "bf16": "bf16_bf16_bf16",
-            "fp8": "fp8_fp8_fp16",
-            "bf8": "bf8_bf8_fp16",
-            "int8": "int8_int8_int32",
-        }
-        dtype_key = dtype_map.get(datatype, "fp16_fp16_fp16")
-
         gpu_combos = WARP_TILE_SUPPORTED_COMBINATIONS.get(gpu_target, {})
         warp_tiles = gpu_combos.get(dtype_key, [])
         print(

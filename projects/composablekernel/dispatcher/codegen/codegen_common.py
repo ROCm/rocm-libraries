@@ -259,6 +259,29 @@ class CommonTypeMappings:
         """
         return "int32" if dtype == "int8" else "fp32"
 
+    # A/B element dtypes whose (A, B, Acc) triple the GEMM arch validator can
+    # resolve. Anything else (e.g. pk_fp4) must fail loudly rather than be
+    # validated under another dtype's warp-tile and LDS rules.
+    ARCH_VALIDATION_DTYPES = ("fp16", "bf16", "fp32", "fp8", "bf8", "int8")
+
+    # Subset of ARCH_VALIDATION_DTYPES that must have an explicit warp-tile
+    # entry for the target arch. The arch filter treats a missing entry as
+    # "unknown, allow", which would let every warp tile through unchecked.
+    WARP_TILE_ENTRY_REQUIRED_DTYPES = ("fp32",)
+
+    @classmethod
+    def get_arch_dtype_triple(cls, dtype: str) -> Tuple[str, str, str]:
+        """Return the (A, B, Acc) dtype triple used for arch validation.
+
+        Raises ValueError naming *dtype* when it has no mapping.
+        """
+        if dtype not in cls.ARCH_VALIDATION_DTYPES:
+            raise ValueError(
+                f"Unsupported GEMM datatype {dtype!r} for arch validation; "
+                f"supported: {', '.join(cls.ARCH_VALIDATION_DTYPES)}"
+            )
+        return (dtype, dtype, cls.get_acc_dtype(dtype))
+
 
 # ============================================================================
 # Code Generation Helpers

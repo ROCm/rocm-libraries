@@ -151,6 +151,21 @@ set_tests_properties(dispatcher_test_codegen_common PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# UnifiedGemmCodegen resolves the arch-validation dtype triple exactly (fp32 is
+# validated as fp32) and raises on an unmapped --datatype instead of silently
+# validating it as fp16.
+add_test(
+    NAME dispatcher_test_codegen_dtype_resolution
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_codegen_dtype_resolution.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_codegen_dtype_resolution PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Arch-string handling in tile_engine's gemm_validation_utils, which seven GEMM
 # instance builders and the dispatcher's own warp gate all share. Registered on the
 # dispatcher side because the bridge/Old-TE instance-set parity that depends on it
