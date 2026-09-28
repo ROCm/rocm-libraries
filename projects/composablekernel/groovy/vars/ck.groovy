@@ -1786,9 +1786,8 @@ String _dispatcherCorrectnessBaseCmd(String arch, String compiler, String dtypes
             -D CMAKE_CXX_COMPILER="${compiler}" \
             -D CMAKE_BUILD_TYPE=Release \
             -D GPU_TARGETS="${arch}" \
-            -D CK_TILE_DISPATCHER=ON \
             -D BUILD_DISPATCHER_BINDINGS=ON \
-            -D DISPATCHER_RULE_SET=tests .. && \
+            -D DISPATCHER_RULE_SET=tests ../dispatcher && \
         ninja -j\$(nproc) ck_tile_dispatcher dispatcher_gemm_lib && \
         python3 ../dispatcher/tests/test_gemm_search_space.py \
             --arch ${arch} \
