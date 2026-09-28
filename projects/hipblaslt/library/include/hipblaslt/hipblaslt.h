@@ -83,6 +83,19 @@
 /*! \ingroup types_module
  *  \brief Specifies the enumeration type to set the postprocessing options for the epilogue.
  */
+/*! \ingroup types_module
+ *  \brief Emulation strategy for FP64 GEMM via Ozaki Scheme II.
+ */
+typedef enum {
+    HIPBLASLT_EMULATION_STRATEGY_DEFAULT    = 0, /**<Use the process-wide default (from HIPBLASLT_EMULATION_STRATEGY env var). */
+    HIPBLASLT_EMULATION_STRATEGY_PERFORMANT = 1, /**<Emulate only when the arithmetic-intensity heuristic predicts a speedup. */
+    HIPBLASLT_EMULATION_STRATEGY_EAGER      = 2, /**<Emulate whenever the data types and epilogue are supported, regardless of problem size. */
+} hipblasLtEmulationStrategy_t;
+
+
+/*! \ingroup types_module
+ *  \brief Specifies the enumeration type to set the postprocessing options for the epilogue.
+ */
 typedef enum {
   HIPBLASLT_EPILOGUE_DEFAULT = 1,                 /**<No special postprocessing. Scale and quantize the results if necessary.*/
   HIPBLASLT_EPILOGUE_RELU = 2,                    /**<Apply ReLU pointwise transform to the results (``x:=max(x, 0)``)*/
@@ -378,6 +391,10 @@ typedef enum {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Setting the attribute validates that the selected stages have all of their required parameters; set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
 #endif
+  HIPBLASLT_MATMUL_DESC_EMULATION_ENABLED_EXT                = 107, /**<Enable/disable FP64/FP32 emulation via Ozaki Scheme II for this matmul. Data type: ``int32_t``. 1=force on, 0=force off, -1=inherit from env var (default). */
+  HIPBLASLT_MATMUL_DESC_EMULATION_STRATEGY_EXT               = 108, /**<Emulation strategy for this matmul. Data type: ``int32_t`` (``hipblasLtEmulationStrategy_t``). 0=DEFAULT, 1=PERFORMANT, 2=EAGER; -1=inherit from env var (default). */
+  HIPBLASLT_MATMUL_DESC_EMULATION_MAX_MANTISSA_BIT_COUNT_EXT = 109, /**<ADP maximum mantissa bit count (precision target). Data type: ``int32_t``. 1..52 = explicit bit count for FP64 (1..23 for FP32); 0=inherit from env var (default). Only affects ADP mode. */
+  HIPBLASLT_MATMUL_DESC_EMULATION_SPECIAL_VALUES_MASK_EXT    = 110, /**<Inf/NaN detection mask for emulation. Data type: ``uint32_t``. Bit 0=Inf, bit 1=NaN; ~0u=inherit from env var (default=0x3). Set to 0 to skip detection. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -1454,6 +1471,46 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
                                          void*                   C,
                                          hipblasLtMatrixLayout_t Cdesc,
                                          hipStream_t             stream);
+/*! \ingroup library_module
+ *  \brief Compute the GPU workspace required by FP64/FP32 emulation for a given problem.
+ *
+ *  \details
+ *  Returns the number of bytes needed in the workspace buffer that must be
+ *  passed to \ref hipblasLtMatmul when emulation is active.  The size depends
+ *  on the matrix dimensions (always uses S_MAX=20 moduli for the workspace
+ *  layout, since ADP mode is always active).
+ *
+ *  Pass the return value to \ref hipblasLtMatmulPreferenceSetAttribute as
+ *  \c HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES to guarantee that the
+ *  heuristic selects a compatible algorithm, and allocate at least this many
+ *  bytes for the workspace pointer supplied to \ref hipblasLtMatmul.
+ *
+ *  @param[in]  handle     hipBLASLt handle (provides device selection).
+ *  @param[in]  matmulDesc Matmul descriptor carrying emulation settings
+ *                         (reads ``HIPBLASLT_MATMUL_DESC_EMULATION_*_EXT`` attrs).
+ *                         May be NULL to use env-var / built-in defaults.
+ *  @param[in]  opA        Transpose mode for matrix A.
+ *  @param[in]  opB        Transpose mode for matrix B.
+ *  @param[in]  m           Number of rows of op(A) and D.
+ *  @param[in]  n           Number of columns of op(B) and D.
+ *  @param[in]  k           Shared dimension of op(A) and op(B).
+ *  @param[in]  batch_count Number of matrices in the batch.  Currently only
+ *                          ``batch_count=1`` is supported; any other value
+ *                          returns 0 (reserved for future batched support).
+ *
+ *  \retval  Workspace size in bytes, or 0 if emulation is not applicable
+ *           (device not supported, emulation disabled, or ``batch_count != 1``).
+ */
+HIPBLASLT_EXPORT
+size_t hipblasLtEmulationWorkspaceSize(hipblasLtHandle_t     handle,
+                                       hipblasLtMatmulDesc_t matmulDesc,
+                                       hipblasOperation_t    opA,
+                                       hipblasOperation_t    opB,
+                                       int64_t               m,
+                                       int64_t               n,
+                                       int64_t               k,
+                                       int32_t               batch_count);
+
 #ifdef __cplusplus
 }
 #endif
