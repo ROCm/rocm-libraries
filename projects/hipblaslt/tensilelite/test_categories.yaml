@@ -142,7 +142,6 @@ test_categories:
     parallel_workers: 4
     pytest_args:
       - "--dist=worksteal"
-      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++"
     labels:
