@@ -13,7 +13,6 @@ import json
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -32,16 +31,9 @@ from hkp_pack.desk_check import (
 )
 from hkp_pack.errors import HkpPackError
 from hkp_pack.pipeline import run_pipeline
+from pack_helpers import _EXAMPLES, _ROOT_IDS, _TOOL, _read, _require_bundles, _run_cli
 
 ARCH = "gfx950"
-
-
-def _read(path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _kernels(shipped_kdp):
-    return shipped_kdp["kernelDescriptors"]
 
 
 # ---------------------------------------------------------------------------
@@ -184,36 +176,32 @@ class TestInvariantsOnARealHipPack:
 # RUNBOOK §4's host boundary. The invariant-function tests import the library
 # directly and would stay green even if the CLI's argument parsing, exit-code
 # mapping, or output path were broken.
-_TOOL = Path(__file__).resolve().parent.parent / "tools" / "hkp_desk_check.py"
-
-
-def _run_cli(*args, mode="structural"):
-    """The CLI as an agent runs it. The mode is always explicit, because the tool
-    requires it."""
-    return subprocess.run(
-        [sys.executable, str(_TOOL), "--mode", mode, *args],
-        capture_output=True,
-        text=True,
-    )
 
 
 # The CLI's own contract, on synthesised variant sets: nothing here depends on
 # which producer made the descriptors.
-def _variant_set(tmp_path, *, packed):
-    """Two agreeing kernels in one KDP, in post-pack shape (a toc_key and symbol
-    each) or pre-pack shape (neither)."""
+def _variant_set(tmp_path, *, packed, drift=False):
+    """Two kernels in one KDP, in post-pack shape or pre-pack shape.
+
+    Pre-pack, the authored spec sits in `kernel_source.spec`. Post-pack, it sits
+    in `provenance.spec` and `kernel_source` carries the toc_key and symbol
+    packing stamps instead, which is the shape a pack writes. `drift` makes the
+    second kernel's metadata disagree with its spec.
+    """
     kernels = []
     for head_size in (64, 128):
-        kernel_source = {"spec": {"head_size": head_size}}
+        spec = {"head_size": head_size}
+        declared = head_size * 2 if drift and head_size == 128 else head_size
+        kernel = {"name": f"d{head_size}", "metadata": {"head_size": declared}}
         if packed:
-            kernel_source.update(toc_key=f"toc-{head_size}", symbol=f"k{head_size}")
-        kernels.append(
-            {
-                "name": f"d{head_size}",
-                "kernel_source": kernel_source,
-                "metadata": {"head_size": head_size},
+            kernel["kernel_source"] = {
+                "toc_key": f"toc-{head_size}",
+                "symbol": f"k{head_size}",
             }
-        )
+            kernel["provenance"] = {"spec": spec}
+        else:
+            kernel["kernel_source"] = {"spec": spec}
+        kernels.append(kernel)
     kdp = tmp_path / "variants.kdp.json"
     kdp.write_text(json.dumps({"kernelDescriptors": kernels}))
     return kdp
@@ -229,6 +217,13 @@ class TestCliEndToEnd:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "compiled specialization agreement: NOT CHECKED" in proc.stdout
         assert "mode=structural" in proc.stdout
+
+    def test_drift_in_a_packed_variant_set_fails_the_run(self, tmp_path):
+        """Packing moves the authored spec to `provenance.spec`, so that is where
+        invariant 1 reads it on packed output. Drift found there fails the run."""
+        proc = _run_cli(str(_variant_set(tmp_path, packed=True, drift=True)))
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "metadata/authored-spec drift: [('d128', 'head_size')]" in proc.stdout
 
     def test_the_mode_is_required(self, tmp_path):
         """No default: a run whose mode is unstated cannot be read back out of a
@@ -254,32 +249,10 @@ class TestCliEndToEnd:
 
 # Real-bundle regressions: everything above runs against a purpose-built fixture,
 # these against every git-tracked bundle the repository carries -- no pack, no
-# hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
-# documented sample tree, and the engine root is what a consumer loads. The engine
-# root ships no bundle today, so its parametrizations skip; authoring one closes
-# that with no change here, since the roots are globbed.
-_PACKAGING = Path(__file__).resolve().parent.parent
-_EXAMPLES = [
-    _PACKAGING / "examples" / "descriptors",
-    _PACKAGING.parent / "src" / "engines" / "kernel_ingestor_engine" / "descriptors",
-]
+# hipcc, no GPU. Both roots `_EXAMPLES` wires are read. The engine root ships no
+# bundle today, so its parametrizations skip; authoring one closes that with no
+# change here, since the roots are globbed.
 _HIP_EXAMPLE = [root / "hip" for root in _EXAMPLES]
-#: Case ids that name the tree, so a failure or a skip says WHICH root it was.
-_ROOT_IDS = [root.parent.name for root in _EXAMPLES]
-
-
-def _require_bundles(producer_root):
-    """Every `.kdp.json` under one producer subtree of one root, or a NAMED skip
-    when it holds none: an emptied root and an absent producer are both legitimate,
-    but the skip must name which, or a root that stopped being read looks like one
-    that passed."""
-    kdps = sorted(producer_root.glob("*/*.kdp.json"))
-    if not kdps:
-        pytest.skip(
-            f"{producer_root.parent} carries no '{producer_root.name}' bundle "
-            f"-- nothing to check for this producer in this root"
-        )
-    return kdps
 
 
 @pytest.mark.quick

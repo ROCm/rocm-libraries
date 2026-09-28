@@ -7,7 +7,7 @@ producers.
 import hashlib
 
 from hkp_pack.pipeline import run_pipeline
-from test_hkp_pack_layout import (
+from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
     ROCKE_ARCH,

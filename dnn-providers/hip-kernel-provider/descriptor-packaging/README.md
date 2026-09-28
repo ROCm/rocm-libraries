@@ -244,11 +244,11 @@ its default. The reason is in the `hkp_wire_pack_target()` header in
 
 ```bash
 cd dnn-providers/hip-kernel-provider
-PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
+PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
     python3 -m pytest descriptor-packaging/tests -q
 ```
 
-`rocm_kpack` (the third `PYTHONPATH` entry, or `--kpack-python-dir` /
+`rocm_kpack` (the second `PYTHONPATH` entry, or `--kpack-python-dir` /
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in
 `tests/conftest.py`: every test needing it skips with one message naming the dependency.
@@ -260,8 +260,12 @@ Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
 
 Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE
 fixtures (`rocke_available`, `rocke_importable`, `rocke_ukd`) and puts the in-tree rocke
-platform and kernels library on `sys.path`. No test outside that directory imports rocke,
-needs its toolchain or packs rocKE descriptors, so a new rocKE test goes there. With
+platform and kernels library on `sys.path`, so the command above needs no rocke path. No
+test outside that directory imports rocke or needs the rocKE toolchain, so a new rocKE
+test goes there. Tests outside it may still author or read rocKE descriptors as JSON:
+the `--no-rocke` gate tests in `tests/test_hkp_pack_layout.py` hand them to a pack built
+without rocKE, which must refuse a selected one before any producer runs and pass over
+an arch-pruned one. With
 `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF` the registered ctest entries pass
 `--ignore=<tests>/rocke` and never collect it; this runs the suite as that build does:
 
@@ -271,9 +275,13 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
         --ignore=descriptor-packaging/tests/rocke
 ```
 
-The two `conftest.py` files both import as `conftest`, so neither exports helpers.
-Helpers both sides use live in a plain module (`tests/synthesised_objects.py`) or in the
-shared test module a `tests/rocke/` file extends, which it imports by name.
+`tests/test_hkp_pack_wiring.py` drives real sub-configures of `HkpPackaging.cmake` to
+hold that build's CMake wiring: a root wired with `ENABLE_ROCKE OFF` packs under an
+interpreter without pip, and the registered entries ignore `tests/rocke/`.
+
+The two `conftest.py` files both import as `conftest`, so neither exports helpers, and no
+test module imports from another. Helpers both sides use live in plain modules:
+`tests/synthesised_objects.py`, `tests/pack_helpers.py` and `tests/cmake_harness.py`.
 
 ### Desk-check a variant set (`hkp_pack.desk_check`, `tools/hkp_desk_check.py`)
 
@@ -355,7 +363,7 @@ The real gfx942 `build_*` functions in `rocke/library/kernels/gfx942/` must sati
 acceptance alone is not effective-specialization or numerical proof.
 
 ```bash
-PYTHONPATH=descriptor-packaging/python:rocke/library:rocke/platform/python:/opt/rocm-kpack/python \
+PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
     python3 -m pytest descriptor-packaging/tests/rocke/test_hkp_pack_rocke.py \
         descriptor-packaging/tests/rocke/test_hkp_pack_producer_guards.py -q
 ```

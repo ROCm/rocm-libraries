@@ -22,45 +22,19 @@ from pathlib import Path
 
 import pytest
 
-from hkp_pack.descriptors import load_flat_input
+from hkp_pack.descriptors import kdp_survives, load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
 from hkp_pack.pipeline import _agreement_inputs, compile_intermediate, run_pipeline
-
-ARCH = "gfx942"
-ROCKE_ARCH = "gfx950"
-
-
-def _read(path):
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _load_kpack(rocm_kpack_dir):
-    from hkp_pack.kpack_resolver import load_kpack
-
-    kpack, _comp = load_kpack(rocm_kpack_dir)
-    return kpack
-
-
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches, source_label=None):
-    """Pack one root. A root holding an `embedded_source` descriptor needs a label."""
-    return run_pipeline(
-        source_root=source_root,
-        arches=list(arches),
-        out_root=tmp_path / "out",
-        hipcc=hipcc,
-        rocm_kpack_dir=rocm_kpack_dir,
-        inter_root=tmp_path / "inter",
-        source_label=source_label,
-    )
-
-
-def _nest(root, sub, fixture):
-    """Copy a flat fixture into `root/sub`, returning the child folder."""
-    dest = root / sub
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(fixture, dest)
-    return dest
+from pack_helpers import (
+    ARCH,
+    EXAMPLE_ROOT,
+    ROCKE_ARCH,
+    _load_kpack,
+    _nest,
+    _read,
+    _run,
+)
 
 
 def _rename_ids(folder, stem, new_stem):
@@ -556,9 +530,6 @@ def test_failure_names_every_failed_arch(
 
 
 # --- E. The shipped example tree -------------------------------------------
-EXAMPLE_ROOT = Path(__file__).resolve().parent.parent / "examples" / "descriptors"
-
-
 @pytest.mark.quick
 def test_example_tree_is_self_consistent():
     """Load-time validation of the committed tree, no toolchain required.
@@ -1899,6 +1870,11 @@ def test_a_compiling_root_that_wrote_no_archive_is_a_failure(
 
 
 # --- L. A build without rocKE (quick, compile-free) --------------------------
+# The rocKE fixture's one UKD, scoped to ROCKE_ARCH, is read here as JSON only: the
+# gate has to run in the build without rocKE that it protects.
+_ROCKE_UKD_ID = "ukd-attention-dense-gfx950"
+_ROCKE_UKD_FILE = "attention_dense.ukd.json"
+_AUTHORING_FORMS = ["inline", "standalone"]
 
 
 def _pack_without_rocke(root, tmp_path, rocm_kpack_dir, arches):
@@ -1913,9 +1889,39 @@ def _pack_without_rocke(root, tmp_path, rocm_kpack_dir, arches):
     )
 
 
+def _add_rocke_ukd(kdp_path, ukd, form):
+    """Append `ukd` to a KDP inline, or as a standalone `.ukd.json` beside it that
+    the KDP references by id."""
+    doc = _read(kdp_path)
+    if form == "inline":
+        doc["kernelDescriptors"].append(ukd)
+    else:
+        (kdp_path.parent / _ROCKE_UKD_FILE).write_text(
+            json.dumps(ukd, indent=2), encoding="utf-8"
+        )
+        doc["kernelDescriptors"].append(ukd["id"])
+    kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+
+def _rocke_root(tmp_path, rocke_fixture, form, arch=None):
+    """The rocKE fixture nested under `rocKE/attention`, its UKD authored in `form`
+    and, when `arch` is given, scoped to that list instead of ROCKE_ARCH."""
+    root = tmp_path / "root"
+    kdp_path = _nest(root, "rocKE/attention", rocke_fixture) / "attention.kdp.json"
+    doc = _read(kdp_path)
+    (ukd,) = doc["kernelDescriptors"]
+    doc["kernelDescriptors"] = []
+    kdp_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    if arch is not None:
+        ukd["arch"] = arch
+    _add_rocke_ukd(kdp_path, ukd, form)
+    return root
+
+
 @pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
 def test_a_selected_rocke_ukd_fails_a_pack_without_rocke(
-    tmp_path, rocke_fixture, rocm_kpack_dir
+    tmp_path, rocke_fixture, rocm_kpack_dir, form
 ):
     """A rocKE kernel a build without rocKE is asked to ship fails the pack.
 
@@ -1923,14 +1929,13 @@ def test_a_selected_rocke_ukd_fails_a_pack_without_rocke(
     error is raised before the arch compiles anything, so neither hipcc nor rocke
     is reached, and it names the kernel, the arch and the remedy.
     """
-    root = tmp_path / "root"
-    _nest(root, "rocKE/attention", rocke_fixture)
+    root = _rocke_root(tmp_path, rocke_fixture, form)
 
     with pytest.raises(HkpPackError, match="HIPKERNELPROVIDER_ENABLE_ROCKE") as excinfo:
         _pack_without_rocke(root, tmp_path, rocm_kpack_dir, [ROCKE_ARCH])
 
     message = str(excinfo.value)
-    assert "ukd-attention-dense-gfx950" in message
+    assert _ROCKE_UKD_ID in message
     assert "attention.kdp.json" in message
     assert ROCKE_ARCH in message
     assert "remove rocKE descriptors from the source root" in message
@@ -1938,22 +1943,58 @@ def test_a_selected_rocke_ukd_fails_a_pack_without_rocke(
 
 
 @pytest.mark.quick
-def test_an_arch_pruned_rocke_ukd_does_not_trip_the_rocke_gate(
+def test_the_rocke_gate_fails_every_arch_it_reaches_and_drops_its_shard(
     tmp_path, rocke_fixture, rocm_kpack_dir
+):
+    """The gate is one more per-arch failure, not an abort of the whole run.
+
+    Every arch the rocKE UKD is selected for is attempted and named, and each
+    loses the shard a previous run left, so a direct re-pack over an existing
+    out-root cannot leave a stale shard beside the error.
+    """
+    arches = [ARCH, ROCKE_ARCH]
+    root = _rocke_root(tmp_path, rocke_fixture, "inline", arch=arches)
+    for arch in arches:
+        stale = tmp_path / "out" / arch
+        stale.mkdir(parents=True)
+        (stale / "attention.kdp.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(HkpPackError) as excinfo:
+        _pack_without_rocke(root, tmp_path, rocm_kpack_dir, arches)
+
+    message = str(excinfo.value)
+    assert "packing failed for 2 of 2" in message
+    for arch in arches:
+        assert f"rocKE kernel selected for {arch}" in message, arch
+        assert not (tmp_path / "out" / arch).exists(), arch
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
+def test_an_arch_pruned_rocke_ukd_does_not_trip_the_rocke_gate(
+    tmp_path, main_fixture, rocke_fixture, rocm_kpack_dir, form
 ):
     """The gate walks the arch selection, not the root.
 
-    The fixture's KDP targets gfx942 and gfx950 while its one rocKE UKD is scoped
-    to gfx950, so a gfx942 pack keeps the KDP and prunes the UKD. That pack must
-    run past the gate to the pipeline's own verdict on a compiling root that
-    wrote no archive; a gate reading the whole root would stop it first.
+    The hip fixture's pointwise KDP survives ARCH through its hip UKDs and also
+    carries the rocKE UKD, scoped to ROCKE_ARCH, so a pack for ARCH ships the KDP
+    and prunes only the rocKE UKD. That pack must get past the gate to the hip
+    compile, which fails on a hipcc that does not exist; a gate reading every
+    entry of a surviving KDP would stop it first.
     """
     root = tmp_path / "root"
-    _nest(root, "rocKE/attention", rocke_fixture)
+    kdp_path = _nest(root, "hip/pointwise", main_fixture) / "pointwise.kdp.json"
+    (ukd,) = _read(rocke_fixture / "attention.kdp.json")["kernelDescriptors"]
+    _add_rocke_ukd(kdp_path, ukd, form)
+
+    flat = load_flat_input(root)
+    (kdp,) = [k for k in flat.kdps() if k.path == kdp_path]
+    assert kdp_survives(kdp.doc, flat, ARCH), "the premise: the KDP ships for ARCH"
 
     with pytest.raises(HkpPackError) as excinfo:
         _pack_without_rocke(root, tmp_path, rocm_kpack_dir, [ARCH])
 
     message = str(excinfo.value)
     assert "HIPKERNELPROVIDER_ENABLE_ROCKE" not in message
-    assert "no archive" in message
+    assert f"failed to compile for {ARCH}" in message
+    assert "hipcc-not-invoked" in message

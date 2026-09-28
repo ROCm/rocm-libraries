@@ -1,31 +1,36 @@
 """The parallel prewarm's rocKE side: a rocKE variant failing in a pool worker,
-and the producer-origin agreement a pool of rocKE variants must keep. Both run
-the rocKE producer path in `hkp_pack.rocke_compile`, stubbed at comgr, over the
-selection corpus helpers of `tests/test_hkp_pack_parallel.py`.
+the in-tree rocKE paths a pool worker must inherit, and the producer-origin
+agreement a pool of rocKE variants must keep. The producer path runs in
+`hkp_pack.rocke_compile`, stubbed at comgr.
 """
 
+import concurrent.futures
 import importlib
 import pickle
 import re
 import sys
 import textwrap
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from hkp_pack import pipeline, rocke_compile
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
-from test_hkp_pack_parallel import (
-    TARGET_ARCH,
-    _ROCKE_STUB_BUILDER,
+from pack_helpers import (
+    _child_sys_path,
+    _conftest_only_paths,
     _kdp,
     _silent,
     _ukd,
     _write_json,
 )
+from pack_helpers import ARCH as TARGET_ARCH
 
 _MISSING_MODULE = "hkp_parallel_absent/kernels/nowhere.py"
+_ABSENT_BUILDER = "build_attention"
+_ROCKE_ROOT = Path(__file__).resolve().parents[3] / "rocke"
 
 
 @pytest.fixture
@@ -46,7 +51,7 @@ def failing_corpus(tmp_path):
             {
                 "kind": "rocke",
                 "source": _MISSING_MODULE,
-                "builder": _ROCKE_STUB_BUILDER,
+                "builder": _ABSENT_BUILDER,
                 "spec": {"tile": tile},
             },
         )
@@ -67,8 +72,8 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
     count.
 
     No `PYTHONPATH` export: children inherit the parent's `sys.path` under both
-    start methods, which `test_worker_inherits_parent_sys_path` is the detector
-    for.
+    start methods, which `test_worker_inherits_the_in_tree_rocke_paths` is the
+    detector for.
     """
     monkeypatch.setenv("HKP_PACK_JOBS", "2")
     flat = load_flat_input(failing_corpus, log=_silent)
@@ -90,6 +95,21 @@ def test_prewarm_failure_names_variant(failing_corpus, tmp_path, monkeypatch):
     assert re.search(rf"variant '\S+' failed to compile for {TARGET_ARCH}", message)
     assert f"'{jobs[0].ukd['id']}'" in message
     assert "module not importable" in message
+
+
+@pytest.mark.quick
+def test_worker_inherits_the_in_tree_rocke_paths():
+    """A pool worker imports rocke and kernels from the paths this directory's
+    conftest inserts, which no `PYTHONPATH` carries, so it can only have them by
+    inheriting the parent's `sys.path`."""
+    candidates = [_ROCKE_ROOT / "platform" / "python", _ROCKE_ROOT / "library"]
+    expected = _conftest_only_paths(candidates)
+    assert len(expected) == 2, "the premise: conftest inserted both, PYTHONPATH neither"
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
+        child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
+
+    assert set(expected) <= set(child_path)
 
 
 # One stable producing invocation stands behind a whole pack, not behind each

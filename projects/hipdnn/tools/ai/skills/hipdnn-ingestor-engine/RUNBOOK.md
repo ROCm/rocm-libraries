@@ -294,12 +294,13 @@ The component selection must include the provider. The `hipdnn-providers` preset
 **not** build hip-kernel-provider; the presets that do are `hipdnn-providers-all`,
 `hip-kernel-provider`, `hipdnn-dev-all` and `miopen-hipdnn-dev-all`.
 
-**`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is unconditional.** The provider's top-level
-`CMakeLists.txt` raises `FATAL_ERROR` whenever `HIPDNN_ENABLE_KERNEL_INGESTOR` is ON and
-it is OFF, inspecting no `kernel_source.kind`, no production root and no descriptor, so
-it fires for HIP-only and `embedded_source` bundles and for a dormant default configure.
-rocKE is likewise resolved once for **every** root, test roots included, so an
-unresolvable comgr is fatal at configure even in a hip-only build.
+**`HIPKERNELPROVIDER_ENABLE_ROCKE=ON` is required to pack a rocKE bundle.** With it ON,
+rocKE is resolved once for **every** root, test roots included, so an unresolvable comgr
+is fatal at configure even in a hip-only build. With it OFF the ingestor still
+configures, builds and packs: the hip producer packs alone with no rocKE wheel, pip or
+comgr, and a `rocke` UKD selected for a packed architecture fails the pack, while one
+that architecture pruning drops is ignored. HIP-only and `embedded_source` bundles pack
+in either mode.
 
 There is **no per-producer production switch**: producer selection is per-UKD on
 `kernel_source.kind`, so one root feeds every producer.

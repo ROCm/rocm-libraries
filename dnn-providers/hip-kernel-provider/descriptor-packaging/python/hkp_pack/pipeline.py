@@ -1405,8 +1405,9 @@ def run_pipeline(
     pack. Empty arch list installs nothing (exit 0).
 
     `enable_rocke=False` states the build has no rocKE producer: a rocke UKD
-    selected for any requested arch raises before that arch compiles anything,
-    while one pruned out of every requested arch is left alone.
+    selected for a requested arch fails that arch before it compiles anything,
+    the same way any other arch failure does, so the pack fails naming every
+    such arch. One pruned out of every requested arch is left alone.
     """
     out_root = Path(out_root)
     results = {}
@@ -1436,9 +1437,9 @@ def run_pipeline(
                 arch=arch, out_dir=out_arch_dir, kpack_path=None, skipped=True
             )
             continue
-        if not enable_rocke:
-            _reject_rocke_entries(surviving, arch, flat.ukd_by_id())
         try:
+            if not enable_rocke:
+                _reject_rocke_entries(surviving, arch, flat.ukd_by_id())
             inter = compile_intermediate(
                 flat, source_root, arch, hipcc, inter_root / arch, log=log
             )

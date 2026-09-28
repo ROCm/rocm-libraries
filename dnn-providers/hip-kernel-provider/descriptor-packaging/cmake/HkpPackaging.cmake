@@ -111,9 +111,8 @@ function(hkp_selected_arches out_var out_source_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_pack_producer(<hkp_wire_pack_target arguments>)
-#   Resolve the producer half of one pack step, from the keywords
-#   hkp_wire_pack_target() was called with, into the caller's scope:
+# _hkp_pack_producer()
+#   Resolve the producer half of one pack step into the caller's scope:
 #
 #     _interp          interpreter the pack tool runs under
 #     _interp_what     how diagnostics name that interpreter
@@ -123,16 +122,11 @@ endfunction()
 #
 #   Validates the ENABLE_ROCKE contract documented on hkp_wire_pack_target().
 #
-#   Called with hkp_wire_pack_target()'s ${ARGV}, which flattens list values such
-#   as ARCHES; only the scalar keywords NAME, ENABLE_ROCKE, ROCKE_* and PACK_JOBS
-#   are read here, so that flattening is immaterial.
+#   Called only from hkp_wire_pack_target(), and reads that function's variables
+#   rather than taking arguments: its parsed ARG_* values, and _given_keywords,
+#   every keyword the call named.
 # ---------------------------------------------------------------------------
 function(_hkp_pack_producer)
-    set(_one NAME SOURCE_ROOT ARCHES HIPCC ROCM_KPACK_DIR
-        OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
-        ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
-
     if(NOT DEFINED ARG_ENABLE_ROCKE)
         message(FATAL_ERROR
             "hkp: root '${ARG_NAME}' was wired without ENABLE_ROCKE; pass "
@@ -140,9 +134,8 @@ function(_hkp_pack_producer)
     endif()
 
     if(NOT ARG_ENABLE_ROCKE)
-        foreach(_kw IN ITEMS ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
-                             ROCKE_WHEEL_STAMP ROCKE_COMGR_LIB)
-            if(DEFINED ARG_${_kw})
+        foreach(_kw IN LISTS _given_keywords)
+            if(_kw MATCHES "^ROCKE_")
                 message(FATAL_ERROR
                     "hkp: root '${ARG_NAME}' disables rocKE but was wired with "
                     "${_kw}, which names a rocKE toolchain this build does not have.")
@@ -275,6 +268,16 @@ function(hkp_wire_pack_target)
         OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY ROCKE_PYTHON_DIR
         ROCKE_COMGR_LIB ROCKE_WHEEL_STAMP PACK_JOBS)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "")
+    # Every keyword the call named, including one given an empty value: without
+    # CMP0174 (CMake 3.31), PARSE_ARGV leaves such a keyword's ARG_* variable
+    # undefined and out of ARG_KEYWORDS_MISSING_VALUES, so `ROCKE_INTERP ""` is
+    # visible only in the arguments themselves.
+    set(_given_keywords "")
+    foreach(_arg IN LISTS ARGV)
+        if(_arg IN_LIST _one)
+            list(APPEND _given_keywords "${_arg}")
+        endif()
+    endforeach()
 
     if(NOT IS_DIRECTORY "${ARG_SOURCE_ROOT}")
         message(FATAL_ERROR
@@ -286,7 +289,7 @@ function(hkp_wire_pack_target)
             "hkp: root '${ARG_NAME}' (${ARG_SOURCE_ROOT}) has no OUT_ROOT, so "
             "the pack step has nowhere to write.")
     endif()
-    _hkp_pack_producer(${ARGV})
+    _hkp_pack_producer()
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -813,7 +816,8 @@ endfunction()
 # hkp_require_kpack_runtime(<interp> <what>)
 #   rocm_kpack is reached by putting a source tree on sys.path, so pip never
 #   resolves the msgpack/zstandard it declares. The supplied interpreter needs
-#   them present independently for every pack, including hip-only roots.
+#   them present independently for every pack, including hip-only roots. pip is
+#   not needed here: only the rocKE wheel install uses it, and checks for it.
 #
 #   Checked at configure time because the failure is otherwise a mid-build
 #   ImportError from inside a dependency, which reads as a packer bug rather
@@ -823,7 +827,7 @@ function(hkp_require_kpack_runtime interp what)
     if(NOT EXISTS "${interp}")
         message(FATAL_ERROR
             "hkp: ${what} does not exist: ${interp}. Set Python3_EXECUTABLE "
-            "to an existing interpreter with pip, msgpack and zstandard supplied.")
+            "to an existing interpreter with msgpack and zstandard supplied.")
     endif()
 
     execute_process(
@@ -878,10 +882,13 @@ function(hkp_rocke_wheel_python_interp out_interp out_ready out_python_dir wheel
     if(NOT _pip_rc EQUAL 0)
         string(STRIP "${_pip_err}" _pip_err)
         message(FATAL_ERROR
-            "hkp: ${Python3_EXECUTABLE} cannot run pip. Supply pip in this "
-            "interpreter's environment, or set Python3_EXECUTABLE to an existing "
-            "interpreter with pip, msgpack and zstandard. Packaging does not "
-            "bootstrap pip or acquire runtime dependencies.\nPython said: ${_pip_err}")
+            "hkp: ${Python3_EXECUTABLE} cannot run pip, which installs the rocke "
+            "wheels because HIPKERNELPROVIDER_ENABLE_ROCKE is ON. Supply pip in "
+            "this interpreter's environment, set Python3_EXECUTABLE to an existing "
+            "interpreter with pip, msgpack and zstandard, or configure with "
+            "-DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF to pack without rocKE. Packaging "
+            "does not bootstrap pip or acquire runtime dependencies.\n"
+            "Python said: ${_pip_err}")
     endif()
 
     set(_import_env "ROCKE_BACKEND=python" "ROCKE_CPP_STRICT=1")
@@ -953,13 +960,14 @@ function(hkp_require_ingestor_toolchain out_arches)
     if(HIPKERNELPROVIDER_ENABLE_ROCKE)
         if(NOT ROCKE_WHEEL_DIR OR NOT ROCKE_WHEEL_VERSION)
             message(FATAL_ERROR
-                "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires the rocke "
+                "hkp: HIPKERNELPROVIDER_ENABLE_ROCKE is ON and requires the rocke "
                 "wheels to pack rocKE kernels, but ROCKE_WHEEL_DIR "
                 "(${ROCKE_WHEEL_DIR}) and ROCKE_WHEEL_VERSION "
                 "(${ROCKE_WHEEL_VERSION}) are not both set. Leave "
                 "ROCKE_BUILD_PYENV=ON to have the build produce the wheels and set "
-                "both variables, or with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
-                "and ROCKE_WHEEL_VERSION to the wheels you supply.")
+                "both variables, with ROCKE_BUILD_PYENV=OFF set ROCKE_WHEEL_DIR "
+                "and ROCKE_WHEEL_VERSION to the wheels you supply, or configure "
+                "with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF to pack without rocKE.")
         endif()
 
         # ROCKE_BUILD_PYENV=ON makes the wheels build outputs, absent until the build
@@ -971,13 +979,15 @@ function(hkp_require_ingestor_toolchain out_arches)
                 "${ROCKE_WHEEL_DIR}/rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl")
             if(NOT EXISTS "${_platform_wheel}" OR NOT EXISTS "${_library_wheel}")
                 message(FATAL_ERROR
-                    "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and ROCKE_BUILD_PYENV "
+                    "hkp: HIPKERNELPROVIDER_ENABLE_ROCKE is ON and ROCKE_BUILD_PYENV "
                     "is OFF, so the rocke wheels must be supplied, but "
                     "ROCKE_WHEEL_DIR (${ROCKE_WHEEL_DIR}) does not hold both of:\n"
                     "    rocke-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
                     "    rocke_library-${ROCKE_WHEEL_VERSION}-py3-none-any.whl\n"
                     "Point ROCKE_WHEEL_DIR at a directory holding both, correct "
-                    "ROCKE_WHEEL_VERSION, or set ROCKE_BUILD_PYENV=ON to build them.")
+                    "ROCKE_WHEEL_VERSION, set ROCKE_BUILD_PYENV=ON to build them, or "
+                    "configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF to pack "
+                    "without rocKE.")
             endif()
         endif()
     endif()
@@ -1182,10 +1192,12 @@ the one named here.")
     hkp_probe_comgr_resolvable(_comgr_ok _comgr_detail)
     if(NOT _comgr_ok)
         message(FATAL_ERROR
-            "hkp: comgr could not be resolved, so no rocKE kernel can be "
-            "lowered and no descriptor root can be packed. comgr ships with "
-            "ROCm and is required. Set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an "
-            "explicit libamd_comgr, or make one discoverable. Resolver said:\n"
+            "hkp: comgr could not be resolved, so no rocKE kernel can be lowered. "
+            "HIPKERNELPROVIDER_ENABLE_ROCKE is ON, which makes comgr a requirement "
+            "of every descriptor root. comgr ships with ROCm. Set "
+            "HIPKERNELPROVIDER_ROCKE_COMGR_LIB to an explicit libamd_comgr, make "
+            "one discoverable, or configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF "
+            "to pack without rocKE. Resolver said:\n"
             "${_comgr_detail}")
     endif()
     hkp_rocke_wheel_stamp(_rocke_wheel_stamp)

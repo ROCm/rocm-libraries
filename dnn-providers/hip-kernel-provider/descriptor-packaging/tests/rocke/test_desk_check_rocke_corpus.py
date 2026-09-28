@@ -27,20 +27,17 @@ from hkp_pack.desk_check import (
     toc_key_uniqueness,
 )
 from hkp_pack.pipeline import run_pipeline
-from test_desk_check_invariants import (
-    _EXAMPLES,
-    _ROOT_IDS,
-    _kernels,
-    _read,
-    _require_bundles,
-    _run_cli,
-)
+from pack_helpers import _EXAMPLES, _ROOT_IDS, _read, _require_bundles, _run_cli
 
 ARCH = "gfx950"
 # The KMD fields the desk-check compares -- `DEFAULT_MATCHER_FIELDS`, narrowed
 # to what this fixture's KMD actually declares.
 _MATCHER_FIELDS = ("batch", "head_size")
 _ROCKE_EXAMPLE = [root / "rocKE" for root in _EXAMPLES]
+
+
+def _kernels(shipped_kdp):
+    return shipped_kdp["kernelDescriptors"]
 
 
 # Fixtures: pack the real desk_check fixture bundle (valid) plus small
@@ -279,16 +276,6 @@ class TestCliEndToEnd:
 
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "head_size" in proc.stdout
-
-    def test_authored_tree_reports_toc_key_not_applicable_and_exits_zero(
-        self, desk_check_fixture
-    ):
-        """A pre-pack authored tree has no toc_key/symbol yet: that reads as
-        NOT-APPLICABLE, never as a false 'None == None' collision, and does not
-        fail the run on its own."""
-        proc = _run_cli(str(desk_check_fixture / "attention.kdp.json"))
-        assert proc.returncode == 0, proc.stdout + proc.stderr
-        assert "NOT-APPLICABLE" in proc.stdout
 
 
 # Real-bundle regressions against every git-tracked rocKE bundle the repository

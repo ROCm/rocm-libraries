@@ -12,7 +12,6 @@ import ast
 import concurrent.futures
 import inspect
 import itertools
-import json
 import os
 import re
 import sys
@@ -25,6 +24,14 @@ from hkp_pack import agreement, pipeline
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
+from pack_helpers import (
+    _child_sys_path,
+    _conftest_only_paths,
+    _kdp,
+    _silent,
+    _ukd,
+    _write_json,
+)
 
 # The one arch the corpus is authored for. Every consumer references this
 # constant instead of restating the literal: a capture script that ran a
@@ -105,46 +112,12 @@ def _rocke_ks():
     }
 
 
-def _ukd(uid, kernel_source, arch=None):
-    doc = {
-        "version": "0.1",
-        "id": uid,
-        "name": uid,
-        "kernel_source": kernel_source,
-        "metadata": {},
-        "priority": 0,
-    }
-    if arch is not None:
-        doc["arch"] = arch
-    return doc
-
-
-def _kdp(kid, arch, entries):
-    # matchers/engine/dispatch are authored empty: the loader requires the keys
-    # and resolves only non-null references, and this corpus is about variant
-    # selection, so carrying generics would add files without adding a case.
-    return {
-        "version": "0.1",
-        "id": kid,
-        "name": kid,
-        "arch": arch,
-        "matchers": [],
-        "engine": None,
-        "dispatch": None,
-        "kernelDescriptors": entries,
-    }
-
-
-def _write_json(dest, name, doc):
-    (dest / name).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-
-
 def _write_corpus(dest, *, hip_only=False, with_embedded=False):
     """Write the selection corpus into `dest`, returning `dest`.
 
-    Standard library only, and no interpreter state is touched, so the whole
-    function can be copied into a checkout that does not contain this test file
-    and run outside pytest.
+    Standard library only, as are the `pack_helpers` authoring helpers it calls,
+    and no interpreter state is touched, so it can be copied with them into a
+    checkout that does not contain these files and run outside pytest.
 
     `hip_only=True` omits the two rocke cases (an inline rocke UKD and a KDP
     referencing a standalone rocke one). Outside pytest there is no stub for the
@@ -435,10 +408,6 @@ MIXED_EXPECTED_KDP_JSON_COUNT = 10
 # `ukd_by_id()`-driven enumeration, and the wildcard standalone only if the
 # KDP-level filter fails to short-circuit the standalone branch.
 EXPECTED_ABSENT = ("ukd-standalone-orphan", "ukd-standalone-wild")
-
-
-def _silent(*_args, **_kwargs):
-    pass
 
 
 @pytest.fixture
@@ -890,17 +859,6 @@ def test_variant_key_for_uses_module_globals(monkeypatch):
     assert pipeline._variant_key_for(rocke_ukd, Path(".")) == "SENTINEL-ROCKE"
 
 
-def _child_sys_path(_ignored):
-    """Run in a pool worker; returns the child's `sys.path`."""
-    return list(sys.path)
-
-
-def _conftest_inserted_paths():
-    packaging_root = Path(__file__).resolve().parent.parent
-    candidates = [packaging_root / "python"]
-    return [str(p) for p in candidates if str(p) in sys.path]
-
-
 @pytest.mark.quick
 def test_worker_inherits_parent_sys_path():
     """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
@@ -915,9 +873,20 @@ def test_worker_inherits_parent_sys_path():
     there, and this says why. The related constraint it does not check, that the
     pool must be built after parent-side path setup, is documented at the
     construction site.
+
+    The path watched is the rocm_kpack directory conftest inserts from
+    HIPKERNELPROVIDER_ROCM_KPACK_DIR, which no `PYTHONPATH` carries. The hkp_pack
+    package root conftest also inserts is exported by the ctest environment, so a
+    child that re-read `PYTHONPATH` would have it too.
     """
-    expected = _conftest_inserted_paths()
-    assert expected, "conftest inserts at least the hkp_pack package root"
+    kpack_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
+    if not kpack_dir:
+        pytest.skip(
+            "HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset, so conftest inserts no "
+            "path that PYTHONPATH does not already carry"
+        )
+    expected = _conftest_only_paths([kpack_dir])
+    assert expected, "the premise: conftest inserted it and PYTHONPATH lacks it"
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]

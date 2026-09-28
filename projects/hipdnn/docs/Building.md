@@ -419,7 +419,9 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
 
 #### Descriptor packaging Python environment
 
-With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can run `-m pip` and import `msgpack` and `zstandard`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can import `msgpack` and `zstandard`. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` it must also be able to run `-m pip`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF`, the hip producer packs alone under the supplied interpreter: no wheel is installed, pip is not needed, and no private import directory is added to `PYTHONPATH`. A `rocke` descriptor selected for a requested architecture fails the pack; one that architecture pruning drops is ignored. The rest of this section applies only with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`.
 
 Packaging installs the exact local `rocke` and `rocke_library` wheels into the build-owned `hkp-rocke-python` directory, using `pip --target --no-index --no-deps --disable-pip-version-check`. `ROCKE_BUILD_PYENV=ON` supplies generated wheels through the existing rocKE developer build; with `ROCKE_BUILD_PYENV=OFF`, supply `ROCKE_WHEEL_DIR` and `ROCKE_WHEEL_VERSION`. Neither packaging mode installs rocKE into the supplied Python environment.
 
