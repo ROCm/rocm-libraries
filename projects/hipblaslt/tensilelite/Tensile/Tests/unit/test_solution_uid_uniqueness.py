@@ -60,6 +60,19 @@ DEFAULT_LOGIC_ROOT = (
     / "Logic"
 )
 
+# The shipped logic corpus lives in the hipBLASLt product tree, not in
+# tensilelite, so it is absent whenever this file is run from installed
+# tensilelite test artifacts. The enforcement point is the library-uniqueness
+# component job, which checks out the source tree; this copy is a
+# convenience/local-dev signal otherwise -- hence ``skipif`` (an unmet
+# precondition), not ``xfail`` (an expected failure).
+_LOGIC_ROOT = Path(os.environ.get("HIPBLASLT_LOGIC_ROOT") or DEFAULT_LOGIC_ROOT)
+
+_needs_logic_dir = pytest.mark.skipif(
+    not _LOGIC_ROOT.is_dir(),
+    reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
+)
+
 STRICT_ENV = "HIPBLASLT_REQUIRE_SOLUTION_UID"
 
 
@@ -217,12 +230,10 @@ def fixture_logic_root() -> Path:
     Returns:
         Path to ``Logic/`` under the hipBLASLt library tree.
     """
-    override = os.environ.get("HIPBLASLT_LOGIC_ROOT")
-    if override:
-        return Path(override)
-    return DEFAULT_LOGIC_ROOT
+    return _LOGIC_ROOT
 
 
+@_needs_logic_dir
 def test_solution_uid_unique_across_logic_files(logic_root: Path) -> None:
     """All present SolutionUID values must be unique repo-wide."""
     process_count = int(os.environ.get("HIPBLASLT_UID_TEST_PROCESSES", "8"))
