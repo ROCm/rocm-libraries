@@ -1119,7 +1119,7 @@ TEST_F(TestBundleDiscoveryFixture, FailedBundleLoadRecordsFailureWithMessage)
 // costly for the one lane that runs. It must skip naming the gap: a failure would
 // turn every device-less run red for a deliberate trade, and a pass would claim a
 // validation that never happened.
-TEST_F(TestBundleDiscoveryFixture, SkippingSyntheticTestSkipsWithItsMessage)
+TEST_F(TestBundleDiscoveryFixture, SkippingSyntheticBodySkipsWithItsMessage)
 {
     detail::SyntheticBundleTest test(detail::SyntheticOutcome::SKIP, "nothing validated this");
 
