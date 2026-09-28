@@ -55,7 +55,7 @@ jobs:
       # but not PATH, and some tests resolve the assembler via
       # shutil.which("amdclang++"). Without it the process-wide rocisa singleton
       # initializes with a bogus compiler and cascades into ~200 codegen failures
-      # across xdist workers (AIHPBLAS-3877).
+      # across xdist workers.
       - name: Run TensileLite unit tests
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
