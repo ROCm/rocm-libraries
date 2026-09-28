@@ -1937,19 +1937,24 @@ capability-specific.
 **Decision: Accepted final state — through the production BLAS runtime artifact
 (`blas_lib`) and `rocm[libraries]`.**
 
-Q097 describes the transitional `blas_test` ownership. The final state replaces
-it after the production artifact and Python package changes land; this decision
-records the target contract without claiming that the current artifact layout
-has already changed.
-
-When promoted, install the client at:
+Q097 describes the transitional `blas_test` ownership. Both that test artifact
+and the final production artifact use the same conventional-prefix location:
 
 ```text
 <ROCm root>/libexec/hipblaslt/tensilelite/tensilelite-client[.exe]
 ```
 
-in `blas_lib`, which delivers it through `rocm-sdk-libraries` and
-`rocm[libraries]`.
+The conventional-prefix adapter treats this as a well-known optional capability
+path. It searches the directory lazily only when a workflow requests the client;
+a missing directory is harmless, while a client that is present must pass the
+normal executable and exact-version validation. Requiring an explicit binding
+for this standard layout was needlessly restrictive and would force each test or
+optional-package consumer to duplicate binding setup. Explicit bindings remain
+the higher-precedence mechanism for custom layouts and deliberate overrides.
+
+The final state promotes the executable from `blas_test` to `blas_lib`, which
+delivers it through `rocm-sdk-libraries` and `rocm[libraries]`, without changing
+the native path.
 
 The `rocm-sdk-libraries` wheel installs an interpreter-local
 `tensilelite-client` console-script trampoline. The trampoline executes the
@@ -2231,16 +2236,20 @@ and omit `rocm[devel]`.
   `release_metadata.py` combines it with the selected build ROCm identity for
   wheel metadata and the generated native-client header.
 - `tensilelite-client` is currently a non-Windows `blas_test` artifact for
-  benchmark/validation use. Its `blas_lib` promotion is a separate future
-  decision.
+  benchmark/validation use, installed at the standard
+  `libexec/hipblaslt/tensilelite` location. Its `blas_lib` promotion is a
+  separate future decision.
+- The conventional-prefix adapter searches that standard location as an
+  optional capability. Absence is harmless; presence enables lazy,
+  version-validated client selection without workflow-specific binding churn.
 - Every wheel archive and installed distribution remains unbound and unchanged;
   `tensilelite-configure-client` writes only the exact installation's keyed file
   below the current user's `~/.tensilelite/bindings` root.
 - Python package state is configuration-independent. Client bindings are
   resolved only when a caller requests the client; this does not expand
   `develop`'s multi-config or raw-rocisa support.
-- The future production client location is
-  `libexec/hipblaslt/tensilelite`; custom layouts use an explicit keyed
+- Production promotion preserves the existing
+  `libexec/hipblaslt/tensilelite` location; custom layouts use an explicit keyed
   per-user binding.
 - Standalone Windows device builds require an explicit ROCm SDK root; only
   standalone non-Windows builds may fall back to `/opt/rocm`.
