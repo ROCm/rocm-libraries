@@ -148,7 +148,7 @@ endif()
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 
 # rocm-cmake must be included before processing 'GPU_TARGETS'.
-include(dependencies/rocm-cmake)
+include(primlibs/dependencies/rocm-cmake)
 
 # Use target ID syntax if supported for GPU_TARGETS
 if(USE_HIPCXX)
@@ -180,12 +180,12 @@ endif()
 # adding '--offload-compress' to a CXX target (i.e. non -xhip), causes compiler
 # warnings that may be treated as error, and thus failing detection of certain
 # depedencies in subsequent 'find_package'-calls.
-include(dependencies/hip)
+include(primlibs/dependencies/hip)
 
 # TODO: this should be moved to toolchain-*.cmake, but this requires a hard
 # depedency of CMake HIP language support due to '--offload-compress' only
 # working with '-xhip'.
-include(flags/offload_compress)
+include(primlibs/flags/offload_compress)
 
 # Other depedencies must be included after adding in offload compress to
 # reduce the size of kernels contained in depedencies.

@@ -126,7 +126,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # rocm-cmake must be included before processing 'GPU_TARGETS'.
-include(dependencies/rocm-cmake)
+include(primlibs/dependencies/rocm-cmake)
 
 # Set target IDs for compilation
 if (NOT BUILD_WITH_LIB STREQUAL "CUDA")
@@ -147,7 +147,7 @@ else()
   set(GPU_TARGETS "all" CACHE INTERNAL "")
 endif()
 
-include(dependencies/hip)
+include(primlibs/dependencies/hip)
 
 include(cmake/Dependencies.cmake)
 
