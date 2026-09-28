@@ -38,6 +38,7 @@ class StinkyAsmModuleWithAdapterSignature:
     def emitAssembly(self) -> str:
         out = ""
         if self._signature is not None:
+            self._refreshTotalInstructionBytes()
             self._refreshSgprCount()
             out += self._signature.toString()
         # .set directives go between signature and instruction body.
@@ -46,6 +47,25 @@ class StinkyAsmModuleWithAdapterSignature:
             out += set_dirs()
         out += self._inner.emitAssembly()
         return out
+
+    def _refreshTotalInstructionBytes(self) -> None:
+        """Copy the pipeline's instruction-byte total onto the signature.
+
+        Port of ``StinkyAsmModuleWithSignature::emitAssembly``:
+        ``AccumulateInstructionSizePass`` stores the total on the asm module,
+        and the signature prints ``STINKY_TOTAL_INST_BYTES`` plus
+        ``.amdhsa_inst_pref_size`` from that value.
+        """
+        leaf = self._inner
+        while hasattr(leaf, "_inner"):
+            leaf = leaf._inner
+        getter = getattr(leaf, "getTotalInstructionBytes", None)
+        setter = getattr(self._signature, "setTotalInstructionBytes", None)
+        if getter is None or setter is None:
+            return
+        total = int(getter())
+        if total >= 0:
+            setter(total)
 
     def _refreshSgprCount(self) -> None:
         """Take the declared SGPR count from the lowered code, as C++ does.

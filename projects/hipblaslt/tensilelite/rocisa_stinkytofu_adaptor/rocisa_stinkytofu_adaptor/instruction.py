@@ -444,6 +444,13 @@ def _to_stinky_register(arg: Any) -> Any:
     if isinstance(arg, float):
         return _st.Register(arg)
     if isinstance(arg, str):
+        # "vcc_lo" / "exec" / "scc" must be typed registers, not literal strings.
+        # A literal still prints the same token, but the size model treats a
+        # non-VCC selector on v_cndmask_b32 as a VOP3 encoding (8 bytes) while
+        # the assembler keeps the e32 form (4 bytes).
+        reg_type = _SPECIAL_REG_TYPE.get(arg)
+        if reg_type is not None:
+            return _st.Register(reg_type, 0, 1)
         return _st.Register(arg)
     if isinstance(arg, _Container):
         s = arg.toString()
@@ -1545,9 +1552,11 @@ VAndOrB32 = _make_ternary_class("VAndOrB32", "v_and_or_b32", InstType.INST_B32)
 class VCndMaskB32(CommonInstruction):
     """``v_cndmask_b32 dst, src0, src1, vcc`` shim with stinkytofu left-path bridge.
 
-    Native rocisa takes (dst, src0, src1, src2=VCC). The logical IR version has
-    only 2 sources (the VCC mask is implicit); ``to_stinky_logical`` forwards
-    only (dst, src0, src1).
+    Native rocisa takes (dst, src0, src1, src2=VCC). When src2 is omitted,
+    ``to_stinky_logical`` supplies a typed ``vcc_lo`` register. A literal-string
+    ``"vcc_lo"`` prints the same token but is not ``RegType::VCC_LO``, so the
+    size model promotes the instruction to VOP3 (8 bytes) while the assembler
+    keeps the e32 form (4 bytes).
     """
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
@@ -1574,7 +1583,10 @@ class VCndMaskB32(CommonInstruction):
         dst_reg = _to_stinky_register(self.dst)
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
-        src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
+        src2_reg = (
+            _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2
+            else _st.Register("vcc_lo", 0, 1)
+        )
         inst = _st.VCndMaskB32(
             dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
         _apply_sdwa(inst, getattr(self, "sdwa", None))
@@ -1617,7 +1629,10 @@ class VCndMaskB16(CommonInstruction):
         dst_reg = _to_stinky_register(self.dst)
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
-        src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
+        src2_reg = (
+            _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2
+            else _st.Register("vcc_lo", 0, 1)
+        )
         inst = _st.VCndMaskB16(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
         return inst
 

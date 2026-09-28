@@ -80,6 +80,8 @@ NB_MODULE(_stinkytofu, m) {
              "Get the output directory; empty means current directory")
         .def("emitAssembly", &StinkyAsmModule::emitAssembly,
              "Emit the assembly code for all instructions in this module")
+        .def("getTotalInstructionBytes", &StinkyAsmModule::getTotalInstructionBytes,
+             "Byte total stored by AccumulateInstructionSizePass, or -1 if unset")
         .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
              "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
