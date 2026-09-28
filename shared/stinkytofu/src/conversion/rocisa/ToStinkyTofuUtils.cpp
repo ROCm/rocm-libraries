@@ -1196,8 +1196,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
             advances.reserve(ring->advances.size());
             for (const auto& row : ring->accesses) {
                 accesses.push_back(
-                    {row[0], row[1], row[2], row[3],
-                     static_cast<LdsRingAccessKind>(row[4])});
+                    {row[0], row[1], row[2], row[3], static_cast<LdsRingAccessKind>(row[4])});
             }
             for (const auto& row : ring->advances) {
                 advances.push_back({row[0], row[1]});

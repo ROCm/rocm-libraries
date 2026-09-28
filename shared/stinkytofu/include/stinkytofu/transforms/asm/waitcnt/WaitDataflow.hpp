@@ -127,8 +127,8 @@ struct QueuedOp {
     bool tripAgeSaturated = false;
 
     bool operator==(const QueuedOp& other) const {
-        return op == other.op && frameDeltas == other.frameDeltas &&
-               tripsBack == other.tripsBack && tripAgeSaturated == other.tripAgeSaturated;
+        return op == other.op && frameDeltas == other.frameDeltas && tripsBack == other.tripsBack &&
+               tripAgeSaturated == other.tripAgeSaturated;
     }
 };
 
