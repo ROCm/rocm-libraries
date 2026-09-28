@@ -329,8 +329,7 @@ def _validate_system_rocm(
     executable_search_paths = (
         path / "bin",
         path / "lib" / "llvm" / "bin",
-        # TODO: Enable once conventional prefixes ship tensilelite-client here.
-        # path / "libexec" / "hipblaslt" / "tensilelite",
+        path / "libexec" / "hipblaslt" / "tensilelite",
     )
     if expected != "BYPASS":
         _validate_compatibility(
