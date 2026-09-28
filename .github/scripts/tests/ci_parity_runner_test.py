@@ -136,19 +136,30 @@ class QuickLabelTest(unittest.TestCase):
                 encoding="utf-8",
             )
             rocjitsu.chmod(rocjitsu.stat().st_mode | stat.S_IEXEC)
-            out = root / "parity"
-            result = ci_parity_runner.run_labeled_ctest(
-                str(rocjitsu),
-                str(root / "cfg.json"),
-                str(root / "rocm"),
-                "^quick$",
-                "",
-                30,
-                os.environ.copy(),
-                False,
-                out,
-            )
+            (root / "cfg.json").write_text("{}\n", encoding="utf-8")
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                # The workflow passes --out parity/emu.json. ctest then
+                # changes into that relative test dir, so the launcher path
+                # written into CTestTestfile.cmake must already be absolute.
+                result = ci_parity_runner.run_labeled_ctest(
+                    "rocjitsu",
+                    "cfg.json",
+                    "rocm",
+                    "^quick$",
+                    "",
+                    30,
+                    os.environ.copy(),
+                    False,
+                    Path("parity"),
+                )
+            finally:
+                os.chdir(previous)
             log = "\n".join(result["log_lines"])
+            launcher = root / "parity" / "ctest-quick" / "rocjitsu-launch"
+            self.assertIn(str(launcher), log)
+            self.assertNotIn("Could not find executable", log)
             self.assertIn("Start 1: test_hiprand_api", log)
             self.assertIn(
                 "1: [ RUN      ] hiprand_32/hiprand_api_32.hiprand_generate_test/0",
