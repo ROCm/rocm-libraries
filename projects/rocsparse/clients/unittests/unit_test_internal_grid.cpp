@@ -151,6 +151,15 @@ TEST(internal_grid_limits, dispatch_limit_x_values)
     }
 }
 
+// A zero or negative block size must not divide by zero, and must not collapse
+// the extent to zero either.
+TEST(internal_grid_limits, dispatch_limit_x_non_positive_block_size)
+{
+    static_assert(rocsparse::dispatch_limit_x(0) == 4294967295LL, "");
+    static_assert(rocsparse::dispatch_limit_x(-1) == 4294967295LL, "");
+    static_assert(rocsparse::dispatch_limit_x(-1024) == 4294967295LL, "");
+}
+
 // clamp_grid_extent returns min(count, max_extent) for every count type.
 TEST(internal_grid_limits, clamp_grid_extent_values)
 {

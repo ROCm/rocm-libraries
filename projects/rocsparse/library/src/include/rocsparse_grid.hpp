@@ -72,9 +72,12 @@ namespace rocsparse
     }
 
     // Largest grid.x extent a dispatch runs correctly for a given block size.
+    // A non-positive block size is itself an invalid launch; it gets the full
+    // 32-bit limit rather than a division by zero, and never a zero extent.
     static constexpr int64_t dispatch_limit_x(int64_t block_size)
     {
-        return static_cast<int64_t>(4294967295LL) / block_size;
+        return (block_size > 0) ? static_cast<int64_t>(4294967295LL) / block_size
+                                : static_cast<int64_t>(4294967295LL);
     }
 
     // Clamp a grid.x extent. block_size must be the blockDim.x the launch uses;
