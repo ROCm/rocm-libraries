@@ -866,6 +866,73 @@ It is opt-in; `auto` does not select it. Still open: whether the nearest split o
 ACC to an XCD" from "cut the head index by contiguous band" specifically. That
 comparison has not yet been measured on both passes.
 
+### On the persistent path: port as-is loses, a pair bundle fixes it
+
+The same mapping is available as a persistent work-index decode:
+`persist_decode="swz_head_first"` (`_rev`, `_fold`). It is explicit-only, never
+selected by `auto`. It has the same digits, fastest first `a(M), blk(NQB),
+c(Hq/M), bt(B)`, and puts each head band on the same XCD. Measured on the
+paper's shape grid (50 shapes, `S ∈ {2K, 8K}`, `B ∈ {1, 2, 8}`, two passes), it
+is well behind `auto` on causal shapes, and neither traversal rescues it:
+
+| causal, vs `auto` | gfx942 | gfx950 |
+|---|---|---|
+| `swz_head_first` | −10.5% | −27.1% |
+| `swz_head_first_rev` | −9.0% | −27.7% |
+| `swz_head_first_fold` | −6.2% | −27.6% |
+
+**Why.** This is the failure of "Why `Q`-fastest orders cannot be rescued",
+appearing in a new place. On the grid-stride loop CTA `p` runs
+`wi = p, p+NP, …`, so its block digit advances by `NP/M` per step: 32 on gfx950
+(256 CTAs), 38 on gfx942 (304). Where `NQB` divides `NP/M` (every gfx950
+shape here), **each CTA keeps one query block for the whole kernel**. Causal
+cost per CTA then varies up to `NQB`-fold, and a per-CTA load model gives a
+makespan of 1.8–1.9× ideal. `rev` and `fold` are functions of `blk` alone, so
+they only relabel which CTAs are heavy. On gfx942 the block does move (38 is
+not a multiple of `NQB`), so the loss is smaller and `fold` recovers part of it.
+Non-causal shapes are unaffected (within about 1–2% of `auto`).
+
+**The fix: bundle the fold pair onto one CTA.** Pair the causal fold
+`{blk, NQB-1-blk}` *inside* one work unit rather than across grid-stride
+steps. A CTA then runs both halves on consecutive steps (unit
+`u = wi % NP + (wi // 2NP)·NP`, half `t = (wi // NP) % 2`). Every unit
+has the same cost, so it no longer matters which unit a CTA gets. The head bands
+stay on their XCDs, because `u % M = wi % M` whenever `M` divides `NP`. This is the
+scheduler of the Triton-TLX persistent AMD flash-attention tutorial
+([`amd_fa_persistent.py`](https://github.com/facebookexperimental/triton/blob/main/third_party/tlx/tutorials/amd_fa_persistent.py):
+per-XCD head-batch ownership, two-tile `{light, heavy}` bundles). AITER's
+LeanAttention with `XCD_REMAP` also balances per XCD, by equal tile counts.
+Two details matter:
+- **The last round** (`W mod 2·NP` items). CTAs that still get two items must get
+  both halves of one pair. The naive split hands a CTA halves of two different
+  pairs, and was worse than `fold` on gfx942.
+- **`W ≤ NP`** (one item per CTA). There is nothing to balance, so emit the plain
+  decode and keep the XCD alignment. Without this the pair decode lost up to about
+  11% on those shapes.
+
+Prototyped as `swz_head_first_pair` (not merged; it needs even `NQB`). On the same
+grid, two fresh passes, no correctness or bit-identity failures:
+
+| causal, vs `auto` | gfx942 | gfx950 |
+|---|---|---|
+| `swz_head_first_pair`, all shapes | +0.6% | **+3.3%** (32/47 wins) |
+| MHA, `B·Hq ≥ 128` | **+6.8%** (10/13 wins, worst −3.2%) | **+10.5%** (12/13 wins, worst +0.1%) |
+| MHA, `B·Hq < 128` | −1.7% | −0.4% |
+| GQA, `Hkv = 8` | −1.6% | +1.8% |
+| best cell | +18% | +26% |
+
+The load model agrees: once there are at least two items per CTA, the gfx950
+makespan drops to 1.00× ideal. So the paper's head-banded L2 locality *does* pay
+on the persistent path, but only once load balance no longer depends on the
+traversal. Its regime is the one seen on the non-persistent path, causal MHA with
+many ACCs, and there it gains more than any other persistent order measured.
+Open before shipping:
+- the gfx942 losses on small MHA and GQA shapes;
+- whether an `auto` rule of the form `causal && MHA && B·Hq ≥ 128` holds on the
+  production shape list (by the non-persistent result above, it would rarely fire
+  there);
+- the golden re-bless any `auto` change requires.
+
 ## Further investigation
 
 1. **Port `wide_lds_dma` to the non-persistent builder** (gfx950). The measured ceiling
@@ -940,6 +1007,10 @@ comparison has not yet been measured on both passes.
     `AttentionDenseSpec.resolved_persist_decode` as the predictor it was always meant to
     be. `Hkv=10` and a non-multiple-of-`num_xcds` `num_persistent` both construct and
     build again.
+11. **Merge the persistent `swz_head_first_pair`** (prototyped, not in the tree). It is
+    the one persistent order found here that beats `auto` clearly in its regime, causal MHA
+    with many ACCs; see "On the persistent path" above for the decode, the tail rule and
+    what is still open before `auto` could select it.
 
 ## Where the code lives
 

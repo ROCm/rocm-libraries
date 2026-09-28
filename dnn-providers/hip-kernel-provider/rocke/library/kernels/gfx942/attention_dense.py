@@ -812,7 +812,8 @@ _SUPPORTED_HEAD_SIZES = (64, 128)
 # instead of the builder raising mid-emission. Resolved values only -- "auto" never
 # reaches the decode chain.
 _IMPLEMENTED_PERSIST_DECODES = frozenset(
-    {"qb_major", "qb_major_fold", "hkv_major", "hkv_minor", "bt_hkv_minor"}
+    {"qb_major", "qb_major_fold", "hkv_major", "hkv_minor", "bt_hkv_minor",
+     "swz_head_first", "swz_head_first_rev", "swz_head_first_fold"}
 )
 
 # Axis orders the NON-persistent grid implements. Separate from the persist
@@ -2434,6 +2435,44 @@ def _build_attention_dense_single_buffer(
                 blk = b.div(r2, b.const_i32(gqa))
                 hq_v = b.add(b.mul(hkv_wi, b.const_i32(gqa)), hql)
                 qb_v = _qb_from_blk(blk)
+            elif spec.resolved_persist_decode.startswith("swz_head_first"):
+                # Persistent-path port of the non-persistent "swz_head_first"
+                # grid order (Zhang et al., arXiv 2511.02132, Fig. 11). The
+                # non-persistent grid re-expresses their formula as
+                # grid=(M*nqb, Hq/M, B), x-fastest, M=num_xcds; this is the
+                # same linearization as a 1-D work-index decode, fastest to
+                # slowest: a(M), blk(NQB), c(Hq/M), bt(B).
+                #
+                #   a   = wi % M
+                #   blk = (wi // M) % NQB
+                #   c   = (wi // (M*NQB)) % (Hq/M)
+                #   bt  =  wi // (M*NQB*(Hq/M))
+                #   hq  = a*(Hq/M) + c
+                #
+                # `a` picks the XCD (xcd = wi % num_xcds = a, since M divides
+                # every slower radix's stride); `c` is the residual band within
+                # that XCD's Hq/M query heads. __post_init__ enforces
+                # Hq % M == 0 -- without it this is not a bijection onto
+                # [0,Hq), the same requirement as the non-persistent order.
+                a_wi = b.mod(wi, b.const_i32(KV_SPLIT_MODULUS))
+                rest1 = b.div(wi, b.const_i32(KV_SPLIT_MODULUS))
+                blk = b.mod(rest1, b.const_i32(NQB))
+                rest2 = b.div(rest1, b.const_i32(NQB))
+                _hpm = Hq // KV_SPLIT_MODULUS
+                c_wi = b.mod(rest2, b.const_i32(_hpm))
+                bt_v = b.div(rest2, b.const_i32(_hpm))
+                hq_v = b.add(b.mul(a_wi, b.const_i32(_hpm)), c_wi)
+                if spec.resolved_persist_decode == "swz_head_first_fold":
+                    qb_v = _qb_from_blk(blk)
+                elif (spec.resolved_persist_decode == "swz_head_first_rev"
+                        and causal and NQB > 1):
+                    # The paper publishes no traversal (plain ascending); `rev`
+                    # is our reverse layered on top, gated on causal like every
+                    # other `_rev` order -- with uniform cost it degenerates to
+                    # the identity.
+                    qb_v = b.sub(b.const_i32(NQB - 1), blk)
+                else:
+                    qb_v = blk
             else:
                 raise ValueError(
                     "gfx942 attention_dense: persist_decode="

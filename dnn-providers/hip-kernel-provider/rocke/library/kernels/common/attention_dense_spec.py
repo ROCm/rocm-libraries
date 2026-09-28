@@ -37,8 +37,16 @@ _COMMON_PERSIST_DECODES = frozenset(
     # the query-block digit instead of the plain ascending walk. Same mapping of
     # work items to (batch, head), different traversal -- so it is a traversal
     # variant of qb_major, not a new locality class, and it is named to say so.
+    #
+    # swz_head_first[_rev|_fold]: the persistent-path port of the non-persistent
+    # grid order of the same name (Zhang et al., arXiv 2511.02132, Fig. 11) --
+    # SAME NAME, same head-axis contiguous-band split, reached as a work-index
+    # decode instead of a 3-D grid. Unlike bt_hkv_minor/qb_major_fold, this
+    # decode is EXPLICIT-ONLY and never auto-selected -- see
+    # platform/dsl_docs/architecture/attention_thread_block_mapping.md for why.
     {"auto", "qb_major", "qb_major_fold", "hkv_major", "hkv_minor",
-     "bt_hkv_minor"}
+     "bt_hkv_minor", "swz_head_first", "swz_head_first_rev",
+     "swz_head_first_fold"}
 )
 
 # XCD count every CDNA3/CDNA4 part this spec targets exposes. Only ``hkv_minor``
@@ -538,6 +546,28 @@ class AttentionDenseSpec:
                     "persist_decode='hkv_minor' is validated only for aligned "
                     "dense attention (not ragged/varlen/paged)"
                 )
+        if self.persist_decode.startswith("swz_head_first"):
+            # Unlike hkv_minor's relaxed guards above, this ONE condition is a
+            # real bijection requirement, not a locality predictor. The decode
+            # splits the query-head axis into a fast band `a` (radix
+            # num_xcds) and a slow residual `c` (radix Hq // num_xcds):
+            #   hq = a * (Hq // num_xcds) + c
+            # If Hq % num_xcds != 0, `Hq // num_xcds` floors down and `hq`
+            # ranges over only `num_xcds * (Hq // num_xcds) < Hq` values --
+            # some query heads are never written and others get written twice.
+            # Same requirement already enforced for the non-persistent grid
+            # order of the same name.
+            if not self.persistent:
+                raise ValueError(
+                    f"persist_decode={self.persist_decode!r} requires "
+                    "persistent=True"
+                )
+            if self.num_query_heads % _PERSIST_XCD_MODULUS:
+                raise ValueError(
+                    f"persist_decode={self.persist_decode!r} needs "
+                    f"num_query_heads ({self.num_query_heads}) divisible by "
+                    f"{_PERSIST_XCD_MODULUS}"
+                )
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
@@ -636,8 +666,10 @@ class AttentionDenseSpec:
         if self.persist_decode != "auto":
             return self.persist_decode
         # ARCH-DEPENDENT, and deliberately not chosen here. The base stays on
-        # the conservative choice so a new arch does not inherit another arch's
-        # result; the gfx942 subclass overrides it.
+        # the conservative choice so a NEW arch does not inherit another arch's
+        # result. Both shipped arches override it -- gfx942 and gfx950 each
+        # return `_batch_conditional_auto_decode()` -- so this base value is
+        # reached only by an arch that has not been measured yet.
         #
         # CORRECTION. This comment used to record bt_hkv_minor as "-1.5% on
         # gfx950, where the hand-written qb_major decode is fastest". That
@@ -652,9 +684,12 @@ class AttentionDenseSpec:
         # on gfx942, and its generic twin (digit order BVGQ + fold) agrees with
         # it to within the noise floor on both arches.
         #
-        # gfx950 nonetheless still selects qb_major here, pending the shipped-
-        # configuration re-measurement and golden re-bless that changing it
-        # requires. Do not re-derive the old number from this comment.
+        # That re-measurement has since landed: gfx950 no longer selects
+        # qb_major here. Its `_aligned_causal_auto_decode` override returns the
+        # same B-conditional rule as gfx942, and because this arch enters the
+        # persistent path whenever there is enough work to fill the grid, BOTH
+        # arms of that rule are live on its default path. Do not re-derive the
+        # old number from this comment.
         #
         # Why the sweep did not catch any of it: qb_major is the digit order
         # BGVQ with the ASCENDING traversal, and `asc` was pruned after the
@@ -770,6 +805,9 @@ class AttentionDenseSpec:
             "hkv_minor": "hkvmin",
             "bt_hkv_minor": "bthkvmin",
             "qb_major_fold": "qbmajfold",
+            "swz_head_first": "swzhf",
+            "swz_head_first_rev": "swzhfrev",
+            "swz_head_first_fold": "swzhffold",
         }.get(self.resolved_persist_decode, "")
 
     def kernel_name(self) -> str:

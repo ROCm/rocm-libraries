@@ -1442,6 +1442,92 @@ class TestAttentionHelpers(unittest.TestCase):
                     "generic xGyQ V-minor split",
                 )
 
+    def test_swz_head_first_persistent_matches_the_paper_formula(self):
+        """The persistent ``swz_head_first[_rev|_fold]`` decode must reproduce
+        the SAME (block, head, batch) as the paper's own published formula
+        (Zhang et al., arXiv 2511.02132, Fig. 11)::
+
+            head  = (w % M)*(Hq/M) + w // (M*nqb)
+            block = (w % (M*nqb)) // M                    (M = num_xcds)
+
+        applied per-batch-instance to the grid-stride index ``wi`` (batch is
+        the slowest digit in both the persistent decode and the non-persistent
+        grid's z-axis). This ties BOTH ports to one ground truth instead of
+        merely to each other -- and along the way gives the non-persistent
+        grid order its first CPU linearization test (it had none; only a GPU
+        A/B against SDPA covered it before this).
+
+        Shapes: GQA at Hkv == num_xcds, GQA at Hkv != num_xcds (the case where
+        swz_head_first diverges from the VQGB digit-order proxy the doc used
+        as a stand-in), and MHA.
+        """
+        from kernels.common.attention_dense_spec import KV_SPLIT_MODULUS as M
+        from kernels.gfx942.attention_dense import (
+            Gfx942AttentionDenseSpec, attention_dense_grid)
+
+        def paper_reference(wi, Hq, NQB, B):
+            hpm = Hq // M
+            per_batch = M * NQB * hpm
+            bt = wi // per_batch
+            w = wi % per_batch
+            hq = (w % M) * hpm + w // (M * NQB)
+            blk = (w % (M * NQB)) // M
+            return blk, hq, bt
+
+        def persist_decode(wi, Hq, NQB):
+            hpm = Hq // M
+            a = wi % M
+            rest1 = wi // M
+            blk = rest1 % NQB
+            rest2 = rest1 // NQB
+            c = rest2 % hpm
+            bt = rest2 // hpm
+            return blk, a * hpm + c, bt
+
+        for Hq, Hkv, B in ((32, 8, 4), (40, 8, 2), (64, 64, 1)):
+            with self.subTest(Hq=Hq, Hkv=Hkv, B=B):
+                base = dict(batch=B, seqlen_q=2048, seqlen_kv=2048,
+                            num_query_heads=Hq, num_kv_heads=Hkv,
+                            head_size=128, causal=True, dtype="fp16",
+                            block_n=64)
+                NQB = 2048 // 256  # default block_m
+                W = M * NQB * (Hq // M) * B
+
+                # Non-persistent grid vs the paper formula directly.
+                spec_np = Gfx942AttentionDenseSpec(
+                    **base, default_grid_order="swz_head_first")
+                gx, gy, gz = attention_dense_grid(spec_np)
+                self.assertEqual(gx * gy * gz, W)
+                for bz in range(gz):
+                    for by in range(gy):
+                        for bx in range(gx):
+                            wi = bx + gx * (by + gy * bz)
+                            got = (bx // M, (bx % M) * (Hq // M) + by, bz)
+                            self.assertEqual(
+                                got, paper_reference(wi, Hq, NQB, B),
+                                f"non-persistent swz_head_first at wi={wi}",
+                            )
+
+                # Persistent decode vs the same oracle, plus full coverage and
+                # the closed-form traversal formulas (_rev, _fold).
+                seen = set()
+                half = NQB // 2
+                for wi in range(W):
+                    got = persist_decode(wi, Hq, NQB)
+                    self.assertEqual(
+                        got, paper_reference(wi, Hq, NQB, B),
+                        f"persistent swz_head_first decode at wi={wi}",
+                    )
+                    blk = got[0]
+                    seen.add((got[2], got[1], blk))
+                    rev_qb = NQB - 1 - blk
+                    fold_qb = blk if blk < half else (NQB - 1 + half - blk)
+                    self.assertTrue(0 <= rev_qb < NQB)
+                    self.assertTrue(0 <= fold_qb < NQB)
+                self.assertEqual(len(seen), W,
+                                 "persistent swz_head_first: decode does not "
+                                 "cover the full (bt, hq, blk) work space")
+
     def test_runtime_shape_grid_orders_do_not_bake_nqb(self):
         """A runtime_shape body must emit the SAME IR for every seqlen.
 
@@ -1512,7 +1598,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 ("gfx950", Gfx950AttentionDenseSpec, 256, None)):
             names = {}
             decodes = sorted(impl) if impl else [
-                "qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor"]
+                "qb_major", "hkv_major", "hkv_minor", "bt_hkv_minor",
+                "swz_head_first", "swz_head_first_rev", "swz_head_first_fold"]
             for dec in decodes:
                 with self.subTest(arch=arch, decode=dec):
                     spec = Spec(**base, num_persistent=npers,

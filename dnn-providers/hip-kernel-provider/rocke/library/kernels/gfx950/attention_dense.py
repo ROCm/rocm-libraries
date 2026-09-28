@@ -1928,6 +1928,30 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             else:
                 qb = qb0
             hkv = b.div(hq, b.const_i32(gqa))
+        elif spec.resolved_persist_decode.startswith("swz_head_first"):
+            # Persistent-path port of the non-persistent "swz_head_first" grid
+            # order (Zhang et al., arXiv 2511.02132, Fig. 11). Mirrors the
+            # gfx942 sibling exactly; see that file for the full derivation.
+            # Fastest to slowest: a(M), blk(NQB), c(Hq/M), bt(B), M=num_xcds.
+            #   a = wi % M; blk = (wi//M) % NQB; c = (wi//(M*NQB)) % (Hq/M);
+            #   bt = wi // (M*NQB*(Hq/M));  hq = a*(Hq/M) + c
+            # Hq % M == 0 is enforced by the shared spec's __post_init__.
+            a_wi = b.mod(wi, b.const_i32(KV_SPLIT_MODULUS))
+            rest1 = b.div(wi, b.const_i32(KV_SPLIT_MODULUS))
+            blk = b.mod(rest1, b.const_i32(NQB))
+            rest2 = b.div(rest1, b.const_i32(NQB))
+            hpm = Hq // KV_SPLIT_MODULUS
+            c_wi = b.mod(rest2, b.const_i32(hpm))
+            bt = b.div(rest2, b.const_i32(hpm))
+            hq = b.add(b.mul(a_wi, b.const_i32(hpm)), c_wi)
+            if spec.resolved_persist_decode == "swz_head_first_fold":
+                qb = _qb_from_blk(blk)
+            elif (spec.resolved_persist_decode == "swz_head_first_rev"
+                    and causal and NQB > 1):
+                qb = b.sub(b.const_i32(NQB - 1), blk)
+            else:
+                qb = blk
+            hkv = b.div(hq, b.const_i32(gqa))
         else:
             raise ValueError(
                 "gfx950 attention_dense: persist_decode="
@@ -2641,6 +2665,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             # invite the two copies to drift.
             bt_e = b.mod(wi, b.const_i32(B))
             hq_e = b.mod(b.div(wi, b.const_i32(B)), b.const_i32(Hq))
+        elif spec.resolved_persist_decode.startswith("swz_head_first"):
+            # MUST mirror site 1 exactly -- same (a, blk, c, bt) decode. The
+            # epilogue needs only (bt_e, hq_e); qb never affects the O address,
+            # so the traversal branch on `blk` is not needed here.
+            a_e = b.mod(wi, b.const_i32(KV_SPLIT_MODULUS))
+            rest1_e = b.div(wi, b.const_i32(KV_SPLIT_MODULUS))
+            rest2_e = b.div(rest1_e, b.const_i32(NQB))
+            hpm_e = Hq // KV_SPLIT_MODULUS
+            c_e = b.mod(rest2_e, b.const_i32(hpm_e))
+            bt_e = b.div(rest2_e, b.const_i32(hpm_e))
+            hq_e = b.add(b.mul(a_e, b.const_i32(hpm_e)), c_e)
         else:
             # Was a bare `else:` emitting qb_major. That made an unrecognised
             # decode VALIDATE, COMPILE and silently run the wrong schedule under
