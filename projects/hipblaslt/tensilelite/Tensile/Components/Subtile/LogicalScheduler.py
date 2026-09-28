@@ -5307,14 +5307,35 @@ class LogicalScheduler:
         that feeds it. Anything ahead of the first store (the stage's N-group label
         and its deferred SrdD row increment) leads the first unit, and any trailing
         remainder joins the last, so the drain's program order survives the scatter.
+
+        A DPP fold is the exception: both coalesced stores read the same packed
+        regs (vPack / the reused ValuC window). Splitting on each buffer_store
+        lets the next partition's drain land between store 1 and store 2 and
+        repack those regs, so the odd-column store writes the later fold's data.
+        The repack module stays one unit, including the acc reads and address
+        setup that have accumulated since the previous store.
         """
+        from rocisa.code import Module
         from rocisa.instruction import BufferStoreB64, BufferStoreB128
         units, cur = [], []
-        for item in stage.flatitems():
-            cur.append(item)
-            if isinstance(item, (BufferStoreB64, BufferStoreB128)):
-                units.append(cur)
-                cur = []
+
+        def walk(items):
+            nonlocal cur
+            for item in items:
+                name = getattr(item, "name", "") or ""
+                if isinstance(item, Module) and name.startswith("16bitSubtilePairedStoreRepack"):
+                    units.append(cur + [item])
+                    cur = []
+                    continue
+                if isinstance(item, Module):
+                    walk(item.items())
+                    continue
+                cur.append(item)
+                if isinstance(item, (BufferStoreB64, BufferStoreB128)):
+                    units.append(cur)
+                    cur = []
+
+        walk(stage.items())
         if cur:
             if units:
                 units[-1].extend(cur)
@@ -5492,7 +5513,7 @@ class LogicalScheduler:
         readyAfter = []
         for unit in units:
             bar = -1
-            for item in unit:
+            for item in self._plsinUnitInsts(unit):
                 read = keys(item, self._PLSIN_UNIT_READS)
                 written = keys(item, self._PLSIN_UNIT_WRITES)
                 if read is None or written is None:
@@ -5503,6 +5524,40 @@ class LogicalScheduler:
                     bar = max(bar, lastReader.get(reg, -1))
             readyAfter.append(bar)
         return readyAfter
+
+    @staticmethod
+    def _plsinUnitInsts(unit):
+        """Instructions a drain unit reads and writes, descending into a fold.
+
+        The fold is one unit so the weave cannot split its two stores, but the
+        readiness bar still has to see the acc reads and packs inside it.
+        """
+        from rocisa.code import Module
+        for item in unit:
+            if isinstance(item, Module):
+                yield from item.flatitems()
+            else:
+                yield item
+
+    @staticmethod
+    def _plsinFlatKeepingFolds(mod):
+        """Flatten a module but leave each DPP fold as one item.
+
+        Gap-B MFMAs live inside the fold, between its two coalesced stores.
+        A later drain that inserts on every MFMA would land in that gap and
+        repack the regs the odd-column store still reads.
+        """
+        from rocisa.code import Module
+        out = []
+        for item in mod.items():
+            name = getattr(item, "name", "") or ""
+            if isinstance(item, Module) and name.startswith("16bitSubtilePairedStoreRepack"):
+                out.append(item)
+            elif isinstance(item, Module):
+                out.extend(LogicalScheduler._plsinFlatKeepingFolds(item))
+            else:
+                out.append(item)
+        return out
 
     def _weaveStagedDrainIntoPartition(self, partModule, units, label):
         """Scatter partition p's drain through partition p+1's MFMAs.
@@ -5522,7 +5577,7 @@ class LogicalScheduler:
         """
         from rocisa.code import Module
         from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
-        flat = list(partModule.flatitems())
+        flat = self._plsinFlatKeepingFolds(partModule)
         mfmaPos = [i for i, inst in enumerate(flat)
                    if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
         if not units or not mfmaPos:
@@ -5594,7 +5649,7 @@ class LogicalScheduler:
             return None
         if plsinDebugEnv("TENSILE_PLSIN_LAST_DRAIN_WEAVE", "1") == "0":
             return None
-        flat = list(partModule.flatitems())
+        flat = self._plsinFlatKeepingFolds(partModule)
         mfmaPos = [i for i, inst in enumerate(flat)
                    if isinstance(inst, (MFMAInstruction, MXMFMAInstruction))]
         if not units or not mfmaPos:

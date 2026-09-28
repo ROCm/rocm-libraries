@@ -5203,10 +5203,16 @@ class GlobalWriteBatchWriter:
       phase2Mod.add(VCndMaskB32(dst=vgpr(vVoff), src0=vgpr(evenVoffSrc), src1=vgpr(vVoff),
                              src2=sgpr(oddMask, self.laneSGPRC),
                              comment=f"{tag} even<-base/perm addr, odd<-perm+half"))
+      # Same row soffset as the un-folded paired store. Absolute row addressing
+      # drops the SrdD cursor, so each N group is only distinguished by this
+      # offset; soffset=0 piles every N group onto the first.
+      _soff, _soffTmp = self._subtileStoreSoffset(phase2Mod, addrCalc)
       # One all-lanes coalesced store (even -> batchA half, odd -> batchB half).
-      phase2Mod.add(BufferStoreB128(src=vgpr(vSD, 4), vaddr=vgpr(vVoff), saddr=sgpr("SrdD", 4), soffset=0,
+      phase2Mod.add(BufferStoreB128(src=vgpr(vSD, 4), vaddr=vgpr(vVoff), saddr=sgpr("SrdD", 4), soffset=_soff,
                  mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
                  comment=f"{tag}: all-lanes coalesced store (8 full 128B lines)"))
+      if _soffTmp is not None:
+        self._epilogScratchFree(_soffTmp)
       phase2Mod.add(SNop(waitState=0, comment="WAR: latch store src before next repack store"))
 
     # PLSIN weave gap B (role="store"): between the two coalesced stores, it hides store-1's
