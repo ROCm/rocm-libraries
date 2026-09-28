@@ -227,12 +227,11 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 |---|---|
 | `HKP_PACK_JOBS` | Prewarm worker count. Defaults to `min(32, ncpu)`; `1` forces the serial path for a clean traceback. |
 
-`HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build the cap
-is the `PACK_JOBS <n>` argument at the `hkp_wire_pack_target()` call site, which the
-wiring transports to the tool. It is per call site because roots carry no ordering edge,
-so the generator runs them at once and unbounded pools multiply. All six calls name a
-value: `1` for the small roots, `2` for the `integration` test root and the production
-target. Omitting `PACK_JOBS` lets the packer size itself against the machine.
+`HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
+from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
+pass `1`, or `2` for `integration`, and the production root passes none, so the packer uses
+its default. The reason is in the `hkp_wire_pack_target()` header in
+`cmake/HkpPackaging.cmake`.
 
 ## Running the tests
 

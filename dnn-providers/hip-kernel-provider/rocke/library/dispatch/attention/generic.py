@@ -53,6 +53,8 @@ _UNIFIED_CAPABILITY = Capability(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
         ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
     ),
+    # Unified kernels already shift the causal diagonal by the runtime
+    # difference between each sequence's KV and query lengths.
     supports_features=ATTENTION_FEATURES,
 )
 
@@ -179,7 +181,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=(256,)),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            supports_features=frozenset({"causal"}),
+            supports_features=frozenset({"causal", "causal_bottom_right"}),
         ),
         _supports=support,
         select_spec=select,
