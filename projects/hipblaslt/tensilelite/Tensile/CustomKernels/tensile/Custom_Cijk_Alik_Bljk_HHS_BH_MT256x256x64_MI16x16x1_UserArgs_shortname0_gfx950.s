@@ -2942,6 +2942,7 @@ s_cbranch_scc1 label_OptNLL_End                    // jump if edges required
 
   
 /*  mfmaIndex:0  */
+s_waitcnt lgkmcnt(0) // Complete LDS reads before the optimized final loop.
 v_mfma_f32_16x16x32_f16 acc[0:3], v[vgprValuB_X0_I0+0+0+0:vgprValuB_X0_I0+0+0+0+3], v[vgprValuA_X0_I0+0+0+0:vgprValuA_X0_I0+0+0+0+3], acc[0:3] // left value = acc[0+0:3+0]
 ds_read_b128 v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], v[vgprLocalReadAddrA] offset:64 // L -> Reg lro=32 swapByteOffset=0 ti=256 vIdx=0 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0
 
