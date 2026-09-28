@@ -32,10 +32,10 @@ ResolvedSchedulingKnobs staticSchedulingKnobDefaults(const std::array<int, 3>& a
     out.dsReadThrottleLatency = hw.lds.readThrottleLatency > 0
                                     ? hw.lds.readThrottleLatency
                                     : 4 * std::max(1, hw.lds.readQueueDepth);
-    out.dsReadPerWmma = kStaticDefaultDsReadPerWmma;
+    out.dsReadPerCap = kStaticDefaultDsReadPerCap;
     out.clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
     out.dsReadThrottleLatencySource = SchedulingKnobSource::StaticDefault;
-    out.dsReadPerWmmaSource = SchedulingKnobSource::StaticDefault;
+    out.dsReadPerCapSource = SchedulingKnobSource::StaticDefault;
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     return out;
 }
@@ -66,8 +66,14 @@ SchedulingKnobOverrides schedulingKnobOverridesFromModuleOptions(
     // Throttle: <=0 unset. 0 is not a useful explicit value (accessors need >0);
     // treat <=0 as unset so legacy zero-init still goes through resolve.
     if (opts.DsReadThrottleLatency > 0) out.dsReadThrottleLatency = opts.DsReadThrottleLatency;
-    // Per-WMMA: <0 unset; 0 is a valid (extreme) override.
-    if (opts.DsReadPerWmma >= 0) out.dsReadPerWmma = opts.DsReadPerWmma;
+    // Cap: <0 unset; 0 is a valid (extreme) override. DsReadPerWmma is the
+    // pre-rename spelling -- options arrive by string key, so a caller still
+    // using it would otherwise silently get the default. New name wins.
+    if (opts.DsReadPerCap >= 0) {
+        out.dsReadPerCap = opts.DsReadPerCap;
+    } else if (opts.DsReadPerWmma >= 0) {
+        out.dsReadPerCap = opts.DsReadPerWmma;
+    }
     // Rule3 lead: <0 unset; 0 means co-locate signal and wait.
     if (opts.ClusterBarrierRule3SignalLeadCycles >= 0)
         out.clusterBarrierRule3SignalLeadCycles = opts.ClusterBarrierRule3SignalLeadCycles;
@@ -100,21 +106,22 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
 
     // Prefer the CDNA5 policy default when WMMA count is small; otherwise
     // ceil(dsLoadCount / wmmaCount), capped at that same default
-    // (kStaticDefaultDsReadPerWmma == kGfx1250Config.dsReadPerWmma). Not an
+    // (kStaticDefaultDsReadPerCap == kGfx1250Config.dsReadPerCap). Not an
     // HWModel fact — scheduling ratios live in CDNA5Config.
-    const int perWmmaCap = kStaticDefaultDsReadPerWmma;
-    out.dsReadPerWmma = wmma <= 128 ? perWmmaCap : std::min(perWmmaCap, ceilDivPositive(ds, wmma));
-    out.dsReadPerWmmaSource = SchedulingKnobSource::Policy;
+    const int perCapCeiling = kStaticDefaultDsReadPerCap;
+    out.dsReadPerCap =
+        wmma <= 128 ? perCapCeiling : std::min(perCapCeiling, ceilDivPositive(ds, wmma));
+    out.dsReadPerCapSource = SchedulingKnobSource::Policy;
 
-    // Independent of the dsReadPerWmma knob above: recompute the same capped
-    // ceil ratio, then (firstWmmaLatency / perWmma) * queueDepth, floored at
+    // Independent of the dsReadPerCap knob above: recompute the same capped
+    // ceil ratio, then (firstWmmaLatency / perCap) * queueDepth, floored at
     // the arch's static readThrottleLatency (72 on gfx1250; queueDepth is 16).
-    const int perWmmaForThrottle = std::min(perWmmaCap, ceilDivPositive(ds, wmma));
+    const int perCapForThrottle = std::min(perCapCeiling, ceilDivPositive(ds, wmma));
     const int queueDepth = std::max(1, hw.lds.readQueueDepth);
     const int throttleFloor =
         hw.lds.readThrottleLatency > 0 ? hw.lds.readThrottleLatency : 4 * queueDepth;
     const int firstWmmaLatency = std::max(0, features.stats.firstWmmaLatencyCycles);
-    const int computedThrottle = (firstWmmaLatency / perWmmaForThrottle) * queueDepth;
+    const int computedThrottle = (firstWmmaLatency / perCapForThrottle) * queueDepth;
     out.dsReadThrottleLatency = std::max(throttleFloor, computedThrottle);
     out.dsReadThrottleLatencySource = SchedulingKnobSource::Policy;
 
@@ -149,15 +156,15 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.dsReadThrottleLatencySource = SchedulingKnobSource::StaticDefault;
     }
 
-    if (overrides.dsReadPerWmma.has_value()) {
-        out.dsReadPerWmma = *overrides.dsReadPerWmma;
-        out.dsReadPerWmmaSource = SchedulingKnobSource::User;
+    if (overrides.dsReadPerCap.has_value()) {
+        out.dsReadPerCap = *overrides.dsReadPerCap;
+        out.dsReadPerCapSource = SchedulingKnobSource::User;
     } else if (!features.stats.degenerate()) {
-        out.dsReadPerWmma = proposed.dsReadPerWmma;
-        out.dsReadPerWmmaSource = SchedulingKnobSource::Policy;
+        out.dsReadPerCap = proposed.dsReadPerCap;
+        out.dsReadPerCapSource = SchedulingKnobSource::Policy;
     } else {
-        out.dsReadPerWmma = defaults.dsReadPerWmma;
-        out.dsReadPerWmmaSource = SchedulingKnobSource::StaticDefault;
+        out.dsReadPerCap = defaults.dsReadPerCap;
+        out.dsReadPerCapSource = SchedulingKnobSource::StaticDefault;
     }
 
     if (overrides.clusterBarrierRule3SignalLeadCycles.has_value()) {
@@ -189,7 +196,7 @@ ResolvedSchedulingKnobs resolveSchedulingKnobsForModule(const StinkyAsmModule& m
 void applyResolvedSchedulingKnobs(PassFeatureConfig& config,
                                   const ResolvedSchedulingKnobs& resolved) {
     config.dagFeatures.dsReadThrottleLatency = resolved.dsReadThrottleLatency;
-    config.dagFeatures.dsReadPerWmma = resolved.dsReadPerWmma;
+    config.dagFeatures.dsReadPerCap = resolved.dsReadPerCap;
 }
 
 const char* schedulingKnobSourceName(SchedulingKnobSource source) {
@@ -213,8 +220,8 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " sumWmmaLat=" << features.stats.sumWmmaLatencyCycles
        << " dsReadThrottleLatency=" << resolved.dsReadThrottleLatency << "("
        << schedulingKnobSourceName(resolved.dsReadThrottleLatencySource) << ")"
-       << " dsReadPerWmma=" << resolved.dsReadPerWmma << "("
-       << schedulingKnobSourceName(resolved.dsReadPerWmmaSource) << ")"
+       << " dsReadPerCap=" << resolved.dsReadPerCap << "("
+       << schedulingKnobSourceName(resolved.dsReadPerCapSource) << ")"
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
        << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")\n";
 }

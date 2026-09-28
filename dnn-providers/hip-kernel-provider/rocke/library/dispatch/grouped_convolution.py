@@ -1661,20 +1661,34 @@ def conv_grouped_candidates(direction: str = "fwd") -> Tuple[KernelCandidate, ..
     return CONV_FWD_REGISTRY.candidates()
 
 
+def registered_conv_grouped_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, ConvGroupedSpec], ...]:
+    """Every registered grouped-conv candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_conv_grouped` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    assert isinstance(req, ConvGroupedRequest)
+    return _registry_for(req).combos(req)
+
+
 def conv_grouped_sweep_space(req: OperatorRequest) -> Sequence[ConvGroupedSpec]:
     if _request_errors(req):
         return ()
     assert isinstance(req, ConvGroupedRequest)
-    registry = _registry_for(req)
-    specs = []
-    seen: set[str] = set()
-    for candidate in registry.supported(req):
-        spec = candidate.select_spec(req)
-        h = spec.kernel_name()
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return _registry_for(req).sweep_space(req, spec_key=lambda spec: spec.kernel_name())
+
+
+def dispatch_conv_grouped_all(
+    req: ConvGroupedRequest,
+) -> Tuple[DispatchResult, ...]:
+    """Every eligible grouped-conv kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return _registry_for(req).dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_conv_grouped(
