@@ -1790,16 +1790,48 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   @staticmethod
-  def _assignCustomKernelParameters(state):
+  def _assignCustomKernelParameters(state: dict) -> None:
     """Minimal parameter setup for handwritten custom kernels.
 
     These kernels carry their own argument layout and don't go through the
     full assignDerivedParameters validation (which would reject them for
-    missing MatrixInstruction, etc.)."""
+    missing MatrixInstruction, etc.).
+
+    Args:
+      state: Solution state carrying a "CustomKernel" block. Mutated in place.
+
+    Returns:
+      None.
+
+    Raises:
+      RuntimeError: If a macrotile component is supplied by neither the
+        CustomKernel block nor the consuming logic file.
+    """
     ck = state["CustomKernel"]
-    state["MacroTile0"] = ck["macrotile"][0]
-    state["MacroTile1"] = ck["macrotile"][1]
-    state["DepthU"]     = ck["macrotile"][2]
+
+    # CustomKernels.py derives the macrotile from MatrixInstruction / MIWaveTile
+    # in custom.config, then from an MTxxx token in the kernel name. Any kernel
+    # that has neither infers 0 and must not overwrite
+    # the tile the consuming logic file already states. MacroTile0 == 0 reaches
+    # ContractionProblemGemm::getNumTiles() as an integer divide by zero, so
+    # dense enumeration (--algo_method 1) dies with SIGFPE as soon as that
+    # solution is costed. Kernels that already encode MT in the name
+    # or declare MI in custom.config are unchanged.
+    macrotile = list(ck.get("macrotile") or [])
+    macrotile += [0] * (3 - len(macrotile))
+    for i, key in enumerate(("MacroTile0", "MacroTile1", "DepthU")):
+      value = macrotile[i] if macrotile[i] > 0 else state.get(key, 0)
+      if not isinstance(value, int) or value <= 0:
+        raise RuntimeError(
+          f"Custom kernel '{ck.get('name', '?')}' has no usable {key}: it is absent "
+          f"from the kernel's custom.config, the kernel name encodes no MTxxx token, "
+          f"and the consuming logic file does not supply one.")
+      macrotile[i] = value
+      state[key]   = value
+    # Keep the block the C++ runtime deserializes in step with the solution:
+    # ContractionSolution reads customKernel.macrotile directly for custom-kernel
+    # tile and workspace sizing.
+    ck["macrotile"] = macrotile
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
@@ -1828,6 +1860,19 @@ class Solution(collections.abc.Mapping):
 
     state["DirectToLdsA"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 2
     state["DirectToLdsB"] = state["DirectToLds"] == 1 or state["DirectToLds"] == 3
+
+    # Nothing else computes a handwritten kernel's workspace, and the host reads
+    # the decision off the CustomKernel block alone (requiredWorkspaceSize only
+    # consults sizeMapping for generated kernels).  A non-atomic Stream-K kernel
+    # that declares none would launch against a zero-byte buffer and fault on its
+    # first partial-tile store.  Derive it from the accumulation mode chosen
+    # above, sized like assignDerivedParameters' computeBytes.  custom.config's
+    # own ProblemType is advisory -- LibraryIO overwrites it with the logic
+    # file's -- so read the type from state.  An explicit declaration wins.
+    if ck.get("workspaceType", "None") == "None" \
+       and state["_GlobalAccumulation"] == 'PartialsBuffer':
+      ck["workspaceType"]          = "StreamKWithReduction"
+      ck["workspaceSizePerElemC"]  = int(state["ProblemType"]["ComputeDataType"].numBytes())
 
     state["_WorkspaceSizePerElemC"] = ck.get("workspaceSizePerElemC", 0)
     state["_WorkspaceSizePerElemBias"] = 0
@@ -1867,6 +1912,19 @@ class Solution(collections.abc.Mapping):
     dcpAutoSkip=None
   ):
     """Derive, stepping auto's pair ranking past a pair the LDS check refuses."""
+    if state.get("StreamK", 0) and state["ProblemType"].get("OutputAmaxD", False):
+      reject(state, printRejectionReason,
+             "StreamK with OutputAmaxD is unsupported: amax reduction requires one "
+             "final-output tile per workgroup, not persistent or partial StreamK tiles")
+      return
+    if state["ProblemType"].get("OutputAmaxD", False):
+      if state.get("GlobalSplitU", 1) != 1:
+        reject(state, printRejectionReason,
+               "OutputAmaxD requires GlobalSplitU=1: split-reduction helpers do not reduce amax")
+        return
+      # The amax workspace/counter indexes dense output tiles within one batch.
+      # Publish the corresponding runtime predicate, including for explicit YAML.
+      state["BatchSizeEqual"] = 1
     if dcpAutoSkip is None:
       # Re-derive pair-dependent scalar state from pristine input on each retry.
       pristine = copy.deepcopy(state) if pgrAutoPairRequested(state) else None
