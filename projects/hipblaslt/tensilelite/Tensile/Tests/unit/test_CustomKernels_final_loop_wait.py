@@ -12,8 +12,7 @@ from Tensile.CustomKernels import getCustomKernelContents
 pytestmark = pytest.mark.unit
 
 KERNELS = [
-    "Custom_Cijk_Alik_Bljk_"
-    f"{dtype}_BH_MT256x256x64_MI16x16x1_UserArgs_shortname{variant}_gfx950"
+    f"Custom_Cijk_Alik_Bljk_{dtype}_BH_MT256x256x64_MI16x16x1_UserArgs_shortname{variant}_gfx950"
     for dtype, variant in [("BBS", 0), ("BBS", 1), ("HHS", 0)]
 ]
 
