@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Advanced Micro Devices, Inc.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
 // Regression test for TheRock#6258 / LP64 typedef conflict in miopen_cstdint.hpp.
 //
