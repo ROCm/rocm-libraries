@@ -48,6 +48,7 @@ from rocisa_stinkytofu_adaptor.code import (  # noqa: E402
     Macro,
     Module,
     RegSet,
+    _detect_epilogue_range,
     SignatureBase,
     SignatureCodeMeta,
     StructuredModule,
@@ -1195,6 +1196,12 @@ class _MockLogicalModule:
     def end_callable(self, name):
         self.items.append(("end_callable", name))
 
+    def begin_group(self, name):
+        self.items.append(("begin_group", name))
+
+    def end_group(self, name):
+        self.items.append(("end_group", name))
+
 
 class TestPopulateLogicalModule(unittest.TestCase):
     def _payloads(self, m):
@@ -1225,6 +1232,37 @@ class TestPopulateLogicalModule(unittest.TestCase):
         m.add(b)
         m.add(c)
         self.assertEqual(self._payloads(m), [("inst", "A"), ("inst", "B"), ("inst", "C")])
+
+    def test_tags_global_write_epilogue_span(self):
+        """First-to-last GlobalWriteElements subtree, including items between."""
+        root = Module("kernel")
+        root.add(_FakeLogicalInst("pre"))
+        first = Module("store0")
+        first.add(Module("GlobalWriteElements"))
+        first.add(_FakeLogicalInst("store"))
+        middle = _FakeLogicalInst("mid")
+        second = Module("store1")
+        nested = Module("wrap")
+        nested.add(Module("GlobalWriteElements"))
+        second.add(nested)
+        second.add(_FakeLogicalInst("store2"))
+        root.add(first)
+        root.add(middle)
+        root.add(second)
+        root.add(_FakeLogicalInst("post"))
+
+        mock = _MockLogicalModule()
+        root._populate_logical_module(mock, None, _detect_epilogue_range(root.itemList))
+        items = mock.items
+        begin = items.index(("begin_group", "globalWriteEpilogue"))
+        end = items.index(("end_group", "globalWriteEpilogue"))
+        self.assertEqual(items[begin + 1], ("textblock", ""))
+        self.assertEqual(items[end - 1], ("textblock", ""))
+        self.assertLess(items.index(("inst", "pre")), begin)
+        self.assertLess(begin, items.index(("inst", "store")))
+        self.assertLess(items.index(("inst", "mid")), end)
+        self.assertLess(items.index(("inst", "store2")), end)
+        self.assertLess(end, items.index(("inst", "post")))
 
     def test_in_order_traversal_with_nested_modules(self):
         outer = Module()
