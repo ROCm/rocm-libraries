@@ -49,9 +49,9 @@ outside the source tree. On Windows, use Git Bash rather than the WSL launcher.
 The selected WMMA atom and all Q/K/V/output pointer types follow that dtype.
 FP16 kernel-cache names remain unchanged; BF16 has distinct names, preventing
 cross-dtype cache collisions. Both causal and noncausal paths and the optional
-V-LDS staging path support the dtype selection. Query and KV lengths still
-require complete 16-token tiles; this dtype change does not add paging, ragged
-inputs, or score features.
+V-LDS staging path support the dtype selection. Aligned query/KV tiles remain
+the default specialization; the independent tail flags below handle partial
+tiles. Packed and paged layouts are not implied by dense-tail support.
 
 The C `rocke_wmma_fmha_fwd_spec_t` now includes `dtype`, initialized to `"fp16"`
 by `rocke_wmma_fmha_fwd_spec_default()`. Native callers must rebuild against
@@ -64,7 +64,7 @@ With `mask_mode="causal"` and `causal_bottom_right=True`, the mask admits
 `key_index <= query_index + seqlen_k - seqlen_q`. This supports chunked dense
 prefill and also `seqlen_q > seqlen_k`, where the fully masked query prefix is
 written as zero. Both input dtypes and both V-staging choices use the same rule.
-Query/KV tile-alignment requirements are unchanged.
+Alignment uses the logical sequence lengths, including when tail flags are set.
 
 The bottom-right variant has a distinct kernel-cache key. It uses true negative
 infinity for masked scores and the initial row maximum. An empty row uses a
@@ -74,6 +74,22 @@ negative logits must not underflow solely because of a finite initial maximum.
 `test_wmma_fmha_fwd_numeric.py` covers constant-value preservation under those
 logits and exact-zero masked prefixes. Legacy FP16 default emission remains
 unchanged; the BF16 normalization change is intentional.
+
+### Sequence tails and dense decode
+
+Set `query_tail=True` when the query length is not divisible by 16, and
+`kv_tail=True` when the KV length is not divisible by 16. Query tiling then
+rounds up; invalid Q lanes load zero and do not store output. The KV-tail
+variant includes the final partial tile, substitutes zero for invalid K/V
+loads, and excludes those keys from softmax. The two flags are independent,
+so a one-token query with an aligned cache does not pay for KV-tail masking.
+
+No input/output padding is required. The shared WMMA helper clamps a row before
+using its address callback, and both direct V gathers and V-LDS staging
+zero-fill invalid values. Numeric tests use NaN-poisoned input padding and
+output canaries to detect leaked padding values or out-of-range stores.
+The benchmark adapter selects these flags from each case's true lengths.
+Aligned configurations retain their previous code and cache names.
 
 The sections below are a historical campaign, not results for this comparator.
 

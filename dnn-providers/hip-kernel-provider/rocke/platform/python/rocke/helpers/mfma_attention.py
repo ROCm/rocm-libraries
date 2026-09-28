@@ -287,6 +287,8 @@ def mfma_attention_fwd_inner_body(
     wmma_v_lds_stage: bool = False,
     arch: str = "gfx950",
     mask_neg_inf: Optional[Value] = None,
+    wmma_seqlen_q: Optional[Value] = None,
+    wmma_kv_tail: bool = False,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -304,6 +306,10 @@ def mfma_attention_fwd_inner_body(
     ``mask_neg_inf`` supplies true negative infinity for masked scores and the
     initial row maximum. Empty rows use a zero exponential shift, avoiding
     inf-inf without excluding large finite negative logits.
+
+    ``wmma_seqlen_q`` bounds query loads and output stores on wave32.
+    ``wmma_kv_tail`` includes and masks a final partial KV tile. Both default
+    to the aligned path; enabling either on a non-wave32 target is rejected.
 
     ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
     the K / V row base addresses (for varlen / paged-KV layouts).
@@ -498,8 +504,12 @@ def mfma_attention_fwd_inner_body(
             arch=arch,
             target=target,
             mask_neg_inf=mask_neg_inf,
+            query_length=wmma_seqlen_q,
+            kv_tail=wmma_kv_tail,
         )
         return
+    if wmma_seqlen_q is not None or wmma_kv_tail:
+        raise ValueError("WMMA tail options require a wave32 target")
 
     # --- CDNA wave64 (MFMA) path ----------------------------------------------
     # Arch guard: the QK/PV MFMA atom selected above must be in the target's MMA
@@ -972,6 +982,8 @@ def _wmma_attention_fwd_inner_body(
     arch: str,
     target,
     mask_neg_inf: Optional[Value] = None,
+    query_length: Optional[Value] = None,
+    kv_tail: bool = False,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1024,6 +1036,8 @@ def _wmma_attention_fwd_inner_body(
     # Accumulator column == this lane's k-position in the QK score tile.
     col = b.mod(lane, c16)
 
+    if kv_tail and mask_neg_inf is None:
+        mask_neg_inf = b.const_f32(float("-inf"))
     neg_inf = mask_neg_inf if mask_neg_inf is not None else b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
 
@@ -1038,12 +1052,26 @@ def _wmma_attention_fwd_inner_body(
         b.mul(q_row, stride_q_token),
         b.mul(head_idx, stride_q_head),
     )
+    q_valid = None
+    q_zero = None
+    q_local_base = q_pos_base if q_pos_base is not None else q_tile_base
+    if query_length is not None:
+        q_valid = b.cmp_lt(b.add(q_local_base, a_row), query_length)
+        q_addr_row_base = b.select(q_valid, q_addr_row_base, b.const_i32(0))
+        q_zero = b.zero_vec(dtype_ir, a_frag)
     q_frags = []
     for d in range(n_dk):
         q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
         if k_half_off is not None:
             q_addr = b.add(q_addr, k_half_off)
-        q_frags.append(b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2))
+        q_frag = b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2)
+        if q_valid is not None:
+            q_frag = b.select(q_valid, q_frag, q_zero)
+        q_frags.append(q_frag)
+
+    k_zero = b.zero_vec(dtype_ir, a_frag) if kv_tail else None
+    v_zero = b.zero_vec(dtype_ir, 8) if kv_tail and v_lds_stage else None
+    v_zero_scalar = b.cast_f32_to(zero_f, dtype_ir) if kv_tail and not v_lds_stage else None
 
     # ---- LDS staging tiles ----
     # P_lds transposes the score acc layout -> the PV A-operand layout.
@@ -1067,7 +1095,12 @@ def _wmma_attention_fwd_inner_body(
 
     c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
     loop_start = k_tile_start if k_tile_start is not None else b.const_i32(0)
-    loop_stop = k_tile_stop if k_tile_stop is not None else b.div(seqlen_k, c_block_k)
+    if k_tile_stop is not None:
+        loop_stop = k_tile_stop
+    elif kv_tail:
+        loop_stop = b.div(b.add(seqlen_k, b.const_i32(MFMA_ATTN_BLOCK_K - 1)), c_block_k)
+    else:
+        loop_stop = b.div(seqlen_k, c_block_k)
 
     kloop = b.scf_for_iter(
         loop_start, loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
@@ -1084,6 +1117,11 @@ def _wmma_attention_fwd_inner_body(
 
         k_tile_base = b.mul(effective_kt, c_block_k)
         k_row_for_lane = b.add(k_tile_base, a_row)  # k position for THIS lane
+        k_valid = None
+        k_load_row = k_row_for_lane
+        if kv_tail:
+            k_valid = b.cmp_lt(k_row_for_lane, seqlen_k)
+            k_load_row = b.select(k_valid, k_row_for_lane, b.const_i32(0))
 
         # Per-K-tile keep / skip predicates (block-sparse). Same semantics as
         # the MFMA body: when false, the score collapses to -inf so the
@@ -1099,11 +1137,11 @@ def _wmma_attention_fwd_inner_body(
             )
 
         if k_row_base_fn is not None:
-            k_addr_row_base = k_row_base_fn(b, k_row_for_lane)
+            k_addr_row_base = k_row_base_fn(b, k_load_row)
         else:
             k_addr_row_base = b.add(
                 b.add(
-                    b.mul(k_row_for_lane, stride_k_token),
+                    b.mul(k_load_row, stride_k_token),
                     b.mul(kv_head_idx, stride_k_head),
                 ),
                 k_off,
@@ -1116,6 +1154,8 @@ def _wmma_attention_fwd_inner_body(
             if k_half_off is not None:
                 k_addr = b.add(k_addr, k_half_off)
             k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
+            if k_valid is not None:
+                k_frag = b.select(k_valid, k_frag, k_zero)
             score = b.mma(op, q_frags[d], k_frag, score)
 
         # ---- Scale + mask + per-row online softmax ----
@@ -1139,6 +1179,8 @@ def _wmma_attention_fwd_inner_body(
                 context_len=causal_ctx_offset,
                 neg_inf=mask_neg_inf,
             )
+            if kv_tail:
+                s_r = b.select(b.cmp_lt(k_col_pos, seqlen_k), s_r, neg_inf)
             if keep_tile is not None:
                 s_r = b.select(
                     keep_tile, s_r,
@@ -1174,7 +1216,7 @@ def _wmma_attention_fwd_inner_body(
         # Both wave32 halves map to the same 16 rows (a_row == lane % 16), so
         # the store is redundant across halves but writes identical data.
         if v_lds_stage:
-            v_stage_row = b.add(k_tile_base, a_row)
+            v_stage_row = k_load_row if kv_tail else b.add(k_tile_base, a_row)
             if v_row_base_fn is not None:
                 v_stage_base = v_row_base_fn(b, v_stage_row)
             else:
@@ -1189,6 +1231,8 @@ def _wmma_attention_fwd_inner_body(
                 v_g = b.global_load_vN(
                     V, b.add(v_stage_base, b.const_i32(e * 8)), dtype_ir, 8, align=16
                 )
+                if k_valid is not None:
+                    v_g = b.select(k_valid, v_g, v_zero)
                 b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
 
         # ---- P staging through LDS: acc layout -> A-operand layout ----
@@ -1237,6 +1281,10 @@ def _wmma_attention_fwd_inner_body(
                 else:
                     # Baseline: per-(d,k) scalar global gather of V[k, d_col].
                     v_row = b.add(k_tile_base, b_k)
+                    v_valid = None
+                    if kv_tail:
+                        v_valid = b.cmp_lt(v_row, seqlen_k)
+                        v_row = b.select(v_valid, v_row, b.const_i32(0))
                     if v_row_base_fn is not None:
                         v_row_base = v_row_base_fn(b, v_row)
                     else:
@@ -1250,6 +1298,8 @@ def _wmma_attention_fwd_inner_body(
                     v_elem = b.global_load(
                         V, b.add(v_row_base, d_col), dtype_ir, align=2
                     )
+                    if v_valid is not None:
+                        v_elem = b.select(v_valid, v_elem, v_zero_scalar)
                 v_b = b.vec_insert(v_b, v_elem, j)
             new_accs[d] = b.mma(op, p_a, v_b, new_accs[d])
 
@@ -1283,4 +1333,9 @@ def _wmma_attention_fwd_inner_body(
                 ),
                 o_col,
             )
-            b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
+            if query_length is None:
+                b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
+            else:
+                keep_q = b.cmp_lt(b.add(q_local_base, row_rel), query_length)
+                with b.scf_if(keep_q):
+                    b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)

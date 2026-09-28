@@ -28,8 +28,6 @@ class RockeKernels:
             raise UnsupportedCase("gfx1151 has no paged/packed attention adapter")
         if case.dtype not in ("fp16", "bf16") or case.kv_dtype:
             raise UnsupportedCase("WMMA adapter requires matching fp16/bf16 Q/K/V storage")
-        if case.seqlen_q % 16 or case.seqlen_k % 16:
-            raise UnsupportedCase("existing WMMA adapter requires complete 16-token tiles")
         if case.window or case.softcap or case.sinks or case.alibi or case.qq_bias:
             raise UnsupportedCase("existing WMMA adapter lacks this score/mask feature")
         spec = WmmaFmhaFwdSpec(
@@ -38,6 +36,8 @@ class RockeKernels:
             mask_mode="none" if case.mask == "none" else "causal",
             dtype=case.dtype,
             causal_bottom_right=case.mask == "causal_bottomright",
+            query_tail=case.seqlen_q % 16 != 0,
+            kv_tail=case.seqlen_k % 16 != 0,
         )
         key = spec.kernel_name()
         if key not in self.cache:

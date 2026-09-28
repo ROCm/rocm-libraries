@@ -4,7 +4,7 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 18 sampled dtype/alignment configs by argv[1] (0..17), builds it
+# Selects one of 26 dtype/alignment/tail configs by argv[1] (0..25), builds it
 # via build_wmma_fmha_fwd(arch='gfx1151') and prints
 # lower_kernel_to_llvm(kernel, arch='gfx1151') to stdout so it can be
 # byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c.
@@ -15,6 +15,13 @@ from _emit_common import run_emit
 
 
 def _spec(idx: int) -> WmmaFmhaFwdSpec:
+    if 18 <= idx < 26:
+        bases = (12, 13, 3, 9, 12, 13, 16, 17)
+        return replace(
+            _spec(bases[idx - 18]),
+            query_tail=idx < 20 or idx >= 22,
+            kv_tail=idx >= 20,
+        )
     if 12 <= idx < 18:
         return replace(
             _spec((2, 8, 3, 9, 5, 11)[idx - 12]),
@@ -77,7 +84,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..17>\n",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..25>\n",
         arch="gfx1151",
     )
 

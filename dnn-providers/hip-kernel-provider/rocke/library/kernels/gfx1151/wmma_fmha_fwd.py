@@ -106,6 +106,8 @@ class WmmaFmhaFwdSpec:
     v_lds_stage: bool = False
     name: str = "rocke_wmma_fmha_fwd"
     causal_bottom_right: bool = False
+    query_tail: bool = False
+    kv_tail: bool = False
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16", "bf16"):
@@ -151,6 +153,7 @@ class WmmaFmhaFwdSpec:
             "bf16" if self.dtype == "bf16" else "fp16",
             "causal_br" if self.causal_bottom_right else self.mask_mode,
             "vlds" if self.v_lds_stage else "vgather",
+            flags={"qtail": self.query_tail, "kvtail": self.kv_tail},
         )
 
 
@@ -323,19 +326,21 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         ),
         mask_neg_inf=(
             b.const_f32(float("-inf"))
-            if spec.causal_bottom_right or spec.dtype == "bf16" else None
+            if spec.causal_bottom_right or spec.dtype == "bf16" or spec.kv_tail else None
         ),
         k_token_offset_elems=batch_off_k,
         v_token_offset_elems=batch_off_v,
         wmma_v_lds_stage=spec.v_lds_stage,
         arch=arch,
+        wmma_seqlen_q=seqlen_q if spec.query_tail else None,
+        wmma_kv_tail=spec.kv_tail,
     )
     b.ret()
     return b.kernel
 
 
 def wmma_fmha_fwd_grid(spec: WmmaFmhaFwdSpec, *, seqlen_q: int, batch: int):
-    """Launch grid ``(seqlen_q // 16, num_query_heads, batch)``."""
-    if seqlen_q % _BLOCK_M != 0:
+    """Cover all query tiles; partial tiles require the query-tail specialization."""
+    if not spec.query_tail and seqlen_q % _BLOCK_M != 0:
         raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {_BLOCK_M}")
-    return (seqlen_q // _BLOCK_M, spec.num_query_heads, batch)
+    return ((seqlen_q + _BLOCK_M - 1) // _BLOCK_M, spec.num_query_heads, batch)

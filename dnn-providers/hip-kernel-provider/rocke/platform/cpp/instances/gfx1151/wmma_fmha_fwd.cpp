@@ -86,6 +86,8 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.name = WMMA_FMHA_DEFAULT_NAME;
     s.dtype = "fp16";
     s.causal_bottom_right = false;
+    s.query_tail = false;
+    s.kv_tail = false;
     return s;
 }
 
@@ -128,7 +130,9 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     parts[5] = spec->causal_bottom_right ? "causal_br" : mask;
     parts[6] = spec->v_lds_stage ? "vlds" : "vgather";
 
-    return rocke_kernel_name_join(name, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
+    const char* flag_names[] = {"qtail", "kvtail"};
+    const int flag_on[] = {spec->query_tail, spec->kv_tail};
+    return rocke_kernel_name_join(name, parts, 7, flag_names, flag_on, 2, out, out_cap, NULL);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -420,13 +424,15 @@ static rocke_status_t
     p.causal_ctx_offset = spec->causal_bottom_right
                               ? rocke_b_sub(b, seqlen_k, seqlen_q)
                               : rocke_b_const_i32(b, 0);
-    p.mask_neg_inf = (spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0)
+    p.mask_neg_inf = (spec->causal_bottom_right || strcmp(p.dtype, "bf16") == 0 || spec->kv_tail)
                         ? rocke_b_const_f32(b, -INFINITY)
                         : NULL;
     p.k_token_offset_elems = batch_off_k;
     p.v_token_offset_elems = batch_off_v;
     p.wmma_v_lds_stage = spec->v_lds_stage;
     p.arch = arch;
+    p.wmma_seqlen_q = spec->query_tail ? seqlen_q : NULL;
+    p.wmma_kv_tail = spec->kv_tail;
 
     (void)rocke_mfma_attention_fwd_inner_body(b, &p);
 
@@ -487,11 +493,11 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
         return ROCKE_ERR_VALUE;
     }
     /* if seqlen_q % BLOCK_M != 0: raise ValueError(...) */
-    if(seqlen_q % ROCKE_WMMA_FMHA_FWD_BLOCK_M != 0)
+    if(!spec->query_tail && seqlen_q % ROCKE_WMMA_FMHA_FWD_BLOCK_M != 0)
     {
         return ROCKE_ERR_VALUE;
     }
-    out[0] = seqlen_q / ROCKE_WMMA_FMHA_FWD_BLOCK_M;
+    out[0] = (seqlen_q + ROCKE_WMMA_FMHA_FWD_BLOCK_M - 1) / ROCKE_WMMA_FMHA_FWD_BLOCK_M;
     out[1] = spec->num_query_heads;
     out[2] = batch;
     return ROCKE_OK;

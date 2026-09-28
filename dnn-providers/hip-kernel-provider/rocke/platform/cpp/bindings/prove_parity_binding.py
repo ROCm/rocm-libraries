@@ -652,9 +652,19 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         for dtype in ("fp16", "bf16")
         for (h, q, k, m, v) in rows
     ]
-    return configs + [
+    configs += [
         dict(configs[index], mask_mode="causal", causal_bottom_right=True)
         for index in (2, 8, 3, 9, 5, 11)
+    ]
+    tails = (
+        (12, True, False), (13, True, False),
+        (3, False, True), (9, False, True),
+        (12, True, True), (13, True, True),
+        (16, True, True), (17, True, True),
+    )
+    return configs + [
+        dict(configs[index], query_tail=query_tail, kv_tail=kv_tail)
+        for index, query_tail, kv_tail in tails
     ]
 
 

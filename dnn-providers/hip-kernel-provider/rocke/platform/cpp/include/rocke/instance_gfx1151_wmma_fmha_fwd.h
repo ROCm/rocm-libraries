@@ -63,6 +63,7 @@ extern "C" {
  *   v_lds_stage      : optional V staging through LDS; default false.
  *   name             : NULL => "rocke_wmma_fmha_fwd".
  *   causal_bottom_right : shift the causal diagonal by Sk-Sq; requires CAUSAL.
+ *   query_tail/kv_tail : independent partial-tile specializations; default false.
  *
  * dtype is referenced as-is; keep it alive while using the spec. */
 typedef struct rocke_wmma_fmha_fwd_spec
@@ -76,6 +77,8 @@ typedef struct rocke_wmma_fmha_fwd_spec
     const char* name; /* NULL => "rocke_wmma_fmha_fwd"        */
     const char* dtype; /* "fp16" default; "f16" alias or "bf16" */
     bool causal_bottom_right; /* default false; causal diagonal is seqlen_k - seqlen_q */
+    bool query_tail; /* default false */
+    bool kv_tail; /* default false */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -116,10 +119,9 @@ rocke_kernel_def_t* rocke_build_wmma_fmha_fwd(rocke_ir_builder_t* b,
                                               const char* arch);
 
 /* wmma_fmha_fwd_grid(spec, seqlen_q, batch) ->
- * (seqlen_q / BLOCK_M, num_query_heads, batch). Writes the three axes to
- * out[0..2]; `out` must hold 3 ints. seqlen_q must be a multiple of BLOCK_M
- * (Python raises otherwise); on a non-multiple this leaves out untouched and
- * returns ROCKE_ERR_VALUE, else ROCKE_OK. */
+ * (ceil(seqlen_q / BLOCK_M), num_query_heads, batch). Writes three axes to out.
+ * Without query_tail, a non-multiple of BLOCK_M is rejected and out is left
+ * unchanged. Native callers must select tail flags for the true runtime lengths. */
 rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
                                         int seqlen_q,
                                         int batch,
