@@ -126,6 +126,12 @@ class AttentionRequest(OperatorRequest):
     attention_tuning_id: str = "auto"
     use_fp8: bool = False
     fp8_fnuz: bool = False
+    # Explicit layouts and score features require candidate capability support.
+    # "auto" retains each existing candidate's layout convention.
+    layout: str = "auto"  # "auto" | "dense" | "ragged" | "paged"
+    use_softcap: bool = False
+    use_alibi: bool = False
+    use_qq_bias: bool = False
     # --- standalone attention_dense knobs (only consumed by the opt-in
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the best qualified persistent prefill path for large Sq:
@@ -152,6 +158,7 @@ class AttentionRequest(OperatorRequest):
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
+        d["layout"] = self.layout.strip().lower() if isinstance(self.layout, str) else ""
         return d
 
     def dims(self) -> dict[str, int]:
@@ -186,6 +193,15 @@ class AttentionRequest(OperatorRequest):
             active.add("sinks")
         if bool(self.use_fp8):
             active.add("fp8")
+        if bool(self.use_softcap):
+            active.add("softcap")
+        if bool(self.use_alibi):
+            active.add("alibi")
+        if bool(self.use_qq_bias):
+            active.add("qq_bias")
+        layout = self.layout.strip().lower() if isinstance(self.layout, str) else ""
+        if layout not in ("auto", ""):
+            active.add(f"layout_{layout}")
         return frozenset(active)
 
 
@@ -213,6 +229,7 @@ ATTENTION_DIM_VOCABULARY = (
     "kv_block_size",
 )
 
+# Feature set of the existing unified backend, not the union of standalone capabilities.
 ATTENTION_FEATURES = frozenset(
     {"causal", "causal_bottom_right", "sliding_window", "sinks", "fp8"}
 )
@@ -231,6 +248,9 @@ def _request_errors(req: OperatorRequest) -> list[str]:
         errors.append("only hdim_q == hdim_v is supported")
     if int(req.nhead_q) % int(req.nhead_k):
         errors.append("nhead_q must be divisible by nhead_k (GQA grouping)")
+    layout = req.layout.strip().lower() if isinstance(req.layout, str) else ""
+    if layout not in ("auto", "dense", "ragged", "paged"):
+        errors.append(f"unsupported attention layout {req.layout!r}")
     try:
         _parse_attention_mask_type(req.mask_type)
     except ValueError as exc:

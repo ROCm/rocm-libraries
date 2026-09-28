@@ -247,6 +247,7 @@ def _case_result(case, rt, kernels, aot, graph_count, repeats):
         buffers = DeviceBuffers(rt, inputs)
         stack.callback(buffers.close)
         graphs = HipGraphs(rt)
+        stack.callback(kernels.release, graphs.stream)
         stack.callback(graphs.close)
         launches = {}
         for arm in ("rocke", "aotriton"):
@@ -344,7 +345,7 @@ def main(argv=None):
         "ml_dtypes": ml_dtypes.__version__, "llvm_flavor": os.environ.get("ROCKE_LLVM_FLAVOR"),
         "aotriton": "0.14.2b", "measurement": "HIP graph replay, alternating arms, median batches",
         "graph_count": args.graph_count, "repeats": args.repeats,
-        "scope": "inference; direct existing WMMA builder until gfx1151 dispatch is implemented",
+        "scope": "inference; public rocKE attention dispatch and tensor binding",
     }, sort_keys=True), flush=True)
     rt = Runtime()
     kernels = RockeKernels(rt)

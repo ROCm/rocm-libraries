@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import math
 from typing import Tuple
 
-from ..core.ir import BF8E5M2, FP8E4M3, IRBuilder, Type, Value
+from ..core.ir import BF8E5M2, FP8E4M3, F32, I32, IRBuilder, Type, Value
 
 
 def next_power_of_2(x: int) -> int:
@@ -732,6 +732,22 @@ def binary_search_seq_idx(
         nr = b.select(le, right, mid)
         b.scf_yield(b.select(done, left, nl), b.select(done, right, nr))
     return b.sub(loop.results[0], b.const_i32(1))
+
+
+def decode_fp8e4m3fn_to_f32(b: IRBuilder, byte: Value) -> Value:
+    """Decode an OCP E4M3FN byte without native FP8 conversion instructions.
+
+    Exponent-15 encodings stay finite except the two NaNs. Subnormals use
+    mantissa * 2**-9; sign insertion preserves both zero encodings.
+    """
+    bits = b.zext(byte, I32)
+    magnitude = b.land(bits, b.const_i32(0x7F))
+    sign = b.shl(b.land(bits, b.const_i32(0x80)), b.const_i32(24))
+    normal = b.add(b.shl(magnitude, b.const_i32(20)), b.const_i32(120 << 23))
+    subnormal = b.fmul(b.sitofp_f32(magnitude), b.const_f32(2.0 ** -9))
+    result = b.select(b.cmp_lt(magnitude, b.const_i32(8)), b.bitcast(subnormal, I32), normal)
+    result = b.select(b.cmp_eq(magnitude, b.const_i32(0x7F)), b.const_i32(0x7FC00000), result)
+    return b.bitcast(b.lor(result, sign), F32)
 
 
 def dequant_fp8x8_to_dtype(

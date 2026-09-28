@@ -110,8 +110,14 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
         variants = [base, replace(base, layout="ragged")]
         variants += [replace(base, layout="paged", page_block_size=page) for page in (16, 32, 64)]
+        variants += [replace(spec, kv_dtype="fp8e4m3") for spec in variants]
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
+
+    def test_unsupported_kv_storage_rejected(self):
+        for storage in ("bf8e5m2", "fp8e4m3fnuz", "fp32"):
+            with self.subTest(storage=storage), self.assertRaises(ValueError):
+                WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, kv_dtype=storage)
 
 
 if __name__ == "__main__":

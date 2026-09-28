@@ -248,6 +248,7 @@ typedef struct rocke_mfma_attn_params
     rocke_value_t* wmma_seqlen_q; /* NULL => complete query tiles */
     bool wmma_kv_tail; /* include and mask the final partial KV tile */
     rocke_value_t* sink_log2; /* optional always-visible softmax logit; no value contribution */
+    rocke_value_t* k_scale; /* WMMA FP8: explicit K dequant scale; v_scale applies before the V cast */
 } rocke_mfma_attn_params_t;
 
 /* ---------------------------------------------- mfma_attention_fwd_inner_body *

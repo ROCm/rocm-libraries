@@ -249,8 +249,9 @@ def test_qq_bias_bounds_compose_with_window():
 @pytest.mark.parametrize("layout", ["ragged", "paged"])
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 @pytest.mark.parametrize("v_staging", [False, True])
-def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_staging):
-    if dtype == "bf16":
+@pytest.mark.parametrize("kv_dtype", ["", "fp8e4m3"])
+def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_staging, kv_dtype):
+    if dtype == "bf16" or kv_dtype:
         pytest.importorskip("ml_dtypes")
     from benchmarks.gfx1151.attention.benchmark_sdpa import DeviceBuffers
     from benchmarks.gfx1151.attention.cases import SdpaCase, make_inputs, reference
@@ -265,8 +266,12 @@ def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_st
         "packed_boundaries", "boundary", dtype, 5, 0, 0, 4, 2, 64,
         layout=layout, mask="causal_bottomright", block_size=16 if layout == "paged" else 0,
         q_lengths=(0, 17, 1, 3, 0), k_lengths=(9, 19, 1, 0, 0), seed=27,
+        kv_dtype=kv_dtype,
     )
     inputs = make_inputs(case)
+    if kv_dtype:
+        inputs.k_scale = np.asarray(0.3, np.float32)
+        inputs.v_scale = np.asarray(0.7, np.float32)
     expected = reference(case, inputs)
     if layout == "paged":
         used = np.zeros(inputs.k.shape[:2], dtype=bool)
@@ -295,6 +300,7 @@ def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_st
             head_size=64, num_query_heads=4, num_kv_heads=2, dtype=dtype,
             layout=layout, page_block_size=case.block_size, v_lds_stage=v_staging,
             mask_mode="causal", causal_bottom_right=True,
+            kv_dtype=kv_dtype,
         )
         kernel = build_wmma_fmha_fwd(spec)
         artifact = compile_kernel(kernel, arch="gfx1151", backend="python")
@@ -306,6 +312,8 @@ def test_packed_boundaries_preserve_guards_and_ignore_poison(layout, dtype, v_st
             "seqlen_q": max(case.q_lengths), "seqlen_k": max(case.k_lengths),
             "cu_seqlens_q": buffers.ptrs["cu_seqlens_q"],
         }
+        if kv_dtype:
+            values.update(k_scale=float(inputs.k_scale), v_scale=float(inputs.v_scale))
         for name, array in (("q", inputs.q), ("k", inputs.k), ("v", inputs.v), ("o", inputs.q)):
             values[f"stride_{name}_token"] = array.strides[-3] // array.itemsize
             values[f"stride_{name}_head"] = array.strides[-2] // array.itemsize

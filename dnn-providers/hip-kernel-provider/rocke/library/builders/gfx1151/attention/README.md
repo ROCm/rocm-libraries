@@ -14,9 +14,9 @@ absorbed-attention or backward benchmark.
   The oracle reads the already-rounded input storage, computes in FP64, and
   returns FP32. The numerical gates are max-absolute error `2e-2` for FP16 and
   `4e-2` for BF16; nonfinite or unwritten outputs fail.
-- `candidate.py` selects the real rocKE implementation. The starting adapter
-  uses `WmmaFmhaFwdSpec` directly; unsupported rows remain required, and direct
-  kernel coverage does not imply unified-dispatch support.
+- `candidate.py` uses public `dispatch_attention` and its tensor binding.
+  Real HIP tensor owners exercise the library path without requiring torch;
+  unsupported rows remain required.
 - `aotriton.py` / `aotriton_bridge.cpp` call the native
   [AOTriton 0.14.2b](https://github.com/ROCm/aotriton/releases/tag/0.14.2b) API
   with its published gfx115x images, not a PyTorch math fallback. Its only
@@ -110,9 +110,9 @@ without being multiplied into the output.
 Enabled features append arguments to the base ABI, in order: a positive FP32
 `softcap`; an input-dtype `sink_ptr`; FP32 `alibi_slopes_ptr`; FP32 `qq_bias_ptr`
 and its I32 row count, column count, and element row stride. Disabled features
-add no arguments. Use the actual `KernelDef.params` or native signature API,
-and the standard kernarg packer, rather than packing mixed pointers/scalars
-without alignment. Native signatures own their names/types in the caller arena.
+add no arguments. Use `wmma_fmha_fwd_signature`, the actual `KernelDef.params`,
+or the native signature API with the standard kernarg packer. Native signatures
+own their names/types in the caller arena.
 
 ### Packed variable lengths and paged KV
 
@@ -142,6 +142,44 @@ The native spec and pybind conversion mirror these fields. Existing dense
 configurations retain their ABI and emitted code. Numeric regressions cover
 empty query/KV sequences, mixed lengths, shuffled pages, poisoned padding,
 output guards, both dtypes, and both V-staging choices.
+
+### FP8 KV storage
+
+Set `kv_dtype="fp8e4m3"` for OCP E4M3FN byte storage with FP16/BF16 Q and O.
+The WMMA path decodes bytes with integer/IEEE operations, multiplies by ordinary
+FP32 `k_scale` and `v_scale`, then casts each operand to the Q dtype before
+the existing 16-bit WMMA. It does not require native FP8 conversion or FP8 WMMA
+instructions. Both scales are runtime scalars appended after layout metadata;
+FNUZ and E5M2 storage are not accepted.
+
+The decoder preserves all finite OCP values, signed zeros, subnormals, and the
+two NaN encodings. Numeric regressions enumerate all 256 bytes and check
+non-power-of-two scale rounding. FP8 storage composes with packed/paged layouts,
+tail bounds, both V-staging choices, and the score features above.
+
+### Public library selection and launch
+
+`dispatch.attention.AttentionRequest(arch="gfx1151", ...)` auto-selects
+`attention_gfx1151_wmma` for supported requests. Set `layout` explicitly to
+`dense`, `ragged`, or `paged`; `auto` resolves to dense on this candidate and
+preserves legacy conventions on other architectures. `use_fp8`,
+`use_softcap`, `use_sinks`, `use_alibi`, and `use_qq_bias` describe required
+features before selection, not features inferred silently at bind time.
+
+`dispatch_attention(request).bind_torch(tensors, **scalars)` accepts caller-owned
+`q`, `k`, `v`, `out` and the selected metadata/auxiliary tensors. Despite the
+historical method name, any real device-tensor owner implementing shape, dtype,
+element strides, device, and `data_ptr()` can bind. The adapter validates rank,
+shape agreement, vector alignment, metadata contiguity, and the dense
+batch-folded stride contract without reading GPU sequence contents.
+
+The compiled launcher is cached by target and complete spec. Repeated
+`binding.launch(stream=...)` calls reuse it. The default fence synchronizes only
+that stream; `fence=False` permits asynchronous and graph-captured launches.
+After external stream synchronization, call
+`rocke.runtime.launcher.release_retained_for_stream(stream)` to release retained
+tensor owners. Captured launch owners must remain alive until their graphs
+are destroyed. The benchmark drains them at that boundary, outside timing.
 
 The sections below are a historical campaign, not results for this comparator.
 

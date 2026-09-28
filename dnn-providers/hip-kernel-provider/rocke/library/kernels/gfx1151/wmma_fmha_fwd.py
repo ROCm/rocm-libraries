@@ -60,12 +60,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from rocke.core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import BF16, F16, FP8E4M3, F32, I32, IRBuilder, KernelDef, PtrType
 
 __all__ = [
     "WmmaFmhaFwdSpec",
     "build_wmma_fmha_fwd",
     "wmma_fmha_fwd_grid",
+    "wmma_fmha_fwd_signature",
     "is_valid_spec",
 ]
 
@@ -114,12 +115,15 @@ class WmmaFmhaFwdSpec:
     use_qq_bias: bool = False
     layout: str = "dense"  # "dense" | "ragged" | "paged"
     page_block_size: int = 0
+    kv_dtype: str = ""  # "" -> Q dtype; "fp8e4m3" -> OCP E4M3FN bytes
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16", "bf16"):
             raise ValueError(
                 f"WmmaFmhaFwdSpec supports fp16/bf16, got {self.dtype!r}"
             )
+        if self.kv_dtype not in ("", "fp8e4m3"):
+            raise ValueError("KV storage must match Q or use OCP fp8e4m3")
         if self.head_size % 16 != 0:
             raise ValueError(
                 f"head_size must be a multiple of 16, got {self.head_size}"
@@ -171,6 +175,7 @@ class WmmaFmhaFwdSpec:
             f"sw{self.sliding_window}" if self.sliding_window else "",
             self.layout if self.layout != "dense" else "",
             f"bs{self.page_block_size}" if self.layout == "paged" else "",
+            f"kv{self.kv_dtype}" if self.kv_dtype else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
@@ -223,9 +228,10 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
     K/V page strides are explicit and head elements are contiguous.
     """
     elem = BF16 if spec.dtype == "bf16" else F16
+    kv_elem = FP8E4M3 if spec.kv_dtype else elem
     Q = b.param("Q", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
-    K = b.param("K", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
-    V = b.param("V", PtrType(elem, "global"), noalias=True, readonly=True, align=16)
+    K = b.param("K", PtrType(kv_elem, "global"), noalias=True, readonly=True, align=16)
+    V = b.param("V", PtrType(kv_elem, "global"), noalias=True, readonly=True, align=16)
     out_ptr = b.param(
         "O", PtrType(elem, "global"), noalias=True, writeonly=True, align=16
     )
@@ -291,6 +297,9 @@ def _declare_params(b: IRBuilder, spec: WmmaFmhaFwdSpec):
             params["block_table_stride"] = b.param("block_table_stride", I32)
             params["stride_k_block"] = b.param("stride_k_block", I32)
             params["stride_v_block"] = b.param("stride_v_block", I32)
+    if spec.kv_dtype:
+        params["k_scale"] = b.param("k_scale", F32)
+        params["v_scale"] = b.param("v_scale", F32)
     return params
 
 
@@ -505,6 +514,9 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         k_tile_stop=tile_stop,
         k_row_base_fn=k_row,
         v_row_base_fn=v_row,
+        kv_dtype=spec.kv_dtype or None,
+        k_scale=p.get("k_scale"),
+        v_scale=p.get("v_scale"),
     )
     b.ret()
     return b.kernel
@@ -515,3 +527,10 @@ def wmma_fmha_fwd_grid(spec: WmmaFmhaFwdSpec, *, seqlen_q: int, batch: int):
     if spec.layout == "dense" and not spec.query_tail and seqlen_q % _BLOCK_M != 0:
         raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {_BLOCK_M}")
     return ((seqlen_q + _BLOCK_M - 1) // _BLOCK_M, spec.num_query_heads, batch)
+
+
+def wmma_fmha_fwd_signature(spec: WmmaFmhaFwdSpec):
+    """Return the specialized ABI without emitting the attention body."""
+    b = IRBuilder(spec.kernel_name())
+    _declare_params(b, spec)
+    return tuple({"name": param.name, "type": param.type.name} for param in b.kernel.params)

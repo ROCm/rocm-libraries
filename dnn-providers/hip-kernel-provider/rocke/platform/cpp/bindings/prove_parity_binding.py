@@ -685,9 +685,13 @@ def cfgs_gfx1151_wmma_fmha_fwd():
         (0, 16), (7, 64), (12, 16), (15, 32), (16, 32), (17, 64),
         (26, 64), (33, 32), (38, 16), (39, 64),
     )
-    return configs + [
+    configs += [
         dict(configs[index], layout="paged" if page else "ragged", page_block_size=page)
         for index, page in layouts
+    ]
+    return configs + [
+        dict(configs[index], kv_dtype="fp8e4m3")
+        for index in (0, 7, 14, 15, 22, 23, 24, 25, 44, 47, 51, 57)
     ]
 
 

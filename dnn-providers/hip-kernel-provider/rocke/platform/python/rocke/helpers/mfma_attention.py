@@ -55,10 +55,11 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ..core.ir import F16, F32, BF16, IRBuilder, Value
+from ..core.ir import F16, F32, BF16, FP8E4M3, IRBuilder, Value
 from .atoms import MfmaAtom
 from .attention import (
     apply_attention_mask,
+    decode_fp8e4m3fn_to_f32,
     safe_inv_l,
     wave_reduce_stages,
 )
@@ -290,6 +291,7 @@ def mfma_attention_fwd_inner_body(
     wmma_seqlen_q: Optional[Value] = None,
     wmma_kv_tail: bool = False,
     sink_log2: Optional[Value] = None,
+    k_scale: Optional[Value] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -340,19 +342,15 @@ def mfma_attention_fwd_inner_body(
     is skipped (no MFMA, no V load, no PV). Used by block-sparse
     (jenga / VSA) attention to short-circuit non-attended K-blocks.
 
-    ``kv_dtype``: K / V storage dtype when it differs from Q's
-    ``dtype`` (e.g. K/V in fp8 while Q is f16). The helper does
-    inline ``cvt_fp8_to_f32 → cast_f32_to_f16 → f16 MFMA`` dequant
-    on the load path; the native fp8 MFMA atom (``mfma_f32_16x16x32_fp8``)
-    is a v2 hoist.
+    ``kv_dtype``: K/V storage dtype when it differs from Q's ``dtype``.
+    The CDNA path uses native conversion on load before MFMA. The WMMA path
+    supports OCP ``fp8e4m3`` storage through software byte decoding, then casts
+    each operand to the selected FP16/BF16 Q dtype.
 
-    ``v_scale`` (optional f32): per-tensor V dequant scale. When set,
-    the final accumulator is multiplied by ``v_scale`` at the
-    epilogue (mathematically equivalent to scaling each V dequant
-    output by ``v_scale``). Callers that need per-tensor ``k_scale``
-    just pre-multiply ``scale_log2`` by ``k_scale`` before invoking
-    the helper -- the QK MFMA result lands in the log2-space score,
-    and a constant K-scale is absorbed cleanly into ``scale_log2``.
+    ``k_scale`` / ``v_scale``: WMMA FP8 storage requires both FP32 scales and
+    applies them after decoding, before the operand casts. Other paths keep
+    the existing optional V-scale epilogue multiply; their callers fold K
+    scale into ``scale_log2`` instead of passing ``k_scale``.
     """
     if head_size % MFMA_ATTN_BLOCK_M != 0:
         raise ValueError(
@@ -459,14 +457,12 @@ def mfma_attention_fwd_inner_body(
     wave_size = target.wave_size
 
     if wave_size == 32:
-        # RDNA wave32 (WMMA). The fp8 / wider-atom / native-fp8 KV paths are
-        # CDNA-only (no RDNA atom); reject them explicitly rather than emitting
-        # an unbuildable kernel.
-        if fp8_kv or use_wider_atom or native_fp8_path:
-            raise ValueError(
-                "wave32 (WMMA) attention supports f16/bf16 KV only; "
-                "fp8 / wider-atom / native-fp8 paths are CDNA-only"
-            )
+        if use_wider_atom or native_fp8_path:
+            raise ValueError("wider-atom and native-FP8 attention paths are CDNA-only")
+        if fp8_kv and kv_dtype_eff != "fp8e4m3":
+            raise ValueError("WMMA FP8 KV storage requires OCP fp8e4m3")
+        if fp8_kv and (k_scale is None or v_scale is None):
+            raise ValueError("WMMA FP8 KV storage requires both FP32 dequant scales")
         _wmma_attention_fwd_inner_body(
             b,
             Q=Q,
@@ -510,10 +506,14 @@ def mfma_attention_fwd_inner_body(
             query_length=wmma_seqlen_q,
             kv_tail=wmma_kv_tail,
             sink_log2=sink_log2,
+            kv_dtype=kv_dtype_eff,
+            k_scale=k_scale,
         )
         return
     if wmma_seqlen_q is not None or wmma_kv_tail:
         raise ValueError("WMMA tail options require a wave32 target")
+    if k_scale is not None:
+        raise ValueError("explicit K dequant scale requires a wave32 target")
 
     # --- CDNA wave64 (MFMA) path ----------------------------------------------
     # Arch guard: the QK/PV MFMA atom selected above must be in the target's MMA
@@ -949,6 +949,17 @@ def _wmma_attn_op_id(arch: str, dtype: str) -> str:
 _WMMA_ATTN_OP_ID = "wmma_f32_16x16x16_f16"
 
 
+def _load_wmma_fp8(b, source, address, count, scale, dtype):
+    raw = b.global_load_vN(source, address, FP8E4M3, count, align=count)
+    values = [
+        b.cast_f32_to(
+            b.fmul(decode_fp8e4m3fn_to_f32(b, b.vec_extract(raw, i)), scale), dtype,
+        )
+        for i in range(count)
+    ]
+    return b.vec_pack(values, dtype)
+
+
 def _wmma_attention_fwd_inner_body(
     b: IRBuilder,
     *,
@@ -993,6 +1004,8 @@ def _wmma_attention_fwd_inner_body(
     query_length: Optional[Value] = None,
     kv_tail: bool = False,
     sink_log2: Optional[Value] = None,
+    kv_dtype: Optional[str] = None,
+    k_scale: Optional[Value] = None,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1008,6 +1021,7 @@ def _wmma_attention_fwd_inner_body(
         raise ValueError(f"WMMA attention atom {op_id} absent on {arch}")
     wave = op.wave_size  # 32
     dtype_ir = _ir_type_for_dtype(dtype)
+    fp8_kv = kv_dtype == "fp8e4m3"
 
     # Lane/slot coordinate maps come straight from the contract for THIS arch's
     # atom, so the gfx11 (cross-half-duplicated, a_frag=16) and gfx12 (split-K,
@@ -1164,7 +1178,10 @@ def _wmma_attention_fwd_inner_body(
             k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
             if k_half_off is not None:
                 k_addr = b.add(k_addr, k_half_off)
-            k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
+            if fp8_kv:
+                k_frag = _load_wmma_fp8(b, K, k_addr, a_frag, k_scale, dtype_ir)
+            else:
+                k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
             if k_valid is not None:
                 k_frag = b.select(k_valid, k_frag, k_zero)
             score = b.mma(op, q_frags[d], k_frag, score)
@@ -1245,9 +1262,14 @@ def _wmma_attention_fwd_inner_body(
                     v_off,
                 )
             for e in range(head_size // 8):
-                v_g = b.global_load_vN(
-                    V, b.add(v_stage_base, b.const_i32(e * 8)), dtype_ir, 8, align=16
-                )
+                if fp8_kv:
+                    v_g = _load_wmma_fp8(
+                        b, V, b.add(v_stage_base, b.const_i32(e * 8)), 8, v_scale, dtype_ir,
+                    )
+                else:
+                    v_g = b.global_load_vN(
+                        V, b.add(v_stage_base, b.const_i32(e * 8)), dtype_ir, 8, align=16
+                    )
                 if k_valid is not None:
                     v_g = b.select(k_valid, v_g, v_zero)
                 b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
@@ -1312,9 +1334,15 @@ def _wmma_attention_fwd_inner_body(
                             ),
                             v_off,
                         )
-                    v_elem = b.global_load(
-                        V, b.add(v_row_base, d_col), dtype_ir, align=2
-                    )
+                    if fp8_kv:
+                        raw = b.global_load(V, b.add(v_row_base, d_col), FP8E4M3, align=1)
+                        v_elem = b.cast_f32_to(
+                            b.fmul(decode_fp8e4m3fn_to_f32(b, raw), v_scale), dtype_ir,
+                        )
+                    else:
+                        v_elem = b.global_load(
+                            V, b.add(v_row_base, d_col), dtype_ir, align=2
+                        )
                     if v_valid is not None:
                         v_elem = b.select(v_valid, v_elem, v_zero_scalar)
                 v_b = b.vec_insert(v_b, v_elem, j)
@@ -1339,7 +1367,7 @@ def _wmma_attention_fwd_inner_body(
             zero_mask = b.fcmp("oeq", l_safe, zero_f)
             inv_l = b.select(zero_mask, zero_f, b.rcp(l_safe))
             v_f32 = b.fmul(b.vec_extract(accs_final[d], r), inv_l)
-            if v_scale is not None:
+            if v_scale is not None and not fp8_kv:
                 v_f32 = b.fmul(v_f32, v_scale)
             o_row = b.add(q_tile_base, row_rel)
             o_col = b.add(b.const_i32(d * 16), col_n)

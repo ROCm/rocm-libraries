@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
-from typing import Any, Mapping
+from typing import Any, Dict, Mapping, Tuple
 
 from rocke.dispatch.core import TorchBinding
 
@@ -461,3 +461,393 @@ def bind_wmma_attention_torch(
         return out
 
     return TorchBinding(launch=launch, grid=grid, block=block)
+
+# Cached modules stay alive across bindings; asynchronous launches retain the
+# supplied tensor owners through KernelLauncher until the caller's stream drain.
+
+_GFX1151_LAUNCHERS: Dict[Tuple[str, Any], Any] = {}
+
+_LOG2E = math.log2(math.e)
+
+
+def _gfx1151_launcher(spec, arch: str):
+    """Build-or-fetch the cached ``KernelLauncher`` for one resolved spec."""
+    key = (str(arch), spec)
+    launcher = _GFX1151_LAUNCHERS.get(key)
+    if launcher is not None:
+        return launcher
+    from kernels.gfx1151.wmma_fmha_fwd import (
+        build_wmma_fmha_fwd,
+        wmma_fmha_fwd_signature,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher
+
+    kernel = build_wmma_fmha_fwd(spec, arch=arch)
+    artifact = compile_kernel(kernel, arch=arch, capture_ir_text=False)
+    launcher = KernelLauncher(
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        signature=wmma_fmha_fwd_signature(spec),
+        cache_key=key,
+    )
+    _GFX1151_LAUNCHERS[key] = launcher
+    return launcher
+
+
+def _gfx1151_q_kind(spec) -> str:
+    return "bf16" if str(spec.dtype).lower() == "bf16" else "fp16"
+
+
+def _gfx1151_kv_kind(spec) -> str:
+    return "fp8" if spec.kv_dtype else _gfx1151_q_kind(spec)
+
+
+def _fits_i32(value: Any, name: str) -> int:
+    value = int(value)
+    if value < 0 or value > 0x7FFF_FFFF:
+        raise ValueError(f"{name}={value} does not fit an I32 kernel argument")
+    return value
+
+
+def _check_last_dim_contiguous(tensor, name: str) -> None:
+    shape = _shape(tensor, name)
+    stride = getattr(tensor, "stride", None)
+    if not callable(stride):
+        raise ValueError(f"{name} must expose strides")
+    if int(stride(len(shape) - 1)) != 1:
+        raise ValueError(f"{name} innermost dimension must be contiguous")
+
+
+def _check_gfx1151_device(tensors: Mapping[str, Any]) -> None:
+    present = {name: t for name, t in tensors.items() if t is not None}
+    if not present:
+        return
+    devices = {str(getattr(t, "device", None)) for t in present.values()}
+    if len(devices) != 1:
+        raise ValueError(
+            f"all gfx1151 attention tensors must share one device, got {devices}"
+        )
+    device = getattr(next(iter(present.values())), "device", None)
+    device_type = getattr(device, "type", str(device).split(":")[0])
+    if str(device_type).lower() != "cuda":
+        raise ValueError("gfx1151 attention tensors must be on a HIP/CUDA device")
+
+
+def _check_gfx1151_qo(tensor, name: str, kind: str, num_heads: int, head_size: int) -> None:
+    actual = _dtype_kind(tensor, name)
+    if actual != kind:
+        raise ValueError(f"{name} dtype must be {kind}, got {actual}")
+    shape = _shape(tensor, name)
+    if len(shape) < 2 or shape[-1] != head_size or shape[-2] != num_heads:
+        raise ValueError(
+            f"{name} trailing dims must be [..., {num_heads}, {head_size}], got {shape}"
+        )
+    _check_last_dim_contiguous(tensor, name)
+
+
+def _check_gfx1151_vector_alignment(tensor, name: str, itemsize: int, width: int) -> None:
+    alignment = max(16, itemsize * width)
+    if int(tensor.data_ptr()) % alignment:
+        raise ValueError(f"{name} base address must be aligned to {alignment} bytes")
+    if width > 1:
+        for axis in range(len(tensor.shape) - 1):
+            if int(tensor.stride(axis)) % width:
+                raise ValueError(f"{name} strides must preserve {width}-element vector alignment")
+
+
+def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> Dict[str, Any]:
+    """Structural (shape/dtype/stride) gate for a gfx1151 WMMA launch.
+
+    Deliberately never reads tensor *contents* (``cu_seqlens_q``/``cu_seqlens_k``/
+    ``seqused_k``/``block_table`` values are loaded on-device by the kernel):
+    only shapes, dtypes, and strides -- all host-visible metadata -- are
+    checked, so this never triggers a GPU length readback or host
+    densification. Returns the base kernel-arg values (everything except the
+    runtime-overridable scalars ``scale_log2``/``softcap``/``k_scale``/
+    ``v_scale``, which the caller merges in per bind/launch).
+    """
+    layout = spec.layout
+    if layout not in ("dense", "ragged", "paged"):
+        raise ValueError(f"unsupported gfx1151 attention layout {layout!r}")
+    required = ("q", "k", "v", "out")
+    missing = [name for name in required if tensors.get(name) is None]
+    if missing:
+        raise ValueError("missing gfx1151 attention tensors: " + ", ".join(missing))
+    q, k, v, out = (tensors[name] for name in required)
+    q_kind = _gfx1151_q_kind(spec)
+    kv_kind = _gfx1151_kv_kind(spec)
+    if kv_kind == "fp8" and _dtype_kind(k, "k") == "fp8_fnuz":
+        raise ValueError(
+            "gfx1151 WMMA FP8 KV storage is OCP fp8e4m3 (not FNUZ); "
+            "got fp8_fnuz for k"
+        )
+    for name, tensor, rank in (
+        ("q", q, 4 if layout == "dense" else 3),
+        ("out", out, 4 if layout == "dense" else 3),
+        ("k", k, 3 if layout == "ragged" else 4),
+        ("v", v, 3 if layout == "ragged" else 4),
+    ):
+        if len(_shape(tensor, name)) != rank:
+            raise ValueError(f"{name} must be rank-{rank} for {layout} layout")
+    _check_gfx1151_qo(q, "q", q_kind, spec.num_query_heads, spec.head_size)
+    _check_gfx1151_qo(out, "out", q_kind, spec.num_query_heads, spec.head_size)
+    _check_gfx1151_qo(k, "k", kv_kind, spec.kv_heads, spec.head_size)
+    _check_gfx1151_qo(v, "v", kv_kind, spec.kv_heads, spec.head_size)
+    if _shape(out, "out") != _shape(q, "q"):
+        raise ValueError("out shape must match q shape")
+    if _shape(v, "v") != _shape(k, "k"):
+        raise ValueError("v shape must match k shape")
+    _check_gfx1151_vector_alignment(q, "q", 2, 16)
+    _check_gfx1151_vector_alignment(k, "k", 1 if spec.kv_dtype else 2, 16)
+    _check_gfx1151_vector_alignment(v, "v", 1 if spec.kv_dtype else 2, 8 if spec.v_lds_stage else 1)
+    _check_gfx1151_vector_alignment(out, "out", 2, 1)
+    if int(out.stride(-2)) < spec.head_size or int(out.stride(-3)) < spec.num_query_heads * int(out.stride(-2)):
+        raise ValueError("out token/head strides must not overlap")
+    _check_gfx1151_device(tensors)
+
+    values: Dict[str, Any] = {
+        "Q": q, "K": k, "V": v, "O": out,
+        "seqlen_q": _fits_i32(request.seqlen_q, "seqlen_q"),
+        "seqlen_k": _fits_i32(request.seqlen_k, "seqlen_k"),
+    }
+
+    if layout == "dense":
+        batch = int(request.batch)
+        seqlen_q = int(request.seqlen_q)
+        seqlen_k = int(request.seqlen_k)
+        for tensor, name, shape0, seqlen in (
+            (q, "q", batch, seqlen_q), (out, "out", batch, seqlen_q),
+            (k, "k", batch, seqlen_k), (v, "v", batch, seqlen_k),
+        ):
+            shape = _shape(tensor, name)
+            if len(shape) != 4:
+                raise ValueError(f"{name} must be rank-4 [B, S, H, D] for dense layout, got {shape}")
+            if shape[0] != shape0 or shape[1] != seqlen:
+                raise ValueError(
+                    f"{name} shape[0:2] must be [{shape0}, {seqlen}], got {shape[:2]}"
+                )
+            stride = tensor.stride
+            token_stride = int(stride(1))
+            batch_stride = int(stride(0))
+            if batch_stride != seqlen * token_stride:
+                raise ValueError(
+                    f"{name} batch stride {batch_stride} must equal "
+                    f"seqlen*token_stride ({seqlen}*{token_stride}) for the "
+                    "gfx1151 dense batch-folded ABI"
+                )
+        values.update({
+            "stride_q_token": _fits_i32(q.stride(1), "stride_q_token"),
+            "stride_q_head": _fits_i32(q.stride(2), "stride_q_head"),
+            "stride_k_token": _fits_i32(k.stride(1), "stride_k_token"),
+            "stride_k_head": _fits_i32(k.stride(2), "stride_k_head"),
+            "stride_v_token": _fits_i32(v.stride(1), "stride_v_token"),
+            "stride_v_head": _fits_i32(v.stride(2), "stride_v_head"),
+            "stride_o_token": _fits_i32(out.stride(1), "stride_o_token"),
+            "stride_o_head": _fits_i32(out.stride(2), "stride_o_head"),
+        })
+    else:
+        for tensor, name in ((q, "q"), (out, "out")):
+            shape = _shape(tensor, name)
+            if len(shape) != 3:
+                raise ValueError(f"{name} must be rank-3 [tokens, H, D] for a packed layout, got {shape}")
+        values.update({
+            "stride_q_token": _fits_i32(q.stride(0), "stride_q_token"),
+            "stride_q_head": _fits_i32(q.stride(1), "stride_q_head"),
+            "stride_o_token": _fits_i32(out.stride(0), "stride_o_token"),
+            "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
+        })
+        cu_seqlens_q = tensors.get("cu_seqlens_q")
+        if cu_seqlens_q is None:
+            raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
+        batch = int(request.batch)
+        if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
+            raise ValueError("cu_seqlens_q dtype must be int32")
+        if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
+            raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
+        _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
+        values["cu_seqlens_q"] = cu_seqlens_q
+
+        if layout == "ragged":
+            cu_seqlens_k = tensors.get("cu_seqlens_k")
+            if cu_seqlens_k is None:
+                raise ValueError("ragged layout requires tensors['cu_seqlens_k']")
+            if _dtype_kind(cu_seqlens_k, "cu_seqlens_k") != "int32":
+                raise ValueError("cu_seqlens_k dtype must be int32")
+            if _shape(cu_seqlens_k, "cu_seqlens_k") != (batch + 1,):
+                raise ValueError(f"cu_seqlens_k must have shape [{batch + 1}]")
+            _check_last_dim_contiguous(cu_seqlens_k, "cu_seqlens_k")
+            k_shape = _shape(k, "k")
+            if len(k_shape) != 3:
+                raise ValueError(f"k must be rank-3 [tokens, H, D] for ragged layout, got {k_shape}")
+            values["cu_seqlens_k"] = cu_seqlens_k
+            values["stride_k_token"] = _fits_i32(k.stride(0), "stride_k_token")
+            values["stride_k_head"] = _fits_i32(k.stride(1), "stride_k_head")
+            values["stride_v_token"] = _fits_i32(v.stride(0), "stride_v_token")
+            values["stride_v_head"] = _fits_i32(v.stride(1), "stride_v_head")
+        else:  # paged
+            seqused_k = tensors.get("seqused_k")
+            block_table = tensors.get("block_table")
+            if seqused_k is None or block_table is None:
+                raise ValueError(
+                    "paged layout requires tensors['seqused_k'] and tensors['block_table']"
+                )
+            if _dtype_kind(seqused_k, "seqused_k") != "int32":
+                raise ValueError("seqused_k dtype must be int32")
+            if _shape(seqused_k, "seqused_k") != (batch,):
+                raise ValueError(f"seqused_k must have shape [{batch}]")
+            _check_last_dim_contiguous(seqused_k, "seqused_k")
+            if _dtype_kind(block_table, "block_table") != "int32":
+                raise ValueError("block_table dtype must be int32")
+            table_shape = _shape(block_table, "block_table")
+            if len(table_shape) != 2 or table_shape[0] != batch or table_shape[1] <= 0:
+                raise ValueError(
+                    f"block_table shape must be [{batch}, max_pages], got {table_shape}"
+                )
+            table_stride = getattr(block_table, "stride", None)
+            if not callable(table_stride):
+                raise ValueError("block_table must expose strides")
+            if int(table_stride(1)) != 1:
+                raise ValueError("block_table innermost stride must be 1")
+            row_stride = _fits_i32(table_stride(0), "block_table_stride")
+            if row_stride < table_shape[1]:
+                raise ValueError("block_table row stride must be non-overlapping")
+            k_shape = _shape(k, "k")
+            v_shape = _shape(v, "v")
+            if len(k_shape) != 4 or k_shape[1] != int(spec.page_block_size):
+                raise ValueError(
+                    f"k cache must be rank-4 [pages, {spec.page_block_size}, H, D], got {k_shape}"
+                )
+            if v_shape != k_shape:
+                raise ValueError(f"v cache shape {v_shape} must match k cache shape {k_shape}")
+            values["seqused_k"] = seqused_k
+            values["block_table"] = block_table
+            values["block_table_stride"] = row_stride
+            values["stride_k_block"] = _fits_i32(k.stride(0), "stride_k_block")
+            values["stride_v_block"] = _fits_i32(v.stride(0), "stride_v_block")
+            values["stride_k_token"] = _fits_i32(k.stride(1), "stride_k_token")
+            values["stride_k_head"] = _fits_i32(k.stride(2), "stride_k_head")
+            values["stride_v_token"] = _fits_i32(v.stride(1), "stride_v_token")
+            values["stride_v_head"] = _fits_i32(v.stride(2), "stride_v_head")
+
+    if spec.use_sinks:
+        sinks = tensors.get("sinks")
+        if sinks is None:
+            raise ValueError("spec.use_sinks requires tensors['sinks']")
+        if _dtype_kind(sinks, "sinks") != q_kind:
+            raise ValueError(f"sinks dtype must be {q_kind}, got {_dtype_kind(sinks, 'sinks')}")
+        if _shape(sinks, "sinks") != (spec.num_query_heads,):
+            raise ValueError(f"sinks must have shape [{spec.num_query_heads}]")
+        _check_last_dim_contiguous(sinks, "sinks")
+        values["sink_ptr"] = sinks
+    if spec.use_alibi:
+        alibi = tensors.get("alibi_slopes")
+        if alibi is None:
+            raise ValueError("spec.use_alibi requires tensors['alibi_slopes']")
+        if "float32" not in str(getattr(alibi, "dtype", "")).lower():
+            raise ValueError("alibi_slopes dtype must be float32")
+        if _shape(alibi, "alibi_slopes") != (spec.num_query_heads,):
+            raise ValueError(f"alibi_slopes must have shape [{spec.num_query_heads}]")
+        _check_last_dim_contiguous(alibi, "alibi_slopes")
+        values["alibi_slopes_ptr"] = alibi
+    if spec.use_qq_bias:
+        qq_bias = tensors.get("qq_bias")
+        if qq_bias is None:
+            raise ValueError("spec.use_qq_bias requires tensors['qq_bias']")
+        if "float32" not in str(getattr(qq_bias, "dtype", "")).lower():
+            raise ValueError("qq_bias dtype must be float32")
+        bias_shape = _shape(qq_bias, "qq_bias")
+        if len(bias_shape) != 2:
+            raise ValueError(f"qq_bias must be rank-2 [rows, cols], got {bias_shape}")
+        _check_last_dim_contiguous(qq_bias, "qq_bias")
+        values["qq_bias_ptr"] = qq_bias
+        values["qq_bias_rows"] = _fits_i32(bias_shape[0], "qq_bias_rows")
+        values["qq_bias_cols"] = _fits_i32(bias_shape[1], "qq_bias_cols")
+        values["qq_bias_stride"] = _fits_i32(qq_bias.stride(0), "qq_bias_stride")
+
+    return values
+
+
+def bind_gfx1151_attention_torch(
+    request, spec, tensors: Mapping[str, Any], **kwargs
+) -> TorchBinding:
+    """Bind a resolved gfx1151 ``WmmaFmhaFwdSpec`` to caller-owned tensors.
+
+    Handles all three layouts (``spec.layout`` ``dense``/``ragged``/``paged``)
+    and FP16/BF16 or OCP fp8e4m3 KV storage (``spec.kv_dtype``). Tensor keys:
+    ``q``/``k``/``v``/``out`` (required), plus layout metadata
+    (``cu_seqlens_q``, ``cu_seqlens_k``, ``seqused_k``, ``block_table``) and
+    optional score inputs (``sinks``, ``alibi_slopes``, ``qq_bias``) as
+    declared by ``spec``. Runtime scalar kwargs: ``softmax_scale`` (default
+    ``1/sqrt(D)``), ``softcap`` (required, positive, when ``spec.use_softcap``),
+    ``k_scale``/``v_scale`` (required FP32 dequant scales when
+    ``spec.kv_dtype`` is set), ``stream`` (HIP stream handle; ``0``/omitted
+    resolves to torch's current stream), and ``fence`` (per-call
+    ``LaunchConfig.fence``; default ``True`` -- a stream-scoped
+    ``hipStreamSynchronize``, never a device-wide sync). All of these may be
+    overridden again on the returned binding's ``launch(**kwargs)`` call.
+
+    Metadata validation (shapes/dtypes/strides) happens once here, at bind
+    time; it never reads ``cu_seqlens*``/``seqused_k``/``block_table``
+    *contents* (that would require a GPU->host readback on every rebind).
+    The compiled ``KernelLauncher`` is cached by ``(arch, spec)``, so binding
+    the same spec again reuses the already-loaded module.
+    """
+    from kernels.gfx1151.wmma_fmha_fwd import wmma_fmha_fwd_grid
+
+    arch = str(request.arch)
+    base_values = _gfx1151_validate_and_collect(request, spec, tensors)
+    grid = wmma_fmha_fwd_grid(spec, seqlen_q=int(request.seqlen_q), batch=int(request.batch))
+    block = (int(spec.block_size), 1, 1)
+
+    kv_dtype = spec.kv_dtype
+    softmax_scale_default = float(
+        kwargs.get("softmax_scale", 1.0 / math.sqrt(int(spec.head_size)))
+    )
+    softcap_default = kwargs.get("softcap")
+    if spec.use_softcap and softcap_default is None:
+        raise ValueError("spec.use_softcap requires kwargs['softcap']")
+    if spec.use_softcap:
+        softcap_default = float(softcap_default)
+        if not math.isfinite(softcap_default) or softcap_default <= 0:
+            raise ValueError("softcap must be finite and positive")
+    if kv_dtype:
+        if "k_scale" not in kwargs or "v_scale" not in kwargs:
+            raise ValueError(
+                "spec.kv_dtype='fp8e4m3' requires explicit kwargs['k_scale'] "
+                "and kwargs['v_scale']"
+            )
+    k_scale_default = float(kwargs.get("k_scale", 1.0))
+    v_scale_default = float(kwargs.get("v_scale", 1.0))
+    stream_default = kwargs.get("stream", 0)
+    fence_default = bool(kwargs.get("fence", True))
+    # Cheap structural/kwargs validation above is complete; only now does a
+    # cache miss compile+load a module (never on any of the error paths above).
+    launcher = _gfx1151_launcher(spec, arch)
+
+    def launch(**_kw):
+        from rocke.runtime.launcher import LaunchConfig
+
+        values = dict(base_values)
+        values["scale_log2"] = float(_kw.get("softmax_scale", softmax_scale_default)) * _LOG2E
+        if spec.use_softcap:
+            softcap = float(_kw.get("softcap", softcap_default))
+            if not math.isfinite(softcap) or softcap <= 0:
+                raise ValueError("softcap must be finite and positive")
+            values["softcap"] = softcap
+        if kv_dtype:
+            values["k_scale"] = float(_kw.get("k_scale", k_scale_default))
+            values["v_scale"] = float(_kw.get("v_scale", v_scale_default))
+        stream = _kw.get("stream", stream_default)
+        config = LaunchConfig(
+            grid=grid,
+            block=block,
+            stream=0 if stream is None else int(stream),
+            fence=bool(_kw.get("fence", fence_default)),
+        )
+        launcher(values, config=config)
+        return tensors["out"]
+
+    return TorchBinding(launch=launch, grid=grid, block=block)
+
+

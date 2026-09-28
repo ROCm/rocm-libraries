@@ -340,12 +340,19 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
     if(wave_size == 32)
     {
-        if(fp8_kv || p->use_wider_atom || p->native_fp8_path)
+        if(p->use_wider_atom || p->native_fp8_path)
         {
-            rocke_i_set_err(b,
-                            ROCKE_ERR_VALUE,
-                            "wave32 (WMMA) attention supports f16/bf16 KV only; "
-                            "fp8 / wider-atom / native-fp8 paths are CDNA-only");
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wider-atom and native-FP8 attention paths are CDNA-only");
+            return ROCKE_ERR_VALUE;
+        }
+        if(fp8_kv && strcmp(kv_dtype_eff, "fp8e4m3") != 0)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA FP8 KV storage requires OCP fp8e4m3");
+            return ROCKE_ERR_VALUE;
+        }
+        if(fp8_kv && (p->k_scale == NULL || p->v_scale == NULL))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA FP8 KV storage requires both FP32 dequant scales");
             return ROCKE_ERR_VALUE;
         }
         return rocke_wmma_attention_fwd_inner_body(b, p, p->wmma_v_lds_stage, target);
@@ -353,6 +360,11 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     if(p->wmma_seqlen_q != NULL || p->wmma_kv_tail)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA tail options require a wave32 target");
+        return ROCKE_ERR_VALUE;
+    }
+    if(p->k_scale != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "explicit K dequant scale requires a wave32 target");
         return ROCKE_ERR_VALUE;
     }
 
@@ -690,6 +702,20 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
 
 /* ============================== WMMA wave32 body ====================== */
 
+static rocke_value_t* load_wmma_fp8(
+    rocke_ir_builder_t* b, rocke_value_t* source, rocke_value_t* address, int count,
+    rocke_value_t* scale, const rocke_type_t* dtype)
+{
+    rocke_value_t* raw = rocke_b_global_load_vN(b, source, address, rocke_fp8e4m3(), count, count);
+    rocke_value_t* values[ROCKE_ATTN_MAX_LANE];
+    for(int i = 0; i < count; ++i)
+    {
+        rocke_value_t* decoded = rocke_decode_fp8e4m3fn_to_f32(b, rocke_b_vec_extract(b, raw, i));
+        values[i] = rocke_b_cast_f32_to(b, rocke_b_fmul(b, decoded, scale), dtype);
+    }
+    return rocke_b_vec_pack(b, values, count, dtype);
+}
+
 rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                                                    const rocke_mfma_attn_params_t* p,
                                                    bool v_lds_stage,
@@ -736,6 +762,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     {
         return rocke_ir_builder_status(b);
     }
+    const bool fp8_kv = p->kv_dtype != NULL && strcmp(p->kv_dtype, "fp8e4m3") == 0;
 
     const rocke_layout_map_t* a_map = op->a_layout;
     const rocke_layout_map_t* c_map = op->c_layout;
@@ -932,8 +959,9 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             {
                 k_addr = rocke_b_add(b, k_addr, k_half_off);
             }
-            rocke_value_t* k_frag
-                = rocke_b_global_load_vN(b, p->K, k_addr, dtype_ir, a_frag, a_frag * 2);
+            rocke_value_t* k_frag = fp8_kv
+                                       ? load_wmma_fp8(b, p->K, k_addr, a_frag, p->k_scale, dtype_ir)
+                                       : rocke_b_global_load_vN(b, p->K, k_addr, dtype_ir, a_frag, a_frag * 2);
             if(k_valid != NULL)
                 k_frag = rocke_b_select(b, k_valid, k_frag, k_zero);
             score = rocke_b_mma(b, op->op_id, q_frags[d], k_frag, score, NULL, 0);
@@ -1027,13 +1055,10 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             }
             for(int e = 0; e < head_size / 8; ++e)
             {
-                rocke_value_t* v_g = rocke_b_global_load_vN(
-                    b,
-                    p->V,
-                    rocke_b_add(b, v_stage_base, rocke_b_const_i32(b, e * 8)),
-                    dtype_ir,
-                    8,
-                    16);
+                rocke_value_t* v_address = rocke_b_add(b, v_stage_base, rocke_b_const_i32(b, e * 8));
+                rocke_value_t* v_g = fp8_kv
+                                         ? load_wmma_fp8(b, p->V, v_address, 8, p->v_scale, dtype_ir)
+                                         : rocke_b_global_load_vN(b, p->V, v_address, dtype_ir, 8, 16);
                 if(k_valid != NULL)
                     v_g = rocke_b_select(b, k_valid, v_g, v_zero);
                 rocke_value_t* idx[2] = {a_row, rocke_b_const_i32(b, e * 8)};
@@ -1107,8 +1132,18 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                         rocke_value_t* v_hd_mul = rocke_b_mul(b, p->kv_head_idx, p->stride_v_head);
                         v_row_base = rocke_b_add(b, rocke_b_add(b, v_tok_mul, v_hd_mul), v_off);
                     }
-                    v_elem = rocke_b_global_load(
-                        b, p->V, rocke_b_add(b, v_row_base, d_col), dtype_ir, 2);
+                    if(fp8_kv)
+                    {
+                        rocke_value_t* raw = rocke_b_global_load(
+                            b, p->V, rocke_b_add(b, v_row_base, d_col), rocke_fp8e4m3(), 1);
+                        rocke_value_t* decoded = rocke_decode_fp8e4m3fn_to_f32(b, raw);
+                        v_elem = rocke_b_cast_f32_to(b, rocke_b_fmul(b, decoded, p->v_scale), dtype_ir);
+                    }
+                    else
+                    {
+                        v_elem = rocke_b_global_load(
+                            b, p->V, rocke_b_add(b, v_row_base, d_col), dtype_ir, 2);
+                    }
                     if(v_valid != NULL)
                         v_elem = rocke_b_select(b, v_valid, v_elem, v_zero_scalar);
                 }
@@ -1155,7 +1190,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             rocke_value_t* zero_mask = rocke_b_fcmp(b, "oeq", l_safe, zero_f);
             rocke_value_t* inv_l = rocke_b_select(b, zero_mask, zero_f, rocke_b_rcp(b, l_safe));
             rocke_value_t* v_f32 = rocke_b_fmul(b, rocke_b_vec_extract(b, accs_final[d], r), inv_l);
-            if(p->v_scale != NULL)
+            if(p->v_scale != NULL && !fp8_kv)
             {
                 v_f32 = rocke_b_fmul(b, v_f32, p->v_scale);
             }

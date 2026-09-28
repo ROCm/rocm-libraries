@@ -68,8 +68,8 @@ requires every candidate to provide:
 - `block`;
 - `bind_torch`.
 
-Routing-only path labels are absent. Dense gfx942/gfx950, gfx1250 WMMA, and
-explicit unified-tuning candidates are executable.
+Routing-only path labels are absent. Dense gfx942/gfx950, gfx1151/gfx1250 WMMA,
+and explicit unified-tuning candidates are executable.
 
 ```python
 from dispatch.attention import AttentionRequest, dispatch_attention_all
@@ -110,6 +110,27 @@ policy plus WPE 2 and 4, while full walks WPE 1 through 4. Set
 `AttentionRequest.dense_waves_per_eu` (or the combo sweep CLI's
 `--dense-waves-per-eu`) to 1..8 to pin one value; 0 keeps policy selection for
 normal dispatch and enables sweep expansion.
+
+## gfx1151 inference
+
+`attention_gfx1151_wmma` is the gfx1151 auto route and an execution candidate.
+Its explicit selectors are `algorithm="wmma_fmha_fwd"` and
+`spec_id="gfx1151_wmma_fmha_fwd"`. Other architecture defaults are unchanged.
+
+The request describes layout (`dense`, `ragged`, or `paged`) and score features
+(`use_softcap`, `use_sinks`, `use_alibi`, `use_qq_bias`, `sliding_window`) before
+selection. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O. Both
+FP16/BF16 Q/O and head dimensions 64/128/256 are supported. Explicit layout
+or feature requirements reject candidates that do not declare them; `layout="auto"`
+retains legacy layout conventions and resolves to dense on gfx1151.
+
+The binding takes `q`, `k`, `v`, `out`; packed inputs also provide the selected
+prefix sums or paged metadata. Runtime kwargs are `softmax_scale`, positive
+`softcap` when selected, and explicit FP32 `k_scale`/`v_scale` for FP8 storage.
+Modules are cached and stream handles are forwarded. Use `fence=False` for
+asynchronous/graph-captured launches, then release retained owners after the
+appropriate synchronization and graph-destruction boundary.
+See the [gfx1151 ABI and tensor-layout guide](../../builders/gfx1151/attention/README.md).
 
 ## Capability versus support
 

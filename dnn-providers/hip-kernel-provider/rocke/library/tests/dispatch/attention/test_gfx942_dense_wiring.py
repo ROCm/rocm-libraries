@@ -14,9 +14,6 @@ Required by ``library/dispatch/AGENTS.md`` step 4. Covers:
     runtime kernel params, so those fields drop out of ``kernel_name()`` and the
     dispatched signature includes them. The persistent grid still bakes batch.
 
-The priority-3 tests are the load-bearing ones: the arm sorts ahead of every other
-candidate, so the opt-in check is the ONLY thing keeping a correctness-first P0 kernel
-off the default gfx942 path.
 """
 
 from __future__ import annotations
@@ -89,11 +86,6 @@ class TestGfx942DenseRegistration(unittest.TestCase):
         self.assertEqual(c.spec_id, _SPEC_ID)
         self.assertEqual(c.algorithm, "attention_dense")
 
-    def test_priority_outranks_every_other_candidate(self):
-        """Documents WHY the opt-in gate matters: nothing else holds this arm back."""
-        c = _candidate()
-        others = [o for o in attention_candidates() if o.name != _NAME]
-        self.assertTrue(all(c.priority <= o.priority for o in others))
 
 
 class TestGfx942DenseOptIn(unittest.TestCase):

@@ -67,8 +67,9 @@ extern "C" {
  *   use_softcap/use_sinks/use_alibi/use_qq_bias : optional runtime score inputs.
  *   layout           : dense, ragged (packed Q/K/V), or paged (packed Q).
  *   page_block_size  : positive power of two for paged; zero otherwise.
+ *   kv_dtype         : empty for Q-matched storage, or OCP fp8e4m3 bytes.
  *
- * dtype and layout are referenced as-is; keep them alive while using the spec. */
+ * dtype, layout and kv_dtype are referenced as-is; keep them alive with the spec. */
 typedef struct rocke_wmma_fmha_fwd_spec
 {
     int head_size;
@@ -88,6 +89,7 @@ typedef struct rocke_wmma_fmha_fwd_spec
     bool use_qq_bias;
     const char* layout; /* "dense" default; "ragged" or "paged" use packed Q */
     int page_block_size; /* positive power of two for paged; zero otherwise */
+    const char* kv_dtype; /* "" -> Q dtype; "fp8e4m3" -> OCP E4M3FN byte storage */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
