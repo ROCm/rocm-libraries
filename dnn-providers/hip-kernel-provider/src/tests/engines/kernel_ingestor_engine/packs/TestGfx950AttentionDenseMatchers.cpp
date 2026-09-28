@@ -32,10 +32,10 @@
  * @file TestGfx950AttentionDenseMatchers.cpp
  * @brief Applicability negatives for hipkernel:Gfx950AttentionDense.
  *
- * One case per "must decline" row of the rejection checklist in `mining.md`, in the
- * same severity order: silent-wrong-answer rows first, then faults, then declined
- * features. Each of these is a graph the kernel would accept and compute something
- * plausible-but-wrong for if the matcher did not stop it.
+ * One case per applicability rule the matcher must decline, in severity order:
+ * silent-wrong-answer cases first, then faults, then declined features. Each of these is
+ * a graph the kernel would accept and compute something plausible-but-wrong for if the
+ * matcher did not stop it.
  *
  * These are matcher-only: no device, no compile, no launch.
  */
@@ -879,7 +879,7 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsHeadSize64)
 }
 
 // ---------------------------------------------------------------------------
-// Silent-wrong-answer rows first (Tier 1 in mining.md)
+// Silent-wrong-answer cases first
 // ---------------------------------------------------------------------------
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdLayout)

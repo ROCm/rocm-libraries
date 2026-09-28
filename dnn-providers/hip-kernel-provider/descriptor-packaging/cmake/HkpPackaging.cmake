@@ -1093,7 +1093,7 @@ function(_hkp_kdp_arch_matches out_var kdp_json arches)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_engine_ids_named(<out> <root> <engine>)
+# _hkp_engine_ids_named(<out> <ambiguous> <root> <engine>)
 #   The ids of every authored UED under <root> whose name is <engine>.
 #
 #   A pack target names a TARGET, not a bundle; which bundle it carries is a cache entry

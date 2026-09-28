@@ -267,7 +267,7 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
         assert added, "nothing was bound at all"
         assert not [entry for entry in added if str(decoy) in entry], (
             f"the look-alike tree under the current directory was bound: {added}. "
-            "The root was resolved against the cwd, which is exactly F7"
+            "The root was resolved against the cwd rather than the checkout"
         )
         expected = launch_surface.find_repo_root(_TOOLS) / _REPO_RELATIVE_ROOT
         for entry in added:
@@ -359,7 +359,7 @@ class TestProviderBindingIsIndependentOfTheInvocationDirectory:
 
 
 class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
-    """F6: the request defaults decide which kernel the dispatcher resolves, and this
+    """The request defaults decide which kernel the dispatcher resolves, and this
     catalog contains one arm of that choice only."""
 
     def test_dense_persistent_is_the_string_off_not_a_yaml_boolean(self):
@@ -422,9 +422,9 @@ class TestTheShippedProfilePinsTheDispatchArmItsCatalogWasBuiltFrom:
         return factory(request_cls(**fields))
 
     def test_the_real_dispatcher_resolves_the_arm_the_catalog_ships(self, monkeypatch):
-        """The YAML value is only half of F6: this is what the dispatcher DOES with it,
-        so a profile that parses correctly but no longer reaches the non-persistent
-        eight-argument kernel still fails."""
+        """Checking the YAML value is only half of it: this is what the dispatcher does
+        with that value, so a profile that parses correctly but no longer reaches the
+        non-persistent eight-argument kernel still fails."""
         spec = self._resolve_with_the_real_dispatcher(monkeypatch)
         assert spec.persistent is False, (
             "the shipped profile resolves the persistent arm at B1/Sq8192/H8/D128 -- "

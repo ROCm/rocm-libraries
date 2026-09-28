@@ -1,10 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// The output comparison, driven directly. It used to sit inside the harness with an
-// EXPECT_TRUE in the middle of it, so the only way to reach it was to run a whole
-// TestBody() and read the failure back out of a fake part-result reporter. It now
-// returns its mismatches, so these assert on them.
+// The output comparison, driven directly. It returns its mismatches, so these assert on
+// them.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
