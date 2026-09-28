@@ -28,6 +28,15 @@ enum class LDSColumnPattern
     OFF_DIM_INTERLEAVED
 };
 
+// The two partial-pass kernels split the off-dimension pass between them.
+// r2c runs SBRR then SBCC and c2r runs SBCC then SBRR, so whichever kernel
+// the plan runs first performs steps 1/2 of the four-step decomposition.
+enum class PartialPassSteps
+{
+    STEPS_1_2,
+    STEPS_3_4
+};
+
 // Base class for stockham partial pass kernels.
 // Subclasses are responsible for different tiling types.
 struct StockhamPartialPassKernel : public StockhamKernel
@@ -69,10 +78,7 @@ struct StockhamPartialPassKernel : public StockhamKernel
     std::vector<unsigned int> factors_pp_other;
     rocfft_transform_type     transform_type_pp;
 
-    // The two partial-pass kernels split the off-dimension pass between them.
-    // r2c runs SBRR then SBCC and c2r runs SBCC then SBRR, so whichever kernel
-    // the plan runs first performs steps 1/2 of the four-step decomposition.
-    bool runs_steps_1_2 = false;
+    PartialPassSteps partial_pass_steps = PartialPassSteps::STEPS_1_2;
 
     // Number of off-dimension butterflies each thread performs.  With one LDS
     // column per transform a thread owns pp_factors_prod off-dimension points;
@@ -914,8 +920,10 @@ struct StockhamPartialPassKernel : public StockhamKernel
         // off-dimension index i = lo + radix_lo * hi becomes hi + radix_hi * lo.
         // Steps 1/2 splits off the low digit and steps 3/4 the high one, so the
         // two halves of the pass swap the digit they gather over.
-        auto radix_lo = runs_steps_1_2 ? pp_factors_other_prod : pp_factors_prod;
-        auto radix_hi = runs_steps_1_2 ? pp_factors_prod : pp_factors_other_prod;
+        auto radix_lo = partial_pass_steps == PartialPassSteps::STEPS_1_2 ? pp_factors_other_prod
+                                                                          : pp_factors_prod;
+        auto radix_hi = partial_pass_steps == PartialPassSteps::STEPS_1_2 ? pp_factors_prod
+                                                                          : pp_factors_other_prod;
 
         auto len_radix_lo = radix_lo * len_2;
         auto len_radix_hi = radix_hi * len_2;

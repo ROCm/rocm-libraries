@@ -44,7 +44,9 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
         : StockhamPartialPassKernel(specs, params, LDSColumnPattern::NON_INTERLEAVED)
     {
         // r2c runs the SBRR first, so that is the kernel doing steps 1/2
-        runs_steps_1_2 = transform_type_pp != rocfft_transform_type_real_inverse;
+        partial_pass_steps = transform_type_pp != rocfft_transform_type_real_inverse
+                                 ? PartialPassSteps::STEPS_1_2
+                                 : PartialPassSteps::STEPS_3_4;
 
         R.size = Expression{std::max(
             nregisters, compute_nregisters(pp_factors_prod, factors_pp, threads_per_transform_pp))};
@@ -378,7 +380,7 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
             body += Else{loadlds};
         }
 
-        if(!runs_steps_1_2)
+        if(partial_pass_steps == PartialPassSteps::STEPS_3_4)
             body += generate_partial_pass_steps_3_4();
 
         // handle even-length real to complex pre-process in lds before transform.
@@ -444,7 +446,7 @@ struct StockhamPartialPassKernelRR : public StockhamPartialPassKernel
             body += real_trans_pre_post();
         }
 
-        if(runs_steps_1_2)
+        if(partial_pass_steps == PartialPassSteps::STEPS_1_2)
             body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};

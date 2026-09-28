@@ -52,7 +52,9 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         workgroup_size *= max_factor_pp;
 
         // c2r runs the SBCC first, so that is the kernel doing steps 1/2
-        runs_steps_1_2 = transform_type_pp == rocfft_transform_type_real_inverse;
+        partial_pass_steps = transform_type_pp == rocfft_transform_type_real_inverse
+                                 ? PartialPassSteps::STEPS_1_2
+                                 : PartialPassSteps::STEPS_3_4;
 
         switch(params.off_dim)
         {
@@ -257,7 +259,8 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         // steps 1/2 gathers the off-dimension with a stride of
         // pp_factors_other_prod, steps 3/4 gathers consecutive points
-        unsigned int pp_gather_stride = runs_steps_1_2 ? pp_factors_other_prod : 1;
+        unsigned int pp_gather_stride
+            = partial_pass_steps == PartialPassSteps::STEPS_1_2 ? pp_factors_other_prod : 1;
 
         stmts += Declaration(tid_hor_pp,
                              thread_id % transforms_per_block_unscaled
@@ -265,7 +268,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
         stmts += Declaration(thread_pp, thread_id / (transforms_per_block));
 
         Expression offset_pp_value = offset + batch * stride[dim];
-        if(!runs_steps_1_2)
+        if(partial_pass_steps == PartialPassSteps::STEPS_3_4)
         {
             // steps 3/4 covers pp_factors_prod consecutive off-dimension points
             // per block, so the block base has to be scaled up to match
@@ -775,7 +778,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         body += loadlds;
 
-        if(!runs_steps_1_2)
+        if(partial_pass_steps == PartialPassSteps::STEPS_3_4)
             body += generate_partial_pass_steps_3_4();
 
         body += LineBreak{};
@@ -829,7 +832,7 @@ struct StockhamPartialPassKernelCC : public StockhamPartialPassKernel
 
         body += postStore;
 
-        if(runs_steps_1_2)
+        if(partial_pass_steps == PartialPassSteps::STEPS_1_2)
             body += generate_partial_pass_steps_1_2();
 
         body += LineBreak{};
