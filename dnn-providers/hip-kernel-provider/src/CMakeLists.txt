@@ -1,6 +1,11 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Included here as well as in the engines that create tidy shim targets, so that
+# hip_kernel_provider_tidy_dependencies() below is defined even when every engine that
+# embeds kernels is disabled.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KernelTidy.cmake")
+
 # OBJECT library with all implementation
 add_library(
     hip_kernel_provider_impl OBJECT
@@ -33,6 +38,11 @@ set_target_properties(hip_kernel_provider_impl PROPERTIES
 )
 clang_tidy_check(hip_kernel_provider_impl)
 add_clang_tidy_custom_target()
+
+# The embedded kernels are only analysed through the tidy shim targets the engines create
+# (see cmake/KernelTidy.cmake); attach them to the `tidy` targets created just above so a
+# tidy run covers them too.
+hip_kernel_provider_tidy_dependencies()
 
 # Static library for unit tests to link against (provides access to internal implementation)
 add_library(hip_kernel_provider_private STATIC

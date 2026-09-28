@@ -2,12 +2,12 @@
 # SPDX-License-Identifier:  MIT
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/KernelEmbedding.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/KernelTidy.cmake")
 
-
-# List kernel files to embed
-add_kernels_for_embedding(
-    TARGET hip_kernel_provider_impl
-    FILES
+# Kernel files to embed. Declared once: add_kernel_tidy_target() below analyses exactly
+# what add_kernels_for_embedding() inlines, so a kernel cannot be embedded without also
+# being checked.
+set(HIP_MLOPS_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdSpatial.cpp
@@ -25,3 +25,16 @@ add_kernels_for_embedding(
     ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelActivation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelMath.hpp)
+
+# List kernel files to embed
+add_kernels_for_embedding(
+    TARGET hip_kernel_provider_impl
+    FILES ${HIP_MLOPS_KERNEL_FILES})
+
+# Embedded kernels are never compiled by the build, so nothing would otherwise put them in
+# front of clang-tidy. This target does: it compiles a generated wrapper per kernel that
+# supplies the hipRTC-time macros and includes the kernel.
+add_kernel_tidy_target(
+    NAME hip_mlops_kernel_tidy
+    PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/tidy/KernelTidyPrelude.hpp
+    FILES ${HIP_MLOPS_KERNEL_FILES})
