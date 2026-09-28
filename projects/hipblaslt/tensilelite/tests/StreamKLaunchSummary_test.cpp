@@ -15,8 +15,8 @@
 // pin that relationship between dynamicPartialsSlots, tiles%grid divisibility,
 // and whether a partials workspace is reserved.
 
-#include <gtest/gtest.h>
 #include <cstdlib>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -87,16 +87,23 @@ namespace
         solution.sizeMapping.threadTile            = TensileLite::dim3(1, 1, 1);
         solution.sizeMapping.depthU                = 64;
         solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
+        solution.sizeMapping.workGroupSize         = TensileLite::dim3(256, 1, 1);
         solution.sizeMapping.CUOccupancy           = 1;
         solution.sizeMapping.workspaceSizePerElemC = 4;
     }
 
-    ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
+    ContractionProblemGemm makeBatchedGemmProblem(size_t m, size_t n, size_t k, size_t batch)
     {
-        auto problem = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, 1);
+        auto problem
+            = ContractionProblemGemm::GEMM(false, false, m, n, k, m, n, m, 1.0, false, batch);
         problem.setComputeInputTypeA(rocisa::DataType::Float);
         problem.setComputeInputTypeB(rocisa::DataType::Float);
         return problem;
+    }
+
+    ContractionProblemGemm makeGemmProblem(size_t m, size_t n, size_t k)
+    {
+        return makeBatchedGemmProblem(m, n, k, 1);
     }
 
     struct AnalyticalEnv
@@ -430,7 +437,7 @@ TEST(StreamKLaunchSummaryTest, DpOnlySourceDistinguishesParamVsRuntime)
     ContractionSolution paramSol;
     initStreamKSolution(paramSol, 4);
     paramSol.sizeMapping.streamKForceDPOnly = 1;
-    auto paramProblem = makeGemmProblem(4096, 4224, 64);
+    auto paramProblem                       = makeGemmProblem(4096, 4224, 64);
     paramProblem.setWorkspaceSize(std::numeric_limits<size_t>::max());
     auto pd = paramSol.computeStreamKDecisions(paramProblem, env.device);
 
@@ -543,7 +550,7 @@ TEST(StreamKLaunchSummaryTest, DynamicSlotsPositiveButDivisible_NoWorkspace)
     auto device          = makeDevice(_MI350_CHIP_ID, _CPX_CU, "mi350cpx");
     device.skDynamicGrid = 0;
     device.skTiles       = 256; // override: number of split stream-k tiles
-    device.skSplit       = 4;   // override: k-split factor per tile
+    device.skSplit       = 4; // override: k-split factor per tile
 
     auto d = solution.computeStreamKDecisions(problem, device);
 
@@ -935,17 +942,10 @@ TEST(StreamKLaunchSummaryTest, ClusterDpClampWinsAttributionOverFixedGrid)
 // this has to be SK3.
 //
 // Parallel is the one reduction that reserves a partials workspace unconditionally
-// (the tree path only reserves when tiles % grid != 0). The snapshot sizes that
-// reservation with partialTileSize(finalGrid), while the caller-facing
-// requiredWorkspaceSize() sizes it with requiredWorkspaceSizeGsu(problem, hw,
-// grid/tiles) -- two different formulas for the same region. They agree here
-// because the parallel grid is an exact multiple of tiles (grid == tiles*skSplit
-// == 64*4), which makes requiredWorkspaceSizeGsu's tiles*gsu equal
-// partialTileSize's grid. The one triple where the formulas would disagree --
-// parallel at a split factor of 1 -- never reaches them: streamKReconcileReduction()
-// demotes it to tree first, in either mode. See the comment on
-// StreamKDecisions::requiredWorkspaceBytes, and the pair of workspace-starved
-// tests below.
+// (the tree path only reserves when tiles % grid != 0). The snapshot and the
+// caller-facing requiredWorkspaceSize() both size that reservation with
+// partialTileSize(finalGrid); see the comment on
+// StreamKDecisions::requiredWorkspaceBytes.
 // ---------------------------------------------------------------------------
 TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
 {
@@ -1007,9 +1007,8 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     EXPECT_EQ(d.requiredWorkspaceBytes, 16777216u) << "128*128*4 bytes * 256 work-groups";
     EXPECT_EQ(d.idealWorkspaceBytes, d.requiredWorkspaceBytes) << "it fits, so nothing was trimmed";
 
-    // In this regime -- and only because finalGrid is an exact multiple of tiles --
-    // the two independent sizings land on the same byte count.
-    EXPECT_EQ(d.finalGrid, d.tiles * d.skSplit) << "why the two sizings coincide here";
+    // The two independent sizings land on the same byte count.
+    EXPECT_EQ(d.finalGrid, d.tiles * d.skSplit);
     EXPECT_GT(solution.requiredWorkspaceSize(problem, env.device), 0u);
     EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), d.requiredWorkspaceBytes);
 
@@ -1022,6 +1021,200 @@ TEST(StreamKLaunchSummaryTest, Sk3ParallelReductionReservesPartialsWorkspace)
     EXPECT_EQ(line.find("preFallback"), std::string::npos) << "nothing moved the grid";
     EXPECT_NE(line.find("isDynamic = no"), std::string::npos);
     EXPECT_NE(line.find("NA (work-queues not used)"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// The batched parallel-reduction scenario, which is what separates the two
+// sizings. getNumTiles() folds the batch count into its result for every
+// streamK != 0 solution, so the batch is already carried by tiles, by the grid
+// derived from it, and therefore by partialTileSize(grid). A sizing that
+// multiplied by the batch a second time would over-report by exactly the batch
+// count, push the reported requirement past the caller's workspace cap, and
+// leave the launch running data-parallel on a zero-byte allocation.
+//
+// 128x128x4096 keeps one tile per batch entry, so batch entries and tiles are
+// the same count and select_reduction's "tiles <= cuCount/4" band still admits
+// parallel at a batch of 8.
+// ---------------------------------------------------------------------------
+TEST(StreamKLaunchSummaryTest, Sk3ParallelBatchedWorkspaceIsNotBatchScaled)
+{
+    constexpr size_t kBatch = 8;
+
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_parallel_batched";
+    initStreamKSolution(solution, 3);
+
+    auto problem = makeBatchedGemmProblem(128, 128, 4096, kBatch);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+
+    auto d = solution.computeStreamKDecisions(problem, env.device);
+
+    ASSERT_EQ(d.reduction, origami::reduction_t::parallel)
+        << "scenario must actually select parallel reduction, otherwise the "
+           "assertions below are about the already-covered tree path";
+    ASSERT_EQ(d.tiles, kBatch) << "one 128x128 tile per batch entry";
+    EXPECT_EQ(problem.getNumTiles(solution.sizeMapping, 1), kBatch)
+        << "getNumTiles already folds the batch count in for streamK != 0";
+    ASSERT_TRUE(d.workspaceAllocated);
+
+    // Both sizings are partialTileSize(finalGrid); neither re-applies the batch.
+    const size_t expected = solution.partialTileSize(d.finalGrid);
+    EXPECT_EQ(d.requiredWorkspaceBytes, expected);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), expected)
+        << "the query must not scale the partials region by the batch count";
+
+    // A budget that fits the partials exactly must survive the query followed
+    // by allocation. The old extra batch factor made this query return zero.
+    ASSERT_GT(expected, 0u);
+    problem.setWorkspaceSize(expected);
+    const size_t allocated = solution.requiredWorkspaceSize(problem, env.device);
+    ASSERT_EQ(allocated, expected);
+    problem.setWorkspaceSize(allocated);
+    const auto launch = solution.computeStreamKDecisions(problem, env.device);
+    EXPECT_EQ(launch.reduction, origami::reduction_t::parallel);
+    EXPECT_EQ(launch.finalGrid, d.finalGrid);
+    EXPECT_EQ(launch.requiredWorkspaceBytes, allocated);
+    EXPECT_FALSE(launch.workspaceDPFallbackFired);
+
+    // Hold the grid fixed to test the fit boundary itself: without this
+    // override the grid selector can choose a smaller split that still fits.
+    env.device.skFixedGrid = d.finalGrid;
+    problem.setWorkspaceSize(expected - 1);
+    EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
+    const auto starved = solution.computeStreamKDecisions(problem, env.device);
+    ASSERT_TRUE(starved.fixedGridUsed);
+    EXPECT_EQ(starved.idealWorkspaceBytes, expected);
+    EXPECT_TRUE(starved.workspaceDPFallbackFired);
+    EXPECT_EQ(starved.reduction, origami::reduction_t::tree);
+    EXPECT_EQ(starved.finalGrid, starved.tiles);
+    EXPECT_EQ(starved.requiredWorkspaceBytes, 0u);
+}
+
+// Preserve every auxiliary allocation from the old GSU-based query while
+// counting StreamK partial tiles once. Fixed grids isolate the sizing rules
+// from the workspace-aware grid selector. These are host sizing tests, not
+// evidence that the corresponding auxiliary GPU kernels support StreamK.
+TEST(StreamKLaunchSummaryTest, Sk3ParallelWorkspacePreservesAuxiliaryAllocations)
+{
+    using Tensor = ContractionProblemGemm::TENSOR;
+    struct Case
+    {
+        const char* name;
+        bool        gradient;
+        Tensor      biasSrc;
+        bool        biasEnabled;
+        bool        amax;
+        size_t      biasBytes;
+    };
+    const Case cases[] = {
+        {"bias A", true, Tensor::A, true, false, 128 * 4 * 4},
+        {"bias B", true, Tensor::B, true, false, 256 * 4 * 4},
+        {"bias D uses partials", true, Tensor::D, true, false, 0},
+        {"forward bias", false, Tensor::D, true, false, 0},
+        {"disabled bias", true, Tensor::A, false, false, 0},
+        {"amax", false, Tensor::D, false, true, 0},
+        {"bias and amax", true, Tensor::A, true, true, 128 * 4 * 4},
+    };
+    for(size_t batch : {1u, 8u})
+    {
+        for(const auto& test : cases)
+        {
+            SCOPED_TRACE(test.name);
+            SCOPED_TRACE(batch);
+            AnalyticalEnv       env;
+            ContractionSolution solution;
+            initStreamKSolution(solution, 3);
+            solution.problemType.useBias                  = 1;
+            solution.problemType.useGradient              = test.gradient;
+            solution.problemType.outputAmaxD              = test.amax;
+            solution.sizeMapping.workspaceSizePerElemBias = 4;
+
+            auto problem = makeBatchedGemmProblem(128, 256, 4096, batch);
+            problem.setUseBias(1);
+            problem.setUseGradient(test.gradient);
+            problem.setBias(test.biasEnabled ? rocisa::DataType::Float : rocisa::DataType::None,
+                            test.biasSrc == Tensor::B ? 256 : 128,
+                            0, test.gradient, test.biasSrc);
+            problem.setOutputAmaxD(test.amax);
+            problem.setAmaxD(rocisa::DataType::Float, true);
+            problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+            const size_t tiles = 2 * batch;
+            env.device.skFixedGrid = tiles * 4;
+            const auto decisions = solution.computeStreamKDecisions(problem, env.device);
+            ASSERT_EQ(decisions.reduction, origami::reduction_t::parallel);
+            ASSERT_EQ(decisions.finalGrid, tiles * 4);
+
+            const size_t partials = 128 * 128 * 4 * tiles * 4;
+            const size_t expected = partials + test.biasBytes + (test.amax ? tiles * 4 : 0);
+            EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), expected);
+            // The previous query differs only by its extra batch factor on partials.
+            EXPECT_EQ(solution.requiredWorkspaceSizeGsu(problem, env.device, 4),
+                      expected + partials * (batch - 1));
+
+            problem.setWorkspaceSize(expected);
+            const size_t allocated = solution.requiredWorkspaceSize(problem, env.device);
+            ASSERT_EQ(allocated, expected);
+            problem.setWorkspaceSize(allocated);
+            const auto launch = solution.computeStreamKDecisions(problem, env.device);
+            EXPECT_EQ(launch.reduction, origami::reduction_t::parallel);
+            EXPECT_FALSE(launch.workspaceDPFallbackFired);
+            EXPECT_EQ(launch.requiredWorkspaceBytes, partials);
+
+            problem.setWorkspaceSize(expected - 1);
+            EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), 0u);
+        }
+    }
+}
+
+TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesCustomMetadata)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, 0);
+    solution.problemType.useBias                  = 1;
+    solution.problemType.useGradient              = true;
+    solution.sizeMapping.workspaceSizePerElemBias = 4;
+    solution.customKernel.name                    = "workspace_probe";
+    solution.customKernel.workspaceType           = CustomWorkspaceType::StreamKWithReduction;
+    solution.customKernel.macrotile               = TensileLite::dim3(128, 128, 64);
+    solution.customKernel.workspaceSizePerElemC    = 8;
+    solution.customKernel.workspaceSizePerElemBias = 8;
+    auto problem = makeBatchedGemmProblem(128, 128, 4096, 8);
+    problem.setUseBias(1);
+    problem.setUseGradient(true);
+    problem.setBias(rocisa::DataType::Float, 128, 0, true, ContractionProblemGemm::TENSOR::A);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    env.device.skFixedGrid = 8 * 4;
+    ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
+
+    // Handwritten kernels use custom metadata; generated kernels use sizeMapping.
+    solution.customKernel.generated = false;
+    EXPECT_EQ(solution.requiredWorkspaceSizeGsu(problem, env.device, 4),
+              128u * 128 * 8 * 32 + 128 * 8 * 4);
+    solution.customKernel.generated = true;
+    EXPECT_EQ(solution.requiredWorkspaceSizeGsu(problem, env.device, 4),
+              128u * 128 * 4 * 32 + 128 * 4 * 4);
+}
+
+// The shared sizing helper must retain GSU's split-one bias-D allocation;
+// parallel StreamK cannot reach that case because reconciliation demotes it.
+TEST(StreamKLaunchSummaryTest, GsuWorkspacePreservesSplitOneBiasD)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, 0);
+    solution.problemType.useBias = 1;
+    solution.problemType.useGradient = true;
+    solution.sizeMapping.workspaceSizePerElemBias = 4;
+    auto problem = makeBatchedGemmProblem(128, 256, 4096, 8);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setUseBias(1);
+    problem.setUseGradient(true);
+    problem.setBias(rocisa::DataType::Float, 128, 0, true, ContractionProblemGemm::TENSOR::D);
+    EXPECT_EQ(solution.requiredWorkspaceSizeGsu(problem, env.device, 0), 0u);
+    EXPECT_EQ(solution.requiredWorkspaceSizeGsu(problem, env.device, 1), 128u * 256 * 8 * 4);
+    EXPECT_EQ(solution.requiredWorkspaceSizeGsu(problem, env.device, 4), 128u * 128 * 4 * 2 * 8 * 4);
 }
 
 // ---------------------------------------------------------------------------

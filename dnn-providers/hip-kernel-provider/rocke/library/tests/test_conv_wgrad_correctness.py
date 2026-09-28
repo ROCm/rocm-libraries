@@ -271,6 +271,8 @@ def _make_spec(
             tile_n=tile_n,
             tile_k=tile_k,
             arch=arch,
+            groups=problem.groups,
+            block_size=warp_m * warp_n * target.wave_size,
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
@@ -314,6 +316,9 @@ def _run_one(
     async_dma: bool = False,
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
 
@@ -342,6 +347,17 @@ def _run_one(
         warp_tile_mn=warp_tile_mn,
         tile_k=tile_k,
     )
+    if spec is not None and (group_merge > 1 or tile_m or tile_n):
+        from dataclasses import replace as _dc_replace
+
+        _over = {}
+        if tile_m:
+            _over["tile_m"] = tile_m
+        if tile_n:
+            _over["tile_n"] = tile_n
+        if group_merge > 1:
+            _over["group_merge"] = group_merge
+        spec = _dc_replace(spec, **_over)
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
 
@@ -397,9 +413,9 @@ def _run_one(
     # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
     # z = groups * split_k (the group axis rides on z alongside split-K;
     # == split_k for groups=1).
-    gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
-    gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    gz = p.groups * spec.split_k
+    gx = (spec.grid_N + spec.tile_n - 1) // spec.tile_n
+    gy = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
+    gz = spec.grid_groups * spec.split_k
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
@@ -421,6 +437,24 @@ def _run_one(
 
     out_f32 = dW_cpu.float()
     ref_f32 = ref.float()
+
+    # Row coverage, checked before the tolerance test so the reason names the
+    # actual failure. A grouped split-K bug that drops whole groups leaves
+    # entire dW output-channel rows at zero -- the epilogue bounded a
+    # group-shifted row against the per-group wg_M (= kpg), so the guard was
+    # false for every group above 0 and those groups' atomics were dropped.
+    # A max-relative-error assertion does report that, but as a generic
+    # tolerance miss that gives no hint which groups vanished.
+    nz_out = out_f32.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_ref = ref_f32.reshape(p.K, -1).abs().sum(dim=1) > 0
+    n_missing = int((nz_ref & ~nz_out).sum())
+    if n_missing:
+        return False, (
+            f"{n_missing}/{p.K} dW output-channel rows are zero while the "
+            f"reference is non-zero (groups={p.groups}, kpg={p.K // p.groups}, "
+            f"spk{split_k}) -- whole groups are not being written"
+        )
+
     abs_diff = (out_f32 - ref_f32).abs()
     ref_scale = ref_f32.abs().max().clamp(min=1.0)
     rel_err = float(abs_diff.max() / ref_scale)
@@ -643,13 +677,18 @@ class TestConvWgradCorrectness(unittest.TestCase):
         self._sweep_pipeline("basic")
 
     def test_split_k(self):
-        # Split-K shares the vectorised load path; the direct-store epilogue is
-        # used (cshuffle + split_k>1 is rejected by the spec validator).
+        # Split-K shares the vectorised load path. cshuffle is REQUIRED here,
+        # not optional: for a 16-bit dW the packed-atomic epilogue needs
+        # cshuffle's contiguous pairs, so the validator rejects
+        # epilogue="default" at split_k > 1. The previous comment had the rule
+        # backwards ("cshuffle + split_k>1 is rejected") and the test passed
+        # "default", so every subtest here skipped on _DTYPES = (fp16, bf16) --
+        # this test asserted nothing at all.
         for dtype in _DTYPES:
             for shape in (_SHAPES[0], _SHAPES[2]):  # dense 3x3 + C=24 edge
                 for split_k in (4, -1):  # fixed degree + CK auto-select
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
-                        self._check(shape, dtype, "mem", "default", split_k)
+                        self._check(shape, dtype, "mem", "cshuffle", split_k)
 
     def test_grouped(self):
         # Grouped wgrad (grid-per-group, group index on block_id_z).  Includes the
@@ -788,7 +827,12 @@ class TestConvWgradCorrectness(unittest.TestCase):
             for shape in grouped:
                 for split_k in (4, -1):  # fixed degree + CK auto-select
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
-                        self._check(shape, dtype, "mem", "default", split_k)
+                        # cshuffle for the same reason as test_split_k: a 16-bit
+                        # dW on the packed-atomic split-K path requires it, so
+                        # "default" made every subtest here skip. That is how the
+                        # grouped split-K group-drop bug (only group 0's dW slab
+                        # written) reached develop with a green test suite.
+                        self._check(shape, dtype, "mem", "cshuffle", split_k)
 
     def test_grouped_depthwise(self):
         # Depthwise (groups == C, cpg == 1): each input channel is its own group.
@@ -959,9 +1003,10 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         )
 
     def test_gfx1250_grouped_wgrad_dual_engine(self):
-        # Grouped wgrad (grid-per-group, Gm=1) on gfx1250 (wave32 WMMA 16x16x32).
-        # Group merging is MFMA-only (is_valid_wgrad_spec rejects Gm>1 on WMMA), so
-        # this guards only the grouped Gm=1 WMMA path. Lower through the backend
+        # Grouped wgrad (grid-per-group) on gfx1250 (wave32 WMMA 16x16x32).
+        # Group merging is MFMA-only, so it cannot apply on wave32; this guards
+        # the grouped WMMA path as it ships, one conv group per workgroup.
+        # Lower through the backend
         # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
         # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
         # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
@@ -1240,9 +1285,9 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
 
         # Stage 1: z = groups * split_k (encodes group and slice index).
         s1_grid = (
-            (spec.wg_N + spec.tile_n - 1) // spec.tile_n,
-            (spec.wg_M + spec.tile_m - 1) // spec.tile_m,
-            p.groups * spec.split_k,
+            (spec.grid_N + spec.tile_n - 1) // spec.tile_n,
+            (spec.grid_M + spec.tile_m - 1) // spec.tile_m,
+            spec.grid_groups * spec.split_k,
         )
         s1_block = (spec.block_size, 1, 1)
 
@@ -1298,6 +1343,9 @@ def _check_two_stage(
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
     seed: int = 0,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1339,6 +1387,12 @@ def _check_two_stage(
 
     # Promote to two-stage.
     ts_spec = _dc_replace(base_spec, two_stage=True)
+    if tile_m is not None:
+        ts_spec = _dc_replace(ts_spec, tile_m=tile_m)
+    if tile_n is not None:
+        ts_spec = _dc_replace(ts_spec, tile_n=tile_n)
+    if group_merge > 1:
+        ts_spec = _dc_replace(ts_spec, group_merge=group_merge)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -1362,6 +1416,36 @@ def _check_two_stage(
     max_abs = dW_ref.abs().max().item()
     if max_abs < 1e-6:
         return True, "reference near-zero; skipped numeric check"
+
+    # Coverage guards, checked before the tolerance so a dropped slab reports
+    # as "whole rows missing" rather than as a vague numeric failure.
+    #
+    # Rows catch an accumulator bound left at the per-group extent under group
+    # merging: every merged row above 0 then fails the test and its dW slab is
+    # never written. Columns catch the failure the row guard structurally
+    # cannot see -- a decompaction error that writes the correct output channel
+    # at the wrong (y, x, c) position, which is the new mode the block-diagonal
+    # predicate introduces.
+    nz_ref_row = dW_ref.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_out_row = dW_ours.reshape(p.K, -1).abs().sum(dim=1) > 0
+    n_missing_rows = int((nz_ref_row & ~nz_out_row).sum())
+    if n_missing_rows:
+        return False, (
+            f"{n_missing_rows}/{p.K} dW output-channel rows are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}, "
+            f"spk{ts_spec.split_k}) -- whole groups are not being written"
+        )
+    cpg = p.C // p.groups
+    n_cols = p.K * p.Y * p.X
+    nz_ref_col = dW_ref.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    nz_out_col = dW_ours.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    n_missing_cols = int((nz_ref_col & ~nz_out_col).sum())
+    if n_missing_cols:
+        return False, (
+            f"{n_missing_cols}/{n_cols} dW (k,y,x) positions are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}) "
+            f"-- the merged column index decompacts to the wrong position"
+        )
 
     tol = 5e-2
     rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
@@ -1691,6 +1775,82 @@ class TestConvWgradTwoStage(unittest.TestCase):
         self._check(shape, "bf16", "mem", groups=2, seed=42)
 
 
+class TestWgradAdmitsImpliesBuilds(unittest.TestCase):
+    """``is_valid_wgrad_spec(spec) is True`` must imply the builder accepts it.
+
+    ``TestWgradValidatorAgreement`` below pins the predicate against
+    ``validate()``; this pins it against the *whole* builder, which enforces
+    constraints ``validate()`` never sees -- the epilogue's store-vector parity,
+    for one. That gap is what broke depthwise wgrad: the predicate blessed a
+    cpg==1 split-K spec and ``build_implicit_gemm_conv_wgrad`` then raised, so
+    the only thing a caller saw was "no valid configurations found".
+
+    Host-side only: both halves are pure spec inspection plus IR construction,
+    so this runs without a GPU.
+    """
+
+    _SHAPES = [
+        # dense, even cpg, odd cpg, depthwise (cpg == 1), and a channel
+        # multiplier (kpg == 2) -- the axes the packed-atomic gate keys on.
+        _Shape("dense_C64K64", N=2, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+        _Shape("g2_cpg32", N=2, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=2),
+        _Shape("g8_cpg8", N=2, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1, groups=8),
+        _Shape("dw_cpg1", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32),
+        _Shape("dw_kpg2", N=2, Hi=8, Wi=8, C=32, K=64, Y=3, X=3, pH=1, pW=1, groups=32),
+        # odd wg_N via an odd Y*X on an even cpg, and even wg_N via an even X
+        # on an odd cpg -- the two cases that separate "even cpg" (the old,
+        # over-broad rule) from "even wg_N" (the real one).
+        _Shape(
+            "g16_cpg2_3x3", N=2, Hi=8, Wi=8, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=16
+        ),
+        _Shape(
+            "g8_cpg3_3x2", N=2, Hi=8, Wi=8, C=24, K=24, Y=3, X=2, pH=1, pW=0, groups=8
+        ),
+    ]
+
+    def test_admits_implies_builds(self):
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+        )
+
+        arch = "gfx950"
+        checked = 0
+        for shape in self._SHAPES:
+            for dtype in _DTYPES:
+                for epilogue in ("default", "cshuffle"):
+                    for split_k in (1, 2, 4, -1):
+                        spec, _problem, _wtk = _make_spec(
+                            arch, shape, dtype, "mem", epilogue, split_k
+                        )
+                        if spec is None:
+                            continue
+                        ok, why = is_valid_wgrad_spec(spec, arch)
+                        if not ok:
+                            continue
+                        checked += 1
+                        with self.subTest(
+                            shape=shape.id,
+                            dtype=dtype,
+                            epilogue=epilogue,
+                            split_k=split_k,
+                        ):
+                            try:
+                                build_implicit_gemm_conv_wgrad(spec, arch=arch)
+                            except ValueError as e:
+                                self.fail(
+                                    f"is_valid_wgrad_spec admitted {shape.id} "
+                                    f"{dtype} {epilogue} spk{split_k} "
+                                    f"(groups={shape.groups}, "
+                                    f"cpg={shape.C // shape.groups}) but the "
+                                    f"builder rejected it: {e}"
+                                )
+        # Guard against the matrix silently collapsing to nothing -- a predicate
+        # that rejects everything would otherwise make this test vacuously green,
+        # which is the failure mode the split-K tests above actually had.
+        self.assertGreater(checked, 0, "no spec was admitted; matrix is vacuous")
+
+
 class TestWgradValidatorAgreement(unittest.TestCase):
     """``is_valid_wgrad_spec`` and ``validate()`` must accept the same specs.
 
@@ -1920,6 +2080,153 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
             f"validator should charge the K-outer shape ({k_outer_bytes}), "
             f"not the M-outer one ({m_outer_bytes}); got: {why}",
         )
+
+
+def _assert_case_ran(test, ok: bool, why: str) -> None:
+    """Fail unless the case was actually built, launched and compared.
+
+    ``_run_one`` and ``_check_two_stage`` report an unbuildable spec as
+    ``(True, "skip (...)")`` so a sweep over many shapes can step past configs
+    an arch does not support. A test that only asserts ``ok`` therefore passes
+    when every one of its cases was skipped. That is not hypothetical: the
+    group-merge cases below silently skipped their whole ``group_merge > 1``
+    axis until this guard was added, because the shape defaulted to groups=1
+    and the gate rejected every merged spec.
+    """
+    test.assertTrue(ok, why)
+    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+class TestWgradGroupMergeNumerics(unittest.TestCase):
+    """GPU numerics for group merging, over the two-stage path.
+
+    ``_check_two_stage`` applies row- and column-coverage guards before the
+    tolerance check, so a dropped group slab or a mis-decompacted column
+    reports as such rather than as an opaque numeric failure.
+    """
+
+    # Depthwise: cpg == kpg == 1, so wg_N == Y*X and merged N == Y*X*Gm.
+    _DW = _Shape(
+        "3x3_dw_N2H12W12C64K64",
+        N=2,
+        Hi=12,
+        Wi=12,
+        C=64,
+        K=64,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=64,
+    )
+
+    def test_group_merge_without_two_stage(self):
+        # The primary path: split_k=1, so dW is written straight from the tile
+        # by the direct or CShuffle store. Both carry the block-diagonal mask
+        # in their addr_fn, so no workspace and no second kernel are involved.
+        for epilogue in ("default", "cshuffle"):
+            for gm in (1, 2, 4, 8):
+                with self.subTest(epilogue=epilogue, group_merge=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        epilogue,
+                        split_k=1,
+                        lds_k_outer=True,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        tile_m=32,
+                        tile_n=128,
+                        group_merge=gm,
+                    )
+                    _assert_case_ran(self, ok, why)
+
+    def test_group_merge_split_k_requires_two_stage(self):
+        # Merging and split-K compose, but a merged tile cannot use the
+        # packed-atomic split-K epilogue: it has no way to drop an off-diagonal
+        # group pair, so it would accumulate garbage into a live dW element.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        spec, _p, _wtk = _make_spec(
+            GPU_ARCH, self._DW, "fp32", "mem", "default", 4, warp_tile_mn=16, tile_k=32
+        )
+        if spec is None:
+            self.skipTest("spec construction failed")
+        from dataclasses import replace as _dc_replace
+
+        spec = _dc_replace(
+            spec,
+            problem=_dc_replace(spec.problem, groups=64),
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+            two_stage=False,
+        )
+        ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
+        self.assertFalse(ok, "atomic split-K + group_merge must be rejected")
+        self.assertIn("two-stage", why)
+        # The two-stage form of the same degree is the supported combination.
+        ts = _dc_replace(spec, two_stage=True)
+        ok_ts, why_ts = is_valid_wgrad_spec(ts, arch=GPU_ARCH)
+        self.assertTrue(ok_ts, why_ts)
+
+    def test_group_merge_with_two_stage_split_k(self):
+        # The combination that matters: merging widens the loads, split-K keeps
+        # the grid full. Runs through the two-stage workspace epilogue, whose
+        # store predicate carries the diagonal mask.
+        for gm in (2, 4, 8):
+            for spk in (4, 8):
+                with self.subTest(group_merge=gm, split_k=spk):
+                    ok, why = _check_two_stage(
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        groups=64,
+                        split_k=spk,
+                        group_merge=gm,
+                        tile_m=32,
+                        tile_n=128,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        seed=70 + gm,
+                    )
+                    self.assertTrue(ok, why)
+
+    def test_group_merge_equals_group_count(self):
+        # grid_groups == 1: the merged problem has a single group. Before the
+        # grouped path was forced on for merged specs this raised
+        # UnboundLocalError rather than building.
+        shape = _Shape(
+            "3x3_dw_N2H12W12C8K8",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=8,
+            K=8,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=8,
+        )
+        ok, why = _run_one(
+            GPU_ARCH,
+            shape,
+            "bf16",
+            "mem",
+            "default",
+            split_k=1,
+            lds_k_outer=True,
+            warp_tile_mn=16,
+            tile_k=32,
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+        )
+        _assert_case_ran(self, ok, why)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@
  */
 #include "rocke/instance_conv_implicit_gemm_wgrad.h"
 
+#include <cstdint> /* int64_t */
 #include <cstdio> /* snprintf */
 #include <cstring> /* strcmp, memset, memcpy */
 
@@ -371,24 +372,73 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
 
         /* For fp16/bf16 output the packed atomic writes pairs of elements via
-         * global_atomic_add_pk_f16/bf16.  Each pair spans two adjacent C
-         * positions within one (y,x) filter position.  An odd C means the last
-         * element of a row has no partner and the pair straddles a filter-position
-         * boundary, producing a wrong-geometry atomic.
-         * Matches Python is_valid_wgrad_spec: "requires even C". */
+         * global_atomic_add_pk_f16/bf16.  The pair is addressed as a flat
+         * `m * wg_N + n` element index with n rounded down to even, so it is
+         * dword-aligned iff the dW row length wg_N = Z*Y*X*(C/groups) is even.
+         *
+         * Two corrections to the previous form of this gate, both mirrored from
+         * Python is_valid_wgrad_spec / WgradConvSpec.validate():
+         *   - it tested the dense problem.C, but the dW row is per-group, so on
+         *     any grouped conv it disagreed with Python (which tests cpg);
+         *   - it did not exempt the two-stage path, which stores f32 to a
+         *     workspace and emits no atomic at all.
+         * The local per-group computation is deliberate: the shared
+         * rocke_wgrad_conv_spec_wg_N() helper still returns the dense Z*Y*X*C
+         * and is used for workspace sizing, so it is not interchangeable here. */
+        const bool effective_two_stage_gate = (s->two_stage || s->force_deterministic) && sk > 1;
         const char* dt = s->dtype_d ? s->dtype_d : "fp16";
-        if(strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0)
+        if(!effective_two_stage_gate && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
         {
-            if(s->problem.C % 2 != 0)
+            const int groups_v = s->problem.groups > 0 ? s->problem.groups : 1;
+            const int cpg_v = s->problem.C / groups_v;
+            const int z_v = s->problem.is_3d ? s->problem.Z : 1;
+            /* 64-bit: every factor is an int from the problem description, so a
+             * 32-bit product is UB on a pathological shape even though no real
+             * conv reaches it. The comparison below only needs the parity. */
+            const int64_t wg_N_v = (int64_t)z_v * s->problem.Y * s->problem.X * cpg_v;
+
+            /* The packed atomic needs BOTH halves of "can this problem form
+             * pairs at all", mirroring Python wgrad_atomic_epilogue_available():
+             *   - an even dW row length wg_N = Z*Y*X*(C/groups), so the flat
+             *     `m * wg_N + n` pair index stays dword-aligned; and
+             *   - an even store-vector width, because the epilogue emits sv/2
+             *     pairs per thread and sv == 1 (what cpg == 1 yields) leaves no
+             *     partner.
+             * Checking only wg_N admits a spec that CShuffleEpilogue::atomic_store
+             * then rejects -- the same admits/build split this gate exists to
+             * close. store_vec mirrors default_vector_sizes(..., split_k=1):
+             * widest of 8/4/2/1 dividing the channel run (per-group when grouped). */
+            int store_vec;
+            if(s->has_vector_size_c)
+            {
+                store_vec = s->vector_size_c;
+            }
+            else
+            {
+                /* vec_c is sized by the C run only (dW's last dim is the C axis). */
+                const int vc_c = (s->problem.groups > 1) ? cpg_v : s->problem.C;
+                store_vec = (vc_c % 8 == 0) ? 8 : (vc_c % 4 == 0) ? 4 : (vc_c % 2 == 0) ? 2 : 1;
+            }
+
+            if(wg_N_v % 2 != 0 || store_vec % 2 != 0)
             {
                 if(reason && reason_cap)
                     snprintf(reason,
                              reason_cap,
-                             "split_k atomic with dtype_d=%s requires even C "
-                             "(packed <2 x dtype> atomic pairs must stay within one filter "
-                             "position); got C=%d",
+                             "split_k atomic with dtype_d=%s requires an even dW row length "
+                             "wg_N=Z*Y*X*(C/groups) and an even store-vector width (packed "
+                             "<2 x dtype> atomic pairs are dword-aligned only on an even row, "
+                             "and sv=1 leaves no partner); got wg_N=%lld, store_vec=%d "
+                             "(Z=%d, Y=%d, X=%d, cpg=%d). Use two_stage=true (or "
+                             "force_deterministic=true) to reach split-K via the f32 "
+                             "workspace path, which emits no atomics.",
                              dt,
-                             s->problem.C);
+                             (long long)wg_N_v,
+                             store_vec,
+                             z_v,
+                             s->problem.Y,
+                             s->problem.X,
+                             cpg_v);
                 return false;
             }
         }
@@ -406,7 +456,11 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
      * Matches Python is_valid_wgrad_spec / validate(): _needs_atomic guard. */
     if(sk > 1 || sk == 0)
     {
-        bool effective_two_stage_v = s->two_stage || (s->force_deterministic && sk > 1);
+        /* The `sk > 1` term applies to two_stage as well, not just to
+         * force_deterministic: the builder computes
+         * is_two_stage = split_k > 1 && two_stage, so at sk == 0 a two_stage
+         * spec still lands on the atomic epilogue and must stay gated. */
+        bool effective_two_stage_v = (s->two_stage || s->force_deterministic) && sk > 1;
         if(!effective_two_stage_v)
         {
             const char* dt = s->dtype_d ? s->dtype_d : "fp16";
@@ -435,14 +489,13 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
     /* split_k == 0 puts the split degree in a kernel argument, so the K-slice
      * length is unknown at build time; the async and unrolled k-loops both need
      * a compile-time trip count. Mirrors the Python validator. */
-    if(s->split_k == 0
-       && (s->async_dma || s->unroll_k || (s->pipeline && strcmp(s->pipeline, "basic") == 0)))
+    if(s->split_k == 0 && (s->async_dma || s->unroll_k))
     {
         if(reason && reason_cap)
             snprintf(reason,
                      reason_cap,
                      "wgrad split_k=0 (runtime degree) is incompatible with "
-                     "async_dma/unroll_k/pipeline='basic': those pipelines need a "
+                     "async_dma/unroll_k: those pipelines need a "
                      "compile-time iteration count. Use a fixed split_k >= 1.");
         return false;
     }
@@ -516,34 +569,26 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         return false;
     }
 
-    /* Both loops are unrolled at build time, one full load+mfma body per K
-     * iteration, so a deep reduction explodes compile time and code size. A
-     * build-practicality bound, not a hardware one. This used to guard 'basic'
-     * only, which left async uncapped and let a low split-K degree unroll five
-     * figures of bodies into one kernel. Mirrors Python. */
+    /* async_dma is Python-unrolled; a deep reduction explodes compile time.
+     * Mirrors Python is_valid_wgrad_spec. */
+    if(s->async_dma)
     {
-        const bool is_basic = s->pipeline && strcmp(s->pipeline, "basic") == 0;
-        if(is_basic || s->async_dma)
+        const int spk = (s->split_k > 1) ? s->split_k : 1;
+        const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
+        const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
+        if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
         {
-            const char* label = is_basic ? "pipeline='basic'" : "async_dma";
-            const int spk = (s->split_k > 1) ? s->split_k : 1;
-            const int slice_k = rocke_wgrad_conv_spec_wg_K_padded(s) / spk;
-            const int k_iters = (slice_k + s->tile_k - 1) / s->tile_k;
-            if(k_iters > ROCKE_MAX_UNROLLED_K_ITERS)
-            {
-                if(reason && reason_cap)
-                    snprintf(reason,
-                             reason_cap,
-                             "%s would unroll to %d K iterations "
-                             "(slice_k=%d, tile_k=%d), over the %d limit; "
-                             "raise split_k or tile_k",
-                             label,
-                             k_iters,
-                             slice_k,
-                             s->tile_k,
-                             ROCKE_MAX_UNROLLED_K_ITERS);
-                return false;
-            }
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "async_dma would unroll to %d K iterations "
+                         "(slice_k=%d, tile_k=%d), over the %d limit; "
+                         "raise split_k or tile_k",
+                         k_iters,
+                         slice_k,
+                         s->tile_k,
+                         ROCKE_MAX_UNROLLED_K_ITERS);
+            return false;
         }
     }
 
@@ -1910,12 +1955,16 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->kloop_k_lo = k_lo;
     /* Python: slice_k = wg_K if k_hi is None else wg_K_padded() // split_k
      *         K_iters = ceil(slice_k / block_k)
-     * k_hi is None exactly when split_k == 1. */
+     * k_hi is None exactly when split_k == 1.
+     * split_k == 0 (runtime degree): the trip count is unknown at build time;
+     * kloop_simple uses c_K_gemm (the runtime upper bound) directly via
+     * scf_for_iter so kloop_num_iters is not consulted -- leave it 0. */
     {
         const int wgk = rocke_wgrad_conv_spec_wg_K(spec);
-        const int slice_k
-            = (k_hi_v == NULL) ? wgk : (rocke_wgrad_conv_spec_wg_K_padded(spec) / spec->split_k);
-        ctx->kloop_num_iters = (slice_k + ctx->block_k - 1) / ctx->block_k;
+        const int slice_k = (k_hi_v == NULL) ? wgk
+                            : (split_k == 0) ? 0 /* runtime: no static trip count */
+                                             : (rocke_wgrad_conv_spec_wg_K_padded(spec) / split_k);
+        ctx->kloop_num_iters = (slice_k > 0) ? (slice_k + ctx->block_k - 1) / ctx->block_k : 0;
     }
 
     /* Chiplet swizzle */
@@ -2434,8 +2483,6 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     /* --- K-loop --- */
     if(spec->unroll_k)
         rocke_conv_emit_kloop_unroll(&ctx);
-    else if(spec->pipeline && strcmp(spec->pipeline, "basic") == 0)
-        rocke_conv_emit_kloop_basic(&ctx);
     else if(!spec->async_dma)
         rocke_conv_emit_kloop_simple(&ctx);
     else
