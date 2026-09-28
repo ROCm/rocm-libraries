@@ -18,17 +18,39 @@ Log handling
    before it.  A block with no "[==========] ... ran." line before it, JSON
    that does not parse, schema_version != 1, an invalid run arch, platform
    or engine, or counters_consistent != true is rejected whole.
+3. Each unclaimed_support entry becomes one cell per case: (bundle, case,
+   arch, platform, engine).  "reached: verified" means the comparison ran,
+   not that it passed, so a cell whose gtest FAILED or was SKIPPED in the
+   same stream is dropped.  So is a cell whose reached depth is below its
+   required depth, or either depth is missing.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Set
+from pathlib import PurePosixPath
+from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set
 
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
+BUNDLE_PREFIX = "integration-test-bundles/"
+
+# VerificationDepth in src/harness/bundle/VerificationOutcome.hpp.
+DEPTHS = {
+    "not-reached": 0,
+    "applicable": 1,
+    "buildable": 2,
+    "executed": 3,
+    "verified": 4,
+}
+
+DROP_NOT_PASSED = "gtest failed or skipped"
+DROP_SHORTFALL = "reached below required"
+DROP_NO_DEPTH = "depth missing or unknown"
+DROP_BAD_PATH = "bundle outside integration-test-bundles/"
 
 _TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -136,3 +158,130 @@ def extract_blocks(text: str, log: str = "") -> List[Block]:
             blocks.append(block)
             state = _StreamState()
     return blocks
+
+
+class Cell(NamedTuple):
+    """One claim a sidecar writer may add."""
+
+    bundle: str
+    case: str
+    arch: str
+    platform: str
+    engine: str
+
+    @property
+    def lane(self) -> str:
+        return f"{self.arch}/{self.platform}"
+
+
+@dataclass
+class BlockCells:
+    kept: Set[Cell] = field(default_factory=set)
+    dropped: Dict[Cell, str] = field(default_factory=dict)  # cell -> DROP_* reason
+    claim_failures: List[dict] = field(default_factory=list)
+    failed_in_use: List[dict] = field(default_factory=list)
+
+    @property
+    def drops(self) -> Counter:
+        return Counter(self.dropped.values())
+
+
+class MalformedSummary(ValueError):
+    pass
+
+
+def _sanitize(text: str) -> str:
+    """sanitizeForGtest in src/harness/bundle/BundleDiscovery.hpp, byte by byte."""
+    return "".join(
+        chr(b) if chr(b).isascii() and (chr(b).isalnum() or chr(b) == "_") else "_"
+        for b in text.encode("utf-8")
+    )
+
+
+def gtest_name(bundle: str, case: str) -> Optional[str]:
+    """The "Suite.Test" name the harness registers for a bundle graph.
+
+    Suite: the bundle's directories under integration-test-bundles/, each
+    sanitized, joined with "_".  Test: the sanitized case id for a sweep,
+    else the sanitized file stem.  None when the path is not under
+    integration-test-bundles/.
+    """
+    if not bundle.startswith(BUNDLE_PREFIX):
+        return None
+    parts = PurePosixPath(bundle[len(BUNDLE_PREFIX) :]).parts
+    if len(parts) < 2 or any(p in ("..", ".") for p in parts):
+        return None
+    suite = "_".join(_sanitize(p) for p in parts[:-1])
+    test = _sanitize(case) if case else _sanitize(PurePosixPath(parts[-1]).stem)
+    return f"{suite}.{test}"
+
+
+def _lane_of(entry: dict, run: dict) -> Dict[str, str]:
+    """An entry's engine/arch/platform: its own when present, else the run's."""
+    lane = {}
+    for key in ("engine", "arch", "platform"):
+        value = entry.get(key, run[key])
+        if not isinstance(value, str) or not value:
+            raise MalformedSummary(f"entry {key} {value!r} is not a string")
+        lane[key] = value
+    if not _ARCH.match(lane["arch"]):
+        raise MalformedSummary(f"entry arch {lane['arch']!r} is not a gfx target")
+    if lane["platform"] not in VALID_PLATFORMS:
+        raise MalformedSummary(f"entry platform {lane['platform']!r} is invalid")
+    return lane
+
+
+def _entries(summary: dict, key: str) -> List[dict]:
+    entries = summary.get(key)
+    if not isinstance(entries, list) or not all(
+        isinstance(e, dict) and isinstance(e.get("bundle"), str) for e in entries
+    ):
+        raise MalformedSummary(f"{key} is not a list of entries with a bundle")
+    return entries
+
+
+def _with_lane(entry: dict, run: dict) -> dict:
+    return {**entry, **_lane_of(entry, run)}
+
+
+def block_cells(block: Block) -> BlockCells:
+    """Splits a parsed block's unclaimed_support into kept and dropped cells."""
+    summary = block.summary
+    if summary is None:
+        raise ValueError("block_cells needs a parsed block")
+    run = summary["run"]
+    result = BlockCells()
+
+    for entry in _entries(summary, "unclaimed_support"):
+        cases = entry.get("cases", [""])
+        if not isinstance(cases, list) or not all(isinstance(c, str) for c in cases):
+            raise MalformedSummary(f"cases of {entry['bundle']} is not a string list")
+        lane = _lane_of(entry, run)
+        reached = DEPTHS.get(entry.get("reached"))
+        required = DEPTHS.get(entry.get("required"))
+
+        for case in cases:
+            cell = Cell(
+                entry["bundle"], case, lane["arch"], lane["platform"], lane["engine"]
+            )
+            name = gtest_name(cell.bundle, case)
+            if name is None:
+                reason = DROP_BAD_PATH
+            elif reached is None or required is None:
+                reason = DROP_NO_DEPTH
+            elif reached < required:
+                reason = DROP_SHORTFALL
+            elif name in block.not_passed:
+                reason = DROP_NOT_PASSED
+            else:
+                result.kept.add(cell)
+                continue
+            result.dropped.setdefault(cell, reason)
+
+    result.claim_failures = [
+        _with_lane(e, run) for e in _entries(summary, "claim_failures")
+    ]
+    result.failed_in_use = [
+        _with_lane(e, run) for e in _entries(summary, "failed_in_use")
+    ]
+    return result

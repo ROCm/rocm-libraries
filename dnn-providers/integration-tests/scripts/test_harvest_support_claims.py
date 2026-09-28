@@ -11,7 +11,18 @@ from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from harvest_support_claims import extract_blocks, split_streams
+from harvest_support_claims import (
+    DROP_BAD_PATH,
+    DROP_NO_DEPTH,
+    DROP_NOT_PASSED,
+    DROP_SHORTFALL,
+    Cell,
+    MalformedSummary,
+    block_cells,
+    extract_blocks,
+    gtest_name,
+    split_streams,
+)
 
 _TS = "2026-09-28T05:47:38.5917461Z "
 _SWEEP = "integration-test-bundles/quick/ConvolutionFwdPointwise/Default/sweep.json"
@@ -231,6 +242,173 @@ class TestRejectBlocks(unittest.TestCase):
         self.assertIn(
             "counters_consistent", self._error(_summary(counters_consistent=False))
         )
+
+
+# ---------------------------------------------------------------------------
+# Gtest names
+# ---------------------------------------------------------------------------
+
+
+class TestGtestName(unittest.TestCase):
+    def test_sweep_case(self) -> None:
+        self.assertEqual(
+            gtest_name(_SWEEP, "2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1"),
+            "quick_ConvolutionFwdPointwise_Default"
+            ".2_8_3_3_fp32_nchw_dil1x1_postpad1x1_prepad1x1",
+        )
+
+    def test_single_graph(self) -> None:
+        self.assertEqual(
+            gtest_name(_SINGLE, ""),
+            "quick_BatchnormFwdInference_nchw_fp32_Small.Small",
+        )
+
+    def test_segments_and_case_are_sanitized(self) -> None:
+        self.assertEqual(
+            gtest_name("integration-test-bundles/quick/Op-A/b.c/sweep.json", "x-1.5"),
+            "quick_Op_A_b_c.x_1_5",
+        )
+
+    def test_non_ascii_becomes_one_underscore_per_byte(self) -> None:
+        self.assertEqual(
+            gtest_name("integration-test-bundles/quick/Op/\u00e9.json", ""),
+            "quick_Op.__",
+        )
+
+    def test_paths_outside_bundle_root_have_no_name(self) -> None:
+        for bundle in (
+            "/abs/integration-test-bundles/quick/A/B.json",
+            "integration-test-bundles/B.json",
+            "integration-test-bundles/quick/../A/B.json",
+        ):
+            with self.subTest(bundle=bundle):
+                self.assertIsNone(gtest_name(bundle, ""))
+
+
+# ---------------------------------------------------------------------------
+# Cells
+# ---------------------------------------------------------------------------
+
+
+def _block(summary: dict, **kwargs: object):
+    (block,) = extract_blocks(_log((23, _gtest_output(summary, **kwargs))))
+    assert block.error is None, block.error
+    return block
+
+
+def _cell(bundle: str, case: str = "", arch: str = "gfx1030") -> Cell:
+    return Cell(bundle, case, arch, "windows", "MIOPEN_ENGINE")
+
+
+class TestBlockCells(unittest.TestCase):
+    def test_one_cell_per_case_and_per_single_graph(self) -> None:
+        cells = block_cells(_block(_summary()))
+        self.assertEqual(
+            cells.kept,
+            {
+                _cell(_SWEEP, "2_8_3_3_fp32_nchw"),
+                _cell(_SWEEP, "2_8_3_3_fp16_nchw"),
+                _cell(_SINGLE),
+            },
+        )
+        self.assertEqual(cells.dropped, {})
+        self.assertEqual(cells.kept.pop().lane, "gfx1030/windows")
+
+    def test_failed_sweep_case_is_dropped(self) -> None:
+        failed = "quick_ConvolutionFwdPointwise_Default.2_8_3_3_fp32_nchw"
+        cells = block_cells(_block(_summary(), failed=[failed]))
+        self.assertEqual(
+            cells.dropped, {_cell(_SWEEP, "2_8_3_3_fp32_nchw"): DROP_NOT_PASSED}
+        )
+        self.assertEqual(cells.drops, {DROP_NOT_PASSED: 1})
+        self.assertIn(_cell(_SWEEP, "2_8_3_3_fp16_nchw"), cells.kept)
+
+    def test_skipped_single_graph_is_dropped(self) -> None:
+        skipped = "quick_BatchnormFwdInference_nchw_fp32_Small.Small"
+        cells = block_cells(_block(_summary(), skipped=[skipped]))
+        self.assertEqual(cells.dropped, {_cell(_SINGLE): DROP_NOT_PASSED})
+        self.assertEqual(cells.drops, {DROP_NOT_PASSED: 1})
+
+    def test_depth_shortfall_and_missing_depth_are_dropped(self) -> None:
+        summary = _summary(
+            unclaimed_support=[
+                {"bundle": _SINGLE, "reached": "executed", "required": "verified"},
+                {"bundle": _SWEEP, "reached": "verified", "cases": ["a"]},
+                {
+                    "bundle": _SWEEP,
+                    "reached": "unknown",
+                    "required": "applicable",
+                    "cases": ["b"],
+                },
+            ]
+        )
+        cells = block_cells(_block(summary))
+        self.assertEqual(cells.kept, set())
+        self.assertEqual(cells.drops, {DROP_SHORTFALL: 1, DROP_NO_DEPTH: 2})
+
+    def test_reached_above_required_is_kept(self) -> None:
+        summary = _summary(
+            unclaimed_support=[
+                {"bundle": _SINGLE, "reached": "verified", "required": "executed"}
+            ]
+        )
+        self.assertEqual(block_cells(_block(summary)).kept, {_cell(_SINGLE)})
+
+    def test_bundle_outside_root_is_dropped(self) -> None:
+        summary = _summary(
+            unclaimed_support=[
+                {
+                    "bundle": "/abs/A/B.json",
+                    "reached": "verified",
+                    "required": "verified",
+                }
+            ]
+        )
+        self.assertEqual(block_cells(_block(summary)).drops, {DROP_BAD_PATH: 1})
+
+    def test_entry_lane_overrides_run(self) -> None:
+        summary = _summary(
+            unclaimed_support=[
+                {
+                    "bundle": _SINGLE,
+                    "arch": "gfx942",
+                    "reached": "verified",
+                    "required": "verified",
+                }
+            ]
+        )
+        self.assertEqual(
+            block_cells(_block(summary)).kept, {_cell(_SINGLE, arch="gfx942")}
+        )
+
+    def test_malformed_entries_raise(self) -> None:
+        bad_entries = (
+            [{"bundle": _SINGLE, "arch": "unknown", "reached": "verified"}],
+            [{"bundle": _SWEEP, "cases": "a", "reached": "verified"}],
+            [{"reached": "verified"}],
+            "not a list",
+        )
+        for entries in bad_entries:
+            with self.subTest(entries=entries):
+                with self.assertRaises(MalformedSummary):
+                    block_cells(_block(_summary(unclaimed_support=entries)))
+
+    def test_failures_are_carried_with_their_lane(self) -> None:
+        failure = {
+            "bundle": _SINGLE,
+            "verdict": "broken",
+            "reason": "no engine",
+            "reached": "not-reached",
+            "required": "verified",
+        }
+        cells = block_cells(
+            _block(_summary(claim_failures=[failure], failed_in_use=[failure]))
+        )
+        expected = dict(
+            failure, arch="gfx1030", platform="windows", engine="MIOPEN_ENGINE"
+        )
+        self.assertEqual(cells.claim_failures, [expected])
+        self.assertEqual(cells.failed_in_use, [expected])
 
 
 if __name__ == "__main__":
