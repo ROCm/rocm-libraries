@@ -183,14 +183,6 @@ static void hipblaslt_set_listener()
     listeners.Append(listener);
 }
 
-static int hipblaslt_version()
-{
-    int                    version;
-    hipblaslt_local_handle handle;
-    hipblasLtGetVersion(handle, &version);
-    return version;
-}
-
 static void hipblaslt_print_usage_warning()
 {
     std::string warning(

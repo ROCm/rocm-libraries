@@ -2189,6 +2189,18 @@ class GlobalWriteBatchWriter:
             assert 0, "Unsupported gradient type"
 
       scaleDModule = Module("Empty scaleDModule")
+      if self.kernel["ProblemType"]["OutputAmaxD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+        # Amax describes the computed result before ScaleD and destination
+        # conversion. Accumulate every scalar, including packed-store lanes,
+        # even when the caller does not use C/D scaling.
+        for vi in range(0, self.gwvw):
+          vgprIdx = self.ss.elementSumIdx[elementIdx] + vi - self.parentWriter.states.c.startVgprValu
+          if self.edge:
+            activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=vgpr(addrCalc.addrDVgpr), comment=""))
+            activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Zero out-of-bounds amax input"))
+            activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
+          else:
+            activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
       if self.kernel["ProblemType"]["UseScaleCD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         for vi in range(0, self.gwvw):
           sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
@@ -2196,13 +2208,6 @@ class GlobalWriteBatchWriter:
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             # Generate single f32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              if self.kernel["ProblemType"]["OutputAmaxD"]:
-                if self.edge:
-                  activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=(vgpr(addrCalc.addrDVgpr)), comment =""))
-                  activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Check If OOB, put zero if OOB"))
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
-                else:
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
               activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=sgpr("ScaleD"), comment="result *= ScaleD"))
             # Original packed route
             elif vi%2 == 1:

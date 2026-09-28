@@ -413,6 +413,11 @@ NB_MODULE(origami, m) {
         "Compute latency per K-complete MT wave");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("config"),
+        nanobind::arg("non_temporal_a_available") = true,
+        nanobind::arg("non_temporal_b_available") = true,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions

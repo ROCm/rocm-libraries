@@ -22,8 +22,9 @@
 #if defined(__HIPSTDPAR_INTERPOSE_ALLOC_V1__)
 #include <hip/hip_runtime.h>
 
-#if __has_include(<pthread.h>)
+#if __has_include(<pthread.h>) && __has_include(<sys/resource.h>)
     #include <pthread.h>
+    #include <sys/resource.h>
     #define __HIPSTDPAR_INTERPOSE_ALLOC_HAS_STACK_ACCESS__
 #endif
 #if __has_include(<sys/mman.h>)
@@ -97,6 +98,12 @@ inline static const bool __initialised{hipInit(0) == hipSuccess};
             if (hipGetDevice(&d_) != hipSuccess) {
                 throw ::std::runtime_error(
                     "Failed to retrieve accelerator for HIPSTDPAR");
+            }
+            if (rlimit l{}; getrlimit(RLIMIT_STACK, &l)) {
+                throw ::std::runtime_error("Failed to query stack limits.");
+            }
+            else if (l.rlim_cur == RLIM_INFINITY) { // Unlimited stack, cap it.
+                n_ = PTHREAD_STACK_MIN;
             }
             if (touch_stack_() &&
                 hipMemAdvise(ps_, n_, hipMemAdviseSetAccessedBy, d_) != hipSuccess) {

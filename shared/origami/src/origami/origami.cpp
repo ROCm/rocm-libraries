@@ -632,7 +632,9 @@ void log_config_rejection(const config_t& config, const char* reason) {
 double compute_ranked_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
-                              model_t model) {
+                              model_t model,
+                              bool non_temporal_a_available = true,
+                              bool non_temporal_b_available = true) {
   if (model == model_t::attention) {
     if (!attention::check_rf_capacity(hardware, config.mt, problem.a_dtype)) {
       log_config_rejection(config, "Register File (RF) capacity exceeded");
@@ -649,7 +651,8 @@ double compute_ranked_latency(const problem_t& problem,
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
-  return gemm::compute_total_latency(problem, hardware, config);
+  return gemm::compute_total_latency(
+      problem, hardware, config, non_temporal_a_available, non_temporal_b_available);
 }
 
 }  // namespace
@@ -670,8 +673,16 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   valid_configs.reserve(configs.size());
   invalid_configs.reserve(configs.size());
 
+  bool non_temporal_a_available = false;
+  bool non_temporal_b_available = false;
+  for (const auto& config : configs) {
+    non_temporal_a_available |= config.cache_hints_a == 4;
+    non_temporal_b_available |= config.cache_hints_b == 4;
+  }
+
   for (auto& config : configs) {
-    const double latency = compute_ranked_latency(problem, hardware, config, model);
+    const double latency = compute_ranked_latency(
+        problem, hardware, config, model, non_temporal_a_available, non_temporal_b_available);
 
     if (latency != kRejectedLatency) {
       valid_configs.push_back({latency, std::cref(config)});
