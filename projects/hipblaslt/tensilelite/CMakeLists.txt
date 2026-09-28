@@ -216,4 +216,11 @@ if(TENSILELITE_ENABLE_HOST)
     if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
         add_subdirectory(tests)
     endif()
+
+    # Also build the loader regression tests in ordinary hipBLASLt test builds:
+    # those are what the Linux shared CI lanes build and install.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+       (HIPBLASLT_BUILD_TESTING OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
+        add_subdirectory(tests/hip-loader)
+    endif()
 endif()

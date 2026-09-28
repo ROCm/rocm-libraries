@@ -133,12 +133,10 @@ namespace TensileLite
             std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
             for(auto module : m_modules)
             {
-                HIP_CHECK_PRINT(hipModuleUnload(module),
-                    [&](hipError_t error_t) {
-                        std::cerr << "hipModuleUnload failed: " << std::endl
-                                  << " error: " << hipGetErrorString(error_t) << std::endl;
-                    }
-                );
+                HIP_CHECK_PRINT(hipModuleUnload(module), [&](hipError_t error_t) {
+                    std::cerr << "hipModuleUnload failed: " << std::endl
+                              << " error: " << hipGetErrorString(error_t) << std::endl;
+                });
             }
 
             // Extra rotation copies are not recreated by recovery.
@@ -153,12 +151,10 @@ namespace TensileLite
             {
                 for(auto module : copyModules)
                 {
-                    HIP_CHECK_PRINT(hipModuleUnload(module),
-                        [&](hipError_t error_t) {
-                            std::cerr << "hipModuleUnload failed: " << std::endl
-                                      << " error: " << hipGetErrorString(error_t) << std::endl;
-                        }
-                    );
+                    HIP_CHECK_PRINT(hipModuleUnload(module), [&](hipError_t error_t) {
+                        std::cerr << "hipModuleUnload failed: " << std::endl
+                                  << " error: " << hipGetErrorString(error_t) << std::endl;
+                    });
                 }
             }
 
@@ -487,8 +483,7 @@ namespace TensileLite
             m_codeObjectDirectory  = std::move(codeObjDir);
         }
 
-        hipError_t SolutionAdapter::initializeLazyLoading(std::string arch,
-                                                          std::string codeObjDir)
+        hipError_t SolutionAdapter::initializeLazyLoading(std::string arch, std::string codeObjDir)
         {
             setLazyLoadingContext(std::move(arch), std::move(codeObjDir));
 
@@ -497,8 +492,8 @@ namespace TensileLite
             bool        loaded;
             {
                 std::lock_guard<std::mutex> guard(m_access);
-                lazyArch = m_lazyLoadArchitecture;
-                lazyDir  = m_codeObjectDirectory;
+                lazyArch                     = m_lazyLoadArchitecture;
+                lazyDir                      = m_codeObjectDirectory;
                 std::string helperKernelName = std::string("Kernels.so-000-") + lazyArch;
                 // If required code object file hasn't yet been loaded, load it now.
                 loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
@@ -512,7 +507,7 @@ namespace TensileLite
                 for(auto ver : {"", "-xnack-", "-xnack+"})
                 {
                     std::string modifiedCOName = "Kernels.so-000-" + lazyArch + ver + ".hsaco";
-                    err = loadCodeObjectFileOnce(lazyDir + modifiedCOName);
+                    err                        = loadCodeObjectFileOnce(lazyDir + modifiedCOName);
 
                     if(err == hipSuccess)
                     {
