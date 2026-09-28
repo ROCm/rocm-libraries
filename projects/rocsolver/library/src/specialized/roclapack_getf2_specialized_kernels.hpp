@@ -70,7 +70,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     T rA[DIM]; // to store this-row values
 
     // read corresponding row from global memory into local array
-#pragma unroll DIM
+#pragma unroll 4
     for(I j = 0; j < DIM; ++j)
         rA[j] = A[myrow + j * lda];
 
@@ -137,7 +137,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         ipiv[myrow] = mypiv + offset;
     if(myrow == 0 && *info == 0 && myinfo > 0)
         *info = myinfo + offset;
-#pragma unroll DIM
+#pragma unroll 4
     for(I j = 0; j < DIM; ++j)
         A[myrow + j * lda] = rA[j];
 }
@@ -179,7 +179,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     T rA[DIM]; // to store this-row values
 
     // read corresponding row from global memory into local array
-#pragma unroll DIM
+#pragma unroll 4
     for(I j = 0; j < DIM; ++j)
         rA[j] = A[myrow + j * lda];
 
@@ -217,7 +217,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
     // write results to global memory
     if(myrow == 0 && *info == 0 && myinfo > 0)
         *info = myinfo + offset;
-#pragma unroll DIM
+#pragma unroll 4
     for(I j = 0; j < DIM; ++j)
         A[myrow + j * lda] = rA[j];
 }
@@ -564,7 +564,7 @@ ROCSOLVER_KERNEL void getf2_scale_update_kernel(const I m,
         // rank update; put computed values back to global memory
         if(i < m)
         {
-#pragma unroll
+#pragma unroll 4
             for(I j = ty; j < n; j += hipBlockDim_y)
             {
                 T val = A[i + j * lda];
