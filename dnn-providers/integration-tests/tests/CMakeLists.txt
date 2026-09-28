@@ -36,6 +36,8 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuLayernormBwdPlan.cpp
     TestGpuLayernormFwdSignatureKey.cpp
     TestGpuLayernormFwdPlan.cpp
+    TestGpuMatmulSignatureKey.cpp
+    TestGpuMatmulPlan.cpp
     TestGpuSdpaFwdSignatureKey.cpp
     TestGpuSdpaFwdPlan.cpp
     TestGpuReductionSignatureKey.cpp
@@ -103,10 +105,12 @@ add_executable(hipdnn_gpu_ref_tests
     gpu-ref/TestGpuFpReferenceDgrad.cpp
     gpu-ref/TestGpuFpReferenceLayernormBwd.cpp
     gpu-ref/TestGpuFpReferenceLayernormFwd.cpp
+    gpu-ref/TestGpuFpReferenceMatmul.cpp
     gpu-ref/TestGpuFpReferenceWgrad.cpp
     gpu-ref/TestGpuFpReferenceReduction.cpp
     gpu-ref/TestGpuFpReferenceRMSNormFwd.cpp
     gpu-ref/TestGpuFpReferenceRMSNormBwd.cpp
+    gpu-ref/TestGpuFpReferenceRmsValidation.cpp
     gpu-ref/TestGpuFpReferenceValidation.cpp
     gpu-ref/TestGpuRefHipError.cpp
     gpu-ref/TestGpuRefKernelCompiler.cpp

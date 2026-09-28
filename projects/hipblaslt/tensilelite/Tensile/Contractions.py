@@ -438,20 +438,6 @@ class ProblemType:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
 
-def extractDimPredicate(cls, key, value, predicateName):
-    """
-    Extract the predicate for AssertStrideEqual*
-    Value is a dictionary
-    """
-    predicates = []
-    for pos,val in value.items():
-        if val != -1:
-            predicates.append(cls(predicateName, index=pos, value=val))
-    if len(predicates) == 1:
-        return predicates[0]
-    elif len(predicates) > 1:
-        return cls.And(predicates)
-
 class TaskPredicate(Properties.Predicate):
     @classmethod
     def FromOriginalKeyPair(cls, pair):
