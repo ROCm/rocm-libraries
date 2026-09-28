@@ -10,7 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as _dataclass_fields
+from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
 from rocke.core.ir import BF16, F16
@@ -73,6 +73,8 @@ class AttentionDenseSpec:
     block_size: int = 0
     num_kv_blocks: int = 0
     use_sinks: bool = False
+    # Appended for positional compatibility with existing concrete specs.
+    causal_bottom_right: bool = field(default=False, kw_only=True)
 
     def supported_persist_decodes(self) -> frozenset[str]:
         """Decode values the concrete kernel type can actually emit."""
@@ -97,13 +99,22 @@ class AttentionDenseSpec:
                 "elements (16 bytes) so the K group pitch stays "
                 f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
             )
+        if self.causal_bottom_right:
+            if not self.causal:
+                raise ValueError("causal_bottom_right requires causal=True")
+            if self.seqlen_q > self.seqlen_kv:
+                raise ValueError(
+                    "causal_bottom_right requires seqlen_q <= seqlen_kv, got "
+                    f"{self.seqlen_q} > {self.seqlen_kv}"
+                )
 
         if self.ragged:
             if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
                 raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv:
+            if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
                 raise ValueError(
-                    "ragged is self-attention only (seqlen_q == seqlen_kv), got "
+                    "ragged is self-attention only (seqlen_q == seqlen_kv) unless "
+                    "causal_bottom_right is set, got "
                     f"{self.seqlen_q} != {self.seqlen_kv}"
                 )
             if self.varlen:
@@ -294,6 +305,8 @@ class AttentionDenseSpec:
         parts.extend(self._layout_name_parts())
         parts.extend(self._shape_name_parts())
         parts.append("causal" if self.causal else "full")
+        if self.causal_bottom_right:
+            parts.append("br")
         if self.ragged:
             parts.append("ragged")
         if self.sliding_window > 0:

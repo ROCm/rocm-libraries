@@ -6755,11 +6755,18 @@ class KernelWriterAssembly(KernelWriter):
       #---
       imod.addComment1("addr += (StaggerUIter) * GlobalReadIncs%s+%u"% (tc, self.states.unrollIdx))
 
+      # GSU.graIncrements negates GlobalReadIncs when the unroll dimension is
+      # mirrored, so that operand is signed there and unsigned everywhere else.
+      unrollMirrored = tc in ('A', 'B', 'Metadata', 'MXSA', 'MXSB') \
+          and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] \
+              in kernel["ProblemType"]["MirrorDims%s"%tc]
+      widenIncs = self.s_mul_i64_i32 if unrollMirrored else self.s_mul_u64_u32
+
       # Calculate the stagger byte offset
-      imod.addModuleAsFlatItems(self.s_mul_i64_i32(
+      imod.addModuleAsFlatItems(widenIncs(
                 sgpr(staggerTmp), sgpr(staggerTmp+1), \
                 sgpr("StaggerUIter"), sgpr("GlobalReadIncs%s+%u"%(tc, self.states.unrollIdx)), \
-                " stagger byte offset"))
+                comment=" stagger byte offset"))
 
       # Apply TDM stagger now while staggerTmp still holds StaggerUIter * GlobalReadIncs.
       # The Sparse and PGR>=3 paths below both reuse staggerTmp for other computations.
@@ -6768,9 +6775,9 @@ class KernelWriterAssembly(KernelWriter):
 
       # Amount of bytes to add to get back to start.
       # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-      imod.addModuleAsFlatItems(self.s_mul_i64_i32(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
+      imod.addModuleAsFlatItems(widenIncs(sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
                 self.loopCounter(kernel, self.states.unrollIdx), sgpr("GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)), \
-                "Number of bytes accessed by the unroll loop"))
+                comment="Number of bytes accessed by the unroll loop"))
 
       # TODO: put this asmCaps into rocisa SSubU64
       if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"]:
@@ -6804,20 +6811,28 @@ class KernelWriterAssembly(KernelWriter):
         imod.addComment1("SRDs += (StaggerUIter) * GlobalReadIncsMetadata")
 
         tc = "Metadata"
+        # Same reasoning as widenIncs above, but evaluated against this tensor's own
+        # mirror list, because the block has just reassigned tc. The metadata
+        # increment is a byte stride like the A/B one, so widening it signed
+        # sign-extends it past 2^31 in exactly the same way.
+        metadataMirrored = kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] \
+            in kernel["ProblemType"]["MirrorDims%s"%tc]
+        widenMetaIncs = self.s_mul_i64_i32 if metadataMirrored else self.s_mul_u64_u32
+
         if kernel["DirectToVgprSparseMetadata"]:
           incSparse = incSparseSgpr
           imod.add(self.calculateIncrementMetadata(kernel, incSparse))
         else:
           incSparse = "GlobalReadIncsMetadata+%u"%(self.states.unrollIdx)
-        imod.addModuleAsFlatItems(self.s_mul_i64_i32( \
+        imod.addModuleAsFlatItems(widenMetaIncs( \
                         sgpr(staggerTmp), sgpr(staggerTmp+1), \
-                        sgpr("StaggerUIter"), sgpr(incSparse), " stagger byte offset of metadata"))
+                        sgpr("StaggerUIter"), sgpr(incSparse), comment=" stagger byte offset of metadata"))
         # Amount of bytes to add to get back to start.
         # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
-        imod.addModuleAsFlatItems(self.s_mul_i64_i32( \
+        imod.addModuleAsFlatItems(widenMetaIncs( \
                   sgpr("WrapU%s+0"%tc), sgpr("WrapU%s+1"%tc), \
                   self.loopCounter(kernel, self.states.unrollIdx), sgpr(incSparse), \
-                  "Number of bytes accessed by the unroll loop"))
+                  comment="Number of bytes accessed by the unroll loop"))
 
         imod.add(SSubU32(sgpr("WrapU%s+0"%tc), sgpr(incSparse), sgpr("WrapU%s+0"%tc), " remove one iteration"))
         imod.add(SSubBU32(sgpr("WrapU%s+1"%tc), 0, sgpr("WrapU%s+1"%tc), " remove one iteration"))
