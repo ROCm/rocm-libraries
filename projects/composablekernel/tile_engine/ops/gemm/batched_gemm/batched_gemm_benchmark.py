@@ -6,12 +6,32 @@ import json
 import subprocess
 import argparse
 import csv
+import itertools
 import time
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from trait_parse import split_trait  # noqa: E402
+
+
+def extract_result_json(text: str) -> Optional[Dict]:
+    """Return the kernel result object from benchmark stdout.
+
+    With -verify on, the verification messages are printed to stdout next to
+    the JSON, so parse the first object that carries a perf_result.
+    """
+    decoder = json.JSONDecoder()
+    pos = text.find("{")
+    while pos != -1:
+        try:
+            obj, _ = decoder.raw_decode(text, pos)
+            if isinstance(obj, dict) and "perf_result" in obj:
+                return obj
+        except json.JSONDecodeError:
+            pass
+        pos = text.find("{", pos + 1)
+    return None
 
 
 class GemmBenchmark:
@@ -245,8 +265,9 @@ class GemmBenchmark:
             with open(json_file, "r") as f:
                 content = f.read().strip()
 
-            # Parse the JSON directly since executables produce clean JSON
-            data = json.loads(content)
+            data = extract_result_json(content)
+            if data is None:
+                raise json.JSONDecodeError("no result object", content, 0)
 
             # Return the complete JSON data as-is, just add some convenience fields
             result = data.copy()
@@ -276,6 +297,7 @@ class GemmBenchmark:
         k: int,
         split_k: int = 1,
         verify: int = 0,
+        batch_count: int = 8,
         warmup: int = 50,
         repeat: int = 100,
         flush_cache: bool = True,
@@ -289,6 +311,7 @@ class GemmBenchmark:
             "n": n,
             "k": k,
             "split_k": split_k,
+            "batch_count": batch_count,
             "verify": verify,
             "warmup": warmup,
             "repeat": repeat,
@@ -296,7 +319,9 @@ class GemmBenchmark:
             "rotating_count": rotating_count,
         }
 
-        print(f"\nBenchmarking M={m}, N={n}, K={k}, split_k={split_k}")
+        print(
+            f"\nBenchmarking batch_count={batch_count}, M={m}, N={n}, K={k}, split_k={split_k}"
+        )
 
         for kernel_path in kernels:
             kernel_info = self.extract_kernel_info(kernel_path)
@@ -357,8 +382,9 @@ class GemmBenchmark:
 
     def benchmark_sweep(
         self,
-        problem_sizes: List[Tuple[int, int, int]],
+        problem_sizes: List[Tuple[int, ...]],
         split_k_values: List[int] = [1],
+        batch_counts: List[int] = [8],
         verify: bool = False,
         warmup: int = 50,
         repeat: int = 100,
@@ -374,31 +400,39 @@ class GemmBenchmark:
         all_results = []
         best_kernels = {}
 
-        for m, n, k in problem_sizes:
-            for split_k in split_k_values:
-                results = self.benchmark_problem_size(
-                    kernels,
-                    m,
-                    n,
-                    k,
-                    split_k,
-                    verify=2 if verify else 0,
-                    warmup=warmup,
-                    repeat=repeat,
-                    flush_cache=flush_cache,
-                    rotating_count=rotating_count,
+        # An explicit B,M,N,K problem pins its batch count; M,N,K sweeps batch_counts
+        problems = [
+            p if len(p) == 4 else (b, *p)
+            for p in problem_sizes
+            for b in ([None] if len(p) == 4 else batch_counts)
+        ]
+        for (batch_count, m, n, k), split_k in itertools.product(
+            problems, split_k_values
+        ):
+            results = self.benchmark_problem_size(
+                kernels,
+                m,
+                n,
+                k,
+                split_k,
+                verify=2 if verify else 0,
+                batch_count=batch_count,
+                warmup=warmup,
+                repeat=repeat,
+                flush_cache=flush_cache,
+                rotating_count=rotating_count,
+            )
+
+            all_results.extend(results)
+
+            # Find best kernel for this configuration
+            best = self.find_best_kernel(results)
+            if best:
+                key = f"b{batch_count}_m{m}_n{n}_k{k}_splitk{split_k}"
+                best_kernels[key] = best
+                print(
+                    f"Best for {key}: {best['name']} ({best['tflops']:.2f} TFLOPS, {best['bandwidth_gb_s']:.2f} GB/s, {best['time_ms']:.2f}ms)"
                 )
-
-                all_results.extend(results)
-
-                # Find best kernel for this configuration
-                best = self.find_best_kernel(results)
-                if best:
-                    key = f"m{m}_n{n}_k{k}_splitk{split_k}"
-                    best_kernels[key] = best
-                    print(
-                        f"Best for {key}: {best['name']} ({best['tflops']:.2f} TFLOPS, {best['bandwidth_gb_s']:.2f} GB/s, {best['time_ms']:.2f}ms)"
-                    )
 
         self.results = all_results
         return best_kernels
@@ -594,7 +628,14 @@ def main():
         "--problem-sizes",
         nargs="+",
         default=["1024,1024,1024", "2048,2048,2048", "4096,4096,4096"],
-        help="Problem sizes as M,N,K tuples",
+        help="Problem sizes as M,N,K (swept over --batch-count) or B,M,N,K tuples",
+    )
+    parser.add_argument(
+        "--batch-count",
+        nargs="+",
+        type=int,
+        default=[8],
+        help="Batch counts for M,N,K problem sizes (default: 8)",
     )
     parser.add_argument(
         "--split-k", nargs="+", type=int, default=[1], help="Split-K values to test"
@@ -647,8 +688,10 @@ def main():
     problem_sizes = []
     for size_str in args.problem_sizes:
         try:
-            m, n, k = map(int, size_str.split(","))
-            problem_sizes.append((m, n, k))
+            dims = tuple(map(int, size_str.split(",")))
+            if len(dims) not in (3, 4):
+                raise ValueError
+            problem_sizes.append(dims)
         except ValueError:
             print(f"Invalid problem size: {size_str}")
             return 1
@@ -663,6 +706,7 @@ def main():
     best_kernels = benchmark.benchmark_sweep(
         problem_sizes=problem_sizes,
         split_k_values=args.split_k,
+        batch_counts=args.batch_count,
         verify=args.verify,
         warmup=args.warmup,
         repeat=args.repeat,

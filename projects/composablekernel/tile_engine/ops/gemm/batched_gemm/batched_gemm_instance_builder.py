@@ -34,8 +34,22 @@ def _import_split_trait():
     return trait_parse_module.split_trait
 
 
+def _import_validation_utils():
+    module_path = Path(__file__).resolve().parent.parent / "gemm_validation_utils.py"
+    spec = importlib.util.spec_from_file_location("gemm_validation_utils", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 GemmKernelBuilder = _import_gemm_kernel_builder()
 split_trait = _import_split_trait()
+_vu = _import_validation_utils()
+
+# Must match BATCHED_SUPPORTED_DTYPES/LAYOUTS in dispatcher batched_gemm_utils.py
+# (not imported here: that module pulls numpy/ctypes into CMake codegen).
+BATCHED_GEMM_SUPPORTED_DTYPES = ("fp16", "bf16", "fp32")
+BATCHED_GEMM_SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr")
 
 # BatchedGemmKernel advances the B pointer of each batch by batch_stride_B plus
 # the split-K offset of an unshuffled B. A weight-preshuffled (flat) B needs a
@@ -98,6 +112,14 @@ class BatchedGemmKernelBuilder(GemmKernelBuilder):
             trait_config.get("pipeline", {}).get("values", []) or []
         )
         return super()._generate_trait_combinations()
+
+    def _validate_tile_config(self, *dims_and_pipeline):
+        """Drop warp tiles the arch has no MFMA/WMMA instruction for (op-local)."""
+        if not _vu.op_warp_tile_allowed(
+            self.gpu_target, self.datatype, dims_and_pipeline[6:9]
+        ):
+            return False
+        return super()._validate_tile_config(*dims_and_pipeline)
 
     def _check_pipeline_allowed_for_op(self, pipeline, epilogue, *pads):
         check_batched_gemm_pipelines([pipeline])
@@ -272,13 +294,13 @@ def main():
     parser.add_argument(
         "--datatype",
         required=True,
-        choices=["fp16"],
+        choices=BATCHED_GEMM_SUPPORTED_DTYPES,
         help="Data type",
     )
     parser.add_argument(
         "--layout",
         required=True,
-        choices=["rcr"],
+        choices=BATCHED_GEMM_SUPPORTED_LAYOUTS,
         help="Matrix layout",
     )
     parser.add_argument("--config_json", required=True, help="Configuration JSON file")
@@ -333,9 +355,6 @@ def main():
     layout_parts = args.layout.lower()
     assert len(layout_parts) == 3, (
         f"Invalid layout string: {args.layout} (must be 3 characters like 'rcr' where r stands for row major and c stands for column major)"
-    )
-    assert layout_parts == "rcr", (
-        f"Invalid matrix_a layout : {args.layout} (batched GEMM only supports 'rcr' layout)"
     )
 
     builder = BatchedGemmKernelBuilder(

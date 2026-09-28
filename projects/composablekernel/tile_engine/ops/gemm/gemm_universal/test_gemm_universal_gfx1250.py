@@ -56,12 +56,13 @@ GFX1250_LDS = 320 * 1024
 # Kernel counts per (dtype, layout) for the full gfx1250 config: total and per
 # new pipeline. Pins the sweep so any config or validator drift is noticed.
 # comp_async is rcr-only on gfx1250, so the rrr rows have no comp_async. The
-# pads sweep [false, true]: comp_async keeps only all-True, TDM only all-False,
-# and the legacy pipelines keep all 8 combos.
+# fp16/bf16 comp_async tiles with M+N=320, K=256 exceed LDS once the descriptor
+# padding is added. The pads sweep [false, true]: comp_async keeps only
+# all-True, TDM only all-False, and the legacy pipelines keep all 8 combos.
 FULL_COUNTS = {
-    ("fp16", "rcr"): (27525, 384, 174, 87),
+    ("fp16", "rcr"): (27489, 348, 174, 87),
     ("fp16", "rrr"): (27141, 0, 174, 87),
-    ("bf16", "rcr"): (27525, 384, 174, 87),
+    ("bf16", "rcr"): (27489, 348, 174, 87),
     ("bf16", "rrr"): (27141, 0, 174, 87),
     # fp8/bf8 comp_async keeps only warp_tile_k=128 (the 16x16x64 set is gated).
     ("fp8", "rcr"): (46908, 288, 360, 180),

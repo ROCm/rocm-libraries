@@ -1191,6 +1191,46 @@ def _output_dtype(dtype: str) -> str:
     return _OUTPUT_DTYPE.get(dtype, dtype)
 
 
+# numpy dtypes the runners hand straight across the C ABI. Host buffers are
+# memcpy'd verbatim, so each itemsize must equal the kernel's sizeof(ElementType);
+# bf16/fp8/bf8 inputs go through the encode helpers instead.
+_NATIVE_IN_NP = {"fp16": np.float16, "fp32": np.float32, "int8": np.int8}
+_C_NP = {"fp16": np.float16, "bf16": np.uint16, "fp32": np.float32, "int32": np.int32}
+
+
+def _encode_operand(x: np.ndarray, dtype: str, use_ocp: Optional[bool] = None) -> np.ndarray:
+    """Encode an A/B host operand into the kernel's element dtype; raise if unknown."""
+    if dtype == "bf16":
+        return _fp32_to_bf16_u16(x)
+    if dtype == "fp8":
+        return _fp32_to_fp8_u8(x, use_ocp=use_ocp)
+    if dtype == "bf8":
+        return _fp32_to_bf8_u8(x, use_ocp=use_ocp)
+    if dtype not in _NATIVE_IN_NP:
+        raise ValueError(f"unsupported input dtype {dtype!r}; add it to _NATIVE_IN_NP")
+    return np.ascontiguousarray(x, dtype=_NATIVE_IN_NP[dtype])
+
+
+def _c_numpy_dtype(dtype: str):
+    """Return (C dtype token, host numpy type) for input ``dtype``; raise if unknown.
+
+    fp8/bf8 accumulate into fp16 and int8 into int32, otherwise C is the input
+    dtype. A silent fallback would size the host C buffer wrong across the C ABI.
+    """
+    out_dtype = _output_dtype(dtype)
+    if out_dtype not in _C_NP:
+        raise ValueError(
+            f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
+            "add it to _C_NP so the host buffer matches sizeof(CDataType)"
+        )
+    return out_dtype, _C_NP[out_dtype]
+
+
+def _decode_c(C_h: np.ndarray, out_dtype: str) -> np.ndarray:
+    """Decode a host C buffer into a numerically comparable array."""
+    return _bf16_u16_to_fp32(C_h) if out_dtype == "bf16" else C_h
+
+
 def _dtype_from_kernel_name(name: str) -> str:
     """Extract the dtype token from a kernel name like ``gemm_<dtype>_<layout>_...``."""
     parts = name.split("_")
@@ -1256,47 +1296,14 @@ class GpuGemmRunner:
         B_lay = B if lb == "r" else B.T
         C_shape = (M, N) if lc == "r" else (N, M)
 
-        # Build A/B host buffers in the kernel's element dtype. The encode
-        # helpers (bf16/fp8/bf8) already force a contiguous float32 source, so an
-        # outer ascontiguousarray would only add a redundant copy; the native
-        # numpy dtypes (fp16/int8) still need it.
-        if dtype == "bf16":
-            A_h = _fp32_to_bf16_u16(A_lay)
-            B_h = _fp32_to_bf16_u16(B_lay)
-        elif dtype == "fp8":
-            A_h = _fp32_to_fp8_u8(A_lay, use_ocp=self._use_ocp)
-            B_h = _fp32_to_fp8_u8(B_lay, use_ocp=self._use_ocp)
-        elif dtype == "bf8":
-            A_h = _fp32_to_bf8_u8(A_lay, use_ocp=self._use_ocp)
-            B_h = _fp32_to_bf8_u8(B_lay, use_ocp=self._use_ocp)
-        elif dtype == "int8":
-            A_h = np.ascontiguousarray(A_lay, dtype=np.int8)
-            B_h = np.ascontiguousarray(B_lay, dtype=np.int8)
-        else:  # fp16 (default)
-            A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
-            B_h = np.ascontiguousarray(B_lay, dtype=np.float16)
-
-        # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
-        # accumulate into fp16, int8 into int32, otherwise the input dtype.
-        out_dtype = _output_dtype(dtype)
-        _C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
-        if out_dtype not in _C_NP:
-            # A silent fp16 fallback would size the host C buffer wrong for an
-            # unrecognized dtype (sizeof(CDataType) mismatch -> corrupt results
-            # across the C ABI). Fail loudly so a new dtype is added here.
-            raise ValueError(
-                f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
-                "add it to _C_NP so the host buffer matches sizeof(CDataType)"
-            )
-        C_h = np.zeros(C_shape, dtype=_C_NP[out_dtype])
+        A_h = _encode_operand(A_lay, dtype, self._use_ocp)
+        B_h = _encode_operand(B_lay, dtype, self._use_ocp)
+        out_dtype, c_np = _c_numpy_dtype(dtype)
+        C_h = np.zeros(C_shape, dtype=c_np)
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
-        # Decode the output back to a comparable numeric array.
-        if out_dtype == "bf16":
-            C_dec = _bf16_u16_to_fp32(C_h)
-        else:  # fp16 / int32 are already directly comparable
-            C_dec = C_h
+        C_dec = _decode_c(C_h, out_dtype)
         C_out = C_dec if lc == "r" else C_dec.T
 
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0

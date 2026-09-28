@@ -48,8 +48,8 @@ _GFX1250_WARP_LAYOUTS = {
 }
 
 
-def _builder(tmp, config_path, gpu_target="gfx1250"):
-    return BatchedGemmKernelBuilder(tmp, gpu_target, "fp16", "rcr", config_path)
+def _builder(tmp, config_path, gpu_target="gfx1250", dtype="fp16", layout="rcr"):
+    return BatchedGemmKernelBuilder(tmp, gpu_target, dtype, layout, config_path)
 
 
 def _write_config(tmp, pipelines, epilogues):
@@ -63,9 +63,18 @@ def _write_config(tmp, pipelines, epilogues):
     return path
 
 
-def _kernels(config_path, gpu_target="gfx1250"):
+def _kernels(config_path, gpu_target="gfx1250", dtype="fp16", layout="rcr"):
     with tempfile.TemporaryDirectory() as tmp:
-        return _builder(tmp, config_path, gpu_target)._get_sampled_kernel_list()
+        return _builder(
+            tmp, config_path, gpu_target, dtype, layout
+        )._get_sampled_kernel_list()
+
+
+def _warp_tiles(kernels):
+    return {
+        (k["tile_config"]["warp_tile_m"], k["tile_config"]["warp_tile_n"], k["tile_config"]["warp_tile_k"])
+        for k in kernels
+    }
 
 
 class TestTraitParsing(unittest.TestCase):
@@ -227,7 +236,9 @@ class TestGfx1250Configs(unittest.TestCase):
             tc = json.load(f)["tile_config"]
         self.assertEqual(tc["warp_tile_m"]["values"], [16])
         self.assertEqual(tc["warp_tile_n"]["values"], [16])
-        self.assertEqual(tc["warp_tile_k"]["values"], [32])
+        # k=32 serves fp16/bf16 (16x16x32), k=4 serves fp32 (16x16x4); the
+        # builder keeps only the WMMA tile of the requested datatype.
+        self.assertEqual(tc["warp_tile_k"]["values"], [4, 32])
 
     def test_schema_matches_ci(self):
         with open(_FULL_CONFIG) as f:
@@ -301,6 +312,50 @@ class TestOtherArchesUnaffected(unittest.TestCase):
                 set(traits["pipeline"]["values"]) & set(_NEW_PIPELINES), name
             )
             self.assertNotIn("tdm", traits["epilogue"]["values"], name)
+
+
+class TestDtypeLayoutCoverage(unittest.TestCase):
+    """fp16/bf16/fp32 x rcr/rrr/crr/ccr, each dtype on its own warp tiles."""
+
+    def test_op_warp_tile_allowed(self):
+        self.assertTrue(vu.op_warp_tile_allowed("gfx1250", "fp32", [16, 16, 4]))
+        self.assertFalse(vu.op_warp_tile_allowed("gfx1250", "fp32", [16, 16, 32]))
+        self.assertFalse(vu.op_warp_tile_allowed("gfx1250", "fp16", [16, 16, 4]))
+        self.assertTrue(vu.op_warp_tile_allowed("gfx942", "fp32", [32, 32, 8]))
+        self.assertFalse(vu.op_warp_tile_allowed("gfx950", "fp32", [16, 16, 32]))
+        # Other (arch, dtype) pairs are left to the shared table.
+        self.assertTrue(vu.op_warp_tile_allowed("gfx942", "fp16", [16, 16, 4]))
+
+    def test_gfx1250_every_dtype_layout_keeps_its_wmma_tile(self):
+        for dtype, wmma in (("fp16", 32), ("bf16", 32), ("fp32", 4)):
+            for layout in ("rcr", "rrr", "crr", "ccr"):
+                with self.subTest(dtype=dtype, layout=layout):
+                    tiles = _warp_tiles(_kernels(_CI_CONFIG, "gfx1250", dtype, layout))
+                    self.assertEqual(tiles, {(16, 16, wmma)})
+
+    def test_gfx9_fp32_uses_fp32_mfma_tiles(self):
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                tiles = _warp_tiles(
+                    _kernels(os.path.join(_CONFIG_DIR, "default_ci_config.json"), arch, "fp32")
+                )
+                self.assertTrue(tiles)
+                self.assertLessEqual(
+                    tiles, {tuple(t) for t in vu.GFX9_FP32_WARP_TILES}
+                )
+
+    def test_fp32_header_uses_float(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b = _builder(tmp, _CI_CONFIG, dtype="fp32", layout="ccr")
+            k = b._get_sampled_kernel_list()[0]
+            _, code = b._generate_kernel_instance(k["tile_config"], k["trait_combo"])
+        for line in (
+            "using ADataType = float;",
+            "using CDataType = float;",
+            "using ALayout = ck_tile::tensor_layout::gemm::ColumnMajor;",
+            "using BLayout = ck_tile::tensor_layout::gemm::ColumnMajor;",
+        ):
+            self.assertIn(line, code)
 
 
 class TestCMake(unittest.TestCase):

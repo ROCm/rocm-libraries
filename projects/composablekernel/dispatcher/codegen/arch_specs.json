@@ -214,11 +214,17 @@
         "here; enabling them would newly generate kernels for combinations this",
         "bridge has never exercised, which needs its own device validation."
       ],
+      "_warp_tile_fp32_source": [
+        "fp32 has a single WMMA form on gfx1250, WarpGemmWmma_f32_16x16x4_f32 in",
+        "include/ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp. Without this row",
+        "fp32 lookups fell back to a gfx9 MFMA default the hardware cannot run."
+      ],
       "warp_tile_combos": {
         "fp16_fp16_fp32": [[16, 16, 32]],
         "bf16_bf16_fp32": [[16, 16, 32]],
         "fp8_fp8_fp32": [[16, 16, 64], [16, 16, 128]],
-        "bf8_bf8_fp32": [[16, 16, 64], [16, 16, 128]]
+        "bf8_bf8_fp32": [[16, 16, 64], [16, 16, 128]],
+        "fp32_fp32_fp32": [[16, 16, 4]]
       }
     }
   },
