@@ -13,8 +13,9 @@ later target shares one or more prediction rules.
   the full access within the 65,536-byte LDS capacity.
 - Treat broadcasts, lane-phase separation, and wave-partition separation as
   opcode-scoped semantics returned by the predictor.
-- Treat an unsupported opcode, width, wave size, or alignment as unsupported;
-  do not approximate it with the nearest supported operation.
+- Treat unavailable opcodes or wave sizes as unsupported, and access-width
+  mismatches or misaligned addresses as invalid request data. Do not approximate
+  either with the nearest supported operation.
 
 Query the production profile through prediction and use its errors for operations
 outside this reviewed set. Update this reference together with any reviewed profile
