@@ -478,14 +478,17 @@ pipeline {
     post {
         success {
             script {
-                postGithubStatus('Math CI Summary', 'success', 'All checks have passed')
+                // TEST: temporarily disabled to verify whether the "Math CI Summary"
+                // required check still appears on the PR without Jenkins posting it.
+                // postGithubStatus('Math CI Summary', 'success', 'All checks have passed')
             }
         }
         failure {
             script {
-                postGithubStatus('Math CI Summary', 'failure', 'Some checks have failed') {
-                    utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
-                }
+                // TEST: temporarily disabled, see note above.
+                // postGithubStatus('Math CI Summary', 'failure', 'Some checks have failed') {
+                //     utils.sendTeamsFailureNotification(buildTheRock: params.BUILD_THEROCK_DOCKER)
+                // }
             }
         }
     }
