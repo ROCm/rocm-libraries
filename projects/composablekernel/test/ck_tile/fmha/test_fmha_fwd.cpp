@@ -925,6 +925,16 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                         std::tuple{2, 8, 2, 300, 355}),
                                  Values("0", "t", "b", "t:50,64", "b:32,40")));
 
+// ALiBi with more than 65536 key positions; the distance |i - j| must not wrap at 16 bits.
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwdLongSeqlen,
+                         Alibi,
+                         Combine(Values(std::tuple{128, -1}),
+                                 Values(mode_enum::batch),
+                                 Values("a:0"),
+                                 Values(std::tuple{1, 2, 2, 16, 65537},
+                                        std::tuple{1, 2, 2, 16, 70000}),
+                                 Values("0", "b")));
+
 TEST_P(Alibi, DataTypeConfig)
 {
     auto [hdims, mode, bias_str, dims, mask_str]     = GetParam();
