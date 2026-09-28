@@ -14697,8 +14697,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
                                   shiftHex=log2(bpe), comment="size_bytes = Stride%s * N * bpe" % ch))
         module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
-        module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=sgpr(tmpsgprSize+0), src1="BufferLimit",
-                              comment="Srd%s size = (fits_32bit) ? actual_size : BufferLimit"%ch))
+        module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=sgpr(tmpsgprSize+0), src1="BufferOOB",
+                              comment="Srd%s size = (fits_32bit) ? actual_size : BufferOOB"%ch))
         module.add(SBranch(labelName=PostLoopSrdEndLabel.getLabelName()))
 
         # GSU > 1: Use BufferOOB for workspace
@@ -14726,8 +14726,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SLShiftLeftB64(dst=sgpr(tmpsgprSize, 2), src=sgpr(tmpsgprSize, 2),
                                   shiftHex=log2(bpe), comment="size_bytes = Stride%s * N * bpe" % ch))
         module.add(SCmpEQU32(src0=sgpr(tmpsgprSize+1), src1=0, comment="Does size fit in 32-bit?"))
-        module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=sgpr(tmpsgprSize+0), src1="BufferLimit",
-                              comment="Srd%s size = (fits_32bit) ? actual_size : BufferLimit"%ch))
+        module.add(SCSelectB32(dst=sgpr("Srd%s+2"%ch), src0=sgpr(tmpsgprSize+0), src1="BufferOOB",
+                              comment="Srd%s size = (fits_32bit) ? actual_size : BufferOOB"%ch))
         self.sgprPool.checkIn(tmpsgprSize)
     else:
       # For other buffers (not C/D), use BufferOOB
