@@ -190,6 +190,13 @@ public:
         return _inputFillRecipes;
     }
 
+    /// Exposed so a test can check the packed copy of the bundle's inputs that the
+    /// engine receives. Empty unless an input is sub-byte.
+    const TensorMap& packedInputs() const
+    {
+        return _packedInputs;
+    }
+
     /// Mode B/C support observation: which engines take this graph?
     ///
     /// Returns observations rather than recording them to a singleton, so a test
