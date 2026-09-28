@@ -1,0 +1,25 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block target_tparams %}
+    template<class Target, class key_type>
+{% endblock %}
+
+{% block params_type -%}
+    non_trivial_runs_config_params
+{%- endblock %}
+
+{% block config_guard scoped %}
+    {{ mk_is_fp_type_check(type.key_type) }} && {{ mk_type_sz_check(type.key_type) }}
+{% endblock %}
+
+{% block config_constructor -%}
+    non_trivial_runs_config_params{ 
+        { {{ config.block_size_x }}, {{ config.ipt }} },
+        {{ config.block_load_func }}
+        block_scan_algorithm::using_warp_scan
+    }
+{%- endblock %}
+
+{% block config_base_type -%}
+    non_trivial_runs_config_params_base<key_type>
+{%- endblock %}

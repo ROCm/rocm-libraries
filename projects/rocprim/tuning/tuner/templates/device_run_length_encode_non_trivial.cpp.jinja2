@@ -1,0 +1,22 @@
+{% extends "common/base.cpp.jinja2" %}
+
+{% block benchmarking_include %}
+    #include "benchmark_device_run_length_encode_non_trivial_runs.hpp"
+{% endblock %}
+
+{% block config_constructor -%}
+    rocprim::non_trivial_runs_config<
+        {{ config.block_size_x }},
+        {{ config.ipt }},
+        {{ config.block_load_func }},
+        rocprim::block_scan_algorithm::using_warp_scan
+    >
+{%- endblock %}
+
+{% block benchmark_type %}
+    using benchmark_type = device_non_trivial_runs_benchmark<key_type, 0, config>;
+{% endblock %}
+
+{% block type_definitions %}
+    using key_type = {{ key_type }};
+{% endblock %}
