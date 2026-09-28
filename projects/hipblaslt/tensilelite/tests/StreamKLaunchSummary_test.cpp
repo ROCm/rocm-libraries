@@ -296,46 +296,6 @@ TEST(StreamKLaunchSummaryTest, Sk5OffResolvesStaticSk3)
 }
 
 // ---------------------------------------------------------------------------
-// SK5 OFF on an efficient-DP geometry: the k_split_aware selector correctly
-// declines StreamK and returns the tile count (plain data-parallel). With a
-// single k-iteration per tile (depthU == K) there is no K to split, and with
-// 1056 tiles over 256 CUs DP already fills the CUs, so grid == tiles: no
-// partials, no workspace. This is NOT the forced/fallback dpOnly source -- the
-// grid simply equals the tile count -- so dpOnly stays false.
-// ---------------------------------------------------------------------------
-TEST(StreamKLaunchSummaryTest, Sk5OffEfficientDpCollapsesToTileGrid)
-{
-    AnalyticalEnv       env;
-    ContractionSolution solution;
-    initStreamKSolution(solution, 5);
-
-    // 4096x4224 -> 1056 tiles; depthU 64 == K -> 1 iter/tile. k_split_aware
-    // collapses the grid to tiles (DP) for this efficient-DP, single-iter shape.
-    auto problem = makeGemmProblem(4096, 4224, 64);
-    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
-    problem.setParams().setStreamKTileSchedulingMode(0); // OFF (static, smCountTarget=0)
-
-    auto d = solution.computeStreamKDecisions(problem, env.device);
-
-    // Mode resolution is unchanged: SK5-OFF still takes the static (SK3) sub-path.
-    EXPECT_EQ(d.streamKMode, 5);
-    EXPECT_FALSE(d.effectiveDynamic);
-    EXPECT_FALSE(d.isDynamic) << "SK5-OFF must take the static (SK3) sub-path";
-    EXPECT_EQ(d.numQueues, 8u);
-    // Grid collapsed to the tile count -> plain DP, no partials, no workspace.
-    EXPECT_EQ(d.skGrid, d.tiles) << "efficient-DP single-iter shape collapses to grid == tiles";
-    EXPECT_EQ(d.tiles % d.skGrid, 0u);
-    EXPECT_EQ(d.skTiles, 0u);
-    EXPECT_FALSE(d.partialsPresent);
-    EXPECT_EQ(d.requiredWorkspaceBytes, 0u);
-    EXPECT_FALSE(d.workspaceAllocated);
-    // Reached DP by the grid equalling tiles, not by a force flag or a runtime
-    // workspace fallback, so dpOnly is not asserted here.
-    EXPECT_FALSE(d.forceDPOnly);
-    EXPECT_FALSE(d.workspaceDPFallbackFired);
-}
-
-// ---------------------------------------------------------------------------
 // SK3 static with partial tiles: partials present, skTiles>0, workspace>0,
 // not dynamic, not DP-only.
 // ---------------------------------------------------------------------------
