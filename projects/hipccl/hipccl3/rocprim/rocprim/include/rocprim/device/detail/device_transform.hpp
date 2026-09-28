@@ -78,6 +78,21 @@ private:
     }
 };
 
+template<bool Nullary, class F, class Arg>
+struct nary_result_type;
+
+template<class F, class Arg>
+struct nary_result_type<true, F, Arg>
+{
+    using type = typename ::rocprim::invoke_result<F>::type;
+};
+
+template<class F, class Arg>
+struct nary_result_type<false, F, Arg>
+{
+    using type = typename ::rocprim::invoke_result<F, Arg>::type;
+};
+
 // Wrapper for unpacking tuple to be used with BinaryFunction.
 // See transform function which accepts two input iterators.
 template<class T1, class T2, class BinaryFunction>
@@ -99,7 +114,6 @@ template<bool                VectorLoadStore,
          unsigned int        BlockSize,
          unsigned int        ItemsPerThread,
          cache_load_modifier LoadType,
-         class ResultType,
          class InputIterator,
          class OutputIterator,
          class Predicate,
@@ -112,10 +126,16 @@ auto transform_kernel_impl(InputIterator  input,
                            UnaryFunction  transform_op) ->
     typename std::enable_if<VectorLoadStore, void>::type
 {
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    constexpr bool is_nullary_op = ::rocprim::is_invocable_v<UnaryFunction>;
+    using _input_type            = typename std::iterator_traits<InputIterator>::value_type;
+    using op_result_type =
+        typename nary_result_type<is_nullary_op, UnaryFunction, _input_type>::type;
+
+    using input_type = typename std::
+        conditional<std::is_void<_input_type>::value, op_result_type, _input_type>::type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using result_type =
-        typename std::conditional<std::is_void<output_type>::value, ResultType, output_type>::type;
+    using result_type = typename std::
+        conditional<std::is_void<output_type>::value, op_result_type, output_type>::type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr bool is_always_true_predicate = std::is_same_v<Predicate, always_true_predicate>;
@@ -131,27 +151,41 @@ auto transform_kernel_impl(InputIterator  input,
 
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
-        block_load_direct_striped<BlockSize>(flat_id,
-                                             input + block_offset,
-                                             input_values,
-                                             valid_in_last_block);
-        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
-        if constexpr(!is_always_true_predicate)
+        if constexpr(!is_nullary_op)
         {
             block_load_direct_striped<BlockSize>(flat_id,
-                                                 output + block_offset,
-                                                 output_values,
+                                                 input + block_offset,
+                                                 input_values,
                                                  valid_in_last_block);
-        }
-
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            if(BlockSize * i + flat_id < valid_in_last_block)
+            // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+            if constexpr(!is_always_true_predicate)
             {
-                if(predicate(input_values[i]))
+                block_load_direct_striped<BlockSize>(flat_id,
+                                                     output + block_offset,
+                                                     output_values,
+                                                     valid_in_last_block);
+            }
+
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(BlockSize * i + flat_id < valid_in_last_block)
                 {
-                    output_values[i] = transform_op(input_values[i]);
+                    if(predicate(input_values[i]))
+                    {
+                        output_values[i] = transform_op(input_values[i]);
+                    }
+                }
+            }
+        }
+        else
+        {
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(BlockSize * i + flat_id < valid_in_last_block)
+                {
+                    output_values[i] = transform_op();
                 }
             }
         }
@@ -163,25 +197,36 @@ auto transform_kernel_impl(InputIterator  input,
     }
     else
     {
-        using vec_input_type = dynamic_size_type<input_type, ItemsPerThread>;
         using vec_output_type = dynamic_size_type<output_type, ItemsPerThread>;
-        block_load_direct_blocked_cast<vec_input_type, LoadType>(flat_id,
-                                                                 input + block_offset,
-                                                                 input_values);
-        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
-        if constexpr(!is_always_true_predicate)
+        if constexpr(!is_nullary_op)
         {
-            block_load_direct_blocked_cast<vec_output_type, LoadType>(flat_id,
-                                                                      output + block_offset,
-                                                                      output_values);
-        }
-
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            if(predicate(input_values[i]))
+            using vec_input_type = dynamic_size_type<input_type, ItemsPerThread>;
+            block_load_direct_blocked_cast<vec_input_type, LoadType>(flat_id,
+                                                                     input + block_offset,
+                                                                     input_values);
+            // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+            if constexpr(!is_always_true_predicate)
             {
-                output_values[i] = transform_op(input_values[i]);
+                block_load_direct_blocked_cast<vec_output_type, LoadType>(flat_id,
+                                                                          output + block_offset,
+                                                                          output_values);
+            }
+
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(predicate(input_values[i]))
+                {
+                    output_values[i] = transform_op(input_values[i]);
+                }
+            }
+        }
+        else
+        {
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                output_values[i] = transform_op();
             }
         }
 
@@ -195,7 +240,6 @@ template<bool                VectorLoadStore,
          unsigned int        BlockSize,
          unsigned int        ItemsPerThread,
          cache_load_modifier LoadType,
-         class ResultType,
          class InputIterator,
          class OutputIterator,
          class Predicate,
@@ -208,10 +252,16 @@ auto transform_kernel_impl(InputIterator  input,
                            UnaryFunction  transform_op) ->
     typename std::enable_if<!VectorLoadStore, void>::type
 {
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    constexpr bool is_nullary_op = ::rocprim::is_invocable_v<UnaryFunction>;
+    using _input_type            = typename std::iterator_traits<InputIterator>::value_type;
+    using op_result_type =
+        typename nary_result_type<is_nullary_op, UnaryFunction, _input_type>::type;
+
+    using input_type = typename std::
+        conditional<std::is_void<_input_type>::value, op_result_type, _input_type>::type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using result_type =
-        typename std::conditional<std::is_void<output_type>::value, ResultType, output_type>::type;
+    using result_type = typename std::
+        conditional<std::is_void<output_type>::value, op_result_type, output_type>::type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr bool is_always_true_predicate = std::is_same_v<Predicate, always_true_predicate>;
@@ -227,27 +277,41 @@ auto transform_kernel_impl(InputIterator  input,
 
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
-        block_load_direct_striped<BlockSize>(flat_id,
-                                             input + block_offset,
-                                             input_values,
-                                             valid_in_last_block);
-        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
-        if constexpr(!is_always_true_predicate)
+        if constexpr(!is_nullary_op)
         {
             block_load_direct_striped<BlockSize>(flat_id,
-                                                 output + block_offset,
-                                                 output_values,
+                                                 input + block_offset,
+                                                 input_values,
                                                  valid_in_last_block);
-        }
-
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            if(BlockSize * i + flat_id < valid_in_last_block)
+            // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+            if constexpr(!is_always_true_predicate)
             {
-                if(predicate(input_values[i]))
+                block_load_direct_striped<BlockSize>(flat_id,
+                                                     output + block_offset,
+                                                     output_values,
+                                                     valid_in_last_block);
+            }
+
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(BlockSize * i + flat_id < valid_in_last_block)
                 {
-                    output_values[i] = transform_op(input_values[i]);
+                    if(predicate(input_values[i]))
+                    {
+                        output_values[i] = transform_op(input_values[i]);
+                    }
+                }
+            }
+        }
+        else
+        {
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(BlockSize * i + flat_id < valid_in_last_block)
+                {
+                    output_values[i] = transform_op();
                 }
             }
         }
@@ -259,19 +323,30 @@ auto transform_kernel_impl(InputIterator  input,
     }
     else
     {
-        block_load_direct_striped<BlockSize>(flat_id, input + block_offset, input_values);
-        // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
-        if constexpr(!is_always_true_predicate)
+        if constexpr(!is_nullary_op)
         {
-            block_load_direct_striped<BlockSize>(flat_id, output + block_offset, output_values);
-        }
-
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            if(predicate(input_values[i]))
+            block_load_direct_striped<BlockSize>(flat_id, input + block_offset, input_values);
+            // When using a predicate, we need to ensure output is unmodified for non-transformed inputs
+            if constexpr(!is_always_true_predicate)
             {
-                output_values[i] = transform_op(input_values[i]);
+                block_load_direct_striped<BlockSize>(flat_id, output + block_offset, output_values);
+            }
+
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(predicate(input_values[i]))
+                {
+                    output_values[i] = transform_op(input_values[i]);
+                }
+            }
+        }
+        else
+        {
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                output_values[i] = transform_op();
             }
         }
 

@@ -72,6 +72,17 @@ struct TransformStableAddrsImpl
             stream);
     }
 };
+
+template<typename T>
+struct constant_generator
+{
+    T value;
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE T operator()() const
+    {
+        return value;
+    }
+};
 } // namespace detail
 
 struct DeviceTransform
@@ -154,6 +165,50 @@ struct DeviceTransform
                                     transform_op,
                                     stream,
                                     HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Generate(RandomAccessIteratorOut output,
+                               NumItemsT               num_items,
+                               Generator               generator,
+                               hipStream_t             stream = nullptr)
+    {
+        return ::rocprim::generate(output, num_items, generator, stream);
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Generate([[maybe_unused]] void*   d_temp_storage,
+                               [[maybe_unused]] size_t& temp_storage_bytes,
+                               RandomAccessIteratorOut  output,
+                               NumItemsT                num_items,
+                               Generator                generator,
+                               hipStream_t              stream = nullptr)
+    {
+        return ::rocprim::generate(output, num_items, generator, stream);
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Fill(RandomAccessIteratorOut output,
+                           NumItemsT               num_items,
+                           Value                   value,
+                           hipStream_t             stream = nullptr)
+    {
+        return Generate(output, num_items, detail::constant_generator<Value>{value}, stream);
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Fill([[maybe_unused]] void*   d_temp_storage,
+                           [[maybe_unused]] size_t& temp_storage_bytes,
+                           RandomAccessIteratorOut  output,
+                           NumItemsT                num_items,
+                           Value                    value,
+                           hipStream_t              stream = nullptr)
+    {
+        return Generate(output, num_items, detail::constant_generator<Value>{value}, stream);
     }
 
     template<typename... RandomAccessIteratorsIn,

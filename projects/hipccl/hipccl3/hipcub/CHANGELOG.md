@@ -21,7 +21,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added `hipcub::DeviceFor::ForEachInLayout`.
 * Added `hipcub::DeviceCopy::Copy`.
 * Added `hipcub::WarpScan::InclusiveScanPartial`, `hipcub::WarpScan::ExclusiveScanPartial` and `hipcub::WarpScan::ScanPartial`.
-* Added `hipcub::DeviceTransform::TransformIf`.
+* Added `hipcub::DeviceTransform::TransformIf`, `hipcub::DeviceTransform::Generate` and `hipcub::DeviceTransform::Fill`.
 * Feature parity with CCCL/CUB 3.2.0.
 
 ### Changed

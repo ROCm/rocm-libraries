@@ -114,6 +114,62 @@ struct DeviceTransform
                                                                         stream));
     }
 
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Generate(RandomAccessIteratorOut output,
+                               NumItemsT               num_items,
+                               Generator               generator,
+                               hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceTransform::Generate(output, num_items, generator, stream));
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Generator>
+   HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Generate(void*                   d_temp_storage,
+                               size_t&                 temp_storage_bytes,
+                               RandomAccessIteratorOut output,
+                               NumItemsT               num_items,
+                               Generator               generator,
+                               hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::Generate(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       output,
+                                                                       num_items,
+                                                                       generator,
+                                                                       stream));
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Fill(RandomAccessIteratorOut output,
+                           NumItemsT               num_items,
+                           Value                   value,
+                           hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceTransform::Fill(output, num_items, value, stream));
+    }
+
+    template<typename RandomAccessIteratorOut, typename NumItemsT, typename Value>
+  HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Fill(void*                   d_temp_storage,
+                           size_t&                 temp_storage_bytes,
+                           RandomAccessIteratorOut output,
+                           NumItemsT               num_items,
+                           Value                   value,
+                           hipStream_t             stream = nullptr)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceTransform::Fill(d_temp_storage,
+                                                                   temp_storage_bytes,
+                                                                   output,
+                                                                   num_items,
+                                                                   value,
+                                                                   stream));
+    }
+
     template<typename... RandomAccessIteratorsIn,
              typename RandomAccessIteratorOut,
              typename Predicate,
