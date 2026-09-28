@@ -109,6 +109,15 @@ hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec oneUsableOneOutOfRang
     return spec;
 }
 
+/// One usable leaf and one leaf predicting exactly zero, which RFC 0019 §8.3 does not accept
+/// as a prediction.
+hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec oneUsableOneZero()
+{
+    auto spec = oneUsableOneOutOfRange();
+    spec.leafValues = {0.0, 4.0, 0.0};
+    return spec;
+}
+
 hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec preferNegativeScores()
 {
     hipdnn_test_sdk::utilities::GbdtModelTestBuilder::TreeSpec spec;
@@ -1243,6 +1252,29 @@ TEST(TestIngestorUhdKernelHeuristic, AnUnmeasuredCandidateSortsLastUnderAMinObje
     // numerically below the 0 the unmeasured one reports.
     EXPECT_LT(scored.front().score, 0.0) << "the measured candidate did not come first";
     EXPECT_DOUBLE_EQ(scored.back().score, 0.0) << "the unmeasured candidate is not reporting 0";
+}
+
+TEST(TestIngestorUhdKernelHeuristic, AZeroCostPredictionDoesNotWinUnderAMinObjective)
+{
+    // RFC 0019 §8.3 accepts only a strictly positive prediction. A zero cost is no
+    // measurement, and oriented for `objective: min` it would be -0 -- greater than every
+    // real candidate's negated cost -- so accepting it made the unpredicted candidate win.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_min_zero_last");
+    const auto fixture
+        = writeFixture(dir.path(), oneUsableOneZero(), "min", {}, /*calibrated=*/false, "identity");
+
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties, "time"};
+
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+    ASSERT_EQ(scored.size(), 2U);
+    EXPECT_LT(scored.front().score, 0.0) << "the zero-cost candidate outranked a measured one";
+    EXPECT_DOUBLE_EQ(scored.back().score, 0.0);
 }
 
 TEST(TestIngestorUhdKernelHeuristic, ANegativeThroughputIsReportedAsAnErrorNotSwallowed)

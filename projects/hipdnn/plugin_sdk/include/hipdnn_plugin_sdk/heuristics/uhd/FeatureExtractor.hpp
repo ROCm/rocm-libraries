@@ -3,7 +3,20 @@
 
 #pragma once
 
-#include <hipdnn_plugin_sdk/heuristics/uhd/JsonLogicEvaluator.hpp>
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_set>
+#include <variant>
+#include <vector>
+
+#include <hipdnn_plugin_sdk/heuristics/uhd/Expressions.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 
 namespace hipdnn_plugin_sdk::uhd
@@ -37,11 +50,11 @@ public:
     }
     void bind(const std::string& name, VariableContext::ValueType value)
     {
-        if(name.empty())
+        if(name.empty() || name == "$")
         {
             throw JsonLogicError("Empty published symbol name");
         }
-        _ctx.bind(name.front() == '$' ? name : "$" + name, std::move(value));
+        _ctx.bind(name, std::move(value));
     }
     const VariableContext& getContext() const
     {
@@ -52,10 +65,10 @@ public:
     nlohmann::json toJson() const
     {
         auto result = nlohmann::json::object();
-        for(const auto& [name, value] : _ctx.bindings())
+        for(const auto& binding : _ctx.bindings())
         {
-            const auto key = !name.empty() && name.front() == '$' ? name.substr(1) : name;
-            std::visit([&](const auto& held) { result[key] = held; }, value);
+            const auto& name = binding.first;
+            std::visit([&](const auto& held) { result[name] = held; }, binding.second);
         }
         return result;
     }
@@ -85,27 +98,38 @@ private:
     VariableContext _ctx;
 };
 
-/// Compiles the complete inline signature into one shared descriptor DAG. The
-/// workspace belongs to a selection, not the extractor, so cached engines are safe
-/// to use concurrently. All output rows and node caches are allocated once per
-/// selection, never once per candidate.
+/// Compiles a `features_signature` once and evaluates it per selection.
+///
+/// Entries that read no `$kernel` symbol are evaluated once per selection (prepare()); only the
+/// kernel-dependent entries are re-evaluated per candidate (extractKernelInto()), which is the
+/// split RFC 0019 §9.3 asks for. A bare reference, which is every entry uhd_gen emits for a raw
+/// field, is read straight from the bindings; an inline expression is evaluated by the
+/// descriptor expression language. The workspace belongs to a selection, not the extractor, so
+/// cached engines are safe to use concurrently.
 class FeatureExtractor
 {
 public:
     struct Workspace
     {
-        expression::Program::Workspace expressions;
         std::vector<double> values;
+        const FeatureExtractor* owner = nullptr;
     };
 
     explicit FeatureExtractor(const std::vector<nlohmann::json>& signature,
-                              const expression::CategoricalEncoding& encoding = {})
-        : _program(signature, encoding)
-        , _signatureHash(computeHash(signature, encoding))
+                              const CategoricalEncoding& encoding = {})
+        : _signatureHash(computeHash(signature, encoding))
+        , _expressions(signature)
     {
-        for(size_t i = 0; i < _program.size(); ++i)
+        _vocabularies.resize(_expressions.size());
+        for(size_t i = 0; i < _expressions.size(); ++i)
         {
-            (_program.kernelDependent(i) ? _kernelIndices : _sharedIndices).push_back(i);
+            (_expressions.referencesKernel(i) ? _kernelIndices : _sharedIndices).push_back(i);
+            const auto& reference = _expressions.reference(i);
+            if(const auto found = encoding.find(reference);
+               !reference.empty() && found != encoding.end())
+            {
+                _vocabularies[i] = found->second;
+            }
         }
     }
 
@@ -118,53 +142,37 @@ public:
 
     Workspace prepare(const FeatureExtractionContext& ctx) const
     {
-        Workspace work{_program.workspace(), std::vector<double>(featureCount(), 0.0)};
-        _program.prepare(ctx.getContext(), work.expressions);
+        Workspace work{std::vector<double>(featureCount(), 0.0), this};
         for(const auto i : _sharedIndices)
         {
-            work.values[i] = expression::Program::number(
-                _program.evaluate(i, ctx.getContext(), work.expressions));
+            work.values[i] = evaluate(i, ctx.getContext());
         }
         return work;
     }
 
     void extractKernelInto(const FeatureExtractionContext& ctx, Workspace& work) const
     {
-        if(work.values.size() != featureCount())
+        if(work.owner != this || work.values.size() != featureCount())
         {
-            throw JsonLogicError("Feature workspace width mismatch");
+            throw JsonLogicError("Feature workspace belongs to a different signature");
         }
-        _program.resetCandidate(work.expressions);
         for(const auto i : _kernelIndices)
         {
-            work.values[i] = expression::Program::number(
-                _program.evaluate(i, ctx.getContext(), work.expressions));
+            work.values[i] = evaluate(i, ctx.getContext());
         }
     }
 
     size_t featureCount() const
     {
-        return _program.size();
+        return _expressions.size();
     }
     size_t kernelDependentCount() const
     {
         return _kernelIndices.size();
     }
-    size_t compiledNodeCount() const
-    {
-        return _program.nodeCount();
-    }
-    size_t sharedNodeCount() const
-    {
-        return _program.sharedNodeCount();
-    }
-    size_t candidateNodeCount() const
-    {
-        return _program.candidateNodeCount();
-    }
     const std::unordered_set<std::string>& getVariableRefs() const
     {
-        return _program.variables();
+        return _expressions.variables();
     }
     const std::string& getSignatureHash() const
     {
@@ -201,7 +209,7 @@ public:
     /// Compact, sorted-key JSON AST plus the optional sorted categorical vocabulary.
     /// This preserves hashes of existing canonical raw-reference signatures.
     static std::string computeHash(const std::vector<nlohmann::json>& signature,
-                                   const expression::CategoricalEncoding& encoding = {})
+                                   const CategoricalEncoding& encoding = {})
     {
         validateSignature(signature);
         try
@@ -231,10 +239,57 @@ public:
     }
 
 private:
+    /// Feature @p i as the number the model reads. A bare reference to an encoded field reads
+    /// its declared code; any other string, an unbound symbol, or an expression that did not
+    /// resolve makes the whole row unscorable rather than substituting a value.
+    double evaluate(size_t i, const VariableContext& ctx) const
+    {
+        const auto& reference = _expressions.reference(i);
+        if(reference.empty())
+        {
+            return ExpressionSet::number(_expressions.resolve(i, ctx));
+        }
+
+        const auto* bound = ctx.find(reference);
+        if(bound == nullptr)
+        {
+            throw JsonLogicError("Undefined variable: " + reference);
+        }
+        const double result = std::visit(
+            [&](const auto& held) -> double {
+                using T = std::decay_t<decltype(held)>;
+                if constexpr(std::is_same_v<T, std::string>)
+                {
+                    const auto& vocabulary = _vocabularies[i];
+                    if(vocabulary.empty())
+                    {
+                        throw JsonLogicError("Type error: string used where a number is required");
+                    }
+                    const auto code = vocabulary.find(held);
+                    if(code == vocabulary.end())
+                    {
+                        throw JsonLogicError(
+                            "Categorical value has no code in categorical_encoding");
+                    }
+                    return static_cast<double>(code->second);
+                }
+                else
+                {
+                    return static_cast<double>(held);
+                }
+            },
+            *bound);
+        if(!std::isfinite(result))
+        {
+            throw JsonLogicError("Non-finite expression value");
+        }
+        return result;
+    }
+
     static void validateLiterals(const nlohmann::json& node, size_t depth, size_t& visited)
     {
-        if(depth > 2 * expression::Program::MAX_EXPRESSION_DEPTH + 2
-           || ++visited > expression::Program::MAX_INPUT_NODES)
+        if(depth > 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 2
+           || ++visited > ExpressionSet::MAX_INPUT_NODES)
         {
             throw JsonLogicError("features_signature exceeds depth or size bound");
         }
@@ -274,10 +329,14 @@ private:
         return signature;
     }
 
-    expression::Program _program;
+    std::string _signatureHash;
+    ExpressionSet _expressions;
+    /// Per entry, the vocabulary of a bare reference the descriptor declares categorical.
+    std::vector<std::map<std::string, int32_t>> _vocabularies;
     std::vector<size_t> _sharedIndices;
     std::vector<size_t> _kernelIndices;
-    std::string _signatureHash;
 };
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

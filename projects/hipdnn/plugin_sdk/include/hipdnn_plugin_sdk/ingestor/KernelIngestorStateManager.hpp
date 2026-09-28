@@ -1064,27 +1064,25 @@ private:
             }
         }
 
+        // The latch and the merge happen under one hold of `_winnerCacheMutex`. Publishing
+        // the latch first and merging after would let a concurrent lookup see the shard as
+        // loaded, find its key not yet merged, and miss a persisted measured winner.
+        // `_winnerCache` takes its own lock inside, and calls no code that could take this
+        // mutex, so the lock order stays total.
+        const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
+        if(!attemptSettled)
         {
-            const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
-            if(!attemptSettled)
-            {
-                return;
-            }
-            if(!_loadedWinnerShards.insert(shardArch).second)
-            {
-                // Another thread's read-through raced this one and already merged.
-                return;
-            }
+            return;
+        }
+        if(!_loadedWinnerShards.insert(shardArch).second)
+        {
+            // Another thread's read-through raced this one and already merged.
+            return;
         }
 
         // Walk in reverse and never overwrite: within the file the last line for a key
         // wins, and a key already in memory was put there by this process's own
         // measurement, which is newer than anything the file can offer.
-        //
-        // Merged outside `_winnerCacheMutex` now that `_winnerCache` locks itself. The latch
-        // above is already claimed, so no second thread reaches this loop for this shard, and
-        // a concurrent recordWinner() for one of these keys wins on its own merits --
-        // putIfAbsent declines to overwrite it, which is the rule this loop always had.
         for(auto it = decoded.rbegin(); it != decoded.rend(); ++it)
         {
             if(!it->first.graph.isUsable())

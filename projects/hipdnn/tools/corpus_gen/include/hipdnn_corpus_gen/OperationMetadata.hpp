@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_plugin_sdk/heuristics/uhd/DescriptorExpression.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/Expressions.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -146,8 +146,8 @@ struct BuilderArgument
     std::string name;
     Kind kind = Kind::DIRECT;
     std::string source; ///< DIRECT, DTYPE_OF
-    /// Compiled once at metadata admission; all dimensions share one expression DAG.
-    hipdnn_plugin_sdk::uhd::expression::Program expressions{std::vector<nlohmann::json>{}};
+    /// Compiled once at metadata admission: one expression per dimension, then conditions.
+    hipdnn_plugin_sdk::uhd::ExpressionSet expressions;
     /// EXPR whose `value` was one expression rather than an array: it resolves to a single
     /// floating-point scalar, unfloored -- a softmax scale of rsqrt(head_dim) is not a dim.
     bool scalarExpression = false;
@@ -201,7 +201,7 @@ struct RegimeAxis
     /// The clauses, as §6.2 boolean expressions -- the same language and the same evaluator as
     /// @ref OperationMetadata::constraints, so there is no second expression dialect to learn
     /// or to keep in step.
-    hipdnn_plugin_sdk::uhd::expression::Program clauses{std::vector<nlohmann::json>{}};
+    hipdnn_plugin_sdk::uhd::ExpressionSet clauses;
 
     /// The label for a point no clause matched. Spelled out in the declaration rather than
     /// defaulted to a silent "other", because an unlabelled population is one the regret table
@@ -363,7 +363,7 @@ struct OperationMetadata
     /// Boolean §6.2 expressions, the same language UMD criteria use. A point failing any is
     /// never proposed, which costs nothing and stops the search from mapping the frontend's
     /// validator and reporting the result as the engine's region.
-    hipdnn_plugin_sdk::uhd::expression::Program constraints{std::vector<nlohmann::json>{}};
+    hipdnn_plugin_sdk::uhd::ExpressionSet constraints;
 
     /// Recorded workload shapes, and how far a draw may drift from one (proposed §4 addition).
     ///
@@ -672,7 +672,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
 
             try
             {
-                axis.clauses = hipdnn_plugin_sdk::uhd::expression::Program(clauses);
+                axis.clauses = hipdnn_plugin_sdk::uhd::ExpressionSet(clauses);
                 for(const auto& variable : axis.clauses.variables())
                 {
                     const auto name = detail::queryReference(variable);
@@ -899,7 +899,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                         }
                         program.insert(program.end(), conditions.begin(), conditions.end());
                     }
-                    resolved.expressions = hipdnn_plugin_sdk::uhd::expression::Program(program);
+                    resolved.expressions = hipdnn_plugin_sdk::uhd::ExpressionSet(program);
                 }
                 catch(const std::exception& error)
                 {
@@ -945,7 +945,7 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
     {
         try
         {
-            metadata.constraints = hipdnn_plugin_sdk::uhd::expression::Program(
+            metadata.constraints = hipdnn_plugin_sdk::uhd::ExpressionSet(
                 root.at("constraints").get<std::vector<nlohmann::json>>());
             for(const auto& variable : metadata.constraints.variables())
             {

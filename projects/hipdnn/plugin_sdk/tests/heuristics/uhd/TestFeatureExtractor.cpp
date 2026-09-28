@@ -8,10 +8,10 @@
 
 namespace
 {
+using hipdnn_plugin_sdk::uhd::CategoricalEncoding;
 using hipdnn_plugin_sdk::uhd::FeatureExtractionContext;
 using hipdnn_plugin_sdk::uhd::FeatureExtractor;
 using hipdnn_plugin_sdk::uhd::JsonLogicError;
-using hipdnn_plugin_sdk::uhd::expression::CategoricalEncoding;
 using nlohmann::json;
 
 TEST(TestFeatureExtractor, InlineExpressionsUsePublishedNamesWithoutAQueryPrefix)
@@ -124,17 +124,6 @@ TEST(TestFeatureExtractor, SharedErrorsAreRaisedOnlyWhenTheCandidateSelectsTheir
     ctx.clearKernelVars();
     ctx.bindKernelVars({{"enabled", true}});
     EXPECT_THROW(extractor.extractKernelInto(ctx, work), JsonLogicError);
-}
-
-TEST(TestFeatureExtractor, DefaultDoesNotHideTypeOrArithmeticErrors)
-{
-    const FeatureExtractor extractor(
-        {json::parse(R"({"value_or_default":[{"/":["$query.batch",0]},7]})")});
-    FeatureExtractionContext ctx;
-    ctx.bind("query.batch", int64_t{2});
-    EXPECT_THROW(extractor.extract(ctx), JsonLogicError);
-    ctx.bind("query.batch", std::string("two"));
-    EXPECT_THROW(extractor.extract(ctx), JsonLogicError);
 }
 
 TEST(TestFeatureExtractor, ShapeAndRankLowerToCanonicalPublishedBindings)

@@ -9,10 +9,10 @@
 
 namespace
 {
+using hipdnn_plugin_sdk::uhd::CategoricalEncoding;
 using hipdnn_plugin_sdk::uhd::FeatureExtractionContext;
 using hipdnn_plugin_sdk::uhd::FeatureExtractor;
 using hipdnn_plugin_sdk::uhd::JsonLogicError;
-using hipdnn_plugin_sdk::uhd::expression::CategoricalEncoding;
 
 CategoricalEncoding readEncoding(const nlohmann::json& request)
 {

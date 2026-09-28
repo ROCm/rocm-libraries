@@ -10,9 +10,12 @@
 #include <vector>
 
 #include "HipdnnMiopenHandle.hpp"
-#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
+#endif
 
 namespace miopen_plugin
 {
@@ -83,6 +86,7 @@ public:
 private:
     int64_t _id;
     std::string _name;
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     /// `<provider>/<provider version>/<selector>/<library>`, resolved once at
     /// construction: it queries the MIOpen library version, and it is both what a
     /// deployed model must have recorded (RFC 0019 §4.1
@@ -91,6 +95,7 @@ private:
     /// Resolved once at construction from the declared ids. Empty when no descriptor root
     /// is installed, which the engine reports as UNAVAILABLE rather than an error.
     hipdnn_plugin_sdk::uhd::EngineModelBinding _l1Models;
+#endif
     std::vector<std::unique_ptr<hipdnn_plugin_sdk::IPlanBuilder<HipdnnMiopenHandle,
                                                                 HipdnnMiopenSettings,
                                                                 HipdnnMiopenContext>>>

@@ -507,8 +507,8 @@ Pass `--feature-signature features.json` instead of `--features`:
 ]
 ```
 
-Build `hipdnn_uhd_features`. Training and runtime use the same compiled
-descriptor-expression evaluator, and it also owns `features_hash`: RFC 0019 §6.3
+Build `hipdnn_uhd_features`. Training and runtime use the same descriptor expression
+language (the kernel ingestor's `jsonexpr`), and the tool also owns `features_hash`: RFC 0019 §6.3
 gives that digest one definition, `FeatureExtractor::computeHash`, which the tool
 asks for rather than reimplements. So the binary is needed for every training run,
 not only for signatures containing expressions, and a run that cannot find it fails
@@ -656,8 +656,9 @@ selection quality.
 UED role-map keys use the bare architecture (for example, `gfx942`); candidate
 collection retains feature-suffixed architecture strings in `device_arch`.
 
-The runtime lives in `hipdnn_plugin_sdk/heuristics/uhd/` and is available without
-`HIPDNN_ENABLE_KERNEL_INGESTOR`, but an engine only reaches it through a binding that
+The runtime lives in `hipdnn_plugin_sdk/heuristics/uhd/` and, like the descriptor expression
+language it evaluates, exists only with `HIPDNN_ENABLE_KERNEL_INGESTOR`; an engine reaches it
+through a binding that
 lives in compiled code: a `predict_engine` UED role for a descriptor-backed
 engine, or, for an engine that ships no UED, the UHD UUID its provider declares in its
 own engine definition (RFC 0019 Open Question 7, RESOLVED). Authoring an L1 model for an

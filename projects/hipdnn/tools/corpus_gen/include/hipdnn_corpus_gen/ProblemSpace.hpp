@@ -218,19 +218,10 @@ inline bool satisfiesConstraints(const OperationMetadata& metadata, const Proble
     }
 
     const auto context = detail::contextFor(point);
-    auto work = metadata.constraints.workspace();
     for(size_t i = 0; i < metadata.constraints.size(); ++i)
     {
-        try
-        {
-            const auto& value = metadata.constraints.evaluate(i, context, work);
-            const auto* held = std::get_if<bool>(&value.raw);
-            if(held == nullptr || !*held)
-            {
-                return false;
-            }
-        }
-        catch(const std::exception&)
+        const auto value = metadata.constraints.evaluate(i, context);
+        if(!value.isBool() || !value.asBool())
         {
             return false;
         }

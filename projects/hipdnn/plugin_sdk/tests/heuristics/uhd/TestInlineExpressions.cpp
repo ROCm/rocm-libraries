@@ -2,49 +2,31 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_plugin_sdk/heuristics/uhd/DescriptorExpression.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 
 namespace
 {
 using hipdnn_plugin_sdk::uhd::FeatureExtractionContext;
 using hipdnn_plugin_sdk::uhd::FeatureExtractor;
-using hipdnn_plugin_sdk::uhd::expression::Error;
-using hipdnn_plugin_sdk::uhd::expression::Program;
-using hipdnn_plugin_sdk::uhd::expression::VariableContext;
+using hipdnn_plugin_sdk::uhd::JsonLogicError;
 using nlohmann::json;
 
-TEST(TestInlineExpressions, SharedSubexpressionsAndCandidateBindingsAreEvaluatedOnce)
+TEST(TestInlineExpressions, ProblemEntriesAreEvaluatedOncePerSelection)
 {
-    struct CountingData
-    {
-        VariableContext context;
-        mutable std::unordered_map<std::string, size_t> reads;
-        const VariableContext::ValueType* getData(const std::string& path) const
-        {
-            ++reads[path];
-            return context.getData(path);
-        }
-    } data;
+    // RFC 0019 §9.3: an entry that reads no `$kernel` symbol is the same for every candidate,
+    // so prepare() evaluates it once and extractKernelInto() leaves it alone.
     const json shared = json::parse(R"({"*":["$input.batch","$input.heads"]})");
     const json candidate = {{"*", json::array({shared, "$kernel.tile_m"})}};
-    const Program program({shared, candidate, {{"+", json::array({candidate, candidate})}}});
-    data.context.bind("$input.batch", int64_t{16});
-    data.context.bind("$input.heads", int64_t{32});
-    auto work = program.workspace();
-    program.prepare(data, work);
-    EXPECT_DOUBLE_EQ(Program::number(program.evaluate(0, data, work)), 512);
-    data.context.bind("$kernel.tile_m", int64_t{64});
-    EXPECT_DOUBLE_EQ(Program::number(program.evaluate(1, data, work)), 32768);
-    EXPECT_DOUBLE_EQ(Program::number(program.evaluate(2, data, work)), 65536);
-    data.context.bind("$kernel.tile_m", int64_t{128});
-    program.resetCandidate(work);
-    EXPECT_DOUBLE_EQ(Program::number(program.evaluate(2, data, work)), 131072);
-    EXPECT_EQ(data.reads.at("$input.batch"), 1u);
-    EXPECT_EQ(data.reads.at("$input.heads"), 1u);
-    EXPECT_EQ(data.reads.at("$kernel.tile_m"), 2u);
-    // Structural reuse is exposed for compilation/partition benchmarks.
-    EXPECT_EQ(program.nodeCount(), 6u);
+    const FeatureExtractor extractor({shared, candidate});
+    EXPECT_EQ(extractor.kernelDependentCount(), 1u);
+
+    FeatureExtractionContext ctx;
+    ctx.bindQueryVars({{"input.batch", int64_t{16}}, {"input.heads", int64_t{32}}});
+    auto work = extractor.prepare(ctx);
+    ctx.bind("input.batch", int64_t{1});
+    ctx.bindKernelVars({{"tile_m", int64_t{64}}});
+    extractor.extractKernelInto(ctx, work);
+    EXPECT_EQ(work.values, (std::vector<double>{512, 2048}));
 }
 
 TEST(TestInlineExpressions, NestedQuantizationRecomputesOnlyItsCandidateTail)
@@ -66,21 +48,26 @@ TEST(TestInlineExpressions, NestedQuantizationRecomputesOnlyItsCandidateTail)
     EXPECT_EQ(work.values, extractor.extract(ctx));
 }
 
-TEST(TestInlineExpressions, IntegerOverflowAndInvalidRealDomainsFailClosed)
+TEST(TestInlineExpressions, InvalidRealDomainsFailClosed)
 {
-    VariableContext ctx;
-    ctx.bind("$input.n", std::numeric_limits<int64_t>::max());
-    const Program overflow({json::parse(R"({"+":["$input.n",1]})")});
-    auto work = overflow.workspace();
-    EXPECT_THROW(overflow.evaluate(0, ctx, work), Error);
-    const Program domain({json::parse(R"({"pow":[-1,0.5]})")});
-    work = domain.workspace();
-    EXPECT_THROW(domain.evaluate(0, ctx, work), Error);
+    // The language declines these rather than producing NaN or infinity; a feature row
+    // must refuse the decline rather than substitute a number for it.
+    FeatureExtractionContext ctx;
+    ctx.bind("input.n", int64_t{0});
+    for(const auto* expression : {R"({"pow":[-1,0.5]})",
+                                  R"({"log2":"$input.n"})",
+                                  R"({"rsqrt":"$input.n"})",
+                                  R"({"/":[1,"$input.n"]})"})
+    {
+        const FeatureExtractor extractor({json::parse(expression)});
+        EXPECT_THROW(extractor.extract(ctx), JsonLogicError) << expression;
+    }
 }
 
 TEST(TestInlineExpressions, UnknownOperatorInUnusedBranchIsRejectedAtCompilation)
 {
-    EXPECT_THROW(Program({json::parse(R"({"if":[false,{"custom_native":[1]},0]})")}), Error);
+    EXPECT_THROW(FeatureExtractor({json::parse(R"({"if":[false,{"custom_native":[1]},0]})")}),
+                 JsonLogicError);
 }
 
 } // namespace

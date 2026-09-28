@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <map>
 #include <mutex>
 
@@ -41,3 +43,5 @@ inline const hipDeviceProp_t& predictionDevice(hipStream_t stream)
 }
 
 } // namespace hipdnn_plugin_sdk::heuristics
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

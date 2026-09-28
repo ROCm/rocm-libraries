@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <array>
 #include <cmath>
 #include <limits>
@@ -122,3 +124,5 @@ inline double applyForward(double value, const std::string& transform)
 } // namespace score_transform
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

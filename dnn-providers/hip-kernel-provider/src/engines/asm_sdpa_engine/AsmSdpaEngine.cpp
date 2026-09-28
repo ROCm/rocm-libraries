@@ -193,6 +193,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
         result.reason = "ASM SDPA selects its own kernel and predicts no exact configuration";
         return result;
     }
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
         const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
@@ -212,6 +213,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
         result.reason = error.what();
         return result;
     }
+#else
+    static_cast<void>(handle);
+    static_cast<void>(graph);
+    static_cast<void>(evaluate);
+    result.reason = "UHD engine prediction requires a build with HIPDNN_ENABLE_KERNEL_INGESTOR";
+    return result;
+#endif
 }
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(

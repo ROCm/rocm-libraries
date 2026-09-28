@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include "IUhdAdapter.hpp"
 
 #include <algorithm>
@@ -635,3 +637,5 @@ inline bool TreeDataAdapter::isTrainedForArch(const std::string& arch) const
 }
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

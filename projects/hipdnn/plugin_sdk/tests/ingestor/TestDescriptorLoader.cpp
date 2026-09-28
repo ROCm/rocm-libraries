@@ -1847,7 +1847,7 @@ TEST(TestDescriptorLoader, ReadsTheWholeHeuristicHeader)
     // Keyed by the whole reference, and on a `$q.*` token deliberately: the encoding must
     // survive the parse without adding a `$kernel.*` axis, which is what RFC 0019 §6.3
     // check 2 measures the UED's knobs against.
-    const hipdnn_plugin_sdk::uhd::expression::CategoricalEncoding encoding
+    const hipdnn_plugin_sdk::uhd::CategoricalEncoding encoding
         = {{"$q.dtype", {{"fp16", 0}, {"bf16", 1}}}};
 
     auto documents = makeSetDocuments('1', "test:model_header");

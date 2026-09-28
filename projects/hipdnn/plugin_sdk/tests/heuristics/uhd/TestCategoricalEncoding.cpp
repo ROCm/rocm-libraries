@@ -9,8 +9,8 @@
 
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 
-/// Categorical vocabularies belong to the model. Numeric expression contexts read
-/// the code of an encoded reference; equality and membership retain string identity.
+/// Categorical vocabularies belong to the model. A bare reference to a declared field reads
+/// its code; inside an expression the value keeps its string identity.
 
 namespace
 {
@@ -132,15 +132,20 @@ TEST(TestCategoricalEncoding, ValueOutsideADeclaredFieldStillThrows)
     EXPECT_THROW(extractKernelFeature("dtype", "float16", encoding), JsonLogicError);
 }
 
-TEST(TestCategoricalEncoding, EncodedReferencesWorkInInlineNumericAndStringContexts)
+TEST(TestCategoricalEncoding, EncodedReferencesKeepStringIdentityInsideExpressions)
 {
+    const Encoding encoding{{"$kernel.dtype", {{"fp16", 1}}}};
     const FeatureExtractor extractor(
-        {nlohmann::json::parse(R"({"+": ["$kernel.dtype", 1]})"),
-         nlohmann::json::parse(R"({"==": ["$kernel.dtype", "fp16"]})")},
-        Encoding{{"$kernel.dtype", {{"fp16", 1}}}});
+        {"$kernel.dtype", nlohmann::json::parse(R"({"==": ["$kernel.dtype", "fp16"]})")}, encoding);
     FeatureExtractionContext ctx;
     ctx.bindKernelVars({{"dtype", std::string("fp16")}});
-    EXPECT_EQ(extractor.extract(ctx), (std::vector<double>{2, 1}));
+    EXPECT_EQ(extractor.extract(ctx), (std::vector<double>{1, 1}));
+
+    // Arithmetic on the string is not arithmetic on its code: the code is the model's
+    // reading of the field, not the field's value.
+    const FeatureExtractor arithmetic({nlohmann::json::parse(R"({"+": ["$kernel.dtype", 1]})")},
+                                      encoding);
+    EXPECT_THROW(arithmetic.extract(ctx), JsonLogicError);
 }
 
 TEST(TestCategoricalEncoding, AStringLiteralIsNotACategory)

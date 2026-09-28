@@ -93,6 +93,7 @@ void initializeMiopenSettings(
     }
 }
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// What this build of @p engineName was, for a model that claims to have measured it.
 ///
 /// `<provider>/<provider version>/<selector>/<library>`. MIOpen picks its own solution,
@@ -128,7 +129,6 @@ std::string selectorRevision(const std::string& engineName)
            + "/miopen-" + library;
 }
 
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Every descriptor file this provider reads, parsed once for the process.
 ///
 /// MIOpen ships no descriptor tree of its own, so the only roots are the ones an operator
@@ -217,12 +217,14 @@ MiopenEngine::MiopenEngine(int64_t id,
                            std::map<std::string, std::vector<std::string>> l1ModelIds)
     : _id(id)
     , _name(std::move(name))
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     , _selectorRevision(selectorRevision(_name))
+#endif
 {
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     bindDeclaredL1Models(_l1Models, _name, _selectorRevision, l1ModelIds);
 #else
-    // Without the ingestor there is no loader to resolve a declared id through, so the
+    // Without the ingestor there is no UHD runtime to bind a declared model into, so the
     // engine reports no estimate -- the same outcome as an id nothing deploys.
     static_cast<void>(l1ModelIds);
 #endif
@@ -316,6 +318,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
         result.reason = "MIOpen selects its own solution and predicts no exact configuration";
         return result;
     }
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
         const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
@@ -330,6 +333,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT MiopenEngine::getPredict
         result.reason = error.what();
         return result;
     }
+#else
+    static_cast<void>(handle);
+    static_cast<void>(graph);
+    static_cast<void>(evaluate);
+    result.reason = "UHD engine prediction requires a build with HIPDNN_ENABLE_KERNEL_INGESTOR";
+    return result;
+#endif
 }
 
 size_t MiopenEngine::getMaxWorkspaceSize(

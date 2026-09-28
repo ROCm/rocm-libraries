@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <hipdnn_plugin_sdk/NativeRegistry.hpp>
 
 #include <cstddef>
@@ -81,3 +83,5 @@ private:
 };
 
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

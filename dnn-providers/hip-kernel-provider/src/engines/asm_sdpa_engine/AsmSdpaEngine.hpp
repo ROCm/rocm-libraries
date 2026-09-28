@@ -4,12 +4,17 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <string_view>
 #include <utility>
+#include <vector>
 
-#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
+#endif
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -107,9 +112,11 @@ public:
 
 private:
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     /// Resolved once at construction from @ref L1_MODEL_IDS; empty when no descriptor
     /// tree is installed, which the engine reports as UNAVAILABLE rather than an error.
     hipdnn_plugin_sdk::uhd::EngineModelBinding _l1Models;
+#endif
 };
 
 } // namespace asm_sdpa_engine

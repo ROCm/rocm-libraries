@@ -169,6 +169,8 @@ export HIPDNN_HEUR_CONFIG_PATH=/etc/hipdnn/engine_overrides.json
 
 Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`. When set, **only** engines named here are eligible — anything else is dropped from the candidate list.
 
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` use the same list for the engines they cannot score: unscored engines (and ties between equal scores) follow the order written here, then any engine it does not name in the built-in order. These policies never drop an engine; only `StaticOrdering` restricts selection to the listed engines.
+
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
 | (unset)    | Use the built-in static ordering (MIOpen-first, deterministic engines last). |

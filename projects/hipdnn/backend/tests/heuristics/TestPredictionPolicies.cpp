@@ -24,6 +24,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -284,6 +285,36 @@ TEST_F(TestPredictionPolicies, UnscoredEnginesFallBackToStaticOrdering)
                                         MIOPEN_ENGINE_ID,
                                         ASM_SDPA_ENGINE_ID,
                                         MIOPEN_ENGINE_DETERMINISTIC_ID}))
+            << "policy " << mode;
+    }
+}
+
+// The operator's HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is the static rule when it is set: the
+// engines it names lead the unscored tail in the order written, and any it does not name
+// follow in the built-in order rather than being dropped.
+TEST_F(TestPredictionPolicies, UnscoredEnginesFollowTheOperatorFallbackOrder)
+{
+    using hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
+        "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER",
+        std::to_string(MIOPEN_ENGINE_DETERMINISTIC_ID) + "," + std::to_string(ASM_SDPA_ENGINE_ID));
+    const std::vector<int64_t> arrival{
+        MIOPEN_ENGINE_ID, ASM_SDPA_ENGINE_ID, HIPBLASLT_ENGINE_ID, MIOPEN_ENGINE_DETERMINISTIC_ID};
+    for(const auto* mode : {MODE_A_POLICY_NAME, MODE_B_POLICY_NAME})
+    {
+        selectMode(mode, arrival);
+        estimate(HIPBLASLT_ENGINE_ID, HIPDNN_ENGINE_PREDICTION_ENGINE, 10);
+        const auto services = host();
+        ASSERT_TRUE(_plugin->finalizeWithHost(_descriptor.get(), &services));
+        EXPECT_EQ(_plugin->getSortedEngineIds(_descriptor.get()),
+                  (std::vector<int64_t>{HIPBLASLT_ENGINE_ID,
+                                        MIOPEN_ENGINE_DETERMINISTIC_ID,
+                                        ASM_SDPA_ENGINE_ID,
+                                        MIOPEN_ENGINE_ID}))
             << "policy " << mode;
     }
 }

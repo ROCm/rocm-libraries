@@ -22,6 +22,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -198,8 +199,8 @@ TEST_F(TestTableAdapter, ScoreFallbackNoMatch)
     auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
-    // Bucket (1, 1) has no entry -> fallback score 0.0
-    EXPECT_DOUBLE_EQ(adapter->score({6.0, 12.0}), 0.0);
+    // Bucket (1, 1) has no entry -> declined, never a zero prediction
+    EXPECT_EQ(adapter->score({6.0, 12.0}), -std::numeric_limits<double>::infinity());
 }
 
 TEST_F(TestTableAdapter, FeaturesHashMismatch)
@@ -301,8 +302,8 @@ TEST_F(TestTableAdapter, MultipleBuckets)
     // {1.0, 1.0, 1.0} -> buckets {0, 0, 1} -> score 10.0 (boundary case)
     EXPECT_DOUBLE_EQ(adapter->score({1.0, 1.0, 1.0}), 10.0);
 
-    // {3.0, 9.0, 2.0} -> buckets {1, 1, 1} -> no entry, fallback 0.0
-    EXPECT_DOUBLE_EQ(adapter->score({3.0, 9.0, 2.0}), 0.0);
+    // {3.0, 9.0, 2.0} -> buckets {1, 1, 1} -> no entry, declined
+    EXPECT_EQ(adapter->score({3.0, 9.0, 2.0}), -std::numeric_limits<double>::infinity());
 }
 
 TEST_F(TestTableAdapter, LoadFromBufferNullBuffer)

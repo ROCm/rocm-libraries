@@ -4,6 +4,7 @@
 #include "PredictionPolicy.hpp"
 
 #include "heuristics/BuiltInLogging.hpp"
+#include "heuristics/FallbackEngineOrder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineOrdering.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
@@ -517,9 +518,21 @@ hipdnnPluginStatus_t policyFinalizeWithHost(hipdnnHeuristicPolicyDescriptor_t de
         }
         // Scored engines first, best-first in the metric's direction; ties and the
         // unscored tail follow the static rules (RFC 0019 §11.2), not candidate-arrival
-        // order, which is neither those rules nor deterministic.
-        std::vector<int64_t> staticOrder = desc.engineIds;
-        hipdnn_data_sdk::utilities::sortEngineIds(staticOrder);
+        // order, which is neither those rules nor deterministic. The static rules are the
+        // operator's HIPDNN_HEUR_FALLBACK_ENGINE_ORDER where it names an engine, then the
+        // built-in vendor precedence for any engine it does not name.
+        std::vector<int64_t> builtInOrder = desc.engineIds;
+        hipdnn_data_sdk::utilities::sortEngineIds(builtInOrder);
+        std::vector<int64_t> staticOrder
+            = applyFallbackOrdering(builtInOrder, parseFallbackOrderingEnv());
+        const std::unordered_set<int64_t> listed(staticOrder.begin(), staticOrder.end());
+        for(const auto id : builtInOrder)
+        {
+            if(listed.count(id) == 0U)
+            {
+                staticOrder.push_back(id);
+            }
+        }
         std::unordered_map<int64_t, std::size_t> staticRank;
         staticRank.reserve(staticOrder.size());
         for(std::size_t rank = 0; rank < staticOrder.size(); ++rank)

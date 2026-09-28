@@ -3,6 +3,8 @@
 
 #pragma once
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -23,7 +25,7 @@ namespace parser_detail
 {
 inline constexpr size_t MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
 inline constexpr size_t MAX_DOCUMENT_NODES = 131072;
-inline constexpr size_t MAX_DOCUMENT_DEPTH = 2 * expression::Program::MAX_EXPRESSION_DEPTH + 8;
+inline constexpr size_t MAX_DOCUMENT_DEPTH = 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 8;
 
 [[noreturn]] inline void fail(const std::string& message)
 {
@@ -468,3 +470,5 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     return result;
 }
 } // namespace hipdnn_plugin_sdk::uhd
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

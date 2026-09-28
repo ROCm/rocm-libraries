@@ -1052,9 +1052,10 @@ private:
 
         // `recovered` is a physical quantity before any orientation is applied: throughput for
         // a calibrated model, and a cost -- a time -- for the `min` targets §15.1 permits.
-        // RFC 0019.13 §8.4 names no target that can be negative, so a negative value here is
-        // the model predicting outside the range it was fitted to. That is a training defect,
-        // not a slow kernel, and it is refused whatever the model declares.
+        // RFC 0019 §8.3 accepts only a finite, strictly positive value as a prediction. A
+        // negative value is the model predicting outside the range it was fitted to, and a
+        // zero is no measurement at all: under `objective: min` a zero cost would outrank every
+        // real candidate. Both are refused whatever the model declares.
         //
         // Only some transforms make it loud. log's inverse yields NaN, but log1p's yields a
         // finite negative, and log1p is what uhd_gen emits by default -- so the most common
@@ -1062,7 +1063,7 @@ private:
         //
         // Bounded here rather than in the adapter because this is the only layer that knows
         // what the number means: TreeDataAdapter sums leaves and has no transform and no units.
-        if(!std::isfinite(recovered) || recovered < 0.0)
+        if(!std::isfinite(recovered) || recovered <= 0.0)
         {
             // Not reported here. One ranking can trip this for a single candidate or for all
             // of them, and those mean different things -- a bad extrapolation versus a model
