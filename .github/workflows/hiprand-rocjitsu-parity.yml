@@ -8,10 +8,9 @@ name: hipRAND rocJITsu Parity PoC
 # (therock-ci-config when CI_CONFIG_PATH is set, otherwise the in-tree
 # BUILD_RUNNER_LABELS). That label is a CPU scale set, not a GPU test runner.
 #
-# The executed test is the single XORWOW gtest case that passed under rocJITsu
-# in the feasibility spike. The full 364-case hipRAND suite is too slow for
-# this job. Widen it with workflow_dispatch input gtest_filter after this
-# workflow is on the default branch.
+# The default run is ctest -L '^quick$', the same five hipRAND binaries the
+# hardware baseline selects with ctest -L '^standard$'. quick and standard are
+# the same set here. Set the workflow_dispatch gtest_filter to narrow it.
 
 on:
   pull_request:
@@ -26,9 +25,9 @@ on:
   workflow_dispatch:
     inputs:
       gtest_filter:
-        description: "hipRAND gtest filter. Default is the proven XORWOW case."
+        description: "Optional hipRAND gtest filter. Empty runs ctest -L ^quick$."
         type: string
-        default: "hiprand_32/hiprand_api_32.hiprand_generate_test/0"
+        default: ""
       rocm_version:
         description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
         type: string
@@ -105,7 +104,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.enabled == 'true'
     runs-on: ${{ needs.gate.outputs.build_runs_on }}
-    timeout-minutes: 180
+    timeout-minutes: 360
     # The build-runner process has CapEff 0 and no docker socket, and a nested
     # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
     # build and the nightly unpack already succeeded. The test uses the non-kmd
@@ -118,7 +117,8 @@ jobs:
       image: ubuntu:24.04
     env:
       ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
-      GTEST_FILTER: ${{ github.event.inputs.gtest_filter || 'hiprand_32/hiprand_api_32.hiprand_generate_test/0' }}
+      GTEST_FILTER: ${{ github.event.inputs.gtest_filter || '' }}
+      CTEST_LABEL: "^quick$"
       BUILD_RUNS_ON: ${{ needs.gate.outputs.build_runs_on }}
       ROCM_SYSTEMS_REF: 1f44cb5afa5e6dec03d57609e5dfba43d4f31c3c
     steps:
@@ -171,22 +171,32 @@ jobs:
           test -x "$root/bin/test_hiprand_api"
           echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
 
-      - name: Run the hipRAND filter under rocJITsu
+      - name: Run the hipRAND quick filter under rocJITsu
         run: |
           set -euo pipefail
           export ROCM_PATH="$ROCM_ROOT"
           export PATH="$ROCM_ROOT/bin:$PATH"
           export LD_LIBRARY_PATH="$ROCM_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           mkdir -p parity
-          python3 .github/scripts/ci_parity_runner.py \
-            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
-            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json" \
-            --rocm-root "$ROCM_ROOT" \
-            --rocm-version "$ROCM_VERSION" \
-            --runner-label "$BUILD_RUNS_ON" \
-            --binary "$ROCM_ROOT/bin/test_hiprand_api" \
-            --gtest-filter "$GTEST_FILTER" \
+          common=(
+            python3 .github/scripts/ci_parity_runner.py
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu"
+            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json"
+            --rocm-root "$ROCM_ROOT"
+            --rocm-version "$ROCM_VERSION"
+            --runner-label "$BUILD_RUNS_ON"
             --out parity/emu.json
+          )
+          if [ -n "$GTEST_FILTER" ]; then
+            "${common[@]}" \
+              --binary "$ROCM_ROOT/bin/test_hiprand_api" \
+              --gtest-filter "$GTEST_FILTER" \
+              --timeout-seconds 1800
+          else
+            "${common[@]}" \
+              --ctest-label "$CTEST_LABEL" \
+              --timeout-seconds 7200
+          fi
 
       - name: Diff against the hardware baseline
         if: always()

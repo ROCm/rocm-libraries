@@ -92,6 +92,7 @@ def render_report(hw: dict, emu: dict, result: dict) -> str:
         f"- Hardware SHA: {hw.get('head_sha', '')}",
         f"- Emulator runner: {emu.get('runner_label', '')}",
         f"- Emulator ROCm version: {emu.get('rocm_version', '')}",
+        f"- ctest label: `{emu.get('ctest_label', '')}`",
         f"- gtest filter: `{emu.get('gtest_filter', '')}`",
         "",
         (
@@ -104,9 +105,9 @@ def render_report(hw: dict, emu: dict, result: dict) -> str:
             f"baseline cases executed ({result['coverage_pct']:.1f}%)"
         ),
         "",
-        "NOT_RUN cases stay out of the parity percentage. The default filter "
-        "is the single XORWOW case proven in the feasibility spike; it is not "
-        "a full-suite grade.",
+        "NOT_RUN cases stay out of the parity percentage. "
+        "ctest -L ^quick$ runs the same five hipRAND binaries as the hardware "
+        "baseline. A gtest filter narrows that set and is not a full-suite grade.",
         "",
         "| class | count |",
         "| --- | --- |",

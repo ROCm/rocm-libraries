@@ -1,7 +1,11 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import os
+import stat
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -38,6 +42,14 @@ class ParseGtestTest(unittest.TestCase):
             ],
         )
 
+    def test_ctest_prefixed_ok_line(self):
+        cases = ci_parity_runner.parse_gtest_output(
+            "1: [       OK ] hiprand_linkage_tests.get_version_test (0 ms)"
+        )
+        self.assertEqual(cases[0]["id"], "hiprand_linkage_tests.get_version_test")
+        self.assertEqual(cases[0]["status"], "passed")
+        self.assertEqual(cases[0]["seconds"], 0.0)
+
     def test_summary_line_without_time_is_ignored(self):
         cases = ci_parity_runner.parse_gtest_output(
             "[  FAILED  ] 2 tests, listed below:"
@@ -61,6 +73,91 @@ class ParseGtestTest(unittest.TestCase):
             ci_parity_runner.looks_unsupported("fatal: UnimplementedInst V_ADD_CO_U32")
         )
         self.assertFalse(ci_parity_runner.looks_unsupported("[       OK ] Case (1 ms)"))
+
+
+INSTALLED_CTEST = textwrap.dedent(
+    """\
+    add_test(test_hiprand_api "../test_hiprand_api")
+    add_test(test_hiprand_cpp_wrapper "../test_hiprand_cpp_wrapper")
+    add_test(test_hiprand_kernel "../test_hiprand_kernel")
+    add_test(test_hiprand_linkage "../test_hiprand_linkage")
+    add_test(test_hiprand_c_compile "../test_hiprand_c_compile")
+    add_test(ffm_only "../ffm_only")
+    set_tests_properties("test_hiprand_api" PROPERTIES LABELS "quick;standard;comprehensive;full")
+    set_tests_properties("test_hiprand_cpp_wrapper" PROPERTIES LABELS "quick;standard;comprehensive;full")
+    set_tests_properties("test_hiprand_kernel" PROPERTIES LABELS "quick;standard;comprehensive;full;ffm-quick;ffm-full")
+    set_tests_properties("test_hiprand_linkage" PROPERTIES LABELS "quick;standard;comprehensive;full;ffm-quick;ffm-full")
+    set_tests_properties("test_hiprand_c_compile" PROPERTIES LABELS "quick;standard;comprehensive;full")
+    set_tests_properties("ffm_only" PROPERTIES LABELS "ffm-quick")
+    """
+)
+
+
+class QuickLabelTest(unittest.TestCase):
+    def test_quick_selects_the_five_baseline_binaries(self):
+        selected = ci_parity_runner.select_labeled_tests(
+            ci_parity_runner.parse_installed_tests(INSTALLED_CTEST),
+            "^quick$",
+        )
+        self.assertEqual(
+            [test["name"] for test in selected],
+            [
+                "test_hiprand_api",
+                "test_hiprand_cpp_wrapper",
+                "test_hiprand_kernel",
+                "test_hiprand_linkage",
+                "test_hiprand_c_compile",
+            ],
+        )
+
+    def test_ctest_verbose_log_for_quick_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hiprand = root / "rocm" / "bin" / "hipRAND"
+            hiprand.mkdir(parents=True)
+            binary = root / "rocm" / "bin" / "test_hiprand_api"
+            binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+            (hiprand / "CTestTestfile.cmake").write_text(
+                "\n".join(
+                    [
+                        'add_test(test_hiprand_api "../test_hiprand_api")',
+                        'set_tests_properties("test_hiprand_api" PROPERTIES LABELS "quick;standard")',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            rocjitsu = root / "rocjitsu"
+            rocjitsu.write_text(
+                "#!/bin/sh\n"
+                "echo '[ RUN      ] hiprand_32/hiprand_api_32.hiprand_generate_test/0'\n"
+                "echo '[       OK ] hiprand_32/hiprand_api_32.hiprand_generate_test/0 (12 ms)'\n",
+                encoding="utf-8",
+            )
+            rocjitsu.chmod(rocjitsu.stat().st_mode | stat.S_IEXEC)
+            out = root / "parity"
+            result = ci_parity_runner.run_labeled_ctest(
+                str(rocjitsu),
+                str(root / "cfg.json"),
+                str(root / "rocm"),
+                "^quick$",
+                "",
+                30,
+                os.environ.copy(),
+                False,
+                out,
+            )
+            log = "\n".join(result["log_lines"])
+            self.assertIn("Start 1: test_hiprand_api", log)
+            self.assertIn(
+                "1: [ RUN      ] hiprand_32/hiprand_api_32.hiprand_generate_test/0",
+                log,
+            )
+            self.assertIn("1/1 Test #1: test_hiprand_api", log)
+            self.assertIn("Passed", log)
+            self.assertEqual(result["cases"][0]["status"], "passed")
+            self.assertEqual(result["returncode"], 0)
 
 
 if __name__ == "__main__":
