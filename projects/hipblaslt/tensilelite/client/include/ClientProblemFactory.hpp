@@ -115,6 +115,7 @@ namespace TensileLite
             int                              m_metadataLayout;
             int                              m_mxBlockA;
             int                              m_mxBlockB;
+            int                              m_mxScaleFormat;
             bool                             m_padMXScaleTensorFreeDim;
 
             TensorOps m_aOps;

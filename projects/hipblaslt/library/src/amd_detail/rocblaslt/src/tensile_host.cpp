@@ -994,19 +994,23 @@ namespace
     // option values (hipblaslt_scaling_format). Block scaling is carried by the MX scale
     // tensor: useScaleAB() is deliberately left empty for MX problems so that they match
     // the UseScaleAB: '' ProblemType in the MX logic files, so it cannot be the only
-    // source here. Block_32_UE8M0_32_8_EXT is indistinguishable from Block_32_UE8M0 at
-    // this layer -- both set an E8 scale with block 32, and the pre-swizzled layout is a
-    // property of the selected solution -- so it is reported as the former.
+    // source here. Shuffled vs non-shuffled layout is carried on the Tensile problem as
+    // mxScaleFormat (HostPreSwizzle vs NoSwizzle) and participates in matching.
     inline int benchScaleFormat(rocisa::DataType   mxType,
                                 size_t             mxBlock,
-                                const std::string& useScaleAB)
+                                const std::string& useScaleAB,
+                                int                mxScaleFormat = 0)
     {
         if(mxBlock)
         {
             switch(mxType)
             {
             case rocisa::DataType::E8:
-                return mxBlock == 32 ? 3 : mxBlock == 16 ? 4 : 0;
+                // 3 = Block_32_UE8M0 (NoSwizzle), 1001 = Block_32_UE8M0_32_8_EXT
+                // (HostPreSwizzle) — see hipblaslt_scaling_format.
+                if(mxBlock == 32)
+                    return mxScaleFormat == 1 ? 1001 : 3;
+                return mxBlock == 16 ? 4 : 0;
             case rocisa::DataType::Float8:
                 return mxBlock == 32 ? 5 : mxBlock == 16 ? 6 : 0;
             case rocisa::DataType::E5M3:
@@ -1024,12 +1028,26 @@ namespace
 
     inline int benchScaleAFormat(const TensileLite::ContractionProblemGemm& problem)
     {
-        return benchScaleFormat(problem.mxTypeA(), problem.mxBlockA(), problem.useScaleAB());
+        return benchScaleFormat(
+            problem.mxTypeA(), problem.mxBlockA(), problem.useScaleAB(), problem.mxScaleFormat());
     }
 
     inline int benchScaleBFormat(const TensileLite::ContractionProblemGemm& problem)
     {
-        return benchScaleFormat(problem.mxTypeB(), problem.mxBlockB(), problem.useScaleAB());
+        return benchScaleFormat(
+            problem.mxTypeB(), problem.mxBlockB(), problem.useScaleAB(), problem.mxScaleFormat());
+    }
+
+    // Map API ScalingFormat pair onto Tensile problem mxScaleFormat.
+    // Both operands must request the host-preswizzled EXT layout to select
+    // HostPreSwizzle (1); otherwise NoSwizzle (0).
+    inline int tensileMXScaleFormatFromProb(const RocblasltContractionProblem& prob)
+    {
+        using SF = RocblasltContractionProblem::ScalingFormat;
+        if(prob.scaleAType == SF::Block_32_UE8M0_32_8_EXT
+           && prob.scaleBType == SF::Block_32_UE8M0_32_8_EXT)
+            return 1; // HostPreSwizzle
+        return 0; // NoSwizzle
     }
 
     inline void logBenchFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
@@ -2064,7 +2082,9 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
+	    // Block_32_UE8M0_32_8_EXT is pre-swizzled scale data in a 32x8 tile.
+            // Both formats set E8 / block 32 here; layout is selected via
+            // setMXScaleFormat() so matching can discriminate them.
             tensileProblem.setMXScaleA(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
@@ -2092,7 +2112,9 @@ namespace
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0:
         case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT:
-	    // Block_32_UE8M0_32_8_EXT (commit fe9a04d) is pre-swizzled scale data in `32x8` tile
+	    // Block_32_UE8M0_32_8_EXT is pre-swizzled scale data in a 32x8 tile.
+            // Both formats set E8 / block 32 here; layout is selected via
+            // setMXScaleFormat() so matching can discriminate them.
             tensileProblem.setMXScaleB(rocisa::DataType::E8, 32, {}, padMXScaleTensorFreeDim);
             break;
         case RocblasltContractionProblem::ScalingFormat::Block_16_UE8M0:
@@ -2170,6 +2192,7 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(tensileMXScaleFormatFromProb(prob));
 
         if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
             prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
@@ -2462,6 +2485,7 @@ namespace
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);
         tensileProblem.setSwizzleTensorB(prob.swizzleB);
+        tensileProblem.setMXScaleFormat(tensileMXScaleFormatFromProb(prob));
 
 	if(prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0 or
    	   prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT)
@@ -3414,20 +3438,24 @@ void initTensileGemmData(rocblaslt_handle       handle,
 #ifdef HIPBLASLT_USE_ROCROLLER
 bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob)
 {
-    // Do not use rocRoller for FP4 A + FP4 B with pre-swizzled (shuffled) scale layout
+    // Do not use rocRoller for FP4 A + FP4 B with MX block scaling by default —
+    // neither the shuffled (HostPreSwizzle / 32_8_EXT) nor the non-preswizzled
+    // (NoSwizzle / VEC32_UE8M0) path. Tensile Origami libraries cover both.
     bool isFp4A = (prob.a_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
     bool isFp4B = (prob.b_type == static_cast<hipDataType>(HIP_R_4F_E2M1));
-    bool isShuffledScale
-        = (prob.scaleAType
-               == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
-           && prob.scaleBType
-                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT);
-    if(isFp4A && isFp4B && isShuffledScale)
+    bool isMxBlockScale
+        = isBlockScaling(prob.scaleAType) || isBlockScaling(prob.scaleBType);
+    if(isFp4A && isFp4B && isMxBlockScale)
         return false;
 
     // Do not use rocRoller for FP8 E4M3 A + FP8 E4M3 B with pre-swizzled (shuffled) scale layout
     bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
     bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    bool isShuffledScale
+        = (prob.scaleAType
+               == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT
+           && prob.scaleBType
+                  == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT);
     if(isFp8A && isFp8B && isShuffledScale)
         return false;
 

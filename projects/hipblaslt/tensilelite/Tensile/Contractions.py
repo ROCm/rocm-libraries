@@ -299,8 +299,15 @@ class ProblemType:
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
-        # mxScaleFormat is a Solution-level parameter and is populated by
-        # Solution.FromOriginalState, which has access to the parent dict.
+        # Problem-level MX scale layout discriminator (also a solution knob).
+        # Libraries that omit it default to NoSwizzle so they match the
+        # canonical / non-preswizzled API scale format.
+        _mxScaleFormatMap = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2, "Auto": 0}
+        if 'MXScaleFormat' in d:
+            fmt = d['MXScaleFormat']
+            rv.mxScaleFormat = fmt if isinstance(fmt, int) else _mxScaleFormatMap.get(fmt, 0)
+        else:
+            rv.mxScaleFormat = 0
 
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
@@ -436,6 +443,9 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
+            # Always predicate on mxScaleFormat so shuffled vs non-shuffled
+            # API scale layouts select different matching libraries.
+            predicates.append(ProblemPredicate("MXScaleFormat", value=self.mxScaleFormat))
         return predicates
 
 class TaskPredicate(Properties.Predicate):
@@ -932,15 +942,23 @@ class Solution:
 
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
 
-        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
-        # but it describes the in-device MX scale layout the kernel expects, which
-        # the host (DataInitialization) needs to know to pick an upload layout.
-        # Plumb it onto problemType so the host can read it post-solution-pick.
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        # Solution-level MXScaleFormat describes the in-device layout the kernel
+        # expects (DataInitialization consults this post-pick). Prefer an
+        # explicit ProblemType.MXScaleFormat when present so library matching
+        # keys off the problem; fall back to the solution knob for legacy
+        # logic files that only set it per-solution.
+        _mxScaleFormatMap = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2, "Auto": 0}
+        solFmt = d.get("MXScaleFormat", "NoSwizzle")
+        solFmtInt = solFmt if isinstance(solFmt, int) else _mxScaleFormatMap.get(solFmt, 0)
+        if 'MXScaleFormat' not in d.get('ProblemType', {}):
+            rv.problemType.mxScaleFormat = solFmtInt
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
+
+        # After predicates are built from ProblemType, mirror an explicit
+        # solution-level MXScaleFormat onto problemType for DataInitialization.
+        if 'MXScaleFormat' in d:
+            rv.problemType.mxScaleFormat = solFmtInt
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
 
         if 'DebugKernel' in d:

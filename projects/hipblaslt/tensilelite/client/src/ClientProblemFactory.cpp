@@ -59,6 +59,7 @@ namespace TensileLite
             , m_useUserArgs(false)
             , m_mxBlockA(args["mx-a-block"].as<int>())
             , m_mxBlockB(args["mx-b-block"].as<int>())
+            , m_mxScaleFormat(args.count("mx-scale-format") ? args["mx-scale-format"].as<int>() : 0)
             , m_padMXScaleTensorFreeDim(false)
             , m_swizzleTensorA(false)
             , m_swizzleTensorB(false)
@@ -530,6 +531,10 @@ namespace TensileLite
                             if(m_mxBlockB)
                             {
                                 rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensorFreeDim);
+                            }
+                            if(m_mxBlockA || m_mxBlockB)
+                            {
+                                rv.back().setMXScaleFormat(m_mxScaleFormat);
                             }
                             // StreamK=5 hybrid-mode toggle. Accepts the full
                             // tri-state {0=OFF (static), 1=ON (dynamic per-XCD

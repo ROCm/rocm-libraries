@@ -511,6 +511,10 @@ _defaultProblemType = {
     "MXBlockB": 0,
     "DataTypeMXSA": "E8",
     "DataTypeMXSB": "E8",
+    # Problem-level MX scale layout (NoSwizzle / HostPreSwizzle / InMemorySwizzle).
+    # Distinct libraries are keyed by this so shuffled vs non-shuffled API
+    # formats select different matching.
+    "MXScaleFormat": "NoSwizzle",
 }
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
@@ -1319,6 +1323,15 @@ class ProblemType(Mapping):
 
     if self["MXBlockB"]:
       name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
+
+    # Discriminate shuffled (host-preswizzled) MX scale layout in library names,
+    # analogous to STA/STB for tensor swizzle. NoSwizzle is the default and is
+    # omitted so existing non-preswizzled library filenames stay stable.
+    mxScaleFormat = self.get("MXScaleFormat", "NoSwizzle")
+    if mxScaleFormat in (1, "HostPreSwizzle"):
+      name.append("MXSFHPS")
+    elif mxScaleFormat in (2, "InMemorySwizzle"):
+      name.append("MXSFIMS")
 
     if self["SwizzleTensorA"]:
       name.append("STA")

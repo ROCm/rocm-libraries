@@ -1213,6 +1213,23 @@ namespace TensileLite
             return m_mxTypeB;
         }
 
+        // In-device MX scale layout requested by the API / problem. Encoded as:
+        //   0 = NoSwizzle       (canonical row/column layout; e.g. VEC32_UE8M0)
+        //   1 = HostPreSwizzle  (gfx950 host-preswizzled; e.g. BLK32_UE8M0_32_8_EXT)
+        //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
+        // Participates in solution matching so shuffled vs non-shuffled select
+        // different libraries / solutions. Distinct from the solution-level
+        // MXScaleFormat knob that describes what a kernel was generated for.
+        int mxScaleFormat() const
+        {
+            return m_mxScaleFormat;
+        }
+
+        void setMXScaleFormat(int mxScaleFormat)
+        {
+            m_mxScaleFormat = mxScaleFormat;
+        }
+
         bool swizzleTensorA() const
         {
             return m_swizzleTensorA;
@@ -1548,6 +1565,7 @@ namespace TensileLite
         int              m_mxBlockB                = 0;
         rocisa::DataType m_mxTypeA                 = rocisa::DataType::None;
         rocisa::DataType m_mxTypeB                 = rocisa::DataType::None;
+        int              m_mxScaleFormat           = 0;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;

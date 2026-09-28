@@ -164,6 +164,8 @@ namespace TensileLite
                                         rhs.mxTypeA(),
                                         lhs.mxTypeB(),
                                         rhs.mxTypeB(),
+                                        lhs.mxScaleFormat(),
+                                        rhs.mxScaleFormat(),
                                         lhs.getParams().smCountTarget(),
                                         rhs.getParams().smCountTarget(),
                                         lhs.getParams().streamKTileSchedulingMode(),
@@ -219,6 +221,7 @@ namespace std
                                              problem.mxBlockB(),
                                              problem.mxTypeA(),
                                              problem.mxTypeB(),
+                                             problem.mxScaleFormat(),
                                              problem.getParams().smCountTarget(),
                                              problem.getParams().streamKTileSchedulingMode(),
                                              problem.getParams().uniformSummationOrder());
@@ -271,7 +274,8 @@ namespace std
                                                   problem.mxBlockA(),
                                                   problem.mxBlockB(),
                                                   problem.mxTypeA(),
-                                                  problem.mxTypeB());
+                                                  problem.mxTypeB(),
+                                                  problem.mxScaleFormat());
             }
             return hash;
         }
