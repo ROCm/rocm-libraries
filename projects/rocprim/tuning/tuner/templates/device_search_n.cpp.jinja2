@@ -19,13 +19,13 @@
 {% endblock %}
 
 {% block benchmark_queue %}
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<1>, config>();
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<6>, config>();
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<10>, config>();
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<14>, config>();
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<25>, config>();
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_is_percent_of_size<50>, config>();
-    executor.queue<device_search_n_benchmark<data_type, size_t, count_is_percent_of_size<100>, config>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<1>, config>>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<6>, config>>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<10>, config>>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<14>, config>>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_equal_to<25>, config>>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_is_percent_of_size<50>, config>>();
+    executor.queue<device_search_n_benchmark<data_type, size_t, count_is_percent_of_size<100>, config>>();
 {% endblock %}
 
 {% block get_time %}
