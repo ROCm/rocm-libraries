@@ -345,6 +345,28 @@ The logical request ("vector along M") contradicts the physical layout (M stride
 invalid → forced `VW=1`. (Mirror case: A col-major makes M stride-1 → vectorizing M is valid/wide, and
 vectorizing K becomes the contradiction → `VW=1`.)
 
+### Corollary — the cooperative-load split axis follows the same rule
+
+The macro tile is loaded cooperatively (`cooperative_load_desc`, `memory.py`): the waves split it along
+the **strided** (contraction) axis, so every wave keeps the full **stride-1** free extent and each lane's
+run stays on the contiguous axis — the wide, coalesced direction. This kernel stores A **col-major**
+(M stride-1, K strided), so the waves split **K** and vectorize **M**. Verified in the emitted ISA: at
+`vw_gl=8` the A/B macro load is `global_load_dwordx4` (b128); at the shipped `vw_gl=4` default it is
+`dwordx2` (b64) — the achieved width tracks `vw` on the contiguous run (f16, ISA-verified). The **axis
+choice is dtype-agnostic** (the descriptor works in elements); the realized *width* is not — per the emit
+contract (`memory.py`) it caps at the 16 B / 128-bit ceiling, so the b128 element count scales with dtype
+(f16 8, f32 4; an f32 8-run splits to 2× `dwordx4`) and f64 is **scalarized** outright (no wide vector to
+earn). Why the waves split **K** and not
+the free axis: the wide `vw` vector must ride the stride-1 axis — putting it on the strided axis is the
+§2b contradiction (→ `VW=1`) — so M carries the vector and its free-lanes, and that lane count must reach
+a served group (32 on gfx90a). Splitting M across the waves as well would starve that count (`memory.py`,
+"one K per served group"), so K — the contraction axis — is what the waves distribute. This is a
+**contract consequence, not a buildable toggle or a measurement**: `cooperative_load_desc` hardcodes
+`wave_dist=[1, n_waves]`, so the free-split alternative is reasoning from the served-group constraint, not
+something emitted. The staged LDS copy is K-width regardless, so the MMA
+read is unaffected; only the global-load width is at stake. (Mirror: a row-major operand makes K stride-1
+→ K is the coalesced axis, and the free axis becomes the one the waves split.)
+
 ## 3. Fragments vs MMA-acceptability
 
 This is the distinction that most often trips people up, so state it plainly.
