@@ -34,8 +34,9 @@ namespace rocsparse
     {
         // Grid-stride loop so that all (m + 1) row pointer entries are processed even when
         // the grid is clamped to maxGridSize[0].
-        for(J gid = static_cast<J>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; gid < (m + 1);
-            gid += static_cast<J>(hipGridDim_x) * BLOCKSIZE)
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            gid < (m + 1);
+            gid += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             if((csr_row_ptr_C[gid] - idx_base_C) < 0)
             {
