@@ -212,9 +212,15 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
 
   if _isMxSwizzledScaleFormat(kernel):
     # HPS/IMS: advance by one swizzle granule (LR subtile bytes * K groups).
+    # StreamK USO admits HostPreSwizzle when DepthU % 256 == 0 so a K-cut
+    # lands on a granule boundary (see streamKUniformSummationOrderObstacle).
     inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
   else:
     # NoSwizzle: match GSU/KernelWriterAssembly canonical K-step.
+    # Per-iteration step is correct, but StreamK._depthUForTc still applies
+    # the HPS *32 on UseSubtileImpl MXSA/MXSB, so StreamK K-partials (and USO)
+    # over-advance this SRD — keep mxScaleFormat==0 refused under USO until
+    # that multiplier is format-gated.
     inc = int(ti.scaleDepthU * ti.bpe)
   module.addComment0("Scale SRD update: %s += %u (%s)" % (
       tc, inc, kernel.get("MXScaleFormat", "NoSwizzle")))

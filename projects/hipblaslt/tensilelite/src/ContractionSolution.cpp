@@ -6130,11 +6130,26 @@ namespace TensileLite
             // problem-type level in the logic files.
             if(problemType.mxBlockA != 0 || problemType.mxBlockB != 0)
             {
-                // The granule size below is derived for one specific geometry.
+                // MX StreamK USO is audited only for HostPreSwizzle (1) under the
+                // envelope below (mxBlock 32, MatrixInstK 128, DepthU % 256 == 0).
+                //
+                // NoSwizzle (0) remains refused even though Option-B emit
+                // (SubtileScaleEmit.emitScaleGRPtrUpdate) uses a canonical
+                // scaleDepthU*bpe K-step: StreamK._depthUForTc still multiplies
+                // UseSubtileImpl MXSA/MXSB by 32 unconditionally — the HPS-era
+                // contract that pairs with KernelWriter's ×MXBlock stride
+                // scaling. NoSwizzle keeps canonical strides (no ×MXBlock), so
+                // a nonzero StreamKLocalStart over-advances the scale SRD by
+                // 32×. USO increases exposure to K-partials (itersPerTile > 1);
+                // DP-only / single-iter tiles hide the mismatch. Do not admit
+                // format 0 until _depthUForTc is gated on MXScaleFormat and
+                // USO+StreamK+scaleA=3 is verified on hardware.
+                //
+                // InMemorySwizzle (2) is likewise unaudited (gfx1250 TDM path).
                 // Change the swizzle format, the block size or MatrixInstK and
                 // 256 silently becomes the wrong number rather than a violated
                 // one, so pin the envelope the derivation covers. All shipped
-                // MX solutions satisfy all three.
+                // MX StreamK USO solutions satisfy HostPreSwizzle + all three.
                 if(problemType.mxScaleFormat != 1)
                     return refuse("MXScaleFormat",
                                   "MX scale format " + std::to_string(problemType.mxScaleFormat)
