@@ -25,15 +25,17 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <vector>
 
 namespace stinkytofu {
 
 // Simulation of a finite-depth hardware pipeline queue.
 //
 // Entries are tracked by absolute expiry time (currentTime_ + drainLatency).
-// advance() is O(1) — it only increments the clock. Expired entries are
-// evicted lazily on push() and full(). Each entry carries its own drain
-// latency to support per-entry math-model variation.
+// advance() is O(1): it increments the real clock and the throttle clock.
+// Expired entries are evicted lazily on push() and full(). Each entry carries
+// its own drain latency to support per-entry math-model variation.
+// advanceThrottle() advances only the pacing clock without aging expiries.
 class InFlightQueue {
    public:
     InFlightQueue() = default;
@@ -41,11 +43,19 @@ class InFlightQueue {
 
     void advance(int cycles) {
         currentTime_ += cycles;
+        advanceThrottle(cycles);
     }
 
-    // Configure saturated-queue pacing. When transitionEntries is positive, the first
-    // transitionEntries issued beyond depth use issueInterval * transitionFactor; later
-    // entries use the full interval.
+    // Advance saturated-queue pacing without aging real in-flight entries.
+    // Used when a scheduler charges throttle latency to a policy budget rather
+    // than treating it as elapsed execution time.
+    void advanceThrottle(int cycles) {
+        throttleTime_ += cycles;
+    }
+
+    // Configure saturated-queue pacing. When transitionEntries is positive, the
+    // first transitionEntries issued beyond depth use issueInterval *
+    // transitionFactor; later entries use the full interval.
     void setThrottleInterval(double issueInterval, double transitionFactor = 1.0,
                              int transitionEntries = 0) {
         throttleInterval_ = issueInterval;
@@ -80,13 +90,26 @@ class InFlightQueue {
     void clear() {
         expiries_.clear();
         currentTime_ = 0;
+        throttleTime_ = 0;
         nextIssueTick_ = -1.0;
     }
 
     // Seed with `count` entries each expiring `residual` cycles from now.
+    // Does not reset throttleTime_ / nextIssueTick_ beyond clearing the next
+    // issue tick; callers that need a clean throttle clock should clear() first.
     void seed(int count, int residual) {
         expiries_.clear();
         for (int i = 0; i < count; ++i) expiries_.push_back(currentTime_ + residual);
+        nextIssueTick_ = -1.0;
+    }
+
+    // Seed with each entry's own residual (as captured by residuals()), so a
+    // predecessor's occupancy carries over without collapsing every entry to
+    // one worst-case value. Same throttle-clock caveat as the (count, residual)
+    // overload above.
+    void seed(const std::vector<int>& residuals) {
+        expiries_.clear();
+        for (int r : residuals) expiries_.push_back(currentTime_ + r);
         nextIssueTick_ = -1.0;
     }
 
@@ -95,7 +118,7 @@ class InFlightQueue {
     int throttleWait() const {
         evict();
         if (activeThrottleInterval() <= 0.0) return 0;
-        const double now = (double)currentTime_;
+        const double now = (double)throttleTime_;
         const double nextTick = (nextIssueTick_ < 0.0) ? now : nextIssueTick_;
         return (int)std::max(0.0, std::ceil((nextTick - now) - 1e-9));
     }
@@ -103,7 +126,7 @@ class InFlightQueue {
     // Push one entry and update saturation pacing state.
     void pushWithThrottle(int drainLatency) {
         push(drainLatency);
-        const double now = (double)currentTime_;
+        const double now = (double)throttleTime_;
         const double issueInterval = activeThrottleInterval();
         if (issueInterval > 0.0)
             nextIssueTick_ = std::max(nextIssueTick_, now) + issueInterval;
@@ -125,6 +148,17 @@ class InFlightQueue {
         return std::max(0, *std::max_element(expiries_.begin(), expiries_.end()) - currentTime_);
     }
 
+    // Remaining cycles until each currently in-flight entry expires, oldest
+    // first (the order push() built them in). Pairs with seed(vector<int>) to
+    // carry occupancy across a BB boundary without collapsing to one value.
+    std::vector<int> residuals() const {
+        evict();
+        std::vector<int> out;
+        out.reserve(expiries_.size());
+        for (int e : expiries_) out.push_back(std::max(0, e - currentTime_));
+        return out;
+    }
+
    private:
     double activeThrottleInterval() const {
         const int occupancy = (int)expiries_.size();
@@ -140,6 +174,7 @@ class InFlightQueue {
 
     int depth_ = 0;
     int currentTime_ = 0;
+    int throttleTime_ = 0;
     double throttleInterval_ = 0.0;
     double transitionFactor_ = 1.0;
     int transitionEntries_ = 0;

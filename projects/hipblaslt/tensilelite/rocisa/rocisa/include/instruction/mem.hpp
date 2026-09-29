@@ -2771,7 +2771,7 @@ namespace rocisa
         {
             if(ds)
                 ds->na = 1;
-            setInst("ds_load_tr4_b64");
+            setInst("ds_load_b64_tr_b4");
         }
 
         DSLoadB64TrB4(const DSLoadB64TrB4& other)

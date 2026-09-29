@@ -20,10 +20,16 @@ foreach(arch IN LISTS archs)
     if(arch MATCHES "^gfx1[12][0-9][0-9]$")
         set(WAVEFRONT "-mno-wavefrontsize64")
     endif()
+    # Enable true16 on all gfx11*/gfx12* (NoSDWA). "SHELL:" keeps the flag group
+    # intact so CMake de-duplication does not drop the paired +real-true16.
+    set(TRUE16_FEATURE "")
+    if(arch MATCHES "^gfx1[12][0-9][0-9]$")
+        set(TRUE16_FEATURE "SHELL:-Xclangas -target-feature -Xclangas +real-true16")
+    endif()
     add_library(extop-obj-${arch} OBJECT)
     target_compile_options(extop-obj-${arch}
         PRIVATE
-            -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${offload_arch} ${WAVEFRONT} -c
+            -Wno-unused-command-line-argument -x assembler -target amdgcn-amd-amdhsa -mcode-object-version=4 -mcpu=${offload_arch} ${WAVEFRONT} -c ${TRUE16_FEATURE}
     )
     target_sources(extop-obj-${arch}
         PRIVATE

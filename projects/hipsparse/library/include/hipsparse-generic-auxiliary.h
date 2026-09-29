@@ -393,7 +393,6 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
                                                 hipDataType                 valueType);
 #endif
 
-#ifdef HIPSPARSE_WITH_SPMV_BSR
 /*! \ingroup generic_module
 *  \brief Create a sparse BSR matrix descriptor.
 *  \details
@@ -441,8 +440,6 @@ hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr
                                           hipDataType                 valueType,
                                           hipsparseOrder_t            order);
 #endif
-#endif /* HIPSPARSE_WITH_SPMV_BSR */
-
 /*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor.
 *  \details
