@@ -432,7 +432,8 @@ def main() -> int:
     )
     ap.add_argument("--dtype", choices=["bf16", "fp16", "fp8"], default="bf16")
     ap.add_argument(
-        "--fp8-two-phase", action="store_true",
+        "--fp8-two-phase",
+        action="store_true",
         help="fp8: use the opt-in two-phase async loader (default = sync-dequant)",
     )
     ap.add_argument("--hq", type=int, default=128, help="query heads (GQA/SWA/varlen)")

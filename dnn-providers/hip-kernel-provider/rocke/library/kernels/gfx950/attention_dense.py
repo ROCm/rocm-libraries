@@ -765,8 +765,9 @@ def build_attention_dense(
 
     def _sync_fp8_load(ptr, lds, buf_val, tile_key0, scale_p, packed_k):
         """Aligned fp8 KV: flat n=8 global load -> unfused-scale dequant -> bf16 LDS
-        store, into the same K_lds/V_lds layout the bf16 path fills. Every key in
-        [0, BN) is in-bounds (aligned KV only), so a plain global load is safe."""
+        store, into the same K_lds/V_lds layout the bf16 path fills. The global
+        load is unbounded, so OOB keys are clamped below (the pipeline
+        over-prefetches one tile past the last consumed KV tile)."""
         total = BN * D
         assert total % (THREADS * 8) == 0, (
             f"fp8 sync loader: BN*D={total} must be divisible by THREADS*8="
@@ -776,8 +777,15 @@ def build_attention_dense(
             e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
             key = b.div(e0, b.const_i32(D))
             d0 = b.mod(e0, b.const_i32(D))
+            # The software pipeline prefetches tile j+1 at the end of iter j; on the
+            # last iteration that tile can fall past seqlen_kv (its data is never
+            # consumed). Clamp OOB keys to row 0 so the unbounded global load stays
+            # in-bounds instead of faulting -- the bf16 path gets this for free from
+            # its bounds-checked buffer resource.
+            kv_row = b.add(tile_key0, key)
+            kv_row = b.select(b.cmp_lt(kv_row, seqlen_kv_p), kv_row, b.const_i32(0))
             addr = b.add(
-                b.add(k_base, b.mul(b.add(tile_key0, key), b.const_i32(stride_k_tok))),
+                b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))),
                 d0,
             )
             deq = dequant_fp8x8_to_dtype(
