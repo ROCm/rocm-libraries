@@ -44,6 +44,7 @@
 
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
+#include "RegionDAG.hpp"
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -2392,6 +2393,44 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     // window itself lives across regions -- it is built in onInit(), not here.
     PASS_DEBUG(std::cerr << "[CDNA5 dsCap] dsReadPerCap=" << dsReadPerCap()
                          << " span=" << dsIssueCapSpan() << "\n");
+
+    // Every ds_load in this region issues in the pre-scan dsReadPriority
+    // order. Barrier membership is not consulted. Lower number first; equal
+    // priority keeps DAG id order. A later load stays unready until every
+    // earlier one has issued, so a ready lower-priority load cannot skip
+    // ahead. A priority edge that would contradict a real dependence is
+    // dropped as a cycle, one pair at a time. These edges are not part of
+    // the Layer 2 overlap contract.
+    {
+        auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
+            return deps.dag.nodes[it->second].dsReadPriority;
+        };
+        auto dagIdOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            return it == deps.dag.instToId.end() ? std::numeric_limits<unsigned>::max()
+                                                 : it->second;
+        };
+        std::vector<StinkyInstruction*> loads;
+        for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
+            auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            if (instPtr != nullptr && isDSRead(*instPtr)) loads.push_back(instPtr);
+        }
+        std::stable_sort(loads.begin(), loads.end(),
+                         [&](StinkyInstruction* a, StinkyInstruction* b) {
+                             const unsigned priA = dsReadPriorityOf(a);
+                             const unsigned priB = dsReadPriorityOf(b);
+                             if (priA != priB) return priA < priB;
+                             return dagIdOf(a) < dagIdOf(b);
+                         });
+        for (size_t i = 1; i < loads.size(); ++i) {
+            deps.requestedConstraints.emplace_back(loads[i - 1], loads[i]);
+            PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion ds priority] predecessor=" << loads[i - 1]
+                                 << " pri=" << dsReadPriorityOf(loads[i - 1]) << " successor="
+                                 << loads[i] << " pri=" << dsReadPriorityOf(loads[i]) << "\n");
+        }
+    }
 
     barrierWmmaThresholds_.clear();
     barrierDsLoadCounts_.clear();

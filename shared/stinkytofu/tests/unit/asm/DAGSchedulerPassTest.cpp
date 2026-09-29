@@ -1041,6 +1041,31 @@ TEST_F(DAGSchedulerPassTest, Layer2RejectsPairWhenDescendantOrderingFormsCycle) 
     EXPECT_EQ(waits, 2);
 }
 
+// Every ds_load in the region issues in dsReadPriority order, with no
+// barrier involved. `high` feeds an earlier WMMA than `low`, but three WMMAs
+// that already read its dest keep it unready while `low` is free.
+TEST_F(DAGSchedulerPassTest, AllDsLoadsIssueInDsReadPriorityOrder) {
+    bb->addSuccessor(bb);
+
+    // Ready immediately, and its consumer WMMA is later, so its
+    // dsReadPriority is worse than `high`.
+    StinkyInstruction* low = createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/0);
+    // These read v[220:228) before `high` writes v[220:224), so `high` cannot
+    // issue until one of them has.
+    for (int i = 0; i < 3; ++i)
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+    StinkyInstruction* high = createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+    // Consumers. Earlier WMMA index => better (lower) dsReadPriority.
+    createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+    createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
+
+    runPassWithUnrollGemm();
+
+    EXPECT_LT(positionOf(*bb, high), positionOf(*bb, low))
+        << "every ds_load must issue in dsReadPriority order, even when the "
+           "worse-priority load is ready first and no barrier is present";
+}
+
 // DS reads + WMMAs: scheduler must not issue WMMAs back-to-back when other
 // instructions exist. With real ds_load latency, WMMAs are not latency-free
 // until ds_reads are issued and latency elapses, so we get: 4 ds_load, then 2
