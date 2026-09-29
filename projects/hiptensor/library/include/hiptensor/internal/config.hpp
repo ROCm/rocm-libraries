@@ -74,8 +74,8 @@ namespace hiptensor
 #define HIPTENSOR_ARCH_GFX1200 __gfx1200__
 #elif defined(__gfx1201__)
 #define HIPTENSOR_ARCH_GFX1201 __gfx1201__
-#elif defined(__gfx1250__)
-#define HIPTENSOR_ARCH_GFX1250 __gfx1250__
+#elif defined(__gfx1250__) || defined(__gfx1250_strict__)
+#define HIPTENSOR_ARCH_GFX1250 1
 #else
 #define HIPTENSOR_ARCH_HOST 1
 #endif

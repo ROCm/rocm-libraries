@@ -336,3 +336,95 @@ class TestGfx1250SubtileCodegen:
         module = emitSingleBufferLoad(ti, kernel, 0, 0)
         asm = str(module)
         assert "tensor_load_to_lds" in asm
+
+
+# ---------------------------------------------------------------------------
+# Iterate-mode (large DepthU) tests
+# ---------------------------------------------------------------------------
+
+ITERATE_DEPTH_U = 1024   # 1024 * 2 = 2048 > 1024B limit
+NORMAL_DEPTH_U  = 64     # 64 * 2 = 128 <= 1024B limit
+
+
+def _setup_sgprs_iterate(writer):
+    """Like _setup_sgprs but also allocates Group2/Group3 for iterate mode."""
+    writer.sgprPool.checkOut(12)
+    writer.sgprs["StrideA0I"] = 10
+    writer.sgprs["StrideB1J"] = 11
+    for tc in ['A', 'B']:
+        writer.sgprs["tdm%sGroup0" % tc] = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        writer.sgprs["tdm%sGroup1" % tc] = writer.sgprPool.checkOutAligned(8, 4, preventOverflow=False)
+        writer.sgprs["tdm%sGroup2" % tc] = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        # Group3 aliases Group2 (same as KernelWriterAssembly)
+        writer.sgprs["tdm%sGroup3" % tc] = writer.sgprs["tdm%sGroup2" % tc]
+        writer.sgprs["tdmLdsAddr%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+        writer.sgprs["tdmLdsSwapMask%s" % tc] = writer.sgprPool.checkOut(1, preventOverflow=False)
+        writer.sgprs["Address%s" % tc] = writer.sgprPool.checkOutAligned(2, 2, preventOverflow=False)
+
+
+class TestIterateMode:
+    """Tests for subtile iterate mode (large DepthU exceeding pad_interval)."""
+
+    @pytest.mark.parametrize("tc", ['A', 'B'])
+    def test_buffer_load_iterate_passes_group2_group3(self, tc):
+        """In iterate mode, emitSingleBufferLoad passes non-None Group2 and Group3."""
+        from unittest.mock import patch
+        from Tensile.Components.Subtile import SubtileGREmit
+        kernel = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs_iterate(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiB.allocOffsetRegisters(writer, kernel)
+        ti = tiA if tc == 'A' else tiB
+        with patch.object(SubtileGREmit, 'TensorLoadToLds', wraps=SubtileGREmit.TensorLoadToLds) as mock_tl:
+            module = SubtileGREmit.emitSingleBufferLoad(ti, kernel, 0, 0)
+            mock_tl.assert_called_once()
+            # positional args: src0 (Group0), src1 (Group1), src2 (Group2), src3 (Group3)
+            args = mock_tl.call_args.args
+            assert args[2] is not None, "iterate mode must pass Group2 (src2)"
+            assert args[3] is not None, "iterate mode must pass Group3 (src3)"
+        asm = str(module)
+        assert "tensor_load_to_lds" in asm
+
+    @pytest.mark.parametrize("tc", ['A', 'B'])
+    def test_buffer_load_normal_omits_group2_group3(self, tc):
+        """Non-iterate mode: emitSingleBufferLoad passes None for both Group2 and Group3."""
+        from unittest.mock import patch
+        from Tensile.Components.Subtile import SubtileGREmit
+        kernel = _create_gfx1250_kernel(64, 64, depth_u=NORMAL_DEPTH_U)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiB.allocOffsetRegisters(writer, kernel)
+        ti = tiA if tc == 'A' else tiB
+        with patch.object(SubtileGREmit, 'TensorLoadToLds', wraps=SubtileGREmit.TensorLoadToLds) as mock_tl:
+            module = SubtileGREmit.emitSingleBufferLoad(ti, kernel, 0, 0)
+            mock_tl.assert_called_once()
+            args = mock_tl.call_args.args
+            assert args[2] is None, "non-iterate mode must not pass Group2 (src2)"
+            assert args[3] is None, "non-iterate mode must not pass Group3 (src3)"
+        asm = str(module)
+        assert "tensor_load_to_lds" in asm
+
+    def test_iterate_mode_flag_on_states(self):
+        """isSubtileIterateMode returns correct results for iterate vs normal kernel configs."""
+        from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+        kernel_iter = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
+        assert isSubtileIterateMode(kernel_iter, "A") is True
+        assert isSubtileIterateMode(kernel_iter, "B") is True
+
+        kernel_normal = _create_gfx1250_kernel(64, 64, depth_u=NORMAL_DEPTH_U)
+        assert isSubtileIterateMode(kernel_normal, "A") is False
+        assert isSubtileIterateMode(kernel_normal, "B") is False
+
+    @pytest.mark.parametrize("depth_u,expected", [
+        (512, False),   # 512*2 = 1024 == limit
+        (513, True),    # 513*2 = 1026 > limit
+        (256, False),   # 256*2 = 512 < limit
+        (1024, True),   # 1024*2 = 2048 > limit
+    ], ids=["at-limit", "just-over", "well-under", "double"])
+    def test_iterate_mode_boundary_bf16(self, depth_u, expected):
+        """Boundary check: iterate mode triggers at DepthU*bpe > 1024 for bf16."""
+        from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
+        kernel = _create_gfx1250_kernel(64, 64, depth_u=depth_u)
+        assert isSubtileIterateMode(kernel, "A") is expected

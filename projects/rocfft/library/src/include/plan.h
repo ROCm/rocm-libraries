@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -505,6 +505,12 @@ private:
     void TopologicalSortDFS(size_t               idx,
                             std::vector<bool>&   visited,
                             std::vector<size_t>& sorted) const;
+
+    // Shared handler for the Build*MultiDevicePlan function-try-blocks: log the
+    // in-flight exception and discard any partial plan state so plan creation
+    // can fall back to another path.  `except_what` is null for unknown
+    // (non-std::exception) throws.
+    void discard_failed_multi_device_plan(const std::string& calling_func, const char* except_what);
 
     // Temp buffers allocated during plan creation for multi-device
     // plans are remembered here.  Mapped per-location.  Individual

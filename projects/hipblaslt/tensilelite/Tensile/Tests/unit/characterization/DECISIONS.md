@@ -316,18 +316,354 @@ available where this change was authored.
 so default and explicitly grouped code objects share one deterministic physical
 kernel order even though their inputs originate from different collection types.
 
-## D24 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+## D24 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
 
-**ADR:** [`adr/0014-flatten-biastypeargs-solutions-header.md`](adr/0014-flatten-biastypeargs-solutions-header.md)
+**ADR:** [`adr/0002-custom-kernels-embedded-yaml-parsing.md`](adr/0002-custom-kernels-embedded-yaml-parsing.md).
 
-**Decision:** `LibraryIO._writeSolutionsHeader` wrapped `BiasTypeArgs` (and its `GateTypeArgs` copy) in a second pair of brackets, so solutions headers carried `[[7]]` where the benchmark config schema takes `[7]`. Fixed at the writer, normalized on read in `TensileLibLogicToYaml` for the files already on disk, and the one `test_writesolutions_char` golden (`test_header_with_bias_and_activation`) re-recorded. Intended behavior change, not a pinned bug.
+**Context:** `test_custom_kernels_char.py` (added on `develop` by #7989) pinned
+`getCustomKernelConfigAndAssembly`, a raw `---`/`...` line-splitter returning
+`(config_text, assembly_text)`. The Gemm-From-Anywhere branch's rewrite of
+`CustomKernels.py` (proper `.amdgpu_metadata` YAML parsing for the external-
+kernel `custom.config` schema) dropped that function in favor of a private
+`_readEmbeddedYaml` returning a parsed dict — the two branches diverged before
+#7989 merged to `develop`, so this was never reconciled. The stale import
+caused a pytest **collection** error, which (per pytest's default behavior)
+aborted the entire `-m unit` run before any test executed — silently hiding
+every other test in the suite behind this one file, not just this module.
 
-## D25 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
+**Decision:** Point the test at the real replacement (`_readEmbeddedYaml`,
+pinning its parsed-dict return) instead of restoring the removed function.
+Also gave `test_get_custom_kernel_config_ok` its own fixture with a minimal
+`amdhsa.kernels` entry (`_VALID_S_WITH_KERNEL_META`), matching the convention
+in `Tests/unit/test_CustomKernelMetadata.py::write_kernel`, since
+`getCustomKernelConfig`'s new no-explicit-`CustomKernel` auto-infer path
+requires one (real kernel `.s` files always have one; only the bare-minimum
+test fixture didn't).
 
-**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D24; no golden changes.
+**Why:** Same-purpose replacement (pin how the module reads its embedded
+YAML), not a scope cut; add-only (no production code touched); private-helper
+characterization already has precedent in this same branch
+(`test_CustomKernelMetadata.py` imports `_parse_tensile_yaml`/`_read_asm_file`
+directly).
 
-## D26 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
+**Rejected alternatives:**
+- *Restore `getCustomKernelConfigAndAssembly`* — rejected per explicit
+  direction: don't reintroduce what Gemm-From-Anywhere deliberately removed.
+- *Delete the test instead of replacing it* — rejected: loses real coverage of
+  the embedded-YAML parsing path with no offsetting gain.
 
-**ADR:** [`adr/0015-fix-formgroups-none-crash.md`](adr/0015-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
+**Validation:** `test_custom_kernels_char.py` — 11 passed, byte-identical
+`.ambr` across two additional `--snapshot-update`-free re-runs.
+
+**Residual scope (not fixed here):** unblocking collection let the full
+`-m unit` suite actually run for the first time on this branch's diff, and it
+surfaced 12 pre-existing failures unrelated to this file. Triaged and closed
+in D24 below.
+
+## D25 — Triage of the 12 failures D23 unblocked: 2 real regressions fixed, 10 stale-fixture goldens/asserts updated
+
+**Context:** D23 fixed a pytest *collection* error that had aborted the entire
+`-m unit` run before any test executed, on this branch's diff, since it
+diverged from `develop`. With collection fixed, the suite ran for the first
+time and surfaced 12 failures across 6 files, all in code this branch itself
+touched. Each was triaged individually per the "did you intend to change this
+behavior?" protocol in `README.md` — no blanket `--snapshot-update`, no
+fixing-via-the-test of anything that was a real code bug.
+
+**Two were real regressions; fixed the source, not the tests/goldens:**
+
+- **`TensileLogic/HandleCustomKernel.hasCustomKernel`** — the line-scanner's
+  marker pattern was changed from `CustomKernelName:` (legacy flat key) to
+  `name:` (matching the new `CustomKernel:` mapping's nested name field), but
+  `handleCustomKernel()` itself still explicitly accepts *either* shape
+  (`sol["CustomKernel"]["name"]` or `sol.get("CustomKernelName", "")`). The
+  narrowed scanner is reachable from a live gating call site
+  (`TensileLogic/Run.py:105`, `if check.OnlyCustomKernels and
+  hasCustomKernel(file): ...`) that decides whether a logic file's solutions
+  get loaded at all under `--only-custom-kernels`-style checks — so a legacy
+  `CustomKernelName:`-keyed logic file would have its custom-kernel solutions
+  silently dropped from that check. Fixed by matching *both*
+  `CustomKernelName:` and `CustomKernel:` (the distinctive parent keys for
+  each schema — not the generic, collision-prone bare `name:`), restoring the
+  original (unchanged) golden's expectation. Added
+  `test_has_custom_kernel_true_new_style_mapping` since the new-style path had
+  zero prior coverage.
+- **`Toolchain.Component.Assembler._retargetAssemblySource`** — new,
+  unconditional preprocessing step on every single assembly compile (rewrites
+  a mismatched `.amdgcn_target`/`amdhsa.target` directive in the source to
+  match the actual build target — the mechanism the `CustomKernels/README.md`
+  Triton section describes). It called `path.read_text()` with no handling
+  for a missing/unreadable file (only `UnicodeDecodeError` was caught), so any
+  `srcPath` that doesn't exist yet crashes `Assembler.__call__` with a
+  confusing traceback instead of reaching the actual compiler invocation
+  right after, which would raise its own clear "no such file" error through
+  the already-exercised `_invoke`/`CalledProcessError` path. Widened the catch
+  to `(UnicodeDecodeError, OSError)`. Also added
+  `test_retarget_assembly_source_rewrites_mismatched_target` and
+  `..._leaves_matching_target_untouched` — the regex rewrite itself had zero
+  test coverage anywhere in the repo before this.
+
+**Everything else was a stale test double, not a code bug — production
+behavior is correct; the fixtures just don't auto-default new fields the way
+their real counterparts do:**
+
+- **`ValidParameters::test_valid_parameters_{key_roster,structure}`** — clean,
+  intentional, single-line-diff changes in `Common/ValidParameters.py`:
+  `CustomKernelName` renamed to `CustomKernel` (matches the mapping-typed
+  parameter everywhere else in this branch), and
+  `AssertFree0/1ElementMultiple` / `AssertSummationElementMultiple` extended
+  with `64`/`128`/`256` (larger custom-kernel tile sizes). Updated both
+  goldens; reviewed the diff line-by-line (see the `.ambr` diff in the PR).
+- **`TensileMain::test_arg_updated_global_parameters_*`** and
+  **`PublicInputSurface::test_platform_*_branch_*`** — two independently
+  hand-rolled fake-`args` builders (`_args()` / `_make_args()`, one using
+  `SimpleNamespace`, one using `argparse.Namespace` directly) both predate the
+  new `--validate-metadata` flag (`Tensile.py`'s `argUpdatedGlobalParameters`
+  now reads `args.ValidateMetadata`). A *real* `argparse` parser always
+  supplies a `store_true` flag's default (`False`), so this can't happen
+  outside a test; added `ValidateMetadata=False` to both builders. Extended
+  `TensileMain`'s "all overrides" test to actually cover
+  `ValidateMetadata=True` (previously untested) and added a explicit
+  default-omitted case; `PublicInputSurface`'s file is narrowly scoped to the
+  unrelated `platform` predicate per its own docstring, so left it at the
+  minimal fixture fix.
+- **`TensileCreateLibraryRun::test_pass_post_kernel_info_to_solution`** — same
+  shape of issue: `KernelCodeGenResult` gained a `customKernelDef:
+  Optional[dict] = None` field (a real instance always has it via the
+  `NamedTuple` default), but the test's `SimpleNamespace` stand-in doesn't
+  auto-default missing attributes the way a `NamedTuple` does. Added
+  `customKernelDef=None`/`=<a dict>` to the two cases and a new test,
+  `..._carries_custom_kernel_def`, pinning the previously-uncovered
+  `solution._state["CustomKernel"] = result.customKernelDef` assignment.
+
+**Validation:** every touched file re-run individually (all green) plus two
+full, `--snapshot-update`-free `-m unit` runs of the whole suite (see the PR
+description for the exact before/after counts).
+
+**Rejected alternatives:**
+- *Blanket `--snapshot-update` across the whole suite* — forbidden by this
+  file's own cardinal rule; would have silently accepted the two real
+  regressions above instead of fixing them.
+- *Leave `hasCustomKernel`/`_retargetAssemblySource` as-is and just fix the
+  two tests* — rejected: both are reachable from real call sites, and
+  "fixing" the test to assert the buggy behavior would have pinned a real
+  regression as if it were intended, exactly what this suite exists to catch.
+
+## D26 — LibraryIO characterization: add-only mutation-kill snapshot cases
+**Decision:** The LibraryIO mutation-hardening slice pins additional *current*
+LibraryIO behavior by appending new syrupy cases to three existing goldens
+(`test_parse_integration_char.ambr`, `test_serializers_char.ambr`,
+`test_writesolutions_char.ambr`); no existing snapshot value is re-recorded.
+**Classification:** category (a) intended behavior capture -- new cases pinning
+previously-unsnapshotted read/write/parse behavior to raise mutation kill power,
+not a change to any pinned behavior. The diffs are insertion-only (+258/-0,
++9/-0, +54/-0) and confined to the LibraryIO node, so no ADR is required (nothing
+behavior-changing or known-wrong is pinned); this registry line is the record.
+The parse_integration additions begin in the mutation infra base and continue
+in this slice.
+**Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
+
+## D27 — Solution.py mutation kill: pickle-free `.ambr` derivation golden
+**Decision:** Kill the `Solution.assignDerivedParameters` mutant giant with a
+syrupy `.ambr` full-derived-state golden regenerated from in-tree designed YAML
+configs, committing no pickle. See ADR 0003.
+**Why:** the giant (~18820 mutants across the `depthU`/`adp` families) is only
+observable by asserting the complete derived `_state`; a pickle golden is opaque,
+version-coupled, and undiffable, against the suite's add-only diffable-golden
+discipline. Unlike the LibraryIO add-only cases in D24, this introduces a new
+golden *vehicle* with a non-obvious regeneration mechanism, so it lands with an
+ADR (0003), not just this registry line.
+**Equivalence evidence:** verified kill-equivalent to the interim pickle corpus
+over 8 stratified windows (lines 1567-2857, 684 mutants, 0 per-key exit-code
+divergence). Byte-stability confirmed by two further no-update runs.
+**Harness fixes (not source):** derivation moved out of collection (a
+collection-time try/except was swallowing raising mutants); `_sanitize` now
+recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
+`MirrorDimsMetadata` mutants a `str()`-only render missed.
+**Regeneration:** on an intentional derivation/config change, rerun with
+`--snapshot-update`, confirm byte-stability with two clean runs, and log the
+regeneration here.
+
+## D28 — Per-file ratchet audit after wave-2 (r8 + HUX crossover)
+**Decision:** Keep the current `develop` floors for the six files flagged in
+review, except for two reproducible increases: raise `Configuration.py` from
+91.18% to 92.53% and `StreamK.py` from 82.18% to 82.24%. Do not import the
+higher floors measured on `users/davidd-amd/mut-v2-coverage` at e69017042cf.
+
+**Evidence:** The local combined report and the uploaded #11967 report agree to
+two decimal places: Configuration 92.53%, segment_interleave 94.41%, Solution
+70.40%, Component 93.49%, GSU 73.72%, and StreamK 82.24%. The gate passes all
+172 files with the existing one-point tolerance. No floor is lowered;
+Solution.py remains at 70.55% even though the current measurement is 0.15 points
+lower.
+
+The e69017042cf report was produced from a different source and test tree. That
+tree has 101 test files absent from this layer, while this layer has 58 other
+test files and 198 modified tests. Relative to that tree, segment_interleave,
+Solution, GSU, and StreamK also changed substantially. The old 99.25%, 100.00%,
+74.58%, 97.20%, 75.86%, and 84.29% values therefore cannot be used as floors for
+this earlier stack layer.
+
+**Classification:** None of the six reported drops is run-to-run measurement
+noise; repeated local and hosted runs reproduce the current values. Configuration
+and Component lost indirect execution supplied by the other test tree.
+segment_interleave, Solution, GSU, and StreamK combine a different test set with
+source growth. Restoring the old floors requires new tests rather than another
+baseline reduction: cover ExpressionEvaluator and reverse-operator branches in
+Configuration, asymmetric aligned layouts in segment_interleave, consolidated
+derived-state cases in Solution, LDS token selection in Component, and focused
+reduction/fixup paths in GSU and StreamK.
+
+## D29 — Remove unstable set-cover basename snapshots
+
+**ADR:** [`adr/0026-remove-setcover-basename-snapshots.md`](adr/0026-remove-setcover-basename-snapshots.md)
+
+**Decision:** Remove the three basename-only set-cover saved-result files.
+Keep the 75 selected configuration cases as bounded generation checks, capture
+derivation rejection reasons, and use focused source patterns where final
+assembly exposes a stable behavior. Superseded by D32, which defines exact
+observables for the bounded sample.
+
+## D30 — Select set-cover problem groups by complete content
+
+**ADR:** [`adr/0024-select-problem-groups-by-content.md`](adr/0024-select-problem-groups-by-content.md)
+
+**Decision:** Replace positional `BenchmarkProblems` indexes with fingerprints
+of complete entries. Superseded by D31 because complete entries include runtime
+problem sizes that do not affect solution generation.
+
+## D31 — Select problem groups by solution-generation inputs
+
+**ADR:** [`adr/0027-select-problem-groups-by-generation-inputs.md`](adr/0027-select-problem-groups-by-generation-inputs.md)
+
+**Decision:** Fingerprint the problem type and generation parameters while
+excluding `BenchmarkFinalParameters`. Use `list_config_fingerprints.py` to list
+the selectors after an intentional generation-input change.
+
+## D32 — Strengthen bounded set-cover observables
+
+**ADR:** [`adr/0028-strengthen-bounded-set-cover-observables.md`](adr/0028-strengthen-bounded-set-cover-observables.md)
+
+**Decision:** Record each selected group's complete fork-permutation count and
+the exact emitter-status multiset for its bounded sample. Remove throwaway
+warm-up emits because canonicalization already removes the known scheduler-state
+difference.
+
+## D33 — Correct the disabled TDMSplit characterization
+
+**ADR:** [`adr/0015-correct-disabled-tdmsplit-test.md`](adr/0015-correct-disabled-tdmsplit-test.md)
+
+**Decision:** Replace the unreachable TDMSplit emission and saved-result checks
+with assertions that normal solution derivation returns no kernels and reports
+`TDMSplit is currently disabled`. The test no longer claims coverage of emitter
+code that product validation prevents it from reaching.
+
+## D34 — Refresh S00-S07 emit results after develop changes
+
+**ADR:** [`adr/0016-refresh-s00-s07-results-after-develop.md`](adr/0016-refresh-s00-s07-results-after-develop.md)
+
+**Decision:** Re-record only the 20 failing S00-S07 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D35 — Refresh S08-S11 emit results after develop changes
+
+**ADR:** [`adr/0017-refresh-s08-s11-results-after-develop.md`](adr/0017-refresh-s08-s11-results-after-develop.md)
+
+**Decision:** Re-record only the 11 failing S08-S11 saved-result nodes with an
+in-tree `rocisa` build. Every node retains its kernel count and emitter return
+codes; only the content-derived basenames change.
+
+## D36 — Rebaseline coverage after the develop rebase
+
+**ADR:** [`adr/0018-rebaseline-coverage-after-develop.md`](adr/0018-rebaseline-coverage-after-develop.md)
+
+**Decision:** Regenerate the per-file baseline from the green post-rebase unit
+run. The update raises 16 floors, adds 14 current files, removes two entries for
+files deleted by develop, and explicitly lowers the nine reproducibly stale
+floors listed in ADR 0018. The tolerance remains 1 percentage point. Superseded
+by D40, which corrects the reduction count and file classification.
+
+## D37 — Config-driven saved results include emitted assembly
+
+**ADR:** [`adr/0019-pin-config-driven-assembly.md`](adr/0019-pin-config-driven-assembly.md)
+
+**Decision:** Record a SHA-256 digest of the emitted opcode set next to each
+config-driven kernel's name and return code. This makes a change in instruction
+kinds observable while ignoring known register, label, count, and order
+variation. Superseded by D41 after the digest proved compiler-sensitive in the
+shared coverage lane.
+
+## D38 — Reject zero-width MX local reads before code generation
+
+**ADR:** [`adr/0020-reject-zero-width-mx-local-reads.md`](adr/0020-reject-zero-width-mx-local-reads.md)
+
+**Decision:** Reject a WMMA_V3 in-memory-swizzled MX solution during derivation
+when `MatrixInstK // MXBlock` is non-positive or an M-major local read is
+narrower than one scale block. Remove three tests that counted code reached only
+before the previous code-generation exception.
+
+## D39 — Select config problem groups explicitly
+
+**ADR:** [`adr/0021-select-config-problem-groups.md`](adr/0021-select-config-problem-groups.md)
+
+**Decision:** Include a `BenchmarkProblems` index in every set-cover case and
+pass it through the config-driven harness. This records which problem group is
+measured when a shared YAML contains more than one group. Superseded by D42
+because an index still changes meaning when a group is inserted or reordered.
+
+## D40 — Correct and refresh the post-mutation coverage baseline
+
+**ADR:** [`adr/0022-correct-coverage-rebaseline.md`](adr/0022-correct-coverage-rebaseline.md)
+
+**Decision:** Correct ADR 0018's accounting from nine to ten original floor
+reductions and document the omitted `Configuration.py` and `Solution.py`
+changes. This proposed refresh was subsequently superseded by D43; none of its
+floor reductions remain in the rebased branch.
+
+## D41 — Separate code-generation smoke coverage from semantic assertions
+
+**ADR:** [`adr/0023-separate-codegen-smoke-from-semantics.md`](adr/0023-separate-codegen-smoke-from-semantics.md)
+
+**Decision:** Remove the compiler-sensitive opcode-set hash from shared saved
+results and remove basename snapshots from the 75 set-cover cases and 29
+S00-S11 designed smoke cases. These tests require successful generation except
+where an existing emitter failure is allowed. Tests that claim a specific
+emitted behavior use explicit source-pattern assertions; the S11a conversion
+test still detects replacement of `v_cvt_f32_i32`, while cases without a stable
+final-assembly observable remain explicitly labeled generation smoke tests.
+
+## D42 — Select set-cover problem groups by content
+
+**ADR:** [`adr/0024-select-problem-groups-by-content.md`](adr/0024-select-problem-groups-by-content.md)
+
+**Decision:** Identify each selected `BenchmarkProblems` entry by a short
+SHA-256 fingerprint of its complete normalized YAML value. The harness searches
+for that fingerprint instead of assuming a list position, so inserting or
+reordering another group cannot silently redirect a set-cover test.
+
+## D43 — Verify the repaired coverage baseline
+
+**ADR:** [`adr/0025-verify-repaired-coverage-baseline.md`](adr/0025-verify-repaired-coverage-baseline.md)
+
+**Decision:** After reproducing ADR 0022's values with a green pre-rebase
+`coverage-unit` run, rebase the complete stack and retain current `develop`'s
+newer baseline through every conflict. The rebased run passed at 84.14%; use its
+report to raise 38 per-file floors without lowering any, and raise the exact
+whole-project floor from 75% to 82%.
+
+## D44 — TensileLibLogicToYaml/LibraryIO: BiasTypeArgs written one level too deep (fixed, goldens flipped)
+
+**ADR:** [`adr/0029-flatten-biastypeargs-solutions-header.md`](adr/0029-flatten-biastypeargs-solutions-header.md)
+
+**Decision:** `LibraryIO._writeSolutionsHeader` wrapped `BiasTypeArgs` (and its `GateTypeArgs` copy) in a second pair of brackets, so solutions headers carried `[[7]]` where the benchmark config schema takes `[7]`. Fixed at the writer, normalized on read in `TensileLibLogicToYaml` for the files already on disk, the one `test_writesolutions_char` golden (`test_header_with_bias_and_activation`) re-recorded, and the nested-shape assertion in `test_write_solutions_cache_forwards_bias_header` (added on `develop` by #11966) flipped to the flat line. Intended behavior change, not a pinned bug.
+
+## D45 — TensileLibLogicToYaml: benchmark solution offset scanned, not assumed
+
+**Decision:** `BENCHMARK_SOLUTION_OFFSET = 4` assumed `MinimumRequiredVersion`, `ProblemSizes`, `BiasTypeArgs` and `ActivationArgs` were all present, but `_writeSolutionsHeader` writes each optional entry only when it is set — and `GateTypeArgs` adds a fifth. A file without bias/activation put the first solution at index 2, and one with a gate put a header entry at index 4. Replaced with `splitBenchmarkHeader`, which scans the known optional keys in order exactly as `LibraryIO.parseSolutionsData` does. Found while fixing D44; no golden changes.
+
+## D46 — TensileLibLogicToYaml: the skipMI / MI-disabled crash is fixed, D14's pin flipped
+
+**ADR:** [`adr/0030-fix-formgroups-none-crash.md`](adr/0030-fix-formgroups-none-crash.md), superseding [`adr/0010-pin-formgroups-none-crash.md`](adr/0010-pin-formgroups-none-crash.md)
 
 **Decision:** D14 pinned the `AttributeError` that `formGroups` raised when `formForkParams` passed the string sentinel `"None"` on the skipMI / MI-disabled path (AIHPBLAS-4409). PR #11538 fixes it: that branch now builds a real `{"WorkGroup": ...}` group. `test_form_fork_params_skip_mi_raises` is replaced by `test_form_fork_params_skip_mi_emits_workgroup`, which asserts the working behavior, plus a companion test pinning the `KeyError` a solution with no `WorkGroup` still raises. ADR 0010 anticipated exactly this flip.

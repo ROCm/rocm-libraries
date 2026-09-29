@@ -61,6 +61,22 @@ jobs:
           package_path: shared/stinkytofu
           test_path: python_module/tests
 
+      - name: Build (ASan)
+        run: invoke asan --build-dir build_asan --clean
+
+      - name: Test (ASan)
+        working-directory: shared/stinkytofu/build_asan
+        # Exclude the "python" label: loading an ASan-instrumented .so into a
+        # Python interpreter that wasn't itself started with the ASan runtime
+        # preloaded fails with "undefined symbol:
+        # __asan_option_detect_stack_use_after_return". Supporting that needs
+        # LD_PRELOAD-ing the ASan runtime into the interpreter (and likely its
+        # own suppressions for CPython's allocator); out of scope here since
+        # this lane targets the C++ core.
+        run: ctest --output-on-failure -LE python
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+
   windows:
     name: Windows
     runs-on: ${{ inputs.windows_runner }}

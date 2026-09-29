@@ -2355,10 +2355,25 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
         << recorder.getRecordedLogsAsString();
 }
 
+namespace
+{
+
+/// The argument list the packager reads out of a hipcc-compiled kernel: three device
+/// pointers, no `name` key, because clang records no argument names for HIP.
+nlohmann::json packagedSignature()
+{
+    return nlohmann::json::array({{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}},
+                                  {{"kind", "global_buffer"}, {"size", 8}, {"offset", 8}},
+                                  {{"kind", "global_buffer"}, {"size", 8}, {"offset", 16}}});
+}
+
+} // namespace
+
 /// The shape the build-time descriptor packager emits: `kpack` kind, the archive
 /// coordinates beside it, and a `provenance` block on the kernel entry. It loads, and all
-/// four coordinates survive parsing -- an adapter needs every one of them to name a single
-/// code object, so dropping any of them silently would only surface at dispatch.
+/// five coordinates survive parsing -- an adapter needs every one of them to name a single
+/// code object and vouch for it, so dropping any of them silently would only surface at
+/// dispatch.
 TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("packaged_kernel"));
@@ -2368,7 +2383,8 @@ TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
                                {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
                                {"toc_key", "PointwiseAdd/block64"},
                                {"symbol", "PointwiseAdd"},
-                               {"sha256", std::string(64, 'a')}};
+                               {"sha256", std::string(64, 'a')},
+                               {"signature", packagedSignature()}};
     kernel["provenance"] = {{"origin_kind", "hip"}, {"entry", "PointwiseAdd"}};
     writeDocuments(dir.path(), packaged);
 
@@ -2384,9 +2400,255 @@ TEST(TestDescriptorLoader, AcceptsAPackagedKernelAndCarriesItsCoordinates)
     EXPECT_EQ(source.tocKey, "PointwiseAdd/block64");
     EXPECT_EQ(source.symbol, "PointwiseAdd");
     EXPECT_EQ(source.sha256, std::string(64, 'a'));
+    ASSERT_EQ(source.signature.size(), 3u);
+    EXPECT_EQ(source.signature[2].kind, "global_buffer");
+    EXPECT_EQ(source.signature[2].size, 8u);
+    EXPECT_EQ(source.signature[2].offset, 16u);
+    // An absent `name` parses to empty rather than to anything a comparison could disagree
+    // with -- the HIP producer emits none.
+    EXPECT_TRUE(source.signature[2].name.empty());
     // Each kind fills only its own fields, so a consumer may read them under the tag alone.
     EXPECT_TRUE(source.sourceFile.empty());
     EXPECT_TRUE(source.entryPoint.empty());
+}
+
+namespace
+{
+
+/// Writes a packaged kernel whose only departure from the shape above is `sha256`, so a
+/// rejection can only be the digest and not some other part of the document.
+void writePackagedKernelWithSha256(const std::filesystem::path& where, const std::string& digest)
+{
+    auto packaged = makeSetDocuments('1', "test:sha256");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", digest},
+           {"signature", packagedSignature()}};
+    writeDocuments(where, packaged);
+}
+
+/// Asserts the digest is refused and that the message can be acted on: it names the key, the
+/// locator, and the text that was wrong. A rejection whose message carries none of the three
+/// sends the reader to grep the loader rather than to their own descriptor.
+void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithSha256(dir.path(), digest);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "'" + digest + "'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
+{
+    // One character short is what a truncated copy-paste produces, and it is the case a plain
+    // non-empty check cannot see.
+    expectSha256Rejected(std::string(63, 'a'), "sha256_short");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
+{
+    expectSha256Rejected(std::string(65, 'a'), "sha256_long");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
+{
+    // Rejected rather than folded: the packer emits `hexdigest()` and nothing else, and two
+    // spellings of one digest compare unequal wherever the field is compared as text.
+    expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
+{
+    expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
+}
+
+TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
+{
+    // requireString already refuses an empty value; the length rule must own the case anyway,
+    // in case requireString ever softens.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
+    writePackagedKernelWithSha256(dir.path(), "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, AcceptsAConformingSha256)
+{
+    // A real hexdigest rather than 64 repeated characters, so the case still holds if the rule
+    // is ever tightened past "64 of [0-9a-f]".
+    const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
+    writePackagedKernelWithSha256(dir.path(), digest);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    EXPECT_EQ(sets.front().packs.front().kernels.front().source.sha256, digest);
+}
+
+namespace
+{
+
+/// Writes a packaged kernel whose only departure from the conforming shape is `signature`,
+/// so a rejection can only be the argument list.
+void writePackagedKernelWithSignature(const std::filesystem::path& where,
+                                      const nlohmann::json& signature)
+{
+    auto packaged = makeSetDocuments('1', "test:signature");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", std::string(64, 'a')},
+           {"signature", signature}};
+    writeDocuments(where, packaged);
+}
+
+/// Asserts the argument list is refused with a message that can be acted on: the key, the
+/// locator, and -- because arguments have no names to be called by on the HIP path -- the
+/// position of the offending one.
+void expectSignatureRejected(const nlohmann::json& signature,
+                             const std::string& scratchLabel,
+                             const std::string& expectedText)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithSignature(dir.path(), signature);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedText))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
+        << recorder.getRecordedLogsAsString();
+}
+
+} // namespace
+
+TEST(TestDescriptorLoader, RejectsAPackagedKernelWithNoSignature)
+{
+    // The key is required rather than defaulted because an empty list is a real answer --
+    // a kernel that takes no arguments -- and absence must not silently become it.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_absent"));
+    auto packaged = makeSetDocuments('1', "test:signature");
+    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
+        = {{"kind", "kpack"},
+           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+           {"toc_key", "PointwiseAdd/block64"},
+           {"symbol", "PointwiseAdd"},
+           {"sha256", std::string(64, 'a')}};
+    writeDocuments(dir.path(), packaged);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'signature'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureThatIsNotAnArray)
+{
+    expectSignatureRejected(nlohmann::json::object(), "signature_object", "must be an array");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryThatIsNotAnObject)
+{
+    expectSignatureRejected(
+        nlohmann::json::array({"global_buffer"}), "signature_scalar", "signature[0]");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryMissingItsKind)
+{
+    expectSignatureRejected(nlohmann::json::array({{{"size", 8}, {"offset", 0}}}),
+                            "signature_no_kind",
+                            "missing required key 'kind'");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryWithANegativeSize)
+{
+    // A kernarg width is unsigned, so a negative one is a broken producer rather than a
+    // value to clamp. Caught here because get<uint32_t>() would wrap it into a huge one.
+    expectSignatureRejected(
+        nlohmann::json::array({{{"kind", "by_value"}, {"size", -4}, {"offset", 0}}}),
+        "signature_negative",
+        "must be a non-negative integer");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryWithAnUnknownKey)
+{
+    // The known-key gate applies inside an argument as it does everywhere else: a misspelled
+    // `value_kind` that merely got ignored would leave the argument silently kindless.
+    expectSignatureRejected(
+        nlohmann::json::array(
+            {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"value_kind", "x"}}}),
+        "signature_unknown_key",
+        "unknown key 'value_kind'");
+}
+
+TEST(TestDescriptorLoader, RejectsASignatureEntryWithAnEmptyName)
+{
+    // Empty already means "this producer records no names", so spelling the key with an
+    // empty value would collapse the two.
+    expectSignatureRejected(
+        nlohmann::json::array(
+            {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"name", ""}}}),
+        "signature_empty_name",
+        "must not be empty");
+}
+
+TEST(TestDescriptorLoader, AcceptsAnEmptySignatureAsAKernelTakingNoArguments)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_empty"));
+    writePackagedKernelWithSignature(dir.path(), nlohmann::json::array());
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    ASSERT_FALSE(sets.front().packs.front().kernels.empty());
+    EXPECT_TRUE(sets.front().packs.front().kernels.front().source.signature.empty());
+}
+
+TEST(TestDescriptorLoader, CarriesTheArgumentNamesAProducerDoesEmit)
+{
+    // The assembly producers record names, and they are the only thing that distinguishes an
+    // operand permutation from the list it permutes, so they have to survive parsing.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signature_named"));
+    writePackagedKernelWithSignature(
+        dir.path(),
+        nlohmann::json::array(
+            {{{"kind", "global_buffer"}, {"size", 8}, {"offset", 0}, {"name", "inputA"}},
+             {{"kind", "by_value"}, {"size", 4}, {"offset", 8}, {"name", "count"}}}));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& signature = sets.front().packs.front().kernels.front().source.signature;
+    ASSERT_EQ(signature.size(), 2u);
+    EXPECT_EQ(signature[0].name, "inputA");
+    EXPECT_EQ(signature[1].kind, "by_value");
+    EXPECT_EQ(signature[1].size, 4u);
+    EXPECT_EQ(signature[1].name, "count");
 }
 
 /// The packaged kernel entry key for key, copied from
@@ -2408,7 +2670,8 @@ TEST(TestDescriptorLoader, ParsesTheShapeTheDescriptorPackagerEmits)
           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
           {"toc_key", "9a1c0e5f7b2d43869a1c0e5f7b2d4386"},
           {"symbol", "pointwise_add_kernel"},
-          {"sha256", std::string(64, 'b')}}},
+          {"sha256", std::string(64, 'b')},
+          {"signature", packagedSignature()}}},
         {"metadata", {{"block_size", 64}, {"dtype", "FLOAT"}}},
         {"priority", 0},
         {"provenance",
@@ -2551,7 +2814,8 @@ TEST(TestDescriptorLoader, JoinsARelativeLibraryAgainstThePackagerLayout)
                                {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
                                {"toc_key", "PointwiseAdd/block64"},
                                {"symbol", "PointwiseAdd"},
-                               {"sha256", std::string(64, 'a')}};
+                               {"sha256", std::string(64, 'a')},
+                               {"signature", packagedSignature()}};
     writeDocuments(shard, documents);
 
     const auto sets = loadFrom(dir.path());

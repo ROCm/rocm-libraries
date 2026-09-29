@@ -110,6 +110,7 @@ set( MIOpen_Source
     fusion/problem_description.cpp
     generic_search.cpp
     getitem_api.cpp
+    gpu_conv_reference.cpp
     glu/problem_description.cpp
     glu_api.cpp
     groupnorm_api.cpp
@@ -252,7 +253,6 @@ set( MIOpen_Source
     solver/conv/conv_ck_grouped_conv_fwd.cpp
     solver/conv/conv_3d_depthwise_fwd.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
-    solver/conv_bin_winoRxS_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
     solver/conv_ck_igemm_fwd_bias_activ_fused.cpp
     solver/conv_ck_igemm_grp_fwd_bias_activ_fused.cpp
@@ -295,6 +295,7 @@ set( MIOpen_Source
     solver/softmarginloss/forward_softmarginloss.cpp
     solver/softmax/attn_softmax.cpp
     solver/softmax/softmax.cpp
+    solver/softmax/softmax_noncontiguous.cpp
     solver/tensorOp/Op1dTensorGeneric.cpp
     solver/tensorOp/Op2dTensorGeneric.cpp
     solver/tensorOp/Op2dTensorLite.cpp
@@ -324,6 +325,24 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/ai_candidate_selection.cpp)
     list(APPEND MIOpen_Source conv/heuristics/ai_conv_nd_kernel_tuning_utils.cpp)
     list(APPEND MIOpen_Source anyramdb.cpp)
+endif()
+
+if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pick.cpp
+        conv/heuristics/lgbm_metadata.cpp
+        conv/heuristics/lgbm_forest.cpp)
+    # The rank model ships as a compact binary asset (kernels/lgbm_rank.bin,
+    # installed with the other model assets below) and is read at runtime by
+    # lgbm_forest.cpp -- no generated C, no text/JSON parse.
+
+    # Perf-config picker: one LightGBM lambdarank model PER tuneable solver, all
+    # packed into a single binary bundle (kernels/lgbm_pcfg.bin, installed with
+    # the other model assets below) and read at runtime by the pcfg metadata
+    # loader. See lgbm_binary.hpp and script/convert_lgbm_binary.py.
+    list(APPEND MIOpen_Source
+        conv/heuristics/lgbm_pcfg_pick.cpp
+        conv/heuristics/lgbm_pcfg_metadata.cpp)
 endif()
 
 list(APPEND MIOpen_Source tmp_dir.cpp binary_cache.cpp md5.cpp)
@@ -380,6 +399,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/reduction_functions.hpp
         kernels/configuration.hpp
         kernels/default_configurations.hpp
+        kernels/gpu_reference_kernel/naive_conv.hpp
         kernels/gpu_reference_kernel/fp8_kern_types.h
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride1.inc
         kernels/Conv_Winograd_v13_3_12_fp16dot_stride2_dec.inc
@@ -392,21 +412,11 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/Conv_Winograd_v16_5_0_epilogue.inc
         kernels/Conv_Winograd_v16_5_0_prologue.inc
         kernels/Conv_Winograd_v16_5_0_stride1.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_epilogue.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_prologue.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_gfx8_stride_2_dec.inc
-        kernels/conv_3x3_wheel_alpha_v9_2_7_gfx8.inc
-        kernels/conv_3x3_wheel_alpha_v3_0b_epilogue.inc
-        kernels/conv_3x3_wheel_alpha_v3_0b_prologue.inc
-        kernels/conv_3x3_wheel_alpha_v3_0b.inc
         kernels/conv_3x3_wheel_alpha_v7_0_3b_epilogue.inc
         kernels/conv_3x3_wheel_alpha_v7_0_3b_prologue.inc
         kernels/conv_3x3_wheel_alpha_v7_0_3b.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_epilogue.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_prologue.inc
-        kernels/conv_3x3_wheel_alpha_v9_0_15_gfx8_stride_2_dil.inc
-        kernels/conv_3x3_wheel_alpha_v9_0_15_gfx8_stride_2_dec.inc
-        kernels/conv_3x3_wheel_alpha_v9_0_15_gfx8.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_gfx9_stride_2_dil.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_gfx9_stride_2_dec.inc
         kernels/conv_3x3_wheel_alpha_v9_0_15_gfx9.inc
@@ -578,6 +588,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/MIOpenSoftMarginLoss.cpp
         kernels/MIOpenSoftmax.cpp
         kernels/MIOpenSoftmaxAttn.cpp
+        kernels/MIOpenSoftmaxNoncontiguous.cpp
         kernels/MIOpenSubSample.cpp
         kernels/MIOpenT5LayerNorm.cpp
         kernels/MIOpenUpSample.cpp
@@ -622,9 +633,6 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         kernels/conv_3x3_wheel_alpha_v9_0_15_stride_2_dec.s
         kernels/conv_3x3_wheel_alpha_v9_0_15.s
         kernels/conv_3x3_wheel_alpha_v7_0_3b.s
-        kernels/conv_3x3_wheel_alpha_v3_0b.s
-        kernels/conv_3x3_wheel_alpha_v9_2_7.s
-        kernels/conv_3x3_wheel_alpha_v9_2_7_stride_2_dec.s
         kernels/Conv_Winograd_v21_1_3_fp16_dot2_f2x3_dilation2.s
         kernels/Conv_Winograd_v21_1_3_fp16_dot2_f2x3_stride1.s
         kernels/Conv_Winograd_v21_1_3_fp16_dot2_f2x3_stride2.s
@@ -1053,9 +1061,23 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         add_library(nlohmann_json INTERFACE IMPORTED GLOBAL)
         target_link_libraries(nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
     endif()
-    file(GLOB MODEL_FILES CONFIGURE_DEPENDS kernels/*.model)
+    file(GLOB MODEL_FILES CONFIGURE_DEPENDS
+        kernels/*.model
+        kernels/lgbm_model_meta.json
+        kernels/lgbm_rank.bin
+        kernels/lgbm_pcfg.bin)
     if(NOT ENABLE_ASAN_PACKAGING )
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
+    endif()
+    # Test-only golden-vector fixtures for the LGBM forest walker parity gates
+    # (test/gtest/lgbm_picker.cpp, lgbm_pcfg_picker.cpp). Copied next to the
+    # model assets so the tests find them via GetSystemDbPath(), but NOT
+    # installed into the package.
+    if(BUILD_TESTING)
+        configure_file("kernels/lgbm_rank_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_rank_golden.json" COPYONLY)
+        configure_file("kernels/lgbm_pcfg_golden.json"
+            "${KERNELS_BINARY_DIR}/lgbm_pcfg_golden.json" COPYONLY)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)

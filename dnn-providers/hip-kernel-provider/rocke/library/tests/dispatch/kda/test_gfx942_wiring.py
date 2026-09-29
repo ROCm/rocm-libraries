@@ -20,8 +20,10 @@ from dispatch.kda import (
     KDA_REGISTRY,
     KdaRequest,
     dispatch_kda,
+    dispatch_kda_all,
     kda_candidates,
     kda_sweep_space,
+    registered_kda_combos,
 )
 
 _FUSED = "kda_gfx942_chunk_fused"
@@ -50,7 +52,7 @@ def _candidate(name: str):
 
 class TestRegistration(unittest.TestCase):
     def test_every_kernel_is_registered(self):
-        self.assertEqual({c.name for c in kda_candidates()}, set(_ALL))
+        self.assertLessEqual(set(_ALL), {c.name for c in kda_candidates()})
 
     def test_identity(self):
         for name, algorithm, spec_id in (
@@ -84,6 +86,9 @@ class TestRouting(unittest.TestCase):
     def test_default_routing_is_the_fused_kernel(self):
         self.assertEqual(dispatch_kda(_req()).candidate.name, _FUSED)
 
+    def test_unspecified_chunk_uses_the_gfx942_default(self):
+        self.assertEqual(dispatch_kda(_req(chunk_size=None)).spec.tile.chunk, 16)
+
     def test_named_algorithm_selects_a_split_half(self):
         for name, algorithm in ((_PREP, "chunk_prep"), (_SCAN, "chunk_scan")):
             with self.subTest(candidate=name):
@@ -101,10 +106,18 @@ class TestRouting(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("opt-in", why)
 
-    def test_sweep_space_offers_only_what_is_reachable(self):
-        # auto routes to fused alone, so the sweep space is one spec -- not the
-        # three it would be if the opt-in gate were advisory.
-        self.assertEqual(len(kda_sweep_space(_req())), 1)
+    def test_sweep_space_probes_opt_in_split_halves(self):
+        # Production auto still routes to fused alone. The sweep primitive
+        # probes opt-in prep/scan the same way attention probes dense/tuning.
+        self.assertEqual(dispatch_kda(_req()).candidate.name, _FUSED)
+        self.assertEqual(len(KDA_REGISTRY.supported(_req())), 1)
+        self.assertEqual(len(kda_sweep_space(_req())), 3)
+        names = [c.name for c, _spec in registered_kda_combos(_req())]
+        self.assertEqual(names, [_FUSED, _PREP, _SCAN])
+        self.assertEqual(
+            [r.candidate.name for r in dispatch_kda_all(_req())],
+            [_FUSED, _PREP, _SCAN],
+        )
 
 
 class TestArchGate(unittest.TestCase):
@@ -121,7 +134,7 @@ class TestArchGate(unittest.TestCase):
 
     def test_registry_serves_them_only_to_gfx942(self):
         self.assertEqual({c.name for c in KDA_REGISTRY.for_arch("gfx942")}, set(_ALL))
-        self.assertEqual(KDA_REGISTRY.for_arch("gfx950"), ())
+        self.assertFalse(set(_ALL) & {c.name for c in KDA_REGISTRY.for_arch("gfx950")})
 
 
 class TestCapabilityGates(unittest.TestCase):

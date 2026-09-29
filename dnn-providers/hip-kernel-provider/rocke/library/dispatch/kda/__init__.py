@@ -3,7 +3,7 @@
 
 """Chunkwise Kimi Delta Attention dispatcher family (path-level selection).
 
-Backed by :mod:`kernels.gfx942.kda_chunkwise`. This module owns only the
+Backed by the gfx942 and gfx950 KDA kernels. This module owns only the
 assembly -- the registry, the entry point, and the re-exports that make
 ``dispatch.kda`` one import for callers. What each candidate *is* lives in the
 arch module that owns it. See :mod:`.common` for the scope of the dispatch
@@ -26,10 +26,11 @@ from rocke.dispatch.core import (
     KernelId,
     OperatorRequest,
     Ranker,
+    make_kernel_id,
     stable_json_hash,
 )
 
-from . import gfx942
+from . import gfx942, gfx950
 from .common import (
     FAMILY,
     KDA_ABI_VERSION,
@@ -40,7 +41,6 @@ from .common import (
     KDA_PARTITION_HEAD_V,
     KdaRequest,
     _request_errors,
-    _selector_matches,
 )
 
 _FAMILY = FAMILY
@@ -51,7 +51,7 @@ _FAMILY = FAMILY
 KDA_REGISTRY = CandidateRegistry(
     _FAMILY, dim_vocabulary=KDA_DIM_VOCABULARY, require_build=True
 )
-for _module in (gfx942,):
+for _module in (gfx942, gfx950):
     _module.register(KDA_REGISTRY)
 
 
@@ -60,33 +60,34 @@ def kda_candidates() -> Tuple[KernelCandidate, ...]:
 
 
 def _kernel_id(req: KdaRequest, candidate: KernelCandidate, spec: Any) -> KernelId:
-    request_hash = stable_json_hash(req.normalized(), n=16)
-    spec_hash = stable_json_hash(asdict(spec), n=16)
-    return KernelId(
-        op="kda",
-        family=_FAMILY,
-        candidate=candidate.name,
-        algorithm=candidate.algorithm,
-        spec_id=candidate.spec_id,
-        arch=req.arch,
-        abi_version=candidate.abi_version,
-        request_hash=request_hash,
-        spec_hash=spec_hash,
-    )
+    return make_kernel_id(req, candidate, spec, op="kda")
+
+
+def registered_kda_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, Any], ...]:
+    """Every registered KDA candidate that can launch ``req``.
+
+    Probes opt-in split-path halves and expands each candidate's
+    ``sweep_space``. Production :func:`dispatch_kda` still returns fused
+    unless the request names a split half.
+    """
+    if _request_errors(req):
+        return ()
+    return KDA_REGISTRY.combos(req)
 
 
 def kda_sweep_space(req: OperatorRequest) -> Sequence[Any]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in KDA_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return KDA_REGISTRY.sweep_space(req)
+
+
+def dispatch_kda_all(req: KdaRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible KDA kernel for ``req``, including opt-in split halves."""
+    if _request_errors(req):
+        return ()
+    return KDA_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def priority_ranker(
@@ -124,6 +125,7 @@ def dispatch_kda(req: KdaRequest, *, ranker: Ranker | None = None) -> DispatchRe
             f"algorithm={candidate.algorithm}",
             f"spec_id={candidate.spec_id}",
             f"v_partitions={req.v_partitions} workgroups={req.workgroups}",
+            f"chunks={req.num_chunks}",
             f"spec_hash={kid.spec_hash}",
             f"request_hash={kid.request_hash}",
         ),
@@ -140,7 +142,9 @@ __all__ = [
     "KDA_REGISTRY",
     "KdaRequest",
     "dispatch_kda",
+    "dispatch_kda_all",
     "kda_candidates",
     "kda_sweep_space",
     "priority_ranker",
+    "registered_kda_combos",
 ]
