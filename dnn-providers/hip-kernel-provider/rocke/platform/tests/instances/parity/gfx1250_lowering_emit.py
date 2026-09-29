@@ -19,6 +19,7 @@
 # each with its gfx950 counterpart pins both sides of the choice.
 #
 # arch is per-config (see _spec), llvm_flavor = AUTO, matching the C side.
+from rocke.core.arch import ArchTarget
 from rocke.core.ir import BF16, F16, F32, I16, I32, I64, IRBuilder, KernelDef, PtrType
 
 from _emit_common import run_emit
@@ -77,7 +78,19 @@ def _wmma_k64(a_kind, b_kind):
 def _wmma_scaled(a_kind, b_kind, scale_mode):
     """K=128 scaled WMMA, parameterized by operand dtypes and scale mode."""
     scale_ty = {"scale": I32, "scale16": I64}[scale_mode]
-    op_id = f"wmma_{scale_mode}_f32_16x16x128_{a_kind}_{b_kind}"
+    block_k = 16 if scale_mode == "scale16" else 32
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype=a_kind,
+        b_dtype=b_kind,
+        c_dtype="fp32",
+        scales=("e8m0", "e8m0", block_k),
+        m=16,
+        n=16,
+        k=128,
+    )
+    assert atom is not None
+    op_id = atom.op_id
 
     def build(b: IRBuilder) -> None:
         a_ptr = b.param(
@@ -252,6 +265,40 @@ CONFIGS = [
     (_global_tr16(I16), "gfx1250"),
     (build_tensor_transfers, "gfx1250"),
 ]
+
+
+# Homogeneous BF8 belongs to the eight-bit example contract.
+CONFIGS.extend(
+    (_wmma_scaled("bf8", "bf8", mode), "gfx1250") for mode in ("scale", "scale16")
+)
+
+
+def _scale_coordinates(block_k):
+    atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
+        family="wmma_scaled",
+        a_dtype="fp8",
+        b_dtype="fp8",
+        c_dtype="fp32",
+        m=16,
+        n=16,
+        k=128,
+        scales=("e8m0", "e8m0", block_k),
+    )
+
+    def build(b):
+        out = b.param("coords", PtrType(I32, "global"), noalias=True, align=16)
+        lane = b.thread_id_x()
+        for layout in (atom.a_scale_layout(), atom.b_scale_layout()):
+            for slot in range(layout.frag_len):
+                x, y = layout.coord(b, lane, slot)
+                b.global_store(out, lane, x)
+                b.global_store(out, lane, y)
+        b.ret()
+
+    return build
+
+
+CONFIGS.extend((_scale_coordinates(block), "gfx1250") for block in (32, 16))
 
 
 def _spec(idx: int):

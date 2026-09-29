@@ -23,6 +23,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CustomKernel_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
@@ -33,9 +34,11 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LaunchDimGuard_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
@@ -55,6 +58,9 @@ if(NOT HIPBLASLT_ENABLE_YAML)
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/CompressedLibraryLoad_test.cpp"
+            # The indexed library layout is msgpack-only: its solution blob is a
+            # msgpack BIN, and mapRawBytes has no YAML implementation.
+            "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
     )
 endif()
 
@@ -81,6 +87,15 @@ if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
 endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
+
+# LaunchDimGuard_test asserts different outcomes for a cluster launch depending
+# on whether SolutionAdapter::launchKernel was compiled with the cluster path,
+# so it needs the same answer the library got. Reuses the cached result of the
+# check in ../CMakeLists.txt rather than repeating the feature test; the
+# definition stays PRIVATE on both targets.
+if(HIP_HAS_CLUSTER_LAUNCH)
+    target_compile_definitions(tensilelite-tests PRIVATE HIP_HAS_CLUSTER_LAUNCH)
+endif()
 
 if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(tensilelite-tests PRIVATE OpenMP::OpenMP_CXX)
