@@ -91,12 +91,16 @@ namespace
         T*     device  = nullptr;
         size_t n_live  = 0;
         size_t n_total = 0;
+        // Retained so the caller can tell a VRAM shortfall, which is a skip, from
+        // any other allocation failure, which is a test failure.
+        hipError_t alloc_status = hipSuccess;
 
         padded_vector(size_t live, size_t tail)
             : n_live(live)
             , n_total(live + tail)
         {
-            if((hipMalloc)(&device, n_total * sizeof(T)) != hipSuccess)
+            alloc_status = (hipMalloc)(&device, n_total * sizeof(T));
+            if(alloc_status != hipSuccess)
                 device = nullptr;
         }
 
@@ -159,8 +163,8 @@ namespace
 
         padded_vector<T> x(live, size_t(c_tail_elements));
         padded_vector<T> y(live, size_t(c_tail_elements));
-        if(!x.device || !y.device)
-            GTEST_SKIP() << LIMITED_VRAM_STRING;
+        CHECK_DEVICE_ALLOCATION(x.alloc_status);
+        CHECK_DEVICE_ALLOCATION(y.alloc_status);
 
         // x is 1 across the batch. Its tail is 1 as well, rather than a guard
         // pattern: the overrunning launch reads x before it writes y, so the tail
@@ -193,8 +197,7 @@ namespace
         const T*         alpha_ptr = &alpha_value;
         if(arg.pointer_mode_device)
         {
-            if(!d_alpha.device)
-                GTEST_SKIP() << LIMITED_VRAM_STRING;
+            CHECK_DEVICE_ALLOCATION(d_alpha.alloc_status);
             ASSERT_EQ(hipMemcpy(d_alpha.device, &alpha_value, sizeof(T), hipMemcpyHostToDevice),
                       hipSuccess);
             ASSERT_EQ(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device),

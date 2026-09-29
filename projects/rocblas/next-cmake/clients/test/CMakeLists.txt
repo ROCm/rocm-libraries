@@ -31,6 +31,7 @@ set(yaml_test_files
     "${_CMAKE_CURRENT_SOURCE_DIR}/atomics_mode_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/aux_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/axpy_gtest.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/axpy_ilp64_chunk_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/blas1_gtest.yaml"
     "${_CMAKE_CURRENT_SOURCE_DIR}/blas1_gtest.yaml.new"
     "${_CMAKE_CURRENT_SOURCE_DIR}/blas2_gtest.yaml"

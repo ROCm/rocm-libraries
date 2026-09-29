@@ -28,6 +28,7 @@ target_sources(
           # blas1
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/asum_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/axpy_gtest.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/axpy_ilp64_chunk_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/copy_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/dot_gtest.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/../blas1/iamaxmin_gtest.cpp"
