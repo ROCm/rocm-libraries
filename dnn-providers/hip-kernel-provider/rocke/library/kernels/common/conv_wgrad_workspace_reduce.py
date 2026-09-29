@@ -1,29 +1,41 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Workspace-cast kernel for the two-stage wgrad path.
+"""Workspace-fold kernel for the two-stage wgrad path.
 
 Stage 2 of the two-stage backward-weight convolution.  Stage 1
-(``conv_implicit_gemm_wgrad`` with ``two_stage=True``) atomic-adds its f32
-partial sums into a scratch buffer of shape ``[groups, wg_M, wg_N]``; by the
-time this kernel runs the reduction over ``split_k`` is already complete, done
-by the hardware atomics.  All that is left is to convert f32 -> ``dtype_d`` and
-write ``dW``.
+(``conv_implicit_gemm_wgrad`` with ``two_stage=True``) f32-atomic-adds its
+partial sums into a scratch buffer of shape ``[groups * R, wg_M, wg_N]``, where
+``R`` is ``ws_replicas``: each of a group's ``split_k`` slices picks one of that
+group's ``R`` replica slabs (by ``block_id_z % R``) and atomically accumulates
+into it.  So by the time this kernel runs the reduction over ``split_k`` is
+complete *within* each slab, but the ``R`` slabs of a group still have to be
+summed.  This kernel folds them and converts f32 -> ``dtype_d`` into ``dW``.
 
-That is why this kernel has no loop: the scratch and ``dW`` have exactly the
-same element count and the same layout, so the whole thing is one load, one
-convert, one store per element.  (It did once carry a sequential reduction over
-a ``[groups * split_k, wg_M, wg_N]`` scratch.  The grid here is sized by the
-*output*, which for a wgrad is a filter-sized handful of elements, so that loop
-ran on a few CTAs with one dependent load per iteration and cost more than the
-Stage 1 GEMM it was reducing.)
+``R`` is a compile-time constant, so the fold is flat and unrolled -- ``R``
+independent loads, ``R - 1`` adds, one convert, one store per output element,
+no loop.  (It did once carry a *sequential* reduction over a
+``[groups * split_k, wg_M, wg_N]`` scratch, i.e. a loop over the reduction
+degree.  The grid here is sized by the *output*, which for a wgrad is a
+filter-sized handful of elements, so that loop ran on a few CTAs with one
+dependent load per iteration and cost more than the Stage 1 GEMM it was
+reducing.  The replica count is deliberately decoupled from ``split_k`` so this
+stage stays a fixed handful of loads however deep the split gets.)
+
+The replicas exist for Stage 1's sake, not this kernel's: a dW-sized scratch is
+a few dozen cache lines, and pointing every CTA's atomics at it serialises them
+in L2.  See the ``ws_replicas`` field docs on ``WgradConvSpec``.
+
+``R`` here MUST match the Stage 1 spec's ``ws_replicas`` -- folding fewer slabs
+silently drops part of the sum, folding more reads past the buffer.
 
 For grouped convolutions the group slabs are contiguous in both buffers, so
-``block_id_z`` indexes them identically on each side.
+``block_id_z`` indexes group ``g``'s ``R`` scratch slabs and its single ``dW``
+slab from the same index.
 
 Kernel signature::
 
-    ws_ptr  : f32 global ptr, readonly      — scratch [groups * wg_M * wg_N]
+    ws_ptr  : f32 global ptr, readonly      — scratch [groups * R * wg_M * wg_N]
     dw_ptr  : dtype_d global ptr, writeonly — weight gradient [groups * wg_M * wg_N]
     wg_M    : i32   — per-group output-channel dimension (K // groups)
     wg_N    : i32   — per-group filter-spatial × input-channel (Y*X * C//groups)
@@ -119,12 +131,14 @@ def build_conv_wgrad_workspace_reduce(
     """Build the IR for the Stage 2 workspace-cast kernel.
 
     Each workgroup covers a ``(tile_m, tile_n)`` patch of ``(wg_M, wg_N)``.
-    Within the patch, each thread owns one ``(m, n)`` element: it loads the f32
-    scratch value, converts it to ``dtype_d``, and stores it to ``dW``.
+    Within the patch, each thread owns one ``(m, n)`` element: it loads that
+    element from each of its group's ``spec.ws_replicas`` f32 scratch slabs,
+    sums them, converts to ``dtype_d``, and stores to ``dW``.
 
-    The scratch already holds the complete sum over ``split_k`` -- Stage 1's
-    f32 atomics did the reduction -- so there is nothing to accumulate here and
-    no summation order to fix.
+    Stage 1's f32 atomics already reduced over ``split_k`` within each slab, so
+    the only accumulation left is the fixed fold across the replicas.  At
+    ``ws_replicas == 1`` that collapses to a single load and the kernel is a
+    pure cast.
     """
     tile_m = spec.tile_m
     tile_n = spec.tile_n

@@ -197,10 +197,20 @@ int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 /* spec.wg_N: filter spatial x input channels per group (Z * Y * X * C/groups). */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
-/* Returns true when the kernel output is guaranteed bit-exact deterministic,
- * i.e. split_k <= 1 (plain store, no atomics).  false means the kernel adds
- * atomically and output order is non-deterministic across runs -- including
- * two_stage=true, whose Stage 1 f32-atomic-adds into shared replica slabs. */
+/* Is THIS spec's output guaranteed bit-exact across runs?  This is a per-spec
+ * predicate, not a property of the kernel family:
+ *
+ *   split_k <= 1  -> true.  Plain store, no atomics, one CTA per output tile.
+ *   split_k >  1  -> false.  The epilogue adds atomically, so the summation
+ *                    order is scheduler-dependent and f32/f16 addition is not
+ *                    associative.  two_stage=true is NOT an exception: its
+ *                    Stage 1 f32-atomic-adds into shared replica slabs, and
+ *                    Stage 2's ordered fold over those slabs cannot un-reorder
+ *                    sums that were already reordered inside one.
+ *
+ * So a deterministic wgrad is still available -- ask for split_k <= 1 -- but a
+ * split-K wgrad, two-stage or not, is not one.  Hosts that need bit-exactness
+ * should gate on this predicate rather than on two_stage. */
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* Returns the workspace buffer size in bytes required for the two-stage

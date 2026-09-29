@@ -8,14 +8,17 @@ Assembles a :class:`~rocke.runtime.launcher.PipelineLauncher` from:
 * **Stage 1** — an implicit-GEMM wgrad kernel (``two_stage=True``) that
   f32-atomic-adds its partial sums into a scratch buffer instead of
   16-bit-atomic-adding into ``dW``.
-* **Stage 2** — a cast kernel that converts the finished f32 scratch to
-  ``dtype_d`` and writes ``dW``.
+* **Stage 2** — a fold/cast kernel that sums the scratch's ``ws_replicas``
+  slabs per group, converts to ``dtype_d``, and writes ``dW``.
 
 This is the route split-K takes when the packed ``<2 x dtype>`` atomic that
 writes a 16-bit ``dW`` directly cannot address the problem -- it needs an even
 ``wg_N = Y*X*cpg``, while ``atomicrmw fadd f32`` has no alignment constraint.
-The reduction over ``split_k`` is done by the hardware atomics, so Stage 2 is
-one load / convert / store per element and does not scale with the degree.
+The reduction over ``split_k`` is done by the hardware atomics; what is left
+for Stage 2 is the fold over the ``R = ws_replicas`` slabs those atomics were
+spread across, which is a compile-time-unrolled ``R`` loads / ``R-1`` adds /
+convert / store per element.  ``R`` is independent of ``split_k``, so Stage 2's
+cost does not scale with the split degree.
 
 Both stages are submitted on the same HIP stream, so HIP's in-order
 execution guarantees Stage 2 begins only after Stage 1 has completed —
@@ -26,8 +29,9 @@ accumulates into it; stale content is added to the result.
 
 Grouped convolutions (``groups > 1``) are fully supported.  Stage 1 uses grid
 ``z = groups * split_k`` and decodes the group from it, so every slice of a
-group lands on that group's single scratch slab.  Stage 2 uses grid
-``z = groups`` and casts all groups in one launch.
+group lands on one of that group's ``R`` scratch slabs (picked by ``z % R``)
+and never on another group's.  Stage 2 uses grid ``z = groups`` and folds and
+casts all groups in one launch.
 
 Usage::
 
