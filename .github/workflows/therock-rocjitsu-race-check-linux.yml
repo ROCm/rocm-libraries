@@ -134,7 +134,7 @@ jobs:
       - name: Check race sweep tooling
         run: |
           export PYTHONPATH="${ROCM_PATH}/share/hipblaslt/tensilelite${PYTHONPATH:+:${PYTHONPATH}}"
-          python3 -B "${ROCM_PATH}/share/hipblaslt/rocjitsu/test_rocjitsu_race_sweep.py"
+          python3 -B "${ROCM_PATH}/share/hipblaslt/tensilelite/rocjitsu/test_rocjitsu_race_sweep.py"
           python3 -B rocm-libraries/.github/scripts/test_rocjitsu_race_check.py
 
       - name: Run rocjitsu race check
