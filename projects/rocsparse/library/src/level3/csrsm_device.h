@@ -42,12 +42,9 @@ namespace rocsparse
         return (m > 0) ? ((nrhs - 1) / blockdim + 1) * m : 0;
     }
 
-    // grid.x for the csrsm solve launch.
-    //
-    // The clamp is a one line substitution for
-    //     rocsparse::get_grid_size(num_blocks, rocsparse::max_grid_size_x)
-    // once PR #11512 lands; it is spelled out here so this fix does not have to
-    // touch rocsparse_common.hpp.
+    // grid.x for the csrsm solve launch. max_grid_x is the largest grid.x the
+    // launch may use; the caller passes rocsparse::get_grid_size_x for the
+    // launch's block size.
     //
     // The clamped extent is then rounded DOWN to a whole number of RHS panels,
     // which is a correctness requirement rather than a tidiness one. The block
@@ -61,10 +58,8 @@ namespace rocsparse
     // resident block can end up waiting on a block that has not been dispatched
     // yet, and the solve hangs instead of returning.
     //
-    // If m alone exceeds max_grid_x the launch fails loudly with
-    // hipErrorInvalidConfiguration instead of silently computing garbage. Such a
-    // matrix needs a row pointer array of more than 17 GB, so it is out of reach
-    // of any current device.
+    // If m alone exceeds max_grid_x this returns m, a grid past the limit,
+    // rather than one too small to hold a single RHS panel.
     __host__ __forceinline__ int64_t csrsm_solve_grid_size(int64_t m,
                                                            int64_t nrhs,
                                                            int64_t blockdim,
@@ -348,9 +343,8 @@ namespace rocsparse
         // Fewer than m blocks cannot be strided safely: a block would have to
         // change rows between sweeps, and the done_array flag it then waits on
         // belongs to a block that has not been dispatched. csrsm_solve_grid_size
-        // never returns less than m (the launch fails with
-        // hipErrorInvalidConfiguration instead), so this is a contract violation;
-        // bail out rather than hang.
+        // never returns less than m, so this is a contract violation; bail out
+        // rather than hang.
         if(panels_per_sweep == 0)
         {
             return;
