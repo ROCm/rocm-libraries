@@ -27,8 +27,14 @@
 
 // Largest absolute element value an initialization pattern can produce for type T.
 // The client initializers fill from fixed, known ranges, so the bound is a constant
-// per (init, type) pair -- no need to scan the matrix. Complex entries take both
-// components from the same range, so the magnitude bound is sqrt(2) * component bound.
+// per (init, type) pair. Complex entries take both components from the same range,
+// so the magnitude bound is sqrt(2) * component bound.
+//
+// Ranges mirror the generators rocblas_init_matrix (clients/include/rocblas_init.hpp)
+// dispatches to per rocblas_initialization: random_generator (rand_int),
+// random_hpl_generator (hpl) and random_zero_one_generator (rand_int_zero_one) in
+// clients/include/rocblas_random.hpp; trig_float's sin/cos are applied in
+// rocblas_init.hpp directly. Keep this in sync if those ranges change.
 template <typename T>
 double init_abs_bound(rocblas_initialization init)
 {
@@ -220,19 +226,23 @@ void testing_gemm_ex_get_solutions(const Arguments& arg)
                                  ldd,
                                  rocblas_bfloat16::rocblas_truncate_t::rocblas_round_near_even);
 
-        // Magnitude-scaled near_check tolerance. Each solution reduces in its own
-        // accumulation order, so a valid result differs from the reference by about
-        // K*eps *relative* to the result magnitude. Rather than scanning the matrix
-        // (which would be O(M*N) and could read leading-dim padding), bound |D|_max
-        // analytically from the init ranges -- O(1). A gross error such as a dropped
-        // alpha or beta term stays well above this bound and still fails. gfx11 needs a
-        // looser per-eps bound for 16-bit inputs.
-        const double result_bound
-            = gemm_result_abs_bound<Ti, To, Tc>(arg.initialization, K, h_alpha_Tc, h_beta_Tc);
-        const double eps_bound = (rocblas_handle(handle)->getArchMajor() == 11 && sizeof(Ti) == 2)
-                                     ? sum_error_tolerance_for_gfx11<Tc, Ti, To>
-                                     : sum_error_tolerance<Tc>;
-        check_tol = result_bound * K * eps_bound;
+        // near_check tolerance. Each solution reduces in its own accumulation order, so
+        // a valid result differs from the reference by about K*eps. gfx11 with 16-bit
+        // inputs uses testing_gemm_ex's looser absolute bound as-is (that constant is
+        // calibrated for absolute K*tol use, not for magnitude scaling). Every other
+        // case scales the relative epsilon by an analytical bound on |D|_max, derived
+        // from the init ranges. A gross error such as a dropped alpha or beta term stays
+        // well above either bound and still fails.
+        if(rocblas_handle(handle)->getArchMajor() == 11 && sizeof(Ti) == 2)
+        {
+            check_tol = K * sum_error_tolerance_for_gfx11<Tc, Ti, To>;
+        }
+        else
+        {
+            const double result_bound
+                = gemm_result_abs_bound<Ti, To, Tc>(arg.initialization, K, h_alpha_Tc, h_beta_Tc);
+            check_tol = result_bound * K * sum_error_tolerance<Tc>;
+        }
     }
 
 #define GEMM_EX_ARGS                                                                        \
