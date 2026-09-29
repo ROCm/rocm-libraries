@@ -1213,13 +1213,12 @@ namespace TensileLite
             return m_mxTypeB;
         }
 
-        // In-device MX scale layout requested by the API / problem. Encoded as:
+        // In-device / API MX scale layout. Encoded as:
         //   0 = NoSwizzle       (canonical row/column layout; e.g. VEC32_UE8M0)
         //   1 = HostPreSwizzle  (gfx950 host-preswizzled; e.g. BLK32_UE8M0_32_8_EXT)
-        //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
-        // Participates in solution matching so shuffled vs non-shuffled select
-        // different libraries / solutions. Distinct from the solution-level
-        // MXScaleFormat knob that describes what a kernel was generated for.
+        //   2 = InMemorySwizzle (solution-level; gfx1250 TDM-populated layout)
+        // Matching predicates use only the API layouts 0/1 when ProblemType
+        // explicitly names them. Value 2 is never a host matching key.
         int mxScaleFormat() const
         {
             return m_mxScaleFormat;

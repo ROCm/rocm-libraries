@@ -1040,7 +1040,8 @@ namespace
 
     // Map API ScalingFormat pair onto Tensile problem mxScaleFormat.
     // Both operands must request the host-preswizzled EXT layout to select
-    // HostPreSwizzle (1); otherwise NoSwizzle (0).
+    // HostPreSwizzle (1); otherwise NoSwizzle (0). InMemorySwizzle (2) is a
+    // solution-level in-device layout only — never returned here for matching.
     inline int tensileMXScaleFormatFromProb(const RocblasltContractionProblem& prob)
     {
         using SF = RocblasltContractionProblem::ScalingFormat;

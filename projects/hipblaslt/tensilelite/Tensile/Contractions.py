@@ -299,15 +299,20 @@ class ProblemType:
         rv.mxBlockB = d.get('MXBlockB', 0)
         rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
         rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
-        # Problem-level MX scale layout discriminator (also a solution knob).
-        # Libraries that omit it default to NoSwizzle so they match the
-        # canonical / non-preswizzled API scale format.
+        # Problem-level MX scale layout discriminator for API matching.
+        # Only NoSwizzle (0) / HostPreSwizzle (1) are matching keys; they must
+        # be named explicitly on ProblemType (as in the gfx950 split Origami
+        # libs). Omitted ProblemType.MXScaleFormat (gfx1250 and most libraries)
+        # must not invent a matching predicate — InMemorySwizzle is a
+        # solution-level in-device layout, not a host API mode.
         _mxScaleFormatMap = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2, "Auto": 0}
         if 'MXScaleFormat' in d:
             fmt = d['MXScaleFormat']
             rv.mxScaleFormat = fmt if isinstance(fmt, int) else _mxScaleFormatMap.get(fmt, 0)
+            rv._mxScaleFormatApiDiscriminator = rv.mxScaleFormat in (0, 1)
         else:
             rv.mxScaleFormat = 0
+            rv._mxScaleFormatApiDiscriminator = False
 
         rv.metadataLayout = 0
         if 'MetadataLayout' in d:
@@ -443,9 +448,10 @@ class ProblemType:
             predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
             if self.mxBlockB:
                 predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
-            # Always predicate on mxScaleFormat so shuffled vs non-shuffled
-            # API scale layouts select different matching libraries.
-            predicates.append(ProblemPredicate("MXScaleFormat", value=self.mxScaleFormat))
+            # Only when ProblemType explicitly names an API layout (0/1).
+            # Never bake solution-level InMemorySwizzle (2) into matching.
+            if getattr(self, '_mxScaleFormatApiDiscriminator', False) and self.mxScaleFormat in (0, 1):
+                predicates.append(ProblemPredicate("MXScaleFormat", value=self.mxScaleFormat))
         return predicates
 
 class TaskPredicate(Properties.Predicate):
@@ -942,22 +948,19 @@ class Solution:
 
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
 
-        # Solution-level MXScaleFormat describes the in-device layout the kernel
-        # expects (DataInitialization consults this post-pick). Prefer an
-        # explicit ProblemType.MXScaleFormat when present so library matching
-        # keys off the problem; fall back to the solution knob for legacy
-        # logic files that only set it per-solution.
-        _mxScaleFormatMap = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2, "Auto": 0}
-        solFmt = d.get("MXScaleFormat", "NoSwizzle")
-        solFmtInt = solFmt if isinstance(solFmt, int) else _mxScaleFormatMap.get(solFmt, 0)
-        if 'MXScaleFormat' not in d.get('ProblemType', {}):
-            rv.problemType.mxScaleFormat = solFmtInt
-
+        # Build matching predicates from ProblemType only. Do not copy
+        # solution-level MXScaleFormat (e.g. InMemorySwizzle) into the problem
+        # discriminator first — that would require host==2, which is not an
+        # API mode. gfx1250 YAMLs omit ProblemType.MXScaleFormat and keep
+        # solution IMS for kernels; matching must stay unaffected.
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
 
-        # After predicates are built from ProblemType, mirror an explicit
-        # solution-level MXScaleFormat onto problemType for DataInitialization.
+        # After predicates are built, mirror solution-level MXScaleFormat onto
+        # problemType for DataInitialization (in-device upload layout).
+        _mxScaleFormatMap = {"NoSwizzle": 0, "HostPreSwizzle": 1, "InMemorySwizzle": 2, "Auto": 0}
         if 'MXScaleFormat' in d:
+            solFmt = d['MXScaleFormat']
+            solFmtInt = solFmt if isinstance(solFmt, int) else _mxScaleFormatMap.get(solFmt, 0)
             rv.problemType.mxScaleFormat = solFmtInt
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
 
