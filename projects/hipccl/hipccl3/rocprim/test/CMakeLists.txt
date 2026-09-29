@@ -118,7 +118,13 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
 
   set_target_properties(${TEST_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      # NOTE(hipccl3): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - the latter
+      # is the outermost build root, so once nested under hipccl3 it placed
+      # test binaries at the top of the whole build tree (<build>/test/)
+      # instead of alongside their object files at <build>/rocprim/test/.
+      # PROJECT_BINARY_DIR is rocPRIM's own build subdir and equals
+      # CMAKE_BINARY_DIR in the standalone case, so this is a no-op there.
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test"
   )
 
   add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
@@ -205,17 +211,16 @@ endif()
 # internal target name. The source path and output directory also used
 # ${CMAKE_SOURCE_DIR}/${CMAKE_BINARY_DIR} (the outermost project's paths,
 # silently wrong once nested) instead of their CMAKE_CURRENT_* equivalents;
-# ROCPRIM_PROJECT_IS_TOP_LEVEL keeps the standalone output location
-# (${CMAKE_BINARY_DIR}, matching today's behavior) unchanged while giving
-# nested builds their own, non-colliding output directory.
-if(ROCPRIM_PROJECT_IS_TOP_LEVEL)
-  set(ROCPRIM_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-else()
-  set(ROCPRIM_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
+# PROJECT_BINARY_DIR (rocPRIM's own build subdir) gives standalone builds the
+# same output location as before (PROJECT_BINARY_DIR == CMAKE_BINARY_DIR
+# there) while giving nested builds their own, non-colliding directory - this
+# previously branched on ROCPRIM_PROJECT_IS_TOP_LEVEL and used
+# CMAKE_CURRENT_BINARY_DIR in the nested case, which is one level too deep
+# (this file's own build dir, rocprim/test), putting the binary in
+# rocprim/test instead of rocprim.
 add_executable(rocprim_generate_resource_spec "${CMAKE_CURRENT_SOURCE_DIR}/generate_resource_spec.cpp")
 set_target_properties(rocprim_generate_resource_spec PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${ROCPRIM_GENERATE_RESOURCE_SPEC_OUTPUT_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   OUTPUT_NAME "generate_resource_spec"
 )
 target_link_libraries(rocprim_generate_resource_spec PRIVATE hip::host)

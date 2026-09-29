@@ -50,7 +50,9 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
     endif()
     set_target_properties(${TEST_TARGET}
         PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/hipstdpar"
+            # NOTE(hipccl3): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - see
+            # ../CMakeLists.txt for why.
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test/hipstdpar"
     )
     if(AMDGPU_TEST_TARGETS)
     foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)

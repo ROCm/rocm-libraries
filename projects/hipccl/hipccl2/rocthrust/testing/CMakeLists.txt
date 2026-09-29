@@ -124,7 +124,9 @@ function(add_thrust_test TEST)
     target_compile_options(${TEST_TARGET} PRIVATE ${COMPILE_OPTIONS})
     set_target_properties(${TEST_TARGET}
         PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
+            # NOTE(hipccl2): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - see
+            # ../test/CMakeLists.txt for why.
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/testing/"
     )
     if(AMDGPU_TEST_TARGETS)
         foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)

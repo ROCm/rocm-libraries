@@ -230,7 +230,7 @@ project had always been the top-level project until hipccl3 existed. Nesting
 all three in one configure failed outright
 (`add_executable cannot create target "generate_resource_spec" because
 another target with the same name already exists`). Fixed, in all three
-hipccl3 copies, by:
+copies (both `hipccl2` and `hipccl3`), by:
 - Renaming the CMake *target* per project
   (`rocprim_generate_resource_spec`, `hipcub_generate_resource_spec`,
   `rocthrust_generate_resource_spec`), while pinning `OUTPUT_NAME
@@ -238,13 +238,22 @@ hipccl3 copies, by:
   `testing.md` actually documents - is unchanged.
 - Switching the source path to `${CMAKE_CURRENT_SOURCE_DIR}`, so it resolves
   to each project's own file regardless of nesting.
-- Keeping the output directory at `${CMAKE_BINARY_DIR}` for standalone builds
-  (unchanged from today), but using `${CMAKE_CURRENT_BINARY_DIR}` when
-  nested, so the three nested builds don't overwrite each other's binary.
-  hipCUB and rocThrust didn't previously have a `*_PROJECT_IS_TOP_LEVEL`-style
-  flag to make that distinction (only rocPRIM did) - a minimal
-  `HIPCUB_PROJECT_IS_TOP_LEVEL`/`ROCTHRUST_PROJECT_IS_TOP_LEVEL` flag was
-  added to each, used only for this purpose.
+- Switching the output directory to `${PROJECT_BINARY_DIR}` (each project's
+  own build subdir). This equals `${CMAKE_BINARY_DIR}` in the standalone
+  case, so standalone behavior is unchanged, while nested builds each get
+  their own non-colliding directory. An earlier pass instead branched on a
+  `*_PROJECT_IS_TOP_LEVEL`-style flag and used `${CMAKE_CURRENT_BINARY_DIR}`
+  for the nested case - one level too deep (this file's own build dir,
+  e.g. `rocthrust/test`, rather than `rocthrust`), so nested builds produced
+  the binary inside `<component>/test/` instead of `<component>/`. Since
+  `${PROJECT_BINARY_DIR}` already matches standalone behavior on its own, no
+  top-level flag is needed for this purpose at all: `ROCTHRUST_PROJECT_IS_TOP_LEVEL`
+  was removed entirely (it had no other consumer), and `HIPCUB_PROJECT_IS_TOP_LEVEL`
+  likewise (see below - hipCUB's copies never actually gated packaging on it
+  either, unlike what the layout-selector section below currently claims).
+  rocPRIM's `ROCPRIM_PROJECT_IS_TOP_LEVEL` is untouched - it has other,
+  genuine consumers (test/benchmark config, packaging) - only its
+  `generate_resource_spec` output directory changed.
 
 ### The `projects/hipccl` layout selector
 
@@ -264,7 +273,7 @@ cmake -S projects/hipccl -B build -DHIPCCL_BUILD_LEGACY=ON
 to work exactly as before - this router is a purely additional entry point,
 not a replacement for either.
 
-Making this work correctly required two small companion fixes:
+Making this work correctly required a companion fix:
 
 - **`hipccl3`'s unified packaging and `find_package(hipccl)` generation are
   now unconditional.** Both were previously guarded behind
@@ -275,29 +284,24 @@ Making this work correctly required two small companion fixes:
   now the outermost `CMAKE_SOURCE_DIR`), which would have silently disabled
   both features. Since `hipccl3`'s root `CMakeLists.txt` is never meant to be
   a mere sub-component of anything else, the guard was simply removed.
-- **hipCUB and rocThrust in `hipccl2` gained a top-level packaging guard they
-  didn't have before.** Only rocPRIM had one
-  (`ROCPRIM_PROJECT_IS_TOP_LEVEL`); hipCUB and rocThrust called
-  `rocm_create_package()` (which triggers `include(CPack)`) unconditionally.
-  `include(CPack)` only supports one call per configure, so the
-  `HIPCCL_BUILD_LEGACY=ON` route - which nests all three - would otherwise
-  fail to configure at all. Both gained the same
-  `HIPCUB_PROJECT_IS_TOP_LEVEL`/`ROCTHRUST_PROJECT_IS_TOP_LEVEL` guard
-  rocPRIM already had, wrapped in `if(NOT DEFINED ...)` (matching a similar
-  wrapper added to rocPRIM's own flag) so a parent can still explicitly force
-  one back on, e.g.:
-  `cmake -S projects/hipccl -B build -DHIPCCL_BUILD_LEGACY=ON -DROCPRIM_PROJECT_IS_TOP_LEVEL=ON`.
-  Standalone builds of any of the three (`cd hipccl2/rocprim && cmake ..`)
-  are unaffected - nothing pre-defines the flag, so it still auto-detects
-  exactly as before, and packaging still happens by default.
 
-One residual limitation: since rocPRIM, hipCUB, and rocThrust each still call
-`rocm_create_package()` independently, only **one** of the three can have its
-flag forced on in a given `HIPCCL_BUILD_LEGACY=ON` configure - forcing all
-three on at once just reproduces the original multi-`include(CPack)`
-collision. Configure/build/install work normally for all three regardless;
-only simultaneous packaging of all three through the selector is out of
-scope.
+Nesting rocPRIM, hipCUB, and rocThrust together (in either layout) does *not*
+hit the classic multi-`include(CPack)` collision one might expect, because
+none of the three call `rocm_create_package()` from inside their own copy of
+`CMakeLists.txt` at all - not even standalone. Each copy's Package section
+explicitly disables it, unconditionally, regardless of
+`ROCPRIM_PROJECT_IS_TOP_LEVEL`/`HIPCUB_PROJECT_IS_TOP_LEVEL`/`ROCTHRUST_PROJECT_IS_TOP_LEVEL`
+(the last two of which have since been removed for having no other use - see
+above). A standalone package built from inside e.g. `hipccl2/rocprim` would
+be a different, differently-named artifact than the unified `hipccl` package
+`hipccl2`'s (or `hipccl3`'s) own root `CMakeLists.txt` produces - installable
+side-by-side by a package manager with no idea they overlap, risking
+duplicate/conflicting installs of the same headers. Only the root
+`CMakeLists.txt` of each layout calls `rocm_create_package()`, exactly once,
+unconditionally; each component copy only supports configure/build/
+`cmake --install`. rocm-libraries' own standalone `projects/rocprim`,
+`projects/hipcub`, and `projects/rocthrust` are untouched and still package
+normally on their own.
 
 ### Known gaps
 

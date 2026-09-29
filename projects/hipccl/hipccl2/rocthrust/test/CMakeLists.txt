@@ -108,7 +108,14 @@ function(add_rocthrust_test TEST)
     endif()
     set_target_properties(${TEST_TARGET}
         PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
+            # NOTE(hipccl2): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - the
+            # latter is the outermost build root, so once nested under
+            # hipccl2 it placed test binaries at the top of the whole build
+            # tree (<build>/test/) instead of alongside their object files at
+            # <build>/rocthrust/test/. PROJECT_BINARY_DIR is rocThrust's own
+            # build subdir and equals CMAKE_BINARY_DIR in the standalone case,
+            # so this is a no-op there.
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test/"
     )
 
     if(AMDGPU_TEST_TARGETS)
@@ -409,18 +416,16 @@ rocm_install(
 # regardless of the internal target name. The source path and output
 # directory also used ${CMAKE_SOURCE_DIR}/${CMAKE_BINARY_DIR} (the outermost
 # project's paths, silently wrong once nested) instead of their
-# CMAKE_CURRENT_* equivalents; ROCTHRUST_PROJECT_IS_TOP_LEVEL keeps the
-# standalone output location (${CMAKE_BINARY_DIR}, matching today's behavior)
-# unchanged while giving nested builds their own, non-colliding output
-# directory.
-if(ROCTHRUST_PROJECT_IS_TOP_LEVEL)
-  set(ROCTHRUST_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-else()
-  set(ROCTHRUST_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
+# CMAKE_CURRENT_* equivalents; PROJECT_BINARY_DIR (rocThrust's own build
+# subdir) gives standalone builds the same output location as before
+# (PROJECT_BINARY_DIR == CMAKE_BINARY_DIR there) while giving nested builds
+# their own, non-colliding directory - earlier this used
+# CMAKE_CURRENT_BINARY_DIR in the nested case, which is one level too deep
+# (this file's own build dir, rocthrust/test), putting the binary in
+# rocthrust/test instead of rocthrust.
 add_executable(rocthrust_generate_resource_spec "${CMAKE_CURRENT_SOURCE_DIR}/generate_resource_spec.cpp")
 set_target_properties(rocthrust_generate_resource_spec PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${ROCTHRUST_GENERATE_RESOURCE_SPEC_OUTPUT_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   OUTPUT_NAME "generate_resource_spec"
 )
 target_link_libraries(rocthrust_generate_resource_spec PRIVATE hip::host)

@@ -82,19 +82,19 @@ endfunction()
 # regardless of the internal target name. The source path and output
 # directory also used ${CMAKE_SOURCE_DIR}/${CMAKE_BINARY_DIR} (the outermost
 # project's paths, silently wrong once nested) instead of their
-# CMAKE_CURRENT_* equivalents; HIPCUB_PROJECT_IS_TOP_LEVEL keeps the
-# standalone output location (${CMAKE_BINARY_DIR}, matching today's behavior)
-# unchanged while giving nested builds their own, non-colliding output
-# directory.
+# CMAKE_CURRENT_* equivalents; PROJECT_BINARY_DIR (hipCUB's own build subdir)
+# gives standalone builds the same output location as before
+# (PROJECT_BINARY_DIR == CMAKE_BINARY_DIR there) while giving nested builds
+# their own, non-colliding directory - this previously branched on
+# HIPCUB_PROJECT_IS_TOP_LEVEL (which had no other consumer - hipCUB's
+# packaging is unconditionally disabled in both hipccl2 and hipccl3, see the
+# Package section) and used CMAKE_CURRENT_BINARY_DIR in the nested case,
+# which is one level too deep (this file's own build dir, hipcub/test),
+# putting the binary in hipcub/test instead of hipcub.
 set(GEN_RES_SPEC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/generate_resource_spec.cpp")
-if(HIPCUB_PROJECT_IS_TOP_LEVEL)
-  set(HIPCUB_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-else()
-  set(HIPCUB_GENERATE_RESOURCE_SPEC_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
 add_executable(hipcub_generate_resource_spec ${GEN_RES_SPEC_PATH})
 set_target_properties(hipcub_generate_resource_spec PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${HIPCUB_GENERATE_RESOURCE_SPEC_OUTPUT_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   OUTPUT_NAME "generate_resource_spec"
 )
 target_link_libraries(hipcub_generate_resource_spec PRIVATE hip::host)

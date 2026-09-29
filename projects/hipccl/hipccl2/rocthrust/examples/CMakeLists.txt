@@ -34,7 +34,9 @@ function(add_thrust_example EXAMPLE)
     endif()
     set_target_properties(${EXAMPLE_TARGET}
         PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples/"
+            # NOTE(hipccl2): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - see
+            # ../test/CMakeLists.txt for why.
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/examples/"
     )
     if (WIN32 AND NOT DEFINED DLLS_COPIED)
       set(DLLS_COPIED "YES")

@@ -20,6 +20,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# NOTE(hipccl2): every RUNTIME_OUTPUT_DIRECTORY below in this file uses
+# PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - the latter is the outermost
+# build root, so once nested under hipccl2 it placed test binaries at the top
+# of the whole build tree (<build>/test/rocprim/) instead of alongside their
+# object files at <build>/rocprim/test/rocprim/). PROJECT_BINARY_DIR is
+# rocPRIM's own build subdir and equals CMAKE_BINARY_DIR in the standalone
+# case, so this is a no-op there.
 set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
 
 # Gets a test target name based on the first source file.
@@ -129,7 +136,7 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
 
   set_target_properties(${TEST_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/rocprim"
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test/rocprim"
   )
   if(AMDGPU_TEST_TARGETS)
     foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
@@ -411,7 +418,7 @@ if(NOT WIN32)
   target_link_libraries(test_linking_lib1 PRIVATE rocprim_hip)
   set_target_properties(test_linking_lib1
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/rocprim"
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test/rocprim"
       COMPILE_DEFINITIONS "TEST_FUNC=test1;${COMMON_DEFINITIONS};"
   )
 
@@ -433,7 +440,7 @@ if(NOT WIN32)
   endif()
   set_target_properties(test_linking_lib2
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/rocprim"
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test/rocprim"
       COMPILE_DEFINITIONS "TEST_FUNC=test2;TEST_LINKING_EMULATE_ANOTHER_VERSION;${COMMON_DEFINITIONS};${LIB2_NAMESPACE_DEFINITION};"
   )
 

@@ -91,7 +91,14 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
 
   set_target_properties(${TEST_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/hipcub"
+      # NOTE(hipccl3): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - the latter
+      # is the outermost build root, so once nested under hipccl3 it placed
+      # test binaries at the top of the whole build tree
+      # (<build>/test/hipcub/) instead of alongside their object files at
+      # <build>/hipcub/test/hipcub/. PROJECT_BINARY_DIR is hipCUB's own build
+      # subdir and equals CMAKE_BINARY_DIR in the standalone case, so this is
+      # a no-op there.
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/test/hipcub"
   )
   if(GPU_TEST_TARGETS)
     foreach(GPU_TARGET IN LISTS GPU_TEST_TARGETS)

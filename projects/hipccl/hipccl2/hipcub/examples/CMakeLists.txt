@@ -69,7 +69,9 @@ function(add_hipcub_example EXAMPLE_NAME EXAMPLE_SOURCES)
 
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/example/hipcub"
+      # NOTE(hipccl2): PROJECT_BINARY_DIR, not CMAKE_BINARY_DIR - see
+      # ../test/hipcub/CMakeLists.txt for why.
+      RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/example/hipcub"
   )
   add_test(
     NAME ${EXAMPLE_NAME}
