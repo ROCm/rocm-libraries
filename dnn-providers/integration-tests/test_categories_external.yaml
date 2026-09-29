@@ -27,6 +27,7 @@ test_categories:
       - "hipdnn_bundle_verifier_python_tests"
       - "hipdnn_support_claim_verifier_python_tests"
       - "hipdnn_support_claim_harvest_python_tests"
+      - "hipdnn_support_sidecar_python_tests"
     labels:
       - "quick"
       - "pre-commit"
@@ -38,5 +39,6 @@ test_categories:
       - "hipdnn_bundle_verifier_python_tests"
       - "hipdnn_support_claim_verifier_python_tests"
       - "hipdnn_support_claim_harvest_python_tests"
+      - "hipdnn_support_sidecar_python_tests"
     labels:
       - "ffm-full"
