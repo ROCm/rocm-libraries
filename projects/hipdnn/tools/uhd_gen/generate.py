@@ -789,7 +789,8 @@ def run_generate(args: argparse.Namespace) -> int:
         for model in models:
             build_plan(Path(model["model_dir"]), tree, args.engine, role=args.role,
                        arch=args.arch or arches[0], corpus=Path(model["corpus"]),
-                       uhd_ids={None: model["uhd_id"]} if model["uhd_id"] else None)
+                       uhd_ids={None: model["uhd_id"]} if model["uhd_id"] else None,
+                       feature_evaluator=args.feature_evaluator)
         # Where each model and its corpus land once the stage is renamed into place.
         published_models = [(output / Path(model["model_dir"]).relative_to(stage),
                              output / Path(model["corpus"]).relative_to(stage), model["uhd_id"])
@@ -824,6 +825,8 @@ def run_generate(args: argparse.Namespace) -> int:
                     promote_args.extend(["--engine", args.engine])
                 if identity:
                     promote_args.extend(["--uhd-id", identity])
+                if args.feature_evaluator:
+                    promote_args.extend(["--feature-evaluator", args.feature_evaluator])
                 if run_promote(parser.parse_args(promote_args)):
                     raise ValueError(f"promotion failed; validated model and reproducible collection remain at {output}")
         for model_dir, _, _ in published_models:

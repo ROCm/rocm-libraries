@@ -93,6 +93,22 @@ def test_the_request_uhd_gen_builds_reaches_the_runtimes_hash_unaltered(evaluato
     assert compute_features_hash(RAW_SIGNATURE, executable=evaluator) == RAW_DIGEST
 
 
+def test_the_feature_semantics_revision_is_the_evaluators_and_absent_means_1(evaluator_reporting):
+    """FeatureSemantics.hpp: uhd_gen never restates the constant, it asks the build. An
+    evaluator whose responses carry no revision predates it, and what such a build computes
+    is revision 1 -- the rule a UHD recording none is read by."""
+    assert features.evaluator_feature_semantics_revision(evaluator_reporting(7)) == 7
+    assert features.evaluator_feature_semantics_revision(evaluator_reporting(None)) == 1
+
+
+@pytest.mark.parametrize("reported", [0, -1, True, 1.5, "1"])
+def test_a_malformed_feature_semantics_revision_is_refused(evaluator_reporting, reported):
+    """Compared for equality downstream, so one revision must have one spelling: a bool or
+    a string passing here as 1 would stamp a model the loader then refuses to parse."""
+    with pytest.raises(ValueError, match="feature_semantics_revision"):
+        features.evaluator_feature_semantics_revision(evaluator_reporting(reported))
+
+
 @pytest.mark.parametrize("signature", [
     RAW_SIGNATURE,
     ["$q.batch", {"*": ["$q.batch", "$q.num_heads"]}],

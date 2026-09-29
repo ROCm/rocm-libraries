@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
+#include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
 
 namespace
 {
@@ -735,16 +737,28 @@ TEST(TestEngineFeatures, UnsupportedFusedWorkDoesNotPublishAPartialGraphRate)
     GraphT graph;
     addTensor(graph, 1, {3, 4});
     addTensor(graph, 2, {4, 7});
-    addTensor(graph, 3, {3, 7});
+    addTensor(graph, 3, {3, 7}, {}, true);
+    addTensor(graph, 4, {3, 7});
     MatmulAttributesT matmul;
     matmul.a_tensor_uid = 1;
     matmul.b_tensor_uid = 2;
     matmul.c_tensor_uid = 3;
     addNode(graph, matmul);
-    addNode(graph, PointwiseAttributesT{});
+    CustomOpAttributesT custom;
+    custom.custom_op_id = "example.opaque";
+    custom.input_tensor_uids = {3};
+    custom.output_tensor_uids = {4};
+    addNode(graph, custom);
     const auto published = features(graph);
     EXPECT_FALSE(published.contains("graph.flops"));
+    EXPECT_FALSE(published.contains("graph.arithmetic_intensity"));
     EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), 2.0 * 3 * 7 * 4);
+    // Only the unknown type loses its total; the known one and absent ones still aggregate.
+    EXPECT_FALSE(published.contains("graph.flops_by_type.CustomOpAttributes"));
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.MatmulAttributes").get<double>(),
+                     2.0 * 3 * 7 * 4);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.ConvolutionFwdAttributes").get<double>(),
+                     0.0);
 }
 
 // nlohmann compares 1 and 1.0 equal; a model reading a feature can still tell them apart.
@@ -879,7 +893,6 @@ TEST(TestEngineFeatures, ConvolutionBackwardDataPublishesItsOperands)
     EXPECT_EQ(published.at("graph.nodes[0].conv_mode"),
               static_cast<int64_t>(ConvMode::CONVOLUTION));
     EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), false);
-    EXPECT_FALSE(published.contains("graph.flops"));
 }
 
 TEST(TestEngineFeatures, ConvolutionWeightGradientPublishesItsOperands)
@@ -1067,6 +1080,473 @@ TEST(TestEngineFeatures, RaggedOperandMakesWorkDataDependent)
     EXPECT_EQ(features(graph).at("graph.nodes[0].data_dependent"), false);
     addTensor(graph, 4, {6, 1, 1});
     graph.tensors[0]->ragged_offset_tensor_uid = 4;
-    EXPECT_EQ(features(graph).at("graph.nodes[0].data_dependent"), true);
+    const auto published = features(graph);
+    EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), true);
+    // Matmul, ConvolutionFwd and SDPA published counts before the content rule, so a ragged
+    // operand keeps the value shipped models were trained on.
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 840.0);
+    // The graph's footprint follows the offsets' contents, not the padded dims.
+    EXPECT_FALSE(published.contains("graph.logical_bytes"));
+}
+
+// A one-node graph whose tensors take uids 1, 2, ... in @p shapes order.
+template <typename TAttributes>
+GraphT single(std::vector<std::vector<int64_t>> shapes, TAttributes attributes)
+{
+    GraphT graph;
+    int64_t uid = 0;
+    for(auto& dims : shapes)
+    {
+        addTensor(graph, ++uid, std::move(dims));
+    }
+    addNode(graph, std::move(attributes));
+    return graph;
+}
+
+TEST(TestEngineFeatures, WorkOfLaterTypesIsUnknownWhenContentsDecideIt)
+{
+    PointwiseAttributesT relu;
+    relu.operation = PointwiseMode::RELU_FWD;
+    relu.in_0_tensor_uid = 1;
+    relu.out_0_tensor_uid = 2;
+    auto graph = single({{6, 4}, {6, 4}, {7}}, relu);
+    EXPECT_DOUBLE_EQ(features(graph).at("graph.flops").get<double>(), 24.0);
+    graph.tensors[0]->ragged_offset_tensor_uid = 3;
+    const auto published = features(graph);
+    EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+    EXPECT_FALSE(published.contains("graph.flops"));
+    EXPECT_FALSE(published.contains("graph.flops_by_type.PointwiseAttributes"));
+}
+
+TEST(TestEngineFeatures, WorkModelKeepsEveryPreviouslyPublishedCount)
+{
+    // Shipped models read `$graph.flops` and `$graph.nodes[0].flops`. Changing any value
+    // below changes what they mean: it requires bumping FEATURE_SEMANTICS_REVISION, and
+    // this assertion with it.
+    EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 1);
+    struct Case
+    {
+        const char* name;
+        GraphT (*make)();
+        std::optional<double> flops;
+    };
+    const Case cases[] = {
+        {"matmul broadcast", matmulBroadcastGraph, 840.0},
+        {"convolution", convFwdGraph, 86400.0},
+        {"grouped convolution", groupedConvFwdGraph, 13824.0},
+        {"dense attention", [] { return attentionGraph(attention()); }, 32256.0},
+        {"causal top-left", causalTopLeftGraph, 9216.0},
+        {"causal bottom-right", causalBottomRightGraph, 27648.0},
+        {"causal bottom-right flag",
+         [] {
+             auto sdpa = attention();
+             sdpa.causal_mask_bottom_right = true;
+             return attentionGraph(sdpa);
+         },
+         27648.0},
+        {"unbounded right",
+         [] {
+             auto sdpa = attention();
+             sdpa.right_bound = -1;
+             return attentionGraph(sdpa);
+         },
+         32256.0},
+        {"unbounded left",
+         [] {
+             auto sdpa = attention();
+             sdpa.left_bound = -1;
+             return attentionGraph(sdpa);
+         },
+         32256.0},
+        {"zero dropout",
+         [] {
+             auto sdpa = attention();
+             sdpa.dropout_probability = 0.0F;
+             return attentionGraph(sdpa);
+         },
+         32256.0},
+        {"diagonal band", boundedAttentionGraph, std::nullopt},
+        {"dropout", dropoutAttentionGraph, std::nullopt},
+        {"paged variable length", pagedVariableLengthAttentionGraph, std::nullopt},
+        {"causal bottom-right with more queries than keys",
+         [] {
+             auto sdpa = attention();
+             sdpa.causal_mask_bottom_right = true;
+             return single({{2, 8, 7, 16}, {2, 2, 3, 16}, {2, 2, 3, 32}, {2, 8, 7, 32}}, sdpa);
+         },
+         std::nullopt},
+    };
+    for(const auto& [name, make, flops] : cases)
+    {
+        SCOPED_TRACE(name);
+        const auto published = features(make());
+        if(flops)
+        {
+            EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), *flops);
+            EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), *flops);
+        }
+        else
+        {
+            EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+            EXPECT_FALSE(published.contains("graph.flops"));
+        }
+    }
+
+    // Every operand or flag SDPA refused before still refuses on its own.
+    using Refusal = void (*)(SdpaAttributesT&);
+    const std::pair<const char*, Refusal> refusals[] = {
+        {"seq_len_q", [](SdpaAttributesT& op) { op.seq_len_q_tensor_uid = 5; }},
+        {"seq_len_kv", [](SdpaAttributesT& op) { op.seq_len_kv_tensor_uid = 5; }},
+        {"page_table_k", [](SdpaAttributesT& op) { op.page_table_k_tensor_uid = 5; }},
+        {"page_table_v", [](SdpaAttributesT& op) { op.page_table_v_tensor_uid = 5; }},
+        {"block_mask", [](SdpaAttributesT& op) { op.block_mask_tensor_uid = 5; }},
+        {"sink_token", [](SdpaAttributesT& op) { op.sink_token_tensor_uid = 5; }},
+        {"attn_mask", [](SdpaAttributesT& op) { op.attn_mask_tensor_uid = 5; }},
+        {"padding_mask", [](SdpaAttributesT& op) { op.padding_mask = true; }},
+        {"alibi_mask", [](SdpaAttributesT& op) { op.alibi_mask = true; }},
+        {"descale_q", [](SdpaAttributesT& op) { op.descale_q_tensor_uid = 5; }},
+        {"descale_k", [](SdpaAttributesT& op) { op.descale_k_tensor_uid = 5; }},
+        {"descale_v", [](SdpaAttributesT& op) { op.descale_v_tensor_uid = 5; }},
+        {"descale_s", [](SdpaAttributesT& op) { op.descale_s_tensor_uid = 5; }},
+        {"scale_s", [](SdpaAttributesT& op) { op.scale_s_tensor_uid = 5; }},
+        {"scale_o", [](SdpaAttributesT& op) { op.scale_o_tensor_uid = 5; }},
+        {"dropout_mask", [](SdpaAttributesT& op) { op.dropout_mask_tensor_uid = 5; }},
+        {"dropout_scale", [](SdpaAttributesT& op) { op.dropout_scale_tensor_uid = 5; }},
+        {"dropout_probability", [](SdpaAttributesT& op) { op.dropout_probability = 0.1F; }},
+        {"left_bound", [](SdpaAttributesT& op) { op.left_bound = 0; }},
+        {"right_bound", [](SdpaAttributesT& op) { op.right_bound = 1; }},
+    };
+    for(const auto& [name, refuse] : refusals)
+    {
+        SCOPED_TRACE(name);
+        auto sdpa = attention();
+        refuse(sdpa);
+        const auto published = features(attentionGraph(sdpa));
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+        EXPECT_FALSE(published.contains("graph.flops_by_type.SdpaAttributes"));
+    }
+}
+
+TEST(TestEngineFeatures, EveryCountableNodeTypeHasItsDeclaredWork)
+{
+    struct Case
+    {
+        GraphT (*make)();
+        double flops;
+    };
+    const Case cases[] = {
+        // 2 * dy.numel (384) * w.numel (864) / K (12).
+        {[] {
+             ConvolutionBwdAttributesT conv;
+             conv.dy_tensor_uid = 1;
+             conv.w_tensor_uid = 2;
+             conv.dx_tensor_uid = 3;
+             return single({{2, 12, 4, 4}, {12, 8, 3, 3}, {2, 8, 7, 7}}, conv);
+         },
+         55296.0},
+        // Two groups: 2 * dy.numel (600) * dw.numel (432) / K (12).
+        {[] {
+             ConvolutionWrwAttributesT conv;
+             conv.x_tensor_uid = 1;
+             conv.dy_tensor_uid = 2;
+             conv.dw_tensor_uid = 3;
+             return single({{2, 8, 7, 7}, {2, 12, 5, 5}, {12, 4, 3, 3}}, conv);
+         },
+         43200.0},
+        // 2.5 * the causal top-left forward's 9216.
+        {[] {
+             SdpaBackwardAttributesT sdpa;
+             sdpa.q_tensor_uid = 1;
+             sdpa.k_tensor_uid = 2;
+             sdpa.v_tensor_uid = 3;
+             sdpa.o_tensor_uid = 4;
+             sdpa.do_tensor_uid = 5;
+             sdpa.stats_tensor_uid = 6;
+             sdpa.dq_tensor_uid = 7;
+             sdpa.dk_tensor_uid = 8;
+             sdpa.dv_tensor_uid = 9;
+             sdpa.causal_mask = true;
+             return single({{2, 8, 3, 16},
+                            {2, 2, 7, 16},
+                            {2, 2, 7, 32},
+                            {2, 8, 3, 32},
+                            {2, 8, 3, 32},
+                            {2, 8, 3, 1},
+                            {2, 8, 3, 16},
+                            {2, 2, 7, 16},
+                            {2, 2, 7, 32}},
+                           sdpa);
+         },
+         23040.0},
+        // One per output element, boolean or not.
+        {[] {
+             PointwiseAttributesT compare;
+             compare.operation = PointwiseMode::CMP_GT;
+             compare.in_0_tensor_uid = 1;
+             compare.in_1_tensor_uid = 2;
+             compare.out_0_tensor_uid = 3;
+             auto graph = single({{2, 3}, {2, 3}, {2, 3}}, compare);
+             graph.tensors[2]->data_type = DataType::BOOLEAN;
+             return graph;
+         },
+         6.0},
+        // One per input element.
+        {[] {
+             ReductionAttributesT reduction;
+             reduction.mode = ReductionMode::ADD;
+             reduction.in_tensor_uid = 1;
+             reduction.out_tensor_uid = 2;
+             return single({{4, 16}, {4, 1}}, reduction);
+         },
+         64.0},
+        // 2 * x.numel (72).
+        {[] {
+             BatchnormInferenceAttributesT norm;
+             norm.x_tensor_uid = 1;
+             norm.mean_tensor_uid = 2;
+             norm.inv_variance_tensor_uid = 3;
+             norm.scale_tensor_uid = 4;
+             norm.bias_tensor_uid = 5;
+             norm.y_tensor_uid = 6;
+             return single({{2, 4, 3, 3},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1},
+                            {2, 4, 3, 3}},
+                           norm);
+         },
+         144.0},
+        {[] {
+             BatchnormInferenceAttributesVarianceExtT norm;
+             norm.x_tensor_uid = 1;
+             norm.mean_tensor_uid = 2;
+             norm.variance_tensor_uid = 3;
+             norm.scale_tensor_uid = 4;
+             norm.bias_tensor_uid = 5;
+             norm.y_tensor_uid = 6;
+             norm.epsilon_tensor_uid = 7;
+             return single({{2, 4, 3, 3},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1},
+                            {2, 4, 3, 3},
+                            {1}},
+                           norm);
+         },
+         144.0},
+        // 5 * x.numel (72).
+        {[] {
+             BatchnormAttributesT norm;
+             norm.x_tensor_uid = 1;
+             norm.scale_tensor_uid = 2;
+             norm.bias_tensor_uid = 3;
+             norm.epsilon_tensor_uid = 4;
+             norm.y_tensor_uid = 5;
+             return single({{2, 4, 3, 3}, {1, 4, 1, 1}, {1, 4, 1, 1}, {1}, {2, 4, 3, 3}}, norm);
+         },
+         360.0},
+        // 8 * x.numel (72).
+        {[] {
+             BatchnormBackwardAttributesT norm;
+             norm.dy_tensor_uid = 1;
+             norm.x_tensor_uid = 2;
+             norm.scale_tensor_uid = 3;
+             norm.dx_tensor_uid = 4;
+             norm.dscale_tensor_uid = 5;
+             norm.dbias_tensor_uid = 6;
+             return single({{2, 4, 3, 3},
+                            {2, 4, 3, 3},
+                            {1, 4, 1, 1},
+                            {2, 4, 3, 3},
+                            {1, 4, 1, 1},
+                            {1, 4, 1, 1}},
+                           norm);
+         },
+         576.0},
+        // 5 * x.numel (512).
+        {[] {
+             LayernormAttributesT norm;
+             norm.x_tensor_uid = 1;
+             norm.scale_tensor_uid = 2;
+             norm.bias_tensor_uid = 3;
+             norm.epsilon_tensor_uid = 4;
+             norm.y_tensor_uid = 5;
+             norm.normalized_dim_count = 1;
+             return single({{8, 64}, {1, 64}, {1, 64}, {1}, {8, 64}}, norm);
+         },
+         2560.0},
+        // 8 * x.numel (512).
+        {[] {
+             LayernormBackwardAttributesT norm;
+             norm.dy_tensor_uid = 1;
+             norm.x_tensor_uid = 2;
+             norm.scale_tensor_uid = 3;
+             norm.dx_tensor_uid = 4;
+             norm.dscale_tensor_uid = 5;
+             norm.dbias_tensor_uid = 6;
+             norm.normalized_dim_count = 1;
+             return single({{8, 64}, {8, 64}, {1, 64}, {8, 64}, {1, 64}, {1, 64}}, norm);
+         },
+         4096.0},
+        // 3 * x.numel (512).
+        {[] {
+             RMSNormAttributesT norm;
+             norm.x_tensor_uid = 1;
+             norm.scale_tensor_uid = 2;
+             norm.epsilon_tensor_uid = 3;
+             norm.y_tensor_uid = 4;
+             return single({{8, 64}, {1, 64}, {1}, {8, 64}}, norm);
+         },
+         1536.0},
+        // 6 * x.numel (512).
+        {[] {
+             RMSNormBackwardAttributesT norm;
+             norm.dy_tensor_uid = 1;
+             norm.x_tensor_uid = 2;
+             norm.scale_tensor_uid = 3;
+             norm.inv_rms_tensor_uid = 4;
+             norm.dx_tensor_uid = 5;
+             norm.dscale_tensor_uid = 6;
+             return single({{8, 64}, {8, 64}, {1, 64}, {8, 1}, {8, 64}, {1, 64}}, norm);
+         },
+         3072.0},
+        // y.numel (256) * the 3x2 window.
+        {[] {
+             ResampleFwdAttributesT pool;
+             pool.x_tensor_uid = 1;
+             pool.y_tensor_uid = 2;
+             pool.window = {3, 2};
+             pool.stride = {2, 2};
+             pool.resample_mode = ResampleMode::MAXPOOL;
+             return single({{2, 8, 8, 8}, {2, 8, 4, 4}}, pool);
+         },
+         1536.0},
+        // dy.numel (256) * the 2x2 window.
+        {[] {
+             ResampleBwdAttributesT pool;
+             pool.dy_tensor_uid = 1;
+             pool.dx_tensor_uid = 2;
+             pool.window = {2, 2};
+             pool.stride = {2, 2};
+             pool.resample_mode = ResampleMode::AVGPOOL_INCLUDE_PADDING;
+             return single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool);
+         },
+         1024.0},
+        // 2 * x.numel (128).
+        {[] {
+             BlockScaleQuantizeAttributesT quantize;
+             quantize.x_tensor_uid = 1;
+             quantize.y_tensor_uid = 2;
+             quantize.scale_tensor_uid = 3;
+             quantize.block_size = 32;
+             return single({{4, 32}, {4, 32}, {4, 1}}, quantize);
+         },
+         256.0},
+        {[] {
+             BlockScaleDequantizeAttributesT dequantize;
+             dequantize.x_tensor_uid = 1;
+             dequantize.scale_tensor_uid = 2;
+             dequantize.y_tensor_uid = 3;
+             dequantize.block_size = {1, 32};
+             auto graph = single({{4, 32}, {4, 1}, {4, 32}}, dequantize);
+             graph.tensors[0]->data_type = DataType::FP8_E4M3;
+             return graph;
+         },
+         256.0},
+    };
+    for(const auto& [make, flops] : cases)
+    {
+        const auto graph = make();
+        const std::string type = EnumNameNodeAttributes(graph.nodes[0]->attributes.type);
+        SCOPED_TRACE(type);
+        const auto published = features(graph);
+        EXPECT_DOUBLE_EQ(published.at("graph.nodes[0].flops").get<double>(), flops);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), flops);
+        EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type." + type).get<double>(), flops);
+    }
+}
+
+TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
+{
+    const auto layernorm = [](std::vector<int64_t> dims) {
+        LayernormAttributesT norm;
+        norm.x_tensor_uid = 1;
+        norm.y_tensor_uid = 2;
+        return single({dims, dims}, norm);
+    };
+    ResampleFwdAttributesT windowless;
+    windowless.x_tensor_uid = 1;
+    windowless.y_tensor_uid = 2;
+    const std::pair<const char*, GraphT> cases[] = {
+        {"empty extent", layernorm({0, 64})},
+        {"negative extent", layernorm({-1, 64})},
+        {"no window", single({{2, 8, 8, 8}, {2, 8, 4, 4}}, windowless)},
+    };
+    for(const auto& [name, graph] : cases)
+    {
+        SCOPED_TRACE(name);
+        const auto published = features(graph);
+        const std::string type = EnumNameNodeAttributes(graph.nodes[0]->attributes.type);
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+        EXPECT_FALSE(published.contains("graph.flops_by_type." + type));
+        // A type the graph does not contain has no work: 0, not unknown.
+        EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.MatmulAttributes").get<double>(), 0.0);
+    }
+}
+
+TEST(TestEngineFeatures, FusedGraphWorkIsTheSumOfItsNodes)
+{
+    const auto published = features(convBiasReluGraph());
+    // The bias add and the ReLU: one operation per output element (600) each.
+    EXPECT_DOUBLE_EQ(published.at("graph.nodes[1].flops").get<double>(), 600.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.nodes[2].flops").get<double>(), 600.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 86400.0 + 600.0 + 600.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.ConvolutionFwdAttributes").get<double>(),
+                     86400.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.PointwiseAttributes").get<double>(), 1200.0);
+    // Only x (784), w (864), bias (12) and the output (600) are external, in half precision;
+    // the two virtual intermediates never leave the fused kernel.
+    const double bytes = (784.0 + 864.0 + 12.0 + 600.0) * 2.0;
+    EXPECT_DOUBLE_EQ(published.at("graph.logical_bytes").get<double>(), bytes);
+    EXPECT_DOUBLE_EQ(published.at("graph.arithmetic_intensity").get<double>(), 87600.0 / bytes);
+}
+
+TEST(TestEngineFeatures, LogicalBytesCountSubByteElementsFractionally)
+{
+    PointwiseAttributesT relu;
+    relu.operation = PointwiseMode::RELU_FWD;
+    relu.in_0_tensor_uid = 1;
+    relu.out_0_tensor_uid = 2;
+    auto graph = single({{3, 2}, {3, 2}}, relu);
+    graph.tensors[0]->data_type = DataType::FP4_E2M1;
+    graph.tensors[1]->data_type = DataType::FP6_E2M3;
+    auto published = features(graph);
+    // Six 4-bit and six 6-bit elements: 3 + 4.5 bytes, not the 12 an allocation rounds to.
+    EXPECT_DOUBLE_EQ(published.at("graph.logical_bytes").get<double>(), 7.5);
+    EXPECT_DOUBLE_EQ(published.at("graph.arithmetic_intensity").get<double>(), 6.0 / 7.5);
+
+    graph.tensors[1]->data_type = DataType::UNSET;
+    published = features(graph);
+    EXPECT_FALSE(published.contains("graph.logical_bytes"));
+    EXPECT_FALSE(published.contains("graph.arithmetic_intensity"));
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 6.0);
+}
+
+TEST(TestEngineFeatures, OverrideShapesLeaveEveryGraphAggregateUnknown)
+{
+    auto graph = convBiasReluGraph();
+    graph.is_override_shape_enabled = true;
+    const auto published = features(graph);
+    EXPECT_FALSE(published.contains("graph.flops"));
+    EXPECT_FALSE(published.contains("graph.logical_bytes"));
+    EXPECT_FALSE(published.contains("graph.arithmetic_intensity"));
+    for(const auto& entry : published.items())
+    {
+        EXPECT_NE(entry.key().rfind("graph.flops_by_type.", 0), 0U) << entry.key();
+    }
 }
 } // namespace

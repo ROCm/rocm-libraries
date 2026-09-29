@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from uhd_gen.features import evaluator_feature_semantics_revision
 from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
 from uhd_gen.promote import PromoteError, _apply, add_promote_arguments, build_plan, parse_uhd_ids, run_promote
 from uhd_gen.provenance import snapshot_provenance
@@ -22,6 +23,11 @@ OLD = "727e5401-3b99-49ff-a2fc-68fd4eedbb54"
 NEW = "cf37fa30-32dc-4a21-a008-68ef5e0d30a6"
 OTHER = "edc1d5b4-6f12-4a40-a749-403966474bc9"
 FEATURES_HASH = "sha256:" + "0" * 16
+
+# Promoting a feature-reading model asks the shared evaluator for the build's feature
+# semantics revision (FeatureSemantics.hpp), exactly as training and evaluation already
+# ask it for the digest: without a built evaluator there is nothing to promote against.
+pytestmark = pytest.mark.usefixtures("evaluator")
 
 
 def _weights(leaf=1.0, *, grouped=False, features_hash=FEATURES_HASH):
@@ -467,6 +473,53 @@ def test_train_mints_identity_when_omitted(tmp_path, evaluator):
     assert _train(tmp_path) == 0
     identity = _read(tmp_path / "model" / "heuristic.uhd.json")["id"]
     assert str(uuid.UUID(identity)) == identity
+
+
+def _record_semantics(model, revision):
+    """Rewrite what `model` recorded, in the UHD and its training manifest alike."""
+    for name in ("heuristic.uhd.json", "train_manifest.json"):
+        document = _read(model / name)
+        document["trained_against"]["feature_semantics_revision"] = revision
+        _write(model / name, document)
+    return model
+
+
+def test_train_records_the_evaluators_revision_and_promote_refuses_it_elsewhere(tmp_path, evaluator,
+                                                                               evaluator_reporting):
+    """FeatureSemantics.hpp end to end: a model trained by a build computing revision N
+    records N, installs for that build, and is refused -- naming both revisions -- for a
+    build computing anything else, as the loader would refuse it."""
+    current = evaluator_feature_semantics_revision(evaluator)
+    bumped = evaluator_reporting(current + 1)
+    assert _train(tmp_path, "--feature-evaluator", bumped) == 0
+    model = tmp_path / "model"
+    assert _read(model / "heuristic.uhd.json")["trained_against"]["feature_semantics_revision"] == current + 1
+    assert _read(model / "train_manifest.json")["trained_against"]["feature_semantics_revision"] == current + 1
+    tree = tmp_path / "tree"
+    build_plan(model, tree, arch="gfx942", feature_evaluator=bumped)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match=rf"revision {current + 1}\b.*revision {current}\b"):
+        build_plan(model, tree, arch="gfx942", feature_evaluator=evaluator)
+    assert _files(tmp_path) == before
+
+
+@pytest.mark.parametrize("opaque", [False, True], ids=["catalog_ranker", "engine_prediction"])
+def test_a_model_recording_no_feature_semantics_is_revision_1(tmp_path, evaluator_reporting, opaque):
+    """Every model shipped before the revision existed records none, so absent means 1: it
+    promotes against a build computing 1 and is refused, naming both, by one computing 2."""
+    tree = _tree(tmp_path / "tree")
+    if opaque:
+        model = _opaque_model(tmp_path / "model")
+        target = {"engine": "ASM_SDPA_ENGINE", "role": "predict_engine", "arch": "gfx950"}
+    else:
+        model = _model(tmp_path / "model", tree)
+        target = {}
+    assert "feature_semantics_revision" not in _read(model / "heuristic.uhd.json")["trained_against"]
+    build_plan(model, tree, feature_evaluator=evaluator_reporting(1), **target)
+    with pytest.raises(PromoteError, match=r"revision 1\b.*revision 2\b"):
+        build_plan(model, tree, feature_evaluator=evaluator_reporting(2), **target)
+    _record_semantics(model, 2)
+    build_plan(model, tree, feature_evaluator=evaluator_reporting(2), **target)
 
 
 @pytest.mark.parametrize("malformed", ["not-a-uuid", "", "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d6"])

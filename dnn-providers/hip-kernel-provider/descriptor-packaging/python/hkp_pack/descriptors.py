@@ -532,8 +532,15 @@ def _validate_trained_against(value, where):
     # names the descriptor set (ued/kmd/umd, all three or none); a model an engine with no
     # UED binds by provider-declared UUID names selector_revision, the provider build that
     # was measured, because it has no descriptor set to be trained against. Loader is
-    # authoritative: UhdParser.hpp parser_detail::provenance.
-    _known_keys(value, ("ued", "kmd", "umd", "selector_revision"), where)
+    # authoritative: UhdParser.hpp parser_detail::provenance. Either form may also record
+    # feature_semantics_revision (FeatureSemantics.hpp), which uhd_gen stamps on every
+    # model it trains: an integer >= 1 the loader compares for equality, never a form on
+    # its own.
+    _known_keys(value, ("ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"), where)
+    if "feature_semantics_revision" in value:
+        semantics = value["feature_semantics_revision"]
+        if isinstance(semantics, bool) or not isinstance(semantics, int) or not 1 <= semantics < 2**63:
+            raise HkpPackError(f"{where}.feature_semantics_revision must be an integer >= 1")
     names_descriptor_set = any(key in value for key in ("ued", "kmd", "umd"))
     if "selector_revision" in value:
         revision = value["selector_revision"]

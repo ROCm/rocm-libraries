@@ -10,7 +10,7 @@ pd = pytest.importorskip("pandas")
 pytest.importorskip("flatbuffers")
 
 from uhd_gen.__main__ import main
-from uhd_gen.features import compute_features_hash
+from uhd_gen.features import compute_features_hash, evaluator_feature_semantics_revision
 
 PROVENANCE = {
     "ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "1.0"},
@@ -75,7 +75,8 @@ def test_a_constant_column_is_dropped_and_named_with_its_value(tmp_path, evaluat
     assert manifest["dropped_constant_features"] == [{"column": "kernel.tile_m", "value": 128},
                                                      {"column": "device.cu_count", "value": 304}]
     assert manifest["requested_features"] == ["kernel.block_size", "kernel.tile_m", "device.cu_count"]
-    assert manifest["trained_against"] == PROVENANCE
+    assert manifest["trained_against"] == {
+        **PROVENANCE, "feature_semantics_revision": evaluator_feature_semantics_revision(evaluator)}
 
 
 def test_an_all_constant_feature_set_is_an_error_not_an_empty_signature(tmp_path, evaluator):

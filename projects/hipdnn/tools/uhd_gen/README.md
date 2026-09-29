@@ -204,6 +204,7 @@ fitted on it models the wrong engine behaviour without any number looking wrong.
 | `--remove-knob` | No | Explicit authored knob removal; requires compatible major-revised training provenance |
 | `--dry-run` | No | Print the plan, write nothing |
 | `--uhd-id` | For an opaque engine, unless recorded | `METRIC=UUID` (repeatable) or a bare UUID for the one model being promoted. The model must already carry the id — `promote` never renames a model; a mismatch is refused |
+| `--feature-evaluator` | Only if undiscoverable | Shared `hipdnn_uhd_features` of the build the model is promoted for, looked up as for `train`. A model with a `features_signature` whose recorded `trained_against.feature_semantics_revision` (absent means 1) differs from the revision this evaluator reports is refused, naming both — the loader would refuse it the same way |
 
 `promote` copies the descriptor and artifact into the UED's directory — under
 `heuristics/<ued-id>/<role>/<arch>/<metric>/`, or directly under `<arch>/` for a
@@ -556,6 +557,21 @@ not only for signatures containing expressions, and a run that cannot find it fa
 naming what to supply instead of stamping a digest nothing verified. Expressions and
 categorical vocabularies are part of the feature hash; there is no separate named
 `derived` block.
+
+Every evaluator response also carries `feature_semantics_revision`, the build's
+`FEATURE_SEMANTICS_REVISION` (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`): what the
+values behind published feature names *mean*. `features_hash` fingerprints which names a
+model reads, not how the C++ computes them, so a change to a FLOP or byte convention, an
+operand encoding or a feature name bumps this revision instead. `train` records the
+evaluator's revision in `trained_against.feature_semantics_revision`; `promote` and
+`evaluate` refuse a model whose recorded revision differs from their evaluator's, naming
+both; and the loader refuses it at bind time for every role, logging both revisions (an
+opaque engine's declared `predict_engine` model reports `UNAVAILABLE` with that reason, and a
+UED role-mapped model is disabled like any other provenance refusal, the engine keeping its
+declared-order fallback). A document recording no revision — every model trained before it
+existed — is revision 1, and so is an evaluator whose responses carry none. Only models with a
+`features_signature` are subject to it: a
+signature-less ranker reads no published feature.
 
 An explicit computed expression using a device field that never varied in the
 training corpus is rejected. Automatic feature proposals omit such expressions

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <array>
+#include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <iostream>
 #include <limits>
@@ -157,7 +158,13 @@ int main(int argc, char**)
             bindRow(context, row);
             values.push_back(extractor.extract(context));
         }
+        // The revision rides on every response rather than behind a flag: whoever asked
+        // for a digest or values is about to stamp or check a model with them, and the
+        // meaning of those values is this build's, so the two cannot be asked of
+        // different binaries.
         std::cout << nlohmann::json{{"features_hash", extractor.getSignatureHash()},
+                                    {"feature_semantics_revision",
+                                     hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION},
                                     {"values", std::move(values)}}
                          .dump()
                   << '\n';

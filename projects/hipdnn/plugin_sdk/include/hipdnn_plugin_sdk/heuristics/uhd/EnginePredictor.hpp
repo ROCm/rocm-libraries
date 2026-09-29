@@ -53,6 +53,17 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
         {
             parser_detail::provenance(config.trainedAgainst, "L1 UHD trained_against");
         }
+        // Not this build's features, so not this build's answer: UNAVAILABLE, exactly as a
+        // stale selector revision is (§11.2). The loader refuses such a model before it is
+        // ever bound; this catches a config that reached the binding by another path.
+        if(auto mismatch
+           = featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
+           !mismatch.empty())
+        {
+            loaded->status = PredictionStatus::UNAVAILABLE;
+            loaded->reason = std::move(mismatch);
+            return loaded;
+        }
         loaded->extractor = std::make_unique<const FeatureExtractor>(config.featuresSignature,
                                                                      config.categoricalEncoding);
         if(loaded->extractor->kernelDependentCount() != 0)
@@ -325,7 +336,8 @@ public:
     /// RFC 0019 §11.2 separates two refusals, and @p status is which one this is:
     ///   - UNAVAILABLE -- "I do not answer this question". The model is fine, it just is
     ///     not this build's: a model trained against another provider revision (§4.1
-    ///     `trained_against.selector_revision`) says nothing about this one.
+    ///     `trained_against.selector_revision`) or on features another revision computes
+    ///     (`trained_against.feature_semantics_revision`) says nothing about this one.
     ///   - INVALID -- "I answer, and the answer is bad". A model that is present and
     ///     failed its contract is a claim: do not pick me.
     /// @param reason Surfaced verbatim to the caller, so it must name what was compared.

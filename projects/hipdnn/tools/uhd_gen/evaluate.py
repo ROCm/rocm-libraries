@@ -1430,7 +1430,9 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
     immediate = role == ROLE
     l1_metric = validate_model(descriptor) if immediate else None
 
-    from .features import build_features_signature, compute_features_hash, signature_references
+    from .features import (build_features_signature, compute_features_hash,
+                           evaluator_feature_semantics_revision, signature_references)
+    from .provenance import require_feature_semantics
 
     signature = descriptor.get("features_signature") or manifest.get("features_signature")
     if not signature and manifest.get("features"):
@@ -1455,6 +1457,12 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
         # that the two implementations had not drifted yet.
         if compute_features_hash(signature, categorical_encoding, feature_evaluator) != expected_hash:
             raise ValueError("features_signature/categorical_encoding does not match features_hash")
+        # The loader refuses a feature-reading model trained under other feature semantics
+        # (FeatureSemantics.hpp), so numbers reported for one describe a model no engine
+        # would ever score. Same rule, same evaluator the digest above came from.
+        if signature:
+            require_feature_semantics(descriptor.get("trained_against", manifest.get("trained_against")),
+                                      evaluator_feature_semantics_revision(feature_evaluator))
 
     transform = descriptor.get("score", {}).get("transform", manifest.get("score_transform", "log1p"))
     if transform not in ("identity", "log1p"):

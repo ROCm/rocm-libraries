@@ -297,6 +297,57 @@ TEST_F(TestEnginePredictor, AModelIsNeverAnsweredInAnotherMetric)
     EXPECT_DOUBLE_EQ(asTime.value, 0.0);
 }
 
+/// FeatureSemantics.hpp: the revision says what published feature values MEAN, so a model
+/// trained under another one reads the same names and passes the same features_hash while
+/// scoring numbers it was never fitted on. It is refused as UNAVAILABLE -- not a bad model,
+/// just not this build's -- naming both revisions. A document recording none is revision 1:
+/// the shape of every model shipped before the revision existed.
+TEST_F(TestEnginePredictor, AModelTrainedOnOtherFeatureSemanticsIsUnavailable)
+{
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    auto current = document();
+    current["trained_against"]["feature_semantics_revision"] = FEATURE_SEMANTICS_REVISION;
+    ASSERT_EQ(predict(config(current)).status, PredictionStatus::AVAILABLE);
+
+    ASSERT_FALSE(document().at("trained_against").contains("feature_semantics_revision"));
+    auto one = document();
+    one["trained_against"]["feature_semantics_revision"] = 1;
+    const auto absent = predict(config(document()));
+    const auto recordedOne = predict(config(one));
+    EXPECT_EQ(absent.status, recordedOne.status);
+    EXPECT_EQ(absent.reason, recordedOne.reason);
+
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    auto stale = document();
+    stale["trained_against"]["feature_semantics_revision"] = newer;
+    scorerCalls = 0;
+    const auto refused = predict(config(stale));
+    EXPECT_EQ(refused.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refused.reason.find("revision " + std::to_string(newer)), std::string::npos)
+        << refused.reason;
+    EXPECT_NE(refused.reason.find("revision " + std::to_string(FEATURE_SEMANTICS_REVISION)),
+              std::string::npos)
+        << refused.reason;
+    EXPECT_EQ(scorerCalls, 0U);
+}
+
+/// Revisions are compared for equality, so one value must have one spelling: 1.0, "1" or
+/// true reaching the comparison as 1 would let a malformed document through as current.
+TEST_F(TestEnginePredictor, AFeatureSemanticsRevisionMustBeAPositiveInteger)
+{
+    for(const auto& value : {nlohmann::json(0),
+                             nlohmann::json(-1),
+                             nlohmann::json(1.0),
+                             nlohmann::json("1"),
+                             nlohmann::json(true),
+                             nlohmann::json(std::numeric_limits<uint64_t>::max())})
+    {
+        auto doc = document();
+        doc["trained_against"]["feature_semantics_revision"] = value;
+        EXPECT_THROW(config(doc), std::invalid_argument) << value.dump();
+    }
+}
+
 /// One engine may bind one model per metric (RFC 0019 §3.1), and the arch fallback stays
 /// inside the requested metric: (gfx950, time) falls back to (default, time) and never to
 /// (gfx950, tflops), because that would report a throughput as a time.

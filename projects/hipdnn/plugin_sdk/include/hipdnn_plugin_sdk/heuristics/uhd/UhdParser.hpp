@@ -18,6 +18,7 @@
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
@@ -148,11 +149,32 @@ inline void dependency(const nlohmann::json& value, const std::string& where)
 ///     reports: L1 is the one score compared ACROSS engines, so a stale estimate does not
 ///     merely misreport a number, it changes which engine is selected.
 ///
+/// Either form may also carry `feature_semantics_revision` (FeatureSemantics.hpp), the
+/// meaning of the features the model was trained on. It never names what the model binds
+/// to, so on its own it satisfies neither form.
+///
 /// Neither names an engine. A UHD still cannot say what it attaches to -- the binding is
 /// the UED role map or the provider-declared UUID, both of which live in compiled code.
 inline void provenance(const nlohmann::json& value, const std::string& where)
 {
-    keys(value, {"ued", "kmd", "umd", "selector_revision"}, where);
+    keys(value, {"ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"}, where);
+    if(value.contains("feature_semantics_revision"))
+    {
+        // An integer, not a number: 1.0 and 1 must not be two spellings of one revision, and
+        // a bool would otherwise convert to one. Bounded so featureSemanticsRevision's
+        // int64_t read cannot wrap; parsed text is unsigned, a document built in memory
+        // may be signed, and both spell the same revision.
+        const auto& recorded = value.at("feature_semantics_revision");
+        const bool valid = recorded.is_number_unsigned()
+                               ? recorded.get<uint64_t>() >= 1
+                                     && recorded.get<uint64_t>() <= static_cast<uint64_t>(
+                                            std::numeric_limits<int64_t>::max())
+                               : recorded.is_number_integer() && recorded.get<int64_t>() >= 1;
+        if(!valid)
+        {
+            fail("trained_against.feature_semantics_revision must be an integer >= 1 in " + where);
+        }
+    }
     const bool namesDescriptorSet
         = value.contains("ued") || value.contains("kmd") || value.contains("umd");
     const bool namesSelector = value.contains("selector_revision");
@@ -194,6 +216,46 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
     }
 }
 } // namespace parser_detail
+
+/// @brief Why a model cannot read this build's features, or "" when it can.
+///
+/// The revision describes what the values behind published feature names mean
+/// (FeatureSemantics.hpp), so it governs exactly the models that read them: those with a
+/// @p featuresSignature. A signature-less ranker -- static order, or a native comparator
+/// over kernel metadata compiled into this same build -- reads no published feature and
+/// cannot be misled by one changing, so a bump does not refuse it.
+///
+/// A validated @p trainedAgainst that records no revision was trained before the revision
+/// existed, which is revision 1 by definition, so today's shipped documents need no edit.
+/// A mismatch in either direction refuses: an older model reads names whose values have
+/// since changed meaning, and a newer one expects meanings this build does not compute.
+/// Neither is wrong about the model itself -- it is simply not this build's -- which is
+/// why every caller that can say so reports it as UNAVAILABLE. The one rule every binding
+/// path asks, so the loader, the L2 ranker and the L1 predictor cannot drift apart.
+inline std::string featureSemanticsMismatch(const std::vector<nlohmann::json>& featuresSignature,
+                                            const nlohmann::json& trainedAgainst)
+{
+    if(featuresSignature.empty())
+    {
+        return {};
+    }
+    int64_t recorded = 1;
+    if(trainedAgainst.is_object())
+    {
+        if(const auto found = trainedAgainst.find("feature_semantics_revision");
+           found != trainedAgainst.end())
+        {
+            recorded = found->get<int64_t>();
+        }
+    }
+    if(recorded == heuristics::FEATURE_SEMANTICS_REVISION)
+    {
+        return {};
+    }
+    return "model was trained against feature semantics revision " + std::to_string(recorded)
+           + ", this build computes revision "
+           + std::to_string(heuristics::FEATURE_SEMANTICS_REVISION);
+}
 
 /// @brief Read a bounded UHD JSON document, rejecting duplicate keys before interpretation.
 inline nlohmann::json readUhdDocument(const std::filesystem::path& path)

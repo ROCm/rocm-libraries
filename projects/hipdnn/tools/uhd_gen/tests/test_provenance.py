@@ -6,7 +6,10 @@ import json
 
 import pytest
 
-from uhd_gen.provenance import ProvenanceError, compare_provenance, snapshot_provenance, validate_provenance
+from uhd_gen.provenance import (
+    ProvenanceError, compare_provenance, record_feature_semantics, require_feature_semantics,
+    snapshot_provenance, validate_provenance,
+)
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -150,3 +153,48 @@ def test_a_stale_selector_revision_is_refused_rather_than_scored():
     compare_provenance(trained, {"selector_revision": "aiter-fwd-1"})
     with pytest.raises(ProvenanceError, match="selector_revision"):
         compare_provenance(trained, {"selector_revision": "aiter-fwd-2"})
+
+
+def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():
+    """FeatureSemantics.hpp, as the loader reads it: every model trained before the revision
+    existed records none and is revision 1; either direction of mismatch refuses."""
+    shipped = {"selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b162a5ffd743c21d"}
+    require_feature_semantics(shipped, 1)
+    require_feature_semantics(None, 1)
+    with pytest.raises(ProvenanceError, match=r"revision 1\b.*revision 2\b"):
+        require_feature_semantics(shipped, 2)
+    newer = {**shipped, "feature_semantics_revision": 3}
+    require_feature_semantics(newer, 3)
+    with pytest.raises(ProvenanceError, match=r"revision 3\b.*revision 2\b"):
+        require_feature_semantics(newer, 2)
+
+
+def test_training_records_the_evaluators_revision_but_never_overwrites_another():
+    """A descriptor or binding snapshot says nothing about feature meaning, so training adds
+    the evaluator's revision; a hand-written snapshot claiming a different one is refused
+    rather than restamped into a model its author said was trained on something else."""
+    snapshot = {"selector_revision": "provider-1"}
+    assert record_feature_semantics(snapshot, 2) == {**snapshot, "feature_semantics_revision": 2}
+    assert record_feature_semantics({**snapshot, "feature_semantics_revision": 2}, 2)[
+        "feature_semantics_revision"] == 2
+    with pytest.raises(ProvenanceError, match="feature_semantics_revision"):
+        record_feature_semantics({**snapshot, "feature_semantics_revision": 1}, 2)
+
+
+@pytest.mark.parametrize("recorded", [0, -1, True, 1.0, "1", 2**63])
+def test_a_feature_semantics_revision_is_a_positive_int64(recorded):
+    """The loader parses exactly this (UhdParser.hpp); anything it refuses must not be
+    written, or a model trains, promotes, and then never loads."""
+    with pytest.raises(ProvenanceError, match="feature_semantics_revision"):
+        validate_provenance({"selector_revision": "provider-1", "feature_semantics_revision": recorded})
+
+
+def test_feature_semantics_is_kept_by_both_provenance_forms():
+    descriptor_set = {"ued": {"id": UED, "revision": "1.0"}, "kmd": {"id": KMD, "revision": "1.0"},
+                      "umd": [], "feature_semantics_revision": 4}
+    assert validate_provenance(descriptor_set)["feature_semantics_revision"] == 4
+    assert validate_provenance({"selector_revision": "r", "feature_semantics_revision": 4}) == {
+        "selector_revision": "r", "feature_semantics_revision": 4}
+    # Never on its own: it says what features meant, not what the model binds to.
+    with pytest.raises(ProvenanceError):
+        validate_provenance({"feature_semantics_revision": 1})

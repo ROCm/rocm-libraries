@@ -26,6 +26,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
@@ -215,6 +216,18 @@ public:
             // fields, which made the descriptor unreadable to save 134 bytes on a file
             // read once per engine.
             auto config = configFrom(descriptor);
+            // The loader refuses this before binding (resolveDescriptorSets); repeated where
+            // the ranker is built so a descriptor that reaches it another way cannot rank
+            // candidates through feature values that no longer mean what it was trained on.
+            if(const auto mismatch
+               = uhd::featureSemanticsMismatch(config.featuresSignature, config.trainedAgainst);
+               !mismatch.empty())
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("uhd: " << describedBy << " " << mismatch
+                                                << "; the model is not used and kernels rank "
+                                                   "by priority, then id");
+                return nullptr;
+            }
             if(descriptor.adapter == UhdAdapter::STATIC_ORDER
                || (descriptor.adapter == UhdAdapter::NATIVE && config.featuresSignature.empty()))
             {

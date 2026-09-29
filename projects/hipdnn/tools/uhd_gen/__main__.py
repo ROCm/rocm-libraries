@@ -67,6 +67,7 @@ from .features import (
     compute_features_hash,
     derive_categorical_encoding,
     evaluate_feature_rows,
+    evaluator_feature_semantics_revision,
     feature_reference,
     parse_signature_entry,
     signature_references,
@@ -441,7 +442,7 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
 
 
 def _run_train(args: argparse.Namespace) -> int:
-    from .provenance import snapshot_provenance, validate_provenance
+    from .provenance import record_feature_semantics, snapshot_provenance, validate_provenance
     from .immediate import (LABEL_STATISTIC, ROLE, check_signature_evaluates, read_corpus,
                             require_binding_metric, training_binding, validate_signature)
 
@@ -632,6 +633,11 @@ def _run_train(args: argparse.Namespace) -> int:
         else:
             features_hash = compute_features_hash(signature, categorical_encoding, args.feature_evaluator)
             matrix = build_feature_matrix(df, [entry[1:] for entry in signature], categorical_encoding)
+        # From the evaluator that just digested this signature: what the published values
+        # mean is that build's, and the loader refuses a model recording any other revision
+        # (FeatureSemantics.hpp). Recorded before fitting, like the rest of the provenance.
+        trained_against = record_feature_semantics(
+            trained_against, evaluator_feature_semantics_revision(args.feature_evaluator))
         names = [entry[1:] if isinstance(entry, str) else f"expression_{index}"
                  for index, entry in enumerate(signature)]
         constant_indices = [index for index in range(matrix.shape[1])

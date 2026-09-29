@@ -11,6 +11,10 @@ from pathlib import Path
 ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
 _REVISION = re.compile(r"^[0-9]+\.[0-9]+$")
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
+#: `trained_against` member recording what published feature values mean (`FeatureSemantics.hpp`).
+FEATURE_SEMANTICS_REVISION = "feature_semantics_revision"
+#: The loader reads the revision as int64_t.
+_MAX_INT64 = 2**63 - 1
 
 
 class ProvenanceError(ValueError):
@@ -51,15 +55,28 @@ def validate_provenance(snapshot: object) -> dict:
         and MIOpen have no UED, KMD or UMD to name; their behaviour is decided by the
         library they wrap, so the revision string is the only thing to be trained against.
 
+    Either form may also record `feature_semantics_revision`, what the feature values the
+    model was trained on MEAN (`FeatureSemantics.hpp`); absent means 1, and
+    `require_feature_semantics` is what compares it.
+
     The loader learned the second form when opaque engines gained L1; this validator did
     not, so every opaque L1 collection died here with "requires exactly ued, kmd and umd"
     after measuring its whole corpus (runs 67929293, 67929294).
     """
     if not isinstance(snapshot, dict):
         raise ProvenanceError("trained_against must be an object")
-    unknown = set(snapshot) - {"ued", "kmd", "umd", "selector_revision"}
+    unknown = set(snapshot) - {"ued", "kmd", "umd", "selector_revision", FEATURE_SEMANTICS_REVISION}
     if unknown:
         raise ProvenanceError(f"trained_against has unknown members: {sorted(unknown)}")
+    semantics = {}
+    if FEATURE_SEMANTICS_REVISION in snapshot:
+        recorded_semantics = snapshot[FEATURE_SEMANTICS_REVISION]
+        # An integer, as the loader requires: a bool or 1.0 spelling revision 1 would pass
+        # an equality check here that the runtime then refuses.
+        if isinstance(recorded_semantics, bool) or not isinstance(recorded_semantics, int) \
+                or not 1 <= recorded_semantics <= _MAX_INT64:
+            raise ProvenanceError(f"trained_against.{FEATURE_SEMANTICS_REVISION} must be an integer >= 1")
+        semantics[FEATURE_SEMANTICS_REVISION] = recorded_semantics
     names_descriptor_set = bool({"ued", "kmd", "umd"} & set(snapshot))
     if not names_descriptor_set:
         if "selector_revision" not in snapshot:
@@ -68,7 +85,7 @@ def validate_provenance(snapshot: object) -> dict:
         revision_text = snapshot["selector_revision"]
         if not isinstance(revision_text, str) or not revision_text:
             raise ProvenanceError("trained_against.selector_revision must be a non-empty string")
-        return {"selector_revision": revision_text}
+        return {"selector_revision": revision_text, **semantics}
     # All three or none: two thirds of a descriptor set is not a weaker claim, it is an
     # unverifiable one.
     if not {"ued", "kmd", "umd"} <= set(snapshot):
@@ -90,7 +107,39 @@ def validate_provenance(snapshot: object) -> dict:
         if not isinstance(snapshot["selector_revision"], str) or not snapshot["selector_revision"]:
             raise ProvenanceError("trained_against.selector_revision must be a non-empty string")
         recorded["selector_revision"] = snapshot["selector_revision"]
-    return recorded
+    return {**recorded, **semantics}
+
+
+def require_feature_semantics(trained: object, current: int) -> None:
+    """Refuse a model whose features meant something else when it was trained.
+
+    `current` is what `features.evaluator_feature_semantics_revision` reports -- the
+    revision of the build that would score the model -- and a model recording none was
+    trained at revision 1 -- as is one recording no `trained_against` at all (`None`). The
+    loader applies the same rule to the same field (`UhdParser.hpp`'s
+    `featureSemanticsMismatch`), and only to a model with a `features_signature`: one
+    reading no published feature cannot be misled by one changing. A mismatch in either
+    direction refuses, naming both.
+    """
+    recorded = 1 if trained is None else validate_provenance(trained).get(FEATURE_SEMANTICS_REVISION, 1)
+    if recorded != current:
+        raise ProvenanceError(
+            f"trained_against.{FEATURE_SEMANTICS_REVISION}: model was trained against feature "
+            f"semantics revision {recorded}, the feature evaluator computes revision {current}")
+
+
+def record_feature_semantics(snapshot: object, current: int) -> dict:
+    """`snapshot` with the evaluator's feature-semantics revision recorded, at train time.
+
+    A descriptor or binding snapshot says nothing about feature meaning, so absence there
+    is no claim and `current` is simply added. One that does record a revision -- a
+    hand-written `--provenance` -- must record this one: stamping over it would publish a
+    model claiming semantics its author said it was not trained on.
+    """
+    recorded = validate_provenance(snapshot)
+    if FEATURE_SEMANTICS_REVISION in recorded:
+        require_feature_semantics(recorded, current)
+    return {**recorded, FEATURE_SEMANTICS_REVISION: current}
 
 
 def compare_provenance(trained: object, actual: object, *, foreign_matchers=frozenset()) -> None:

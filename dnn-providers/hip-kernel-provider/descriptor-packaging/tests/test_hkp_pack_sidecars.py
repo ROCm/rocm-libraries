@@ -316,11 +316,12 @@ def _canonical_uhd_validator():
     "invalid_hash", "unknown_header", "unsupported_format",
     "tflops_metric", "time_metric", "legacy_units", "unregistered_metric",
     "calibrated_without_metric", "metric_objective_mismatch",
+    "feature_semantics", "feature_semantics_zero", "feature_semantics_text",
 ])
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
     validator = _canonical_uhd_validator()
     doc = _model_uhd("model.bin")
-    valid = mutation in ("valid", "tflops_metric", "time_metric")
+    valid = mutation in ("valid", "tflops_metric", "time_metric", "feature_semantics")
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -360,6 +361,13 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
     elif mutation == "metric_objective_mismatch":
         # The metric fixes the direction; `objective` only restates it.
         doc["score"] = {"metric": "time"}
+    elif mutation == "feature_semantics":
+        # FeatureSemantics.hpp: what uhd_gen stamps on every model it trains.
+        doc["trained_against"]["feature_semantics_revision"] = 2
+    elif mutation == "feature_semantics_zero":
+        doc["trained_against"]["feature_semantics_revision"] = 0
+    elif mutation == "feature_semantics_text":
+        doc["trained_against"]["feature_semantics_revision"] = "1"
     root = tmp_path / "src"
     _write_json(root / "heuristic.uhd.json", doc)
     (root / "model.bin").write_bytes(b"artifact")

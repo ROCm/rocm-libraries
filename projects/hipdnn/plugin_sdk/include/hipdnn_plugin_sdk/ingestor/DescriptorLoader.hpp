@@ -2399,9 +2399,16 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
 
         // Model validity is independent of engine/pack validity. Check every role and
         // architecture now, but leave artifact loading to the selected model at rank time.
+        // A model trained on features this build computes differently (FeatureSemantics.hpp)
+        // is refused here too, for every role alike: an L2 ranker reads the same published
+        // graph features an L1 estimate does, so neither may score through a changed meaning.
         const auto provenanceError = [&](const HeuristicDescriptor& model,
                                          const std::string& arch) {
-            return detail::provenanceError(model, arch, &engine, schema, set.packs, set.matchers);
+            auto reason
+                = detail::provenanceError(model, arch, &engine, schema, set.packs, set.matchers);
+            return reason.empty() ? uhd::featureSemanticsMismatch(model.featuresSignature,
+                                                                  model.trainedAgainstJson)
+                                  : reason;
         };
         const auto disabled = [&](const char* roleName,
                                   const std::string& arch,
@@ -2639,9 +2646,10 @@ struct DeclaredEnginePredictions
  * engine (§3.1).
  *
  * A declared id gets the pre-flight a role reference gets -- the same symbol and artifact
- * check (detail::usableModel), and the same provenance rule (detail::provenanceError),
- * which refuses a model claiming a descriptor set this engine does not have -- plus the
- * one check that only applies here: @p selectorRevision.
+ * check (detail::usableModel), the same provenance rule (detail::provenanceError), which
+ * refuses a model claiming a descriptor set this engine does not have, and the same
+ * feature-semantics rule (uhd::featureSemanticsMismatch) -- plus the one check that only
+ * applies here: @p selectorRevision.
  *
  * **Staleness is refused, not warned about.** An opaque engine's behaviour is the vendor
  * library's, so what its model was measured against is a provider build, recorded as
@@ -2764,6 +2772,14 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
                     status = PredictionStatus::UNAVAILABLE;
                     reason = "model was trained against " + bound.trainedAgainstSelectorRevision
                              + ", engine reports " + selectorRevision;
+                }
+                else if(auto mismatch = uhd::featureSemanticsMismatch(bound.featuresSignature,
+                                                                      bound.trainedAgainstJson);
+                        !mismatch.empty())
+                {
+                    // Wrong build, not a broken model: the same refusal as a stale selector.
+                    status = PredictionStatus::UNAVAILABLE;
+                    reason = std::move(mismatch);
                 }
             }
             if(!reason.empty())

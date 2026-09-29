@@ -90,7 +90,7 @@ def compute_features_hash(signature: list, categorical_encoding: dict | None = N
     canonicalisation would have shipped a descriptor the runtime refuses to load rather
     than failing a test here.
     """
-    digest, _ = _run_feature_evaluator(signature, categorical_encoding, [], executable)
+    digest, _, _ = _run_feature_evaluator(signature, categorical_encoding, [], executable)
     return digest
 
 
@@ -211,8 +211,20 @@ def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
     return resolved
 
 
+def evaluator_feature_semantics_revision(executable: str | Path | None = None) -> int:
+    """What the feature values this evaluator computes MEAN (`FeatureSemantics.hpp`).
+
+    Asked of the binary rather than restated here, for the reason `compute_features_hash`
+    is: a Python copy of the constant would agree with C++ only until someone bumped one
+    side. uhd_gen stamps it into `trained_against.feature_semantics_revision` at train time
+    and refuses to promote or evaluate a model recording another, exactly as the loader
+    refuses to bind one. An empty signature and no rows: the answer depends on neither.
+    """
+    return _run_feature_evaluator([], None, [], executable)[2]
+
+
 def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, rows: list,
-                           executable: str | Path | None) -> tuple[str, list[list[float]]]:
+                           executable: str | Path | None) -> tuple[str, list[list[float]], int]:
     """The only crossing into FeatureExtractor, which owns both the digest and the values.
 
     Entries are parsed before the request is built so an unauthorable signature fails with
@@ -232,6 +244,12 @@ def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, r
     try:
         response = json.loads(result.stdout)
         digest, values = response["features_hash"], response["values"]
+        # Every response carries it. An evaluator that omits it was built before the
+        # revision existed, and what such a build computes is revision 1 by definition --
+        # the same rule that reads a UHD recording none as revision 1.
+        revision = response.get("feature_semantics_revision", 1)
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+            raise ValueError(f"feature_semantics_revision must be an integer >= 1, got {revision!r}")
         if not isinstance(digest, str) or not digest.startswith("sha256:"):
             raise ValueError("missing features_hash")
         if len(values) != len(rows) or any(len(row) != len(parsed) for row in values):
@@ -241,7 +259,7 @@ def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, r
             raise ValueError("non-finite or non-numeric feature result")
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
-    return digest, values
+    return digest, values, revision
 
 
 def evaluate_feature_maps(rows: list[dict], signature: list, categorical_encoding: dict | None = None,
@@ -252,7 +270,8 @@ def evaluate_feature_maps(rows: list[dict], signature: list, categorical_encodin
     refuses that row; `value_or_default`/`present` over an absent name evaluate as they do
     at runtime. That is the only definition of "this signature evaluates" there is.
     """
-    return _run_feature_evaluator(signature, categorical_encoding, rows, executable)
+    digest, values, _ = _run_feature_evaluator(signature, categorical_encoding, rows, executable)
+    return digest, values
 
 
 def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None = None,

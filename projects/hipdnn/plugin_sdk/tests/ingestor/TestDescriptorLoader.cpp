@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -2413,6 +2414,178 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionWithoutASelectorRevisionIsRef
               hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::INVALID);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
                                           "records no trained_against.selector_revision"));
+}
+
+/// FeatureSemantics.hpp for a declared model: the check runs where selector_revision's does
+/// and refuses the same way -- UNAVAILABLE, the model is not bad, it is not this build's --
+/// with a reason naming both revisions. A document recording no revision is revision 1,
+/// which is how today's shipped ASM SDPA models load unedited.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedOnOtherFeatureSemanticsIsUnavailable)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    const ScopedL1Scorer scorer;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_fsr"));
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    const auto recording = [](const std::string& id, std::optional<int64_t> revision) {
+        auto document = declaredL1Document(id);
+        if(revision.has_value())
+        {
+            document["trained_against"]["feature_semantics_revision"] = *revision;
+        }
+        return document;
+    };
+    const auto currentId = testUuid('f', '1');
+    const auto staleId = testUuid('f', '2');
+    const auto absentId = testUuid('f', '3');
+    const auto oneId = testUuid('f', '4');
+    writeDocument(dir.path(), {".uhd.json", recording(currentId, FEATURE_SEMANTICS_REVISION)});
+    writeDocument(dir.path(), {".uhd.json", recording(staleId, newer)});
+    writeDocument(dir.path(), {".uhd.json", recording(absentId, std::nullopt)});
+    writeDocument(dir.path(), {".uhd.json", recording(oneId, 1)});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", currentId},
+                                                                        {"gfx950", staleId},
+                                                                        {"gfx942", absentId},
+                                                                        {"gfx90a", oneId}}));
+
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    EXPECT_EQ(resolved.byMetric.at("tflops").count("default"), 1u);
+    // Absent and an explicit 1 are one claim, so they bind or refuse together.
+    const auto boundOrRefusal = [&](const std::string& arch) {
+        const auto refused = resolved.refused.find("tflops");
+        return refused != resolved.refused.end() && refused->second.count(arch) != 0
+                   ? refused->second.at(arch).reason
+                   : std::string("bound");
+    };
+    EXPECT_EQ(boundOrRefusal("gfx942"), boundOrRefusal("gfx90a"));
+
+    ASSERT_EQ(resolved.refused.count("tflops"), 1u);
+    ASSERT_EQ(resolved.refused.at("tflops").count("gfx950"), 1u);
+    const auto& refusal = resolved.refused.at("tflops").at("gfx950");
+    EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refusal.reason.find("revision " + std::to_string(newer)), std::string::npos)
+        << refusal.reason;
+    EXPECT_NE(refusal.reason.find("revision " + std::to_string(FEATURE_SEMANTICS_REVISION)),
+              std::string::npos)
+        << refusal.reason;
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, refusal.reason));
+}
+
+namespace
+{
+
+/// makeSetDocuments with its ranker turned into a feature-reading tree_data model, plus a
+/// feature-reading `predict_engine` model under the UED role map: one model per scoring
+/// role, both recording @p revision in `trained_against` (nothing when nullopt). Only
+/// resolution is under test, so neither artifact exists.
+Documents featureSemanticsDocuments(const std::string& engineName, std::optional<int64_t> revision)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    auto provenance = provenanceOf(documents);
+    if(revision.has_value())
+    {
+        provenance["feature_semantics_revision"] = *revision;
+    }
+    auto& ranker = documentOfType(documents, ".uhd.json");
+    ranker["adapter"] = "tree_data";
+    ranker.erase("native");
+    ranker["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
+    ranker["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
+    ranker["trained_against"] = provenance;
+    ranker["objective"] = "max";
+    ranker["tree_data"] = {{"artifact", "ranker.bin"}};
+
+    const auto predictionId = testUuid('1', 'c');
+    auto prediction = ranker;
+    prediction["id"] = predictionId;
+    prediction["name"] = "engine throughput";
+    prediction["features_signature"] = nlohmann::json::array({"$graph.flops"});
+    prediction["features_hash"]
+        = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$graph.flops"});
+    prediction["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log1p"}};
+    prediction["tree_data"] = {{"artifact", "prediction.bin"}};
+    documentOfType(documents, ".ued.json")["predict_engine"] = {{"default", predictionId}};
+    documents.push_back({".uhd.json", std::move(prediction)});
+    return documents;
+}
+
+} // namespace
+
+/// FeatureSemantics.hpp for UED role-mapped models: L2 (`sort_kernel_catalog`) and L1
+/// (`predict_engine`) read the same published features, so both are refused at the point
+/// descriptor provenance is, naming both revisions, and the engine keeps its declared-order
+/// fallback. Absent means revision 1, the shape of every model shipped before it existed.
+TEST(TestDescriptorLoader, AModelTrainedOnOtherFeatureSemanticsIsRefusedForEveryScoringRole)
+{
+    using hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION;
+    const ScopedSymbols symbols;
+    const auto load = [](const std::string& name, std::optional<int64_t> revision) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(name));
+        writeDocuments(dir.path(), featureSemanticsDocuments("test:" + name, revision));
+        auto sets = loadFrom(dir.path());
+        if(sets.size() != 1u)
+        {
+            throw std::runtime_error("expected exactly one engine from " + name);
+        }
+        return std::move(sets.front());
+    };
+    const auto bound = [](const DescriptorSet& set) {
+        return std::make_pair(set.heuristicsByMetric.count("") == 1u,
+                              set.enginePredictionsByMetric.count("tflops") == 1u);
+    };
+
+    EXPECT_EQ(bound(load("fsr_current", FEATURE_SEMANTICS_REVISION)), std::make_pair(true, true));
+    EXPECT_EQ(bound(load("fsr_absent", std::nullopt)), bound(load("fsr_one", 1)));
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const auto newer = FEATURE_SEMANTICS_REVISION + 1;
+    // Kept alive through the ranking below, which reads the tree the set was loaded from.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("fsr_newer"));
+    writeDocuments(dir.path(), featureSemanticsDocuments("test:fsr_newer", newer));
+    const auto sets = loadFrom(dir.path());
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& stale = sets.front();
+    EXPECT_EQ(bound(stale), std::make_pair(false, false));
+    ASSERT_EQ(stale.unavailableHeuristicArches.count(""), 1u);
+    EXPECT_EQ(stale.unavailableHeuristicArches.at("").count("default"), 1u);
+    ASSERT_EQ(stale.unavailableEnginePredictionArches.count("tflops"), 1u);
+    EXPECT_EQ(stale.unavailableEnginePredictionArches.at("tflops").count("default"), 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "revision " + std::to_string(newer)
+                                              + ", this build computes revision "
+                                              + std::to_string(FEATURE_SEMANTICS_REVISION)))
+        << recorder.getRecordedLogsAsString();
+    // Refusing the ranker never costs the engine: it ranks in declared order (64 first).
+    EXPECT_EQ(firstBlockSize(stale), 64);
+}
+
+/// The revision governs what published feature values mean, so a ranker that reads none --
+/// a native comparator over kernel metadata, compiled into this same build -- is never
+/// refused by it, whatever it records. Otherwise a bump would disable every shipped
+/// signature-less ranker for a change it cannot observe.
+TEST(TestDescriptorLoader, ASignatureLessRankerIsNotRefusedByFeatureSemantics)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("fsr_signature_less"));
+    auto documents = makeSetDocuments('1', "test:fsr_signature_less");
+    auto provenance = provenanceOf(documents);
+    provenance["feature_semantics_revision"]
+        = hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION + 1;
+    documentOfType(documents, ".uhd.json")["trained_against"] = std::move(provenance);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(firstBlockSize(sets.front()), 256);
 }
 
 /// No descriptor tree installed is the normal state of a machine that has not deployed a

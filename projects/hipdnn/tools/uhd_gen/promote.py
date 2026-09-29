@@ -15,9 +15,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .artifact import artifact_digest, is_grouped_tree, verify_tree_artifact
+from .features import evaluator_feature_semantics_revision
 from .provenance import (
     ROLES, ProvenanceError, compare_provenance, descriptor_id, foreign_matcher_ids,
-    load_descriptor_tree, provenance_for_engine, revision, select_engine, validate_provenance,
+    load_descriptor_tree, provenance_for_engine, require_feature_semantics, revision,
+    select_engine, validate_provenance,
 )
 from .immediate import ROLE, validate_model
 from .ranking_metrics import RANKING_METRICS
@@ -78,6 +80,10 @@ def add_promote_arguments(parser: argparse.ArgumentParser) -> None:
                              "names the one model being promoted). The model must already carry "
                              "it: promote never renames a model. Required for an engine with no "
                              "UED unless the collection recorded the id its provider declares.")
+    parser.add_argument("--feature-evaluator",
+                        help="Path to the shared hipdnn_uhd_features executable of the build the "
+                             "model is promoted for; its feature-semantics revision must be the "
+                             "one the model recorded")
 
 
 def parse_uhd_ids(values: list[str] | None) -> dict[str | None, str]:
@@ -108,7 +114,8 @@ def run_promote(args: argparse.Namespace) -> int:
         plan = build_plan(Path(args.model_dir), Path(args.descriptor_tree), args.engine,
                           role=args.role, arch=args.arch, remove_knobs=args.remove_knobs,
                           corpus=Path(args.corpus) if args.corpus else None,
-                          uhd_ids=parse_uhd_ids(args.uhd_ids))
+                          uhd_ids=parse_uhd_ids(args.uhd_ids),
+                          feature_evaluator=args.feature_evaluator)
         for warning in plan.warnings:
             logger.warning("%s", warning)
         if not args.dry_run:
@@ -124,11 +131,12 @@ def build_plan(model_dir: Path, descriptor_tree: Path, engine: str | None = None
                role: str = "sort_kernel_catalog", arch: str | None = None,
                remove_knobs: tuple[str, ...] | list[str] = (),
                corpus: Path | None = None,
-               uhd_ids: dict[str | None, str] | None = None) -> PromotePlan:
+               uhd_ids: dict[str | None, str] | None = None,
+               feature_evaluator: str | None = None) -> PromotePlan:
     """Resolve all dependencies, ownership and destination collisions without writes."""
     try:
         return _build_plan(Path(model_dir), Path(descriptor_tree), engine, role, arch,
-                           remove_knobs, corpus, uhd_ids or {})
+                           remove_knobs, corpus, uhd_ids or {}, feature_evaluator)
     except ValueError as error:
         raise PromoteError(str(error)) from error
 
@@ -365,7 +373,8 @@ def _slug(name: str) -> str:
     return "".join(character if character.isalnum() else "_" for character in name).strip("_")
 
 
-def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, corpus=None, uhd_ids=None):
+def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, corpus=None, uhd_ids=None,
+                feature_evaluator=None):
     uhd_ids = uhd_ids or {}
     if role not in ROLES:
         raise PromoteError(f"unknown heuristic role {role!r}")
@@ -397,6 +406,11 @@ def _build_plan(model_dir, descriptor_tree, engine, role, arch, remove_knobs, co
     if recorded_role is not None and recorded_role != role:
         raise PromoteError("incoming model was trained for another role")
     provenance = descriptor.get("trained_against", {})
+    if descriptor.get("features_signature"):
+        # The loader refuses a model whose recorded feature semantics are not the build's
+        # (FeatureSemantics.hpp), silently leaving the engine on its fallback; installing
+        # one would ship a model nobody scores. Only a feature-reading model, as there.
+        require_feature_semantics(provenance, evaluator_feature_semantics_revision(feature_evaluator))
     if role == ROLE:
         validate_model(descriptor)
     artifact_path, artifact_key = _artifact_path(descriptor, descriptor_path, model_dir)
