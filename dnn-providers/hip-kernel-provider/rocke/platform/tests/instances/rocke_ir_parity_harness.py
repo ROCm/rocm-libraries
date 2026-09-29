@@ -2591,6 +2591,19 @@ def cases():
         ("fp16_h64_sq512", {"dtype": "fp16", "head_size": 64}),
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
+        # fp8 KV sync-dequant loader (aligned KV, default grid). Flash + SWA at
+        # D128 (unpacked LDS row) and D64 (K_GROUP>1 packed-row store) lock both
+        # loader layouts through the golden and the cpp byte-identity gate.
+        ("fp8_causal_sq512", {"kv_storage_dtype": "fp8e4m3"}),
+        (
+            "fp8_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "sliding_window": 128},
+        ),
+        ("fp8_d64_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "head_size": 64}),
+        (
+            "fp8_d64_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
+        ),
         # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
         # shifted-diagonal routes, the sink composition, and the BM128 geometry.
         (
