@@ -165,7 +165,6 @@ constexpr size_t FMOE_NSTAGES = sizeof(FMOE_STAGES) / sizeof(FMOE_STAGES[0]);
 
 std::string fmoe_lower(const py::dict& d, const std::string& arch)
 {
-    const auto llvm_flavor = resolve_python_llvm_flavor();
     Store st;
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
     rocke_fmoe_forward_spec_t s = fmoe_build(d, st);
@@ -176,7 +175,7 @@ std::string fmoe_lower(const py::dict& d, const std::string& arch)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = '\0';
         rocke_status_t s2 = rocke_fused_moe_forward_lower_to_llvm(
-            &s, a, FMOE_STAGES[i].stage, llvm_flavor, &ll, err, sizeof err);
+            &s, a, FMOE_STAGES[i].stage, resolve_python_llvm_flavor(), &ll, err, sizeof err);
         std::string text = take_ll(s2, ll, err, "rocke_engine.fused_moe_e2e_lower_llvm");
         out += "; === fused_moe_e2e stage: ";
         out += FMOE_STAGES[i].banner;

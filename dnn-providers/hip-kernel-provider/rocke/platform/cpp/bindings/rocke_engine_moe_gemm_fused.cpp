@@ -138,7 +138,6 @@ const char* arch_or_default(const std::string& arch)
 
 std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
-    const auto llvm_flavor = resolve_python_llvm_flavor();
     std::deque<std::string> store;
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
@@ -150,7 +149,8 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
         throw std::runtime_error(msg);
     }
     char* ll = nullptr;
-    rocke_status_t st = rocke_lower_kernel_to_llvm(k, llvm_flavor, arch_or_default(arch), &ll);
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
     rocke_ir_builder_free(&b);
     if(st != ROCKE_OK || !ll)
     {
