@@ -459,11 +459,7 @@ def _make_gfx950_attention_dense_candidate(
             # follow-up), and the spec rejects fp8 + ragged shapes in support().
             supports_features=frozenset(
                 {"causal", "sliding_window", "sinks"}
-                | (
-                    {"causal_bottom_right", "fp8"}
-                    if not variant.persistent
-                    else set()
-                )
+                | ({"causal_bottom_right", "fp8"} if not variant.persistent else set())
             ),
         ),
         _supports=support,

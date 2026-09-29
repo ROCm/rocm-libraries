@@ -67,6 +67,17 @@ from rocke.runtime import (  # noqa: E402
 
 _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 _TOL = 2e-2
+_FP8_E4M3_MAX = 448.0
+
+
+def _quantize_fp8(t):
+    """Per-tensor fp8 e4m3 quantization. Returns ``(fp8_tensor, scale)`` where
+    ``fp8_tensor.float() * scale`` reconstructs ``t`` up to fp8 rounding. The
+    scale maps the tensor's max-abs onto the fp8 dynamic range."""
+    amax = t.abs().max().clamp(min=1e-8)
+    scale = (amax / _FP8_E4M3_MAX).item()
+    q = (t.float() / scale).clamp(-_FP8_E4M3_MAX, _FP8_E4M3_MAX).to(torch.float8_e4m3fn)
+    return q, scale
 
 
 # --------------------------------------------------------------------------- #
@@ -124,11 +135,13 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
     sb = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
+        .ptr("k_ptr", spec.kv_storage_dtype or spec.dtype)
+        .ptr("v_ptr", spec.kv_storage_dtype or spec.dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.kv_storage_dtype == "fp8e4m3":
+        sb = sb.scalar("k_scale", "f32").scalar("v_scale", "f32")
     if spec.runtime_shape:
         sb = (
             sb.scalar("batch", "i32")
@@ -166,7 +179,10 @@ def bench_dense(
 ):
     """Returns (dense_ms, tflops, max_abs, kernel_name)."""
     dev = "cuda"
-    dt = _TORCH_DT[dtype]
+    # fp8 = fp8 KV storage with a bf16 compute/output dtype (Q stays bf16).
+    is_fp8 = dtype == "fp8"
+    compute_dtype = "bf16" if is_fp8 else dtype
+    dt = _TORCH_DT[compute_dtype]
     B = len(seqlens)
     max_s = max(seqlens)
     total = sum(seqlens)
@@ -175,6 +191,8 @@ def bench_dense(
     torch.manual_seed(seed)
     # packed ragged batch when >1 sequence (or a single non-uniform packing).
     varlen = B > 1 or (total != B * max_s)
+    if is_fp8 and varlen:
+        raise ValueError("fp8 dense prefill is aligned-KV only (no varlen batch)")
 
     if varlen:
         # packed [total_tok, H, D] + int32 cu_seqlens[B+1].
@@ -221,6 +239,17 @@ def bench_dense(
         k = (torch.randn(1, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
         v = (torch.randn(1, S, Hkv, D, dtype=dt, device=dev) * 0.2).contiguous()
         out = torch.zeros(1, S, Hq, D, dtype=dt, device=dev)
+        k_dev, v_dev = k, v  # tensors handed to the kernel (fp8 when is_fp8)
+        k_scale = v_scale = None
+        if is_fp8:
+            k_fp8, k_scale = _quantize_fp8(k)
+            v_fp8, v_scale = _quantize_fp8(v)
+            # Reference attends over the SAME dequantized values the kernel reads
+            # (fp8*scale), so the check isolates kernel correctness from the
+            # quantization loss.
+            k = (k_fp8.float() * k_scale).to(dt).contiguous()
+            v = (v_fp8.float() * v_scale).to(dt).contiguous()
+            k_dev, v_dev = k_fp8, v_fp8
         spec = AttentionDenseSpec(
             batch=1,
             seqlen_q=S,
@@ -229,13 +258,14 @@ def bench_dense(
             num_kv_heads=Hkv,
             head_size=D,
             causal=True,
-            dtype=dtype,
+            dtype=compute_dtype,
             block_n=block_n,
             waves_per_eu=waves_per_eu,
             lds_k_group_pad=lds_k_group_pad,
             sliding_window=W,
             persistent=persistent,
             num_persistent=num_persistent,
+            kv_storage_dtype="fp8e4m3" if is_fp8 else None,
         )
         lch = _dense_launcher(spec)
         cfg = LaunchConfig(
@@ -243,7 +273,16 @@ def bench_dense(
             block=attention_dense_block(spec),
             stream=stream,
         )
-        vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+        vals = {
+            "q_ptr": q,
+            "k_ptr": k_dev,
+            "v_ptr": v_dev,
+            "o_ptr": out,
+            "scale": scale,
+        }
+        if is_fp8:
+            vals["k_scale"] = float(k_scale)
+            vals["v_scale"] = float(v_scale)
         if spec.runtime_shape:
             vals["batch"] = int(spec.batch)
             vals["seqlen_q"] = int(spec.seqlen_q)
@@ -389,7 +428,7 @@ def main() -> int:
         choices=["causal", "mha", "swa", "varlen", "persistent", "all"],
         default="all",
     )
-    ap.add_argument("--dtype", choices=["bf16", "fp16"], default="bf16")
+    ap.add_argument("--dtype", choices=["bf16", "fp16", "fp8"], default="bf16")
     ap.add_argument("--hq", type=int, default=128, help="query heads (GQA/SWA/varlen)")
     ap.add_argument("--hkv", type=int, default=8, help="kv heads (GQA/SWA/varlen)")
     ap.add_argument("--d", type=int, default=128, help="head size")
