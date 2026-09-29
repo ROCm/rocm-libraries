@@ -588,7 +588,8 @@ constexpr bool validate_policy_coupling()
     // area.
     static_assert(Layout::kArenaBytes == (UseDoubleKVLdsBuffer ? 71680 : 53248));
     static_assert(Layout::kUseDoubleKVLdsBuffer == UseDoubleKVLdsBuffer);
-    static_assert(Pipeline::kKLoadOnce == UseDoubleKVLdsBuffer);
+    // Both paths stage K as a whole (kN0 x kSubQKHeaddim) tile.
+    static_assert(Pipeline::kKLoadOnce);
     static_assert(Pipeline::GetSmemSize() == Layout::kArenaBytes);
 
     using EnabledQ   = ck_tile::detail::LdsPaddingConfig<true, 256, 16>;
@@ -625,8 +626,8 @@ static_assert(validate_policy_coupling<ck_tile::half_t, 64, false>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 128, true, true, true>());
 static_assert(validate_policy_coupling<ck_tile::bf16_t, 64, true, true, false>());
 static_assert(validate_policy_coupling<ck_tile::half_t, 128, true, true, true>());
-// The selector must reject this combination even though the pipeline itself
-// deliberately forbids progressive loading without double K/V buffers.
+// Progressive loading without double K/V buffers is a supported combination,
+// but Q padding is tied to the double-buffer M128 traversal, so Q stays unpadded.
 static_assert(std::is_same_v<ck_tile::detail::QrTdmPaddingSelection<
                                  TestFmhaProblem<ck_tile::bf16_t, 128, false, true>>::Q,
                              NoPad>);

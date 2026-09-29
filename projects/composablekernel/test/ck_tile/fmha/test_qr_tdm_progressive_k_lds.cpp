@@ -118,7 +118,10 @@ using TestFmhaProblemForShape = ck_tile::BlockFmhaPipelineProblem<DataType,
                                                                   UseDoubleKVLdsBuffer,
                                                                   ProgressiveDsLoadK>;
 
-using SingleBufferM64Problem    = TestFmhaProblem<64>;
+using SingleBufferM64Problem = TestFmhaProblem<64>;
+// Progressive K reload on the single-buffer path: the combination the codegen
+// used to reject, and the one d256 and d512 run in production.
+using SingleBufferProgressiveM64Problem = TestFmhaProblem<64, false, true>;
 using DoubleBufferM64Problem    = TestFmhaProblem<64, true>;
 using ProgressiveM64Problem     = TestFmhaProblem<64, true, true>;
 using DoubleBufferM128Problem   = TestFmhaProblem<128, true>;
@@ -132,6 +135,8 @@ using DoubleBufferSinkM64Problem =
 
 static_assert(!SingleBufferM64Problem::kUseDoubleKVLdsBuffer);
 static_assert(!SingleBufferM64Problem::kProgressiveDsLoadK);
+static_assert(!SingleBufferProgressiveM64Problem::kUseDoubleKVLdsBuffer);
+static_assert(SingleBufferProgressiveM64Problem::kProgressiveDsLoadK);
 static_assert(DoubleBufferM64Problem::kUseDoubleKVLdsBuffer);
 static_assert(!DoubleBufferM64Problem::kProgressiveDsLoadK);
 static_assert(ProgressiveM64Problem::kUseDoubleKVLdsBuffer);
@@ -150,7 +155,12 @@ using TestPipeline = ck_tile::BlockFmhaPipelineQRKSVSTdm<Problem>;
 static_assert(TestPipeline<SingleBufferSinkM64Problem>::kHasSink);
 static_assert(TestPipeline<DoubleBufferSinkM64Problem>::kHasSink);
 
-static_assert(!TestPipeline<SingleBufferM64Problem>::kKLoadOnce);
+// Every path stages K as a whole tile now, which is what the progressive reload
+// needs; the single-buffer one still never reaches the K-pair staging variant,
+// whose shape requirements no qr_tdm single-buffer tile satisfies.
+static_assert(TestPipeline<SingleBufferM64Problem>::kKLoadOnce);
+static_assert(TestPipeline<SingleBufferProgressiveM64Problem>::kKLoadOnce);
+static_assert(!TestPipeline<SingleBufferProgressiveM64Problem>::kStagedKPairs);
 static_assert(TestPipeline<DoubleBufferM64Problem>::kKLoadOnce);
 static_assert(TestPipeline<DoubleBufferM128Problem>::kKLoadOnce);
 static_assert(TestPipeline<ProgressiveM64Problem>::kKLoadOnce);
@@ -424,6 +434,45 @@ TEST(QrTdmProgressiveKLds, SingleBufferSinkWindowJump)
     expect_finite_nonzero(single);
     expect_close(
         single, baseline, "sink single-buffer output differs from the double-buffer baseline");
+}
+
+// Progressive reload changes when K fragments are pulled out of LDS, not what
+// they contain, so the single-buffer path must agree with itself without the
+// reload and with the double-buffer baseline. Same odd/even tile counts as
+// above, since the reload is issued from inside the unrolled body.
+TEST(QrTdmProgressiveKLds, SingleBufferProgressiveMatchesBaseline)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "QR-TDM progressive K LDS is only supported on gfx1250";
+
+    constexpr ck_tile::index_t seqlen_q     = 64;
+    constexpr ck_tile::index_t max_seqlen_k = 192;
+
+    const auto q = make_input(kBatch * kHeads * seqlen_q * kHeadDim, 13, 29, 14, 0.03125f);
+    const auto k = make_input(kBatch * kHeads * max_seqlen_k * kHeadDim, 7, 31, 15, 0.025f);
+    const auto v = make_input(kBatch * kHeads * max_seqlen_k * kHeadDim, 11, 37, 18, 0.02f);
+    const ck_tile::DeviceMem q_device(q.size() * sizeof(ck_tile::half_t));
+    const ck_tile::DeviceMem k_device(k.size() * sizeof(ck_tile::half_t));
+    const ck_tile::DeviceMem v_device(v.size() * sizeof(ck_tile::half_t));
+    q_device.ToDevice(q.data());
+    k_device.ToDevice(k.data());
+    v_device.ToDevice(v.data());
+
+    for(const ck_tile::index_t seqlen_k : {64, 65, 128, 129, 192})
+    {
+        const auto progressive = run_kernel<SingleBufferProgressiveM64Problem>(
+            q_device, k_device, v_device, seqlen_q, seqlen_k);
+        const auto single =
+            run_kernel<SingleBufferM64Problem>(q_device, k_device, v_device, seqlen_q, seqlen_k);
+        const auto baseline =
+            run_kernel<DoubleBufferM64Problem>(q_device, k_device, v_device, seqlen_q, seqlen_k);
+
+        const std::string suffix = " at seqlen_k=" + std::to_string(seqlen_k);
+        expect_finite_nonzero(progressive);
+        expect_close(progressive, single, "progressive output differs from single-buffer" + suffix);
+        expect_close(
+            progressive, baseline, "progressive output differs from double-buffer baseline" + suffix);
+    }
 }
 
 template <typename DataType>

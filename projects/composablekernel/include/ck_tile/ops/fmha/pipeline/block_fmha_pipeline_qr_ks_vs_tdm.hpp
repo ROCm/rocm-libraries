@@ -51,9 +51,10 @@ struct BlockFmhaPipelineQRKSVSTdm
     using VLayout                    = remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
     static_assert(kQLoadOnce == Policy::QLoadOnce);
-    static constexpr bool kKLoadOnce = Problem::kUseDoubleKVLdsBuffer;
-    static_assert(!Problem::kProgressiveDsLoadK || Problem::kUseDoubleKVLdsBuffer,
-                  "progressive K LDS loading requires double K/V LDS buffers");
+    // Both paths stage a whole (kN0 x kSubQKHeaddim) K tile per LDS buffer, so
+    // the progressive reload -- which walks that tile slice by slice -- no
+    // longer depends on K/V double buffering.
+    static constexpr bool kKLoadOnce = true;
 
     static constexpr index_t kBlockSize = Problem::kBlockSize;
 
@@ -833,16 +834,70 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             s_wait_tensorcnt_barrier<2>();
             k_lds_read_window.set_bottom_tensor_view_data_ptr(k_lds_ptr(number<kCurBuf>{}));
-            static_for<0, k0_loops, 1>{}([&](auto i_k0) {
+            if constexpr(Problem::kProgressiveDsLoadK)
+            {
+                // Reload k_tile in place, in groups of four ds_loads dropped
+                // into the WMMA sweep right after the fragments they overwrite
+                // died. Same traversal as the double-buffer path; it needs the
+                // whole K tile in LDS, which this path now also stages.
+                static_assert(std::is_same_v<Policy, BlockFmhaPipelineQRKSVSTdmDefaultPolicy>);
+                using Gemm0  = remove_cvref_t<decltype(gemm_0)>;
+                using Window = remove_cvref_t<decltype(k_lds_read_window)>;
+                static_assert(Gemm0::MIterPerWarp == 1 || Gemm0::MIterPerWarp == 2);
+                static_assert(Gemm0::NIterPerWarp == 4 && Gemm0::KIterPerWarp == 1);
+                static_assert(Window::Traits::NumAccess == 8);
+                static_assert(Window::Traits::ScalarPerVector == 8);
+                static_assert(sizeof(typename Window::Traits::vector_t) == 16);
+
                 auto k_tile = load_tile(k_lds_read_window);
-                gemm_0(s_acc,
-                       get_slice_tile(q_tile,
-                                      sequence<0, i_k0 * kK0>{},
-                                      sequence<kM0, (i_k0 + 1) * kK0>{}),
-                       k_tile);
-                if constexpr(i_k0 + 1 < k0_loops)
+                static_assert(remove_cvref_t<decltype(k_tile)>::get_thread_buffer_size() == 64);
+
+                static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
                     move_tile_window(k_lds_read_window, {0, kK0});
-            });
+                    gemm_0.template RunWithAfterWarp<true>(
+                        s_acc,
+                        get_slice_tile(
+                            q_tile, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{}),
+                        k_tile,
+                        [&k_lds_read_window, &k_tile](auto mIter, auto nIter, auto kIter) {
+                            if constexpr(mIter == Gemm0::MIterPerWarp - 1 && kIter == 0 &&
+                                         decltype(nIter)::value % 2 == 1)
+                            {
+                                // Allow VALU/SALU/VMEM/DS-write/TRANS/LDSDMA to cross while
+                                // keeping MFMA/WMMA and DS-read ordered around the reload.
+                                constexpr unsigned kProgressiveDsLoadSchedMask =
+                                    0x002 | 0x004 | 0x010 | 0x020 | 0x040 | 0x200 | 0x400 | 0x800;
+                                __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+                                constexpr index_t begin = 2 * (decltype(nIter)::value - 1);
+                                k_lds_read_window.template load_access_range<begin, begin + 4>(
+                                    k_tile);
+                                __builtin_amdgcn_sched_barrier(kProgressiveDsLoadSchedMask);
+                            }
+                        });
+                });
+                // Keep the reload-overlap traversal on the final slice too, even
+                // though it has no reload, so the schedule stays uniform.
+                gemm_0.template RunWithAfterWarp<true>(
+                    s_acc,
+                    get_slice_tile(q_tile,
+                                   sequence<0, (k0_loops - 1) * kK0>{},
+                                   sequence<kM0, k0_loops * kK0>{}),
+                    k_tile,
+                    [](auto, auto, auto) {});
+            }
+            else
+            {
+                static_for<0, k0_loops, 1>{}([&](auto i_k0) {
+                    auto k_tile = load_tile(k_lds_read_window);
+                    gemm_0(s_acc,
+                           get_slice_tile(q_tile,
+                                          sequence<0, i_k0 * kK0>{},
+                                          sequence<kM0, (i_k0 + 1) * kK0>{}),
+                           k_tile);
+                    if constexpr(i_k0 + 1 < k0_loops)
+                        move_tile_window(k_lds_read_window, {0, kK0});
+                });
+            }
             // rewind the LDS read window to the tile origin for the next iteration
             if constexpr(1 < k0_loops)
                 move_tile_window(k_lds_read_window, {0, -kK0 * (k0_loops - 1)});

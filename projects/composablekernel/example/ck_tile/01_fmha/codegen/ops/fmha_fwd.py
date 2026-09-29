@@ -565,13 +565,6 @@ class FmhaFwdPipeline:
         else:
             n += "_ntrload"
         if self.tag == "qr_tdm":
-            if (
-                self.F_progressive_ds_load_k == "t"
-                and self.F_use_double_kv_lds_buffer != "t"
-            ):
-                raise ValueError(
-                    "QR-TDM progressive K LDS loading requires K/V LDS prefetch (double buffering)"
-                )
             if self.F_use_double_kv_lds_buffer == "t":
                 n += "_kvldsprefetch"
             else:
@@ -1638,9 +1631,10 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 # D256 keeps single K/V LDS buffers: its double-buffer arena
                 # already fills the LDS budget, leaving no room for the
                 # bank-conflict padding its row pitch needs. Progressive K
-                # reload requires double buffering, so it goes with it.
+                # reload stays on: the single-buffer path also stages whole K
+                # tiles now.
                 tdm_double_kv = "f" if (hdim, hdim_v) == (256, 256) else "t"
-                tdm_prog_k = tdm_double_kv
+                tdm_prog_k = "t"
                 tdm_masks = list(get_mask_map(mask_impl))
                 if mask_impl == "simplified":
                     # Avoid carrying general-window mask state through the
