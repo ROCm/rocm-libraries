@@ -119,7 +119,7 @@ These tests cover descriptor APIs, handles, execution, plugin management, graph 
 
 `hipdnn_integration_tests` is provider-agnostic. It contains one shared graph set. Each provider runs the executable independently with its own plugin and engine; one run never loads or compares several providers.
 
-Use the shared suite for graph execution and numerical comparison against the CPU reference executor. See the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md) for bundles, provider configuration, and categories.
+Use the shared suite for graph execution and numerical comparison against the CPU reference executor. See the [integration test documentation](../../../../dnn-providers/integration-tests/docs/README.md) for bundles, provider configuration, and categories.
 
 ### Graph Validation
 
@@ -152,7 +152,7 @@ A green hipDNN core job proves that its selected routing and API tests passed. I
 
 ### Test Categories
 
-The public test categories are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. Provider categories may differ; see the [provider integration test guide](../../../../dnn-providers/integration-tests/README.md).
+The public test categories are `quick`, `standard`, `comprehensive`, and `full`. In core hipDNN, `quick` currently matches every core test and higher categories inherit that set. Provider categories may differ; see [Test tiers](../../../../dnn-providers/integration-tests/docs/running-tests.md#test-tiers).
 
 ### Code Coverage
 

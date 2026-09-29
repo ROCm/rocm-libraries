@@ -103,12 +103,8 @@ Infer options from the user request:
      ```
    - **Before reporting the result, load the `hipdnn-integration-testing`
      skill.** This suite is the one place where exit code 0 is routinely
-     meaningless: a run that skips every test still exits 0, and `ctest -L`
-     with a label that matches nothing prints `No tests were found!!!` and
-     also exits 0. That skill applies the suite's own documentation to the
-     output, including the support-claim summary (for example
-     `unclaimed_support`, which means the `.support.json` sidecars need
-     updating).
+     meaningless; that skill applies the suite's own documentation to the
+     output, including the signals it prints that never fail a run.
 
 9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested. For `external-integration` runs, report the `Passed:`/`Skipped:`/`Failed:` counts from the binary's "TEST COVERAGE SUMMARY" — never the exit code alone; a 100%-skipped run is green and is not evidence the engine still works.
 
@@ -178,9 +174,7 @@ If a requested component has no matching target, say that it was not present in 
 
 - `hipdnn-integration-testing` skill — the doc-driven reference behind the
   `external-integration` scope. It loads the suite's documentation
-  (`dnn-providers/integration-tests/docs/`) and applies it: what
-  `hipdnn_integration_tests` runs, how tiers, `exclude_gpu`, `ctest -L`,
-  `--gtest_filter` and the per-engine TOML decide what executes, how to read the
-  coverage and support-claim summaries, and which green runs tested nothing.
-  **Load it before interpreting any result from step 8, and before concluding
-  an engine did or did not regress.** This skill executes; that one explains.
+  (`dnn-providers/integration-tests/docs/`) and applies it to what a run did
+  and printed. **Load it before interpreting any result from step 8, and
+  before concluding an engine did or did not regress.** This skill executes;
+  that one explains.

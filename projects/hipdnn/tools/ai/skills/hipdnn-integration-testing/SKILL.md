@@ -1,7 +1,7 @@
 ---
 name: hipdnn-integration-testing
-description: "Run, read, and extend hipDNN's cross-provider integration test suite (dnn-providers/integration-tests): bundles and template sweeps, golden data and DVC, .support.json claim sidecars, per-engine TOML, tier YAML, CTest lanes. Doc-driven: loads all of its knowledge at run time from the suite's human-readable docs in dnn-providers/integration-tests/docs/ (local checkout first, GitHub develop as fallback). Use when adding or updating bundles or support claims, running or triaging hipdnn_integration_tests, or when a run prints a SUPPORT CLAIM SUMMARY with unclaimed_support, CLAIM_BROKEN or failed_in_use, 'zero tests ran', or an all-skipped result."
-argument-hint: "[task: run|read-output|add-bundle|update-claims|file-formats|triage] [engine: MIOPEN_ENGINE|HIPBLASLT_ENGINE|HIP_MLOPS_ENGINE|ASM_SDPA_ENGINE|...]"
+description: "Run, read, and extend hipDNN's cross-provider integration test suite (dnn-providers/integration-tests): bundles and sweeps, golden data and DVC, .support.json claim sidecars, per-engine TOML, tier YAML, CTest lanes. Doc-driven: loads all of its knowledge at run time from the suite's human-readable docs in dnn-providers/integration-tests/docs/ (local checkout first, GitHub develop as fallback). Use when adding or updating bundles or support claims, running or triaging hipdnn_integration_tests, or when a run prints a SUPPORT CLAIM SUMMARY with unclaimed_support, CLAIM_BROKEN or failed_in_use, 'zero tests ran', or an all-skipped result."
+argument-hint: "[task: run|read-output|add-bundle|update-claims|file-formats|triage] [engine name]"
 allowed-tools: Bash, Read, Grep, Glob, WebFetch
 ---
 
@@ -21,38 +21,41 @@ rocm-libraries root, with `dnn-providers/integration-tests/docs/README.md` as th
 entry point. Never answer from memory or from an earlier session: load them
 fresh.
 
-1. **Local checkout first.** Find the repository root with:
-
-   ```bash
-   git rev-parse --show-toplevel
-   ```
-
-   Call that `<repo-root>`. If `<repo-root>/dnn-providers/integration-tests/docs/README.md`
+1. **Find the checkout the developer is working in**, and call its root
+   `<repo-root>`. Try, in order:
+   - a checkout or worktree the developer named;
+   - the current directory: `git rev-parse --show-toplevel`;
+   - a build directory in play: its `CMakeCache.txt` records the source tree
+     as `CMAKE_HOME_DIRECTORY`.
+2. **Local documents first.** If `<repo-root>/dnn-providers/integration-tests/docs/README.md`
    exists, read the documents from there. A local copy describes the code the
    developer is actually building, including unmerged changes on their branch,
    so it wins over any remote copy.
-2. **GitHub `develop` otherwise.** With no checkout, or a checkout that predates
-   the `docs/` directory, fetch the same paths from raw GitHub — the index first:
+3. **GitHub `develop` otherwise.** If there is no checkout, or that file does not
+   exist in it, fetch the same paths from raw GitHub — the index first:
 
    ```text
    https://raw.githubusercontent.com/ROCm/rocm-libraries/develop/dnn-providers/integration-tests/docs/README.md
    ```
 
-   Fetch each further document by replacing `README.md` with the file name the
-   index links to (WebFetch, or `curl -fsSL` with that URL). Tell the developer
-   the text came from `develop` and may not match their tree.
-3. **Neither reachable** → stop and say so. Do not substitute remembered
+   Every other document the index links is relative to that directory: replace
+   `README.md` in the URL with the linked file name. Fetch verbatim with
+   `curl -fsSL <url>`; use WebFetch only when there is no shell, and ask it for
+   the complete raw text, since a summary loses the exact strings this skill
+   matches against. Tell the developer the text came from `develop` and may not
+   match their tree.
+4. **Neither reachable** → stop and say so. Do not substitute remembered
    content.
 
 Say once, in a line, which source you loaded (checkout path and branch, or
 GitHub `develop`).
 
-Read the index first. It maps topics to documents and lists the signals a run
-can print. Then read every document the task touches; when a task crosses
-areas — "add a bundle and get the lane green" touches all of them — read them
-all, they are short. The documents link to tool READMEs elsewhere in the tree
-(migration scripts, reference-data scripts) and to RFCs; follow those the same
-way, local first, then the same repository path on GitHub.
+Read the index first. It defines the terms, maps topics to documents, and
+lists the signals a run can print. Then read every document the task touches;
+when a task crosses areas — "add a bundle and get the lane green" touches all
+of them — read them all. The documents link to tool READMEs elsewhere in the
+tree and to RFCs; follow those the same way, local first, then the same
+repository path on GitHub.
 
 ## 2. Work from the documents
 
@@ -66,25 +69,29 @@ way, local first, then the same repository path on GitHub.
 - To build or execute in a local superbuild, use the `hipdnn-superbuild-test`
   skill (target discovery, Windows DLL `PATH`); this skill interprets what those
   runs mean.
-- Do not change bundles, sidecars, golden data or engine TOML — including by
-  running `--write-support-claims`, which edits the source tree — unless the
-  developer asked for it. Otherwise propose the exact command or edit and let
-  them decide.
+- **What you may change.** A request to add a bundle or update claims covers
+  every step the documents prescribe for it, including running
+  `--write-support-claims` and the confirming run. Anything you notice while
+  doing something else — including signals from an unrelated run — gets a
+  proposal with the exact command or edit, not an action.
 
 ## 3. After every run: surface the signals
 
 Whenever you run the suite, or the developer shows you its output, check the
 output against **every row** of the signals table in the index and report each
 signal that is present, with the next step the documents prescribe. Report the
-result the way the running document says to (the counts it names), never an
-exit code on its own.
+result the way the running document says to, never as an exit code alone.
+
+If the output you have lacks the blocks the documents say a run prints — for
+example a CTest run that shows only pass/fail lines — obtain the full output
+the way the running document describes before concluding that no signal is
+present, and say that you did.
 
 Call out `unclaimed_support` explicitly every time it appears in a
 `SUPPORT CLAIM SUMMARY`, even when the run is green and even when the developer
-asked about something else. It is the one signal that never fails a run, so it
-is routinely missed. Name the engine, arch and platform from the summary's
-`run` block and the bundles and cases listed, and point the developer at the
-documented procedure for updating the sidecars.
+asked about something else. Name the engine, arch and platform from the
+summary's `run` block and the bundles and cases listed, and point the developer
+at the documented procedure for updating the sidecars.
 
 ## 4. Keep this skill hollow
 

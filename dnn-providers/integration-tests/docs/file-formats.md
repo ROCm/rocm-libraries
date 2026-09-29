@@ -30,14 +30,16 @@ dnn-providers/integration-tests/
 
 dnn-providers/<provider>/
   config/<ENGINE_NAME>.toml                 # per-engine tolerances, validator overrides, skips
-  test_categories_integration.yaml          # CTest tiers for hipdnn_integration_tests run against this provider
+  test_categories_integration.yaml          # CTest tiers for the lane (hip-kernel-provider: one
+                                            #   <ENGINE_NAME>_test_categories_integration.yaml per engine)
 ```
 
-Two words used throughout:
+Terms (full list in the [index](README.md#terms)):
 
 - A **bundle** is one graph plus everything that describes it. It is either a
-  **single-graph bundle** (one `{Name}.json`) or a **template-sweep bundle** (one
-  `graph.template.json` expanded once per case in `sweep.json`).
+  **single-graph bundle** (one `{Name}.json`) or a **sweep** (one
+  `graph.template.json` expanded once per case in `sweep.json`). "Bundle" covers
+  both.
 - A **case** is one registered test. A single-graph bundle is one case; a sweep is
   one case per `cases[]` entry.
 
@@ -62,12 +64,13 @@ segment is sanitized (any character other than `[A-Za-z0-9_]` becomes `_`):
 | Bundle kind | Suite | Test | Example full name |
 |---|---|---|---|
 | Single graph | relative directory, segments joined by `_` | file stem | `quick_BatchnormFwdInference_nchw_fp32_Small.Small` |
-| Sweep | sweep directory, segments joined by `_` | `cases[].id` | `quick_RMSNorm_Default.2_16_8_8_bfp16_nchw_772637` |
+| Sweep | sweep directory, segments joined by `_` | `cases[].id` | `quick_RMSNorm_Default.2_1_1_1_bfp16_nchw_fa8ec9` |
 
 So the tier directory is always the suite prefix (`quick_*`, `standard_*`, …),
 which is what the tier YAML files match on. Two bundles that sanitize to the same
-full name abort registration with `Bundle name collision`, naming both paths. A
-bundle placed directly in the data root (no sub-folder) is rejected.
+full name abort registration with `Bundle name collision`, naming both paths.
+Keep every bundle under a tier directory: a graph placed directly in the data
+root registers under the root folder's name and matches no tier.
 
 Discovery imposes no folder schema beyond that; the
 `{tier}/{Op}/{Layout}/{DataType}/{Name}` convention below is a convention, kept
@@ -112,7 +115,7 @@ tensor *name* (`RMSNorm_0::Y`), and names survive capture where uids may not.
 
 **Path convention:** `{tier}/{Op}/{Layout}/{DataType}/{Name}/{Name}.json`, where
 `Layout` is `nchw`/`nhwc`/`ncdhw`/`ndhwc` (SDPA uses `bhsd`) and `DataType` is
-`fp16`/`fp32`/`bfp16`/`fp8`/`int8` (SDPA uses `bf16`).
+`fp16`/`fp32`/`bfp16`/`fp8`/`int8` (SDPA writes bfloat16 as `bf16`).
 
 ## Template-sweep bundle — `graph.template.json` + `sweep.json`
 
@@ -138,14 +141,17 @@ replaced — there is no substitution inside a longer string.
 
 Resolution rules (`IntegrationTestBundle.hpp`):
 
-- Inside a tensor object, a placeholder is looked up first in that tensor's
-  entry in the case's `values.tensors[]` (matched by `uid`), then in the
-  case-wide `values`.
-- `dims`, `strides` and `data_type` **must** come from the per-tensor entry;
-  a case-wide fallback for those three is an error.
+- Inside any object that has an integer `uid` (a tensor), a placeholder is
+  looked up first in that uid's entry in the case's `values.tensors[]`, then in
+  the case-wide `values`.
+- Placeholders named `${case.dims}`, `${case.strides}` or `${case.data_type}`
+  inside such an object **must** resolve from the per-tensor entry; a case-wide
+  fallback for those three is an error. Other names (`${case.io_data_type}`)
+  may fall back.
 - `<path>` may be a dotted path into a nested object in `values`.
-- A placeholder with no value is a load error for that case. A `values` key that
-  no placeholder used is a warning (`Unused sweep value '…'`).
+- A placeholder with no value makes that case fail to load (it is dropped from
+  registration with an `ERROR` log line). A `values` key that no placeholder
+  used is a warning (`Unused sweep value '…'`).
 
 ### `sweep.json`
 
@@ -185,9 +191,10 @@ Resolution rules (`IntegrationTestBundle.hpp`):
 Case ids are handles, not descriptions. `import_graph.py` generates them as
 `{shape}_{dtype}_{layout}_{≤3 salient attrs}[_{hash6}]`; the `hash6` suffix is
 added only when the readable part is not already unique.
-**Do not hand-write a `sweep.json`**, and do not rename ids casually:
-support-claim sidecars and the `ffm-quick` tier in provider YAML files name
-cases by id.
+**Do not author cases by hand** — generate them with `import_graph.py` (see
+[Adding Tests](adding-tests.md#add-a-bundle)). Editing a field of an existing
+case, such as adding its `golden` pointer, is fine. Do not rename ids casually:
+support-claim sidecars, and miopen-provider's `ffm-quick` tier, name cases by id.
 
 #### `tensor_patches`
 
@@ -221,10 +228,15 @@ required on every case. Parsed by `src/harness/BundleMetadata.hpp`.
 | `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. |
 | `generator`, `generator_version`, `generated_at`, `reference_source`, `reference_source_hash`, `reference_strategy`, `rocm_version`, `operation`, `generation_command`, `notes` | string | Provenance only; no effect on the run. |
 
-A bundle without its metadata is an error. `format_version` is the only field
-the parser itself requires; record the provenance fields too, so a reviewer can
-tell where the graph came from. Generators may write extra keys (`config`,
-`input_range`, …); the harness ignores keys it does not know.
+A bundle without its metadata is an error. Required fields:
+
+- `format_version` (`1`) — the harness rejects the metadata without it.
+- `generator` and `reference_source`, non-empty — required by
+  `reference-data-scripts/verify_golden_bundles.py`, so a reviewer can tell
+  where the graph and its expected values came from.
+
+Generators may write extra keys (`config`, `input_range`, …); the harness
+ignores keys it does not know.
 
 ## Golden data — `.tensors.dvc` and `.bin`
 
@@ -273,37 +285,60 @@ stopped supporting this graph" from a skip nobody reads into a test failure.
 | Single graph `dir/Small.json` | `dir/Small.support.json` | `claims: { ENGINE: { arch: [platforms] } }` |
 | Sweep `dir/sweep.json` | `dir/support.json` (one file for the whole sweep) | `claims: { ENGINE: [ { cases: [ids], support: { arch: [platforms] } } ] }` |
 
-Single graph (`quick/BatchnormFwdInference/nchw/bfp16/Small/Small.support.json`):
+Single graph (`quick/BatchnormFwdInference/nchw/bfp16/Small/Small.support.json`,
+one of its two engines shown), in the exact on-disk form:
 
 ```json
 {
   "claims": {
     "HIP_MLOPS_ENGINE": {
-      "gfx1151": ["windows"],
-      "gfx90a": ["linux"],
-      "gfx942": ["linux"]
+      "gfx1151": [
+        "windows"
+      ],
+      "gfx90a": [
+        "linux"
+      ],
+      "gfx942": [
+        "linux"
+      ]
     }
   },
   "version": 1
 }
 ```
 
-Sweep (`quick/RMSNorm/Default/support.json`, abbreviated):
+Sweep (`quick/Layernorm/Variant2/support.json`, case list shortened):
 
 ```json
 {
   "claims": {
     "HIP_MLOPS_ENGINE": [
       {
-        "cases": ["2_1_1_1_bfp16_nchw_fa8ec9", "2_3_4_4_fp32_nhwc_970649"],
-        "support": { "gfx1151": ["windows"], "gfx90a": ["linux"], "gfx942": ["linux"] }
-      },
-      {
-        "cases": ["runtime_epsilon"],
-        "support": { "gfx1151": ["windows"] }
+        "cases": [
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count1",
+          "2_2_3_2_2_bfp16_ncdhw_normalized_dim_count2"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
       }
     ]
   },
+  "version": 1
+}
+```
+
+A bundle nothing is claimed for yet (see
+[Adding Tests](adding-tests.md#when-no-engine-accepts-the-graph-yet)):
+
+```json
+{
+  "claims": {},
   "version": 1
 }
 ```
@@ -317,27 +352,34 @@ Rules:
   first `:` — and matches exactly. `gfx942` covers `gfx942:sramecc+:xnack-`; it
   does not cover `gfx940`, and there are no family wildcards.
 - **Platform** is `linux` or `windows`.
-- In a sweep sidecar a case id may appear in at most one group per engine.
-  `--write-support-claims` groups cases whose `support` maps are identical. A
+- In a sweep sidecar a case id may appear in at most one group per engine. A
   case named in no group is simply unclaimed.
 - **Every bundle has a sidecar.** A sidecar claims nothing about engines, archs
   or platforms it does not list; the absence of a claim is not a claim of
-  non-support. A bundle that no engine accepts yet still carries a sidecar with
-  an empty `claims` object — see
-  [Adding Tests](adding-tests.md#when-no-engine-accepts-the-graph-yet).
-- Sidecars are **machine-written** by `--write-support-claims`, which emits a
-  canonical form (sorted keys, 2-space indent, trailing newline, LF line
-  endings). The pre-commit verifier rejects anything else, so hand edits are
-  limited to *retracting* a claim or writing an empty sidecar — and then must
-  keep that exact form.
+  non-support. A bundle that no engine accepts yet carries the empty sidecar
+  above. A bundle with **no** sidecar is invisible to the claim machinery: no
+  verdict, not even `unclaimed_support`.
+- Sidecars are **machine-written** by `--write-support-claims`. Its form is
+  stricter than JSON validity: sorted keys, 2-space indent, one array element
+  per line, trailing newline, LF line endings; platforms and case ids sorted;
+  one group per identical `support` map, groups ordered by their first case id.
+  The verifier rejects anything that is not `json.dumps(…, indent=2,
+  sort_keys=True)` output, and the writer rewrites anything not in its own form
+  on its next run. So hand edits are limited to *retracting* a claim or writing
+  an empty sidecar, in exactly that form.
 
-The pre-commit hook `verify-support-claims`
-(`scripts/verify_support_claims.py`) runs on any change under
-`integration-test-bundles/` and checks: the schema; canonical form; that every
+`scripts/verify_support_claims.py` checks: the schema; canonical form; that every
 claimed sweep case id exists in the sibling `sweep.json`; that no id repeats per
-engine; that claim-bearing graphs do not declare an unknown
+engine; that graphs with non-empty claims do not declare an unknown
 `enforcement_level`; and that no sidecar is orphaned (a `X.support.json` with no
-`X.json`, or a `support.json` outside a sweep root).
+`X.json`, or a `support.json` outside a sweep root). It is registered as the
+`verify-support-claims` pre-commit hook, but the repository's pre-commit
+configuration currently excludes `integration-test-bundles/` from every hook,
+so **run it by hand** after changing sidecars or sweeps:
+
+```bash
+python dnn-providers/integration-tests/scripts/verify_support_claims.py
+```
 
 How claims are checked during a run, and every verdict a run can report, is in
 [Running the Tests](running-tests.md#support-claim-summary). The harness
@@ -385,10 +427,14 @@ reason    = "ROCm/rocm-libraries#6979 - no engine has an applicable solution"
 | `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose` or `rms`; `rms_threshold` is required and positive for `rms`, forbidden for `allclose`. **Later entries win.** Allclose is the default everywhere; this table is the only thing that changes it, and is meant for outputs where per-element comparison is the wrong question (long reductions), not for buying slack. |
 | `[[test_skips]]` | `filters` and `reason` are required. **The first matching entry wins** — the opposite order from the two tables above. `archs` is a substring match against the raw `gcnArchName` (so `gfx11` covers `gfx1100` and `gfx1151`); `platforms` is `linux` / `windows`. The skip message is `[arch <current gcnArchName>] <reason>`. |
 
-`filters` are POSIX-style globs (`*` and `?`) matched against the full GTest name
-— the same string `--gtest_filter` matches, but not `--gtest_filter` syntax:
-`:` does not separate alternatives and a leading `-` does not negate. Use one
-array element per pattern.
+`filters` are globs matched against the full GTest name — the same string
+`--gtest_filter` matches, but not `--gtest_filter` syntax: `:` does not separate
+alternatives and a leading `-` does not negate. Use one array element per
+pattern, and only `*` and `?` as wildcards: Linux matches with `fnmatch`
+(case-sensitive), Windows with `PathMatchSpecA` (case-insensitive).
+
+A `validator = "rms"` entry whose globs catch an integer output fails that
+tensor with a message naming the glob; narrow it to float outputs.
 
 The TOML applies to bundle and C++ graph tests alike. It never applies to
 `hipdnn_golden_data_tests`: an engine's config describes how far that engine may
@@ -407,9 +453,9 @@ is the reference for the format. Three scopes exist and are easy to confuse:
 
 | File | Governs |
 |---|---|
-| `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries (`hipdnn_integration_tests_unit_tests`, `hipdnn_gpu_ref_tests`) |
+| `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries (`hipdnn_integration_tests_unit_tests`, `hipdnn_gpu_ref_tests`, `hipdnn_golden_data_tests`) |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` | `hipdnn_integration_tests` **run against that provider's plugin** — i.e. the bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.
@@ -439,23 +485,33 @@ execution_settings:
   its `labels`.
 - Tier inclusion is written out, not inherited: in the provider files the
   `standard` category lists the quick patterns *and* the standard ones. Labels
-  do not cascade on their own; check the file you are editing.
-- `exclude_gpu_<arch>[_windows|_linux]` adds negative patterns for the named
-  categories and an `ex_gpu_<arch>` label. A match-everything pattern (`"*"`)
-  cannot be expressed as a gtest filter, so that suite is registered
-  `DISABLED` and never launched. Suites are generated per `ex_gpu_*` label
-  declared in the file, not for the arch you are building.
-- `ffm-quick` lists exact test names (sweep case ids). Regenerating a sweep can
-  rename those ids and silently shrink the tier.
+  do not cascade on their own; check the file you are editing. What each
+  provider tier selects is tabulated in
+  [Running the Tests](running-tests.md#test-tiers).
+- Keep `Smoke/*` and `Quick/*` in a provider's quick tier even on a default
+  build: the always-built C++ tests register under those prefixes, and the
+  C++ graph tests do too when a branch builds them.
+- `exclude_gpu_<arch>[_windows|_linux]` adds a per-arch variant suite
+  (`<prefix>_<category>_<arch>_suite`, label `ex_gpu_<arch>`) carrying that
+  arch's negative patterns. A match-everything pattern (`"*"`) cannot be
+  expressed as a gtest filter, so that variant is registered `DISABLED` and
+  never launched. Variants are generated per `ex_gpu_*` label declared in the
+  file, not for the arch you are building; you select one with
+  `ctest -L ex_gpu_<arch>`.
+- miopen-provider's `ffm-quick` lists exact test names (sweep case ids).
+  Regenerating a sweep can rename those ids and silently shrink that tier.
 
 ## Where each format is enforced
 
 | Format | Parsed / checked by | When it fails |
 |---|---|---|
-| Graph `.json` | `IntegrationTestBundle.hpp` | Load error for that case |
-| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or bad/duplicate id aborts registration; a bad case fails that case only |
-| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp` | Required for every bundle and every sweep case; a missing file or block is an error |
-| `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` at commit | Required for every bundle; a missing sidecar is an error. A broken claim fails the test at run time; a malformed sidecar is rejected at commit |
+| Graph `.json` | `IntegrationTestBundle.hpp` | Case dropped from registration with an `ERROR` log line; the run stays green with one test fewer |
+| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph |
+| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for every bundle and every sweep case, with `generator` and `reference_source`; a missing file or block is an error |
+| `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for every bundle; a missing sidecar is an error. A broken claim fails the test at run time |
 | Golden `.bin` / `.dvc` | `IntegrationTestBundle.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Falls back to a reference in `auto` mode; fails in `golden` mode |
 | Engine `.toml` | `TestSettings.hpp` | Binary exits 1 at startup |
-| `test_categories*.yaml` | `shared/ctest/parse_test_categories.py` | CMake configure error |
+| `test_categories*.yaml` | `shared/ctest/parse_test_categories.py` | CMake **warning** at configure; that target's tier suites are not generated, so `ctest -L <tier>` quietly runs less. Check the configure log or `ctest -N -L <tier>` |
+
+The only load problem that registers a *failing* test is a tensor marked
+`is_runtime_pass_by_value` that still carries a baked `value`.
