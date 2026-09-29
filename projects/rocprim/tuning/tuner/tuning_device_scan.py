@@ -46,6 +46,7 @@ class Tuner(BaseTuner):
         params["block_load_method"] = ["::rocprim::block_load_method::block_load_transpose"]
         params["block_store_method"] = ["::rocprim::block_store_method::block_store_transpose"]
         params["block_scan_algo"] = ["::rocprim::block_scan_algorithm::using_warp_scan", "::rocprim::block_scan_algorithm::reduce_then_scan"]
+        params["lookback_scan_state_alignment"] = [0, 64, 128]
 
         return params
 
