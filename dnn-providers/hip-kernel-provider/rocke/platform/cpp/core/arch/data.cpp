@@ -968,6 +968,10 @@ int rocke_arch_mma_c_frag_len(const char* op_id)
  *   family, a_dtype, b_dtype, c_dtype, m, n, k, op_id,
  *   a_frag_len, b_frag_len, c_frag_len, wave_size, a_layout, b_layout, c_layout
  *
+ * The trailing scale fields and d_dtype are left to zero-init below: every atom
+ * here is unscaled unless it spells its scale metadata, and every one produces
+ * the dtype it accumulates (d_dtype NULL => D == C, see rocke_arch_mma_op_d_dtype).
+ *
  * Low-bit spellings normalize to explicit exponent/mantissa catalog keys.
  */
 

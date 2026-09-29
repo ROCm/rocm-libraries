@@ -160,6 +160,12 @@ class MmaOp:
     from ``(op_id, family, shape)`` at load time via :data:`_MMA_FRAGMENT_INFO`;
     op_ids without verified layout maps still carry frag lengths but raise from
     the accessor until a map is added.
+
+    ``c_dtype`` is the **accumulator input**; :attr:`result_dtype` is what the
+    atom **produces**. Every atom the catalog ships today accumulates and
+    produces the same dtype, so ``d_dtype`` is ``None`` on all of them and
+    :attr:`result_dtype` falls back to ``c_dtype``. The two are named apart so
+    an atom whose D differs from its C needs no schema change to represent.
     """
 
     family: str  # "mma" | "wmma" | "wmma_scaled"
@@ -170,6 +176,11 @@ class MmaOp:
     n: int
     k: int
     op_id: str
+    # The result dtype, when it differs from the accumulator. ``None`` means
+    # "same as c_dtype". It trails ``op_id`` rather than sitting next to
+    # ``c_dtype`` because a defaulted dataclass field may not precede a
+    # required one; read it through :attr:`result_dtype`, never directly.
+    d_dtype: Optional[str] = None
     a_frag_len: int = 0
     b_frag_len: int = 0
     c_frag_len: int = 0
@@ -219,6 +230,11 @@ class MmaOp:
     @property
     def shape(self) -> Tuple[int, int, int]:
         return (self.m, self.n, self.k)
+
+    @property
+    def result_dtype(self) -> str:
+        """The dtype this atom produces (D), defaulting to the accumulator (C)."""
+        return self.d_dtype or self.c_dtype
 
     # --- physical-layout accessors ---------------------------------------
     def a_layout(self) -> LayoutMap:
@@ -1166,6 +1182,36 @@ def _op_id_c_dtype() -> Dict[str, str]:
 
 
 @lru_cache(maxsize=1)
+def _op_id_d_dtype() -> Dict[str, str]:
+    """``op_id -> normalized result dtype``, the D twin of :func:`_op_id_c_dtype`.
+
+    A catalog row without an explicit ``"d"`` key contributes its accumulator
+    dtype, because C doubles as the result for every atom shipped today; the
+    key is only spelled when an atom's D differs from its C. Same first-hit and
+    raise-on-drift contract as the C lookup — an op_id names a specific atom, so
+    its result dtype must be invariant across the arches listing it. Mirrored by
+    ``rocke_arch_mma_op_id_d_dtype`` in ``query.cpp``.
+    """
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            op_id = o["op_id"]
+            d = normalize_dtype(o.get("d", o["c"]))
+            prev = out.get(op_id)
+            if prev is None:
+                out[op_id] = d  # first hit wins
+            elif prev != d:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
+                    f"inconsistent result dtype across arches ({prev!r} vs {d!r}). "
+                    f"An op_id names a specific atom, so its result dtype must be "
+                    f"invariant across the arches that list it; fix the catalog so "
+                    f"every row agrees."
+                )
+    return out
+
+
+@lru_cache(maxsize=1)
 def _op_id_family() -> Dict[str, str]:
     """Resolve operation families without selecting a target or parsing IDs."""
     out: Dict[str, str] = {}
@@ -1197,6 +1243,9 @@ def _build_mma_op(o: dict) -> MmaOp:
         a_dtype=normalize_dtype(o["a"]),
         b_dtype=normalize_dtype(o["b"]),
         c_dtype=normalize_dtype(o["c"]),
+        # Absent "d" leaves d_dtype None, i.e. D == C. Spell "d" in the catalog
+        # only for an atom whose result dtype differs from its accumulator.
+        d_dtype=normalize_dtype(o["d"]) if "d" in o else None,
         m=o["m"],
         n=o["n"],
         k=o["k"],

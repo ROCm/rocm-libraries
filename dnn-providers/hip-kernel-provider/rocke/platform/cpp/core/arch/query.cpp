@@ -419,6 +419,40 @@ const char* rocke_arch_mma_op_id_c_dtype(const char* op_id)
     return NULL;
 }
 
+const char* rocke_arch_mma_op_d_dtype(const rocke_mma_op_t* op)
+{
+    /* Mirrors MmaOp.result_dtype: a NULL d_dtype means "same as c_dtype",
+     * which holds for every atom in the shipped catalog. */
+    if(!op)
+    {
+        return NULL;
+    }
+    return op->d_dtype ? op->d_dtype : op->c_dtype;
+}
+
+const char* rocke_arch_mma_op_id_d_dtype(const char* op_id)
+{
+    int i;
+    if(!op_id)
+    {
+        return NULL;
+    }
+    /* The D twin of rocke_arch_mma_op_id_c_dtype, mirroring
+     * target._op_id_d_dtype()[op_id]: same first-hit-wins contract, and a row
+     * that leaves d_dtype NULL contributes its accumulator dtype. Op_ids absent
+     * from every catalog return NULL. */
+    for(i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_arch_target_t* t = rocke_ati_arch_registry[i].target;
+        const rocke_mma_op_t* op = t ? rocke_mma_catalog_by_op_id(&t->mma, op_id) : NULL;
+        if(op)
+        {
+            return rocke_arch_mma_op_d_dtype(op);
+        }
+    }
+    return NULL;
+}
+
 /* ============================== arch target =========================== */
 
 const rocke_arch_target_t* rocke_arch_target_from_gfx(const char* gfx)
