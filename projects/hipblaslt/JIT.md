@@ -81,32 +81,32 @@ adaptation token, not a general owning executable object.
 
 | Component | Current input, output and connection |
 | --- | --- |
-| One-solution builder | One recipe and target produce complete main/helper artifacts through `Tensile.SingleSolution` and the existing TensileLite generators, validators and compiler tools. |
-| Ranked recipe selector | Supplied candidates and problem facts produce one validated recipe or rejection reasons. `Tensile.JitGemm` calls the builder without running a model. |
+| One-solution builder | One recipe and target produce a source bundle through `Tensile.SingleSolution --source-only` and the existing TensileLite generators and validators: the main kernel assembly, the helper HIP source and its headers, and the one-solution library entry. It builds no code objects in this mode. |
+| Ranked recipe selector | Supplied candidates and problem facts produce validated recipes or rejection reasons. `Tensile.JitGemm` calls the builder without running a model, and publishes the first `requested_solutions` accepted candidates (default 1) that `exclude_kernel_names` does not name. |
 | Jit | `hipblaslt-jit-component.{hpp,cpp}`. For one request and device target, `Jit::generate` runs the predictor when the backend consumes a prediction, asks the backend for solutions in a private scratch directory, builds each solution's code objects, checks support, and loads the supported ones as process-local bundles. With a solution store, it publishes them instead and loads them only when publishing fails; no store is configured yet. Each failure records its stage (configure, predict, generate, build, support, load or publish), and `getJitAlgo` reports the first one. The scratch directory is removed on success and kept after a failure that left files in it. |
-| TensileLite backend | `hipblaslt-jit-tensilelite.cpp`. It writes the `Tensile.JitGemm` request from the prediction, or passes an explicit recipe through, runs the generator, and returns the bundle's one-solution library entry and code objects. It loads nothing. |
+| TensileLite backend | `hipblaslt-jit-tensilelite.cpp`. It writes the `Tensile.JitGemm` request from the prediction, or passes an explicit recipe through, runs the generator with `--source-only`, and returns each published bundle's library entry, main kernel assembly and helper source. It builds and loads nothing. |
 | Origami predictor | `hipblaslt-jit-origami-predictor.cpp` expands the tuning knowledge's candidate seeds across the target's matrix instructions, ranks them with Origami, and emits the `origami.gemm.dp.v1` modeled contract (workgroup mapping, stagger and launch outputs) that the TensileLite backend forwards to `Tensile.JitGemm`. Jit runs it only when no explicit recipe is configured. |
 | TensileLite defaults | `hipblaslt-jit-tensilelite-defaults.cpp` is the tuning knowledge: 11 tile shapes, two DepthU rules, and cache hints that are only the defaults on gfx90a and gfx1250. It supplies no values for unmodeled knobs, which keep Tensile's defaults. |
-| Builder and loader | `hipblaslt-jit-loader.cpp`. The prebuilt builder accepts the code objects the generator already built. The Tensile loader parses the entry, checks support and workspace with TensileLite's predicates, and loads the code objects into a `TensileBundle`. |
+| Code-object builder | `hipblaslt-jit-builder.cpp` over `hipblaslt-jit-code-object.cpp`. The comgr builder assembles the main kernels, compiles the helper source and links both into one raw executable code object for the device's target ID, then checks that the object targets that ID and defines the entry's kernel. See [code-object construction with comgr](#code-object-construction-with-comgr). |
+| Loader | `hipblaslt-jit-loader.cpp`. It reads source bundles by directory convention for the backends. The Tensile loader parses the entry, checks support and workspace with TensileLite's predicates, and loads the code object into a `TensileBundle`. |
 | Direct entry point and test | An explicit recipe and GEMM descriptors produce a checked algorithm. `hipblaslt-jit-direct-gemm-test` exercises C/C++ execution independently of the generic entry point. |
 | Generic entry point and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect Jit to existing execution. `hipblaslt-jit-generic-gemm-test` covers this flow. |
 | Benchmark | `hipblaslt-bench --jit-gemm` uses the generic TensileLite backend with prediction, completing selection and compilation before correctness checks and execution timing. It includes the internal headers until step 5 removes the option. See the [benchmark guide](clients/bench/README.jit.md). |
-| Mock backend | `hipblaslt-jit-mock-backend.cpp` replays one bundle that `Tensile.SingleSolution` wrote, without Python or a subprocess, for problems that the replayed solution's predicates accept. Its faults fail generation, truncate the main code object so the build fails, or abort the process. Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`; it is not a production backend. |
+| Mock backend | `hipblaslt-jit-mock-backend.cpp` replays one source bundle that `Tensile.SingleSolution` or `Tensile.JitGemm` wrote, without Python or a subprocess, for problems and devices that the replayed solution's predicates accept; the comgr builder still builds it. Its faults fail generation, replace the main kernel assembly with an invalid instruction so the build fails, or abort the process. Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`; it is not a production backend. |
 
 The host runs the Python generator as a child process: POSIX spawning on Linux
-and `CreateProcessW` on Windows. `Tensile.SingleSolution` assembles and links
-the main kernel and compiles helper source with the configured compiler and
-offload-bundler paths, then publishes a bundle containing the serialized
-solution library, manifest, private loader envelope and code objects. The host
-loads the serialized library and every listed code object, checks support and
-workspace with TensileLite's predicates, and resolves every helper symbol before
-returning an algorithm.
+and `CreateProcessW` on Windows. With `--source-only`, `Tensile.SingleSolution`
+writes the main kernel assembly, the helper HIP source and headers, and the
+serialized one-solution library, and publishes them as a source bundle with a
+provenance manifest. The host reads the bundle, builds one code object with
+comgr, checks support and workspace with TensileLite's predicates, and resolves
+the helper symbols before the first submission.
 
 With `createBackend`, an empty `Options::configPath` makes Jit run the Origami
 predictor before generation. The selector validates ranked candidates
-in order and compiles the first supported recipe. It does not benchmark
-candidates or invent a recipe when selection fails. The direct entry point always
-requires an explicit recipe.
+in order and publishes the first supported recipe, or the first N when Jit asks
+for N solutions. It does not benchmark candidates or invent a recipe when
+selection fails. The direct entry point always requires an explicit recipe.
 
 ### Origami modeled inputs
 
@@ -182,7 +182,10 @@ or by default for eligible block-scaled problems), `getBestSolutions` and
 ### Build
 
 `HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles and
-exports no JIT entry points. The enabled implementation requires the host library and ROCm. The TensileLite
+exports no JIT entry points. The enabled implementation requires the host
+library, ROCm and ROCm's `amd_comgr` CMake package, which only a JIT build
+links. comgr compiles the helper source against the host's C and C++ standard
+library headers, so those must be installed where JIT runs. The TensileLite
 backend also requires its Python dependencies and the local rocisa extension.
 Additional Python import paths use the platform separator (`:` or `;`). From the
 repository root, with a Python environment that has the TensileLite
@@ -238,11 +241,16 @@ library propagates support failures, including a mismatch between the
 supplied physical MX scale layout and the compiled solution. Generation never
 benchmarks recipes or substitutes another recipe when the supplied one fails.
 
-The private loader reads `loader.bin`, a bounded, versioned envelope published
-alongside the human-readable `manifest.json`. JavaScript Object Notation (JSON)
-is a diagnostic record. `clients/tests/jit/test_helper_failures.py` and
-`test_bundle_failures.py` damage valid bundles and check that the public C and
-extension paths reject them without writing output or workspace.
+hipBLASLt reads a source bundle by directory convention:
+`library/TensileLibrary.*` is the one-solution entry, `sources/*.s` are the
+main kernels, `sources/Kernels.cpp` holds the helper kernels, and the other
+files in `sources/` are the headers it includes. The file count and sizes are
+bounded, and symbolic links must stay inside the bundle. The JavaScript Object
+Notation (JSON) `manifest.json` is a provenance record that hipBLASLt does not
+read. `clients/tests/jit/test_helper_failures.py` and `test_bundle_failures.py`
+damage valid bundles and check that the public C and extension paths reject
+them without writing output or workspace. A failed build names the retained
+`comgr.log` in its message.
 
 ### Validation
 
@@ -355,20 +363,35 @@ tuning data is later work, listed under [future work](#roadmap).
 ### Code-object construction with comgr
 
 Generators emit assembly or HIP source plus metadata only; they do not assemble,
-link or bundle. hipBLASLt C++ builds code objects in process through AMD comgr,
-adapted from rocRoller's `InProcessAssembler`
-(`shared/rocroller/lib/source/Assemblers/InProcessAssembler.cpp`):
+link or bundle. hipBLASLt C++ builds code objects in process through AMD comgr
+(`hipblaslt-jit-code-object.cpp`), adapted from rocRoller's `InProcessAssembler`
+(`shared/rocroller/lib/source/Assemblers/InProcessAssembler.cpp`), as roadmap
+step 3 describes. The builder uses three comgr actions:
 
-- Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`, then
-  `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE`.
-- HIP helper source: comgr HIP compilation.
+- Assembly: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`, after the
+  `.amdgcn_target` directive is rewritten to the device's full target ID.
+- HIP helper source: `AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE` with
+  `--rocm-path` and a content-derived `-cuid`, so helper objects link together.
+- Link: `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE` joins the main kernel
+  and helper relocatables into one code object per solution, with
+  `-Xlinker --build-id=sha1`.
 
-The output is raw, uncompressed executable code objects. comgr cannot bundle or
-compress them, and `hipModuleLoad` accepts raw executable and linkable format
-(ELF) objects. hipBLASLt disables comgr's own on-disk cache (`~/.cache/comgr`)
-for these builds, so the JIT solution library is the only persistent cache of
-generated code. With this step, the generator does not need the compiler and
-offload-bundler paths that it uses today.
+The generator and the builder use the same code-object version, which
+`GenerationRequest::codeObjectVersion` carries (4 by default). The output is a
+raw, uncompressed executable code object. comgr cannot bundle or compress it,
+and `hipModuleLoadData` accepts raw executable and linkable format (ELF)
+objects. The generator receives the compiler path, which TensileLite uses to
+probe assembler capabilities, and needs no offload bundler.
+
+comgr's own on-disk cache (`~/.cache/comgr`) and the JIT solution library serve
+different purposes, so hipBLASLt turns the comgr cache off for JIT builds.
+When `HIPBLASLT_JIT` is `1` or `2` and `AMD_COMGR_CACHE` is unset, hipBLASLt
+sets `AMD_COMGR_CACHE=0` when the library is loaded, and again before its first
+build for a mode set after load. It never overwrites a value the user set. comgr
+reads `AMD_COMGR_CACHE` and its cache directory once, at the first cached
+action of any comgr user in the process, so the setting applies to hipRTC and
+rocRoller in that process too, and a value set after that action has no effect.
+The builder logs which case applied at info level.
 
 ### JIT solution library
 
@@ -398,11 +421,11 @@ separate mechanisms.
 ### Tool paths
 
 Generation needs the Python interpreter, the TensileLite source directory and
-its import paths and, until step 3, the compiler and offload bundler. Their
-locations become build-time defaults baked into the library. The existing
-`HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
-`HIPBLASLT_JIT_PYTHONPATH`, `HIPBLASLT_JIT_CXX` and
-`HIPBLASLT_JIT_OFFLOAD_BUNDLER` environment variables override them. Today only
+its import paths, and the compiler that TensileLite uses to probe assembler
+capabilities. Their locations become build-time defaults baked into the
+library. The existing `HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
+`HIPBLASLT_JIT_PYTHONPATH` and `HIPBLASLT_JIT_CXX` environment variables
+override them. Today only
 `hipblaslt-bench` bakes these defaults and reads the overrides. A heuristic query
 has no application `Options`, so the library must own them.
 
@@ -475,7 +498,7 @@ each step advances.
 | --- | --- | --- | --- |
 | 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | Backend interface |
 | 2. Jit component and interfaces | Done | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
-| 3. comgr code-object builder | Planned | Build code objects in hipBLASLt through comgr, adapted from rocRoller's `InProcessAssembler`. TensileLite emits only assembly, helper source and metadata. | Backend interface |
+| 3. comgr code-object builder | Done | hipBLASLt builds one code object per solution through comgr, adapted from rocRoller's `InProcessAssembler`, linking the main kernel assembly and the helper HIP source together. With `--source-only`, TensileLite emits only assembly, helper source and metadata, and `Tensile.JitGemm` can publish several ranked bundles. hipBLASLt disables the comgr cache when `HIPBLASLT_JIT` is `1` or `2`. | Backend interface |
 | 4. JIT solution library | Planned | Per-`ProblemType` library under `HIPBLASLT_JIT_LIBRARY_PATH`, merged under a file lock with atomic rename, loaded as a second master library, with reserved solution indices. | JIT solution library (cache) |
 | 5. Heuristic integration | Planned | Add `HIPBLASLT_JIT` modes 0, 1 and 2 to `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`, with the fallback order and failure rules above. Bake the tool-path defaults into the library, warn once when a JIT-off build sees `HIPBLASLT_JIT`, and remove `hipblaslt-bench --jit-gemm`. | JustInTime library type; backend interface |
 | 6. Validation sweep | Planned | Rerun the shared JIT driver and add heuristic, cache and mode coverage. | Overall JIT validation |

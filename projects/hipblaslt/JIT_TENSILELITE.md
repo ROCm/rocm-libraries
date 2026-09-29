@@ -46,9 +46,11 @@ cmake --build "$project_build" --target _rocisa hipblaslt --parallel
 
 Generation needs a Python interpreter with the TensileLite dependencies and
 access to the checkout's TensileLite modules and built `rocisa` extension. Supply
-that interpreter and the compiler/offload-bundler paths through `Options`.
-The generated path loads its own code objects; it does not require a prebuilt
-hipBLASLt device library.
+that interpreter and the compiler path through `Options`; TensileLite uses the
+compiler only to probe assembler capabilities. hipBLASLt builds the code object
+in process with comgr, so the JIT build also needs ROCm's `amd_comgr` package
+(see [Build](JIT.md#build)). The generated path loads its own code object; it
+does not require a prebuilt hipBLASLt device library.
 
 A build with JIT disabled does not compile or export the entry point.
 
@@ -72,7 +74,6 @@ options.pythonPath             = additionalPythonPaths;
 options.configPath             = recipePath;
 options.outputPath             = freshOutputDirectory;
 options.cxxCompiler            = compilerPath;
-options.offloadBundler         = offloadBundlerPath;
 // An empty architecture uses the current device's architecture.
 
 hipblasLtMatmulHeuristicResult_t selected{};
@@ -137,18 +138,21 @@ before stream capture.
 
 ### Artifacts and failures
 
-The output directory contains `bundle/manifest.json`, the private loader
-envelope, the serialized solution library and all generated code objects.
+The output directory contains the source bundle `bundle/`: `library/` holds the
+serialized one-solution library, `sources/` holds the main kernel assembly and
+the helper HIP source with its headers, and `manifest.json` records provenance.
 Generator diagnostics remain in the sibling `<output>.log`; the child working
 directory is `<output>.cwd`. Use a new output path for another compilation.
 
 On failure, `getGemmAlgo` clears the result, sets `result.state`, and returns a
 status; `Diagnostics::message` provides details when available. A missing recipe
-is rejected before starting generation. The loader checks artifact identities
-and targets, and execution preparation resolves required helper symbols before
-submission. Invalid recipes, missing artifacts or unsupported problems produce a
-failure rather than an executable result. Empty output needs no GEMM algorithm
-and returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
+is rejected before starting generation. The bundle reader enforces containment
+and size limits. The builder checks that the code object targets the device and
+defines the entry's kernel; when comgr fails, the message names the `comgr.log`
+kept in the Jit scratch directory. Execution preparation resolves required
+helper symbols before submission. Invalid recipes, missing artifacts or
+unsupported problems produce a failure rather than an executable result. Empty
+output needs no GEMM algorithm and returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
 
 The direct entry point always requires a recipe. Origami prediction is available
 through `tensilelite::createBackend` when `Options::configPath` is empty; see
@@ -158,14 +162,18 @@ through `tensilelite::createBackend` when `Options::configPath` is empty; see
 
 `TensileLiteBackend` implements the Jit backend interface. Both entry points
 create it through `tensilelite::createBackend`, which configures a Jit with the
-Origami predictor, the TensileLite defaults as tuning knowledge, the prebuilt
+Origami predictor, the TensileLite defaults as tuning knowledge, the comgr
 builder and the Tensile loader. Without a recipe, the backend consumes the
 predictor's `origami.gemm.dp.v1` prediction and writes it as the
 `Tensile.JitGemm` request; with a recipe, Jit skips prediction and the backend
 passes the recipe to `Tensile.SingleSolution`. Knobs the model does not predict
-keep TensileLite defaults and derivation. The backend returns the bundle's
-one-solution library entry and code objects and loads nothing; the Tensile
-loader checks support and loads them.
+keep TensileLite defaults and derivation. Both run with `--source-only` and the
+code-object version of the Jit request. When Jit asks for more than one
+solution, the request adds `requested_solutions`, and `Tensile.JitGemm`
+publishes one bundle per accepted candidate as `bundle-<rank>`. The backend
+returns each bundle's one-solution library entry, main kernel assembly and
+helper source, and builds and loads nothing; the comgr builder builds one code
+object per solution, and the Tensile loader checks support and loads it.
 
 ## Planned changes
 
@@ -175,14 +183,13 @@ the roadmap step that changes it.
 | Concern | Current | Planned |
 | --- | --- | --- |
 | Entry point | Internal direct `tensilelite::getGemmAlgo` and `tensilelite::createBackend`, both used by tests and the benchmark. | Reached from the heuristic query. The headers remain for unit tests (step 5). |
-| Backend output | A complete bundle: `Tensile.SingleSolution` assembles, links and compiles code objects with the configured compiler and offload bundler. | Assembly, HIP helper source and metadata only. hipBLASLt builds raw, uncompressed code objects through AMD comgr (step 3). |
 | Persistence | Process-local; each program invocation compiles again. | Solutions are published into the per-`ProblemType` JIT solution library and reused across processes (step 4). |
 
 TensileLite remains one of several independent backends. rocRoller and
 HipKittens are future backends behind the same interface; they do not route
 through TensileLite. `Tensile.SingleSolution` and `Tensile.JitGemm` are the
 current Python entry points; the [single-solution guide](tensilelite/SINGLE_SOLUTION.md)
-describes them. Step 3 changes what the backend produces.
+describes them.
 
 [Validation](JIT.md#validation) describes the test coverage. Source support and
 cross-compilation do not establish numerical results on another GPU or native

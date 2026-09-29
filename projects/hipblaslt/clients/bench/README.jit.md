@@ -3,8 +3,9 @@
 `hipblaslt-bench --jit-gemm` generates a kernel for the requested matrix
 multiplication, then checks and times it through hipBLASLt. For problems covered
 by its GPU performance model, Origami ranks kernel parameter recipes.
-`Tensile.JitGemm` validates those recipes in order and asks `Tensile.SingleSolution` to compile the first
-valid solution, including any helper kernels it needs.
+`Tensile.JitGemm` validates those recipes in order and asks `Tensile.SingleSolution` to generate the
+first valid solution, including any helper kernels it needs, and hipBLASLt
+compiles it with comgr.
 
 Generation finishes before correctness checks, warmup, and timing. CPU timing
 still includes host dispatch for each GEMM. This feature targets functional
@@ -20,8 +21,10 @@ The components interact in this order:
    for ranked tuning parameters. Its private selection plan names the ranked
    request consumed by the builder.
 3. `Tensile.JitGemm` validates the supplied candidates, and `SingleSolution`
-   compiles the first valid one into a complete kernel/helper bundle.
-4. The generic result is adapted to a GEMM algorithm, then the benchmark's
+   writes the first valid one as a source bundle: main kernel assembly, helper
+   source and library entry.
+4. hipBLASLt builds the bundle into one code object with comgr and loads it.
+5. The generic result is adapted to a GEMM algorithm, then the benchmark's
    existing C or C++ execution path checks and times it.
 
 The benchmark does not own prediction policy or launch generated code directly.
@@ -35,7 +38,8 @@ them.
 JIT GEMM is a build-time opt-in feature enabled by
 `HIPBLASLT_ENABLE_JIT=ON`. Building `hipblaslt-bench` also requires
 `HIPBLASLT_ENABLE_CLIENT=ON`. The [JIT build instructions](../../JIT.md#build)
-describe the required host library, Python dependencies, and compiler setup.
+describe the required host library, comgr, Python dependencies, and compiler
+setup.
 The JIT path does not require a prebuilt hipBLASLt device library.
 
 ```bash
@@ -125,10 +129,13 @@ combination does not create a tuning file.
 Each request retains its generated files in a fresh temporary directory.
 `--jit-output-dir /path/to/artifact-parent` chooses the parent directory.
 The recipe, manifest path, and prediction summary are printed to stderr;
-result CSV is printed to stdout. Compiler and generator diagnostics are kept
-in the generator log. The manifest also records rejected recipes and all code
-objects belonging to the chosen solution. Invalid recipes are skipped before
-compilation; a compiler or resource failure ends the request.
+result CSV is printed to stdout. Generator diagnostics are kept in the
+generator log. The artifact directory holds the chosen solution's source
+bundle: its library entry, main kernel assembly and helper source, which
+hipBLASLt builds into one code object with comgr. The manifest also records
+rejected recipes and the sources belonging to the chosen solution. Invalid
+recipes are skipped before compilation; a build or resource failure ends the
+request, and a comgr failure names its retained log.
 
 Repeated GEMM calls reuse the generated algorithm without compiling again.
 The algorithm and its loaded modules remain registered until process exit and
@@ -138,10 +145,10 @@ reproduce a recipe; the opaque algorithm value and its index cannot be saved
 as a reusable library entry.
 
 CMake selects the Python interpreter, TensileLite source and rocisa import
-paths, compiler, and offload bundler. The environment variables
-`HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`,
-`HIPBLASLT_JIT_PYTHONPATH`, `HIPBLASLT_JIT_CXX`, and
-`HIPBLASLT_JIT_OFFLOAD_BUNDLER` override those paths for local development.
+paths, and the compiler that TensileLite uses to probe assembler capabilities.
+The environment variables `HIPBLASLT_JIT_PYTHON`,
+`HIPBLASLT_JIT_TENSILE_SOURCE`, `HIPBLASLT_JIT_PYTHONPATH`, and
+`HIPBLASLT_JIT_CXX` override those paths for local development.
 `HIPBLASLT_JIT_PYTHONPATH` uses the platform path separator (`:` on Linux,
 `;` on Windows) between additional Python import directories. Using `--jit-gemm` in a build without the feature reports
 that `HIPBLASLT_ENABLE_JIT` must be enabled.

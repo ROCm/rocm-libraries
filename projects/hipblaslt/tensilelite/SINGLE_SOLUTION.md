@@ -2,14 +2,16 @@
 
 This source guide is for TensileLite contributors and hipBLASLt integration
 developers. Its ownership and publication scope follow the
-[JIT roadmap](../JIT.md#roadmap). The builder supplies the compilation
-step used by the direct hipBLASLt integration; it does not make ordinary
+[JIT roadmap](../JIT.md#roadmap). The builder supplies the generation
+step used by hipBLASLt's TensileLite JIT backend; it does not make ordinary
 matmul calls compile code.
 
-`Tensile.SingleSolution.generateAndBuildSingleSolution` compiles one GEMM
+`Tensile.SingleSolution.generateAndBuildSingleSolution` generates one GEMM
 solution from a TensileLite YAML recipe. A solution includes the main assembly
 kernel, any helper kernels and support code, and the metadata needed by the
-TensileLite runtime. This entry point does not run GPU work or measure kernel
+TensileLite runtime. By default the builder also builds the code objects. With
+`sourceOnly` it emits only the sources and metadata, which hipBLASLt builds in
+process with comgr. This entry point does not run GPU work or measure kernel
 performance.
 
 The YAML supplies an exact recipe using the existing problem and parameter
@@ -46,8 +48,10 @@ calls the same entry point.
 The Python function returns a frozen `SingleSolutionBuildResult` containing
 absolute bundle, manifest, and library paths, a tuple of all code-object paths,
 the main code-object path and kernel name, the solution name and local index,
-and the architecture. It raises `SingleSolutionError`, or its configuration or
-build subclass, on failure.
+the architecture, and a tuple of source paths. A source-only result has no
+code-object paths and a main code-object path of `None`; a full build lists no
+sources. It raises `SingleSolutionError`, or its configuration or build
+subclass, on failure.
 
 The CLI prints progress followed by the manifest path. It reports failures on
 stderr and returns a nonzero exit status. Programs invoking it should check
@@ -104,17 +108,23 @@ A consuming runtime must honor the same restrictions.
 
 The architecture is explicit, so generation does not need GPU enumeration.
 Compiler, offload bundler, code-object version (`4`, `5`, or `6`), library format
-(`msgpack` or `yaml`), and temporary-file retention are Python and CLI options.
-Invocation options select the format and toolchain; contradictory YAML target
-settings are rejected. The selected library format must be enabled in the
-consuming host library.
+(`msgpack` or `yaml`), source-only output (`--source-only`), and temporary-file
+retention are Python and CLI options. Invocation options select the format and
+toolchain; contradictory YAML target settings are rejected. The selected library
+format must be enabled in the consuming host library.
 
-Both main and helper code objects use the requested code-object version.
-Helper compilation bypasses the shared helper cache so the bundle reflects
-the selected sources and toolchain. Source-only output, forced invalid-kernel
-generation, and profiling conflict with this entry point and are rejected.
-Benchmark timing, result export, clock control, monitoring, library-logic
-analysis, and client generation do not run. Generation uses one worker.
+With `sourceOnly`, nothing is assembled, compiled or bundled. The compiler only
+probes assembler capabilities, and no offload bundler is needed. The
+code-object version still shapes the assembly, whose kernel metadata version
+depends on it, so the consumer must build the sources with the same version.
+Without `sourceOnly`, main and helper code objects use the requested
+code-object version, and helper compilation bypasses the shared helper cache so
+the bundle reflects the selected sources and toolchain.
+
+The YAML settings `GenerateSourcesAndExit`, `ForceGenerateKernel` and
+`PythonProfile` conflict with this entry point and are rejected. Benchmark
+timing, result export, clock control, monitoring, library-logic analysis, and
+client generation do not run. Generation uses one worker.
 
 Generation uses shared Python configuration and rocisa capability caches.
 Calls must not overlap other TensileLite generation in the same process, and
@@ -126,25 +136,41 @@ and tool temporary files.
 ## Bundle contents and publication
 
 Each request creates its output directory exclusively and builds in a private
-`.staging` directory. After compilation and metadata serialization succeed,
+`.staging` directory. After generation and metadata serialization succeed,
 that directory is atomically renamed to `bundle`. A failure leaves staging
 files for diagnosis and publishes no bundle. Retrying requires a new output
 path, so an existing result is never overwritten.
 
-`keepBuildTmp=True` retains intermediate assembly and object files in the
-published bundle. Generated helper sources and required headers are retained
-in `support_files` whenever the solution needs them.
+`keepBuildTmp=True` retains intermediate assembly, and in a full build the
+object files, in the published bundle.
 
-The manifest uses `schema_version: 2`. Artifact paths are relative to the
-bundle directory:
+A source-only bundle is laid out by convention, so a consumer can build it
+without reading the manifest:
+
+| Path | Contents |
+| --- | --- |
+| `library/TensileLibrary.dat.zlib` (MsgPack) or `library/TensileLibrary.yaml` | The one-solution library entry |
+| `sources/<kernel>.s` | Main kernel assembly |
+| `sources/Kernels.cpp`, `sources/Kernels.h` | Helper kernel source, present only when the solution needs helpers |
+| Other `sources/*.h` files | Static headers that `Kernels.cpp` includes |
+| `manifest.json` | Provenance |
+
+A full build keeps the code objects next to the library under `library/` and
+lists generated helper sources and required headers in `support_files`
+whenever the solution needs them.
+
+The manifest is a provenance record. A source-only manifest has
+`schema_version: 3` and `mode: "source"`; a full-build manifest has
+`schema_version: 2`. Artifact paths are relative to the bundle directory:
 
 | Field | Contents |
 | --- | --- |
 | `architecture` | Requested and resolved architecture, plus compiler target |
-| `main_kernel` | Main entrypoint name and code-object path |
-| `code_objects` | All main `.co` and helper `.hsaco` files |
+| `main_kernel` | Main entrypoint name, plus its code-object path in a full build |
+| `sources` | Source-only: the main `.s` file, the headers, then `Kernels.cpp` and `Kernels.h` |
+| `code_objects` | Full build: all main `.co` and helper `.hsaco` files |
 | `helpers` | Generator kind (`kernel_family`, `header`, or `device_function`), class, and family/support name |
-| `support_files` | Generated helper sources and required headers |
+| `support_files` | Full build: generated helper sources and required headers |
 | `solution` | Local index, solution name, and kernel name |
 | `library` | Format, logical path, and physical path |
 | `counts` | One solution, one main kernel, and helper/support generator counts |
@@ -154,8 +180,8 @@ For MsgPack, `library.path` names the physical `.dat.zlib` file and
 `library.logical_path` names `.dat`; the runtime loader understands both.
 
 The serialized solution library describes runtime support predicates,
-workspace, and kernel arguments. A host runtime loads every listed code object,
-checks the requested problem, allocates workspace, and uses the ordered
+workspace, and kernel arguments. A host runtime loads the solution's code
+objects, checks the requested problem, allocates workspace, and uses the ordered
 invocation sequence from `ContractionSolution::solve`. Helper-generator counts
 and code-object counts do not determine the number of launches; the runtime
 problem and selected accumulation path determine that sequence.
@@ -186,7 +212,11 @@ solution validators determine which parameters and values are legal; the interfa
 does not restrict a predictor to a fixed list of four parameters.
 
 The module builds the first candidate accepted by solution validation and the
-static size/stride predicates. The shared predicate definitions also control
+static size/stride predicates. The optional `requested_solutions` (default 1,
+at most the candidate count) asks for that many accepted candidates in ranked
+order, and the optional `exclude_kernel_names` skips candidates whose kernel
+name it lists. `--source-only` applies as for `Tensile.SingleSolution`. The
+shared predicate definitions also control
 early rejection for vector widths, buffer offsets and workgroup counts. Checks
 requiring workspace, scalar values or device state remain with the host runtime,
 which evaluates the complete predicates before execution. The module does not
@@ -228,12 +258,15 @@ They check generation and compilation, not equal kernel latency or numerical
 correctness. Predicted costs belong to the supplied problem; successful compilation
 does not establish that a ranking or measured performance transfers to another one.
 
-Bundles generated through this entry point additionally contain
-`jit_prediction`. The record includes selected tuning parameters, descriptor
-`implementation_parameters`, defaults, resolved values, candidate rejections,
-and either a modeled cost or null. Request and selected YAML siblings are
-retained for inspection. Generation still publishes exactly one complete
-solution and never benchmarks candidates.
+This entry point publishes each accepted candidate as its own one-solution
+bundle, `bundle-0`, `bundle-1` and so on in ranked order, all at once, and
+`bundle` links to `bundle-0`. When the candidates run out after at least one
+was accepted, it publishes the bundles it has. Each bundle additionally
+contains `jit_prediction`. The record includes selected tuning parameters,
+descriptor `implementation_parameters`, defaults, resolved values, candidate
+rejections, and either a modeled cost or null. The selected YAML of rank 0 is
+retained as `<output>.yaml` next to `<output>.prediction.json`, and that of rank
+r as `<output>.<r>.yaml`. Generation never benchmarks candidates.
 
 ## hipBLASLt provider integration
 
@@ -244,6 +277,13 @@ stagger and launch outputs. This module retains the supplied order, translates
 model units, and rejects unsupported or changed predictions before compilation. Descriptor
 scale modes are translated here, separately from tuning parameters, so the C++
 caller does not repeat target-dependent layout rules.
+
+The backend runs this module and `Tensile.SingleSolution` with `--source-only`
+and the code-object version it builds with, and adds `requested_solutions` when
+it needs more than one solution. It reads each published bundle by the layout
+above and builds one raw executable code object per solution in process through
+comgr, linking the main kernel assembly and the helper source together. The
+[JIT guide](../JIT.md#code-object-construction-with-comgr) describes that build.
 
 No ranking means no generation. Exhausted rankings report each rejection;
 neither case substitutes an unranked recipe. The [benchmark guide](../clients/bench/README.jit.md)
