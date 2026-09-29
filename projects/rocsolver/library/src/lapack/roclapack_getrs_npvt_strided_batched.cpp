@@ -35,64 +35,89 @@ rocblas_status rocsolver_getrs_npvt_strided_batched_impl(rocblas_handle handle,
                                                          const rocblas_operation trans,
                                                          const I n,
                                                          const I nrhs,
-                                                         U A,
+                                                         U A_arg,
                                                          const I lda,
                                                          const rocblas_stride strideA,
-                                                         U B,
+                                                         U B_arg,
                                                          const I ldb,
                                                          const rocblas_stride strideB,
-                                                         const I batch_count)
+                                                         const I batch_count_arg)
 try
 {
-    ROCSOLVER_ENTER_TOP("getrs_npvt_strided_batched", "--trans", trans, "-n", n, "--nrhs", nrhs,
-                        "--lda", lda, "--strideA", strideA, "--ldb", ldb, "--strideB", strideB,
-                        "--batch_count", batch_count);
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const batch_count = batch_count_arg;
 
-    if(!handle)
-        return rocblas_status_invalid_handle;
+        ROCSOLVER_ENTER_TOP("getrs_npvt_strided_batched", "--trans", trans, "-n", n, "--nrhs", nrhs,
+                            "--lda", lda, "--strideA", strideA, "--ldb", ldb, "--strideB", strideB,
+                            "--batch_count", batch_count);
 
-    // argument checking
-    rocblas_status st
-        = rocsolver_getrs_npvt_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        if(!handle)
+            return rocblas_status_invalid_handle;
 
-    // working with unshifted arrays
-    rocblas_stride shiftA = 0;
-    rocblas_stride shiftB = 0;
+        // argument checking
+        rocblas_status st
+            = rocsolver_getrs_npvt_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
-    // strided batched execution
-    I inca = 1;
-    I incb = 1;
+    I const max_batch_count = 64 * 1024;
+    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = ceildiv(batch_count_arg, nsweep);
 
-    // memory workspace sizes:
-    // size of workspace (for calling TRSM)
-    bool optim_mem;
-    size_t size_work1, size_work2, size_work3, size_work4;
-    rocsolver_getrs_npvt_getMemorySize<false, true, T>(trans, n, nrhs, batch_count, &size_work1,
-                                                       &size_work2, &size_work3, &size_work4,
-                                                       &optim_mem, lda, ldb);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const bid_end = std::min(batch_count_arg, bid + bid_inc);
+        I const batch_count = bid_end - bid;
 
-    if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
-                                                      size_work4);
+        auto const A = A_arg + bid * strideA;
+        auto const B = B_arg + bid * strideB;
 
-    // memory workspace allocation
-    void *work1, *work2, *work3, *work4;
-    rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
+        // working with unshifted arrays
+        rocblas_stride shiftA = 0;
+        rocblas_stride shiftB = 0;
 
-    if(!mem)
-        return rocblas_status_memory_error;
+        // strided batched execution
+        I inca = 1;
+        I incb = 1;
 
-    work1 = mem[0];
-    work2 = mem[1];
-    work3 = mem[2];
-    work4 = mem[3];
+        // memory workspace sizes:
+        // size of workspace (for calling TRSM)
+        bool optim_mem;
+        size_t size_work1, size_work2, size_work3, size_work4;
+        rocsolver_getrs_npvt_getMemorySize<false, true, T>(trans, n, nrhs, batch_count, &size_work1,
+                                                           &size_work2, &size_work3, &size_work4,
+                                                           &optim_mem, lda, ldb);
 
-    // execution
-    return rocsolver_getrs_npvt_template<false, true, T>(
-        handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
-        batch_count, work1, work2, work3, work4, optim_mem);
+        if(rocblas_is_device_memory_size_query(handle))
+            return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2,
+                                                          size_work3, size_work4);
+
+        // memory workspace allocation
+        void *work1, *work2, *work3, *work4;
+        rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
+
+        if(!mem)
+            return rocblas_status_memory_error;
+
+        work1 = mem[0];
+        work2 = mem[1];
+        work3 = mem[2];
+        work4 = mem[3];
+
+        // execution
+        rocblas_status const istat = rocsolver_getrs_npvt_template<false, true, T>(
+            handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB,
+            batch_count, work1, work2, work3, work4, optim_mem);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    } // end for isweep
+    return (rocblas_status_success);
 }
 catch(...)
 {
