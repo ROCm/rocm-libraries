@@ -2080,10 +2080,15 @@ inline std::deque<std::string>& registeredEngineNames()
  *
  * @warning Native symbols must already be registered when this is called; a set naming an
  *          unregistered symbol is dropped.
+ *
+ * @param stateManagers When non-null, receives the state manager validation built for each
+ *        returned set, index for index, so a caller constructing engines from these sets
+ *        need not build each one a second time. Null discards them.
  */
 template <typename THandle>
-inline std::vector<DescriptorSet>
-    loadValidatedDescriptorSets(const std::vector<std::filesystem::path>& roots)
+inline std::vector<DescriptorSet> loadValidatedDescriptorSets(
+    const std::vector<std::filesystem::path>& roots,
+    std::vector<std::unique_ptr<KernelIngestorStateManager<THandle>>>* stateManagers = nullptr)
 {
     std::vector<DescriptorSet> validated;
 
@@ -2174,15 +2179,13 @@ inline std::vector<DescriptorSet>
             continue;
         }
 
+        std::unique_ptr<KernelIngestorStateManager<THandle>> built;
         try
         {
-            // Built only to prove the set validates, then thrown away: Container::copyEngineIds
-            // is static and would otherwise advertise an id for a set that fails to
-            // construct. Extracting validateAndIndexPacks() into a shared predicate would
-            // remove this discarded second walk, and with it the duplicate warning an
-            // engine shipping no heuristic gets: once here, once at real construction.
-            auto probe = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
-            static_cast<void>(probe);
+            // Built to prove the set validates -- Container::copyEngineIds is static and
+            // would otherwise advertise an id for a set that fails to construct -- and
+            // handed to the caller that asked for it, so that engine is not built twice.
+            built = makeStateManager<THandle>(set, set.engine.graphMatchNativeSymbol);
         }
         catch(const std::exception& error)
         {
@@ -2213,6 +2216,10 @@ inline std::vector<DescriptorSet>
         }
 
         validated.push_back(std::move(set));
+        if(stateManagers != nullptr)
+        {
+            stateManagers->push_back(std::move(built));
+        }
     }
 
     std::string from;

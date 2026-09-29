@@ -135,20 +135,54 @@ void registerNativeIngestorSymbols()
     std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
-const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
+namespace
 {
-    // Memoized: Container's static engine-id enumeration and its constructor both call
-    // this and must agree on what shipped.
-    static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
+
+using StateManager = hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>;
+
+/// What discovery produced: the sets, and the state manager validation built for each,
+/// index for index, waiting for the first engine constructed from that set.
+struct Discovery
+{
+    Discovery()
+    {
         // Register before scanning: validation checks each descriptor's symbol against the
         // registry, so an unregistered pack drops its descriptors here instead of throwing
         // at first use.
         registerNativeIngestorSymbols();
-        return hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
-            descriptorSearchDirectories());
-    }();
+        sets = hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
+            descriptorSearchDirectories(), &stateManagers);
+    }
 
-    return s_sets;
+    std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
+    std::vector<std::unique_ptr<StateManager>> stateManagers;
+    std::mutex stateManagersMutex;
+};
+
+Discovery& discovery()
+{
+    // Memoized: Container's static engine-id enumeration and its constructor both call
+    // this and must agree on what shipped.
+    static Discovery s_discovery;
+    return s_discovery;
+}
+
+} // namespace
+
+const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
+{
+    return discovery().sets;
+}
+
+std::unique_ptr<StateManager> takeDiscoveredStateManager(size_t index)
+{
+    auto& found = discovery();
+    const std::lock_guard<std::mutex> guard(found.stateManagersMutex);
+    if(index >= found.stateManagers.size())
+    {
+        return nullptr;
+    }
+    return std::move(found.stateManagers[index]);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
