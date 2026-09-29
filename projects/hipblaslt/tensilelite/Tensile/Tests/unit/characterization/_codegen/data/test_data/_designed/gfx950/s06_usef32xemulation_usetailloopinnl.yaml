@@ -1,0 +1,68 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S06 candidate: UseF32XEmulation + useTailloopInNll TF32 pack interleave.
+#
+# Target: Tensile/KernelWriter.py noLoadLoopBody TF32-pack-after-ShiftK block
+#   4014,4017,4028,4030,4034: `if kernel["UseF32XEmulation"] and useTailloopInNll:`
+#   (_interleavePackAB of packA/packB Pre + pack items, searchStrings __TF32_1/__TF32_2).
+#
+# Reachability analysis (why gfx950, NOT gfx1250 as the mapper proposed):
+#   The block requires BOTH kernel["UseF32XEmulation"] AND useTailloopInNll True.
+#     * UseF32XEmulation -> Solution.py sets it iff F32XdlMathOp is XFloat32,
+#       DataType is single, AND archCaps["HasF32XEmulation"].
+#     * useTailloopInNll -> Solution.py KEEPS TailloopInNll only on a non-WMMA
+#       MFMA arch (disabled when asmCaps["HasWMMA"]).
+#   Cap sweep (makeIsaInfoMap): only gfx950 has HasF32XEmulation=1 AND MFMA=1 AND
+#   WMMA=0 AND HasMFMA_xf32=0. gfx1250 has F32XEmulation but is WMMA -> TailloopInNll
+#   is force-disabled. gfx942 has native xf32 (HasMFMA_xf32=1) -> no emulation.
+#   => gfx950 is the sole arch that reaches the target block.
+#
+# DataType=S (f32) with F32XdlMathOp=X drives the 3-MFMA XF32 emulation path.
+# Fork: single permutation -> 1 kernel.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # f32 -> XF32 emulation NT GEMM, TailloopInNll on gfx950 (MFMA, no native xf32)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      F32XdlMathOp: X
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 2, 2]
+        - DepthU: [64]
+        - TailloopInNll: [True]
+        - UseCustomMainLoopSchedule: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - WavefrontSize: [64]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 200]

@@ -30,6 +30,33 @@ def _bench_row(**overrides):
     return row
 
 
+def _log_row(**overrides):
+    """Build a bench yaml row (LOG_FIELDS convention, uppercase M/N/K)."""
+    row = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "M": 16,
+        "N": 16,
+        "K": 16,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "c_f32_r",
+    }
+    row.update(overrides)
+    return row
+
+
+def _probe_row(row, us):
+    """Build a raw-probe-output-style row (GEMM_FIELDS convention) from a bench yaml row."""
+    out = {k.lower() if k in ("M", "N", "K") else k: v for k, v in row.items()}
+    out["compute_type"] = out["compute_type"].lstrip("c_")
+    out["us"] = us
+    return out
+
+
 def test_run_raises_for_missing_paths(tmp_path: Path) -> None:
     bench_file = tmp_path / "bench.yaml"
     bench_file.write_text("[]\n")
@@ -175,7 +202,8 @@ def test_standard_benchmark_validation_and_scaling(monkeypatch: pytest.MonkeyPat
     hip = tmp_path / "hip"
     hip.mkdir()
     bench_file = tmp_path / "bench.yaml"
-    yaml.safe_dump([_bench_row(), _bench_row(m=32)], bench_file.open("w"), sort_keys=False)
+    row1, row2 = _log_row(M=16), _log_row(M=32)
+    yaml.safe_dump([row1, row2], bench_file.open("w"), sort_keys=False)
     out_file = tmp_path / "out.out"
 
     seen = {"calls": []}
@@ -183,7 +211,8 @@ def test_standard_benchmark_validation_and_scaling(monkeypatch: pytest.MonkeyPat
     def _fake_run(_hip, yaml_file, _out, **kwargs):
         seen["calls"].append(Path(yaml_file))
         if "probe" in str(yaml_file):
-            return pd.DataFrame([{"us": 10.0}, {"us": 20.0}])
+            # deliberately scrambled relative to the bench rows' order
+            return pd.DataFrame([_probe_row(row2, 20.0), _probe_row(row1, 10.0)])
         return pd.DataFrame([{"ok": 1}])
 
     monkeypatch.setattr(bcore, "run", _fake_run)
@@ -196,7 +225,7 @@ def test_standard_benchmark_probe_mismatch_raises(monkeypatch: pytest.MonkeyPatc
     hip = tmp_path / "hip"
     hip.mkdir()
     bench_file = tmp_path / "bench.yaml"
-    yaml.safe_dump([_bench_row(), _bench_row(m=32)], bench_file.open("w"), sort_keys=False)
+    yaml.safe_dump([_log_row(), _log_row(M=32)], bench_file.open("w"), sort_keys=False)
 
     def _fake_run(*_a, **_k):
         return pd.DataFrame([{"us": 10.0}])
