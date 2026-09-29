@@ -120,7 +120,7 @@
 #undef ROCPRIM_TARGET_UNKNOWN
 
 // See https://llvm.org/docs/AMDGPUUsage.html#instructions
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
     #define ROCPRIM_TARGET_CDNA5 1
 #elif defined(__gfx942__) || defined(__gfx9_4_generic__)
     #define ROCPRIM_TARGET_CDNA3 1
@@ -165,7 +165,8 @@
         // Preserve late target selection for AMDGPU SPIR-V.
         #define ROCPRIM_IS_CDNA5()                                \
             (__builtin_amdgcn_processor_is("gfx1250")             \
-             || __builtin_amdgcn_processor_is("gfx1250-strict"))
+             || __builtin_amdgcn_processor_is("gfx1250-strict")   \
+             || __builtin_amdgcn_processor_is("gfx1251"))
     #else
         // Concrete AMDGPU compilation already knows the target architecture
         // from preprocessor macros (see ROCPRIM_TARGET_CDNA5 above), so use
