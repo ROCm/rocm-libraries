@@ -6029,7 +6029,6 @@ namespace hipblaslt_jit
                                            Diagnostics&            diagnostics) const
     {
         workspace           = 0;
-        diagnostics.backend = "TensileLite";
         const auto* request = dynamic_cast<const jit::GemmRequest*>(&operation);
         if(!request || operation.kind() != jit::GemmRequest::operation)
         {
