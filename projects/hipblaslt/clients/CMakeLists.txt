@@ -7,9 +7,6 @@ add_library(hipblaslt-clients-common STATIC)
 if(HIPBLASLT_ENABLE_JIT)
     # testing_matmul.hpp is shared by the benchmark and client tests.
     target_compile_definitions(hipblaslt-clients-common PUBLIC HIPBLASLT_ENABLE_JIT)
-    find_program(HIPBLASLT_JIT_OFFLOAD_BUNDLER clang-offload-bundler
-        HINTS "${ROCM_PATH}/llvm/bin" "${HIP_CLANG_ROOT}/bin" "/opt/rocm/llvm/bin"
-        REQUIRED)
     if(NOT TARGET _rocisa)
         message(FATAL_ERROR "hipblaslt-bench JIT requires the local _rocisa target")
     endif()
@@ -21,8 +18,7 @@ if(HIPBLASLT_ENABLE_JIT)
         HIPBLASLT_JIT_PYTHON="${Python_EXECUTABLE}"
         HIPBLASLT_JIT_TENSILE_SOURCE="${PROJECT_SOURCE_DIR}/tensilelite"
         HIPBLASLT_JIT_PYTHONPATH="$<TARGET_FILE_DIR:_rocisa>/.."
-        HIPBLASLT_JIT_CXX="${CMAKE_CXX_COMPILER}"
-        HIPBLASLT_JIT_BUNDLER="${HIPBLASLT_JIT_OFFLOAD_BUNDLER}")
+        HIPBLASLT_JIT_CXX="${CMAKE_CXX_COMPILER}")
 endif()
 
 target_include_directories(hipblaslt-clients-common

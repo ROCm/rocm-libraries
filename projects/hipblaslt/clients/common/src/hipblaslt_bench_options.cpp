@@ -40,9 +40,8 @@ namespace hipblaslt_bench_options
         options.pythonExecutable = configured("HIPBLASLT_JIT_PYTHON", HIPBLASLT_JIT_PYTHON);
         options.tensileSourceDirectory
             = configured("HIPBLASLT_JIT_TENSILE_SOURCE", HIPBLASLT_JIT_TENSILE_SOURCE);
-        options.pythonPath     = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_PYTHONPATH);
-        options.cxxCompiler    = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_CXX);
-        options.offloadBundler = configured("HIPBLASLT_JIT_OFFLOAD_BUNDLER", HIPBLASLT_JIT_BUNDLER);
+        options.pythonPath  = configured("HIPBLASLT_JIT_PYTHONPATH", HIPBLASLT_JIT_PYTHONPATH);
+        options.cxxCompiler = configured("HIPBLASLT_JIT_CXX", HIPBLASLT_JIT_CXX);
         // Empty configPath requests Origami prediction; the runtime supplies the device ISA.
         try
         {

@@ -26,11 +26,9 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
         std::string outputPath; // Must not exist. Diagnostic .log/.cwd siblings are retained.
         std::string architecture; // Empty selects the current device.
 #ifdef _WIN32
-        std::string cxxCompiler    = "clang++.exe";
-        std::string offloadBundler = "clang-offload-bundler.exe";
+        std::string cxxCompiler = "clang++.exe";
 #else
-        std::string cxxCompiler    = "amdclang++";
-        std::string offloadBundler = "clang-offload-bundler";
+        std::string cxxCompiler = "amdclang++";
 #endif
     };
 
