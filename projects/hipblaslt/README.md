@@ -330,4 +330,4 @@ To contribute to our repository, you can create a GitHub pull request.
 
 ## JIT contributor guides
 
-[JIT implementation roadmap](JIT_ROADMAP.md) describes the source-level workflow and current integration scope.
+The [JIT guide](JIT.md) describes current just-in-time (JIT) behavior, the approved target design and the roadmap.

@@ -12,6 +12,13 @@ The [discussion draft](confluence-roadmap-draft.md) summarizes the design altern
 Convergence means the same versioned metadata schema and execution semantics across
 producers, not identical symbols, layouts, or tuning values.
 
+**September 29, 2026 update:** the approved target design in [JIT.md](../JIT.md#target-design)
+changes three parts of this note: the explicit JIT entry points leave the public API,
+rocRoller becomes a future independent backend behind the Jit interface, and
+JIT-generated solutions supply the heuristic query after the pre-tuned lookup. The
+affected sections below are revised; source anchors and discovery evidence are unchanged.
+The [roadmap](../JIT.md#roadmap) records which steps are implemented.
+
 **The infrastructure is already in this checkout as Gemm-From-Anywhere (GFA) V1.** This is not a guessed synonym: the original [pull request (PR) #9304](https://github.com/ROCm/rocm-libraries/pull/9304) explicitly links the design page [Hipblaslt-kernel-from-anywhere](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1403547193/Hipblaslt-kernel-from-anywhere). The page itself was not fetched; the public PR and current source establish the connection. [Re-land PR #11155](https://github.com/ROCm/rocm-libraries/pull/11155) merged September 18, 2026 as `1833a352c1029aab2c976692894584b5b5294c09`; a read-only ancestry check confirms that commit is included in inspected/published HEAD `bf27d85949b56da1452d376e45044e9b873f68b4`.
 
 The current guide is [CustomKernels/README.md](../tensilelite/Tensile/CustomKernels/README.md). PR #9304 defines V1 as the metadata format, generic Tensile-host argument dispatch, and checked-in demos from external sources. It explicitly defers full production kernel sets, hipKittens, and **JIT generation** to later milestones. Thus the proposed JIT synergy advances an anticipated follow-up, while the current source is not a standalone universal KFA runtime.
@@ -95,13 +102,17 @@ It is not complete equivalence. Concrete source gaps are:
 
 `solve:4977–4996` documents the temporary `generated` gate: subtile, gfx950 and work-stealing generated layouts have not been validated through `generateCustomCall`. This is a real compatibility boundary. Enrichment must let those kernels join the shared path; changing a Boolean does not prove compatibility.
 
+Roadmap step 3 of the target design has generators emit assembly or HIP source plus metadata only, and hipBLASLt builds raw code objects through AMD comgr. KFA already embeds `custom.config` in the assembly's `.amdgpu_metadata` section, so it is a natural carrier for the "metadata" output of assembly-emitting backends. How HIP-source output carries the same metadata is not yet defined. The plan of record does not yet select the metadata format; the packaging gap above still applies whichever format is chosen.
+
 ## Existing selection and execution that both origins reuse
 
 For ordinary installed libraries, KFA custom kernels are ordinary ContractionSolutions. `MasterSolutionLibrary.FromOriginalState:400–604` builds layers in this order: hardware, operation identifier, performance metric, problem/type predicates, optional lazy placeholder, then equality/range/grid/prediction selection. Runtime `getSolutions` in `tensile_host.cpp:4850–4880` calls `library->findTopSolutions`; `SingleSolutionLibrary.hpp` applies hardware and software predicates. Chosen solutions use existing `solve` and HIP SolutionAdapter loading/launching. Origin is not a separate selector backend.
 
 Current JIT supplies an explicitly chosen singleton instead of searching the installed multi-solution library. `loadGeneratedBundle` (`hipblaslt-jit-tensilelite.cpp:143–204`) reads the private envelope, loads the normal serialized library via `LoadLibraryData`, loads code-object bytes with SolutionAdapter and resolves the primary symbol. `Bundle::support/prepare` (`tensile_host.cpp:6033–6131`) reuses hardware/problem/task/software predicates, required workspace, ConstructTensileProblem, GetTensileInputs, bindFlagRegion and `solution->solve`. It resolves **every** returned helper symbol before publishing a PreparedLaunch; execution calls `adapter->launchKernels`.
 
-Therefore the current JIT implementation does not contain a whole second kernel execution engine. KFA convergence can unify the generated/custom descriptor and argument/launch branches, then reduce private artifact translation. It does not remove operation capture, module ownership, complete-bundle preparation, concurrency/device rules, process launch or public API adaptation.
+Therefore the current JIT implementation does not contain a whole second kernel execution engine. KFA convergence can unify the generated/custom descriptor and argument/launch branches, then reduce private artifact translation. It does not remove operation capture, module ownership, complete-bundle preparation, concurrency/device rules, process launch or operation adaptation.
+
+In the target design, the JIT solution library is loaded at runtime as a second master library (roadmap step 4). Because it mimics the TensileLibrary layout of a library file plus code objects, its entries are expected to remain serialized solutions that keep the existing predicates, workspace rules and `solve` sequence. That library is then another consumer of the same executable contract, not a new selector backend.
 
 ## Reusing problem and solution types across producers
 
@@ -128,8 +139,11 @@ For non-GEMM work, first define the operation payload, support checks, argument
 binding, ordered helpers, workspace initialization, and lifetime. Reuse
 `KernelArguments`, `KernelInvocation`, and HIP `SolutionAdapter` where sufficient.
 Shared generic handles do not establish a non-GEMM KFA profile or execution adapter.
-Keep the current `getJitAlgo(device, request, backend, maxWorkspaceBytes, solution,
-diagnostics)` contract while evaluating these internal reuse choices.
+The target design removes `getJitAlgo(device, request, backend, maxWorkspaceBytes,
+solution, diagnostics)`, `makeGemmRequest`, both `getGemmAlgo` functions and
+`createBackend` from the public API (roadmap step 1). Their headers become internal
+and are used by unit tests, and Jit takes over backend invocation (step 2). Evaluate
+these reuse choices against that internal contract.
 
 ## rocRoller: existing integration and proposed KFA adaptation
 
@@ -168,7 +182,13 @@ consumer for each supported profile. Origami ranking remains distinct from code
 generation. rocRoller is disabled in the current local build; this assessment is
 source evidence, not a new runtime or interoperability result.
 
-## Selection and the optional fallback library
+In the target design, rocRoller is a future independent backend behind the Jit
+interface, alongside TensileLite and other generators; it does not route through
+TensileLite. That backend is outside the six planned roadmap steps. Until it
+exists, the runtime route described above stays in place. `HIPBLASLT_JIT=2`
+skips that early route so that JIT is the only source of solutions.
+
+## Selection and JIT-generated solutions
 
 The current [library construction](../tensilelite/Tensile/SolutionLibrary.py)
 normally orders Equality, Range, Prediction, GridBased, FreeSize, and TruePred
@@ -177,22 +197,39 @@ equality distance; Prediction uses Origami to rank existing solutions. Modes and
 available branches affect traversal. Provider-private prediction of new recipes
 is a different task and remains outside the existing-solution ranking contract.
 
-An optional `JustInTime` library type could use the same producer/validation service
-as the explicit API, but only after the complete applicable lookup produces zero
-compatible solutions. This remains an alternative under assessment. In particular,
-[ExactLogicLibrary::findTopSolutions](../tensilelite/include/Tensile/ExactLogicLibrary.hpp)
-accumulates across rows until the requested count: a final JIT row could compile
-to fill top-N despite an already usable result. A leaf also cannot catch an absent
-root library or operation branch, or an earlier return from the rocRoller path.
+The September 25 revision assessed an optional `JustInTime` library type that would
+generate only after the complete lookup produced zero compatible solutions. The
+approved target design in [JIT.md](../JIT.md#heuristic-integration-and-hipblaslt_jit)
+replaces that alternative:
 
-Before implementation, settle the full lookup boundary, the existing retry from
-reduced-precision to 32-bit computation, compiler/backend context, workspace and
-capability checks, compilation latency, unsupported versus failed outcomes,
-enumeration/index-query behavior, and persistent cache identity/invalidation.
-Current lookup lacks that compilation context. A GEMM-templated library does not
-become operation-independent by adding a type. The explicit API remains useful for
-backend choice, deliberate generation, and prewarming; zero-result fallback improves
-coverage but does not seek faster alternatives when an existing solution is usable.
+- JIT is not a leaf row inside the pre-tuned library. With `HIPBLASLT_JIT=1`, the
+  trigger is evaluated after the complete pre-tuned lookup and the existing
+  `getAllSolutions` shortfall fill. That placement covers an absent root library or
+  operation branch, which a leaf could not catch.
+- The trigger also runs after the retry that repeats an xf32 lookup with FP32 math
+  inside `getBestSolutions`. Results from rocRoller's early route count toward
+  `requestedAlgoCount`.
+- The trigger fires when the result is empty **or** contains fewer than
+  `requestedAlgoCount` solutions. The query then consults the JIT solution library
+  and generates as many solutions as are needed to reach the requested count. Filling
+  top-N is intended; the earlier concern that
+  [ExactLogicLibrary::findTopSolutions](../tensilelite/include/Tensile/ExactLogicLibrary.hpp)
+  could compile merely to fill top-N no longer describes an unwanted outcome, and the
+  trigger sits outside that accumulation.
+- With `HIPBLASLT_JIT=2`, JIT is the only source: Equality, Prediction, the other
+  pre-tuned libraries and the rocRoller early route are skipped. The JIT solution
+  library is consulted before generation.
+- The explicit entry points leave the public API (step 1). Deterministic backend
+  choice and prewarming remain available to unit tests through the internal headers.
+
+JIT.md now also defines the failure rules (JIT failures are always reported),
+build-time tool-path defaults with `HIPBLASLT_JIT_*` overrides for the heuristic
+path, and the cache key under which mismatched libraries are ignored rather than
+deleted. Still to settle before step 5: compilation latency, concurrency and stream
+capture inside a heuristic query, whether the existing heuristic contract allows
+fewer than `requestedAlgoCount` results, how unsupported and failed outcomes map to
+statuses, and enumeration/index-query behavior for reserved indices. A GEMM-templated
+library does not become operation-independent by adding a type.
 
 ## Reviewable implementation sequence
 
@@ -200,4 +237,6 @@ coverage but does not seek faster alternatives when an existing solution is usab
 2. **Validation:** define a distinct schema/profile version and backward-compatible reader. Validate required executable fields, recognized semantics, argument offsets/types/sizes, symbols, targets and complete artifact contents. Do not overload provenance Version or weaken artifact containment/integrity checks. Add strict validation at this producer/consumer boundary.
 3. **Equivalence:** compare old and metadata-driven argument bytes, complete launch descriptors, workspace requirements and full helper sequence for the same concrete requests. Then run representative numerical/runtime tests on their actual GPUs, including nontrivial C/D strides, batching, split-K/Stream-K, scaling/epilogues, and malformed/unsupported metadata. Source inspection alone is not a runtime-equivalence result.
 4. **Shared path:** gate each proven profile onto KFA-driven execution, retaining existing support predicates and HIP adapter. Unproven profiles continue on their established path until extended and validated. An existing external fixture and equivalent generated kernel should exercise the same consumer.
-5. **Simplification:** consolidate/delete only the code now demonstrably redundant. `SingleSolution._writeLoaderEnvelope:478–502`, `readEnvelope` in `hipblaslt-jit-tensilelite-artifacts.hpp`, and `loadGeneratedBundle`'s private manifest-to-library identity plumbing are concrete transport candidates once common KFA artifacts cover their requirements. Much validation migrates rather than vanishes. Retire generated/custom packing forks only when no supported profile depends on them.
+5. **Simplification:** consolidate/delete only the code now demonstrably redundant. `SingleSolution._writeLoaderEnvelope:478–502`, `readEnvelope` in `hipblaslt-jit-tensilelite-artifacts.hpp`, and `loadGeneratedBundle`'s private manifest-to-library identity plumbing are concrete transport candidates once common KFA artifacts cover their requirements. The planned JIT solution library, which mimics the TensileLibrary layout, is another candidate replacement for that private transport. Much validation migrates rather than vanishes. Retire generated/custom packing forks only when no supported profile depends on them.
+
+This sequence is independent of the six target-design roadmap steps in [JIT.md](../JIT.md#roadmap). KFA convergence remains deferred follow-up work.

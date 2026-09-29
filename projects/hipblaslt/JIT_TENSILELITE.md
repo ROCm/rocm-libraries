@@ -1,21 +1,36 @@
-# Compile an explicit TensileLite recipe for GEMM
+# TensileLite JIT backend
 
 This is a source guide for contributors and integration developers, maintained
-under the existing hipBLASLt code/documentation reviewer rules. See the
-[roadmap](JIT_ROADMAP.md) for ownership, source publication and deferred release
-documentation integration.
+under the existing hipBLASLt code/documentation reviewer rules. The
+[JIT guide](JIT.md) describes the overall just-in-time (JIT) design, the
+components around this backend and the [roadmap](JIT.md#roadmap).
+
+TensileLite is the live JIT backend. This page describes its current direct
+entry point, which compiles one explicit YAML (YAML Ain't Markup Language)
+recipe, and its planned role behind the Jit backend interface.
+
+**Status:** the direct entry point below is public on this branch today.
+[Step 1](JIT.md#roadmap), now in progress, moves `hipblaslt-jit-tensilelite.hpp`
+to an internal header used by unit tests. Once step 5 lands, applications reach
+TensileLite generation through `hipblasLtMatmulAlgoGetHeuristic` with
+`HIPBLASLT_JIT`. The usage below remains accurate until step 1 lands.
+
+## Current direct entry point
 
 The experimental TensileLite API compiles one supplied YAML recipe, loads its
 generated kernel and helpers, and returns a `hipblasLtMatmulHeuristicResult_t`.
 Use that result with `hipblasLtMatmul` or the C++ `hipblaslt_ext::Gemm` class.
-Compilation happens synchronously before GEMM execution.
+Compilation happens synchronously before general matrix multiplication (GEMM)
+execution.
 
 Include `<hipblaslt/hipblaslt-jit-tensilelite.hpp>` and call
 `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo`. The call takes the
 ordinary GEMM descriptors, scalars and buffers, generation options, and a
 workspace limit. TensileLite must accept the recipe for that problem and device.
+The [sample](clients/samples/29_hipblaslt_jit_gemm/README.md) shows the whole
+flow.
 
-## Build requirements
+### Build requirements
 
 Enable the host library and `HIPBLASLT_ENABLE_JIT` in the existing configured
 build. For example, from the repository root with `project_build` set to that
@@ -33,10 +48,10 @@ that interpreter and the compiler/offload-bundler paths through `Options`.
 The generated path loads its own code objects; it does not require a prebuilt
 hipBLASLt device library.
 
-The public declaration remains available when JIT is disabled. Calling it then
+The declaration remains available when JIT is disabled. Calling it then
 returns `HIPBLAS_STATUS_NOT_SUPPORTED` and a diagnostic naming the build option.
 
-## Describe and compile the GEMM
+### Describe and compile the GEMM
 
 Create the handle, matrix descriptors, input/output buffers and stream using the
 ordinary hipBLASLt/HIP APIs. Keep the handle's device current when compiling.
@@ -77,7 +92,7 @@ An explicit architecture must match the current device, including any required
 target features. The recipe, requested GEMM and available workspace must agree;
 a valid build alone does not make a kernel usable for every problem.
 
-## Execute and reuse the result
+### Execute and reuse the result
 
 Allocate `selected.workspaceSize` bytes when it is nonzero, then pass the
 returned algorithm to the existing execution API:
@@ -115,11 +130,11 @@ satisfies recipes whose synchronization state is bound to that stream.
 
 The library retains the compiled algorithm's modules until process exit, so
 copies of the algorithm remain usable in that process on their original
-device. Algorithm bytes and indices are not a persistent library format. The
-API does not expose loading a retained bundle in a later process. Compile before
-stream capture.
+device. Algorithm bytes and indices are not a persistent library format today.
+The API does not expose loading a retained bundle in a later process. Compile
+before stream capture.
 
-## Artifacts and failures
+### Artifacts and failures
 
 The output directory contains `bundle/manifest.json`, the private loader
 envelope, the serialized solution library and all generated code objects.
@@ -127,21 +142,38 @@ Generator diagnostics remain in the sibling `<output>.log`; the child working
 directory is `<output>.cwd`. Use a new output path for another compilation.
 
 On failure, `getGemmAlgo` clears the result, sets `result.state`, and returns a
-status; `Diagnostics::message` provides details when available. A missing recipe is rejected before starting
-generation. The loader checks artifact identities and targets, and execution
-preparation resolves required helper symbols before submission. Invalid recipes,
-missing artifacts or unsupported problems produce a failure rather than an
-executable result. Empty output needs no GEMM algorithm and returns
-`HIPBLAS_STATUS_NOT_SUPPORTED`.
+status; `Diagnostics::message` provides details when available. A missing recipe
+is rejected before starting generation. The loader checks artifact identities
+and targets, and execution preparation resolves required helper symbols before
+submission. Invalid recipes, missing artifacts or unsupported problems produce a
+failure rather than an executable result. Empty output needs no GEMM algorithm
+and returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
 
-## Current scope and follow-up work
+The direct entry point always requires a recipe. Origami prediction is available
+through the generic TensileLite provider when `Options::configPath` is empty;
+see [Origami modeled inputs](JIT.md#origami-modeled-inputs).
 
-This entry point is the direct TensileLite path for an explicit GEMM recipe.
-The separate generic API stack adds a common backend/operation interface above
-this implementation. Prediction, a searchable JIT library, persistent caching,
-and shared KFA metadata are follow-up work. They are not prerequisites for using
-the direct recipe interface.
+## Planned backend role
 
-Consult the PR validation results for the configurations actually tested.
-Source support and cross-compilation do not establish numerical results on
-another GPU or native Windows execution.
+The rows below are planned; the code does not implement them yet. Each row names
+the roadmap step that changes it.
+
+| Concern | Current | Planned |
+| --- | --- | --- |
+| Entry point | Public direct `tensilelite::getGemmAlgo`, and the generic provider created by `tensilelite::createBackend`. | An internal backend behind Jit, reached from the heuristic query. The headers remain for unit tests (step 1, step 2). |
+| Backend input | An explicit recipe, or problem facts plus Origami-ranked candidates in the generic provider. | Algorithm parameters (M, N, K, datatypes, scale types, layout, activation and the rest of the GEMM description) plus the gfx target, with ranked candidates from the Predictor (step 2). |
+| Unmodeled knobs | TensileLite defaults and derivation. | Supplied through TuningKnowledge, which initially returns the same TensileLite defaults (step 2). |
+| Backend output | A complete bundle: `Tensile.SingleSolution` assembles, links and compiles code objects with the configured compiler and offload bundler. | Assembly, HIP helper source and metadata only. hipBLASLt builds raw, uncompressed code objects through AMD comgr (step 3). |
+| Persistence | Process-local; each program invocation compiles again. | Solutions are published into the per-`ProblemType` JIT solution library and reused across processes (step 4). |
+
+TensileLite remains one of several independent backends. rocRoller and
+HipKittens are future backends behind the same interface; they do not route
+through TensileLite. `Tensile.SingleSolution` and `Tensile.JitGemm` are the
+current Python entry points; the [single-solution guide](tensilelite/SINGLE_SOLUTION.md)
+describes them. Step 3 changes what the backend produces, and that guide is
+updated with it.
+
+The configurations actually tested are listed under
+[recorded validation](JIT.md#recorded-validation). Source support and
+cross-compilation do not establish numerical results on another GPU or native
+Windows execution.

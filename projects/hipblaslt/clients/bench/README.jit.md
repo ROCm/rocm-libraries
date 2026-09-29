@@ -170,12 +170,7 @@ support; numerical correctness also requires execution on that GPU.
 
 ## Next integration steps
 
-The current provider combines prediction and compilation inside one library
-request. A separate library-level planning protocol is TBD: it would pass
-operation and device facts to prediction, look up reusable code, and compile
-only after a cache miss. A searchable JIT solution library and persistent cache
-are also TBD; today the caller explicitly retains one algorithm in one process.
-Exact epilogue specialization and stored tuning blueprints are future inputs to
-selection, not promises that the initial model covers those costs or parameters.
-See the [component roadmap](../../JIT_ROADMAP.md) for their
-inputs, outputs, and planned interaction.
+The [target design](../../JIT.md#target-design) moves generation behind the
+heuristic query, controlled by `HIPBLASLT_JIT`, with a persistent JIT solution
+library. Roadmap steps 4 and 5 in the [JIT guide](../../JIT.md#roadmap) add that
+library and the heuristic integration, and step 5 removes `--jit-gemm`.

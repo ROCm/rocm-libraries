@@ -1,6 +1,6 @@
 # hipBLASLt JIT downstream handoff
 
-Updated September 25, 2026. This is the canonical handoff for the consolidated
+Updated September 29, 2026. This is the canonical handoff for the consolidated
 hipBLASLt/TensileLite just-in-time (JIT) work. Development continues on the remote-backed branch
 below, with no associated pull request. Consolidation, closure of the upstream
 review stack, and the branch rename are complete.
@@ -49,19 +49,21 @@ algorithm for existing C/C++ general matrix multiplication (GEMM) execution.
 An ordinary matmul call does not initiate this new TensileLite/generic JIT path;
 the separate existing rocRoller integration can generate code at runtime.
 
-- [Roadmap and delivered scope](projects/hipblaslt/JIT_ROADMAP.md).
+- [JIT guide](projects/hipblaslt/JIT.md): the plan of record. It separates
+  current behavior from the approved target design and carries the roadmap.
 - [Standalone builder](projects/hipblaslt/tensilelite/SINGLE_SOLUTION.md).
-- [Direct API](projects/hipblaslt/JIT_TENSILELITE.md) and
+- [TensileLite backend](projects/hipblaslt/JIT_TENSILELITE.md) and
   [sample 29](projects/hipblaslt/clients/samples/29_hipblaslt_jit_gemm/README.md).
-- [Generic API](projects/hipblaslt/JIT.md) and
-  [sample 30](projects/hipblaslt/clients/samples/30_hipblaslt_generic_jit_gemm/README.md).
+- [Sample 30](projects/hipblaslt/clients/samples/30_hipblaslt_generic_jit_gemm/README.md)
+  for the generic API.
 - [Benchmark usage](projects/hipblaslt/clients/bench/README.jit.md) and
   [shared validation driver](.github/scripts/test_hipblaslt_jit.py).
-- [Design notes](projects/hipblaslt/jit-design/README.md): the September 25
-  Confluence-copyable discussion draft and KernelFromAnywhere (KFA) assessment
-  cover existing type reuse, common producer metadata, rocRoller integration, and
-  an optional zero-result fallback library. These are design updates, not source
-  implementation. Timing plans retain their historical source anchors.
+- [Design notes](projects/hipblaslt/jit-design/README.md): the September 29
+  Confluence-copyable discussion draft of the target design and the
+  KernelFromAnywhere (KFA) assessment cover existing type reuse, common producer
+  metadata, rocRoller as a future backend, and heuristic-driven generation. These
+  are design updates, not source implementation. Timing plans retain their
+  historical source anchors.
   The draft revision has not been published; the supplied Confluence URL is a
   format/tone reference, with no destination page identified. Reading that
   reference returned an access-denied response; its contents were not verified.
@@ -95,27 +97,51 @@ part of this transition.
 
 ## Existing environment
 
-Reuse the root `.venv` and `projects/hipblaslt/build/release`. The inspected
-configuration is Release, `GPU_TARGETS=gfx950`, `HIPBLASLT_ENABLE_JIT=ON`,
-`HIPBLASLT_ENABLE_MXDATAGENERATOR=ON`, and `HIPBLASLT_ENABLE_DEVICE=OFF`.
-Both configured Python executable keys use root `.venv/bin/python` (3.10.12).
-C/C++ compilers are `/opt/rocm/bin/amdclang` and `/opt/rocm/bin/amdclang++`.
-The existing host environment needs no dependency installation or rebuild for
-this documentation cleanup.
+The host runs Ubuntu 24.04. The former ROCm 7.1.1 installation is gone. Two
+TheRock bundles live under `/opt/rocm-versions`:
+`gfx950-10.2.0a20260922` and `gfx1250-10.2.0a20260922` (AMD clang 24.0.0).
+Select one with `rocm-use gfx950` or `rocm-use gfx1250`, a bash function
+defined in `/etc/profile.d/rocm-helpers.sh`; zsh cannot source that file. Besides
+setting `ROCM_PATH`, `PATH` and `LD_LIBRARY_PATH` for the current shell, it
+repoints the system-wide `/opt/rocm` symlink with `sudo`, which affects every
+other shell and agent on the host. gfx950 work runs natively (8× MI355X). gfx1250
+kernels run on the FFM MI450 simulator installed at `/opt/ffm/mi450`; simulator
+runs are not native hardware evidence.
 
-From the repository root, this setup only selects the existing environment:
+Reuse the root `.venv` and `projects/hipblaslt/build/release`. The venv holds
+CPython 3.10.12 installed by uv; both configured Python executable keys use root
+`.venv/bin/python`. The build tree uses the Unix Makefiles generator (ninja is
+not installed) and was configured with the gfx950 bundle's `amdclang`,
+`amdclang++` and `amdflang`. The inspected configuration is Release,
+`GPU_TARGETS=gfx950`, `HIPBLASLT_ENABLE_JIT=ON`, `HIPBLASLT_ENABLE_CLIENT=ON`,
+`HIPBLASLT_BUILD_TESTING=ON`, `HIPBLASLT_ENABLE_MXDATAGENERATOR=ON`,
+`HIPBLASLT_ENABLE_DEVICE=OFF` and `HIPBLASLT_ENABLE_ROCROLLER=OFF`. It also sets
+`CMAKE_SKIP_INSTALL_RULES=ON`, so an installation check needs a separate build
+tree.
+
+The ROCm bundle ships its own `libhipblaslt` and `libtensilelite-host`. Put both
+build-tree library directories ahead of the bundle's libraries, or the loader
+picks the prebuilt copies. From the repository root, in bash:
 
 ```bash
+source /etc/profile.d/rocm-helpers.sh
+rocm-use gfx950
 project_root="$PWD"
 project_build="$project_root/projects/hipblaslt/build/release"
+project_python="$project_root/.venv/bin/python"
 source "$project_root/.venv/bin/activate"
-export PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH"
 export PYTHONPATH="$project_build/tensilelite/rocisa:$project_build/tensilelite:$project_root/projects/hipblaslt/tensilelite"
-export LD_LIBRARY_PATH="$project_build/library:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$project_build/library:$project_build/tensilelite:$LD_LIBRARY_PATH"
 export PYTHONDONTWRITEBYTECODE=1
 export TENSILE_DISABLE_HELPER_CACHE=1
 export TENSILE_HELPER_CACHE_DIR="$project_build/helper-cache"
+export AMD_COMGR_CACHE=0
+export HIP_VISIBLE_DEVICES=0
 ```
+
+`rocm-use` places the bundle's `lib` and `llvm/lib` directories at the front of
+`LD_LIBRARY_PATH`, so the build-tree directories are prepended after it runs.
+`HIP_VISIBLE_DEVICES` selects one GPU when other work shares the host.
 
 Use this build's library and rocisa extension with its configured interpreter;
 do not mix the host CPython 3.10 module with a different container interpreter.
@@ -168,12 +194,22 @@ backup or a standalone clone. Its prerequisite commits are recorded by
 ## Remaining downstream work
 
 The agreed direct/generic/prediction implementation and branch transition are
-complete. No source fix or integration step from that delivery remains pending.
-Continue with the next requested downstream change. Broader AIHPBLAS-4801
-planning/cache protocols remain future work. The subsequent modeled-input change
-adds the complete applicable data-parallel Origami contract, with its capability
-inventory and unsupported transport cases documented in `projects/hipblaslt/JIT.md`.
-Broader candidate domains and unmodeled tuning knowledge remain separate work.
+complete. The subsequent modeled-input change adds the complete applicable
+data-parallel Origami contract, with its capability inventory and unsupported
+transport cases documented in `projects/hipblaslt/JIT.md`.
+
+The approved target design in `projects/hipblaslt/JIT.md` moves generation behind
+the heuristic query. Its [roadmap](projects/hipblaslt/JIT.md#roadmap) has six
+steps, and the status column there is authoritative:
+
+1. Demote the public API: make the JIT headers internal and turn samples 29 and
+   30 into test binaries (in progress).
+2. Add the Jit component, the backend interface, a mock backend, and the
+   Predictor and TuningKnowledge interfaces.
+3. Build code objects in hipBLASLt through comgr.
+4. Add the persistent JIT solution library.
+5. Add `HIPBLASLT_JIT` to the heuristic query and remove `hipblaslt-bench --jit-gemm`.
+6. Run the validation sweep with heuristic, cache and mode coverage.
 
 The optional timing/progress design uses independent `HIPBLASLT_JIT_DEBUG`
 categories `timing` and `progress`, including `timing,progress`. Unset/empty adds

@@ -1,191 +1,187 @@
-# hipBLASLt JIT: direct TensileLite workflow and roadmap
+# hipBLASLt JIT: heuristic-driven generation, design and roadmap
 
-**Implementation basis:** Basic tip #12565 (`b2510705`) and dependent generic/prediction/documentation tip #12430 (`d742375d`), validated September 24, 2026 and consolidated on `users/jolabega/downstream-hipblaslt-jit-develop`. Their executable and test source remains the implementation baseline; the earlier pull request (PR) stack is closed without merging. “Implemented” below means present in this downstream checkout, not merged, released or approved as product naming.
+**Implementation basis:** Basic tip #12565 (`b2510705`) and dependent generic/prediction/documentation tip #12430 (`d742375d`), validated September 24, 2026 and consolidated on `users/jolabega/downstream-hipblaslt-jit-develop`, plus the later change that makes the C++ predictor emit the complete data-parallel Origami contract `origami.gemm.dp.v1`. The earlier pull request (PR) stack is closed without merging. “Implemented” below means present in this downstream checkout, not merged, released or approved as product naming.
 
-**Design update, September 28, 2026:** this revision adds type reuse, backend and selection proposals to the original workflow document. The current interfaces remain unchanged. This document is ready to copy into Confluence; it has not been published there.
+**Design update, September 29, 2026:** this revision records the approved target design and the decisions settled since the September 28 draft. Just-in-time (JIT) generation moves behind the existing heuristic query, controlled by the environment variable `HIPBLASLT_JIT`, with a persistent JIT solution library and in-process code-object construction. The explicit JIT entry points leave the public application programming interface (API). Roadmap step 1 is in progress; the other steps are Planned. This document is ready to copy into Confluence; it has not been published there.
 
-This page is for hipBLASLt and TensileLite contributors and integration developers. It is the discussion copy of the versioned contributor roadmap and separates current behavior from planned work. Source Markdown follows the existing `@ROCm/hipblaslt-reviewers` and `@ROCm/hipblaslt-docs-reviewers` CODEOWNERS rules. These contributor files sit outside the ROCm release-documentation source tree; this page makes no release publication or support commitment.
+This page is for hipBLASLt and TensileLite contributors and integration developers. It is the discussion copy of the versioned [JIT guide](https://github.com/ROCm/rocm-libraries/blob/users/jolabega/downstream-hipblaslt-jit-develop/projects/hipblaslt/JIT.md), which holds the same design with a rendered Mermaid diagram. Confluence does not render Mermaid Markdown, so this page shows the diagram as text and as an edge table. Source Markdown follows the existing `@ROCm/hipblaslt-reviewers` and `@ROCm/hipblaslt-docs-reviewers` CODEOWNERS rules. These contributor files sit outside the ROCm release-documentation source tree; this page makes no release publication or support commitment.
 
-Terminology: just-in-time (JIT) generation; application programming interface (API); general matrix multiplication (GEMM); KernelFromAnywhere (KFA), implemented as Gemm-From-Anywhere (GFA). KFA currently describes GEMM custom kernels; other operation profiles remain proposed.
+Terminology: just-in-time (JIT) generation; application programming interface (API); general matrix multiplication (GEMM); KernelFromAnywhere (KFA), implemented as Gemm-From-Anywhere (GFA); AMD code object manager (comgr).
 
-## Purpose and delivery scope
+## Summary
 
-The first delivery is a direct hipBLASLt-to-TensileLite path: an application supplies one YAML (YAML Ain't Markup Language) recipe, hipBLASLt compiles and loads the resulting solution, and the application executes it through the existing C or C++ GEMM interface. This is the basic AIHPBLAS-4549 integration.
+Today, JIT generation is an explicit, application-driven path. An application calls a JIT entry point with its GEMM descriptors, hipBLASLt compiles one solution through TensileLite, and the application passes the returned algorithm to `hipblasLtMatmul` or `hipblaslt_ext::Gemm`. An ordinary heuristic query or matmul call does not initiate this path. The separate, existing rocRoller integration has its own runtime generation path.
 
-A solution can contain a main kernel and several helpers. Successful compilation alone does not establish support for a requested GEMM: the runtime also checks the device, problem, workspace and required executable symbols.
+In the target design, `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` consult the pre-tuned libraries first. When `HIPBLASLT_JIT` enables it, they fill a shortfall from a persistent JIT solution library and then from newly generated solutions. Generators emit source and metadata only; hipBLASLt builds code objects through comgr. The explicit JIT entry points become internal interfaces used by tests.
 
-The implemented generic layer adds request/backend/solution interfaces under AIHPBLAS-4801 and initial provider prediction under AIHPBLAS-4551. It extends the basic implementation and preserves the direct API and sample. Persistent caching, KFA metadata convergence, broader prediction coverage and timing/progress diagnostics remain follow-up work; none is required to run the explicit-recipe path.
+## Current behavior
 
-## Direct workflow available in the basic stack
+| Component | Current behavior |
+| --- | --- |
+| Direct TensileLite API | `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo` in the installed `hipblaslt/hipblaslt-jit-tensilelite.hpp` compiles one required, explicit YAML (YAML Ain't Markup Language) recipe and returns a `hipblasLtMatmulHeuristicResult_t`. Sample `29_hipblaslt_jit_gemm` exercises it. |
+| Generic API | The installed `hipblaslt/hipblaslt-jit.hpp` provides `makeGemmRequest`, `getJitAlgo` and the generic `getGemmAlgo`; `tensilelite::createBackend` configures the provider. Sample `30_hipblaslt_generic_jit_gemm` exercises it. `hipblaslt-ext.hpp` includes both JIT headers. |
+| Builder | `Tensile.SingleSolution` compiles one recipe into a complete bundle, invoking the assembler, linker, HIP compiler driver and offload bundler. The host runs it as a child process, then loads the serialized library and all code objects and checks support and workspace. |
+| Provider prediction | With an empty `Options::configPath`, the C++ predictor ranks synthetic candidates with Origami and emits the `origami.gemm.dp.v1` modeled contract (matrix instruction, macro tile, `DepthU`, cache hints, workgroup mapping, stagger and launch). `Tensile.JitGemm` validates candidates in order and builds the first supported one. It never benchmarks candidates or invents a recipe. |
+| Benchmark | `hipblaslt-bench --jit-gemm` uses the generic provider with prediction and completes generation before correctness checks and timing. |
+| Lifetime | Algorithms and modules are retained until process exit on their generating device. No persistent cache or bundle reload exists. |
+| Pre-tuned selection | Default construction orders Equality, Range, Prediction, GridBased and FreeSize selectors, followed by TruePred rows. The Prediction library type (C++ `ProblemPredictionLibrary`) ships 507 pre-tuned solution YAML files in per-architecture `Origami` directories under `Logic/asm_full/` (gfx950 489, gfx1250 7, gfx1250v0 7, navi32 4) and ranks them at runtime with `origami::rank_configs`. Origami does not construct kernels at package time. |
+| xf32 retry | When a problem that requests xf32 math finds no solution, `getBestSolutions` repeats the lookup with FP32 math. |
+| Shortfall fill | When `getBestSolutions` returns fewer results than `requestedAlgoCount`, the heuristic code calls `getAllSolutions`, excluding GridBased and Prediction, and appends supported, non-duplicate solutions. |
+| rocRoller | When it applies (`HIPBLASLT_USE_ROCROLLER=1`, or by default for eligible block-scaled problems), rocRoller returns its own results before Tensile lookup, using a handle-owned cache and generating on a miss. It is not a generic JIT provider today. |
+
+## Target design
+
+### Diagram
 
 ```text
-GEMM descriptors, scalars and buffers + explicit YAML recipe
-                              |
-              tensilelite::getGemmAlgo
-                              |
-              Tensile.SingleSolution
-                  compile one solution
-                              |
-       Load serialized solution + main/helper code objects
-                              |
-              Check device/problem/workspace
-                              |
-              hipblasLtMatmulHeuristicResult_t
-                         /             \
-             hipblasLtMatmul       Gemm.initialize / run
+HEURISTIC QUERY                                          JIT  BACKENDS AND PREDICTION
+
+EqualityLibrary ---------+                                    TensileLite ----------------+
+                         |                                    HipKittens (future) . . . . +
+OrigamiLibrary ----------+                                    rocRoller (future) . . . . .+
+(LibraryType: Prediction)|                                    OtherBackends (future) . . .+
+                         v                                                                |
+                  SolutionLibrary <--------------------  Jit <----------------------------+
+                         |    if not satisfied by         ^
+                         |    pre-tuned libraries         |
+                         v                                +------ Predictor <------ Origami
+                  AlgoGetHeuristic                                    ^
+                                                                      +------------------- TuningKnowledge
+
+Solid lines: connections in the target design.
+Dotted lines: future backends. Each backend connects only to Jit; none depends on TensileLite.
 ```
 
-Include `<hipblaslt/hipblaslt-jit-tensilelite.hpp>` and use `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo`. The call takes the usual GEMM descriptors, host scalars and buffers, `tensilelite::Options`, and a workspace limit. It returns the algorithm and required workspace in a `hipblasLtMatmulHeuristicResult_t`.
-
-`Options::configPath` is required and names an explicit recipe. Generation options also identify the Python interpreter/import paths, compiler, fresh output directory and target. An empty architecture means the current device; an explicitly requested target must match that device. The direct entry point does not interpret a missing recipe as a request for prediction.
-
-Compilation is synchronous and invokes `Tensile.SingleSolution` without benchmarking. The loader uses the generated serialized solution and every listed code object. Support checks reuse Tensile's predicates and workspace rules; preparation constructs the ordered launches and resolves required main/helper symbols before submission.
-
-The standalone Python/command-line interface (CLI) builder only compiles artifacts; it does not load or execute graphics processing unit (GPU) work. The direct host call performs generation, loading and validation. The application then submits the returned algorithm to the existing execution API. Calling `hipblasLtMatmul` alone does not invoke this new TensileLite/generic JIT path. The separate existing rocRoller route can generate code at runtime.
-
-`Tensile --build-only` already generates and compiles kernels without benchmarking, including a YAML containing one recipe, and writes code objects plus a serialized solution library. `SingleSolution` reuses those generators and compiler tools while requiring exactly one recipe. It returns named artifacts and solution identity to Python, records all main/helper code objects and target/toolchain provenance in a manifest, and publishes the bundle only after every required artifact succeeds. The direct hipBLASLt integration consumes that bundle through a child-process invocation. Skipping benchmarking and compiling without a GPU are shared capabilities; the distinction is the bounded callable interface and complete bundle contract.
-
-The sample in `clients/samples/29_hipblaslt_jit_gemm` demonstrates the whole flow for 16-bit floating-point (FP16) GEMM: configure the direct call, allocate the returned workspace, run both execution APIs, and check against a central processing unit (CPU) reference. Applications own their descriptors, buffers and workspace and must follow existing handle/stream synchronization rules; the handle owns internal synchronization state. The library owns generation, loading and retained algorithm state. The sample and runtime do not require a prebuilt hipBLASLt device library.
-
-## Lifetime, failures and build behavior
-
-The returned algorithm is bound to its originating process and device. The library retains its loaded modules until process exit so algorithm copies remain usable. Repeated execution reuses the compiled result. Stored algorithm bytes or indices are not portable identities, and retained build files are not a persistent JIT cache.
-
-Compile before stream capture. Keep application buffers and workspace valid until their operations complete. C matmul prepares each execution; C++ callers initialize their `Gemm` with the selected algorithm and initialize again after changing its problem, pointers or captured scalar values. Existing handle, stream, workspace and object concurrency requirements continue to apply. Stream-K preparation can bind synchronization state to its preparation stream.
-
-A failed selection clears the result and returns a status, with diagnostic details when available. A failed build publishes no completed bundle; a subsequent load/support failure may leave completed artifacts for diagnosis. Missing helpers and insufficient workspace are rejected before submitting the operation. Failed C++ reinitialization preserves its prior prepared execution context. Ordinary GPU execution errors keep the execution API's semantics.
-
-Empty M/N output returns `HIPBLAS_STATUS_NOT_SUPPORTED` without compilation. K=0 can use an explicit recipe implementing beta*C. Datatype, scale-layout and instruction support still depend on the chosen solution; output-amax currently requires one batch, GlobalSplitU=1 and StreamK=0.
-
-`HIPBLASLT_ENABLE_JIT` defaults to `OFF`; enabling it requires the host library. The public direct declaration remains available when disabled and returns `HIPBLAS_STATUS_NOT_SUPPORTED`. The output bundle includes the serialized library, manifest, private loader envelope and code objects. Generator logs remain alongside the fresh output directory.
-
-## Generic extension above the basic path
-
-The generic layer is a partial implementation of AIHPBLAS-4801. Its purpose is to describe an operation independently of the backend that produces executable code. The public experimental interface in `hipblaslt/hipblaslt-jit.hpp` uses opaque, copyable `Request`, `Backend` and `Solution` handles:
-
-```cpp
-hipblasStatus_t getJitAlgo(int device, const Request& request,
-    const Backend& backend, size_t maxWorkspaceBytes,
-    Solution& solution, Diagnostics& diagnostics);
-```
-
-`makeGemmRequest` captures an existing GEMM description; the generic `getGemmAlgo` adapter turns a compatible solution into the result accepted by `hipblasLtMatmul` and `Gemm`. The caller selects a configured backend. Compiler settings, tuning fields and predictor schemas remain in provider-specific options and implementation rather than the common handles. The provider boundary is for compiled-in implementations and does not establish a stable external plugin application binary interface (ABI).
-
-The request owns descriptor values and copied host scalars while application buffers retain their usual lifetime requirements. `Solution` copies share the compiled bundle; adapting one to a GEMM algorithm retains the executable state in the process-local registry. Sample `clients/samples/30_hipblaslt_generic_jit_gemm` demonstrates this generic flow separately from the direct sample.
-
-| Component | Responsibility |
-| --- | --- |
-| Application | Describe the operation, choose direct or generic selection, own buffers/workspace, and execute through the operation API. |
-| Generic coordinator | Validate request/backend/device, invoke the provider, retain the returned solution and connect the operation adapter. |
-| Backend/provider | Produce supported code and executable metadata, including any provider-private prediction and parameter translation. |
-| Operation adapter | Connect a compatible solution to the existing operation descriptors and execution interface. |
-| Prepared execution | Bind current arguments/workspace and retain the modules and ordered invocations required for execution. |
-
-GEMM is the implemented operation. An independent provider fixture demonstrates the generic seam; it is not a second production compiler. Additional operations require their own factories and execution adapters. Generic attention execution and dynamic provider discovery are future work.
-
-The generic provider currently combines planning and compilation. Its provider-private plan does not complete the future library-controlled planning/cache contract. This distinction is why AIHPBLAS-4801 remains partial even when the common handles and GEMM adapters are usable.
-
-### Reuse of existing problem and solution types
-
-The internal `GemmRequest` already embeds `RocblasltContractionProblem`, adds an operation tag, and owns captured alpha/beta values. A different generator does not require another GEMM problem schema. The current `Request` handle supplies ownership and operation identification; public `GemmProblemType` alone is narrower than this complete payload.
-
-| Existing type or mechanism | Current behavior and planned reuse |
-| --- | --- |
-| Tensile `Problem`, `ProblemInputs`, and `Solution` bases | Generic but skeletal; we will assess extensions for missing semantics rather than assume they already own compilation identity and executable lifetime. |
-| `ContractionProblemGemm` and `ContractionSolution` | We will reuse the existing GEMM predicates, size mapping, workspace policy and ordered preparation across compatible producers. These types remain GEMM-specific. |
-| Generic `Solution` / private `CompiledSolution` | Current handles retain backend, target, request and bundle state, plus workspace requirements. We will preserve that ownership around existing operation solutions as producer support expands. A matmul algorithm token does not replace general executable ownership. |
-| `KernelArguments`, `KernelInvocation`, HIP `SolutionAdapter` | We will reuse existing argument, module and launch mechanisms where sufficient. HIP is the Heterogeneous-compute Interface for Portability runtime. |
-
-A new operation needs its own payload, support rules, argument binding, workspace policy and complete helper sequence. We will generalize shared mechanics only where those requirements justify it. Non-GEMM KFA profiles and adapters are future work; another compiler alone does not require a new executor or another public `Problem` type.
-
-### Alternative generators
-
-| Role | TensileLite | rocRoller | Other generators, proposed |
-| --- | --- | --- | --- |
-| Current integration | Production generic provider and direct API; explicit recipe or provider-private predicted candidates. | Separate runtime selects a `KernelType`, ranks configurations with Origami, checks a handle-owned cache, and generates/loads on a miss. It is not a generic provider today. | No second production generic provider is implemented; the independent provider is a test fixture. |
-| Current execution | Serialized `ContractionSolution`, existing predicates/solve logic, retained bundle and HIP adapter. | `CommandArguments`, predicates and synchronization scratch feed `CommandKernel::launchKernel`; this route precedes Tensile solution lookup. | Checked-in external KFA examples demonstrate particular artifacts and supported profiles. |
-| Planned convergence | TensileLite will emit complete KFA metadata and use the shared consumer for proven profiles. | The planned rocRoller adapter will export or normalize supported artifacts into that same contract and consumer. | Additional providers would implement the same producer contract and any required operation adapter. |
-
-On a cache miss, rocRoller's `RocRollerGemmKernel::generate` calls `CommandKernel::generateKernel` and `loadKernel`. A separate checked-in rocRoller assembly fixture uses Tensile KFA ingestion; it does not prove automatic metadata export from runtime generation. The rocRoller dispatch branch also supports precompiled custom code objects from other producers with handwritten argument packing. Any common adapter must preserve its predicates and Stream-K `ZeroedBeforeAndAfter` scratch contract; caller-visible workspace alone is not the complete synchronization requirement.
-
-## Prediction as a separate extension
-
-The prediction/benchmark layer uses provider-private Origami ranking and the candidate selector. An empty `Options::configPath` requests prediction only through generic `tensilelite::createBackend`; an explicit path requests that recipe. Prediction ranks candidates and compiles the first supported recipe. It does not benchmark candidate kernels or manufacture a default recipe after ranking/validation fails. This provider behavior does not change the direct API's required recipe.
-
-The modeled contract covers `MatrixInstruction`, macro tile/`DepthU`, `NonTemporalA/B`, all four workgroup-mapping outputs and all three stagger outputs for the current data-parallel candidate domain. [The capability table](../JIT.md#origami-modeled-inputs) records their translations and mode limits. Unsupported mappings and derived changes reject a candidate; only unpredicted settings use defaults and derivation. Stream-K enablement is a caller input, not an Origami prediction. Broader candidate domains, unmodeled tuning choices and epilogue cost estimates need further work. Existing gfx950 microscaling (MX) rankings lack necessary subtile choices, and gfx1250 latency estimates are not calibrated. A supported explicit recipe and a usable prediction are separate capabilities.
-
-`hipblaslt-bench` completes prediction/compilation before correctness checks, warmup and execution timing. Kernel correctness and prediction quality are evaluated separately. This extension belongs to AIHPBLAS-4551 and stays above the basic direct delivery. Origami ranks configurations or existing solutions; it is not a code-generation backend. The installed library’s Prediction selector ranks existing solutions, while this provider predicts recipes that may not exist yet.
-
-## Roadmap and component interactions
-
-AIHPBLAS-4548 is the umbrella. The rows below describe contributions and remaining contracts, not ticket-closure claims.
-
-| Component / tracking | Status | Purpose and connection |
+| From | To | Meaning |
 | --- | --- | --- |
-| Builder and direct host integration — AIHPBLAS-4549 | Implemented downstream | Explicit YAML reaches SingleSolution; complete artifacts load and execute through C/C++ GEMM. Direct sample and focused continuous integration (CI) demonstrate application use. |
-| Generic interfaces/adapters — AIHPBLAS-4801 | Partial implementation | Common operation/backend/solution handles and GEMM adaptation. The applicable data-parallel modeled-input contract is preserved; a reusable planning/cache protocol remains open. |
-| Modeled prediction — AIHPBLAS-4551 | Initial policy implemented; broader work deferred | Provider-private Origami ranking supplies ordered choices to validation and compilation, including choices independent of installed solution indices. |
-| `JustInTime` solution library — AIHPBLAS-4550 | Alternative under assessment | If adopted, this library would consult compatible generated entries before compiling, only after complete applicable lookup, including Equality and Origami-based Prediction, yields zero compatible results. Placement and policy remain under assessment below. Explicit selection calls alone do not provide this library. |
-| Planning/input protocol — AIHPBLAS-4801 remainder | Future | The planning protocol will turn operation, target and specialization facts into reusable backend planning/recipe identity before compilation, preserving relevant modeled inputs while keeping predictor schemas private. |
-| Persistent cache — AIHPBLAS-4552 | Future | The cache will use plan/compatibility identity for lookup, load on a hit, and compile/store on a miss. We will define ProblemType grouping, code-object merging, equality-like metadata, invalidation and concurrent publication. |
-| Exact epilogue — AIHPBLAS-4553 | Future | The generator will compile exactly the requested bias/activation/output specialization without generic activation dispatch. This is separate from current epilogue correctness and future epilogue cost modeling. |
-| Tuning blueprints — AIHPBLAS-4554 | Future | The provider will combine stored choices for unmodeled parameters with predicted choices before validation. Existing defaults are not a blueprint database. |
-| KFA metadata convergence | Deferred follow-up | TensileLite will emit the agreed KFA encoding so generated and existing KFA kernels can share selection and execution. We will prove argument, helper, workspace, predicate and launch equivalence before consolidating paths. |
-| `HIPBLASLT_JIT_DEBUG` diagnostics | Deferred follow-up | We will add independent `timing` and `progress` categories for final duration reports and live compilation-stage transitions. Default behavior will remain free of the new instrumentation. |
-| More operations and production backends | Future | We will reuse existing operation types and execution machinery and add concrete adapters/profiles and producer implementations as their contracts are demonstrated. rocRoller adaptation is proposed above. |
+| EqualityLibrary | SolutionLibrary | Existing pre-tuned Equality matching. |
+| OrigamiLibrary (LibraryType: Prediction) | SolutionLibrary | Existing pre-tuned solutions ranked by Origami at runtime. |
+| SolutionLibrary | AlgoGetHeuristic | Results returned by `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`. |
+| Jit | SolutionLibrary | Only if the request is not satisfied by the pre-tuned libraries (`HIPBLASLT_JIT=1`), or as the only source (`HIPBLASLT_JIT=2`). |
+| TensileLite | Jit | Live backend. |
+| HipKittens | Jit | Future backend; explicitly deferred in this pass (dashed). |
+| rocRoller | Jit | Future backend (dashed). |
+| OtherBackends | Jit | Future backends (dashed). |
+| Predictor | Jit | Ranked candidate configurations. |
+| Origami | Predictor | Analytical ranking. |
+| TuningKnowledge | Predictor | Values for knobs the model does not predict; TensileLite defaults initially. |
 
-For KFA convergence, producer metadata will retain the full executable contract: argument order/types/padding, target and predicates, helpers and their order, grid/workgroup/cluster units, local data share (LDS), workspace initialization and internal synchronization state. Sharing serialized metadata alone does not prove equivalent selection or execution. The current direct implementation has not completed that convergence.
+### Components
 
-KFA custom kernels already become normal `ContractionSolution`s; the current JIT loader also reads a normal singleton `MasterSolutionLibrary` and reuses support, solve and launch machinery. We will standardize on the **same versioned metadata schema and execution semantics** across supported producers; concrete symbols, layouts and tuning values may differ:
+| Component | Role |
+| --- | --- |
+| AlgoGetHeuristic | The public heuristic entry points, C `hipblasLtMatmulAlgoGetHeuristic` and C++ extension `GemmInstance::algoGetHeuristic`. No JIT-specific public call is required. |
+| SolutionLibrary | The existing solution-library lookup, fed by EqualityLibrary, OrigamiLibrary and, when enabled, the JIT solution library. |
+| OrigamiLibrary | The existing `LibraryType: Prediction`. The name is a design label, not a new type. |
+| Jit | hipBLASLt code that calls a backend-specific JIT interface and builds a library of JIT-generated kernels. The design does not introduce a `JitInterface` type name. |
+| JIT interface | Input: algorithm parameters (for GEMM: M, N, K, datatypes, scale types, layout, activation and the rest of the operation description) plus the gfx target. Output: solutions. Implementations are backend specific. |
+| Backends | Independent generators: TensileLite (live); rocRoller, HipKittens and others (future extension points; HipKittens deferred in this pass); a new in-process mock backend in tests to prove swappability. |
+| Predictor | Ranks candidates for Jit from Origami and TuningKnowledge. The current C++ predictor (`hipblaslt-jit-tensilelite-predictor.cpp`) already ranks synthetic candidates with Origami and emits `origami.gemm.dp.v1`. |
+| TuningKnowledge | A new interface. It initially supplies TensileLite defaults for unmodeled knobs; real tuning data is later work under AIHPBLAS-4554. |
+| Code-object builder | hipBLASLt C++ that assembles and links through comgr, adapted from rocRoller's `InProcessAssembler`. |
+| JIT solution library | The persistent cache, loaded as a second master library. |
 
-```text
-PLANNED: supported producers will converge on one library-owned consumer
-  TensileLite                rocRoller                Other generator
-      |                          |                           |
-      +--------------------------+---------------------------+
-                                 v
-                Code objects + common KFA metadata
-                                 v
-             Library-owned validation / KFA consumer
-                                 v
-        Existing operation solution / predicates / preparation
-                                 v
-              Shared argument, module and launch mechanisms
-```
+### Existing types and KFA metadata
 
-Generated `CustomKernel` metadata is partial: workspace policy and helper ordering still come from the full solution, and generated/custom argument paths differ. Generated assembly's `custom.config` currently contains only `InternalSupportParams.KernArgsVersion`; normal kernel ABI metadata is also present, and fuller solution state lives in the serialized solution. Provenance `Source`, `Version` and descriptive `Features` are not schema negotiation or runtime capability gates.
+The type-reuse guidance from the September 25 revision still applies. The GEMM payload remains `RocblasltContractionProblem`, and selection and execution reuse `ContractionProblemGemm`, `ContractionSolution`, `KernelArguments`, `KernelInvocation` and the HIP `SolutionAdapter` where sufficient. Another generator does not require a second public GEMM problem model. KFA custom kernels already become normal `ContractionSolution`s; KFA metadata is the candidate common encoding for the metadata that generators emit, but the plan of record does not yet select the format. KFA convergence remains deferred; the [KFA assessment](https://github.com/ROCm/rocm-libraries/blob/users/jolabega/downstream-hipblaslt-jit-develop/projects/hipblaslt/jit-design/kfa-producer-convergence.md) records producer gaps and the proof sequence required before dispatch is shared.
 
-We will complete producer metadata first, then strictly validate it and prove argument-byte, launch, workspace and helper-sequence equivalence before numerical validation and migration of each supported profile. We will preserve symbols/targets, physical layouts, predicates, dynamic shared memory, synchronization, lifetime and diagnostics. Only then will we remove redundant translation or packing. The [KFA assessment](kfa-producer-convergence.md) records detailed gaps and source evidence.
+### Code-object construction
 
-The proposed diagnostic spelling is `HIPBLASLT_JIT_DEBUG=timing`, `progress`, or `timing,progress`. Timing will report compilation stages and the overall call; progress will report stage transitions while work is running. Neither category will imply the other, and unset/empty will add no timing collection, observer or debug files. Reports will preserve existing logs, bundle semantics, exit status and benchmark timing boundaries. These names describe planned behavior, not an implemented option.
+Generators emit assembly or HIP source plus metadata only. hipBLASLt C++ assembles and links through comgr, adapted from rocRoller's `InProcessAssembler`: `AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE`, then `AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE`. HIP helper source uses comgr HIP compilation. The output is raw, uncompressed executable code objects: comgr cannot bundle or compress, and `hipModuleLoad` accepts raw executable and linkable format (ELF) objects. hipBLASLt disables comgr's own on-disk cache (`~/.cache/comgr`) for these builds, so the JIT solution library is the only persistent cache of generated code.
 
-### Optional fallback library and selection policy
+### JIT solution library
 
-The explicit API remains useful for deterministic backend choice, deliberate generation and prewarming before stream capture. If adopted, a `JustInTime` library type would provide an alternative entry point to the proposed shared producer/validation service; it is not a selected replacement. It would address missing coverage; when any usable existing kernel is available, zero-result fallback would not search for a faster generated alternative.
+| Property | Design |
+| --- | --- |
+| Location | The directory named by `HIPBLASLT_JIT_LIBRARY_PATH`. By default hipBLASLt creates a per-user directory with mode 0700: `/tmp/hipblaslt-jit-<uid>/` on Linux, `%TEMP%\hipblaslt-jit-<user>` on Windows. |
+| Layout | One library per `ProblemType`, mimicking the TensileLibrary layout of a library file plus code objects. |
+| Publication | New solutions merge in under a file lock with atomic rename, so several processes can share a directory. |
+| Loading | Loaded at runtime as a second master library. |
+| Indices | Cached solutions use real solution indices from a reserved index range. Tests may still use process-local JIT tokens. |
+| Cache key | The gfx target and its target features, the backend identifier and version, the comgr version, the compiler environment settings that affect output, and the library schema version. A library whose key does not match is ignored; hipBLASLt never deletes cache entries automatically. |
 
-Default Tensile construction orders Equality, Range, Prediction, GridBased, FreeSize and TruePred beneath hardware/operation/problem predicates. Equality is matching with equality distance; Prediction uses Origami. Modes and available branches alter traversal. The proposed trigger is **zero compatible results across the complete applicable lookup**, not an unfilled requested count: `findTopSolutions` accumulates across rows, so a final JIT row could otherwise compile merely to fill top-N.
+### Tool paths
 
-A leaf cannot handle an absent root library or operation branch, or an earlier return from rocRoller. Before adopting the alternative, we will define that full lookup boundary and the existing retry from reduced-precision to 32-bit computation. Current lookup lacks compiler/backend context; fallback would also need configured backends, target/capability/workspace checks, concurrency and compilation-latency policy, diagnostics, unsupported-versus-failed outcomes, and rules for enumeration/index queries. It would compile outside stream capture. A GEMM-templated library does not gain non-GEMM execution by adding a type.
+The Python interpreter, TensileLite source directory and import paths, and (until comgr replaces them) the compiler and offload bundler become build-time defaults baked into the library. The existing `HIPBLASLT_JIT_PYTHON`, `HIPBLASLT_JIT_TENSILE_SOURCE`, `HIPBLASLT_JIT_PYTHONPATH`, `HIPBLASLT_JIT_CXX` and `HIPBLASLT_JIT_OFFLOAD_BUNDLER` environment variables override them. Today only `hipblaslt-bench` bakes these defaults; a heuristic query has no application options, so the library must own them.
 
-In this alternative, compatible generated-cache lookup would precede compilation. We will define target, toolchain, schema, recipe and specialization identity, invalidation, concurrent publication and reclamation for the planned cache. Process-local algorithm retention and rocRoller's handle cache are separate from the proposed persistent cache. If the optional library is adopted, it and the existing explicit API would share those proposed services while retaining different selection policies.
+### Heuristic integration
+
+| `HIPBLASLT_JIT` | Behavior |
+| --- | --- |
+| `0` or unset (default) | Off. Heuristic queries behave as they do today. |
+| `1` | Fallback. JIT runs only when the existing lookup leaves the result short of `requestedAlgoCount`. |
+| `2` | Forced. JIT is the only source; the query skips Equality, Origami (Prediction), all other libraries and rocRoller's early path. It looks up the JIT solution library first, then generates. |
+
+In fallback mode, the existing lookup runs to completion first: `getBestSolutions`, including rocRoller's early path and the xf32-to-FP32 retry, then the existing `getAllSolutions` shortfall fill. rocRoller results count toward `requestedAlgoCount`. If the result is still empty or has fewer than `requestedAlgoCount` solutions, the query consults the JIT solution library, then generates and publishes. Jit generates as many solutions as are needed to reach `requestedAlgoCount`, as `AlgoGetHeuristic` does for pre-tuned results.
+
+JIT failures are always reported. In fallback mode, failing to reach `requestedAlgoCount` is a hard error unless the existing heuristic contract already allows returning fewer results; step 5 verifies that contract. In forced mode, a failure returns zero results and is still reported. A build with `HIPBLASLT_ENABLE_JIT=OFF` ignores `HIPBLASLT_JIT` with a one-time warning.
+
+### Public API changes
+
+`getJitAlgo`, `makeGemmRequest`, `getGemmAlgo` (generic and TensileLite direct) and `createBackend` leave the public and extension API. `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` stop being installed and stop being included from `hipblaslt-ext.hpp`; they move to internal headers under `library/src/amd_detail/` used by unit tests. Samples 29 and 30 become standalone test binaries under `clients/tests/jit`, run by `.github/scripts/test_hipblaslt_jit.py`. `hipblaslt-bench --jit-gemm` keeps working through the internal header until step 5 removes it.
+
+### Ticket mapping
+
+AIHPBLAS-4548 is the umbrella epic. These mappings describe scope, not ticket closure.
+
+| Ticket | Scope |
+| --- | --- |
+| AIHPBLAS-4801, Interface for JIT backends | The backend interface and the predict, cache lookup and active module path. |
+| AIHPBLAS-4552 | JIT solution library (cache). |
+| AIHPBLAS-4551 | Prediction. |
+| AIHPBLAS-4550 | JustInTime library type. |
+| AIHPBLAS-4553 | Exact epilogue. |
+| AIHPBLAS-4554 | Tuning blueprints. |
+| AIHPBLAS-4549 | Builder and direct integration (current behavior). |
+
+## Roadmap
+
+The steps are planned in this order. The related-ticket column associates each step with the ticket scopes above for review; it is not a ticket-closure plan.
+
+| Step | Status | Scope | Related tickets |
+| --- | --- | --- | --- |
+| 1. Demote the public API | In progress | Stop installing the two JIT headers and including them from `hipblaslt-ext.hpp`; move them to internal headers for unit tests. Convert samples 29 and 30 to test binaries run by the shared driver. `--jit-gemm` uses the internal header until step 5. | AIHPBLAS-4801 |
+| 2. Jit component and interfaces | Planned | Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. | AIHPBLAS-4801, AIHPBLAS-4551, AIHPBLAS-4554 |
+| 3. comgr code-object builder | Planned | In-process assembly/link and helper compilation; TensileLite emits assembly, helper source and metadata only. | AIHPBLAS-4801 |
+| 4. JIT solution library | Planned | Per-`ProblemType` cache under `HIPBLASLT_JIT_LIBRARY_PATH` with locked merge, atomic rename and reserved indices. | AIHPBLAS-4552 |
+| 5. Heuristic integration | Planned | `HIPBLASLT_JIT` modes and failure rules in `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`; library-owned tool-path defaults; the JIT-off warning; removal of `hipblaslt-bench --jit-gemm`. | AIHPBLAS-4550, AIHPBLAS-4801 |
+| 6. Validation sweep | Planned | Shared JIT driver plus heuristic, cache and mode coverage. | AIHPBLAS-4548 |
+
+On the development host, gfx950 hardware (8× MI355X) is available for native numerical validation, and gfx1250 kernels run on the FFM MI450 simulator. Simulator runs are not native gfx1250 hardware evidence.
+
+Outside these steps, exact epilogue specialization (AIHPBLAS-4553), real tuning data (AIHPBLAS-4554), rocRoller and HipKittens backends, KFA metadata convergence, `HIPBLASLT_JIT_DEBUG` timing/progress diagnostics and additional operations remain future work.
+
+## Changes from the September 25 revision
+
+- The September 25 revision assessed an optional `JustInTime` library that would generate only after the complete lookup returned **zero** compatible results, and it warned against compiling to fill a requested top-N count. The approved design also triggers when the result has fewer than `requestedAlgoCount` solutions, and generates enough to fill the count.
+- The September 25 revision kept the explicit API as the primary application entry point for deterministic backend choice and prewarming. The approved design removes it from the public API; applications reach JIT through the heuristic query.
+- The September 25 revision listed persistent-cache grouping and concurrent publication as undefined. The approved design sets one library per `ProblemType` with locked merge and atomic rename, a cache key under which mismatched libraries are ignored rather than deleted, and 0700 per-user default directories.
+- Today the TensileLite generator builds its own code objects with external tools. The approved design has generators emit source and metadata only, and hipBLASLt builds the code objects through comgr.
+- The September 25 revision treated rocRoller integration as a proposed KFA adaptation. The approved design adds rocRoller as a future independent backend behind the Jit interface, and `HIPBLASLT_JIT=2` skips rocRoller's existing early path.
+
+## Decisions settled since the September 28 draft
+
+1. **Fallback and rocRoller:** rocRoller results count toward `requestedAlgoCount` in `HIPBLASLT_JIT=1`, and the fallback runs after the xf32-to-FP32 retry and the `getAllSolutions` fill. Forced mode consults the JIT solution library, then generates.
+2. **Failure policy:** JIT failures are always reported. In fallback mode, an unfulfilled count is a hard error unless the existing heuristic contract allows fewer results. Forced mode returns zero results on failure.
+3. **Tool paths:** build-time defaults baked into the library, overridable by the existing `HIPBLASLT_JIT_*` environment variables.
+4. **Cache identity and location:** the cache key listed above; mismatched libraries are ignored and never deleted automatically; 0700 per-user default directories on Linux and Windows. comgr's own cache is disabled for these builds.
+5. **Build and bench behavior:** a JIT-off build ignores `HIPBLASLT_JIT` with a one-time warning; `hipblaslt-bench --jit-gemm` is removed in step 5.
+6. **Mock backend:** a new in-process test backend.
 
 ## Decisions to track
 
-1. **Planning and selection:** we will assess the optional zero-result fallback after existing selection, including Equality and Origami-based Prediction, and define full-lookup placement, reusable provider plans, configured backends and compilation/query/failure policy while retaining the explicit API.
-2. **Cache identity and ownership:** we will distinguish operation lookup from artifact identity, include target/features, toolchain, schema, specialization and blueprint compatibility, and agree invalidation, concurrent publication and reclamation.
-3. **KFA equivalence:** we will select feature groups for producer/consumer convergence and compare packed argument bytes and ordered invocations before numerical validation, preserving helpers, distinct layouts, workspace and copied-algorithm lifetime.
-4. **Specialization and model quality:** we will agree which fields affect compiled identity and evaluate ranking quality separately from numerical correctness.
-5. **Observability:** we will define stage boundaries, parent/child duration accounting and live progress transport without changing public ABI or making report failures change compilation results.
+1. **Heuristic-path latency:** how compilation latency, concurrent generation of the same problem and stream capture are handled inside a heuristic query.
+2. **Result contract:** whether the existing heuristic contract allows returning fewer than `requestedAlgoCount` results (verified in step 5), and how unsupported and failed outcomes map to statuses.
+3. **Reserved indices:** the size and stability of the reserved index range, and enumeration and index-query behavior for it.
+4. **Backend choice:** how Jit selects among several backends once more than TensileLite exists.
+5. **Metadata format:** whether generator metadata converges on KFA `custom.config` and replaces the current private loader envelope.
 
 ## Validation and references
 
-The basic path has native Linux gfx950 evidence: direct C/C++ correctness, split-K, Stream-K/workspace, amax/alpha-zero, helper/artifact failures, algorithm copies/lifetime and disabled-build behavior. All ten basic driver routes passed. The integrated generic API passed twelve routes, with thirteen affected failure cases rerun after final exception-handling changes. Both direct and generic samples passed C/C++ checks over 32,768 elements with zero maximum error.
+Recorded evidence applies to the current behavior only. The basic path has native Linux gfx950 evidence: all ten direct driver routes passed. The integrated generic API passed twelve routes, with thirteen affected failure cases rerun after final exception-handling changes. Both samples passed C/C++ checks over 32,768 elements with zero maximum error. The prediction layer passed sixteen targeted benchmark checks. The gfx1250 `ScheduleIterAlg=4` fixture has generation/compilation evidence only. The workflow schedules gfx90a, gfx942, gfx950 and gfx1250; this configuration does not establish successful execution on every target. Native Windows execution remains unverified. None of these results validates the target design. rocRoller research is source-based.
 
-The prediction layer passed sixteen targeted benchmark checks: three numerical C/mixed/C++ cases, two expected prediction/recipe failures and eleven negative checks. Six retained API/sample/provider/disabled driver routes also passed, and the enabled build was restored. These are targeted results, not a full benchmark sweep. Documentation-only relocation preserves the validated executable and test source.
-
-The gfx1250 `ScheduleIterAlg=4` fixture has generation/compilation evidence only. The workflow schedules gfx90a, gfx942, gfx950 and gfx1250; this configuration does not establish successful execution on every target. Native Windows execution remains unverified. Earlier upper-stack CI results belong to their recorded historical heads. These results do not validate the proposed convergence or fallback changes. rocRoller research is source-based; it is disabled in the existing local build and was not runtime-tested for this document.
-
+- Versioned guides on the downstream branch: [JIT guide](https://github.com/ROCm/rocm-libraries/blob/users/jolabega/downstream-hipblaslt-jit-develop/projects/hipblaslt/JIT.md), [TensileLite backend](https://github.com/ROCm/rocm-libraries/blob/users/jolabega/downstream-hipblaslt-jit-develop/projects/hipblaslt/JIT_TENSILELITE.md), [standalone builder](https://github.com/ROCm/rocm-libraries/blob/users/jolabega/downstream-hipblaslt-jit-develop/projects/hipblaslt/tensilelite/SINGLE_SOLUTION.md), [KFA assessment](https://github.com/ROCm/rocm-libraries/blob/users/jolabega/downstream-hipblaslt-jit-develop/projects/hipblaslt/jit-design/kfa-producer-convergence.md).
 - Historical basic foundations: [single-solution builder #12459](https://github.com/ROCm/rocm-libraries/pull/12459), [candidate selector #12460](https://github.com/ROCm/rocm-libraries/pull/12460), [process launcher #12552](https://github.com/ROCm/rocm-libraries/pull/12552), [artifact reader #12563](https://github.com/ROCm/rocm-libraries/pull/12563), [direct runtime #12564](https://github.com/ROCm/rocm-libraries/pull/12564), [direct sample/CI #12565](https://github.com/ROCm/rocm-libraries/pull/12565).
-- Contributor guides at the final documentation tip: [versioned roadmap](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/JIT_ROADMAP.md), [standalone builder](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/tensilelite/SINGLE_SOLUTION.md), [direct API](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/JIT_TENSILELITE.md), [generic API](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/JIT.md), and [validation](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/clients/tests/jit/README.md).
 - Historical upper work: [generic interface #12461](https://github.com/ROCm/rocm-libraries/pull/12461), [generic usage #12462](https://github.com/ROCm/rocm-libraries/pull/12462), [prediction/benchmark #12463](https://github.com/ROCm/rocm-libraries/pull/12463), [documentation tail #12430](https://github.com/ROCm/rocm-libraries/pull/12430).
+- Contributor guides at the final implementation tip: [versioned roadmap](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/JIT_ROADMAP.md) and [generic API](https://github.com/ROCm/rocm-libraries/blob/d742375dbbef5ef44e9890e199741de70d573f14/projects/hipblaslt/JIT.md).
 - Related design context: [Dynamic Local Kernel Libraries for hipBLASLt](https://amd.atlassian.net/wiki/spaces/MLSE/pages/1915912619/Dynamic+Local+Kernel+Libraries+for+hipBLASLt). This was supplied as a format/tone reference; its authenticated page and subpages were unavailable for this document review. The deliverable here is the copyable draft.

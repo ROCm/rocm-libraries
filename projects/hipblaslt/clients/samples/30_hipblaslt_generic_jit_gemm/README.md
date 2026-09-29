@@ -15,7 +15,7 @@ The application follows five steps:
 
 The [JIT API guide](../../../JIT.md) explains backend settings, build
 requirements, concurrency, lifetime and failure behavior. The
-[component roadmap](../../../JIT_ROADMAP.md) places the sample
+[roadmap](../../../JIT.md#roadmap) places the sample
 in the full request, prediction, compilation and execution flow.
 
 ## Build and run
