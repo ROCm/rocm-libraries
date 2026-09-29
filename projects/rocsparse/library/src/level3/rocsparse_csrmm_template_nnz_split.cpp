@@ -301,23 +301,21 @@ namespace rocsparse
             }
         }
 
-        const uint32_t block_reduce_grid_x = rocsparse::get_grid_size_x(handle, n, 1024);
-
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrmmnn_general_block_reduce<1024>),
-            dim3(block_reduce_grid_x, get_grid_size_y<J>(handle, batch_count_C)),
-            dim3(1024),
-            0,
-            handle->stream,
-            n,
-            nblocks,
-            batch_count_C,
-            row_block_red,
-            val_block_red,
-            dense_C,
-            ldc,
-            order_C,
-            batch_stride_C);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrmmnn_general_block_reduce<1024>),
+                                           dim3(rocsparse::get_grid_size_x(handle, n, 1024),
+                                                get_grid_size_y<J>(handle, batch_count_C)),
+                                           dim3(1024),
+                                           0,
+                                           handle->stream,
+                                           n,
+                                           nblocks,
+                                           batch_count_C,
+                                           row_block_red,
+                                           val_block_red,
+                                           dense_C,
+                                           ldc,
+                                           order_C,
+                                           batch_stride_C);
 
         return rocsparse_status_success;
     }
