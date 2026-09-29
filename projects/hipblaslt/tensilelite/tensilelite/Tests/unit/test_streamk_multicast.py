@@ -54,12 +54,19 @@ class TestRegistration:
         NOT be a user/benchmark-settable validParameter."""
         from Tensile.Common.ValidParameters import validParameters
         assert "StreamKMulticast" not in validParameters
+        assert "StreamKClusterMulticast" not in validParameters
 
     def test_not_a_default_benchmark_parameter(self):
         """Not in defaultSolution either -- it is seeded/derived on state only by
         Solution.assignProblemIndependentDerivedParameters."""
         from Tensile.Common.GlobalParameters import defaultSolution
         assert "StreamKMulticast" not in defaultSolution
+        assert "StreamKClusterMulticast" not in defaultSolution
+
+    def test_not_a_required_naming_parameter(self):
+        from Tensile.Common.RequiredParameters import getRequiredParametersFull, getRequiredParametersMin
+        assert "StreamKClusterMulticast" not in getRequiredParametersFull()
+        assert "StreamKClusterMulticast" not in getRequiredParametersMin()
 
 
 # --- config -> Solution derivation helpers ---------------------------------

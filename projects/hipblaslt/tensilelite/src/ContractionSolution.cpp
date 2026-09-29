@@ -1136,7 +1136,7 @@ namespace TensileLite
                                              size_t resolvedGlobalAccumulation) const
     {
         validatePersistentLoopArgsVersion();
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
         {
             if(!launch.clusterSchedule.enabled || launch.argsVersion != 2
                || launch.reduction != origami::reduction_t::tree)
@@ -1583,7 +1583,7 @@ namespace TensileLite
             }
             else
             {
-                auto tiles = sizeMapping.streamKClusterMulticast
+                auto tiles = usesStreamKSpatialCluster()
                                  ? launch.clusterSchedule.blocks
                                  : problem.getNumTiles(sizeMapping, 1);
 
@@ -1642,7 +1642,7 @@ namespace TensileLite
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
 
                     const StreamKStaticSplit split
-                        = sizeMapping.streamKClusterMulticast
+                        = usesStreamKSpatialCluster()
                               ? launch.clusterSchedule.split
                               : streamKStaticSplit(tiles, itersPerTile, launch.grid,
                                                    pAMDGPU->skFullTiles, false);
@@ -1995,7 +1995,7 @@ namespace TensileLite
     std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             return std::make_tuple(1, size_t{1}, size_t{0}, size_t{0});
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
@@ -2127,7 +2127,7 @@ namespace TensileLite
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
         Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
     {
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             return std::make_tuple(size_t{0}, size_t{0}, size_t{0});
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
@@ -2682,7 +2682,7 @@ namespace TensileLite
         if(problem.transposeC01())
             std::swap(numWorkGroups.x, numWorkGroups.y);
 
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
         {
             checkPersistentArgument(numWorkGroups.x);
             checkPersistentArgument(numWorkGroups.y);
@@ -2756,13 +2756,13 @@ namespace TensileLite
 
         if(sizeMapping.isPersistent())
         {
-            if(sizeMapping.streamKClusterMulticast
+            if(usesStreamKSpatialCluster()
                || (sizeMapping.isPersistentDataParallel()
                    && (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1)))
             {
-                if(sizeMapping.streamKClusterMulticast && !launch.clusterSchedule.enabled)
+                if(usesStreamKSpatialCluster() && !launch.clusterSchedule.enabled)
                     throw std::runtime_error("Missing resolved StreamK cluster schedule");
-                const size_t clusters = sizeMapping.streamKClusterMulticast ? launch.grid
+                const size_t clusters = usesStreamKSpatialCluster() ? launch.grid
                     : launch.grid / checkedMultiply(sizeMapping.clusterDim.x, sizeMapping.clusterDim.y);
                 rv.numWorkGroups = spatialClusterLaunch(clusters, sizeMapping.clusterDim);
             }
@@ -2837,7 +2837,7 @@ namespace TensileLite
                 kernelArgs<T_Debug, false>( 1,
                                             3,
                                             rv.args,
-                                            sizeMapping.streamKClusterMulticast
+                                            usesStreamKSpatialCluster()
                                                 ? launch.clusterSchedule.physicalGrid
                                                 : getNumWorkGroups(rv),
                                             &hardware,
@@ -2857,7 +2857,7 @@ namespace TensileLite
                 kernelArgs<T_Debug, false>( 1,
                                             0,
                                             rv.args,
-                                            sizeMapping.streamKClusterMulticast
+                                            usesStreamKSpatialCluster()
                                                 ? launch.clusterSchedule.physicalGrid
                                                 : getNumWorkGroups(rv),
                                             &hardware,
@@ -2935,7 +2935,7 @@ namespace TensileLite
                                                 PersistentLaunchSettings const&              launch) const
     {
         validatePersistentLoopArgsVersion();
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             throw std::runtime_error("StreamK scheduling ABI 2 requires generated argument packing");
         KernelInvocation rv;
         rv.isSingleCall = true;
@@ -5161,7 +5161,7 @@ namespace TensileLite
         if(outerVersion < 0 || outerVersion > 3)
             throw std::runtime_error("Unsupported kernel argument protocol version");
         if(version < 0 || version > 2 || (version == 1 && !sizeMapping.isPersistentDataParallel())
-           || ((version == 2) != sizeMapping.streamKClusterMulticast))
+           || (version == 2 && !sizeMapping.isStreamK()))
             throw std::runtime_error("Invalid persistent loop argument layout for execution policy");
         if(version == 1 && outerVersion != 3)
             throw std::runtime_error("DataParallel argument layout version 1 requires KernArgsVersion=3");
@@ -5173,7 +5173,7 @@ namespace TensileLite
     {
         validatePersistentLoopArgsVersion();
         const int version = internalArgsSupport.persistentLoopArgsVersion;
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
         {
             const auto& c = sizeMapping.clusterDim;
             const bool supportedShape = c.z == 1
@@ -5917,7 +5917,7 @@ namespace TensileLite
     size_t ContractionSolution::requiredWorkspaceSize(Problem const&  problem,
                                                       Hardware const& hardware) const
     {
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             return resolveClusteredStreamKSettings(problem, hardware).workspaceBytes;
         if(sizeMapping.isPersistentDataParallel())
             return 0;
@@ -6182,8 +6182,7 @@ namespace TensileLite
         // whether parallel remains eligible under uniform summation order, and
         // wants only the yes/no, so obstacleToken defaults to unrequested.
         std::string streamKUniformSummationOrderObstacle(
-            SizeMapping const&                      sizeMapping,
-            ContractionSolution::ProblemType const& problemType,
+            ContractionSolution const&              solution,
             ContractionSolution::Problem const&     problem,
             char const**                            obstacleToken = nullptr);
     } // namespace
@@ -6191,7 +6190,7 @@ namespace TensileLite
     origami::reduction_t ContractionSolution::getSKReduction(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             return origami::reduction_t::tree;
         if(sizeMapping.isPersistentDataParallel())
             return origami::reduction_t::none;
@@ -6279,7 +6278,7 @@ namespace TensileLite
                     = reductionStrat == origami::reduction_t::parallel
                       && sizeMapping.streamKAtomic == 0
                       && streamKUniformSummationOrderObstacle(
-                             sizeMapping, problemType, problem)
+                             *this, problem)
                              .empty();
                 if(!keepParallel)
                     reductionStrat = origami::reduction_t::tree;
@@ -6563,7 +6562,7 @@ namespace TensileLite
                                                                 Hardware const& hardware,
                                                                 bool const* effectiveDynamicHint) const
     {
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             return resolveClusteredStreamKSettings(problem, hardware);
         StreamKSettings sk;
         const bool customStreamK
@@ -6744,19 +6743,20 @@ namespace TensileLite
         // fence configurations that are expressible but were never audited for
         // this guarantee.
         std::string streamKUniformSummationOrderObstacle(
-            SizeMapping const&                        sizeMapping,
-            ContractionSolution::ProblemType const&   problemType,
+            ContractionSolution const&                solution,
             ContractionSolution::Problem const&       problem,
             char const**                              obstacleToken)
         {
+            const auto& sizeMapping = solution.sizeMapping;
+            const auto& problemType = solution.problemType;
             auto refuse = [&](char const* token, std::string detail) -> std::string {
                 if(obstacleToken != nullptr)
                     *obstacleToken = token;
                 return detail;
             };
 
-            if(sizeMapping.streamKClusterMulticast)
-                return refuse("StreamKClusterMulticast",
+            if(solution.usesStreamKSpatialCluster())
+                return refuse("StreamKSpatialCluster",
                               "StreamK spatial cluster reduction is not yet audited for uniform summation order");
 
             // Atomic fixup accumulates partial tiles in arrival order.
@@ -6975,7 +6975,7 @@ namespace TensileLite
             // That helper tags itself, so the token is already set when it
             // objects.
             const std::string obstacle = streamKUniformSummationOrderObstacle(
-                sizeMapping, problemType, problem, obstacleToken);
+                *this, problem, obstacleToken);
             if(!obstacle.empty())
                 return obstacle;
 
@@ -7371,7 +7371,7 @@ namespace TensileLite
                 grid = cuCount;
             }
 
-            if(self.sizeMapping.streamKClusterMulticast)
+            if(self.usesStreamKSpatialCluster())
             {
                 if(outSelectedGrid) *outSelectedGrid = grid;
                 return grid;
@@ -7679,7 +7679,7 @@ namespace TensileLite
                                           size_t               tiles,
                                           origami::reduction_t reductionStrat) const
     {
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
             return resolveClusteredStreamKSettings(problem, hardware).grid;
         return getPersistentGridImpl(*this, problem, hardware, tiles, reductionStrat, nullptr);
     }
@@ -7724,7 +7724,7 @@ namespace TensileLite
         if(!sizeMapping.isStreamK())
             return d;
 
-        if(sizeMapping.streamKClusterMulticast)
+        if(usesStreamKSpatialCluster())
         {
             const auto launch = resolveClusteredStreamKSettings(problem, hardware);
             d.clusterSchedule = launch.clusterSchedule;

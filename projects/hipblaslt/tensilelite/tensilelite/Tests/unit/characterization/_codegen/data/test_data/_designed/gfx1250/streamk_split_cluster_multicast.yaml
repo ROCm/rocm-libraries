@@ -59,7 +59,6 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [-1]
         - StoreVectorWidth: [-1]
         - TileProcessingStrategy: [StreamK]
-        - StreamKClusterMulticast: [True]
         - StreamKFixupTreeReduction: [1]
         - PrefetchAcrossPersistent: [0]
         - WorkAssignment: [StaticGrid]
