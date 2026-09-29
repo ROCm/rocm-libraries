@@ -4,9 +4,8 @@
 """Bounded packaged-kernel experiment for the advisory rocJITsu race-check job."""
 
 import argparse
-from collections import Counter, defaultdict
+from collections import Counter
 import csv
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,9 +14,10 @@ import signal
 import subprocess
 import threading
 import time
-import zlib
+import math
 
-SHAPES = [(256, 256, 1, k) for k in (64, 128, 256, 320)]
+from rocjitsu_sweep_plan import make_plan, sha256
+
 TYPE_OPTIONS = {
     "problem-identifier": "operationIdentifier",
     "a-type": "aType",
@@ -53,185 +53,22 @@ def write_json(path, value):
     temporary.replace(path)
 
 
-def sha256(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def read_library(path):
-    import msgpack
-
-    payload = path.read_bytes()
-    if path.name.endswith(".zlib"):
-        payload = zlib.decompress(payload)
-    data = msgpack.unpackb(payload, raw=False)
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected a library mapping: {path}")
-    return data
-
-
-def matches_hardware(predicate, target, device):
-    kind = predicate["type"]
-    value = predicate.get("value")
-    if kind == "AMDGPU":
-        return matches_hardware(value, target, device)
-    if kind in {"And", "Or"}:
-        results = [matches_hardware(p, target, device) for p in value]
-        return all(results) if kind == "And" else any(results)
-    if kind == "Processor":
-        return value == target
-    if kind == "PciChipId":
-        return value == device["device_id"]
-    if kind == "CUCount":
-        return value == device["simd_count"] // device["simd_per_cu"]
-    # Unknown constraints are outside the prototype's selection scope, never bypassed.
-    return False
-
-
-def ordinary_problem(problem):
-    if any(
-        problem.get(key, False)
-        for key in (
-            "groupedGemm",
-            "sparse",
-            "useGradient",
-            "useE",
-            "mxBlockA",
-            "mxBlockB",
-            "useInitialStridesAB",
-            "useInitialStridesCD",
-        )
-    ):
-        return False
-    allowed = {"Half", "BFloat16", "Float", "Float8", "BFloat8", "Int8", "Int32"}
-    return all(problem[key] in allowed for key in ("aType", "bType", "cType", "dType"))
-
-
-def select_batches(groups, kernel_count, batch_size):
-    """Select distinct names in contiguous index ranges without trimming native shards."""
-    batches = []
-    names = set()
-    remaining = kernel_count
-    # Round-robin across shards before selecting another batch from a large shard.
-    candidates = []
-    for key, solutions in sorted(groups.items()):
-        solutions.sort(key=lambda s: s["index"])
-        candidates.append([key, solutions, 0])
-    while remaining:
-        made_progress = False
-        for candidate in candidates:
-            key, solutions, start = candidate
-            size = min(batch_size, remaining)
-            while start + size <= len(solutions):
-                block = solutions[start : start + size]
-                start += 1
-                kernels = {s["kernelName"] for s in block}
-                indices = [s["index"] for s in block]
-                if (
-                    indices != list(range(indices[0], indices[0] + size))
-                    or len(kernels) != size
-                    or names & kernels
-                ):
-                    continue
-                names.update(kernels)
-                batches.append(
-                    {
-                        "id": len(batches),
-                        "library": key[0],
-                        "problem_type": block[0]["problemType"],
-                        "hardware_predicate": block[0]["hardwarePredicate"],
-                        "solutions": [
-                            {
-                                "index": s["index"],
-                                "name": s["name"],
-                                "kernel": s["kernelName"],
-                            }
-                            for s in block
-                        ],
-                    }
-                )
-                remaining -= size
-                start += size - 1
-                made_progress = True
-                break
-            candidate[2] = start
-            if not remaining:
-                break
-        if not made_progress:
-            raise ValueError(
-                f"Requested {kernel_count} distinct kernels; selected only {kernel_count - remaining}"
-            )
-    return batches
-
-
 def prepare(args):
+    begin = time.monotonic()
     base = json.loads(args.config.read_text(encoding="utf-8"))
-    device = base["vm"]["gpu"]["device"]
-    library_dir = (
-        args.library_dir / args.target
-        if (args.library_dir / args.target).is_dir()
-        else args.library_dir
+    manifest = make_plan(
+        args.library_dir,
+        args.target,
+        base["vm"]["gpu"]["device"],
+        args.kernels,
+        args.seed,
     )
-    libraries = sorted(
-        set(library_dir.glob(f"*{args.target}.dat"))
-        | set(library_dir.glob(f"*{args.target}.dat.zlib"))
+    manifest.update(
+        backend=args.backend,
+        workers=args.workers,
+        tools={str(p): sha256(p) for p in (args.rocjitsu, args.client, args.config)},
+        preparation_seconds=time.monotonic() - begin,
     )
-    if not libraries:
-        raise ValueError(
-            f"No {args.target} packaged solution metadata under {library_dir}"
-        )
-    groups = defaultdict(list)
-    counts = Counter()
-    for library in libraries:
-        for solution in read_library(library).get("solutions", []):
-            counts["inventory"] += 1
-            if not matches_hardware(solution["hardwarePredicate"], args.target, device):
-                counts["other_or_unknown_hardware"] += 1
-                continue
-            if not ordinary_problem(solution["problemType"]):
-                counts["outside_problem_scope"] += 1
-                continue
-            key = (
-                str(library),
-                json.dumps(solution["problemType"], sort_keys=True),
-                json.dumps(solution["hardwarePredicate"], sort_keys=True),
-            )
-            group = groups[key]
-            # Keep only selection fields, and share the type/predicate within a
-            # group. Large size mappings and problem predicates stay in the
-            # packaged shard, where the native client will enforce them.
-            group.append(
-                {
-                    **{k: solution[k] for k in ("index", "name", "kernelName")},
-                    "problemType": (
-                        group[0]["problemType"] if group else solution["problemType"]
-                    ),
-                    "hardwarePredicate": (
-                        group[0]["hardwarePredicate"]
-                        if group
-                        else solution["hardwarePredicate"]
-                    ),
-                }
-            )
-            counts["eligible"] += 1
-    jobs = select_batches(groups, args.kernels, args.batch_size)
-    for job in jobs:
-        metadata = Path(job["library"])
-        main_object = metadata.with_name(
-            metadata.name.removesuffix(".zlib").removesuffix(".dat") + ".co"
-        )
-        if not main_object.is_file():
-            raise ValueError(f"Missing code object for selected shard: {main_object}")
-        helpers = [
-            library_dir / f"Kernels.so-000-{args.target}.hsaco",
-            library_dir / f"hipblasltTransform_{args.target}.hsaco",
-        ]
-        job["code_objects"] = [str(main_object)] + [
-            str(p) for p in helpers if p.is_file()
-        ]
-        job["sha256"] = {
-            str(p): sha256(p) for p in [metadata, *map(Path, job["code_objects"])]
-        }
     base.update(
         max_ticks=0,
         num_threads=1,
@@ -243,17 +80,6 @@ def prepare(args):
     base["sinks"] = {"types": ["stderr"]}
     config = args.reports / "rocjitsu.json"
     write_json(config, base)
-    manifest = {
-        "target": args.target,
-        "workers": args.workers,
-        "kernels": args.kernels,
-        "shapes": SHAPES,
-        "planned_cases": args.kernels * len(SHAPES),
-        "inventory": dict(counts),
-        "jobs": jobs,
-        "tools": {str(p): sha256(p) for p in (args.rocjitsu, args.client, args.config)},
-        "note": "Bounded deterministic ordinary-GEMM selection, not full library/path coverage.",
-    }
     write_json(args.reports / "manifest.json", manifest)
     return manifest, config
 
@@ -319,8 +145,12 @@ def client_options(job, results):
     return options
 
 
-def classify(job, text, returncode):
-    expected = {(s["index"], shape): s for s in job["solutions"] for shape in SHAPES}
+def classify_tensile(job, text, returncode):
+    expected = {
+        (s["index"], tuple(c["shape"])): s
+        for s in job["solutions"]
+        for c in job["cases"]
+    }
     cases = {}
     errors = []
     for line in text.splitlines():
@@ -341,48 +171,188 @@ def classify(job, text, returncode):
         cases[key] = row[9]
         if row[9] != "PASSED":
             errors.append(f"Case {key}: {row[9]}")
-    dispatches = Counter(
-        re.findall(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', text, re.M)
-    )
-    wanted = Counter(
-        expected[key]["kernel"] for key, status in cases.items() if status == "PASSED"
-    )
-    for name in {s["kernel"] for s in job["solutions"]}:
-        if dispatches[name] != wanted[name]:
-            errors.append(f"Target dispatch count mismatch: {name}")
-    # Retain auxiliary dispatch identities for diagnosis; helpers vary by datatype/GSU.
-    auxiliary = {
-        k: v
-        for k, v in dispatches.items()
-        if k not in {s["kernel"] for s in job["solutions"]}
-    }
-    races = re.findall(r"^RACE .*", text, re.M)
-    warnings = Counter(line for line in text.splitlines() if "[rj warn]" in line)
-    if races:
-        errors.append(
-            f"{len(races)} race reports (including runtime/kernel reports; none suppressed)"
-        )
-    if warnings:
-        errors.append(
-            f"{sum(warnings.values())} emulator warnings; coverage needs investigation"
-        )
     missing = sorted(set(expected) - set(cases))
     if missing:
         errors.append(f"{len(missing)} missing case records")
+    result = {
+        "id": job["id"],
+        "cases": [
+            {
+                "index": i,
+                "shape": shape,
+                "status": status,
+                "case_id": next(
+                    c["id"] for c in job["cases"] if tuple(c["shape"]) == shape
+                ),
+            }
+            for (i, shape), status in sorted(cases.items())
+        ],
+    }
+    return finish_result(job, text, returncode, result, errors, launches_per_case=1)
+
+
+def finish_result(job, text, returncode, result, errors, launches_per_case):
+    dispatches = Counter(
+        re.findall(r'^\[rocjitsu\] Kernel dispatch: "([^"]+)"', text, re.M)
+    )
+    kernel = job["solutions"][0]["kernel"]
+    wanted = sum(c["status"] == "PASSED" for c in result["cases"]) * launches_per_case
+    if dispatches[kernel] != wanted:
+        errors.append(
+            f"Target dispatch count mismatch: expected {wanted}, observed {dispatches[kernel]}"
+        )
+    races = re.findall(r"^RACE .*", text, re.M)
+    warnings = Counter(line for line in text.splitlines() if "[rj warn]" in line)
+    if races:
+        errors.append(f"{len(races)} race reports (none suppressed)")
+    if warnings:
+        errors.append(f"{sum(warnings.values())} emulator warnings")
     if returncode:
         errors.append(f"Client exited {returncode}")
-    return {
-        "id": job["id"],
-        "failed": bool(errors),
-        "errors": errors,
-        "returncode": returncode,
-        "cases": [
-            {"index": i, "shape": s, "status": v} for (i, s), v in sorted(cases.items())
+    result.update(
+        failed=bool(errors),
+        errors=errors,
+        returncode=returncode,
+        race_headers=races,
+        warnings=dict(warnings),
+        target_dispatches=dispatches[kernel],
+        auxiliary_dispatches={k: v for k, v in dispatches.items() if k != kernel},
+    )
+    return result
+
+
+BENCH_TYPES = {
+    "Float": "f32_r",
+    "Half": "f16_r",
+    "BFloat16": "bf16_r",
+    "Float8": "f8_r",
+    "BFloat8": "bf8_r",
+    "Int8": "i8_r",
+    "Int32": "i32_r",
+}
+
+
+def bench_options(job):
+    p = job["problem_type"]
+    row = {
+        "function": "matmul",
+        "algo_method": 2,
+        "solution_index": job["solutions"][0]["index"],
+        "requested_solution_num": 1,
+        "transA": "T" if p["transA"] else "N",
+        "transB": "T" if p["transB"] else "N",
+        **{f"{x}_type": BENCH_TYPES[p[f"{x}Type"]] for x in "abcd"},
+        "compute_type": "c_i32_r" if p["computeType"] == "Int32" else "c_f32_r",
+        "scale_type": BENCH_TYPES[p["computeType"]],
+        "compute_input_typeA": BENCH_TYPES[
+            p.get("computeInputTypeA", p.get("computeInputType", p["aType"]))
         ],
-        "race_headers": races,
-        "warnings": dict(warnings),
-        "auxiliary_dispatches": auxiliary,
+        "compute_input_typeB": BENCH_TYPES[
+            p.get("computeInputTypeB", p.get("computeInputType", p["bType"]))
+        ],
+        "alpha": 1,
+        "beta": 0,
+        "initialization": "rand_int",
+        "bias_vector": bool(p.get("useBias")),
+        "bias_type": BENCH_TYPES[(p["biasDataTypeWhiteList"] or [p["computeType"]])[0]],
+        "bias_source": {0: "a", 1: "b", 3: "d"}[p["biasSrcWhiteList"][0]],
+        "scaleA": {"": "none", "Scalar": "Scalar", "Vector": "Vector"}[
+            p.get("useScaleAB", "")
+        ],
+        "scaleB": {"": "none", "Scalar": "Scalar", "Vector": "Vector"}[
+            p.get("useScaleAB", "")
+        ],
+        "scaleC": bool(p.get("useScaleCD")),
+        "scaleD": bool(p.get("useScaleCD")),
+        "scaleAlpha_vector": bool(p.get("useScaleAlphaVec")),
+        "amaxD": bool(p.get("outputAmaxD")),
+        "activation_type": "none",
+        "norm_check": 1,
+        "norm_check_assert": True,
+        "allclose_check": 1,
+        "iters": 1,
+        "cold_iters": 0,
+        "use_gpu_timer": False,
+        "print_kernel_info": True,
+        "user_allocated_workspace": 134217728,
+        "skip_slow_solution_ratio": 0.0,
+        "adaptive": False,
     }
+    if p.get("f32XdlMathOp") == "XFloat32":
+        row["compute_type"] = "c_xf32_r"
+    return [
+        dict(
+            row,
+            M=c["shape"][0],
+            N=c["shape"][1],
+            batch_count=c["shape"][2],
+            K=c["shape"][3],
+        )
+        for c in job["cases"]
+    ]
+
+
+def classify_bench(job, text, returncode):
+    """Require a numeric result and explicit solution identity for every YAML row."""
+    records, headers, pending = [], None, None
+    errors = []
+    for line in text.splitlines():
+        header = re.match(r"^\[\d+\]:(.*)", line)
+        if header:
+            headers = next(csv.reader([header[1]]))
+            continue
+        if headers is not None:
+            row = next(csv.reader([line.strip()]))
+            if len(row) == len(headers):
+                pending = dict(zip(headers, row))
+                records.append(pending)
+                headers = None
+                continue
+        identity = re.match(
+            r"\s*--(Solution index|Solution name|kernel name):\s*(.*)", line
+        )
+        if identity and pending is not None:
+            pending[identity[1]] = identity[2]
+    expected = {tuple(c["shape"]): c for c in job["cases"]}
+    cases = {}
+    solution = job["solutions"][0]
+    for row in records:
+        try:
+            shape = tuple(int(row[k]) for k in ("m", "n", "batch_count", "k"))
+            if shape not in expected:
+                raise ValueError(f"Unplanned bench case: {shape}")
+            if shape in cases:
+                raise ValueError(f"Duplicate bench case: {shape}")
+            if (
+                int(row["Solution index"]) != solution["index"]
+                or row["Solution name"] != solution["name"]
+                or row["kernel name"] != solution["kernel"]
+            ):
+                raise ValueError(f"Wrong bench solution/kernel identity: {shape}")
+            # norm_check_assert handles datatype-dependent tolerance in the native
+            # client. Require its measurement too; an exit of zero is insufficient.
+            numeric = [float(row[k]) for k in ("norm_error", "atol", "rtol")]
+            passed = all(math.isfinite(x) and x >= 0 for x in numeric)
+            cases[shape] = {
+                "case_id": expected[shape]["id"],
+                "index": solution["index"],
+                "shape": shape,
+                "status": "PASSED" if passed else "FAILED",
+            }
+            if not passed:
+                errors.append(f"Non-finite bench validation: {shape}")
+        except (KeyError, ValueError) as error:
+            errors.append(f"Invalid bench record: {error}")
+    if len(cases) != len(expected):
+        errors.append(f"{len(expected) - len(cases)} missing bench case records")
+    return finish_result(
+        job,
+        text,
+        returncode,
+        {"id": job["id"], "cases": list(cases.values())},
+        errors,
+        launches_per_case=2,
+    )
 
 
 def execute_command(command, log, timeout, env):
@@ -514,11 +484,15 @@ def run(args):
             HSA_OVERRIDE_CPU_AFFINITY_DEBUG="0",
             HSA_ENABLE_SDMA="1",
         )
+        if args.backend == "bench":
+            env["HIPBLASLT_TENSILE_LIBPATH"] = manifest["library_dir"]
         write_json(
             args.reports / "settings.json",
             {
                 "cpus": cpus,
                 "timeout": args.timeout,
+                "backend": args.backend,
+                "library_dir": manifest["library_dir"],
                 "controlled_environment": {
                     k: env[k]
                     for k in (
@@ -534,11 +508,43 @@ def run(args):
 
         def execute(job, slot):
             stem = args.reports / f"batch-{job['id']:03}"
-            options = client_options(job, stem.with_suffix(".csv"))
-            ini = [f"{k}={v}" for k, v in options.items()]
-            ini += ["problem-size=" + ",".join(map(str, shape)) for shape in SHAPES]
-            ini += ["code-object=" + path for path in job["code_objects"]]
-            stem.with_suffix(".ini").write_text("\n".join(ini) + "\n", encoding="utf-8")
+            if "planning_error" in job:
+                result = {
+                    "id": job["id"],
+                    "failed": True,
+                    "errors": [job["planning_error"]],
+                    "cases": [
+                        {
+                            "case_id": c["id"],
+                            "index": job["solutions"][0]["index"],
+                            "shape": c["shape"],
+                            "status": "UNSUPPORTED_CASE",
+                        }
+                        for c in job["cases"]
+                    ],
+                }
+                write_json(stem.with_suffix(".result.json"), result)
+                return result
+            if args.backend == "tensile":
+                options = client_options(job, stem.with_suffix(".csv"))
+                ini = [f"{k}={v}" for k, v in options.items()]
+                ini += [
+                    "problem-size=" + ",".join(map(str, c["shape"]))
+                    for c in job["cases"]
+                ]
+                ini += ["code-object=" + path for path in job["code_objects"]]
+                stem.with_suffix(".ini").write_text(
+                    "\n".join(ini) + "\n", encoding="utf-8"
+                )
+                client_args = ["--config-file", str(stem.with_suffix(".ini"))]
+            else:
+                import yaml
+
+                stem.with_suffix(".yaml").write_text(
+                    yaml.safe_dump(bench_options(job), sort_keys=False),
+                    encoding="utf-8",
+                )
+                client_args = ["--yaml", str(stem.with_suffix(".yaml"))]
             command = [
                 "taskset",
                 "-c",
@@ -548,13 +554,15 @@ def run(args):
                 str(config),
                 "--",
                 str(args.client),
-                "--config-file",
-                str(stem.with_suffix(".ini")),
+                *client_args,
             ]
             write_json(stem.with_suffix(".command.json"), command)
             begin = time.monotonic()
             rc = execute_command(command, stem.with_suffix(".log"), args.timeout, env)
-            result = classify(
+            classifier = (
+                classify_tensile if args.backend == "tensile" else classify_bench
+            )
+            result = classifier(
                 job,
                 stem.with_suffix(".log").read_text(encoding="utf-8", errors="replace"),
                 rc,
@@ -578,23 +586,33 @@ def run(args):
         counts = Counter()
         missing = []
         for result in summary["results"]:
-            expected = {
-                (s["index"], shape)
-                for s in by_id[result["id"]]["solutions"]
-                for shape in SHAPES
-            }
-            observed = {(c["index"], tuple(c["shape"])) for c in result["cases"]}
+            job = by_id[result["id"]]
+            observed = {c["case_id"] for c in result["cases"]}
             missing += [
-                {"index": i, "shape": shape} for i, shape in sorted(expected - observed)
+                {
+                    "job": job["id"],
+                    "index": job["solutions"][0]["index"],
+                    "case_id": c["id"],
+                    "shape": c["shape"],
+                }
+                for c in job["cases"]
+                if c["id"] not in observed
             ]
             counts.update(c["status"] for c in result["cases"])
         unstarted = [
-            {"index": s["index"], "shape": shape}
+            {
+                "job": j,
+                "index": by_id[j]["solutions"][0]["index"],
+                "case_id": c["id"],
+                "shape": c["shape"],
+            }
             for j in summary["unstarted"]
-            for s in by_id[j]["solutions"]
-            for shape in SHAPES
+            for c in by_id[j]["cases"]
         ]
         summary.update(
+            backend=args.backend,
+            seed=args.seed,
+            artifact_fingerprint=manifest["artifact_fingerprint"],
             seconds=time.monotonic() - start,
             planned_cases=manifest["planned_cases"],
             counts=dict(counts),
@@ -628,17 +646,21 @@ def main():
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--kernels", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=10)
+    parser.add_argument("--backend", choices=("tensile", "bench"), required=True)
+    parser.add_argument(
+        "--seed",
+        required=True,
+        help="Recorded PR revision or explicit seed for reproducible sampling",
+    )
     parser.add_argument("--timeout", type=float, default=120)
     args = parser.parse_args()
     if (
         not 1 <= args.workers <= 4
         or not 1 <= args.kernels <= 100
-        or not 1 <= args.batch_size <= 10
         or not 0 < args.timeout <= 120
     ):
         parser.error(
-            "Prototype limits: 1–4 workers, 1–100 kernels, 1–10 kernels/batch, timeout at most 120 seconds"
+            "Prototype limits: 1–4 workers, 1–100 kernels, timeout at most 120 seconds"
         )
     for key in ("rocjitsu", "client", "config", "library_dir", "reports"):
         setattr(args, key, getattr(args, key).resolve())
