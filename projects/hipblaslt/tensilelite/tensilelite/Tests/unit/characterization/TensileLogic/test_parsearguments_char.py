@@ -38,7 +38,7 @@ import sys
 
 import pytest
 
-from Tensile.TensileLogic.ParseArguments import BUNDLED_KNOWN_BUGS, parseArguments
+from tensilelite.TensileLogic.ParseArguments import BUNDLED_KNOWN_BUGS, parseArguments
 
 pytestmark = pytest.mark.unit
 

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.Toolchain.Validators import _exeExists
+from tensilelite.Toolchain.Validators import _exeExists
 
 pytestmark = pytest.mark.unit
 
