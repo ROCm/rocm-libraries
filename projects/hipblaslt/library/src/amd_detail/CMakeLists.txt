@@ -99,6 +99,15 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
         roc::hipblaslt hip::host Threads::Threads)
     target_compile_features(hipblaslt-jit-component-test PRIVATE cxx_std_17)
 
+    # Compiles the comgr builder directly; runs without a GPU unless --gpu is given.
+    add_executable(hipblaslt-jit-code-object-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/code_object_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp")
+    target_include_directories(hipblaslt-jit-code-object-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/src/include")
+    target_link_libraries(hipblaslt-jit-code-object-test PRIVATE amd_comgr hip::host Threads::Threads)
+    target_compile_features(hipblaslt-jit-code-object-test PRIVATE cxx_std_17)
+
     add_executable(hipblaslt-jit-generic-api-test
         "${PROJECT_SOURCE_DIR}/clients/tests/jit/public_gemm_test.cpp")
     target_include_directories(hipblaslt-jit-generic-api-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -106,6 +115,6 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
     target_compile_features(hipblaslt-jit-generic-api-test PRIVATE cxx_std_17)
     target_link_libraries(hipblaslt-jit-generic-api-test PRIVATE roc::hipblaslt hip::device)
     set_target_properties(hipblaslt-jit-mock-backend-test hipblaslt-jit-component-test
-                          hipblaslt-jit-generic-api-test PROPERTIES
+                          hipblaslt-jit-code-object-test hipblaslt-jit-generic-api-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
 endif()
