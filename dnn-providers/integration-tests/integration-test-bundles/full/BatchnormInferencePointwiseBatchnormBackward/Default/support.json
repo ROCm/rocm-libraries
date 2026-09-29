@@ -45,6 +45,7 @@
             "linux"
           ],
           "gfx1151": [
+            "linux",
             "windows"
           ],
           "gfx90a": [
@@ -104,6 +105,7 @@
             "linux"
           ],
           "gfx1151": [
+            "linux",
             "windows"
           ],
           "gfx90a": [
