@@ -121,6 +121,8 @@ def main() -> int:
         print("no HIP device visible", file=sys.stderr)
         return 2
 
+    from builders.gfx950.gdn.gdn_decode import TOL, check
+
     print(
         f"{'batch':>6} {'arm':>5} {'tile':>10} {'spec_id':>22} {'grid':>8} "
         f"{'eager_us':>10} {'device_us':>10}  correctness"

@@ -131,9 +131,48 @@ def test_simple_reference_path_matches(harness):
     assert max(out_err, state_err) <= harness["TOL"]
 
 
+def _assert_dispatch_result_matches_fp32(harness, result, batch):
+    """Compile and launch one dispatch result, including state-pool safety."""
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+
+    spec = result.spec
+    artifact = compile_kernel(result.build(), arch=ARCH)
+    launcher = KernelLauncher(
+        hsaco=artifact.hsaco,
+        kernel_name=artifact.kernel_name,
+        signature=result.signature,
+    )
+    inputs = harness["make_inputs"](spec, batch)
+    before = inputs["state"].clone()
+    values, _ = harness["prepare"](spec, inputs, batch)
+    cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
+    with no_fence():
+        launcher(values, config=cfg)
+    torch.cuda.synchronize()
+    written = inputs["write_indices"].long()
+    untouched = torch.ones(
+        values["state"].shape[0], dtype=torch.bool, device=values["state"].device
+    )
+    untouched[written] = False
+    assert untouched.any(), result.candidate.spec_id
+    assert torch.equal(
+        values["state"][untouched], before[untouched]
+    ), result.candidate.spec_id
+    assert torch.isfinite(values["out"]).all(), result.candidate.spec_id
+    assert torch.isfinite(values["state"][written]).all(), result.candidate.spec_id
+    ref_out, ref_state = harness["ref_fp32"](spec, inputs)
+    out_err = (values["out"].float() - ref_out).abs().max().item()
+    state_err = (values["state"].float()[written] - ref_state).abs().max().item()
+    assert max(out_err, state_err) <= harness["TOL"], (
+        f"batch {batch} spec_id={result.candidate.spec_id} "
+        f"out={out_err:.3e} state={state_err:.3e}"
+    )
+
+
 @requires_gfx950
 def test_all_registry_candidates_are_correct(harness, request):
-    """Every legal registry candidate must match the independent FP32 oracle."""
+    """Every legal default-D128 registry candidate matches the FP32 oracle."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
     batches = (
@@ -152,47 +191,20 @@ def test_all_registry_candidates_are_correct(harness, request):
         else:
             assert len(results) == 54
         for result in results:
-            from rocke.helpers.compile import compile_kernel
-            from rocke.runtime.launcher import KernelLauncher, LaunchConfig, no_fence
+            _assert_dispatch_result_matches_fp32(harness, result, batch)
 
-            spec = result.spec
-            artifact = compile_kernel(result.build(), arch=ARCH)
-            launcher = KernelLauncher(
-                hsaco=artifact.hsaco,
-                kernel_name=artifact.kernel_name,
-                signature=result.signature,
-            )
-            inputs = harness["make_inputs"](spec, batch)
-            before = inputs["state"].clone()
-            values, _ = harness["prepare"](spec, inputs, batch)
-            cfg = LaunchConfig(grid=result.grid, block=result.block, stream=0)
-            with no_fence():
-                launcher(values, config=cfg)
-            torch.cuda.synchronize()
-            written = inputs["write_indices"].long()
-            untouched = torch.ones(
-                values["state"].shape[0],
-                dtype=torch.bool,
-                device=values["state"].device,
-            )
-            untouched[written] = False
-            assert untouched.any(), result.candidate.spec_id
-            assert torch.equal(
-                values["state"][untouched], before[untouched]
-            ), result.candidate.spec_id
-            assert torch.isfinite(values["out"]).all(), result.candidate.spec_id
-            assert torch.isfinite(
-                values["state"][written]
-            ).all(), result.candidate.spec_id
-            ref_out, ref_state = harness["ref_fp32"](spec, inputs)
-            out_err = (values["out"].float() - ref_out).abs().max().item()
-            state_err = (
-                (values["state"].float()[written] - ref_state).abs().max().item()
-            )
-            assert max(out_err, state_err) <= harness["TOL"], (
-                f"batch {batch} spec_id={result.candidate.spec_id} "
-                f"out={out_err:.3e} state={state_err:.3e}"
-            )
+
+@requires_gfx950
+def test_all_d64_registry_candidates_are_correct(harness):
+    """Every explicitly selectable D64 tile is proven on device, not only auto."""
+    from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
+
+    results = dispatch_gdn_decode_all(
+        GdnDecodeRequest(batch=1, arch=ARCH, head_k_dim=64, head_v_dim=64)
+    )
+    assert len(results) == 20
+    for result in results:
+        _assert_dispatch_result_matches_fp32(harness, result, batch=1)
 
 
 @requires_gfx950

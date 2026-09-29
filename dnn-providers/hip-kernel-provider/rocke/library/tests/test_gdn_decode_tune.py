@@ -5,7 +5,39 @@
 
 from __future__ import annotations
 
+import dataclasses as dc
+from itertools import product
+from types import SimpleNamespace
+
 from builders.gfx950.gdn import tune
+from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
+
+
+def test_legal_configs_enumerates_every_validator_admitted_kda_tile():
+    base = dc.replace(
+        GdnDecodeSpec(), gate_kind="kda", num_k_heads=16, num_v_heads=32
+    )
+    expected = [
+        tile
+        for tile in product(
+            tune._NUM_WARPS, tune._WARP_THREADS_K, tune._BLOCKS_PER_V
+        )
+        if is_valid_spec(
+            dc.replace(
+                base,
+                num_warps=tile[0],
+                warp_threads_k=tile[1],
+                blocks_per_v_dim=tile[2],
+            ),
+            arch=tune.ARCH,
+        )[0]
+    ]
+
+    assert tune.legal_configs(base) == expected
+
+
+def test_sweep_registry_batch_returns_empty_without_registry_results():
+    assert tune.sweep_registry_batch(1, ()) == []
 
 
 def test_complete_sweep_returns_success(capsys):
@@ -23,16 +55,23 @@ def test_incomplete_sweep_returns_failure_and_names_every_cell(capsys):
     assert "Hk=16 Hv=32 batch=4" in err
 
 
-def test_main_fails_when_any_requested_cell_is_missing(monkeypatch, capsys):
+def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(tune.torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(tune, "legal_configs", lambda spec: [(1, 8, 1)])
 
-    def fake_sweep(base, batch, configs):
-        if base.num_k_heads == 16 and batch == 2:
-            return []
-        return [(1.0, (1, 8, 1), 0.0)]
+    def fake_results(request):
+        return () if request.num_k_heads == 16 and request.batch == 2 else (object(),)
 
-    monkeypatch.setattr(tune, "sweep_batch", fake_sweep)
+    monkeypatch.setattr(tune, "dispatch_gdn_decode_all", fake_results)
+    monkeypatch.setattr(
+        tune,
+        "sweep_registry_batch",
+        lambda batch, results: [] if not results else [(1.0, (1, 8, 1), "test", 0.0)],
+    )
+    monkeypatch.setattr(
+        tune,
+        "dispatch_gdn_decode",
+        lambda request: SimpleNamespace(candidate=SimpleNamespace(spec_id="test")),
+    )
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -47,5 +86,4 @@ def test_main_fails_when_any_requested_cell_is_missing(monkeypatch, capsys):
     )
 
     assert tune.main() == 1
-    err = capsys.readouterr().err
-    assert "Hk=16 Hv=32 batch=2" in err
+    assert "batch 2: no candidate was both correct and timeable" in capsys.readouterr().out

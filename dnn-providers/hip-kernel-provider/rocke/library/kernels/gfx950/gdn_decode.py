@@ -53,8 +53,8 @@ linear-attention decode contract:
 ``blocks_per_v_dim`` workgroups per ``(sequence, value_head)``. Each warp splits
 the ``head_k_dim`` reduction across ``warp_threads_k`` lanes and recombines with
 an XOR butterfly (``quad_perm`` at offsets 1-2, ``ds_swizzle`` wider), so no LDS
-is allocated. The tile ``(num_warps, warp_threads_k, blocks_per_v_dim)`` is
-chosen per batch from the dispatcher's tuned table.
+is allocated. Dispatch selects this tile from the gfx950 GDN registry: `auto`
+uses a deterministic static priority, while an explicit `spec_id` pins a tile.
 
 ``simple=True`` is the v1 reference: one workgroup per ``(sequence, value_head)``,
 ``head_v_dim`` threads, thread ``t`` owning state row ``t`` (the full

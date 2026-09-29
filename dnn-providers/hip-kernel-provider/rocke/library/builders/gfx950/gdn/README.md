@@ -242,9 +242,9 @@ For the simple reference path, there is no V split:
 grid = batch * num_v_heads
 ```
 
-At small batch, `blocks_per_v_dim` may be greater than one to create more
-workgroups and fill the GPU. At large batch, dispatch normally reduces the split
-because the batch already provides enough workgroups.
+For GDN, `auto` always uses the static `(2, 16, 8)` registry priority when it
+is legal; batch changes the grid but not the tile. KDA alone changes its
+work-keyed table choice with `batch * num_v_heads`.
 
 `out_err` and `state_err` are maximum absolute errors against the fp32 reference.
 In the current coverage, state error is larger than output error. Both remain

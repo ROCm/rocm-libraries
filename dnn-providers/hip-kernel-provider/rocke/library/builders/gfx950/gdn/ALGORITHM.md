@@ -34,7 +34,7 @@
   - [4.3 Dataflow and pipeline](#43-dataflow-and-pipeline)
   - [4.4 Cross-lane reduction](#44-cross-lane-reduction)
   - [4.5 State pool addressing](#45-state-pool-addressing)
-  - [4.6 Tile selection by batch](#46-tile-selection-by-batch)
+  - [4.6 Registry and tile selection](#46-registry-and-tile-selection)
   - [4.7 The reference path](#47-the-reference-path)
   - [4.8 Spec validation](#48-spec-validation)
 - [5. Prefill kernel](#5-prefill-kernel)
@@ -60,6 +60,9 @@
 | `BH` | `batch × num_v_heads` — the number of independent recurrences |
 | `NC` | chunks per sequence, `seqlen / C` |
 | `S` | the recurrent state of one head, `DV × DK` |
+| `NW` | `num_warps`, waves per warp-tiled workgroup |
+| `WTK` | `warp_threads_k`, lanes per warp assigned to the key reduction |
+| `BPV` | `blocks_per_v_dim`, workgroups splitting one value head |
 | `q̂`, `k̂` | L2-normalised query/key |
 | `Γ_i` | cumulative in-chunk decay up to row `i`; `γ_C` is the whole-chunk decay |
 | `EV` | per-band value extent, `DV / value_splits` — the scan's working V rows (§5.5) |
@@ -174,15 +177,16 @@ and `linear_attn_config.head_dim`, and KDA has no head grouping, so `Hk = Hv`.
 
 Three things the table pins down that the rest of the document assumes:
 
-- **`DK == DV` on every supported row.** The tile table and the `DV × DK` state shape both rely
+- **`DK == DV` on every supported row.** The tile geometry and the `DV × DK` state shape both rely
   on it. A target with `DK ≠ DV` needs the tile geometry re-derived.
 - **`kv_group = 2` is the only shipping GDN grouping.** The `(Hv, Hk) = (32, 8)` case in §7 —
   `kv_group = 4` — is a validation stress point, not a deployment.
-- **Where these models land in the tuned tables.** Both have `Hv = 32`, so `BH = 32 × batch`.
-  Prefill's `value_splits` bands on `BH` (`≤64 → 8`, `≤128 → 2`, else `1`), which means batch 1-2
-  gets 8 splits, batch 3-4 gets 2, and batch 5 and up runs unsplit; batches 2 and 4 sit exactly
-  on band edges. Decode's tile table bands on *batch* directly (`≤4`, `≤32`, `≤128`, larger), so a
-  serving batch crosses all four.
+- **Where these models land in the selection policies.** Both have `Hv = 32`.
+  Prefill's `value_splits` bands on `BH = 32 × batch` (`≤64 → 8`, `≤128 → 2`,
+  else `1`), so batches 1-2 get 8 splits, batches 3-4 get 2, and larger
+  batches run unsplit. GDN decode instead enumerates validator-approved
+  registry tiles and uses the documented static `(2, 16, 8)` priority for the
+  supported D128 deployment; batch changes the grid, not its tile.
 
 This also fixes the scope of §2.3's reuse-over-fork argument. A target that keeps the gated delta
 rule but changes the gate's *formula* stays a `gate_kind`, not a fork. A target that changes `C`,
@@ -629,7 +633,7 @@ Widening the range needs nested chunking or per-token rescaling.
 **Follow-ups.**
 
 1. A fused-path GDN prefill kernel (§5.4).
-2. gfx942 support; the tuned tables are arch-specific and need re-sweeping.
+2. gfx942 support; KDA work bands are arch-specific and need re-sweeping.
 3. Extending the supported decay range.
 4. Scan-side parallelism beyond the current `value_splits` cap, or a shorter serial chain — the scan
    is the critical path at small `BH` (§5.4).
