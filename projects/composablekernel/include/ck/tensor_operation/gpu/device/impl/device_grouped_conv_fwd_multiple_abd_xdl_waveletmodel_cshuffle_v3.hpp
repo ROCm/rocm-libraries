@@ -317,12 +317,8 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     using DeviceOp = DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3;
     GET_MXDL_PER_WAVE_IMPL
     // Force usage of 16x16 instruction for WMMA
-    static constexpr bool Wave32Force16MNPerXDL =
-        is_NSpatialGC_GKSpatial_NSpatialGK<ALayout, BLayout, ELayout>() &&
-        sizeof(AComputeDataType) == 2 && sizeof(BComputeDataType) == 2 &&
-        is_same_v<CDEElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
-        (ConvForwardSpecialization == ConvolutionForwardSpecialization::Filter1x1Stride1Pad0 ||
-         ConvForwardSpecialization == ConvolutionForwardSpecialization::Default);
+    // Note: transformation from 32x32 tile to 16x16 has been disabled because it was buggy
+    static constexpr bool Wave32Force16MNPerXDL = false;
     static constexpr index_t Wave32MaxMNPerXDL =
         Wave32Force16MNPerXDL ? 16 : math::max(MPerXDL, NPerXDL);
 
