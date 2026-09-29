@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
@@ -51,20 +52,20 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
     ROCSPARSE_DEVICE_ILF void scale_device(I length, T scalar, A* __restrict__ array)
     {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
 
-        if(gid >= length)
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            gid < length;
+            gid += stride)
         {
-            return;
-        }
-
-        if(scalar == static_cast<T>(0))
-        {
-            array[gid] = static_cast<A>(0);
-        }
-        else
-        {
-            array[gid] *= scalar;
+            if(scalar == static_cast<T>(0))
+            {
+                array[gid] = static_cast<A>(0);
+            }
+            else
+            {
+                array[gid] *= scalar;
+            }
         }
     }
 
@@ -264,7 +265,8 @@ rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::scale_kernel<256>),
-                dim3((length - 1) / 256 + 1),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(length) - 1) / 256 + 1, 256)),
                 dim3(256),
                 0,
                 handle->stream,
