@@ -3708,7 +3708,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.add(globalReadDTLInitCommonSgpr(self, kernel))
     if kernel["ProblemType"].get("MXBlockA", 0) or kernel["ProblemType"].get("MXBlockB", 0):
-      module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
+      module.add(globalReadScaleDTLInitCommonSgpr(self, kernel))
 
     module.add(self.graAddresses(kernel, tensorParametersA))
     if kernel["ProblemType"].get("MXBlockA", 0) and "MX" in tensorParametersA:
@@ -5331,10 +5331,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.isPrefetchAcrossPersistentEnabled(kernel):
       module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0, comment="PrefetchAcrossPersistent: not primed at kernel entry"))
 
-    # Should check for is swizzled instead of usesubtileimpl
+    # HostPreSwizzle / InMemorySwizzle pack scales so M-strides are expressed
+    # in data-K units (× MXBlock). NoSwizzle keeps canonical scale strides
+    # (K/MXBlock elements); scaling them by 32 breaks Option-B gather addressing.
     # TODO: Move this calculation to host-side?
-    if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockA"] and kernel["UseSubtileImpl"]:
-      module.addComment("Scale StridesMXSA by 32")
+    mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+    if (kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]
+        and kernel["UseSubtileImpl"]
+        and mxScaleFormat in ("HostPreSwizzle", "InMemorySwizzle")):
+      module.addComment("Scale StridesMXSA/B by MXBlock for swizzled scale layout")
       module.add(SLShiftLeftB32(sgpr("StridesMXSA"), 5, sgpr("StridesMXSA")))
       module.add(SLShiftLeftB32(sgpr("StridesMXSB"), 5, sgpr("StridesMXSB")))
 
@@ -5385,7 +5390,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if mxsatileInfo != None and mxsbtileInfo != None:
       if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
-        module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
+        module.add(globalReadScaleDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
     if self.states.doShadowInit:
@@ -5452,8 +5457,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(localReadDTLInitCommonSwapVgpr(self, kernel))
 
     if not hasTDM:
-      module.add(graTileAssignmentScaleSwizzled(self, kernel))
-    module.add(lraTileAssignmentScaleSwizzled(self, kernel))
+      module.add(graTileAssignmentScale(self, kernel))
+    module.add(lraTileAssignmentScale(self, kernel))
 
     module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
@@ -7601,7 +7606,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         mxsaTileInfo = self.states.mxsa.tileInfo
         mxsbTileInfo = self.states.mxsb.tileInfo
 
-        # For Swizzled scale we use extra LDS space for now to allow wider DTL loads
+        # Scale LDS footprint:
+        #   HostPreSwizzle/InMemorySwizzle: extra space for wide collective DTL
+        #     (loadWidthGR * wavefront * numWaves).
+        #   NoSwizzle Option B: remaps into the same HPS-shaped LDS slots, so
+        #     keep the same allocation (not the smaller canonical MT*Ks size).
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
         sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves

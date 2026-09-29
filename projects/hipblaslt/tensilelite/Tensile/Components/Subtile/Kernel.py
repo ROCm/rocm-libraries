@@ -122,9 +122,11 @@ from .SubtileScaleEmit import (
     emitScaleGROffset, emitScaleLROffset,
     emitScaleGRLoad, emitScaleLRLoad,
     emitScaleGRPtrUpdate, emitScaleGRLDSSwap, emitScaleLRLDSSwap,
-    graTileAssignmentScaleSwizzled, lraTileAssignmentScaleSwizzled,
+    graTileAssignmentScale, graTileAssignmentScaleSwizzled,
+    lraTileAssignmentScale, lraTileAssignmentScaleSwizzled,
     globalReadDoScaleSubtile, localReadDoScaleSubtile,
     globalReadScalePtrUpdates, globalReadScaleSwizzledDTLInitCommonSgpr,
+    globalReadScaleDTLInitCommonSgpr,
     emitSubtileScaleDsRead,
 )
 
@@ -338,7 +340,12 @@ CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',
 CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
-  """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
+  """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB').
+
+  Geometry is selected by data dtype (B4 vs B8). MXScaleFormat selects the
+  emit path (HostPreSwizzle DTL vs NoSwizzle Option-B gather) rather than a
+  distinct tile-pair for TN BufferLoad FP4; both formats share MXS*_B4/B8.
+  """
   data_tc = 'A' if tc == 'MXSA' else 'B'
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   if dtype.is6bitFloat() or dtype.isFloat4():
@@ -410,7 +417,13 @@ class TileInfo:
         self.depthU = kernel["_DepthU%s" % tc]
         self.scaleDepthU = self.depthU
       self.waveGroupSize = kernel["MIWaveGroup"][0 if isA else 1]
-      self.isSwizzled = isinstance(geometry, MXScaleTilePair)
+      # MX scale "swizzled" refers to HostPreSwizzle / InMemorySwizzle LDS
+      # packing, not merely being an MXScaleTilePair (NoSwizzle is canonical).
+      if isinstance(geometry, MXScaleTilePair):
+        self.isSwizzled = kernel.get("MXScaleFormat", "NoSwizzle") in (
+            "HostPreSwizzle", "InMemorySwizzle")
+      else:
+        self.isSwizzled = False
     elif isinstance(geometry, CDTileGeometry):
       self.macroTile = None  # C/D uses macroTile0/1
       self.macroTile0 = kernel["MacroTile0"]
@@ -681,6 +694,7 @@ class TileInfo:
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
+      self._sharedVgprGROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffsetSwap")]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
       self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 
@@ -720,7 +734,8 @@ class TileInfo:
     if self.lr is not None:
       self.lr.deallocOffsetRegisters(self, writer, kernel)
     # MXScaleTilePair dealloc
-    for attr in ('_sharedVgprGROffset', '_sharedVgprLROffset', '_sharedVgprLROffsetSwap'):
+    for attr in ('_sharedVgprGROffset', '_sharedVgprGROffsetSwap',
+                 '_sharedVgprLROffset', '_sharedVgprLROffsetSwap'):
       for v in getattr(self, attr, []):
         writer.vgprPool.checkIn(v)
       if hasattr(self, attr):
@@ -797,6 +812,11 @@ class TileInfo:
   def sharedVgprGROffset(self):
     if self.gr: return self.gr.sharedVgprGROffset
     return getattr(self, '_sharedVgprGROffset', [])
+
+  @property
+  def sharedVgprGROffsetSwap(self):
+    """Double-buffer swap mask for NoSwizzle Option-B scale GR ds_store."""
+    return getattr(self, '_sharedVgprGROffsetSwap', [])
 
   @property
   def sharedVgprLROffset(self):

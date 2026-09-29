@@ -229,14 +229,6 @@ REJECT_CASES = [
         dict(),
         id="gfx1250_noswizzle_with_streamk",
     ),
-    # 10. Phase 0: NoSwizzle + gfx950 MX / UseSubtileImpl is rejected until
-    #     subtile NoSwizzle emit lands (Phase 1 clears this).
-    pytest.param(
-        dict(isa=ISA_GFX950, mxLoadInst="BufferLoad",
-             mxScaleFormat="NoSwizzle", tdmInst=0, streamK=0),
-        dict(),
-        id="gfx950_noswizzle_mx_rejected_phase0",
-    ),
 ]
 
 
@@ -268,19 +260,20 @@ class TestRejectComplements:
         assert _run(state) is True
 
     def test_noswizzle_on_non_gfx1250_passes(self):
-        # NoSwizzle is banned on gfx1250 and (Phase 0) gfx950/subtile MX;
-        # non-MX or non-gfx950 arches remain fine.
+        # NoSwizzle is only banned on gfx1250; other archs (incl. gfx950
+        # subtile after Phase-1 emit) are fine.
         state = _make_state(isa=ISA_GFX942, mxLoadInst="BufferLoad",
                             mxScaleFormat="NoSwizzle", tdmInst=0, streamK=0,
                             mxBlockA=0, mxBlockB=0)
         assert _run(state) is True
 
-    def test_gfx950_noswizzle_with_subtile_rejected(self):
+    def test_gfx950_noswizzle_with_subtile_allowed(self):
+        # Phase 1: explicit NoSwizzle + UseSubtileImpl is valid on gfx950.
         state = _make_state(isa=ISA_GFX950, mxLoadInst="BufferLoad",
                             mxScaleFormat="NoSwizzle", tdmInst=0, streamK=0,
                             useSubtileImpl=True)
-        assert _run(state) is False
-        assert state["Valid"] is False
+        assert _run(state) is True
+        assert state["MXScaleFormat"] == "NoSwizzle"
 
 
 # ---------------------------------------------------------------------------
@@ -290,11 +283,12 @@ class TestRejectComplements:
 @pytest.mark.parametrize("isa,mxLoadInst,mxScaleFormat,tdmInst,streamK", [
     (ISA_GFX1250, "TDM",        "InMemorySwizzle", 3, 3),
     (ISA_GFX950,  "BufferLoad", "HostPreSwizzle",  0, 0),
-], ids=["TDM_IMS_gfx1250", "BL_HPS_gfx950"])
+    (ISA_GFX950,  "BufferLoad", "NoSwizzle",       0, 0),
+], ids=["TDM_IMS_gfx1250", "BL_HPS_gfx950", "BL_NS_gfx950"])
 def test_explicit_valid_pair(isa, mxLoadInst, mxScaleFormat, tdmInst, streamK):
     state = _make_state(isa=isa, mxLoadInst=mxLoadInst,
                         mxScaleFormat=mxScaleFormat, tdmInst=tdmInst,
-                        streamK=streamK)
+                        streamK=streamK, useSubtileImpl=(isa == ISA_GFX950))
     assert _run(state) is True
     assert state["MXLoadInst"]    == mxLoadInst
     assert state["MXScaleFormat"] == mxScaleFormat
