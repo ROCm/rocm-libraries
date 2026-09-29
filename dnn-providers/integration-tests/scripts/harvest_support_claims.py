@@ -899,16 +899,17 @@ def main(
     except (SidecarError, OSError) as exc:
         print(f"error: {exc}{wrote_nothing}", file=sys.stderr)
         return 1
-    verb = "would change"
-    if args.write:
-        verb = "changed"
-        try:
-            for path, change in plan.items():
-                path.write_bytes(change.text.encode("utf-8"))
-        except OSError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+    verb = "changed" if args.write else "would change"
     for path, change in plan.items():
+        if args.write:
+            try:
+                path.write_bytes(change.text.encode("utf-8"))
+            except OSError as exc:
+                print(
+                    f"error: {exc}; wrote only the sidecars listed above",
+                    file=sys.stderr,
+                )
+                return 1
         print(f"{verb} {path.relative_to(root)} (+{change.added})", file=sys.stderr)
     added = sum(change.added for change in plan.values())
     print(f"{len(plan)} sidecars {verb}, +{added} claims", file=sys.stderr)

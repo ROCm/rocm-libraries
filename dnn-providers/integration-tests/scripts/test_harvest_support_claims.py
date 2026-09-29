@@ -864,6 +864,26 @@ class TestWrite(unittest.TestCase):
         self.assertIn("unable to access; wrote nothing", err)
         self.assertFalse(self.sweep.exists() or self.single.exists())
 
+    def test_failed_write_lists_only_the_sidecars_written(self) -> None:
+        write_bytes = Path.write_bytes
+        written: List[Path] = []
+
+        def fail_second(path: Path, data: bytes) -> int:
+            if written:
+                raise OSError(f"{path}: disk full")
+            written.append(path)
+            return write_bytes(path, data)
+
+        with mock.patch.object(Path, "write_bytes", fail_second):
+            code, err = self._main(*self._WRITE)
+        self.assertEqual(code, 1)
+        (first,) = written
+        (second,) = {self.sweep, self.single} - {first}
+        self.assertIn(f"changed {self._rel(first)} (+", err)
+        self.assertNotIn(f"changed {self._rel(second)}", err)
+        self.assertIn("disk full; wrote only the sidecars listed above\n", err)
+        self.assertFalse(second.exists())
+
     def test_second_run_changes_nothing(self) -> None:
         self._main(*self._WRITE)
         before = self.sweep.read_bytes(), self.single.read_bytes()
