@@ -26,7 +26,7 @@ import rocisa
 
 from typing import List, Dict
 
-from .Architectures import ARCH_CAP_OVERRIDES, baseArchName, gfxToIsa
+from .Architectures import ARCH_CAP_OVERRIDES, baseArchName, gfxToIsa, tuningArchOf
 from .Types import IsaVersion, IsaInfo
 
 
@@ -62,7 +62,7 @@ def applyArchCapOverrides(isaInfoMap: Dict[IsaVersion, IsaInfo], archNames: List
         # Keyed on the bare name: --gpu-targets forwards a requested spec verbatim,
         # predicates and all, and a lookup that missed gfx1250-strict[cu=64] would
         # silently build it with gfx1250's capabilities.
-        overrides = ARCH_CAP_OVERRIDES.get(baseArchName(name))
+        overrides = ARCH_CAP_OVERRIDES.get(tuningArchOf(baseArchName(name)))
         if not overrides:
             continue
         isa = gfxToIsa(name)

@@ -36,6 +36,7 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
+#include "rocblaslt_arch_revision.hpp"
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
@@ -3004,18 +3005,43 @@ namespace
                 // path. Only use the subdir if a Tensile mapping file is actually present
                 // there; otherwise the directory may have been created by ExtOp/Transform
                 // installs without a corresponding Tensile library (multi-arch non-TheRock
-                // builds). Both the subdir and the mapping filenames carry `processor`,
-                // the name the runtime reports for this device -- which is the compiler
-                // target the kernels in it were built for, including a silicon-revision
-                // variant such as gfx1250-strict.
+                // builds). The mapping filenames carry `processor`, the name the runtime
+                // reports for this device -- which is the compiler target the kernels in
+                // it were built for, including gfx1250-strict. The subdir is revisioned:
+                // an A0 part reporting gfx1250 loads library/gfx1250v0/, with no fallback.
                 {
-                    auto processor_path     = path / processor;
+                    int asicRevision = -1;
+                    if(processor == "gfx1250")
+                    {
+                        hipDeviceProp_t deviceProperties;
+                        HIP_CHECK_EXC(hipGetDeviceProperties(&deviceProperties, deviceId));
+                        asicRevision = deviceProperties.asicRevision;
+                    }
+                    const auto libArch      = rocblaslt_revisioned_arch_name(processor, asicRevision);
+                    auto processor_path     = path / libArch;
                     auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
                        || std::filesystem::exists(mapping_yaml))
                     {
+                        path = std::move(processor_path);
+                    }
+                    else if(libArch != processor)
+                    {
+                        auto master = processor_path / ("TensileLibrary_" + processor);
+                        if(!std::filesystem::exists(master.string() + ".dat")
+                           && !std::filesystem::exists(master.string() + ".dat.zlib")
+                           && !std::filesystem::exists(master.string() + ".yaml"))
+                            std::cerr << "\nrocblaslt error: " << processor
+                                      << " device with asicRevision 0 (A0) needs the " << libArch
+                                      << " GEMM library, but " << processor_path
+                                      << " holds no Tensile library. Build with the "
+                                      << libArch << " subtree (the default for -a " << processor
+                                      << "), or run with HSA_DISABLE_GFX12_STRICT=0 and a "
+                                      << processor << "-strict build. Not falling back to "
+                                      << (path / processor)
+                                      << ": its kernels give wrong results on A0." << std::endl;
                         path = std::move(processor_path);
                     }
                 }

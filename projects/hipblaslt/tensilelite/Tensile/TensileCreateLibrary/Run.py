@@ -58,7 +58,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import archNamesByIsa, architectureMap, baseArchName, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf
+from Tensile.Common.Architectures import ARCH_BUILD_ALIASES, archNamesByIsa, architectureMap, baseArchName, compilerTargetOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf, tuningArchOf, withArchBuildAliases
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
@@ -627,7 +627,7 @@ def writeSolutionsAndKernels(
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
         targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(p, isa, targetGfx)
+        _alignAmdgcnTargetToStepping(p, isa, compilerTargetOf(targetGfx))
         try:
             asmToolchain.assembler(targetGfx, wavefrontsize, str(p), str(o_path))
         except RuntimeError as e:
@@ -754,7 +754,7 @@ def writeSolutionsAndKernelsTCL(
         asmPath, isa, wavefrontsize, result = ret
         o_path = asmPath.with_suffix(".o")
         targetGfx = archNames.get(isa) or isaToGfx(isa)
-        _alignAmdgcnTargetToStepping(asmPath, isa, targetGfx)
+        _alignAmdgcnTargetToStepping(asmPath, isa, compilerTargetOf(targetGfx))
         asmToolchain.assembler(targetGfx, wavefrontsize, str(asmPath), str(o_path))
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(asmPath, o_path, asmPath.stem)
@@ -999,6 +999,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     splitGSU = False
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
+    archRenames = {tuningArchOf(a): compilerTargetOf(a) for a in archs if tuningArchOf(a) != compilerTargetOf(a)}
 
     fIter = zip(
         logicFiles,
@@ -1008,6 +1009,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         itertools.repeat(printIndexAssignmentInfo),
         itertools.repeat(isaInfoMap),
         itertools.repeat(args["LazyLibraryLoading"]),
+        itertools.repeat(archRenames),
     )
 
     def libraryIter(lib: MasterSolutionLibrary):
@@ -1322,6 +1324,20 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
 
+    # An alias is only built as its own fan-out child, which --gfx1250v0 spawns.
+    isGroupChild = bool(os.environ.get(_GROUP_BUILD_ENV))
+    aliases = [a for a in archs if baseArchName(a) in ARCH_BUILD_ALIASES]
+    if aliases and not (isGroupChild and arguments["BuildGfx1250v0"]):
+        printExit(
+            f"--architecture names {', '.join(aliases)}, which is a build alias, not an "
+            "architecture; request gfx1250 with --gfx1250v0 instead."
+        )
+
+    # Before the grouping, which has to split the alias from what it expands
+    # from. Not in a fan-out child: it was handed exactly the group to build.
+    if arguments["BuildGfx1250v0"] and not isGroupChild:
+        archs = withArchBuildAliases(expandAllArchitectures(archs))
+
     # More than one group only when a stepping was asked for beside the
     # architecture it steps from, which no single run can name. Everything else
     # takes the one path below, unchanged.
@@ -1341,15 +1357,16 @@ def run():
 
     # StinkyTofu selects its cost table by name, and two steppings share one ISA,
     # so the ISA-derived name would land on the base arch's table. Hand it the
-    # requested name instead; "" means this build asked for none.
+    # requested name instead, as tuned (gfx1250v0 builds as gfx1250-strict);
+    # "" means this build asked for none.
     #
     # One name, because the global is single-valued -- not because grouping says
     # so. Collision-free grouping only keeps two architectures sharing an ISA
     # apart, so steppings of two different base architectures would share a
-    # group. gfx1250-strict is the only stepping registered today, so that pair
-    # cannot arise; a second one has to revisit this.
+    # group. All steppings registered today share gfx1250's ISA, so that pair
+    # cannot arise; a stepping of another architecture has to revisit this.
     steppings = [baseArchName(a) for a in archs if steppingArchOf(a)]
-    globalParameters["StinkyTofuArchName"] = steppings[0] if steppings else ""
+    globalParameters["StinkyTofuArchName"] = tuningArchOf(steppings[0]) if steppings else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -1385,7 +1402,7 @@ def run():
             return False
         # archs came through expandAllArchitectures, which replaces "all" with
         # the architectures it covers, so there is no keyword left to honour.
-        return archMatch(load_logic_gfx_arch(p), archs)
+        return archMatch(load_logic_gfx_arch(p), [tuningArchOf(a) for a in archs])
 
     globPattern = os.path.join(
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
@@ -1411,6 +1428,14 @@ def run():
         print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
 
     print1(f"# LibraryLogicFiles: {len(logicFiles)}")
+
+    aliases = [a for a in archs if a in ARCH_BUILD_ALIASES]
+    if aliases and not logicFiles:
+        printWarning(
+            f"No {', '.join(tuningArchOf(a) for a in aliases)} logic files matched under "
+            f"{arguments['LogicPath']}; skipping {', '.join(aliases)}."
+        )
+        return
 
     if not logicFiles:
         # Still exits 0 and still writes the subtree: a build that legitimately
@@ -1499,14 +1524,18 @@ def run():
     # arch-suffixed every fallback entry before this point. Filtering on that
     # suffix keeps each arch's Mapping complete while letting builds produce
     # non-colliding mapping artifacts that survive overlay-style installs.
-    for archName in archs:
+    #
+    # Files are named by the library name and written under the requested one,
+    # which differ only for a build alias (library/gfx1250v0/*_gfx1250*).
+    outDirs = {compilerTargetOf(a): a for a in archs}
+    for archName, outDir in outDirs.items():
         archMapping = {
             idx: name
             for idx, name in libraryMapping.items()
             if name.endswith("_" + archName)
         }
         if archMapping:
-            archDir = libraryDir(outputPath, archName)
+            archDir = libraryDir(outputPath, outDir)
             archMappingFile = os.path.join(
                 archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
             )
@@ -1514,8 +1543,8 @@ def run():
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
-        if archName in archs:
-            archDir = libraryDir(outputPath, archName)
+        if archName in outDirs:
+            archDir = libraryDir(outputPath, outDirs[archName])
             def writeMsl(name, lib, archDir=archDir):
                 filename = os.path.join(archDir, name)
                 lib.applyNaming(splitGSU)

@@ -234,3 +234,49 @@ def test_a_feature_suffixed_file_belongs_to_its_architecture_but_a_stepping_does
     # subtree: they carry a different ELF machine code and will not load there.
     assert not matches("TensileLibrary_gfx1250-strict.dat", "gfx1250")
     assert not matches("TensileLibrary_gfx1250.dat", "gfx1250-strict")
+
+
+# --------------------------------------------------------------------------- #
+# library/gfx1250v0/: gfx1250-strict's kernels built for gfx1250, for A0 parts
+# the runtime reports as gfx1250. Only the directory differs from library/gfx1250/;
+# ExtOp and Transform are opened from library/gfx1250/ and are absent here.
+# --------------------------------------------------------------------------- #
+def _make_v0_dir(root: Path, token: str = "gfx1250") -> Path:
+    v0_dir = root / "lib" / "hipblaslt" / "library" / "gfx1250v0"
+    v0_dir.mkdir(parents=True)
+    (v0_dir / f"TensileLibrary_lazy_{token}.dat.zlib").write_bytes(b"x")
+    (v0_dir / f"TensileLiteLibrary_lazy_{token}_Mapping.dat.zlib").write_bytes(b"x")
+    (v0_dir / f"TensileLibrary_HH_HH_{token}.co").write_bytes(b"x")
+    (v0_dir / f"Kernels.so-000-{token}.hsaco").write_bytes(b"x")
+    return v0_dir
+
+
+def test_a_v0_subtree_named_for_gfx1250_without_extops_is_accepted(tmp_path):
+    _make_arch_dir(tmp_path, "gfx1250")
+    _make_v0_dir(tmp_path)
+    _make_stepping_dir(tmp_path)
+
+    assert validate_library_layout.validate(tmp_path) == []
+
+
+def test_a_v0_subtree_named_for_itself_is_rejected(tmp_path):
+    """The runtime forms file names from gcnArchName, which is gfx1250 on A0."""
+    _make_arch_dir(tmp_path, "gfx1250")
+    _make_v0_dir(tmp_path, token="gfx1250v0")
+
+    violations = validate_library_layout.validate(tmp_path)
+    assert any("missing TensileLibrary master/lazy file for gfx1250 " in v for v in violations), violations
+    assert any("Kernels.so-000-gfx1250v0.hsaco" in v for v in violations), violations
+    assert not any("extop_" in v or "hipblasltTransform_" in v for v in violations), violations
+
+
+def test_a_v0_subtree_holding_strict_files_is_rejected(tmp_path):
+    _make_arch_dir(tmp_path, "gfx1250")
+    v0_dir = _make_v0_dir(tmp_path)
+    (v0_dir / "TensileLibrary_HH_HH_gfx1250-strict.co").write_bytes(b"x")
+
+    violations = validate_library_layout.validate(tmp_path)
+    assert violations == [
+        f"filename in the gfx1250v0 subtree is not named for gfx1250: "
+        f"{(v0_dir / 'TensileLibrary_HH_HH_gfx1250-strict.co').resolve()}"
+    ]

@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Union, NamedTuple
 
 from Tensile.Common import ensurePath, print1, print2, printWarning
 from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Architectures import compilerTargetOf, isaToGfx
 from Tensile.Common.Types import IsaVersion
 from Tensile.CustomKernels import validateCustomKernelMetadata
 from ..SolutionStructs import Solution
@@ -133,7 +133,7 @@ def buildAssemblyCodeObjectFiles(
       objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)
       if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ name + extCoRaw)] = objectFiles
+        coFileMap[asmDir / ("TensileLibrary_"+ compilerTargetOf(name) + extCoRaw)] = objectFiles
       for kernel in archKernels:
         coName = kernel.get("codeObjectFile", None)
         if coName:
@@ -144,7 +144,7 @@ def buildAssemblyCodeObjectFiles(
         linker(sorted(objFiles), str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          bundler.compress(str(coFileRaw), str(coFile), name)
+          bundler.compress(str(coFileRaw), str(coFile), compilerTargetOf(name))
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

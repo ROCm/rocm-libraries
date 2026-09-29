@@ -42,7 +42,7 @@ from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from Tensile.Common.Architectures import architectureMap, archNameForIsa, \
+from Tensile.Common.Architectures import ARCH_BUILD_ALIASES, architectureMap, archNameForIsa, \
                                          baseArchName, detectGlobalCurrentArch, \
                                          gfxToIsa, steppingArchOf
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
@@ -709,7 +709,8 @@ def Tensile(userArgs):
             # (gfx1250v1, gfx1250v) still resolves to (12,5,0) and would silently
             # build the shipping stepping. Check the base name, so target IDs and
             # predicates (gfx942:xnack-, gfx950[cu=64]) keep working as before.
-            if isa is None or baseArchName(arch) not in architectureMap:
+            if isa is None or baseArchName(arch) not in architectureMap \
+                    or baseArchName(arch) in ARCH_BUILD_ALIASES:
                 raise ValueError(f"Unrecognized GPU target: '{arch}'")
             isaList.append(isa)
             archNames.append(arch)
@@ -738,7 +739,8 @@ def Tensile(userArgs):
             if not arch:
                 continue
             isa = gfxToIsa(arch)
-            if isa is None or baseArchName(arch) not in architectureMap:
+            if isa is None or baseArchName(arch) not in architectureMap \
+                    or baseArchName(arch) in ARCH_BUILD_ALIASES:
                 raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
             if nameCameFromDetection:
                 continue

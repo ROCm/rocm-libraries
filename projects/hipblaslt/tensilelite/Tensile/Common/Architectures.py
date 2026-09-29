@@ -72,7 +72,68 @@ architectureMap = {
     # Spelled as clang and ROCr both spell it. Shares gfx1250's ISA, so
     # SUPPORTED_ISA cannot name it; this entry is where `all` picks it up.
     "gfx1250-strict": "gfx1250-strict",
+    "gfx1250v0": "gfx1250v0",
 }
+
+# Names that build another architecture's codegen for an existing target,
+# shipped under that target's file names in a subtree of their own. gfx1250v0
+# is gfx1250-strict's logic and capabilities built for gfx1250, for A0 parts
+# the runtime reports as gfx1250. No compiler knows the alias, so it stays out
+# of `all`, archMacroNames and GPU_TARGETS, and is only built on request
+# (TensileCreateLibrary --gfx1250v0).
+ARCH_BUILD_ALIASES = {
+    "gfx1250v0": {
+        # Both the compiler target and the name the library files carry.
+        "target": "gfx1250",
+        "tuningArch": "gfx1250-strict",
+        # gfx1250-strict's features on a gfx1250 compile or assembly.
+        "deviceTargetFeatures": [
+            "+needs-aligned-2addr-lds",
+            "-wmma-f4-insts",
+            "-block16-cvt-scale-insts",
+        ],
+    },
+}
+
+
+def _buildAlias(spec: str) -> Optional[dict]:
+    return ARCH_BUILD_ALIASES.get(baseArchName(spec))
+
+
+def compilerTargetOf(spec: str) -> str:
+    """The compiler target a spec is built for, and the name its library files
+    carry; the spec itself unless aliased."""
+    alias = _buildAlias(spec)
+    return alias["target"] if alias else spec
+
+
+def tuningArchOf(spec: str) -> str:
+    """The architecture whose logic and capability overrides a spec builds; the spec itself unless aliased."""
+    alias = _buildAlias(spec)
+    return alias["tuningArch"] if alias else spec
+
+
+def deviceTargetFeaturesOf(spec: str) -> List[str]:
+    """Target features added when compiling or assembling a spec; none unless aliased."""
+    alias = _buildAlias(spec)
+    return list(alias["deviceTargetFeatures"]) if alias else []
+
+
+def withArchBuildAliases(archs: List[str]) -> List[str]:
+    """``archs`` plus the alias of every target it requests.
+
+    gfx1250 gains gfx1250v0; gfx1250-strict names a different target and does
+    not expand.
+
+    Call before ``isaCollisionFreeGroups``: the alias shares its ISA with what
+    it expands from and has to reach the partitioner that splits them.
+    """
+    named = {baseArchName(a) for a in archs}
+    return archs + [
+        alias
+        for alias, fields in ARCH_BUILD_ALIASES.items()
+        if fields["target"] in named and alias not in named
+    ]
 
 gfxVariantMap = {
     "gfx906": ["gfx906:xnack+", "gfx906:xnack-"],
@@ -206,7 +267,7 @@ def supportedSteppings() -> List[str]:
     return [
         name
         for name in architectureMap
-        if steppingArchOf(name) in covered
+        if steppingArchOf(name) in covered and name not in ARCH_BUILD_ALIASES
     ]
 
 
@@ -268,7 +329,11 @@ def archMacroNames(isa: IsaVersion) -> List[str]:
     if isa is None:
         return []
     names = sorted(
-        {baseArchName(name) for name in architectureMap if gfxToIsa(name) == isa}
+        {
+            baseArchName(name)
+            for name in architectureMap
+            if gfxToIsa(name) == isa and name not in ARCH_BUILD_ALIASES
+        }
     )
     return ["__" + name.replace("-", "_") + "__" for name in names]
 

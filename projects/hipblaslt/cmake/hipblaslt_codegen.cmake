@@ -130,6 +130,10 @@ function(hipblaslt_detect_sanitizer_runtime out_options out_lib_dirs)
     set(${out_lib_dirs} "${_lib_dirs}" PARENT_SCOPE)
 endfunction()
 
+# When ON, a build that requests gfx1250 also produces library/gfx1250v0/
+# (gfx1250-strict's kernels built for gfx1250). Never add gfx1250v0 to GPU_TARGETS.
+option(HIPBLASLT_BUILD_GFX1250V0 "Build library/gfx1250v0/ alongside gfx1250 for A0 parts reporting gfx1250." ON)
+
 function(create_device_library)
     set(_opts HOST_ASAN HOST_TSAN)
     set(_one
@@ -293,11 +297,20 @@ function(create_device_library)
     if(NOT _cdl_ASM_COMMENTS)
         list(APPEND _opts_list "--disable-asm-comments")
     endif()
+    set(_logic_arches ${_cdl_ARCHES})
+    if(HIPBLASLT_BUILD_GFX1250V0)
+        list(APPEND _opts_list "--gfx1250v0")
+        # gfx1250v0 is built from gfx1250-strict's logic, so validate that too.
+        if("gfx1250" IN_LIST _cdl_ARCHES AND NOT "gfx1250-strict" IN_LIST _cdl_ARCHES)
+            list(APPEND _logic_arches "gfx1250-strict")
+        endif()
+    endif()
+    list(JOIN _logic_arches "$<SEMICOLON>" _logic_arches_semi)
 
     set(_tensile_logic_args
         "${_cdl_LOGIC_PATH}"
         --architecture
-        "${_arches_semi}"
+        "${_logic_arches_semi}"
         --use-bundled-known-bugs
         --check-all
     )

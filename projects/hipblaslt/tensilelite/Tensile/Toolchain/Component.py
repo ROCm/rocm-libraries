@@ -31,6 +31,7 @@ from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
 from Tensile.Common import SemanticVersion, print2
+from Tensile.Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -201,6 +202,8 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
+        features = deviceTargetFeaturesOf(targetGfx)
+        targetGfx = compilerTargetOf(targetGfx)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
@@ -208,6 +211,7 @@ class Assembler(Component):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
+            *[a for f in features for a in ("-Xclangas", "-target-feature", "-Xclangas", f)],
             f"-mcpu={targetGfx}",
             "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64",
             srcPath,
@@ -279,9 +283,12 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={gfx}" for gfx in target_list]
+        archFlags = [f"--offload-arch={compilerTargetOf(gfx)}" for gfx in target_list]
+        # -Xclang reaches every device compile; an alias always builds alone.
+        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
+        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
         args = [
-            *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
+            *(self.default_args), "-I", include_path, *archFlags, *featureFlags, srcPath, "-c", "-o", destPath
         ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 

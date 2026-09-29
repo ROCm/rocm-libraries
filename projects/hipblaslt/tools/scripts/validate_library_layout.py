@@ -30,6 +30,14 @@ TENSILE_LAZY_CANDIDATES = (
     "TensileLibrary_lazy_{arch}.yaml",
 )
 
+# A subtree built for another architecture's compiler target and carrying that
+# target's file names: library/gfx1250v0/ holds gfx1250-strict's kernels built
+# for gfx1250, named *_gfx1250*. ExtOp and Transform are opened from
+# library/<gcnArchName>/, so they are not required here.
+REVISION_SUBTREES = {
+    "gfx1250v0": "gfx1250",
+}
+
 PER_ARCH_REQUIRED = {
     "gfx950": ("rr_custom_kernels_gfx950.co",),
 }
@@ -174,9 +182,12 @@ def validate(install_root: Path) -> List[str]:
         # where a rule is about the ISA. Everything the runtime opens by name is
         # keyed on the subtree's own name instead (see _stepping_base).
         stepping_of = _stepping_base(arch_dir.name)
-        base = stepping_of or arch_dir.name
+        revision_of = REVISION_SUBTREES.get(arch_dir.name)
+        base = stepping_of or revision_of or arch_dir.name
         if not _arch_dir_name_is_base(base):
             continue
+        # The name the files inside carry.
+        name = revision_of or arch_dir.name
 
         entries: Set[str] = {p.name for p in arch_dir.iterdir() if p.is_file()}
 
@@ -193,7 +204,7 @@ def validate(install_root: Path) -> List[str]:
         # the directory and the filename it opens carry the stepping, and the
         # subtree needs its own copies rather than inheriting the
         # architecture's.
-        for template in REQUIRED_PER_BASE_FILES:
+        for template in REQUIRED_PER_BASE_FILES if not revision_of else ():
             if not _has_required_file(entries, template, arch_dir.name):
                 violations.append(
                     f"missing required file in {arch_dir}: {template.format(arch=arch_dir.name)}"
@@ -201,13 +212,13 @@ def validate(install_root: Path) -> List[str]:
 
         # Every subtree, stepping or not, is named for what the runtime reports
         # and opens the master spelled the same way, so one name serves both.
-        master_present = any(t.format(arch=arch_dir.name) in entries for t in TENSILE_MASTER_CANDIDATES)
-        lazy_present = any(t.format(arch=arch_dir.name) in entries for t in TENSILE_LAZY_CANDIDATES)
+        master_present = any(t.format(arch=name) in entries for t in TENSILE_MASTER_CANDIDATES)
+        lazy_present = any(t.format(arch=name) in entries for t in TENSILE_LAZY_CANDIDATES)
         if not (master_present or lazy_present):
             violations.append(
-                f"missing TensileLibrary master/lazy file for {arch_dir.name} in {arch_dir} "
-                f"(expected one of: TensileLibrary_{arch_dir.name}.{{dat,dat.zlib,yaml}} or "
-                f"TensileLibrary_lazy_{arch_dir.name}.{{dat,dat.zlib,yaml}})"
+                f"missing TensileLibrary master/lazy file for {name} in {arch_dir} "
+                f"(expected one of: TensileLibrary_{name}.{{dat,dat.zlib,yaml}} or "
+                f"TensileLibrary_lazy_{name}.{{dat,dat.zlib,yaml}})"
             )
 
         for extra in PER_ARCH_REQUIRED.get(base, ()):
@@ -219,8 +230,13 @@ def validate(install_root: Path) -> List[str]:
         for fname in entries:
             if fname == "metadata.yaml":
                 continue
-            if not _filename_arch_matches_dir(fname, arch_dir.name):
-                if stepping_of:
+            if not _filename_arch_matches_dir(fname, name):
+                if revision_of:
+                    violations.append(
+                        f"filename in the {arch_dir.name} subtree is not named for "
+                        f"{name}: {arch_dir / fname}"
+                    )
+                elif stepping_of:
                     violations.append(
                         f"filename in the {arch_dir.name} subtree is not named for it: "
                         f"{arch_dir / fname} (a stepping is what the runtime reports for "
