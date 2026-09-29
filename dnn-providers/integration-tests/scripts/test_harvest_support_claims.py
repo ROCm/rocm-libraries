@@ -33,6 +33,7 @@ from harvest_support_claims import (
     run_gh,
     split_streams,
 )
+from support_sidecar import Claim, load, render
 
 _TS = "2026-09-28T05:47:38.5917461Z "
 _SWEEP = "integration-test-bundles/quick/ConvolutionFwdPointwise/Default/sweep.json"
@@ -620,12 +621,96 @@ class TestMain(unittest.TestCase):
             "run ID zero": ["--run", "0"],
             "run ID twice": ["--run", "7", "--run", "7"],
             "jobs not a regex": ["--run", "7", "--jobs", "("],
+            "write without lane": [log, "--write"],
         }
         for name, argv in cases.items():
             with self.subTest(name):
                 gh = FakeGh()
                 self.assertEqual(self._main(*argv, gh=gh)[0], 2)
                 self.assertEqual(gh.calls, [])
+
+
+class TestWrite(unittest.TestCase):
+    _LANE = ("--lane", "gfx1030/windows")
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        for bundle in (_SWEEP, _SINGLE):
+            path = self.root / bundle
+            path.parent.mkdir(parents=True)
+            path.write_text("{}\n", encoding="utf-8")
+        self.sweep = self.root / _SWEEP.replace("sweep.json", "support.json")
+        self.single = self.root / _SINGLE.replace(".json", ".support.json")
+
+    def _main(self, *argv: str, summary: Optional[dict] = None) -> tuple:
+        log = self.root / "a.log"
+        log.write_text(_single_log(summary or _summary()), encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = main([str(log), "--write", *argv], FakeGh(), self.root)
+        return code, err.getvalue()
+
+    def _claim(self, case: str = "") -> Claim:
+        return Claim(case, "MIOPEN_ENGINE", "gfx1030", "windows")
+
+    def test_writes_new_sidecars(self) -> None:
+        code, err = self._main(*self._LANE)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            load(self.sweep),
+            {self._claim("2_8_3_3_fp16_nchw"), self._claim("2_8_3_3_fp32_nchw")},
+        )
+        self.assertEqual(load(self.single), {self._claim()})
+        self.assertIn(f"wrote {self.sweep.relative_to(self.root)}\n", err)
+        self.assertIn("2 sidecars changed", err)
+
+    def test_adds_to_an_existing_sidecar_and_keeps_every_old_claim(self) -> None:
+        old = {
+            Claim("x", "MIOPEN_ENGINE", "gfx942", "linux"),
+            Claim("2_8_3_3_fp16_nchw", "OTHER_ENGINE", "gfx1030", "windows"),
+        }
+        self.sweep.write_text(render(self.sweep, old), encoding="utf-8")
+        self.assertEqual(self._main(*self._LANE)[0], 0)
+        self.assertEqual(
+            load(self.sweep),
+            old | {self._claim("2_8_3_3_fp16_nchw"), self._claim("2_8_3_3_fp32_nchw")},
+        )
+
+    def test_second_run_changes_nothing(self) -> None:
+        self._main(*self._LANE)
+        before = self.sweep.read_bytes(), self.single.read_bytes()
+        code, err = self._main(*self._LANE)
+        self.assertEqual(code, 0)
+        self.assertIn("0 sidecars changed", err)
+        self.assertEqual((self.sweep.read_bytes(), self.single.read_bytes()), before)
+
+    def test_other_lane_writes_nothing(self) -> None:
+        self.assertEqual(self._main("--lane", "gfx942/linux")[0], 0)
+        self.assertFalse(self.sweep.exists() or self.single.exists())
+
+    def test_refused_sidecar_writes_nothing(self) -> None:
+        text = '{"version": 1, "claims": {}}\n'
+        self.single.write_text(text, encoding="utf-8")
+        code, err = self._main(*self._LANE)
+        self.assertEqual(code, 1)
+        self.assertIn("not in the form this writer renders; wrote nothing", err)
+        self.assertFalse(self.sweep.exists())
+        self.assertEqual(self.single.read_text("utf-8"), text)
+
+    def test_missing_bundle_writes_nothing(self) -> None:
+        (self.root / _SINGLE).unlink()
+        code, err = self._main(*self._LANE)
+        self.assertEqual(code, 1)
+        self.assertIn(f"{_SINGLE}: no such bundle", err)
+        self.assertFalse(self.sweep.exists() or self.single.exists())
+
+    def test_rejected_log_writes_nothing(self) -> None:
+        code, err = self._main(*self._LANE, summary=_summary(schema_version=2))
+        self.assertEqual(code, 1)
+        self.assertIn("a log was rejected; wrote nothing", err)
+        self.assertFalse(self.sweep.exists() or self.single.exists())
 
 
 _JOB = "Test miopenprovider (gfx1030, windows)"

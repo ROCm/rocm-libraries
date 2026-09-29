@@ -5,8 +5,8 @@ RFC 0015: a run of hipdnn_integration_tests prints a SUPPORT CLAIM SUMMARY
 block after its tests.  Its unclaimed_support list names graphs that reached
 the depth their bundle requires on this lane (arch + platform + engine) but
 that no support.json sidecar claims yet.  This script reads CI job logs,
-extracts those blocks, and prints the claim cells a sidecar writer may add.
-It writes no files.
+extracts those blocks, and prints the claim cells to add; with --write it
+adds them to the sidecars.
 
 Log handling
 ------------
@@ -37,8 +37,16 @@ Runs
 6. claim_failures and failed_in_use are listed for a human; they are never
    claims.
 
-Exit status: 0 on success, 1 if any log was rejected, 2 on a usage error or
-when a run cannot be fetched.
+Writing
+-------
+7. --write adds the claims to the sidecars of their bundles and names each
+   file it changed.  It needs --lane, so one change covers one lane.  Claims
+   are only added: a sidecar becomes its old claims plus the new ones.
+   Nothing is written if a log was rejected or any sidecar is refused (see
+   support_sidecar.py).  verify_support_claims.py checks the result.
+
+Exit status: 0 on success, 1 if any log was rejected or a sidecar was
+refused, 2 on a usage error or when a run cannot be fetched.
 """
 
 from __future__ import annotations
@@ -64,6 +72,8 @@ from typing import (
     Tuple,
 )
 
+from support_sidecar import Claim, SidecarError, load, render, sidecar_path
+
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
 BUNDLE_PREFIX = "integration-test-bundles/"
@@ -88,6 +98,7 @@ NIGHTLY_WORKFLOW = "therock-multi-arch-ci-nightly.yml"
 DEFAULT_JOBS = "Test miopenprovider"
 FETCHED_CONCLUSIONS = ("success", "failure")
 NIGHTLY_PAGE = 50
+INTEGRATION_TESTS = Path(__file__).resolve().parent.parent
 
 _TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -649,7 +660,33 @@ def _read_run(path: Path) -> List[Tuple[str, str]]:
     return [(str(f), f.read_text(encoding="utf-8", errors="replace")) for f in files]
 
 
-def main(argv: Optional[Sequence[str]] = None, gh: Gh = run_gh) -> int:
+def write_claims(cells: Sequence[Cell], root: Path) -> List[Path]:
+    """Add cells to the sidecars under root; return the files that changed.
+
+    Every sidecar is read and rendered before any is written, so a refused
+    one (SidecarError) leaves all files as they were.
+    """
+    new: Dict[Path, Set[Claim]] = {}
+    for cell in cells:
+        if not (root / cell.bundle).is_file():
+            raise SidecarError(f"{cell.bundle}: no such bundle under {root}")
+        path = root / sidecar_path(cell.bundle)
+        claim = Claim(cell.case, cell.engine, cell.arch, cell.platform)
+        new.setdefault(path, set()).add(claim)
+    texts = {path: render(path, load(path) | claims) for path, claims in new.items()}
+    changed = []
+    for path, text in sorted(texts.items()):
+        if not path.exists() or path.read_bytes().decode("utf-8") != text:
+            path.write_bytes(text.encode("utf-8"))
+            changed.append(path)
+    return changed
+
+
+def main(
+    argv: Optional[Sequence[str]] = None,
+    gh: Gh = run_gh,
+    root: Path = INTEGRATION_TESTS,
+) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -685,8 +722,16 @@ def main(argv: Optional[Sequence[str]] = None, gh: Gh = run_gh) -> int:
         "--lane", type=_lane_arg, help="only this arch/platform, e.g. gfx942/linux"
     )
     parser.add_argument("--format", choices=("table", "json"), default="table")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="add the claims to the sidecars (needs --lane)",
+    )
     args = parser.parse_args(argv)
 
+    if args.write and args.lane is None:
+        print("error: --write needs --lane", file=sys.stderr)
+        return 2
     repeated = sorted(i for i, n in Counter(args.run_ids).items() if n > 1)
     if repeated:
         print(f"error: --run given twice for {repeated}", file=sys.stderr)
@@ -711,7 +756,23 @@ def main(argv: Optional[Sequence[str]] = None, gh: Gh = run_gh) -> int:
 
     result = harvest(runs, args.min_runs, args.lane)
     print(render_json(result) if args.format == "json" else render_table(result))
-    return 1 if any(log.error is not None for log in result.logs) else 0
+    if any(log.error is not None for log in result.logs):
+        if args.write:
+            print("error: a log was rejected; wrote nothing", file=sys.stderr)
+        return 1
+    if args.write:
+        try:
+            changed = write_claims(result.claims, root)
+        except SidecarError as exc:
+            print(f"error: {exc}; wrote nothing", file=sys.stderr)
+            return 1
+        except OSError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        for path in changed:
+            print(f"wrote {path.relative_to(root)}", file=sys.stderr)
+        print(f"{len(changed)} sidecars changed", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
