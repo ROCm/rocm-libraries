@@ -1197,7 +1197,8 @@ A new count of "how many tests exist today" is not; phrase it qualitatively inst
 ## Experimental JIT validation
 
 The [JIT validation guide](clients/tests/jit/README.md) explains the direct
-TensileLite and generic APIs, both samples, prediction, corruption and
-feature-off tests through the public C/C++ GEMM execution paths.
+TensileLite and generic entry points, the direct and generic GEMM tests,
+prediction, corruption and feature-off tests through the public C/C++ GEMM
+execution paths.
 It describes the shared native GPU workflow, source-build checks, and coverage
 that remains unverified.

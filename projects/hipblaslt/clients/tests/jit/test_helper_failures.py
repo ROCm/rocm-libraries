@@ -3,7 +3,7 @@
 """Check public C/C++ GEMM helper failures before submission and state publication.
 
 Run with the existing venv after a source-built split-K bundle is available.
-The sample's --expect-helper-failure mode checks D/workspace sentinels and that
+The API test's --expect-helper-failure mode checks D/workspace sentinels and that
 failed reinitialization leaves the prior extension algorithm runnable.
 """
 

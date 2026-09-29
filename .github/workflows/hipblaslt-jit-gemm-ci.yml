@@ -55,7 +55,7 @@ jobs:
           families = get_all_families_for_trigger_types(["presubmit", "postsubmit"])
           matrix = []
           # All requested architectures run the same JIT regressions, including
-          # families that generic CI otherwise selects only by PR label.
+          # families that generic CI otherwise selects only on request by label.
           for architecture, key in [
               ("gfx90a", "gfx90a"),
               ("gfx942", "gfx94x"),
@@ -197,7 +197,7 @@ jobs:
           python .github/scripts/test_hipblaslt_jit.py \
             --build "$JIT_BUILD_DIR" --architecture "$JIT_ARCHITECTURE" \
             --output jit-test-logs/results 2>&1 | tee jit-test-logs/test.log
-      - name: Upload logs and generated bundle evidence
+      - name: Upload logs and generated bundles
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
         with:

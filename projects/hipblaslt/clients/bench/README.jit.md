@@ -8,9 +8,9 @@ valid solution, including any helper kernels it needs.
 
 Generation finishes before correctness checks, warmup, and timing. CPU timing
 still includes host dispatch for each GEMM. This feature targets functional
-coverage for now; the predicted solution is not guaranteed to be the fastest
-available kernel. Follow-up work will incorporate tuning knowledge into the
-prediction process.
+coverage; the predicted solution is not guaranteed to be the fastest available
+kernel. Incorporating tuning knowledge into prediction is planned work in the
+[JIT roadmap](../../JIT.md#roadmap).
 
 The components interact in this order:
 
@@ -161,7 +161,7 @@ python projects/hipblaslt/clients/bench/test_jit_gemm.py \
   --bench projects/hipblaslt/build/release/clients/hipblaslt-bench \
   --build-root projects/hipblaslt/build/release \
   --python /path/to/venv/bin/python --architecture gfx950 \
-  --output /tmp/hipblaslt-jit-checks
+  --output "$(mktemp -d)/hipblaslt-jit-checks"
 ```
 
 The output path must be new. `--case half-c-default` selects a smoke case;

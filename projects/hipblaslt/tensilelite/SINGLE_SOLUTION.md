@@ -3,7 +3,7 @@
 This source guide is for TensileLite contributors and hipBLASLt integration
 developers. Its ownership and publication scope follow the
 [JIT roadmap](../JIT.md#roadmap). The builder supplies the compilation
-step used by the later direct hipBLASLt integration; it does not make ordinary
+step used by the direct hipBLASLt integration; it does not make ordinary
 matmul calls compile code.
 
 `Tensile.SingleSolution.generateAndBuildSingleSolution` compiles one GEMM
@@ -237,7 +237,7 @@ solution and never benchmarks candidates.
 
 ## hipBLASLt provider integration
 
-The library's TensileLite backend can now create the ranked request internally
+The library's TensileLite backend creates the ranked request internally
 from a generic operation request. Its data-parallel GEMM contract supplies
 `MatrixInstruction`, macro tile/`DepthU`, `NonTemporalA/B`, workgroup mapping,
 stagger and launch outputs. This module retains the supplied order, translates

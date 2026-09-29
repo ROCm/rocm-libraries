@@ -9,11 +9,11 @@ TensileLite is the live JIT backend. This page describes its current direct
 entry point, which compiles one explicit YAML (YAML Ain't Markup Language)
 recipe, and its planned role behind the Jit backend interface.
 
-**Status:** the direct entry point below is internal. [Step 1](JIT.md#roadmap)
-moved `hipblaslt-jit-tensilelite.hpp` to `library/src/amd_detail/`; it is not
-installed, and only the JIT tests and `hipblaslt-bench --jit-gemm` use it. Once
-step 5 lands, applications reach TensileLite generation through
-`hipblasLtMatmulAlgoGetHeuristic` with `HIPBLASLT_JIT`.
+**Status:** the direct entry point below is internal.
+`hipblaslt-jit-tensilelite.hpp` is in `library/src/amd_detail/`; it is not
+installed, and only the JIT tests and `hipblaslt-bench --jit-gemm` use it. After
+[roadmap](JIT.md#roadmap) step 5, applications reach TensileLite generation
+through `hipblasLtMatmulAlgoGetHeuristic` with `HIPBLASLT_JIT`.
 
 ## Current direct entry point
 
@@ -160,7 +160,7 @@ the roadmap step that changes it.
 
 | Concern | Current | Planned |
 | --- | --- | --- |
-| Entry point | Internal direct `tensilelite::getGemmAlgo`, and the generic provider created by `tensilelite::createBackend`, both used by tests and the benchmark since step 1. | An internal backend behind Jit, reached from the heuristic query. The headers remain for unit tests (step 2). |
+| Entry point | Internal direct `tensilelite::getGemmAlgo`, and the generic provider created by `tensilelite::createBackend`, both used by tests and the benchmark. | An internal backend behind Jit, reached from the heuristic query. The headers remain for unit tests (step 2). |
 | Backend input | An explicit recipe, or problem facts plus Origami-ranked candidates in the generic provider. | Algorithm parameters (M, N, K, datatypes, scale types, layout, activation and the rest of the GEMM description) plus the gfx target, with ranked candidates from the Predictor (step 2). |
 | Unmodeled knobs | TensileLite defaults and derivation. | Supplied through TuningKnowledge, which initially returns the same TensileLite defaults (step 2). |
 | Backend output | A complete bundle: `Tensile.SingleSolution` assembles, links and compiles code objects with the configured compiler and offload bundler. | Assembly, HIP helper source and metadata only. hipBLASLt builds raw, uncompressed code objects through AMD comgr (step 3). |
@@ -170,10 +170,8 @@ TensileLite remains one of several independent backends. rocRoller and
 HipKittens are future backends behind the same interface; they do not route
 through TensileLite. `Tensile.SingleSolution` and `Tensile.JitGemm` are the
 current Python entry points; the [single-solution guide](tensilelite/SINGLE_SOLUTION.md)
-describes them. Step 3 changes what the backend produces, and that guide is
-updated with it.
+describes them. Step 3 changes what the backend produces.
 
-The configurations actually tested are listed under
-[recorded validation](JIT.md#recorded-validation). Source support and
+[Validation](JIT.md#validation) describes the test coverage. Source support and
 cross-compilation do not establish numerical results on another GPU or native
 Windows execution.

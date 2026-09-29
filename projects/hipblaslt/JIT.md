@@ -10,21 +10,21 @@ integration is undecided.
 
 This page is the single JIT guide and carries the roadmap. It has three parts:
 
-- [Current behavior](#current-behavior) describes what the downstream branch
-  `users/jolabega/downstream-hipblaslt-jit-develop` implements today.
-  "Implemented" means present on that branch, not merged, released or approved
+- [Current behavior](#current-behavior) describes what the code implements
+  today. "Implemented" means present in the source, not released or approved
   as product naming.
 - [Target design](#target-design) is the approved plan of record. The code does
   not implement it yet, apart from the roadmap steps marked Done.
-- [Roadmap](#roadmap) lists the planned implementation steps between the two.
-  It is updated as each step lands.
+- [Roadmap](#roadmap) lists the implementation steps between the two, with the
+  status of each.
 
 The [TensileLite backend guide](JIT_TENSILELITE.md) covers the TensileLite
 generator and its current direct entry point. The
 [single-solution guide](tensilelite/SINGLE_SOLUTION.md) covers the Python
 builder, recipes, bundles and ranked candidate validation. The
-[design notes](jit-design/README.md) hold the Confluence discussion draft, the
-KernelFromAnywhere (KFA) assessment and the timing/progress plans.
+[JIT test guide](clients/tests/jit/README.md) covers building and running the
+tests. The [design notes](jit-design/README.md) hold the KernelFromAnywhere
+(KFA) assessment and the timing/progress plans.
 
 ## Summary
 
@@ -40,14 +40,14 @@ In the target design, JIT generation moves behind the existing heuristic query.
 `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic` consult
 the pre-tuned libraries first. When the environment variable `HIPBLASLT_JIT`
 enables it, they fill a shortfall from a persistent JIT solution library and
-then from newly generated solutions. The explicit JIT entry points have already
-left the public API and remain internal interfaces used by tests.
+then from newly generated solutions. The explicit JIT entry points are internal
+interfaces used by tests; they are not part of the public API.
 
 ## Current behavior
 
 ### Entry points
 
-Two internal JIT entry points exist on this branch. Both share one TensileLite
+Two internal JIT entry points exist. Both share one TensileLite
 provider implementation and one process-local algorithm registry, and both
 return an algorithm for the existing C/C++ GEMM execution APIs.
 
@@ -56,8 +56,8 @@ return an algorithm for the existing C/C++ GEMM execution APIs.
 | Direct TensileLite | `library/src/amd_detail/hipblaslt-jit-tensilelite.hpp` | `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo` compiles one required, explicit YAML (YAML Ain't Markup Language) recipe and returns a `hipblasLtMatmulHeuristicResult_t`. The `hipblaslt-jit-direct-gemm-test` binary exercises it. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
 | Generic request/backend/solution | `library/src/amd_detail/hipblaslt-jit.hpp` | `jit::tensilelite::createBackend` configures the provider. `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars, `jit::getJitAlgo` compiles on the selected device and returns an owned `Solution`, and `jit::getGemmAlgo` adapts it to the algorithm accepted by `hipblasLtMatmul` and `Gemm`. The `hipblaslt-jit-generic-gemm-test` binary exercises it. |
 
-[Step 1](#roadmap) made both headers internal: they are not installed and
-`hipblaslt-ext.hpp` does not include them. The five functions keep
+Both headers are internal: they are not installed and `hipblaslt-ext.hpp` does
+not include them. The five functions keep
 `HIPBLASLT_EXPORT`, so `libhipblaslt.so` still exports them for the JIT test
 binaries and `hipblaslt-bench --jit-gemm`, which link against the shared
 library. No installed header declares them, and they are not a supported API.
@@ -180,10 +180,14 @@ or by default for eligible block-scaled problems), `getBestSolutions` and
 `HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles and
 exports no JIT entry points. The enabled implementation requires the host library and ROCm. The TensileLite
 provider also requires its Python dependencies and the local rocisa extension.
-Additional Python import paths use the platform separator (`:` or `;`). Using an
-existing configured build and Python environment:
+Additional Python import paths use the platform separator (`:` or `;`). From the
+repository root, with a Python environment that has the TensileLite
+dependencies:
 
 ```bash
+project_root="$PWD"
+project_build="$project_root/projects/hipblaslt/build/release"
+project_python=/path/to/venv/bin/python
 cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
   -DHIPBLASLT_ENABLE_JIT=ON -DHIPBLASLT_ENABLE_HOST=ON \
   -DHIPBLASLT_BUILD_TESTING=ON \
@@ -191,11 +195,18 @@ cmake -S "$project_root/projects/hipblaslt" -B "$project_build" \
   -DPython_EXECUTABLE="$project_python" -DPython3_EXECUTABLE="$project_python"
 cmake --build "$project_build" --target _rocisa hipblaslt-jit-generic-api-test --parallel
 export PYTHONPATH="$project_build/tensilelite/rocisa:$project_build/tensilelite:$project_root/projects/hipblaslt/tensilelite"
+export LD_LIBRARY_PATH="$project_build/library:$project_build/tensilelite${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-Use the compiler and target appropriate for the local device. Generated bundles
-do not depend on a prebuilt hipBLASLt device library. The `jit` CMake preset
-enables this feature for a new configuration.
+Use the compiler and target appropriate for the local device. Set both Python
+executable keys to the same interpreter, and use the built rocisa extension only
+with that interpreter. A ROCm installation can ship its own `libhipblaslt` and
+`libtensilelite-host`; keep the build tree's `library` and `tensilelite`
+directories ahead of them on `LD_LIBRARY_PATH`, or the loader picks the prebuilt
+copies. Generated bundles do not depend on a prebuilt hipBLASLt device library.
+The `jit` CMake preset enables this feature for a new configuration. The
+[JIT test guide](clients/tests/jit/README.md) lists the test targets and the
+validation commands.
 
 ### Algorithm lifetime and failures
 
@@ -229,23 +240,20 @@ is a diagnostic record. `clients/tests/jit/test_helper_failures.py` and
 `test_bundle_failures.py` damage valid bundles and check that the public C and
 extension paths reject them without writing output or workspace.
 
-### Recorded validation
+### Validation
 
-The earlier review stacks are closed without merging; see
-[SESSION_HANDOFF.md](../../SESSION_HANDOFF.md) for historical revisions and
-evidence. Recorded direct validation passed ten routes on native Linux gfx950,
-and generic validation passed twelve routes with affected failure checks rerun.
-Direct and generic samples, now the `direct-gemm` and `generic-gemm` test
-binaries, passed C/C++ checks over 32,768 elements with zero maximum error. Prediction/benchmark checks passed sixteen targeted cases. The
-`ScheduleIterAlg=4` gfx1250 fixture has generation/compilation evidence only.
-After step 1, the shared driver passed 13 of 14 routes on native gfx950. The
-`bench` route stops at its `half-gelu-aux` case with a NaN `norm_error`, which
-the pre-change baseline shows too.
+The [JIT test guide](clients/tests/jit/README.md) describes the test binaries
+and the shared driver, `.github/scripts/test_hipblaslt_jit.py`, which runs them
+on a GPU of the requested architecture. The
+[benchmark guide](clients/bench/README.jit.md) describes the prediction and
+benchmark checks.
 
 The shared `hipblaslt-jit-gemm-ci.yml` workflow configures gfx90a, gfx942,
-gfx950 and gfx1250 runners. Configured targets are distinct from completed
-native runs, and native Windows execution is unverified. rocRoller analysis is
-source-based; the current local build has it disabled.
+gfx950 and gfx1250 runners. A configured target is a coverage request; the
+workflow's run results show which native executions completed. Numerical
+results require execution on the target GPU, and cross-compilation establishes
+generation and compilation only. The tests do not cover native Windows
+execution. The rocRoller analysis in this guide is based on source inspection.
 
 ## Target design
 
@@ -309,7 +317,7 @@ TensileLite.
 | Mock backend | A new in-process test backend behind the same interface. It proves the interface is swappable and that Jit does not depend on TensileLite. |
 | Predictor | Ranks candidate configurations for Jit. It is fed by Origami and TuningKnowledge. |
 | Origami | The existing analytical model. It ranks configurations; it is not a generator backend. |
-| TuningKnowledge | A new interface that supplies values for knobs the model does not predict. It initially returns TensileLite defaults; real tuning data is planned under AIHPBLAS-4554. |
+| TuningKnowledge | A new interface that supplies values for knobs the model does not predict. It initially returns TensileLite defaults; real tuning data (tuning blueprints) is planned as [future work](#roadmap). |
 | Code-object builder | hipBLASLt C++ that turns emitted source into executable code objects through AMD comgr. |
 | JIT solution library | The persistent cache of generated solutions, loaded as a second master library. |
 
@@ -338,7 +346,7 @@ TuningKnowledge. The current C++ predictor already ranks synthetic candidates
 with Origami and emits the `origami.gemm.dp.v1` modeled contract; step 2 places
 it behind a Predictor interface. TuningKnowledge supplies the TensileLite
 defaults used today for unmodeled knobs. Replacing those defaults with stored
-tuning data is later work under AIHPBLAS-4554.
+tuning data is later work, listed under [future work](#roadmap).
 
 ### Code-object construction with comgr
 
@@ -355,8 +363,8 @@ The output is raw, uncompressed executable code objects. comgr cannot bundle or
 compress them, and `hipModuleLoad` accepts raw executable and linkable format
 (ELF) objects. hipBLASLt disables comgr's own on-disk cache (`~/.cache/comgr`)
 for these builds, so the JIT solution library is the only persistent cache of
-generated code. Once this step lands, the generator no longer needs the compiler
-and offload-bundler paths it uses today.
+generated code. With this step, the generator does not need the compiler and
+offload-bundler paths that it uses today.
 
 ### JIT solution library
 
@@ -433,65 +441,47 @@ one-time warning when it is set.
 
 ### Public API changes
 
-Step 1, which is Done, demoted the explicit JIT entry points:
+The explicit JIT entry points are not part of the public API; roadmap step 1,
+which is Done, implements this part of the design:
 
 - `getJitAlgo`, `makeGemmRequest`, both `getGemmAlgo` functions (generic and
-  TensileLite direct) and `createBackend` left the public and extension API.
-- `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are no longer installed
-  or included from `hipblaslt-ext.hpp`. They are internal headers under
+  TensileLite direct) and `createBackend` are not in the public or extension
+  API.
+- `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed or
+  included from `hipblaslt-ext.hpp`. They are internal headers under
   `library/src/amd_detail/` used by the JIT tests. The functions stay exported
   from the shared library only so those tests can link; see
   [Entry points](#entry-points).
-- Samples 29 and 30 became the `hipblaslt-jit-direct-gemm-test` and
-  `hipblaslt-jit-generic-gemm-test` binaries under `clients/tests/jit`, run by
-  `.github/scripts/test_hipblaslt_jit.py`.
-- `hipblaslt-bench --jit-gemm` keeps working through the internal headers until
-  step 5, which removes the option once `HIPBLASLT_JIT` exists.
+- The `hipblaslt-jit-direct-gemm-test` and `hipblaslt-jit-generic-gemm-test`
+  binaries under `clients/tests/jit` exercise the two entry points and are run
+  by `.github/scripts/test_hipblaslt_jit.py`.
+- `hipblaslt-bench --jit-gemm` works through the internal headers until step 5,
+  which removes the option once `HIPBLASLT_JIT` exists.
 
-Applications then reach JIT only through the heuristic query and
+After step 5, applications reach JIT only through the heuristic query and
 `HIPBLASLT_JIT`.
-
-### Ticket mapping
-
-AIHPBLAS-4548 is the umbrella epic. These mappings describe scope, not ticket
-closure.
-
-| Ticket | Scope in the target design |
-| --- | --- |
-| AIHPBLAS-4801, Interface for JIT backends | The backend interface and the predict, cache lookup and active module path. |
-| AIHPBLAS-4552 | The JIT solution library (cache). |
-| AIHPBLAS-4551 | Prediction. |
-| AIHPBLAS-4550 | The JustInTime library type. |
-| AIHPBLAS-4553 | Exact epilogue specialization. |
-| AIHPBLAS-4554 | Tuning blueprints (real TuningKnowledge data). |
-| AIHPBLAS-4549 | The builder and direct integration that the current behavior delivers. |
 
 ## Roadmap
 
-The steps are planned in this order. The status column is updated as code
-lands. The related-ticket column associates each step with the ticket scopes
-above for review; it is not a ticket-closure plan.
+The steps are planned in this order, and the status column shows which are
+implemented. The work-area column names the part of the overall JIT effort that
+each step advances.
 
-| Step | Status | Scope | Related tickets |
+| Step | Status | Scope | Work area |
 | --- | --- | --- | --- |
-| 1. Demote the public API | Done | Stop installing `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` and remove their includes from `hipblaslt-ext.hpp`; move them to internal headers used by unit tests. Convert samples 29 and 30 to test binaries under `clients/tests/jit` run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | AIHPBLAS-4801 |
-| 2. Jit component and interfaces | Planned | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | AIHPBLAS-4801, AIHPBLAS-4551, AIHPBLAS-4554 |
-| 3. comgr code-object builder | Planned | Build code objects in hipBLASLt through comgr, adapted from rocRoller's `InProcessAssembler`. TensileLite emits only assembly, helper source and metadata. | AIHPBLAS-4801 |
-| 4. JIT solution library | Planned | Per-`ProblemType` library under `HIPBLASLT_JIT_LIBRARY_PATH`, merged under a file lock with atomic rename, loaded as a second master library, with reserved solution indices. | AIHPBLAS-4552 |
-| 5. Heuristic integration | Planned | Add `HIPBLASLT_JIT` modes 0, 1 and 2 to `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`, with the fallback order and failure rules above. Bake the tool-path defaults into the library, warn once when a JIT-off build sees `HIPBLASLT_JIT`, and remove `hipblaslt-bench --jit-gemm`. | AIHPBLAS-4550, AIHPBLAS-4801 |
-| 6. Validation sweep | Planned | Rerun the shared JIT driver and add heuristic, cache and mode coverage. | AIHPBLAS-4548 |
-
-On the development host described in [SESSION_HANDOFF.md](../../SESSION_HANDOFF.md),
-gfx950 hardware (8× MI355X) is available for native numerical validation, and
-gfx1250 kernels run on the FFM MI450 simulator. Simulator runs are not native
-gfx1250 hardware evidence.
+| 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | Backend interface |
+| 2. Jit component and interfaces | Planned | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
+| 3. comgr code-object builder | Planned | Build code objects in hipBLASLt through comgr, adapted from rocRoller's `InProcessAssembler`. TensileLite emits only assembly, helper source and metadata. | Backend interface |
+| 4. JIT solution library | Planned | Per-`ProblemType` library under `HIPBLASLT_JIT_LIBRARY_PATH`, merged under a file lock with atomic rename, loaded as a second master library, with reserved solution indices. | JIT solution library (cache) |
+| 5. Heuristic integration | Planned | Add `HIPBLASLT_JIT` modes 0, 1 and 2 to `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`, with the fallback order and failure rules above. Bake the tool-path defaults into the library, warn once when a JIT-off build sees `HIPBLASLT_JIT`, and remove `hipblaslt-bench --jit-gemm`. | JustInTime library type; backend interface |
+| 6. Validation sweep | Planned | Rerun the shared JIT driver and add heuristic, cache and mode coverage. | Overall JIT validation |
 
 The following work sits outside the six steps and remains future:
 
 | Work | Remaining contract |
 | --- | --- |
-| Exact epilogue — AIHPBLAS-4553 | Compile the requested bias/activation/output specialization. This is separate from current epilogue correctness and from modeling epilogue cost. |
-| Tuning data — AIHPBLAS-4554 | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
+| Exact epilogue specialization | Compile the requested bias/activation/output specialization. This is separate from current epilogue correctness and from modeling epilogue cost. |
+| Tuning blueprints | Replace TuningKnowledge defaults with stored choices for parameters outside the model. Existing defaults are not a blueprint database. |
 | rocRoller and HipKittens backends | Implement the backend interface. HipKittens is deferred in this pass. The existing rocRoller runtime path remains separate until then. |
 | KFA metadata convergence | Complete producer metadata, then prove argument, launch, helper, workspace and synchronization equivalence before sharing dispatch. See the [KFA assessment](jit-design/kfa-producer-convergence.md). |
 | Timing/progress | Independent `HIPBLASLT_JIT_DEBUG` categories `timing`, `progress`, or `timing,progress`. Unset/empty adds no collection, observer or files. See the [host](jit-design/timing-host-plan.md) and [Python](jit-design/timing-python-plan.md) plans. |

@@ -16,7 +16,9 @@ Use the project's existing configured build and Python environment. The build
 must provide the source hipBLASLt host library, the local rocisa extension, and
 the Python dependencies needed by TensileLite. Configure the target for the GPU
 on which the tests will run; a compiler target is not a substitute for that GPU.
-From the repository root, with `project_build` set to the existing build:
+Set `project_build`, `project_python`, `PYTHONPATH` and `LD_LIBRARY_PATH` as in
+the [JIT build instructions](../../../JIT.md#build), then, from the repository
+root:
 
 ```bash
 cmake -S projects/hipblaslt -B "$project_build" \
@@ -26,11 +28,12 @@ cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
   hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-backend-test \
   hipblaslt-jit-process-test hipblaslt-jit-artifacts-test
-python .github/scripts/test_hipblaslt_jit.py \
-  --build "$project_build" --architecture gfx950 --output /tmp/jit-validation
+"$project_python" .github/scripts/test_hipblaslt_jit.py \
+  --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
 
-Choose a fresh output directory. The driver checks that the shared library and
+Choose a fresh output directory. When other work shares the host, set
+`HIP_VISIBLE_DEVICES` to keep the tests on one GPU. The driver checks that the shared library and
 Python modules come from the checkout/build, and points device-library lookup
 at an empty directory. It records commands, logs, generated bundles, and a
 `summary.json`. A failed case makes the driver return a failing status.
@@ -40,8 +43,17 @@ build directory with `HIPBLASLT_ENABLE_JIT=OFF`, rebuilds the disabled consumer
 and benchmark, and checks their rejection diagnostics. Restore `ON` and rebuild
 before continuing enabled development. To run a focused enabled check without
 reconfiguration, select cases explicitly, for example `--case alternate-backend`
-or `--case bench`. `--case helper-failures` and `--case bundle-failures` also
-build a valid split-K test bundle before damaging its artifacts.
+or `--case bench`. `--case` can be repeated; this smoke run covers both entry
+points and the shared execution assertions:
+
+```bash
+"$project_python" .github/scripts/test_hipblaslt_jit.py \
+  --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-smoke" \
+  --case direct-gemm --case generic-gemm --case generic-api
+```
+
+`--case helper-failures` and `--case bundle-failures` also build a valid split-K
+test bundle before damaging its artifacts.
 
 ## What each layer checks
 
@@ -67,8 +79,8 @@ GPU execution is needed to establish numerical results.
 
 ## Direct and generic GEMM tests
 
-`hipblaslt-jit-direct-gemm-test` and `hipblaslt-jit-generic-gemm-test` replace
-the former samples 29 and 30. Both compile one supplied TensileLite recipe for
+`hipblaslt-jit-direct-gemm-test` and `hipblaslt-jit-generic-gemm-test` each
+compile one supplied TensileLite recipe for
 M=256, N=128, K=512, column-major NN FP16 input/output, FP32 accumulation,
 alpha=1.25 and beta=0.5. They then execute the result through `hipblasLtMatmul`
 and `hipblaslt_ext::Gemm`, poisoning the output before each run and comparing
@@ -95,7 +107,7 @@ tensile_source="$PWD/projects/hipblaslt/tensilelite"
 "$project_build/clients/staging/hipblaslt-jit-direct-gemm-test" \
   "$project_python" "$tensile_source" "$PYTHONPATH" \
   "$tensile_source/Tensile/Tests/unit/test_data/single_solution_splitk.yaml" \
-  /tmp/jit-direct-gemm gfx950 "$ROCM_PATH/bin/amdclang++"
+  "$(mktemp -d)/jit-direct-gemm" gfx950 "$ROCM_PATH/bin/amdclang++"
 ```
 
 Use the compiler and architecture for the local device. The output path must
@@ -116,10 +128,10 @@ Missing native runners fail setup instead of silently substituting another GPU.
 The SDK supplies build dependencies; project libraries are built from the source
 under review.
 
-A configured workflow is a coverage request. Consult its actual run results
-and the PR's Test Result section to see which GPU executions completed. Linux
-host tests of Windows argument encoding do not establish Windows process or
-HIP execution coverage. Native Windows validation remains TBD.
+A configured workflow is a coverage request; its run results show which GPU
+executions completed. Linux host tests of Windows argument encoding do not
+establish Windows process or HIP execution coverage, and the workflow does not
+run native Windows jobs.
 
 The direct entry point always requires an explicit recipe. Empty-recipe
 prediction is available only through the generic TensileLite backend.

@@ -1,14 +1,14 @@
 # Host timing boundaries — planning only
 
-Source inspected at `bf27d85949b56da1452d376e45044e9b873f68b4`. No source edits, builds, tests, or GPU work performed. Paths below are relative to `projects/hipblaslt/`.
+This is a plan; the host timing and progress features are not implemented. Paths below are relative to `projects/hipblaslt/`.
 
 ## Explicit debug categories
 
-The user-selected umbrella is **`HIPBLASLT_JIT_DEBUG`**. Initial named categories are `timing` (final duration report) and `progress` (stage transitions during compilation). Examples: `HIPBLASLT_JIT_DEBUG=timing`, `HIPBLASLT_JIT_DEBUG=progress`, or `HIPBLASLT_JIT_DEBUG=timing,progress`. Unset/empty means no added debug output, collector clock calls, event observer, or timing/progress files. Categories are independent: progress alone does not collect/report durations; timing alone does not stream stage events. Trim comma-separated tokens, deduplicate them, and recognize explicit lowercase names. Extend with future names rather than numeric masks or an implicit `all` category.
+The umbrella environment variable is **`HIPBLASLT_JIT_DEBUG`**. Initial named categories are `timing` (final duration report) and `progress` (stage transitions during compilation). Examples: `HIPBLASLT_JIT_DEBUG=timing`, `HIPBLASLT_JIT_DEBUG=progress`, or `HIPBLASLT_JIT_DEBUG=timing,progress`. Unset/empty means no added debug output, collector clock calls, event observer, or timing/progress files. Categories are independent: progress alone does not collect/report durations; timing alone does not stream stage events. Trim comma-separated tokens, deduplicate them, and recognize explicit lowercase names. Extend with future names rather than numeric masks or an implicit `all` category.
 
 Conservative unknown-token policy: ignore unknown categories, warn once for the explicit invalid configuration, and enable only recognized categories. Do not fail a GEMM or silently enable unrelated diagnostics. Configuration is read into private provider state; propagation to the child uses only its request argv/environment overlay, never mutation of the parent process environment.
 
-Environment-prefix invocation works for existing sample and bench executables without public API/ABI expansion. A future per-call provider option would allow mixed requests in one process, but the initial plan does not add fields to public `Options`/`Diagnostics` or invent a bench flag without a clean way to pass that flag to the provider. Structured report location is orthogonal to category selection: use the existing unique `<output>.cwd` workspace initially, with no additional environment knobs. The coordinated direct Python proposal is `--debug timing`, `--debug progress`, or `--debug timing,progress`; Python need not interpret the hipBLASLt environment variable. Host-managed private transport options suppress child human output and select files only for enabled categories.
+Environment-prefix invocation works for the existing test and bench executables without API/ABI expansion. A future per-call provider option would allow mixed requests in one process, but the initial plan does not add fields to `Options`/`Diagnostics` or invent a bench flag without a clean way to pass that flag to the provider. Structured report location is orthogonal to category selection: use the existing unique `<output>.cwd` workspace initially, with no additional environment knobs. The coordinated direct Python proposal is `--debug timing`, `--debug progress`, or `--debug timing,progress`; Python need not interpret the hipBLASLt environment variable. Host-managed private transport options suppress child human output and select files only for enabled categories.
 
 ## Recommended measurements (only when timing is enabled)
 
@@ -16,7 +16,7 @@ The primary coarse measurement should be `generator_process_elapsed_ns`, taken w
 
 It includes process-runner validation and setup, environment copying, exclusive log creation, spawn, Python startup/imports, Python selection/build/bundle publication, any work after publication, child shutdown, wait, cleanup, and result mapping. The runner implements the same synchronous contract on POSIX and Windows. It excludes provider option/argv preparation and `.cwd` creation before `run`, host prediction before `generate`, and bundle validation/loading after the child exits.
 
-If the user also wants the time until the provider has an executable supported bundle, add a distinct `provider_build_ready_elapsed_ns`, covering `Provider::compile` entry through return. On failure, use the same span with an unsuccessful outcome; do not imply readiness. Its success endpoint includes the provider's support check. It is not the same as total public API latency or GEMM adaptation latency.
+To also measure the time until the provider has an executable supported bundle, add a distinct `provider_build_ready_elapsed_ns`, covering `Provider::compile` entry through return. On failure, use the same span with an unsuccessful outcome; do not imply readiness. Its success endpoint includes the provider's support check. It is not the same as total entry-point latency or GEMM adaptation latency.
 
 Two useful provider-level child spans are `host_prediction_elapsed_ns` around `planGemm`, and `bundle_load_elapsed_ns` around `loadGeneratedBundle`. Neither belongs in Python compilation totals. Keep the first version small: the coarse generator span is required; provider total and these two spans are justified if accounting for all runtime preparation is in scope.
 
@@ -45,7 +45,7 @@ Explicit YAML invokes `Tensile.SingleSolution`; empty `configPath` invokes `Tens
 - If the child is killed or crashes before telemetry is finalized, retain the host elapsed and actual runner outcome; child phase timings may be missing or partial.
 - Use invocation-local clocks and storage. Do not add global timer state, parent environment/cwd mutation, HIP event timing, or GPU synchronization. Distinct calls already require distinct fresh output paths.
 - Timing/reporting must preserve the primary result and diagnostic exception. Stop the relevant span before serializing its report; state what report overhead remains inside outer spans. No throwing destructor for telemetry emission.
-- Public API comments explicitly promise no persistent cache/reload across invocations (`hipblaslt-jit.hpp:62–64`). Repeated calls are fresh generator requests, although OS/tool caches may change elapsed time. Repeated kernel launches in one prepared algorithm are not new build samples.
+- The entry-point header comments explicitly promise no persistent cache/reload across invocations (`hipblaslt-jit.hpp:62–64`). Repeated calls are fresh generator requests, although OS/tool caches may change elapsed time. Repeated kernel launches in one prepared algorithm are not new build samples.
 
 ## Report transport and client presentation
 
@@ -89,11 +89,9 @@ When both categories are enabled, progress I/O and observer activity can affect 
 
 ## Validation to include in the implementation plan
 
-No validation was executed for this planning task.
-
 1. Reuse the existing host process test seam to inject child delay and assert coarse elapsed contains it; validate setup/spawn/nonzero/signal outcomes without requiring a GPU. `clients/tests/jit/provider_process_test.cpp` already exercises nonzero exit at 181–186, missing executable at 188–191, concurrent isolation at 233–246, and POSIX signal status at 249–255. Since the recommended timer is provider-local rather than part of `process::run`, the implementation should factor only the narrow telemetry seam needed for GPU-free checks; do not move timing into platform-specific spawn internals just to fit a test.
 2. Cover explicit SingleSolution and predicted JitGemm modes, with host prediction absent/present respectively and module recorded.
 3. Inject a loader failure after a successful child to confirm generator success and provider failure remain distinct.
 4. Confirm concurrent distinct output paths produce independent reports and no shared timer state.
-5. Preserve the existing bench sentinel: `clients/bench/test_jit_gemm.py:891–907` already checks one generator invocation across warmup/timing, an injected two-second delay, and exclusion of that delay from three measured CPU-timed calls. Extend that test to inspect timing diagnostics when implementation is authorized; retain stderr/stdout provenance checks at 91–95.
+5. Preserve the existing bench sentinel: `clients/bench/test_jit_gemm.py:891–907` already checks one generator invocation across warmup/timing, an injected two-second delay, and exclusion of that delay from three measured CPU-timed calls. Extend that test to inspect timing diagnostics when timing is implemented; retain stderr/stdout provenance checks at 91–95.
 6. Validate the debug-category matrix: unset/empty, timing only, progress only, both, duplicates/whitespace, and unknown tokens. Disabled categories must produce no associated output/files/collector activity. A delayed fake child should demonstrate that a flushed progress event is observed before child exit, with complete final drain, no stdout contamination, retained normal logs, and safe shutdown on nonzero/signal outcomes.
