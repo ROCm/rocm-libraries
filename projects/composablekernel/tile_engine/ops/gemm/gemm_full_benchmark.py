@@ -498,8 +498,9 @@ def main():
     if not all_configs:
         print(
             f"  ERROR: 0 configs expanded for dtype {args.dtype} on {arch} "
-            f"(layout {sweep_layout}); none of the warp tiles in "
-            f"{', '.join(config_paths)} are listed for {dtype_key}: {warp_tiles}"
+            f"(layout {sweep_layout}); no config in {', '.join(config_paths)} "
+            f"passes the {arch} checks (listed {dtype_key} warp tiles: "
+            f"{warp_tiles}; pipeline, layout and tile-size gates)"
         )
         return 1
     print(f"  Build workers: {args.workers}")

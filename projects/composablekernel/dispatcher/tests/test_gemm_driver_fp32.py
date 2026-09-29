@@ -206,6 +206,21 @@ def test_zero_expanded_configs_is_an_error(monkeypatch, capsys):
     assert "0 configs expanded for dtype fp32 on gfx950" in out
 
 
+def test_zero_configs_after_the_gfx1250_gates_names_the_gates(
+    monkeypatch, capsys, tmp_path
+):
+    # 16x16x4 is listed for fp32; only the TDM layout gate rejects these.
+    cfg = json.loads(GFX1250_FP32_CI.read_text())
+    cfg["trait_config"]["pipeline"]["values"] = ["comp_tdm_v2"]
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps(cfg))
+    argv = ("--dtype", "fp32", "--layout", "rrr", str(path))
+    rc, out, built = _main(monkeypatch, capsys, *argv, arch="gfx1250")
+    assert rc == 1 and not built
+    assert "0 configs expanded for dtype fp32 on gfx1250" in out
+    assert "tile-size gates" in out
+
+
 def test_fp32_default_run_reaches_the_build(monkeypatch, capsys):
     rc, out, built = _main(monkeypatch, capsys, "--dtype", "fp32")
     assert len(built) == 1 and len(built[0]) > 0
