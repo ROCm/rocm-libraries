@@ -432,8 +432,10 @@ Step 1 above builds the key from the spec. By default *every* spec field partici
 A **runtime param field** is a spec field the kernel body reads as a kernel argument instead of baking into the body. The spec declares them by overriding `runtime_param_fields`, and `attention_dense_cache_key` excludes exactly those fields from the key, so one compiled binary serves every value of them:
 
 ```text
-attention_dense_cache_key(spec, arch) -> (arch, type(spec), <fields not in runtime_param_fields>)
+attention_dense_cache_key(spec, arch) -> (arch, type(spec), <fields not in runtime_param_fields> + <block order>)
 ```
+
+The block order the kernel uses is keyed explicitly because auto may pick it from shape fields the key drops.
 
 The declaration lives on the spec that owns the body, not in the shared key function, because the two must agree: declaring a field the body still bakes is a cache collision — different problems served by the wrong binary. `library/tests/test_attention_builds.py::TestAttentionDenseRuntimeShapeCollision` guards that direction by asserting specs sharing a key lower to identical IR.
 

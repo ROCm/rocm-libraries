@@ -366,9 +366,10 @@ byte-identically for D=128, so D=64 support costs the D=128 schedule nothing.
 
 Same inner pipeline, different outer work assignment:
 
-- **Default** — one CTA per $(\text{q-block}, \text{query-head}, \text{batch})$.
-  Grid `(⌈S_q/256⌉, H_q, B)`. Simple; the per-CTA launch/dispatch + scalar setup
-  + K/V-prime cold-start (~4.5 tile-equivalents) is paid once **per query block**.
+- **Default** — one CTA per $(\text{q-block}, \text{query-head}, \text{batch})$,
+  laid out by `nonpersist_decode` (below). Simple; the per-CTA launch/dispatch +
+  scalar setup + K/V-prime cold-start (~4.5 tile-equivalents) is paid once **per
+  query block**.
 - **Persistent (grid-stride)** — a 1-D grid of `num_persistent` long-lived CTAs
   (256 = exactly one 8-wave block per CU on MI355X's 256 CUs at 2 waves/SIMD).
   Each CTA grid-strides over the flattened work-item space
@@ -382,8 +383,10 @@ $(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:
 
 - **`qb_major`** — `wi = qb·(H_q·B) + h_q·B + bt`. Putting the triangular causal
   cost index `qb` in the MSB spreads cheap + expensive query blocks across each
-  CTA under grid-stride. But every 256-CTA grid-stride phase spans *all* KV
-  heads at once → large L2 footprint (57% L2 hit at GQA-8).
+  CTA under grid-stride; under causal masking `qb` is also folded (as in
+  `hkv_major` below; `interleave` is an explicit alternative). But every 256-CTA
+  grid-stride phase spans *all* KV heads at once → large L2 footprint (57% L2 hit
+  at GQA-8).
 - **`hkv_major`** — `wi = hkv·(NQB·g·B) + blk·(g·B) + h_ql·B + bt`, with `blk`
   folded to a **low/high-paired** query-block index (`blk < half → qb = blk`;
   else `qb = NQB−1−(blk−half)`). Putting `hkv` in the MSB keeps each grid-stride
@@ -391,8 +394,28 @@ $(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:
   query heads (**L2 hit 57% → ~93%, HBM misses 5.9× lower**); the low/high qb
   pairing preserves `qb_major`'s causal-triangle balance. Valid only when the
   CTA grid-strides across both halves of a KV head ($g\cdot NQB\cdot B \ge 2\,NP$).
-- **`auto`** (default) — `hkv_major` when it is balance-safe **and** GQA
-  ($g>1$), else `qb_major`. Strictly ≥ `qb_major`.
+- **`bt_hkv_minor`** — `wi = ((blk·g + h_ql)·H_{kv} + hkv)·B + bt`, `blk`
+  folded under causal. Batch, then KV head, are the fastest digits; the hardware
+  assigns XCDs round-robin (`xcd = wi mod 8`), so with fewer batches than XCDs
+  each XCD streams few KV heads' K/V.
+- **`gqa_pair`, `gqa_pair_2phase`** — explicit only; see the prefill README.
+- **`auto`** (default) — for aligned causal attention `bt_hkv_minor` below
+  `chiplet_num_xcds` batches, else `qb_major`; otherwise `hkv_major` when it is
+  balance-safe **and** GQA ($g>1$), else `qb_major`.
+
+**Default-grid block order (`nonpersist_decode`).** The grid shape and the
+block-id → work-item map:
+
+- **`qb_minor`** — grid `(⌈S_q/256⌉, H_q, B)`; the query block is the fastest
+  digit.
+- **`bt_hkv_minor`** — grid `(B, H_q, ⌈S_q/256⌉)` with the KV head as the low
+  digit of the head axis; query blocks run longest-first under causal masking.
+- **`hq_minor_swz`** — Swizzled Head-first (arXiv 2511.02132): grid
+  `(M·⌈S_q/256⌉, H_q/M, B)`, $M$ = `chiplet_num_xcds`, so each XCD owns a
+  contiguous band of query heads; longest-first under causal masking.
+- **`auto`** (default) — `hq_minor_swz` for causal MHA with ≥16 query blocks and
+  ≥8192 work items, `bt_hkv_minor` for other aligned causal attention, else
+  `qb_minor`.
 
 **Measured (MI355X, bf16, D=128, causal, $S = 8192$, 128/8 GQA, 0 spill, err
 ≈1.46e-3).** Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only
@@ -404,14 +427,16 @@ session, each pinned to its config (grid / decode / V-pad / lazy):
 | default grid | one-CTA/q-block | — | 32 | on | ≈543 |
 | persistent baseline | persistent NP=256 | qb-major | 0 | off | ≈877 |
 | persistent + V-pad | persistent NP=256 | qb-major | 32 | off | ≈912 |
-| **persistent (shipped default)** | persistent NP=256 | **hkv-major** | 32 | on | **≈948** |
+| **persistent (then default)** | persistent NP=256 | **hkv-major** | 32 | on | **≈948** |
 
 The clock-invariant deltas are the load-bearing part: **hkv/qb ≈ 1.04×** (L2 hit
-57%→~93%), **V-pad 0→32 ≈ +5%**, **lazy ≈ +2%** — and the shipped default
+57%→~93%), **V-pad 0→32 ≈ +5%**, **lazy ≈ +2%** — and the then-shipped default
 (`persistent=True`, `persist_decode="auto"`, `lazy_rescale=True`,
 `lds_v_row_pad=32`, the last row) is byte-identical IR to a re-measure, so the
-ratio reproduces regardless of the absolute clock. The persistent variant is the
-production choice for dense prefill.
+ratio reproduces regardless of the absolute clock. These measurements predate
+the current block orders. The persistent variant is the production choice for
+dense prefill, except large causal MHA, where the default grid with
+`hq_minor_swz` measured ahead.
 
 ### 8.3 Ragged sequence lengths — on-chip boundary padding
 
