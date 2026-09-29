@@ -2670,26 +2670,26 @@
         },
         "attention_dense/gfx950/bottom_right_bm128_sq512": {
           "arch": "gfx950",
-          "bytes": 382266,
+          "bytes": 382326,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_bm128_sq512_sk1024_causal_br_lazyrs",
-          "sha256": "c2c92452c2091d1a8876879ab1ae599f8ade695a3803e43dcf2b4630de1f122b",
+          "sha256": "aa3888bf37bf2e8b004fffb7499036dfadd8b3c45fa8e841ef6c64a9bce57280",
           "status": "ok"
         },
         "attention_dense/gfx950/bottom_right_sinks_sq512": {
           "arch": "gfx950",
-          "bytes": 338029,
+          "bytes": 338089,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk1024_causal_br_sinks_lazyrs",
-          "sha256": "093d02309d37c15263ee6878ef8531634244989b67e7c27126a4ade5a59df0f7",
+          "sha256": "cfd8170287d9292eb5ed62394e1a093878859e2076968d3c2da508db45ff3846",
           "status": "ok"
         },
         "attention_dense/gfx950/bottom_right_sq512": {
           "arch": "gfx950",
-          "bytes": 337321,
+          "bytes": 337381,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq512_sk1024_causal_br_lazyrs",
-          "sha256": "c7b3387ba1a5383e50727af012d24c927854ae777702f8cd24260266c3e7b7a6",
+          "sha256": "64e2cec90dbd9953ecd79d86bb2e731aff0af894844c6b93ca6c58a9ef0de29e",
           "status": "ok"
         },
         "attention_dense/gfx950/default_causal_sq512": {
@@ -2838,10 +2838,10 @@
         },
         "attention_dense/gfx950/ragged_bottom_right_sq500": {
           "arch": "gfx950",
-          "bytes": 338697,
+          "bytes": 338757,
           "family": "attention_dense",
           "kernel_name": "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq500_sk1234_causal_br_ragged_lazyrs",
-          "sha256": "7ce3332c5df4f002f0a4b46d1bf8febd063ef9084da436c0b6cabcbae3160371",
+          "sha256": "dedec4ebe113b5dca2a3c0be1d2a1ce77a142fd8e051ba0dd4d12f83dbab2b1a",
           "status": "ok"
         },
         "attention_dense/gfx950/ragged_causal_sq500": {
