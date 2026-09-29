@@ -16,7 +16,7 @@ To add hipThreads to your CMake project, add the following lines to your ``CMake
 
    [...]
 
-   target_link_libraries(target_name hipthreads::hipthreads)
+   target_link_libraries(<target_name> hipthreads::hipthreads)
 
 
 Include the hipThreads headers in your code:
