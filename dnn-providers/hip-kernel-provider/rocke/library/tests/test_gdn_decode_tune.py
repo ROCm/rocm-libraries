@@ -14,14 +14,10 @@ from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 
 def test_legal_configs_enumerates_every_validator_admitted_kda_tile():
-    base = dc.replace(
-        GdnDecodeSpec(), gate_kind="kda", num_k_heads=16, num_v_heads=32
-    )
+    base = dc.replace(GdnDecodeSpec(), gate_kind="kda", num_k_heads=16, num_v_heads=32)
     expected = [
         tile
-        for tile in product(
-            tune._NUM_WARPS, tune._WARP_THREADS_K, tune._BLOCKS_PER_V
-        )
+        for tile in product(tune._NUM_WARPS, tune._WARP_THREADS_K, tune._BLOCKS_PER_V)
         if is_valid_spec(
             dc.replace(
                 base,
@@ -86,4 +82,6 @@ def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, cap
     )
 
     assert tune.main() == 1
-    assert "batch 2: no candidate was both correct and timeable" in capsys.readouterr().out
+    assert (
+        "batch 2: no candidate was both correct and timeable" in capsys.readouterr().out
+    )

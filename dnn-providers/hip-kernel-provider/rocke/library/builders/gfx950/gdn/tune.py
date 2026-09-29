@@ -41,6 +41,7 @@ _NUM_WARPS = (1, 2, 4, 8, 16)
 _WARP_THREADS_K = (1, 2, 4, 8, 16, 32)
 _BLOCKS_PER_V = (1, 2, 4, 8, 16, 32)
 
+
 def device_is_visible() -> bool:
     """Load the ROCm-only measurement backend only when tuning is requested."""
     global TOL, launch, launcher_for, make_inputs, prepare, ref_fp32, torch
@@ -242,7 +243,6 @@ def main() -> int:
     )
     parser.add_argument("--top", type=int, default=8, help="rows to print per cell")
     args = parser.parse_args()
-
 
     if not device_is_visible():
         print("no HIP device visible", file=sys.stderr)
