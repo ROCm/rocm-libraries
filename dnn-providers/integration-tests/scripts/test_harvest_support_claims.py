@@ -25,6 +25,7 @@ from harvest_support_claims import (
     DROP_SHORTFALL,
     Cell,
     FetchError,
+    LogReport,
     MalformedSummary,
     block_cells,
     extract_blocks,
@@ -515,7 +516,10 @@ class TestReadLog(unittest.TestCase):
         )
         report, cells = read_log("a.log", text)
         self.assertEqual(cells, [])
-        self.assertEqual(report.error, "stream 23: counters_consistent is not true")
+        self.assertEqual(
+            report,
+            LogReport("a.log", error="stream 23: counters_consistent is not true"),
+        )
         self.assertTrue(report.status().startswith("REJECTED: stream 23"))
 
     def test_malformed_entry_rejects_the_log(self) -> None:

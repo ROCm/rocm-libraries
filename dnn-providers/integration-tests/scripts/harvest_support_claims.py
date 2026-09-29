@@ -427,7 +427,10 @@ def _stream_name(stream: str) -> str:
 
 
 def read_log(path: str, text: str) -> Tuple[LogReport, List[BlockCells]]:
-    """The cells of every block in one log, or none if any block is rejected."""
+    """The cells of every block in one log, or none if any block is rejected.
+
+    A rejected log's report carries only its error: no block of it counts.
+    """
     report = LogReport(path)
     blocks = extract_blocks(text, path)
     cells: List[BlockCells] = []
@@ -437,8 +440,7 @@ def read_log(path: str, text: str) -> Tuple[LogReport, List[BlockCells]]:
                 raise MalformedSummary(block.error)
             cells.append(block_cells(block))
         except MalformedSummary as exc:
-            report.error = f"{_stream_name(block.stream)}: {exc}"
-            return report, []
+            return LogReport(path, error=f"{_stream_name(block.stream)}: {exc}"), []
         run = block.summary["run"]
         report.lanes.add(f"{run['arch']}/{run['platform']}")
         report.modes.add(block.summary["mode"])
