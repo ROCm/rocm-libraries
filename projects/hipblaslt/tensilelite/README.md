@@ -191,10 +191,23 @@ Relevant options:
 
 ## Design records
 
-- `docs/Public.md`: original proposal.
-- `docs/PackagingDecisions.md`: accepted choices and rationale.
-- `docs/PackagingPlan.md`: implementation and acceptance plan.
-- `PythonBuildGrillingDecisions.md`: current canonical Python-build decisions.
+- [Python build decisions](PythonBuildGrillingDecisions.md): current decisions.
+- [ROCm wheel runtime decisions](RocmWheelRuntimeGrillingDecisions.md): current
+  installed-runtime decisions.
+- [Python build implementation plan](PythonBuildImplementationPlan.md): current
+  rocm-libraries implementation plan.
+- [TheRock Python build implementation plan](TheRockPythonBuildImplementationPlan.md):
+  current TheRock integration plan.
+- [ROCm version identity investigation](RocmVersionIdentityInvestigation.md):
+  version-authority evidence and conclusions.
+- [Invoke installation with a Python ROCm SDK](InvokeInstallPythonRocmSupport.md):
+  planned Python-SDK support for `invoke install`.
+- [Public proposal](docs/Public.md),
+  [packaging decisions](docs/PackagingDecisions.md), and
+  [packaging plan](docs/PackagingPlan.md): superseded proposal and planning records.
+- [Namespace split proposal](../../../TensileLiteNamespaceSplitProposal.md) and
+  [relative-import investigation](../../../TensileLiteRelativeImportInvestigation.md):
+  historical namespace migration planning snapshots.
 
 <!-- Copyright Advanced Micro Devices, Inc., or its affiliates. -->
 <!-- SPDX-License-Identifier: MIT -->
