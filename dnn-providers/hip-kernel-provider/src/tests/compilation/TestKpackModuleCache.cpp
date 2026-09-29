@@ -3,12 +3,14 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
@@ -25,6 +27,8 @@ using hip_kernel_provider::testing::PackedKernelSource;
 using hip_kernel_provider::testing::readPackedKernelSource;
 using hip_kernel_provider::testing::testKpackArchive;
 using hip_kernel_provider::testing::unitKpackRoot;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
 
 /// The arch and toc key of rocm-kpack's own test archive, which testKpackArchive() resolves
 /// from this binary's location. Its entries are placeholder payloads rather than HSA code
@@ -154,6 +158,44 @@ TEST(TestKpackModuleCacheLoad, ReportsAnArchTheArchiveDoesNotHold)
         EXPECT_NE(message.find(ARCHIVE_ARCH), std::string::npos)
             << "the message must name the arches the archive provides: " << message;
     }
+}
+
+TEST(TestKpackModuleCacheLoad, EveryLoadFromOneArchiveSharesOneOpenReader)
+{
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
+
+    // Two loads naming different entries of one archive reach one reader: kpack_open reads
+    // the whole compressed archive, so reopening per miss repays that read for every
+    // newly used kernel.
+    const auto first = openSharedKpackArchive(testKpackArchive().string());
+    const auto second = openSharedKpackArchive(testKpackArchive().string());
+    EXPECT_EQ(first.get(), second.get());
+    EXPECT_NE(std::find(first->arches.begin(), first->arches.end(), ARCHIVE_ARCH),
+              first->arches.end());
+}
+
+TEST(TestKpackModuleCacheLoad, AFailedOpenIsRetriedRatherThanRemembered)
+{
+    const ScopedDirectory scratch = claimScratchDirectory("kpackmodulecache");
+    const std::filesystem::path archive = scratch.path() / "arrives-later.kpack";
+
+    try
+    {
+        static_cast<void>(openSharedKpackArchive(archive.string()));
+        FAIL() << "expected an absent archive to fail to open";
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        EXPECT_EQ(failure.stage(), KpackLoadStage::OPEN_ARCHIVE) << failure.what();
+        EXPECT_NE(std::string(failure.what()).find("does not exist"), std::string::npos)
+            << failure.what();
+    }
+
+    // The same path, once the archive exists, opens: the failure was not cached.
+    std::filesystem::copy_file(testKpackArchive(), archive);
+    EXPECT_NE(openSharedKpackArchive(archive.string()), nullptr);
 }
 
 TEST(TestKpackModuleCacheLoad, ASecondOrdinalDoesNotAnswerFromTheFirstOrdinalsEntry)
