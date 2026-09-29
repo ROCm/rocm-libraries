@@ -552,7 +552,7 @@ endfunction()
 #   contributes its stamp file twice: as a dependency, so packing a root reruns
 #   the check, and as an argument, so the step also fails when a stamped pack
 #   root holds no descriptor at all. A name whose root is not wired contributes
-#   neither, so a dormant root -- one with no source root set, or with nothing to
+#   neither, so a dormant root -- one with an empty source root, or with nothing to
 #   pack for this build -- is not held to that rule.
 #
 #   An absent root, an empty root, a root with no embedded_source descriptor and
@@ -1007,8 +1007,8 @@ endfunction()
 #   hkp_rocke_wheel_python_interp populates does not exist until the build runs;
 #   imports are asserted there under the environment the pack step will use.
 #   With rocKE disabled no wheel exists or is wanted: the hip producer runs
-#   alone, and the pack step itself rejects any rocKE descriptor it is asked to
-#   pack.
+#   alone, and the pack step is told to drop the rocke kind, so rocKE UKDs prune
+#   like arch-pruned ones.
 # ---------------------------------------------------------------------------
 function(hkp_require_ingestor_toolchain out_arches)
     # hipcc is the perl/bat driver that honors --genco; on Windows it is

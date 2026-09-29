@@ -306,29 +306,29 @@ The component selection must include the provider. The `hipdnn-providers` preset
 rocKE is resolved once for **every** root, test roots included, so an unresolvable comgr
 is fatal at configure even in a hip-only build. With it OFF the ingestor still
 configures, builds and packs: the hip producer packs alone with no rocKE wheel, pip or
-comgr, and a `rocke` UKD selected for a packed architecture fails the pack, while one
-that architecture pruning drops is ignored. HIP-only and `embedded_source` bundles pack
+comgr, the `rocKE/` family folder is excluded from every root, and any `rocke` UKD
+elsewhere is pruned like an arch-pruned one. HIP-only and `embedded_source` bundles pack
 in either mode.
 
 There is **no per-producer production switch**: producer selection is per-UKD on
-`kernel_source.kind`, so one root feeds every producer.
+`kernel_source.kind`, so one root feeds every producer. Two filters remove content: a
+family folder (`rocKE/`) is excluded when its option is OFF, matched by exact name as a
+top-level folder of a root, and only producers gated by a build option (rocKE) are
+disabled by kind.
 
-Production packaging is wired on exactly one condition — the root named by
-`HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` holds at least one **non-hidden
-`*.kdp.json`**. Standalone UKDs, kernel sources and READMEs do not make a pack, because
-a KDP is what arch pruning consumes. Outcomes:
+Every root the provider wires, production and test alike, is probed at configure with
+the same filters the pack step gets. A root that is empty, or that would ship nothing
+for any architecture this build packs for, is **dormant**: it is skipped at pack, any
+stale output tree is removed, and one STATUS line says why. That is never an error,
+whether the root was named or inherited. A root set but not a directory is fatal at configure. A KDP is
+what arch pruning consumes, so standalone UKDs, kernel sources and READMEs alone do not
+make a pack.
 
-| Condition | Outcome |
-|---|---|
-| No KDP under the root | Dormant; any stale product tree is removed. Not an error |
-| KDP present, pruned on every arch, root explicitly named by this build | **Hard failure** — naming a root asserts it ships here |
-| KDP present, pruned on every arch, built-in default root | Dormant, so configuring for an undeclared arch is not a build error |
-| Root set but not a directory | Fatal at configure |
-
-That default root is `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/` and
-holds no bundle, so a default configure leaves production packaging dormant. Supply your
-own bundle under it — or repoint the cache variable — before expecting output, and
-substitute your bundle's name wherever a bundle path appears below.
+The production root is `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH`
+defaulting to `$PROVIDER/src/engines/kernel_ingestor_engine/descriptors/`. It carries the
+rocKE `gfx950_attention_dense` bundle, so production packaging is dormant for a build
+that excludes `rocKE/` or packs no arch that bundle's KDP declares. Substitute your
+bundle's name wherever a bundle path appears below.
 `descriptors/README.md` carries the authoring rules that root enforces, including the
 native pack whose symbols a bundle's UKDs must name before it serves. The packaging
 dependencies are documented from the repository root in

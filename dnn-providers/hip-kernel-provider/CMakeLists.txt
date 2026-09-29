@@ -571,8 +571,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 PATTERN "${HKP_PACK_STAMP_NAME}" EXCLUDE)
     endif()
 
-    # The test packing roots are wired unconditionally under this gate, so the test tree
-    # always has content to ship once the build has run.
+    # The test packing roots are wired under this gate, each unless it has nothing to pack
+    # for this build, in which case it is dormant and writes no output. The install rule
+    # ships whatever the wired roots and the fixture archive staged into this tree.
     if(HIPKERNELPROVIDER_ENABLE_TESTS)
         install(DIRECTORY "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/"
                 DESTINATION "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_TEST_DESCRIPTOR_SUBDIR}"

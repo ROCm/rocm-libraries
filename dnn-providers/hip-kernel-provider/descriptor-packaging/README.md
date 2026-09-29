@@ -19,14 +19,20 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   (`rocKE/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
   `HkpPackaging.cmake` maps each switchable folder to the option that enables it, and a
   family whose option is OFF is passed as `--exclude-folder <name>`: its files are
-  never read, under every root. A new family is one entry in that table.
+  never read, under every root. A new family is one entry in that table. A folder is
+  matched by its exact name as a **top-level** child of the root, so a folder of that
+  name deeper in the tree is not a family. A root that is itself placed inside a family
+  folder (for example `descriptors/rocKE/...`) is not filtered by that family's switch:
+  pointing a root there is the user's responsibility.
 - **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
   as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
   lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
   `rocke` is disabled. A kind outside the vocabulary is still a validation error.
 
-A root, or an arch, left with nothing to pack is skipped, not failed.
+A root, or an arch, left with nothing to pack is skipped, not failed. Only producers
+gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
+not pruned.
 
 The provider wires six roots: production, plus five over the four authored test sets
 (`shared` packs twice, once into each test binary's discovery root).
@@ -36,13 +42,31 @@ The provider wires six roots: production, plus five over the four authored test 
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
 | Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
-Before wiring production, configure asks the packer (`pipeline.shipped_engines`, under
-the base interpreter, with the same filters) which engines each arch's shard would
-carry. A root that is empty or would ship nothing for any arch this build packs for is
-**dormant**, named or inherited alike, and any stale product tree is removed; neither
-is an error. The same answer decides which engines' census and integration tests are
-registered. A probe that cannot answer leaves the root wired, so the packer reports
-what is wrong with it. A root set but not a directory is fatal.
+Before wiring any root, configure asks the packer (`pipeline.shipped_engines` and
+`pipeline.offered_engines`, under the base interpreter, with the same filters) which
+engines each arch's shard would carry and which engines the root carries for any arch. A
+root, production or test, named or inherited alike, that is empty or would ship nothing
+for any arch this build packs for is **dormant** at configure and skipped at pack, and
+any stale output tree is removed; neither is an error, and one STATUS line says why. A
+dormant root is recorded so the census and the embedded-source verify step skip it
+too. Two answers decide which engine-pinned tests are registered:
+
+- **Per-arch registrations** (the census, and the external and gpu_ref integration
+  checks) install into a gfx-specific shard and are gated on
+  `hkp_gfx950_attention_dense_available()`, which reads what the shard for that arch
+  ships.
+- **Host-side sources that pin an engine**, such as the gfx950 knobs suite, are gated on
+  `hkp_product_offers_engine()`, which reads what the product root carries for any arch
+  under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
+  tests must work with another build's arch content.
+
+A probe that cannot answer leaves the root wired, so the packer reports what is wrong
+with it, and both predicates then read `HIPKERNELPROVIDER_ENABLE_ROCKE`. A root set but
+not a directory is fatal.
+
+Test roots hold no family folder today. The first family folder added under
+`test_descriptors/` must also gate the test binary's cases: a fixture root that goes
+dormant still leaves cases in that binary that expect its descriptors.
 
 Two rules govern the walk:
 
