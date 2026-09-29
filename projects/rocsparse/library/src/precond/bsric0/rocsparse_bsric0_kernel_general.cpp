@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsric0_kernel_general.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_grid_x.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -416,7 +417,7 @@ namespace rocsparse
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsric0_kernel_general<SLEEP, BLOCKSIZE, WFSIZE>),
-            dim3(rocsparse::get_grid_size_x(A->rows), A->batch_count),
+            dim3(rocsparse::get_grid_size_x(handle, A->rows, BLOCKSIZE), A->batch_count),
             dim3(BLOCKSIZE),
             0,
             handle->stream,

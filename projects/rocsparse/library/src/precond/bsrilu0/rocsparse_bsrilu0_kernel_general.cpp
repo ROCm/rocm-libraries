@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsrilu0_kernel_general.hpp"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_grid_x.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -376,7 +377,8 @@ namespace rocsparse
         auto          numeric_exact     = bsrilu0_info->get_singularity_numeric_exact();
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrilu0_kernel_general<BLOCKSIZE, WFSIZE, SLEEP>),
-            dim3(rocsparse::get_grid_size_x((WFSIZE * A->rows - 1) / BLOCKSIZE + 1),
+            dim3(rocsparse::get_grid_size_x(
+                     handle, (WFSIZE * A->rows - 1) / BLOCKSIZE + 1, BLOCKSIZE),
                  A->batch_count),
             dim3(BLOCKSIZE),
             0,

@@ -29,9 +29,9 @@
 //
 // Kept in its own header, and deliberately free of any rocsparse or HIP
 // include, so that the host-only rocsparse-unit-test binary can compile it as
-// plain C++ without pulling in the HIP toolchain. Both helpers are needed on
-// the host (to size the launch) and on the device (to recover the work above
-// the clamp), so they are annotated for both when compiled as HIP.
+// plain C++ without pulling in the HIP toolchain. The launch clamps grid.x with
+// rocsparse::get_grid_size_x (rocsparse_grid.hpp); grid_x_chunk recovers the
+// work above the clamp inside the kernel.
 //
 #if defined(__HIPCC__)
 #define ROCSPARSE_GRID_X_ILF static __host__ __device__ __forceinline__
@@ -41,40 +41,6 @@
 
 namespace rocsparse
 {
-    //
-    // Largest extent the hardware accepts on grid.x. Verified on gfx1201, which
-    // reports maxGridSize[0] == 2147483647 (grid.y and grid.z report 65535).
-    //
-    // Deliberately a function rather than a namespace scope constant. PR #11512
-    // (AISPARSE-696) introduces a rocsparse::max_grid_size_x constant in
-    // rocsparse_common.hpp; a namespace scope constexpr has internal linkage, so
-    // the same name coming from two headers is a redeclaration error in any
-    // translation unit that includes both. A function body cannot collide that
-    // way, and the worst case once both land is a duplicate spelling of one
-    // integer rather than a build break.
-    //
-    ROCSPARSE_GRID_X_ILF int64_t grid_x_max_extent()
-    {
-        return 2147483647;
-    }
-
-    //
-    // Extent to launch on grid.x for count units of work, clamped to what the
-    // hardware accepts. Work above the clamp is recovered by grid_x_chunk inside
-    // the kernel.
-    //
-    // The clamp is the whole point: A->rows arrives from the spmat descriptor as
-    // an int64_t and dim3 takes a uint32_t, so without it a row count above the
-    // cap is narrowed silently. Between 2^31 and 2^32 the narrowing produces a
-    // value dim3 accepts but the driver rejects; at and above 2^32 it wraps, so
-    // 2^32 launches an empty grid and 2^32 + 7 launches seven blocks.
-    //
-    ROCSPARSE_GRID_X_ILF uint32_t get_grid_size_x(int64_t count)
-    {
-        const int64_t maximum = rocsparse::grid_x_max_extent();
-        return static_cast<uint32_t>((count > maximum) ? maximum : count);
-    }
-
     //
     // Half-open range [first, last) of the count work items owned by block
     // block_id when the items are split into grid_size contiguous chunks. The

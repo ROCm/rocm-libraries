@@ -23,8 +23,8 @@
  * ************************************************************************ */
 
 //
-// Host unit tests for the grid.x clamp and for the contiguous chunk partition
-// that the incomplete factorizations use to recover the work above the clamp.
+// Host unit tests for the contiguous chunk partition that the incomplete
+// factorizations use to recover the work above the grid.x clamp.
 //
 // These live in the host-only rocsparse-unit-test binary rather than in
 // rocsparse-unit-test-device, and they declare no memory requirement, so
@@ -32,8 +32,6 @@
 // clamp exists for is far past what any available device can hold, so the
 // properties the kernels depend on are checked here arithmetically instead:
 //
-//   - the clamp never returns an extent the hardware would reject, and never
-//     truncates an extent it would accept;
 //   - the chunks are a partition: every item in [0, count) is owned by exactly
 //     one block;
 //   - the chunks are monotone in the block id, which is the property that keeps
@@ -46,34 +44,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <vector>
-
-TEST(grid_x, max_extent_matches_the_hardware)
-{
-    // gfx1201 reports maxGridSize[0] == 2147483647. Every AMD GPU reports the
-    // same value for the x axis; the 65535 cap applies to y and z only.
-    EXPECT_EQ(rocsparse::grid_x_max_extent(), 2147483647);
-}
-
-TEST(grid_x, get_grid_size_x_below_and_at_the_clamp)
-{
-    EXPECT_EQ(rocsparse::get_grid_size_x(0), 0u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(1), 1u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(65536), 65536u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(2147483646), 2147483646u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(2147483647), 2147483647u);
-}
-
-TEST(grid_x, get_grid_size_x_above_the_clamp)
-{
-    // Without the clamp these narrow into dim3: 2^31 and 2^31 + 1 are accepted
-    // by dim3 but rejected by the driver, and 2^32 and 2^32 + 7 wrap to 0 and 7,
-    // so the launch would silently do nothing or almost nothing.
-    EXPECT_EQ(rocsparse::get_grid_size_x(2147483648LL), 2147483647u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(2147483649LL), 2147483647u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(4294967296LL), 2147483647u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(4294967303LL), 2147483647u);
-    EXPECT_EQ(rocsparse::get_grid_size_x(1LL << 40), 2147483647u);
-}
 
 TEST(grid_x, grid_x_chunk_is_a_partition)
 {
@@ -148,8 +118,7 @@ TEST(grid_x, grid_x_chunk_degenerates_to_one_item_per_block_when_unclamped)
     // count, and this is what makes the recovery loop a no-op there.
     for(int64_t count : {int64_t(1), int64_t(3), int64_t(64), int64_t(65537), int64_t(100000)})
     {
-        const uint32_t grid_size = rocsparse::get_grid_size_x(count);
-        ASSERT_EQ(static_cast<int64_t>(grid_size), count);
+        const uint32_t grid_size = static_cast<uint32_t>(count);
 
         for(uint32_t block_id = 0; block_id < grid_size; ++block_id)
         {
@@ -165,17 +134,17 @@ TEST(grid_x, grid_x_chunk_degenerates_to_one_item_per_block_when_unclamped)
 TEST(grid_x, grid_x_chunk_covers_a_count_above_the_clamp)
 {
     // The case the clamp exists for: more items than the grid can express.
-    // Check the leading blocks and the final block without walking 2^31 items.
+    // grid_size is what rocsparse::get_grid_size_x returns at 256 threads per
+    // block, (2^32 - 1) / 256. Check the leading blocks and the final block
+    // without walking every item.
     const int64_t  count     = 5000000000LL;
-    const uint32_t grid_size = rocsparse::get_grid_size_x(count);
-
-    ASSERT_EQ(grid_size, 2147483647u);
+    const uint32_t grid_size = 16777215u;
 
     int64_t first, last;
 
     rocsparse::grid_x_chunk(count, grid_size, 0, first, last);
     EXPECT_EQ(first, 0);
-    EXPECT_EQ(last, 3);
+    EXPECT_EQ(last, 299);
 
     int64_t total = 0;
     for(uint32_t block_id = 0; block_id < 1000; ++block_id)
@@ -183,7 +152,7 @@ TEST(grid_x, grid_x_chunk_covers_a_count_above_the_clamp)
         rocsparse::grid_x_chunk(count, grid_size, block_id, first, last);
         total += last - first;
     }
-    EXPECT_EQ(total, 3000);
+    EXPECT_EQ(total, 299000);
 
     rocsparse::grid_x_chunk(count, grid_size, grid_size - 1, first, last);
     EXPECT_EQ(last, count);
