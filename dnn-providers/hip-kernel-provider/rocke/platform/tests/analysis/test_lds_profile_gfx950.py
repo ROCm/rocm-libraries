@@ -5,8 +5,10 @@
 
 import pytest
 
+from rocke.analysis.lds import opcodes
 from rocke.analysis.lds.model import AccessClassification, GroupKind, LdsAccess
-from rocke.analysis.lds.predict import predict_lds_conflicts
+from rocke.analysis.lds.predict import LdsPredictionError, predict_lds_conflicts
+from rocke.analysis.lds.profiles import Gfx950Profile
 
 
 def _access(access_id: int, lane: int, address: int, *, width: int = 4) -> LdsAccess:
@@ -129,3 +131,20 @@ def test_wave_half_separation_prevents_conflict():
     )
 
     _assert_normal(result)
+
+
+@pytest.mark.parametrize("width", [8, 16])
+@pytest.mark.parametrize("method", ["phase_key", "collision_key"])
+def test_global_wide_read_addition_does_not_expand_gfx950_support(
+    monkeypatch, width, method
+):
+    opcode = f"ds_read_test_b{width * 8}"
+    monkeypatch.setitem(
+        opcodes._OPCODE_SPECS, opcode, opcodes.OpcodeSpec(opcode, "read", width)
+    )
+    profile = Gfx950Profile()
+    assert opcode not in profile.supported_opcodes
+    with pytest.raises(LdsPredictionError, match="not supported by gfx950"):
+        _predict(opcode, [_access(0, 0, 0, width=width)])
+    with pytest.raises(ValueError, match="not supported by gfx950"):
+        getattr(profile, method)(opcode, 0)

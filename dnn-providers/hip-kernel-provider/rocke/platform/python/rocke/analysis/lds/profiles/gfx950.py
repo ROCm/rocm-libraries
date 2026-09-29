@@ -28,6 +28,11 @@ class Gfx950Profile(Gfx90aProfile):
         """Return the observed lane phase for one canonical opcode."""
 
         spec = get_opcode_spec(opcode)
+        if spec.opcode not in self.supported_opcodes:
+            raise ValueError(
+                f"opcode is not supported by {self.identity.target}: {opcode}"
+            )
+
         bit5 = (lane >> 5) & 1
         if spec.direction == "read" and spec.access_width_bytes == 8:
             return (bit5,)
@@ -42,6 +47,10 @@ class Gfx950Profile(Gfx90aProfile):
         """Return the observed repeating byte-address class for one access."""
 
         spec = get_opcode_spec(opcode)
+        if spec.opcode not in self.supported_opcodes:
+            raise ValueError(
+                f"opcode is not supported by {self.identity.target}: {opcode}"
+            )
         if spec.direction == "read" and spec.access_width_bytes in {8, 16}:
             return lds_byte_address % 256
         return super().collision_key(opcode, lds_byte_address)
