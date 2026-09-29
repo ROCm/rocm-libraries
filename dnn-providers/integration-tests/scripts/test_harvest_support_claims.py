@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from unittest import mock
@@ -37,6 +38,7 @@ from harvest_support_claims import (
 )
 from support_sidecar import Claim, load, render
 
+_TESTDATA = Path(__file__).resolve().parent / "testdata"
 _TS = "2026-09-28T05:47:38.5917461Z "
 _SWEEP = "integration-test-bundles/quick/ConvolutionFwdPointwise/Default/sweep.json"
 _SINGLE = (
@@ -59,8 +61,13 @@ def _summary(**overrides: object) -> dict:
             "unclaimed": 3,
         },
         "counters_consistent": True,
-        "unenforced": 0,
-        "harness_defects": 0,
+        "unenforced": {
+            "no_applicable_claim": 0,
+            "not_opened": 0,
+            "not_selected": 0,
+            "skipped_before_run": 0,
+        },
+        "harness_defects": {"missed_query": 0},
         "claim_failures": [],
         "failed_in_use": [],
         "unclaimed_support": [
@@ -474,6 +481,32 @@ class TestReadLog(unittest.TestCase):
         report, cells = read_log("a.log", text)
         self.assertEqual(cells, [])
         self.assertIn("unprefixed stream: unclaimed_support", report.error)
+
+    def test_block_printed_by_the_harness(self) -> None:
+        # An excerpt of a CI job log: the gtest results before the block, and
+        # the block exactly as SupportClaimReport.cpp printed it.
+        path = _TESTDATA / "support_claim_summary_hip_mlops_gfx942_linux.log"
+        text = path.read_bytes().decode("utf-8")
+        (block,) = extract_blocks(text)
+        self.assertEqual(len(block.not_passed), 4)
+        self.assertIn(
+            "quick_SdpaFwdRuntimeScale_bhsd_fp8_hd128_nomask_batch_Small.Small",
+            block.not_passed,
+        )
+        report, (cells,) = read_log(path.name, text)
+        self.assertIsNone(report.error)
+        self.assertEqual(report.lanes, {"gfx942/linux"})
+        self.assertEqual(cells.dropped, {})
+        self.assertEqual(len(cells.kept), 48)
+        self.assertEqual({c.engine for c in cells.kept}, {"HIP_MLOPS_ENGINE"})
+        bundles = Counter(c.bundle for c in cells.kept)
+        self.assertEqual(
+            bundles,
+            {
+                "integration-test-bundles/quick/ResampleFwd/Default/sweep.json": 24,
+                "integration-test-bundles/quick/ResampleFwd/Variant2/sweep.json": 24,
+            },
+        )
 
 
 class TestHarvest(unittest.TestCase):

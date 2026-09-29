@@ -1,0 +1,110 @@
+2026-09-29T10:04:13.2620108Z 12: [==========] 4899 tests from 111 test suites ran. (661995 ms total)
+2026-09-29T10:04:13.2620380Z 12: [  PASSED  ] 3476 tests.
+2026-09-29T10:04:13.2620587Z 12: [  SKIPPED ] 1423 tests, listed below:
+2026-09-29T10:04:13.2620999Z 12: [  SKIPPED ] Smoke/IntegrationConvFwdSerializeRoundTripFp32.SerializeRoundTripExecutesCorrectly/0
+2026-09-29T10:04:13.2621596Z 12: [  SKIPPED ] Smoke/IntegrationConvFwdSerializeRoundTripFp32.SerializeRoundTripExecutesCorrectly/1
+2026-09-29T10:04:13.2622170Z 12: [  SKIPPED ] Smoke/IntegrationConvFwdSerializeRoundTripFp32.SerializeRoundTripExecutesCorrectly/2
+2026-09-29T10:04:13.2996380Z 12: [  SKIPPED ] quick_SdpaFwdRuntimeScale_bhsd_fp8_hd128_nomask_batch_Small.Small
+2026-09-29T10:04:13.2996550Z 12: ==== SUPPORT CLAIM SUMMARY (ENFORCING) ====
+2026-09-29T10:04:13.2996621Z 12: {
+2026-09-29T10:04:13.2996706Z 12:   "support_claim_summary": {
+2026-09-29T10:04:13.2996790Z 12:     "claim_failures": [],
+2026-09-29T10:04:13.2996872Z 12:     "counters_consistent": true,
+2026-09-29T10:04:13.2996967Z 12:     "failed_in_use": [],
+2026-09-29T10:04:13.2997040Z 12:     "graphs": {
+2026-09-29T10:04:13.2997111Z 12:       "found": 9684,
+2026-09-29T10:04:13.2997190Z 12:       "queried": 4120,
+2026-09-29T10:04:13.2997258Z 12:       "ran": 4120,
+2026-09-29T10:04:13.2997334Z 12:       "selected": 4120,
+2026-09-29T10:04:13.2997409Z 12:       "with_claims": 9460
+2026-09-29T10:04:13.2997480Z 12:     },
+2026-09-29T10:04:13.2997558Z 12:     "harness_defects": {
+2026-09-29T10:04:13.2997632Z 12:       "missed_query": 0
+2026-09-29T10:04:13.2997703Z 12:     },
+2026-09-29T10:04:13.2997777Z 12:     "mode": "enforcing",
+2026-09-29T10:04:13.2997853Z 12:     "run": {
+2026-09-29T10:04:13.2997922Z 12:       "arch": "gfx942",
+2026-09-29T10:04:13.2998011Z 12:       "engine": "HIP_MLOPS_ENGINE",
+2026-09-29T10:04:13.2998088Z 12:       "platform": "linux"
+2026-09-29T10:04:13.2998158Z 12:     },
+2026-09-29T10:04:13.2998232Z 12:     "schema_version": 1,
+2026-09-29T10:04:13.2998310Z 12:     "unclaimed_support": [
+2026-09-29T10:04:13.2998381Z 12:       {
+2026-09-29T10:04:13.2998556Z 12:         "bundle": "integration-test-bundles/quick/ResampleFwd/Default/sweep.json",
+2026-09-29T10:04:13.2998632Z 12:         "cases": [
+2026-09-29T10:04:13.2998786Z 12:           "1_2_3_2_2_bfp16_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+2026-09-29T10:04:13.2998940Z 12:           "1_2_3_2_2_bfp16_ndhwc_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+2026-09-29T10:04:13.2999142Z 12:           "1_2_3_2_2_fp16_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+2026-09-29T10:04:13.2999332Z 12:           "1_2_3_2_2_fp16_ndhwc_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+2026-09-29T10:04:13.2999542Z 12:           "1_2_3_2_2_fp32_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+2026-09-29T10:04:13.2999703Z 12:           "1_2_3_2_2_fp32_ndhwc_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+2026-09-29T10:04:13.2999847Z 12:           "1_2_4_3_bfp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.2999985Z 12:           "1_2_4_3_bfp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3000119Z 12:           "1_2_4_3_fp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3000252Z 12:           "1_2_4_3_fp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3000383Z 12:           "1_2_4_3_fp32_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3000514Z 12:           "1_2_4_3_fp32_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3000650Z 12:           "2_3_3_2_bfp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3000857Z 12:           "2_3_3_2_bfp16_nhwc_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3000992Z 12:           "2_3_3_2_fp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3001122Z 12:           "2_3_3_2_fp16_nhwc_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3001262Z 12:           "2_3_3_2_fp32_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3001390Z 12:           "2_3_3_2_fp32_nhwc_padding_modeneg_inf_pad_postpad0x0_prepad0x0",
+2026-09-29T10:04:13.3001525Z 12:           "2_3_4_3_bfp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3001657Z 12:           "2_3_4_3_bfp16_nhwc_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3001784Z 12:           "2_3_4_3_fp16_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3001972Z 12:           "2_3_4_3_fp16_nhwc_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3002094Z 12:           "2_3_4_3_fp32_nchw_padding_modezero_pad_postpad1x1_prepad1x1",
+2026-09-29T10:04:13.3002225Z 12:           "2_3_4_3_fp32_nhwc_padding_modezero_pad_postpad1x1_prepad1x1"
+2026-09-29T10:04:13.3002295Z 12:         ],
+2026-09-29T10:04:13.3002374Z 12:         "reached": "verified",
+2026-09-29T10:04:13.3002454Z 12:         "required": "verified"
+2026-09-29T10:04:13.3002520Z 12:       },
+2026-09-29T10:04:13.3002587Z 12:       {
+2026-09-29T10:04:13.3002757Z 12:         "bundle": "integration-test-bundles/quick/ResampleFwd/Variant2/sweep.json",
+2026-09-29T10:04:13.3002832Z 12:         "cases": [
+2026-09-29T10:04:13.3003024Z 12:           "1_2_4_3_3_bfp16_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3003215Z 12:           "1_2_4_3_3_bfp16_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3003401Z 12:           "1_2_4_3_3_fp16_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3003577Z 12:           "1_2_4_3_3_fp16_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3003764Z 12:           "1_2_4_3_3_fp32_ncdhw_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3003940Z 12:           "1_2_4_3_3_fp32_ndhwc_postpad0x1x0_prepad1x0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3004117Z 12:           "1_2_4_6_bfp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3004289Z 12:           "1_2_4_6_fp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3004453Z 12:           "1_2_4_6_fp32_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3004624Z 12:           "1_2_8_3_bfp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3004845Z 12:           "1_2_8_3_fp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3005065Z 12:           "1_2_8_3_fp32_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3005236Z 12:           "2_3_3_5_bfp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3005408Z 12:           "2_3_3_5_bfp16_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3005576Z 12:           "2_3_3_5_fp16_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3005736Z 12:           "2_3_3_5_fp16_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3005905Z 12:           "2_3_3_5_fp32_nchw_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3006071Z 12:           "2_3_3_5_fp32_nhwc_postpad0x1_prepad1x0_resample_modeavgpool_exclude_padding",
+2026-09-29T10:04:13.3006236Z 12:           "2_3_7_2_bfp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3006411Z 12:           "2_3_7_2_bfp16_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3006617Z 12:           "2_3_7_2_fp16_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3006785Z 12:           "2_3_7_2_fp16_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3006949Z 12:           "2_3_7_2_fp32_nchw_postpad1x0_prepad0x1_resample_modeavgpool_include_padding",
+2026-09-29T10:04:13.3007109Z 12:           "2_3_7_2_fp32_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding"
+2026-09-29T10:04:13.3007180Z 12:         ],
+2026-09-29T10:04:13.3007256Z 12:         "reached": "verified",
+2026-09-29T10:04:13.3007339Z 12:         "required": "verified"
+2026-09-29T10:04:13.3007414Z 12:       }
+2026-09-29T10:04:13.3007484Z 12:     ],
+2026-09-29T10:04:13.3007562Z 12:     "unenforced": {
+2026-09-29T10:04:13.3007646Z 12:       "no_applicable_claim": 1213,
+2026-09-29T10:04:13.3007794Z 12:       "not_opened": 0,
+2026-09-29T10:04:13.3007870Z 12:       "not_selected": 5340,
+2026-09-29T10:04:13.3007956Z 12:       "skipped_before_run": 0
+2026-09-29T10:04:13.3008022Z 12:     },
+2026-09-29T10:04:13.3008096Z 12:     "verdicts": {
+2026-09-29T10:04:13.3008169Z 12:       "accepted": 0,
+2026-09-29T10:04:13.3008242Z 12:       "broken": 0,
+2026-09-29T10:04:13.3008321Z 12:       "confirmed": 2907,
+2026-09-29T10:04:13.3008392Z 12:       "errored": 0,
+2026-09-29T10:04:13.3008473Z 12:       "failed_in_use": 0,
+2026-09-29T10:04:13.3008546Z 12:       "unclaimed": 48
+2026-09-29T10:04:13.3008616Z 12:     }
+2026-09-29T10:04:13.3008683Z 12:   }
+2026-09-29T10:04:13.3008755Z 12: }
