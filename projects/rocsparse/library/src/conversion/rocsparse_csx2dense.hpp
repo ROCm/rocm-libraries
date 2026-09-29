@@ -24,7 +24,7 @@
 #pragma once
 
 #include "csx2dense_device.h"
-#include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 
 namespace rocsparse
 {
@@ -58,9 +58,10 @@ namespace rocsparse
                 static constexpr rocsparse_int WAVEFRONT_SIZE  = 32;
                 static constexpr rocsparse_int NROWS_PER_BLOCK = 16;
 
-                const int64_t blocks
-                    = rocsparse::min((static_cast<int64_t>(m) - 1) / NROWS_PER_BLOCK + 1,
-                                     static_cast<int64_t>(handle->properties.maxGridSize[0]));
+                const int64_t blocks = rocsparse::get_grid_size_x(
+                    handle,
+                    (static_cast<int64_t>(m) - 1) / NROWS_PER_BLOCK + 1,
+                    WAVEFRONT_SIZE * NROWS_PER_BLOCK);
                 dim3 k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NROWS_PER_BLOCK);
 
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -84,9 +85,10 @@ namespace rocsparse
                 static constexpr rocsparse_int WAVEFRONT_SIZE  = 64;
                 static constexpr rocsparse_int NROWS_PER_BLOCK = 16;
 
-                const int64_t blocks
-                    = rocsparse::min((static_cast<int64_t>(m) - 1) / NROWS_PER_BLOCK + 1,
-                                     static_cast<int64_t>(handle->properties.maxGridSize[0]));
+                const int64_t blocks = rocsparse::get_grid_size_x(
+                    handle,
+                    (static_cast<int64_t>(m) - 1) / NROWS_PER_BLOCK + 1,
+                    WAVEFRONT_SIZE * NROWS_PER_BLOCK);
                 dim3 k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NROWS_PER_BLOCK);
 
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -116,9 +118,10 @@ namespace rocsparse
                 static constexpr rocsparse_int WAVEFRONT_SIZE     = 32;
                 static constexpr rocsparse_int NCOLUMNS_PER_BLOCK = 16;
 
-                const int64_t blocks
-                    = rocsparse::min((static_cast<int64_t>(n) - 1) / NCOLUMNS_PER_BLOCK + 1,
-                                     static_cast<int64_t>(handle->properties.maxGridSize[0]));
+                const int64_t blocks = rocsparse::get_grid_size_x(
+                    handle,
+                    (static_cast<int64_t>(n) - 1) / NCOLUMNS_PER_BLOCK + 1,
+                    WAVEFRONT_SIZE * NCOLUMNS_PER_BLOCK);
                 dim3 k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NCOLUMNS_PER_BLOCK);
 
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -142,9 +145,10 @@ namespace rocsparse
                 static constexpr rocsparse_int WAVEFRONT_SIZE     = 64;
                 static constexpr rocsparse_int NCOLUMNS_PER_BLOCK = 16;
 
-                const int64_t blocks
-                    = rocsparse::min((static_cast<int64_t>(n) - 1) / NCOLUMNS_PER_BLOCK + 1,
-                                     static_cast<int64_t>(handle->properties.maxGridSize[0]));
+                const int64_t blocks = rocsparse::get_grid_size_x(
+                    handle,
+                    (static_cast<int64_t>(n) - 1) / NCOLUMNS_PER_BLOCK + 1,
+                    WAVEFRONT_SIZE * NCOLUMNS_PER_BLOCK);
                 dim3 k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NCOLUMNS_PER_BLOCK);
 
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
