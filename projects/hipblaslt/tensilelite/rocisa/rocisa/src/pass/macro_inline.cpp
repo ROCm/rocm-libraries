@@ -131,7 +131,7 @@ namespace rocisa
                     assert(false && "unknown macro condition operator");
                 results.push_back(result ? 1 : 0);
                 break;
-            case 4:
+            case 3:
                 assert(val == "&&" && "unknown macro logical operator");
                 results.push_back(2); // sentinel for &&
                 break;
