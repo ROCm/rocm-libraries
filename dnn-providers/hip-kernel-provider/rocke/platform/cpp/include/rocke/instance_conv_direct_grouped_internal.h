@@ -89,6 +89,7 @@ typedef struct rocke_dconv_16c_ctx
     const rocke_direct_conv_16c_spec_t* spec; /* the DirectConv16cSpec        */
     const char* arch; /* NULL-normalised "gfx950"     */
     rocke_direct_conv_problem_t p; /* spec->problem (by value)     */
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() depending on p.dtype */
 
     /* ---- block-geometry scalars (Python all-caps locals) -- */
     int BLOCK_Q; /* spec.block_q                              */
@@ -100,7 +101,7 @@ typedef struct rocke_dconv_16c_ctx
     int LOAD_VEC; /* 4                                         */
     int NUM_VEC4; /* LDS_ROW_FP16 / LOAD_VEC                    */
     int PASSES; /* ceil(NUM_VEC4 / THREADS)                  */
-    int lds_total_fp16; /* PASSES * THREADS * LOAD_VEC                */
+    int lds_total_elems; /* PASSES * THREADS * LOAD_VEC                */
     int q_subtiles; /* BLOCK_Q // 16                             */
     int n_iters; /* H + KH - 1                                */
 
@@ -120,10 +121,11 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* c_cpg; /* const_i32(cpg)                       */
     rocke_value_t* c_kpg; /* const_i32(kpg)                       */
     rocke_value_t* c_W; /* const_i32(W)                         */
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg; /* const_i32(BLOCK_GROUPS * cpg)        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                         */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                 */
-    rocke_value_t* fp16x4_zero; /* zero_vec_f16(4)                      */
+    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                      */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                      */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -145,7 +147,7 @@ typedef struct rocke_dconv_16c_ctx
     rocke_value_t* q_tile_start; /* bx * BLOCK_Q                         */
 
     /* ---- LDS ping-pong buffers + buffer rsrcs -- */
-    rocke_value_t* A_smem; /* smem_alloc lds_a [1, lds_total_fp16] */
+    rocke_value_t* A_smem; /* smem_alloc lds_a [1, lds_total_elems] */
     rocke_value_t* B_smem; /* smem_alloc lds_b (or == A_smem)      */
     rocke_value_t* a_rsrc; /* buffer_rsrc(A, A_bytes)              */
     rocke_value_t* b_rsrc; /* buffer_rsrc(Bp, B_bytes)            */
@@ -223,7 +225,7 @@ typedef struct rocke_dconv_4c_ctx
     rocke_value_t* c_kpg; /* const_i32(kpg)                        */
     rocke_value_t* c_half_bytes; /* const_i32(2)                          */
     rocke_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    rocke_value_t* fp16x4_zero; /* zero_vec_f16(4)                       */
+    rocke_value_t* io_vec4_zero; /* zero_vec_f16(4)                       */
     rocke_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */
@@ -385,6 +387,7 @@ typedef struct rocke_dconv_8c_ctx
     const rocke_direct_conv_8c_spec_t* spec;
     const char* arch;
     rocke_direct_conv_problem_t p;
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() */
 
     int BLOCK_Q;
     int BLOCK_GROUPS;
@@ -395,7 +398,7 @@ typedef struct rocke_dconv_8c_ctx
     int LOAD_VEC;
     int NUM_VEC4;
     int PASSES;
-    int lds_total_fp16;
+    int lds_total_elems;
     int q_subtiles; /* BLOCK_Q / 16 */
     int n_iters;
 
@@ -413,10 +416,11 @@ typedef struct rocke_dconv_8c_ctx
     rocke_value_t* c_cpg;
     rocke_value_t* c_kpg;
     rocke_value_t* c_W;
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
-    rocke_value_t* fp16x4_zero;
+    rocke_value_t* io_vec4_zero;
     rocke_value_t* zero_acc; /* <4 x float> */
 
     rocke_value_t* tid;
@@ -483,6 +487,7 @@ typedef struct rocke_dconv_32c_ctx
     const rocke_direct_conv_32c_spec_t* spec;
     const char* arch;
     rocke_direct_conv_problem_t p;
+    const rocke_type_t* io_type; /* rocke_f16() or rocke_bf16() */
 
     int BLOCK_Q;
     int BLOCK_GROUPS;
@@ -494,7 +499,7 @@ typedef struct rocke_dconv_32c_ctx
     int NUM_VEC4;
     int PASSES;
     int N_CH_BLOCKS; /* cpg / 4 = 8 for cpg=32 */
-    int lds_total_fp16;
+    int lds_total_elems;
     int q_subtiles; /* BLOCK_Q / 32 */
     int n_iters;
 
@@ -512,10 +517,11 @@ typedef struct rocke_dconv_32c_ctx
     rocke_value_t* c_cpg;
     rocke_value_t* c_kpg;
     rocke_value_t* c_W;
+    rocke_value_t* c_stride; /* const_i32(p.stride)                  */
     rocke_value_t* c_BG_cpg;
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
-    rocke_value_t* fp16x4_zero;
+    rocke_value_t* io_vec4_zero;
     rocke_value_t* zero_acc; /* <16 x float> */
 
     rocke_value_t* tid;
@@ -587,6 +593,10 @@ typedef struct rocke_dconv_dw_ctx
     int THREADS;
     int BLOCK_CH;
     int n_iters;
+    int Ho; /* output height: (H + 2*PAD - KH) / stride + 1 */
+    int Wo; /* output width:  (W + 2*PAD - KW) / stride + 1 */
+    int c_stride_dw; /* p.stride (kept as int for flush-loop modulo) */
+    int is_bf16; /* 1 when p.dtype == "bf16", 0 otherwise */
 
     rocke_value_t* A;
     rocke_value_t* Bp;
@@ -597,10 +607,12 @@ typedef struct rocke_dconv_dw_ctx
 
     rocke_value_t* c0;
     rocke_value_t* c_wave;
-    rocke_value_t* c_W;
+    rocke_value_t* c_W; /* const_i32(Wo) — output width          */
+    rocke_value_t* c_groups; /* const_i32(groups)                     */
     rocke_value_t* c_half_bytes;
     rocke_value_t* oob_sentinel;
     rocke_value_t* zero_f32;
+    rocke_value_t* ch_in_range; /* ch < p.groups — guards partial channel tile */
 
     rocke_value_t* tid;
     rocke_value_t* wave_id;
@@ -618,7 +630,7 @@ typedef struct rocke_dconv_dw_ctx
 
     const rocke_tensor_descriptor_t* a_desc; /* A[N,H,W,C] + 2 embeds */
     const rocke_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,1] naive */
-    const rocke_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive */
+    const rocke_tensor_descriptor_t* d_desc; /* D[N,Ho,Wo,total_k] naive */
 
     /* weights_f32[r][s]: KH x KW preloaded f32 scalars */
     rocke_value_t* weights_f32[ROCKE_DCONV_DW_MAX_KH][ROCKE_DCONV_DW_MAX_KW];

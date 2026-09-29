@@ -41,7 +41,9 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        const I ai = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
+        // Cast to the (possibly 64-bit) index type I before the multiply so the
+        // global thread id does not wrap at 2^32 when m exceeds the 32-bit range.
+        const I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
 
         if(ai >= m)
         {
@@ -89,7 +91,9 @@ namespace rocsparse
                                             Y*                   y,
                                             rocsparse_index_base idx_base)
     {
-        const I ai = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
+        // Cast to the (possibly 64-bit) index type I before the multiply so the
+        // global thread id does not wrap at 2^32 when m exceeds the 32-bit range.
+        const I ai = static_cast<I>(BLOCKSIZE) * hipBlockIdx_x + hipThreadIdx_x;
 
         if(ai >= m)
         {

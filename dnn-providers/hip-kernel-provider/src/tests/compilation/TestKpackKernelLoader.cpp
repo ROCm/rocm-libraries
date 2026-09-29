@@ -31,27 +31,27 @@ using hipdnn_plugin_sdk::HipdnnPluginException;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::ScopedDirectory;
 
+using hip_kernel_provider::testing::findPackedArchDirectory;
+using hip_kernel_provider::testing::PackedKernelSource;
+using hip_kernel_provider::testing::readPackedKernelSource;
+using hip_kernel_provider::testing::testKpackArchive;
+using hip_kernel_provider::testing::unitKpackRoot;
+
 constexpr const char* SCRATCH_LABEL = "kpackloader";
 
-/// rocm-kpack's own test archive, path supplied by CMake from ROCM_KPACK_SOURCE_DIR.
-/// It holds gfx1100 and gfx1101 binaries under the toc keys "lib/libhip.so#0" and
-/// "bin/hiptest#0". Used rather than a hand-forged file so the reader under test is
-/// the pinned reader meeting an archive it actually accepts. The parse-level cases
-/// need a real *container*, not a matching *device*; the device cases read this
-/// build's own packed archive -- see unitKpackRoot().
+/// One arch and one toc key of rocm-kpack's own test archive, which testKpackArchive()
+/// resolves from this binary's location. It holds gfx1100 and gfx1101 binaries under the
+/// toc keys "lib/libhip.so#0" and "bin/hiptest#0". Used rather than a hand-forged file so
+/// the reader under test is the pinned reader meeting an archive it actually accepts. The
+/// parse-level cases need a real *container*, not a matching *device*; the device cases
+/// read this build's own packed archive -- see unitKpackRoot().
 ///
 /// Its entries are placeholder payloads rather than HSA code objects, so KpackArchive
 /// turns them away at DECOMPRESS on the code-object magic check. Nothing past that stage
 /// -- the digest comparison, the device bind, the module load -- is reachable from here;
 /// those cases need a packed archive and therefore a device.
-constexpr const char* REAL_ARCHIVE = HIPKERNELPROVIDER_TEST_KPACK_ARCHIVE;
 constexpr const char* ARCHIVE_ARCH = "gfx1100";
 constexpr const char* ARCHIVE_TOC_KEY = "lib/libhip.so#0";
-
-using hip_kernel_provider::testing::findPackedArchDirectory;
-using hip_kernel_provider::testing::PackedKernelSource;
-using hip_kernel_provider::testing::readPackedKernelSource;
-using hip_kernel_provider::testing::unitKpackRoot;
 
 /// The two descriptors the packed conv set stages, one inline and one standalone. Their
 /// archive and toc_key are read out of the built files rather than written here: a copy
@@ -159,12 +159,13 @@ TEST_F(TestKpackKernelLoader, ReportsACorruptArchive)
 
 TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 {
-    ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
 
     try
     {
-        _loader.load(REAL_ARCHIVE,
+        _loader.load(testKpackArchive(),
                      ARCHIVE_TOC_KEY,
                      "gfx942",
                      0,
@@ -189,12 +190,13 @@ TEST_F(TestKpackKernelLoader, ReportsAnArchMismatch)
 
 TEST_F(TestKpackKernelLoader, ReportsAMissingTocKey)
 {
-    ASSERT_TRUE(std::filesystem::exists(REAL_ARCHIVE))
-        << "the kpack test asset named at configure time is missing: " << REAL_ARCHIVE;
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
 
     try
     {
-        _loader.load(REAL_ARCHIVE,
+        _loader.load(testKpackArchive(),
                      "no/such/entry#7",
                      ARCHIVE_ARCH,
                      0,

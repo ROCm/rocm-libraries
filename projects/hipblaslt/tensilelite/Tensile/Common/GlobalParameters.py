@@ -349,6 +349,7 @@ globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
 )
+globalParameters["ValidateMetadata"] = False  # Set to True to validate custom.config metadata at build time
 
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
@@ -395,6 +396,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # code quality — e.g. how many regions a loop was split into, what caused the
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
+
+# StinkyTofu per-pass wall time (stderr).  After each kernel's pipeline finishes,
+# report self time, inclusive total, and run count for every pass that ran, so a
+# slow kernel generation can be attributed to individual passes.
+globalParameters["StinkyTofuTimePasses"] = False
 
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
@@ -578,7 +584,7 @@ defaultBenchmarkCommonParameters = [
     {"NonVolatileWS": [0]},
     {"NonVolatileMetadata": [0]},
     {"PreloadKernArgs": [True]},
-    {"CustomKernelName": [""]},
+    # {"CustomKernel": [{"name": "", "args": [], "macrotile": [0,0,0], "threads": [0,0,0], "grid": [0,0,0]}]},
     {"NoReject": [False]},
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
@@ -607,6 +613,7 @@ defaultBenchmarkCommonParameters = [
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
     {"PrefetchAcrossPersistent": [0]},
+    {"ReuseAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
@@ -840,6 +847,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "EnableGemmA2AFusion", # --enable-gemm-a2a-fusion toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
     # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
