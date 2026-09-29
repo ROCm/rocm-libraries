@@ -152,12 +152,13 @@ struct BBScheduleState {
     // successor BBs in a loop. Kept separate from dsResiduals.
     int globalReadInflightCount = 0;  // credits still in flight at BB end
     int globalReadResidual = 0;       // max remaining drain latency among them
-    // Cross-BB ds_load (LDS return queue) credit state, same shape as the
-    // global-read pair above. Carried to successor BBs in a loop so a fresh
-    // region doesn't model the LDS queue as empty when hardware still has the
-    // prior iteration's tail draining.
-    int dsReadInflightCount = 0;  // credits still in flight at BB end
-    int dsReadResidual = 0;       // max remaining drain latency among them
+    // Cross-BB ds_load (LDS return queue) credit state: each credit's own
+    // remaining drain latency at BB end (InFlightQueue::residuals()), carried
+    // to successor BBs in a loop so a fresh region doesn't model the LDS queue
+    // as empty when hardware still has the prior iteration's tail draining.
+    // Kept as the full per-entry list, not collapsed to a count/worst-case
+    // pair, so seeding doesn't overstate how long every entry has left.
+    std::vector<int> dsReadResiduals;
 };
 
 // Cache for cross-BB scheduling state. Lives in the scheduler's run() scope
