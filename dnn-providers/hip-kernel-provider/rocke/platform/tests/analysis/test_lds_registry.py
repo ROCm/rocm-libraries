@@ -4,6 +4,7 @@
 """Profile registry tests for the public LDS conflict expert."""
 
 import pytest
+
 from rocke.analysis.lds.registry import (
     UnsupportedLdsTargetError,
     registered_targets,

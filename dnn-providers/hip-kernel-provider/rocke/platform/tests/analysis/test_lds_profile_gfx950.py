@@ -4,6 +4,7 @@
 """CPU-only golden cases for the explicit gfx950 LDS profile."""
 
 import pytest
+
 from rocke.analysis.lds.model import AccessClassification, GroupKind, LdsAccess
 from rocke.analysis.lds.predict import predict_lds_conflicts
 
