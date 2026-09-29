@@ -107,6 +107,15 @@ inline std::shared_ptr<const Model> model(const UhdConfig& config)
                                                             : PredictionStatus::INVALID;
             loaded->reason = "UHD adapter is unavailable or its model failed validation";
         }
+        // R9: a grouped tree_data model decides per group, and an L1 estimate is one row per
+        // graph -- there is no per-row contract saying which group a graph's row belongs to,
+        // so score() would answer from the root ensemble alone, which is not what was
+        // trained or evaluated. Refused as a contract failure (INVALID) until one exists.
+        else if(config.adapterType == "tree_data" && loaded->adapter->groupFeatureIndex() >= 0)
+        {
+            loaded->reason = "grouped tree_data artifact cannot be bound to the predict_engine "
+                             "role: grouped L1 models have no per-row contract";
+        }
         else if(loaded->adapter->expectedFeatureCount() != loaded->extractor->featureCount()
                 || loaded->adapter->getFeaturesHash() != config.featuresHash)
         {
@@ -421,12 +430,18 @@ private:
     /// A failed compile is NOT cached: deployment is separate from load (RFC 0019 §5), so
     /// an artifact that is still being installed, or a transient read error, must not
     /// disable the model for the rest of the provider's lifetime.
+    ///
+    /// Keyed by the model's UUID, not the arch key that bound it (D2): one UUID bound under
+    /// several architecture keys is one model, so it is compiled once and shared. Coverage
+    /// per architecture is the artifact's `training_arches`, checked per query. A config
+    /// built in memory without an id falls back to its arch key.
     std::shared_ptr<const prediction_detail::Model> compiledModel(const std::string& metric,
                                                                   const std::string& arch,
                                                                   const UhdConfig& config) const
     {
         const std::lock_guard<std::mutex> lock(_modelMutex);
-        const auto key = std::make_pair(metric, arch);
+        const auto key
+            = std::make_pair(metric, config.uhdId.empty() ? "arch:" + arch : config.uhdId);
         if(const auto cached = _modelCache.find(key); cached != _modelCache.end())
         {
             return cached->second;

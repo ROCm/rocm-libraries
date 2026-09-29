@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import uuid
 from pathlib import Path
 
 import pytest
 
-from uhd_gen.promote import PromoteError, _apply, add_promote_arguments, build_plan, run_promote
+from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
+from uhd_gen.promote import PromoteError, _apply, add_promote_arguments, build_plan, parse_uhd_ids, run_promote
 from uhd_gen.provenance import snapshot_provenance
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
@@ -19,6 +21,15 @@ KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
 OLD = "727e5401-3b99-49ff-a2fc-68fd4eedbb54"
 NEW = "cf37fa30-32dc-4a21-a008-68ef5e0d30a6"
 OTHER = "edc1d5b4-6f12-4a40-a749-403966474bc9"
+FEATURES_HASH = "sha256:" + "0" * 16
+
+
+def _weights(leaf=1.0, *, grouped=False, features_hash=FEATURES_HASH):
+    """A `tree_data` artifact the runtime would load: promote verifies what it installs."""
+    ensemble = {"tree_info": [{"tree_structure": {"leaf_value": leaf}}], "max_feature_idx": 0,
+                "objective": "regression"}
+    return build_gbdt_model(ensemble, features_hash, group_by_feature_index=0 if grouped else -1,
+                            groups=[(0.0, ensemble)] if grouped else None)
 
 
 def _write(path, document):
@@ -65,7 +76,7 @@ def _model(root, tree, *, identity=NEW, artifact="model.bin", provenance=None, m
     _write(root / "train_manifest.json", {"training_arches": ["gfx942"], "trained_against": provenance})
     payload = root / artifact
     payload.parent.mkdir(parents=True, exist_ok=True)
-    payload.write_bytes(b"incoming model")
+    payload.write_bytes(_weights())
     return root
 
 
@@ -100,7 +111,7 @@ def test_install_rewrites_nested_artifact_path_portably(tmp_path):
     _apply(plan)
     installed = _read(plan.destination_descriptor)
     artifact = plan.destination_descriptor.parent / installed["tree_data"]["artifact"]
-    assert artifact.read_bytes() == b"incoming model"
+    assert artifact.read_bytes() == _weights()
 
 
 @pytest.mark.parametrize("binding", ["role", "architecture", "engine"])
@@ -111,7 +122,7 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     ued.pop("predict_engine")
     _write(tree / "engine.ued.json", ued)
     first = _model(tmp_path / "first", tree)
-    (first / "model.bin").write_bytes(b"first model weights")
+    (first / "model.bin").write_bytes(_weights(1.0))
     first_plan = build_plan(first, tree)
     _apply(first_plan)
     first_descriptor = first_plan.destination_descriptor.read_bytes()
@@ -136,12 +147,12 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
                         score={"metric": "tflops", "calibrated": True, "transform": "identity"})
     _write(second / "heuristic.uhd.json", document)
     _write(second / "train_manifest.json", {"training_arches": [arch], "trained_against": provenance})
-    (second / "model.bin").write_bytes(b"second model weights")
+    (second / "model.bin").write_bytes(_weights(2.0))
     second_plan = build_plan(second, tree, engine=engine, role=role, arch=arch)
     _apply(second_plan)
 
     assert first_plan.destination_descriptor.read_bytes() == first_descriptor
-    assert first_artifact.read_bytes() == b"first model weights"
+    assert first_artifact.read_bytes() == _weights(1.0)
     assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [NEW]
     installed = {
         _read(path)["id"]: (path, _read(path))
@@ -149,12 +160,12 @@ def test_default_filenames_preserve_other_model_bindings(tmp_path, binding):
     }
     [selected] = _read(second_plan.ued_path)[role][arch]
     path, document = installed[selected]
-    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == b"second model weights"
+    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == _weights(2.0)
 
-    (second / "model.bin").write_bytes(b"replacement weights")
+    (second / "model.bin").write_bytes(_weights(3.0))
     _apply(build_plan(second, tree, engine=engine, role=role, arch=arch))
-    assert first_artifact.read_bytes() == b"first model weights"
-    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == b"replacement weights"
+    assert first_artifact.read_bytes() == _weights(1.0)
+    assert (path.parent / document["tree_data"]["artifact"]).read_bytes() == _weights(3.0)
 
 def test_dry_run_makes_no_writes(tmp_path):
     tree = _tree(tmp_path / "tree")
@@ -462,19 +473,28 @@ def test_train_mints_identity_when_omitted(tmp_path, evaluator):
 def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
     assert _train(tmp_path, "--uhd-id", malformed) == 1
     assert not (tmp_path / "model" / "heuristic.uhd.json").exists()
-def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1"):
-    """A model for an engine with no UED: trained against a selector revision only."""
+
+
+def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
+    """A model for an engine with no UED: trained against a selector revision only.
+
+    `declared` is the id the engine's description carried for the metric while the corpus
+    was collected (binding.uhd_id), i.e. the provider's declaration; None when it had none.
+    """
     provenance = {"selector_revision": revision}
     doc = {"version": "1.0", "id": identity, "name": "model", "adapter": "tree_data",
            "objective": "max", "features_signature": ["$graph.work"],
-           "features_hash": "sha256:" + "0" * 16, "trained_against": provenance,
+           "features_hash": FEATURES_HASH, "trained_against": provenance,
            "score": {"metric": "tflops", "calibrated": True, "transform": "identity"},
            "tree_data": {"artifact": "model.bin"}}
     _write(root / "heuristic.uhd.json", doc)
+    binding = {"engine": "ASM_SDPA_ENGINE", "metric": "tflops"}
+    if declared is not None:
+        binding["uhd_id"] = declared
     _write(root / "train_manifest.json",
            {"training_arches": ["gfx950"], "trained_against": provenance,
-            "role": "predict_engine"})
-    (root / "model.bin").write_bytes(b"incoming model")
+            "role": "predict_engine", "binding": binding})
+    (root / "model.bin").write_bytes(_weights())
     return root
 
 
@@ -495,7 +515,7 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
     assert _read(tree / "engine.ued.json") == before, "no role map may change"
     installed = tree / "heuristics" / "ASM_SDPA_ENGINE" / "predict_engine" / "gfx950" / "tflops"
     assert _read(installed / "heuristic.uhd.json")["id"] == NEW
-    assert (installed / "model.bin").read_bytes() == b"incoming model"
+    assert (installed / "model.bin").read_bytes() == _weights()
 
 
 def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
@@ -509,6 +529,45 @@ def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
     model = _opaque_model(tmp_path / "model")
     with pytest.raises(PromoteError, match="already installed"):
         build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+
+
+def test_an_opaque_model_with_no_declared_id_is_refused_with_guidance(tmp_path):
+    """The engine reads only the ids its provider declares, so an id nobody declared would
+    install a model that is never read. Without a recorded declaration, --uhd-id is required."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "model", declared=None)
+    with pytest.raises(PromoteError, match="--uhd-id tflops="):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+    plan = build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950",
+                      uhd_ids={"tflops": NEW})
+    assert plan.descriptor_id == NEW
+
+
+@pytest.mark.parametrize("declared,requested", [(OTHER, None), (None, {"tflops": OTHER}),
+                                                (NEW, {"tflops": OTHER})])
+def test_an_opaque_model_under_an_undeclared_id_is_refused(tmp_path, declared, requested):
+    """Promote never renames a model: one trained under another id is refused, and so is a
+    --uhd-id that contradicts the id the engine itself declared at collection."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "model", declared=declared)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match=OTHER):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950",
+                   uhd_ids=requested)
+    assert _files(tmp_path) == before
+
+
+def test_repromoting_an_identical_opaque_model_is_idempotent(tmp_path):
+    """D2: the declared UUID is one model. The same content promoted again -- for the same
+    or another arch directory -- binds what is installed and writes nothing new."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "model")
+    _apply(build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950"))
+    installed = _files(tree)
+    plan = build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="default")
+    _apply(plan)
+    assert (plan.copies, plan.write_descriptor) == ([], False)
+    assert _files(tree) == installed
 
 
 def test_an_engine_with_no_catalog_cannot_be_given_a_catalog_ranker(tmp_path):
@@ -627,3 +686,146 @@ def test_an_explicit_corpus_outranks_the_sibling_default(tmp_path):
 
     with pytest.raises(PromoteError, match="kernel-b"):
         build_plan(model, tree, corpus=archived)
+
+
+MATCH_A = "11be5fe7-02a7-4ec2-b79c-e849951f8c24"
+MATCH_B = "22be5fe7-02a7-4ec2-b79c-e849951f8c24"
+
+
+def _packs(tree):
+    """One pack per arch, each with its own matcher, as a multi-arch engine ships them."""
+    _write(tree / "a.umd.json", {"version": "1.0", "id": MATCH_A})
+    _write(tree / "b.umd.json", {"version": "1.0", "id": MATCH_B})
+    for arch, matcher, pack in (("gfx942", MATCH_A, "33be5fe7-02a7-4ec2-b79c-e849951f8c24"),
+                                ("gfx950", MATCH_B, "44be5fe7-02a7-4ec2-b79c-e849951f8c24")):
+        _write(tree / f"{arch}.kdp.json", {"version": "1.0", "id": pack, "engine": UED,
+                                            "arch": [arch], "matchers": [matcher]})
+    # The gfx950 key binds a metric-less incumbent this promotion replaces; it must be
+    # installed for its metric to be read.
+    _installed(tree / "other.uhd.json", OTHER)
+    return tree
+
+
+def _multi_arch_model(root, tree, leaf=1.0):
+    """A model collected over both arches' packs: its provenance records both matchers."""
+    provenance = snapshot_provenance(tree, arch="default")
+    assert [item["id"] for item in provenance["umd"]] == [MATCH_A, MATCH_B]
+    model = _model(root, tree, provenance=provenance)
+    _write(root / "train_manifest.json", {"training_arches": ["gfx942", "gfx950"],
+                                          "trained_against": provenance})
+    (root / "model.bin").write_bytes(_weights(leaf))
+    return model
+
+
+def test_one_model_over_two_arches_packs_binds_both_arch_keys_as_one_model(tmp_path):
+    """R5 + D2: each arch ignores the matchers of the other arch's pack, so the model is
+    valid on both; the second promotion binds the installed copy rather than a second one,
+    and promoting it again changes nothing."""
+    tree = _packs(_tree(tmp_path / "tree"))
+    model = _multi_arch_model(tmp_path / "model", tree)
+    _apply(build_plan(model, tree, arch="gfx942"))
+    first = _files(tree)
+    _apply(build_plan(model, tree, arch="gfx950"))
+
+    ued = _read(tree / "engine.ued.json")
+    assert (ued["sort_kernel_catalog"]["gfx942"], ued["sort_kernel_catalog"]["gfx950"]) == ([NEW], [NEW])
+    assert len([path for path in tree.rglob("*.uhd.json") if _read(path)["id"] == NEW]) == 1
+    second = _files(tree)
+    assert {path for path in second if second[path] != first.get(path)} == {Path("engine.ued.json")}
+    _apply(build_plan(model, tree, arch="gfx950"))
+    assert _files(tree) == second
+
+
+@pytest.mark.parametrize("change", ["incompatible", "unowned"])
+def test_an_arch_relevant_or_unowned_recorded_matcher_is_still_refused(tmp_path, change):
+    """Only other arches' matchers are ignored. A recorded matcher this arch's pack uses
+    must still be compatible, and one no pack of the engine owns is a removed dependency."""
+    tree = _packs(_tree(tmp_path / "tree"))
+    model = _multi_arch_model(tmp_path / "model", tree)
+    if change == "incompatible":
+        _write(tree / "b.umd.json", {"version": "1.0", "id": MATCH_B, "revision": "2.0"})
+        build_plan(model, tree, arch="gfx942")
+        with pytest.raises(PromoteError, match=MATCH_B):
+            build_plan(model, tree, arch="gfx950")
+    else:
+        pack = _read(tree / "gfx950.kdp.json")
+        pack["matchers"] = []
+        _write(tree / "gfx950.kdp.json", pack)
+        for arch in ("gfx942", "gfx950"):
+            with pytest.raises(PromoteError, match=MATCH_B):
+                build_plan(model, tree, arch=arch)
+
+
+def test_one_id_with_different_content_is_refused_under_another_arch(tmp_path):
+    """D2: a UUID bound under several arch keys is one model, so a different model cannot
+    take the id for one arch while another arch keeps scoring with the installed one."""
+    tree = _packs(_tree(tmp_path / "tree"))
+    model = _multi_arch_model(tmp_path / "model", tree)
+    _apply(build_plan(model, tree, arch="gfx942"))
+    (model / "model.bin").write_bytes(_weights(2.0))
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match="different content"):
+        build_plan(model, tree, arch="gfx950")
+    assert _files(tmp_path) == before
+
+
+def test_promote_writes_the_artifact_digest_the_trainer_left_out(tmp_path):
+    """R6: without a declared hash the runtime's model identity ignores the artifact bytes."""
+    tree = _tree(tmp_path / "tree")
+    plan = build_plan(_model(tmp_path / "model", tree), tree)
+    _apply(plan)
+    assert _read(plan.destination_descriptor)["tree_data"]["hash"] == hashlib.sha256(_weights()).hexdigest()
+
+
+@pytest.mark.parametrize("defect", ["identifier", "declared_hash", "features_hash", "truncated"])
+def test_an_artifact_the_runtime_would_refuse_is_never_installed(tmp_path, defect):
+    """R8: promote applies TreeDataAdapter's load checks to the bytes it installs."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree)
+    data = _weights()
+    if defect == "identifier":
+        data = data[:4] + b"NOPE" + data[8:]
+    elif defect == "features_hash":
+        data = _weights(features_hash="sha256:" + "1" * 16)
+    elif defect == "truncated":
+        data = data[:12]
+    else:
+        doc = _read(model / "heuristic.uhd.json")
+        doc["tree_data"]["hash"] = hashlib.sha256(b"other bytes").hexdigest()
+        _write(model / "heuristic.uhd.json", doc)
+    (model / "model.bin").write_bytes(data)
+    before = _files(tmp_path)
+    with pytest.raises(PromoteError, match="refuse"):
+        build_plan(model, tree)
+    assert _files(tmp_path) == before
+
+
+def test_a_grouped_artifact_is_refused_for_engine_prediction_only(tmp_path):
+    """R9: the runtime scores an L1 model's root ensemble alone, so a grouped artifact has no
+    engine-level meaning; as a catalog ranker it is the two-layer model it was built as."""
+    tree = _tree(tmp_path / "tree")
+    model = _opaque_model(tmp_path / "opaque")
+    (model / "model.bin").write_bytes(_weights(grouped=True))
+    with pytest.raises(PromoteError, match="grouped"):
+        build_plan(model, tree, "ASM_SDPA_ENGINE", role="predict_engine", arch="gfx950")
+    catalog = _model(tmp_path / "catalog", tree)
+    (catalog / "model.bin").write_bytes(_weights(grouped=True))
+    build_plan(catalog, tree)
+
+
+def test_uhd_id_names_the_model_being_promoted_and_never_renames_it(tmp_path):
+    tree = _tree(tmp_path / "tree")
+    model = _model(tmp_path / "model", tree, metric="time")
+    _installed(tree / "old.uhd.json", OLD, {"metric": "tflops", "calibrated": False})
+    assert build_plan(model, tree, uhd_ids=parse_uhd_ids([f"time={NEW}", f"tflops={OTHER}"])).descriptor_id == NEW
+    with pytest.raises(PromoteError, match="never renames"):
+        build_plan(model, tree, uhd_ids=parse_uhd_ids([f"time={OTHER}"]))
+    with pytest.raises(PromoteError, match="estimates time"):
+        build_plan(model, tree, uhd_ids=parse_uhd_ids([f"tflops={NEW}"]))
+
+
+@pytest.mark.parametrize("values", [[NEW, f"time={OTHER}"], [f"latency={NEW}"], [f"time={NEW}", f"time={OTHER}"],
+                                    ["time=not-a-uuid"]])
+def test_malformed_uhd_id_lists_are_refused(values):
+    with pytest.raises(ValueError):
+        parse_uhd_ids(values)

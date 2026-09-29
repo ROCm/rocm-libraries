@@ -7,16 +7,20 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <set>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdConfig.hpp>
 
 namespace hipdnn_plugin_sdk::uhd
@@ -236,9 +240,36 @@ inline nlohmann::json readUhdDocument(const std::filesystem::path& path)
         });
 }
 
+/// @brief The digest of the model artifact at @p path, in the format a UHD declares one
+/// (lowercase SHA-256 hex over the whole file, as every adapter compares it), or "" when
+/// there are no bytes to identify: absent, not a regular file, empty, over the adapters'
+/// 256 MiB bound, or unreadable.
+inline std::string artifactDigest(const std::filesystem::path& path)
+{
+    constexpr std::uintmax_t MAX_ARTIFACT_BYTES = 256 * 1024 * 1024;
+    std::error_code error;
+    if(!std::filesystem::is_regular_file(path, error))
+    {
+        return {};
+    }
+    const auto size = std::filesystem::file_size(path, error);
+    if(error || size == 0 || size > MAX_ARTIFACT_BYTES)
+    {
+        return {};
+    }
+    std::ifstream file(path, std::ios::binary);
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    if(!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
+    {
+        return {};
+    }
+    return sha256(bytes.data(), bytes.size());
+}
+
 /// @brief Parse the common UHD format independently of any descriptor catalog.
 /// @param root Already-decoded document; structural size/depth bounds still apply.
-/// @param path Descriptor filename, used to resolve artifact paths absolutely.
+/// @param path Descriptor filename, used to resolve artifact paths absolutely. A model body
+///        declaring no `hash` has its artifact read and digested (artifactDigest()).
 /// @throws std::invalid_argument or nlohmann::json::exception for malformed input.
 inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesystem::path& path)
 {
@@ -462,10 +493,15 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
                                         / text(body, custom ? "library" : "artifact", where))
                   .lexically_normal()
                   .string();
-        if(body.contains("hash"))
-        {
-            result.modelHash = text(body, "hash", where);
-        }
+        // Model identity is content (R6): what versions the persistent winner cache and the
+        // selector revision is this digest, so a model that declares none is identified by
+        // the bytes present now. Computed once, here, and then verified by the adapter like
+        // a declared one -- bytes replaced after load are refused rather than scored under
+        // the old identity. Empty only when nothing is deployed yet (deployment is separate
+        // from load, RFC 0019 §5); such a model has no content identity, and the winner
+        // cache declines to persist for it (engineIdentity).
+        result.modelHash = body.contains("hash") ? text(body, "hash", where)
+                                                 : artifactDigest(result.modelArtifactPath);
     }
     return result;
 }

@@ -8,7 +8,10 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
+#include <string>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
@@ -115,6 +118,35 @@ protected:
         doc["objective"] = "min";
         doc["score"] = {{"metric", "time"}, {"calibrated", true}, {"transform", "identity"}};
         return config(doc);
+    }
+
+    /// document() as a tree_data model naming @p artifact beside the UHD, declaring no hash.
+    nlohmann::json treeDocument(const std::string& artifact) const
+    {
+        auto doc = document();
+        doc["adapter"] = "tree_data";
+        doc.erase("native");
+        doc["tree_data"] = {{"artifact", artifact}};
+        return doc;
+    }
+
+    /// A flat one-feature ensemble matching document()'s signature that predicts
+    /// @p throughput everywhere, trained on @p trainingArches.
+    GbdtModelTestBuilder treeModel(double throughput,
+                                   const std::vector<std::string>& trainingArches
+                                   = {"gfx942"}) const
+    {
+        GbdtModelTestBuilder builder;
+        builder.setNumFeatures(1)
+            .setFeaturesHash(document().at("features_hash").get<std::string>())
+            .setBaseScore(std::log1p(throughput))
+            .setTrainingArches(trainingArches);
+        return builder;
+    }
+
+    std::string artifactPath(const std::string& artifact) const
+    {
+        return (_directory.path() / artifact).string();
     }
 };
 
@@ -399,6 +431,99 @@ TEST_F(TestEnginePredictor, LoadedModelIsImmutableAndTrainingArchitectureLimitsC
     ASSERT_EQ(cached.status, PredictionStatus::AVAILABLE);
     EXPECT_NEAR(cached.value, 9.0, 1e-12);
     EXPECT_EQ(predictWith(cfg, compiled, true, "gfx950").status, PredictionStatus::UNAVAILABLE);
+}
+
+/// D2: one UUID bound under several architecture keys is one model. It is compiled once and
+/// shared, and where it answers is decided by the artifact's `training_arches`, never by the
+/// binding: bound for gfx942 and gfx950 but trained on gfx942 only, it answers on gfx942 and
+/// reports "no coverage" on gfx950.
+///
+/// The artifact is removed between the two queries. Compiled per arch key, the gfx950 query
+/// recompiles and reports the artifact "not deployed"; compiled per UUID, it reaches the
+/// model gfx942 already compiled, and that model's coverage is what answers.
+TEST_F(TestEnginePredictor, OneUuidBoundUnderTwoArchesIsOneModelAnsweringOnlyWhereTrained)
+{
+    ASSERT_TRUE(treeModel(42.0, {"gfx942"}).buildToFile(artifactPath("shared.fb")));
+    const auto shared = config(treeDocument("shared.fb"));
+    EngineModelBinding binding;
+    binding.bind("tflops", "gfx942", shared);
+    binding.bind("tflops", "gfx950", shared);
+    const auto ask = [&](const std::string& arch) {
+        return binding.predict(17, "test:opaque", "selector-1", "tflops", arch, _features, true);
+    };
+
+    const auto trained = ask("gfx942:sramecc+:xnack-");
+    ASSERT_EQ(trained.status, PredictionStatus::AVAILABLE) << trained.reason;
+    EXPECT_NEAR(trained.value, 42.0, 1e-12);
+
+    ASSERT_TRUE(std::filesystem::remove(artifactPath("shared.fb")));
+    const auto untrained = ask("gfx950");
+    EXPECT_EQ(untrained.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(untrained.reason, "UHD model has no coverage for this architecture");
+    EXPECT_EQ(untrained.uhd_id, shared.uhdId);
+}
+
+/// R6: a UHD declaring no artifact hash is identified by the bytes present when it was
+/// parsed, in the same format a declared hash takes, so replacing the weights changes the
+/// identity every cache keys on. The adapter verifies against it like a declared digest:
+/// weights replaced after parse are refused, never scored under the old identity.
+TEST_F(TestEnginePredictor, AModelDeclaringNoHashIsIdentifiedByTheBytesItWasParsedWith)
+{
+    const auto path = artifactPath("weights.fb");
+    const auto bytesDigest = [&]() {
+        std::ifstream file(path, std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>()};
+        return sha256(bytes);
+    };
+    ASSERT_TRUE(treeModel(42.0).buildToFile(path));
+    const auto original = config(treeDocument("weights.fb"));
+    EXPECT_EQ(original.modelHash, bytesDigest());
+
+    ASSERT_TRUE(treeModel(9.0).buildToFile(path));
+    const auto retrained = config(treeDocument("weights.fb"));
+    EXPECT_EQ(retrained.modelHash, bytesDigest());
+    EXPECT_NE(retrained.modelHash, original.modelHash);
+
+    const auto stale = predict(original);
+    EXPECT_EQ(stale.status, PredictionStatus::INVALID);
+    const auto current = predict(retrained);
+    ASSERT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
+    EXPECT_NEAR(current.value, 9.0, 1e-12);
+
+    // Nothing deployed yet: no bytes, so no content identity (RFC 0019 §5).
+    ASSERT_TRUE(std::filesystem::remove(path));
+    EXPECT_TRUE(config(treeDocument("weights.fb")).modelHash.empty());
+}
+
+/// R9: a grouped tree_data model decides per group, and an L1 estimate is one row per graph
+/// with no contract naming its group, so the runtime would answer from the root ensemble
+/// alone -- a number nothing trained or evaluated. Refused as INVALID, naming why; the same
+/// ensemble without groups is the control.
+TEST_F(TestEnginePredictor, AGroupedTreeArtifactIsRefusedForTheEngineRole)
+{
+    GbdtModelTestBuilder::TreeSpec zero;
+    zero.featureIndices = {0};
+    zero.thresholds = {0.0};
+    zero.leftChildren = {-1};
+    zero.rightChildren = {-1};
+    zero.leafValues = {0.0};
+    zero.defaultLeft = {1};
+
+    ASSERT_TRUE(treeModel(42.0).addTree(zero).buildToFile(artifactPath("flat.fb")));
+    const auto flat = predict(config(treeDocument("flat.fb")));
+    ASSERT_EQ(flat.status, PredictionStatus::AVAILABLE) << flat.reason;
+
+    ASSERT_TRUE(treeModel(42.0)
+                    .addTree(zero)
+                    .setGroupByFeatureIndex(0)
+                    .addGroup(0.0, {zero})
+                    .addGroup(1.0, {zero})
+                    .buildToFile(artifactPath("grouped.fb")));
+    const auto grouped = predict(config(treeDocument("grouped.fb")));
+    EXPECT_EQ(grouped.status, PredictionStatus::INVALID);
+    EXPECT_NE(grouped.reason.find("grouped"), std::string::npos) << grouped.reason;
+    EXPECT_DOUBLE_EQ(grouped.value, 0.0);
 }
 
 TEST_F(TestEnginePredictor, ParserRejectsDuplicateKeysAndOversizedNesting)

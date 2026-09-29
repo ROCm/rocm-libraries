@@ -220,16 +220,23 @@ public:
             {
                 auto built
                     = std::shared_ptr<UhdKernelHeuristic>(new UhdKernelHeuristic(describedBy));
-                built->_config = std::move(config);
+                built->_objectiveSign = objectiveSignOf(config.objective);
                 if(descriptor.adapter == UhdAdapter::STATIC_ORDER)
                 {
                     built->_direct = std::make_shared<UnrankedKernelHeuristic>();
                 }
                 else
                 {
-                    built->_direct = std::make_shared<NativeKernelHeuristic>(
-                        descriptor.nativeSymbol, describedBy);
+                    // The objective travels with the scorer: rankScored orders higher-first,
+                    // so a native cost scorer handed no objective ranks the slowest kernel
+                    // first.
+                    built->_direct
+                        = std::make_shared<NativeKernelHeuristic>(descriptor.nativeSymbol,
+                                                                  describedBy,
+                                                                  config.objective,
+                                                                  config.scoreTransform);
                 }
+                built->_config = std::move(config);
                 built->_hasDefaultModel = true;
                 return built;
             }
@@ -486,32 +493,29 @@ public:
                             : std::vector<ScoredKernel>{};
         }
         const auto* metric = hipdnn_data_sdk::utilities::findRankingMetric(context.rankingMetric);
-        if(!_hasDefaultModel || metric == nullptr || _config.scoreMetric != metric->name
-           || !_config.scoreCalibrated
-           || _config.objective != hipdnn_data_sdk::utilities::objectiveOf(*metric)
+        if(!_hasDefaultModel || metric == nullptr
+           || !answersCalibrated(_config.scoreMetric,
+                                 _config.scoreCalibrated,
+                                 _config.objective,
+                                 context.rankingMetric)
            || (!_direct
                && (!_adapter || !_extractor
                    || !_adapter->isTrainedForArch(context.deviceProperties.gcnArchName))))
         {
             return {};
         }
-        // A direct scorer is ordered higher-first by IKernelHeuristic::rankScored and never
-        // sees the objective, so its order is best-first only for a metric where higher wins.
-        if(_direct
-           && metric->direction != hipdnn_data_sdk::utilities::MetricDirection::HIGHER_IS_BETTER)
-        {
-            return {};
-        }
         auto ranking = rankWith(catalog, context);
         for(auto& candidate : ranking)
         {
-            // A model's reported score is oriented so higher wins; undoing the orientation
-            // recovers the physical value. 0 is the no-measurement sentinel either way, and
-            // stays +0 rather than becoming -0 under a `min` objective.
-            candidate.score = _direct ? uhd::score_transform::applyInverse(candidate.score,
-                                                                           _config.scoreTransform)
-                              : candidate.score == 0.0 ? 0.0
-                                                       : _objectiveSign * candidate.score;
+            // Every ranker here reports a score oriented so higher wins; undoing the
+            // orientation recovers the physical value, and a direct scorer's transform is
+            // inverted after it. 0 is the no-measurement sentinel either way, and stays +0
+            // rather than becoming -0 under a `min` objective.
+            const double unoriented = _objectiveSign * candidate.score;
+            candidate.score
+                = candidate.score == 0.0 ? 0.0
+                  : _direct ? uhd::score_transform::applyInverse(unoriented, _config.scoreTransform)
+                            : unoriented;
         }
         // Degraded rankings use zero sentinels, never available physical estimates.
         if(ranking.empty() || ranking.front().score == 0.0
@@ -638,46 +642,8 @@ public:
     std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
                                                          const std::string& arch) const
     {
-        static const std::set<std::string> NONE_UNAVAILABLE;
-        const auto refusedIt = _unavailable.find(metric);
-        const auto& refused
-            = refusedIt == _unavailable.end() ? NONE_UNAVAILABLE : refusedIt->second;
-        for(const auto& unavailable : refused)
-        {
-            if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))
-            {
-                return nullptr;
-            }
-        }
-        const auto models = _byMetric.find(metric);
-        if(models == _byMetric.end())
-        {
-            return nullptr;
-        }
-        const HeuristicDescriptor* chosen = nullptr;
         std::string key;
-        for(const auto& [candidate, descriptor] : models->second)
-        {
-            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX)
-               && candidate.size() > key.size())
-            {
-                chosen = &descriptor;
-                key = candidate;
-            }
-        }
-        if(chosen == nullptr)
-        {
-            if(refused.count("default") != 0)
-            {
-                return nullptr;
-            }
-            if(const auto fallback = models->second.find("default");
-               fallback != models->second.end())
-            {
-                chosen = &fallback->second;
-                key = "default";
-            }
-        }
+        const auto* chosen = boundFor(metric, arch, key);
         if(chosen == nullptr)
         {
             return nullptr;
@@ -703,7 +669,95 @@ public:
         return loaded;
     }
 
+    /// @brief The id of the model calibratedRanking() answers with for @p metric on @p arch,
+    ///        read off what is bound: no model is loaded and nothing is ranked.
+    ///
+    /// What a CONFIGURATION prediction description names. Describing is how a caller
+    /// discovers which predictions an engine can make, one query per (kind, metric), so it
+    /// must cost no model load and no catalog ranking. Artifact coverage is not checked, as
+    /// L1's description does not check it: that needs the artifact, and evaluation reports it.
+    std::string calibratedModelId(const std::string& metric, const std::string& arch) const override
+    {
+        if(isResolver())
+        {
+            std::string key;
+            const auto* bound = boundFor(metric, arch, key);
+            if(bound == nullptr
+               || !answersCalibrated(
+                   bound->score.metric, bound->score.calibrated, bound->objective, metric))
+            {
+                return {};
+            }
+            return toString(bound->id);
+        }
+        if(!_hasDefaultModel
+           || !answersCalibrated(
+               _config.scoreMetric, _config.scoreCalibrated, _config.objective, metric))
+        {
+            return {};
+        }
+        return _config.uhdId;
+    }
+
 private:
+    /// The descriptor @p metric's own entries bind for @p arch, and its arch key, or null.
+    /// RFC 0019 §3.1's arch fallback stays inside the metric, and a refused entry -- exact or
+    /// `default` -- never falls through to a model it would have shadowed.
+    const HeuristicDescriptor*
+        boundFor(const std::string& metric, const std::string& arch, std::string& key) const
+    {
+        static const std::set<std::string> NONE_UNAVAILABLE;
+        const auto refusedIt = _unavailable.find(metric);
+        const auto& refused
+            = refusedIt == _unavailable.end() ? NONE_UNAVAILABLE : refusedIt->second;
+        for(const auto& unavailable : refused)
+        {
+            if(unavailable != "default" && archMatches(arch, unavailable, ArchMatchMode::PREFIX))
+            {
+                return nullptr;
+            }
+        }
+        const auto models = _byMetric.find(metric);
+        if(models == _byMetric.end())
+        {
+            return nullptr;
+        }
+        const HeuristicDescriptor* chosen = nullptr;
+        key.clear();
+        for(const auto& [candidate, descriptor] : models->second)
+        {
+            if(candidate != "default" && archMatches(arch, candidate, ArchMatchMode::PREFIX)
+               && candidate.size() > key.size())
+            {
+                chosen = &descriptor;
+                key = candidate;
+            }
+        }
+        if(chosen == nullptr && refused.count("default") == 0)
+        {
+            if(const auto fallback = models->second.find("default");
+               fallback != models->second.end())
+            {
+                chosen = &fallback->second;
+                key = "default";
+            }
+        }
+        return chosen;
+    }
+
+    /// Whether a model declaring this score answers calibratedRanking() in @p metric: it
+    /// estimates exactly that registered metric (RFC 0019 §11.4 -- no substitution), is
+    /// calibrated, and orders in the metric's own direction.
+    static bool answersCalibrated(const std::string& scoreMetric,
+                                  bool calibrated,
+                                  const std::string& objective,
+                                  std::string_view metric)
+    {
+        const auto* registered = hipdnn_data_sdk::utilities::findRankingMetric(metric);
+        return registered != nullptr && calibrated && scoreMetric == registered->name
+               && objective == hipdnn_data_sdk::utilities::objectiveOf(*registered);
+    }
+
     /// Which ranker decides a kernel choice, and why -- the answer §11.4 asks the trace for.
     struct RankerChoice
     {
@@ -1016,12 +1070,17 @@ private:
         : _config(std::move(config))
         , _adapter(std::move(adapter))
         , _extractor(std::move(extractor))
-        // rank() sorts descending, so a model predicting a cost rather than a rate has to
-        // be negated. Omitting this silently inverts every latency-trained UHD.
-        , _objectiveSign(_config.objective == "min" ? -1.0 : 1.0)
+        , _objectiveSign(objectiveSignOf(_config.objective))
         , _describedBy(std::move(describedBy))
         , _hasDefaultModel(true)
     {
+    }
+
+    /// rank() sorts descending, so a ranker predicting a cost rather than a rate has to be
+    /// negated. Omitting this silently inverts every latency-trained UHD.
+    static double objectiveSignOf(const std::string& objective)
+    {
+        return objective == "min" ? -1.0 : 1.0;
     }
 
     /// The model's score, returned to its metric's units and oriented so higher always wins,

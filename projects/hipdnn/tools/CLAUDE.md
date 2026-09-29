@@ -144,7 +144,22 @@ sbatch --constraint=GFX950 --gres=gpu:1 --time=08:00:00 \
     uhd_gen/reproduce/generate.sbatch
 ```
 
-An engine with no catalog (AITER, MIOpen) takes `UHD_ROLES=l1` alone.
+An engine with no catalog (AITER, MIOpen) takes `UHD_ROLES=l1` alone. It reads only the UHD
+ids its provider declares per metric; `generate.sbatch` passes them (`--uhd-id METRIC=UUID`,
+override with `UHD_IDS=tflops=<uuid>+time=<uuid>`), and `generate` refuses to train one under
+any other id. MIOpen convolutions need its provider built too:
+
+```bash
+--export=ALL,UHD_PROVIDERS=miopen-provider,UHD_ENGINE=MIOPEN_ENGINE,UHD_ROLES=l1,UHD_METRICS=tflops+time,UHD_GRAPHS=/exchange/conv-corpus,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-miopen
+```
+
+(`UHD_PROVIDERS=miopen-provider+hip-kernel-provider` builds both.) MIOpen's ids are declared
+under `default`, so its models are promoted there (`UHD_L1_ARCH` overrides): one model per
+metric, answering on every arch it was trained on and "no coverage" on the rest.
+
+`UHD_GRAPHS` may be a `hipdnn_corpus_gen` root: `generate` reads its `manifest.json` graph
+list. A graph whose collection fails is skipped and listed under `failed_graphs` in
+`generation_manifest.json`; more than 5% failing (`--max-graph-failures`) fails the run.
 
 What the job prints, in order, and what each number means:
 
@@ -157,20 +172,31 @@ What the job prints, in order, and what each number means:
 
 Artifacts land in `UHD_KEEP`: `l1/corpus.csv` (one measured row per graph),
 `l1/model/heuristic.uhd.json` + `model.bin`, `l1/model/eval_report.json`, `declined.txt`.
+With several metrics each has `l1/corpus_<metric>.csv` and `l1/model_<metric>/`.
 
 ## Step 3 — verify the model the way the runtime will
 
 ```bash
-sbatch … --export=ALL,UHD_CORPUS=/exchange/corpus,UHD_ARCH=gfx950,\
+sbatch … --export=ALL,UHD_CORPUS=/exchange/corpus,UHD_ARCH=gfx950,UHD_METRICS=tflops+time,\
 "UHD_MODELS=rocKE=/exchange/out-dense/l1/model:hipkernel:Gfx950AttentionDense;AITER=/exchange/out-aiter/l1/model:ASM_SDPA_ENGINE",\
 UHD_KEEP=/exchange/bakeoff uhd_gen/reproduce/bakeoff.sbatch
 ```
 
-Installs every model into one runtime and asks each engine to predict every graph. Join
-`predictions.json` against the measured `corpus.csv` files: for each graph both engines
-serve, does the higher prediction belong to the engine that measured faster? That agreement
-rate is what L1 is for. Absolute error is secondary — a model biased low everywhere still
-picks correctly.
+Installs every model into one runtime and asks each engine to predict every graph, once per
+metric in `UHD_METRICS` (default `tflops`; add `UHD_PROVIDERS=miopen-provider+hip-kernel-provider`
+for MIOpen). Then score it:
+
+```bash
+python3 uhd_gen/reproduce/score_predictions.py --manifest /exchange/corpus/manifest.json \
+    --predictions /exchange/bakeoff/predictions.json \
+    --measured /exchange/out-dense/l1/corpus.csv --measured /exchange/out-aiter/l1/corpus.csv
+```
+
+For each metric and each graph two or more engines serve, does the prediction that wins in
+that metric's direction (highest TFLOPS, lowest time) belong to the engine that measured
+best? That agreement rate is what L1 is for. Absolute error is secondary — a model biased low
+everywhere still picks correctly. Engines are named as the runtime names them (no
+allowlist), and a measured row counts only toward the metric its binding was collected under.
 
 `compare_engines.py` does the measured half (coverage, per-regime winners, margins).
 
@@ -196,7 +222,9 @@ Every one of these was hit on a real run and cost between 20 minutes and two hou
 | `Engine '<name>' is not registered by any loaded plugin` (exit 1) | misspelled name, or `--plugin-dir` does not hold the provider | the message lists every loaded engine; copy the name from it |
 | `SHORT: N of M requested problems` then exit 3 | the search stopped at its budget limit while still finding problems | raise `--budget`; the SHORT lines name the combination |
 | `Ambiguous enrolled knob tuple for candidates X and Y` | two candidates differ only in something not declared as an int KMD field | declare the distinguishing knob; `generate.py` exposes every int field automatically |
-| `incoming UHD id … is already installed; refusing duplicate identity` | an opaque engine's model is bound BY its UUID, and the tree already ships one | intended: replace the shipped document, do not promote a second copy |
+| `UHD id … is already installed at … with different content` | one UUID is one model under every arch key that binds it, and a different model already carries it | replace it by promoting to the arch it is installed for, or train the new model under a new id |
+| `… owns no UED, so it reads only the UHD id its provider declares … Pass --uhd-id` | an opaque engine's description reported no id for the metric, and none was passed | pass the provider's declared id (`UHD_IDS=`); a minted id would never be read |
+| `rows were collected for metric 'tflops', but the model predicts 'time'` | an L1 corpus collected under one metric handed to another metric's training | train each metric on its own `corpus_<metric>` |
 | an engine answers but its predictions are unchanged after a retrain | the promotion above was refused, so the runtime is still using the shipped model | check the promote lines in the bake-off log before trusting a comparison |
 
 ## Giving an engine a catalog worth ranking

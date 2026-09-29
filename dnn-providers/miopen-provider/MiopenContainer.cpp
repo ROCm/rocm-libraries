@@ -49,18 +49,22 @@ namespace miopen_plugin
 //
 // Ids per engine, not per provider: MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC run
 // different solvers over different operations and perform differently, so a single
-// model cannot answer for both. `default` covers every architecture; splitting an engine
-// per architecture is an edit to its map here, nothing else. Each architecture lists at
-// most one model per ranking metric (§4.4); the metric is the model's own `score.metric`,
-// so adding a `time` model is appending its id to the list.
+// model cannot answer for both. Per ranking metric, because a `tflops` and a `time`
+// model are different models (§4.4) and collection promotes each under its own id. Not
+// per architecture: every id binds under `default`, one model may be trained across
+// several architectures, and the artifact's `training_arches` decides per query where
+// it answers -- an architecture it was not trained on gets no estimate.
 //
-// Nothing is deployed for these ids today. An unresolved id is UNAVAILABLE -- no
-// estimate, engine unaffected, static ordering as before (§11.2's "no declared model"
-// row) -- so the ids can ship ahead of the models they name.
-const std::map<std::string, std::vector<std::string>> MIOPEN_ENGINE_L1_MODELS{
-    {"default", {"c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"}}};
-const std::map<std::string, std::vector<std::string>> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS{
-    {"default", {"2d95f8e7-16c4-4b03-a8f1-7be25390c4da"}}};
+// Nothing is deployed for these ids yet, so they could still change freely; once a
+// model ships under one, changing it orphans that model. An unresolved id is
+// UNAVAILABLE -- no estimate, engine unaffected, static ordering as before (§11.2's "no
+// declared model" row) -- so the ids can ship ahead of the models they name.
+const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS{
+    {"tflops", "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"},
+    {"time", "30284ebe-6e15-4f8e-968d-09f92d8a9480"}};
+const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS{
+    {"tflops", "2d95f8e7-16c4-4b03-a8f1-7be25390c4da"},
+    {"time", "8ae8a348-8d47-4ad8-992f-2114d722f7cb"}};
 
 const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngineDefinitions()
 {

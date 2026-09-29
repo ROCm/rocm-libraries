@@ -8,9 +8,11 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -156,6 +158,53 @@ TEST(TestIngestorUhdAdapters, TheFactoryRefusesACustomLibraryWhoseDeclaredHashIs
     // And a UHD declaring no digest still loads: §4.1 makes the artifact hash optional.
     config.modelHash.clear();
     EXPECT_NE(makeUhdAdapter(config), nullptr);
+}
+
+/// A one-feature table scoring every value 1.0, written to @p path; returns its bytes' digest.
+std::string writeTableModel(const std::filesystem::path& path)
+{
+    namespace fb = hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<double> boundaries = {5.0};
+    const std::vector<uint32_t> key = {0};
+    const std::vector<flatbuffers::Offset<fb::FeatureBucket>> buckets
+        = {fb::CreateFeatureBucket(builder, 0, builder.CreateVector(boundaries))};
+    const std::vector<flatbuffers::Offset<fb::TableEntry>> entries
+        = {fb::CreateTableEntry(builder, builder.CreateVector(key), 100, 1.0)};
+    const auto model = fb::CreateTableModel(builder,
+                                            1,
+                                            builder.CreateString(FEATURES_HASH),
+                                            builder.CreateVector(buckets),
+                                            builder.CreateVector(entries));
+    builder.Finish(model, fb::TableModelIdentifier());
+    std::ofstream(path, std::ios::binary)
+        .write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
+               static_cast<std::streamsize>(builder.GetSize()));
+    return sha256(builder.GetBufferPointer(), builder.GetSize());
+}
+
+/// R8: the table arm dropped `modelHash` exactly as the custom_library arm once did, so a
+/// table artifact was scored whatever its bytes -- under an identity (the declared digest)
+/// those bytes do not have. It now verifies the digest the way tree_data does.
+TEST(TestIngestorUhdAdapters, TheFactoryRefusesATableWhoseDeclaredHashIsNotItsBytes)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        std::filesystem::temp_directory_path()
+        / ("uhd_adapters_table_"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())));
+    UhdConfig config;
+    config.adapterType = "table";
+    config.modelArtifactPath = (dir.path() / "table.fb").string();
+    config.featuresHash = FEATURES_HASH;
+    const auto digest = writeTableModel(config.modelArtifactPath);
+
+    config.modelHash = sha256(std::string("a different table"));
+    EXPECT_EQ(makeUhdAdapter(config), nullptr);
+
+    config.modelHash = digest;
+    const auto loaded = makeUhdAdapter(config);
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->type(), UhdAdapterType::TABLE);
 }
 
 } // namespace

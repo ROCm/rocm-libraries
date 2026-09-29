@@ -14,17 +14,17 @@
 namespace miopen_plugin
 {
 
-/// @brief Each MIOpen engine's declared L1 models: architecture to UHD UUIDs, at most one
-/// per ranking metric.
+/// @brief Each MIOpen engine's declared L1 models: registered ranking metric to the UUID
+/// of the UHD that answers in it, bound under `default` for every architecture.
 ///
 /// RFC 0019 Open Question 7 (RESOLVED): MIOpen ships no UED, so it binds its
 /// `predict_engine` models by naming those UHDs' UUIDs in the provider's own engine
 /// definition rather than through a UED role map. Defined in MiopenContainer.cpp beside
 /// the engine table that consumes them, and declared here because the declaration is part
 /// of what this provider promises: a deployer installs a model by publishing a UHD that
-/// carries one of these ids.
-extern const std::map<std::string, std::vector<std::string>> MIOPEN_ENGINE_L1_MODELS;
-extern const std::map<std::string, std::vector<std::string>> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS;
+/// carries the id declared for its metric.
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_L1_MODELS;
+extern const std::map<std::string, std::string> MIOPEN_ENGINE_DETERMINISTIC_L1_MODELS;
 
 /*
  * Container class to manage the intantiation and ownership of all MIOpen plan builders and engines.

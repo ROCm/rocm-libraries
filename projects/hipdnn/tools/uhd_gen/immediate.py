@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .features import signature_references
+from .features import evaluate_feature_maps, signature_references
 from .corpus_io import read_corpus_frame
 from .provenance import compare_provenance, validate_provenance
 from .ranking_metrics import RANKING_METRICS, RankingMetric, is_valid_metric_value, ranking_metric
@@ -60,6 +60,11 @@ def _positive(value, where: str) -> float:
     return float(value)
 
 
+def _missing(value) -> bool:
+    """Absent from the row: never written, JSON null, or the NaN pandas fills in for either."""
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
 def _optional_spread(value, where: str) -> float | None:
     """§8.3's `stddevMs`: nonnegative when the row carries a measurement, else absent."""
     if value is None or (isinstance(value, float) and math.isnan(value)):
@@ -88,19 +93,67 @@ def validate_binding(value) -> dict:
         raise ValueError(f"binding.role must be {ROLE}")
     if binding["arch"] != "default" and not _ARCH.fullmatch(binding["arch"]):
         raise ValueError("binding.arch must be a bare gfx architecture or default")
+    # The runtime's description names the metric it was asked in (EnginePredictor), and
+    # which label a row may train or be scored against depends on it: a row collected
+    # under the tflops selector is not a `time` measurement, whatever columns it carries.
+    if binding.get("metric") not in RANKING_METRICS:
+        raise ValueError(f"binding.metric must name a registered ranking metric "
+                         f"({', '.join(RANKING_METRICS)}); got {binding.get('metric')!r}")
     binding["trained_against"] = validate_provenance(binding.get("trained_against"))
     return binding
 
 
-def validate_signature(signature: list, published: set[str] | None = None) -> None:
-    """Only provider-published graph/device/constraint inputs, never measured outputs."""
+def require_binding_metric(binding: dict, metric: str, where: str,
+                           selector_revision: str | None = None) -> None:
+    """A collection binding feeds only a model of the metric (and selector) it was taken under.
+
+    The engine's own selector answers in the requested metric, so rows described under
+    one metric are measurements of what that selector picked -- training or scoring a
+    model of another metric on them fits the wrong engine behaviour without any number
+    looking wrong. A binding that names no metric cannot be checked and is refused.
+    """
+    recorded = binding.get("metric")
+    if recorded is None:
+        raise ValueError(f"{where}: collection binding records no metric; the model predicts {metric!r}")
+    if recorded != metric:
+        raise ValueError(f"{where}: rows were collected for metric {recorded!r}, "
+                         f"but the model predicts {metric!r}")
+    if selector_revision is not None and binding.get("selector_revision") != selector_revision:
+        raise ValueError(f"{where}: rows were collected under selector revision "
+                         f"{binding.get('selector_revision')!r}, but the model was trained "
+                         f"against {selector_revision!r}")
+
+
+def validate_signature(signature: list) -> None:
+    """Only graph/device/constraint inputs, never measured outputs.
+
+    Whether each entry evaluates on the engine's published features is a separate
+    question the shared evaluator answers (`check_signature_evaluates`): a reference inside
+    `value_or_default` or `present` is legal on a graph that does not publish it.
+    """
     for reference in signature_references(signature):
         name = reference.removeprefix("$")
         parts = set(re.split(r"[.\[\]]+", name))
         if "." not in name or parts & _LEAKED_FIELDS:
             raise ValueError(f"L1 features cannot depend on kernel/candidate/timing inputs: {reference}")
-        if published is not None and name not in published:
-            raise ValueError(f"L1 feature is not published by the engine: {reference}")
+
+
+def check_signature_evaluates(signature: list, published, categorical_encoding: dict | None = None,
+                              executable: str | Path | None = None) -> None:
+    """Every published feature map yields a full row through the runtime's FeatureExtractor.
+
+    `published` holds the rows' `features` objects (or their JSON). The engine refuses a row
+    its signature cannot evaluate -- an unbound bare reference, a string with no code --
+    and scores one where `value_or_default`/`present` supplies the answer, so the evaluator
+    decides, not a name-by-name membership test that rejects mixed-operation corpora.
+    """
+    distinct = {json.dumps(_object(value, "features"), sort_keys=True) for value in published}
+    try:
+        evaluate_feature_maps([json.loads(value) for value in sorted(distinct)], signature,
+                              categorical_encoding, executable)
+    except ValueError as error:
+        raise ValueError(f"the L1 features_signature does not evaluate on every published "
+                         f"feature map: {error}") from error
 
 
 def normalize_row(value: dict) -> dict:
@@ -122,6 +175,10 @@ def normalize_row(value: dict) -> dict:
     if value.get("is_valid") is not True:
         raise ValueError("L1 labels require is_valid=true")
     binding = validate_binding(value.get("binding"))
+    # `hipdnn_bench` states the metric it asked in beside the description it got back; the
+    # two disagreeing means the row is not what its binding says it is.
+    if not _missing(value.get("metric")):
+        require_binding_metric(binding, value["metric"], "immediate measurement")
     engine = value.get("engine_id", value.get("engine"))
     if isinstance(engine, bool) or not isinstance(engine, int):
         raise ValueError("engine_id must be an integer")
@@ -152,7 +209,6 @@ def normalize_row(value: dict) -> dict:
             raise ValueError(f"published feature {key} must be a finite scalar")
         if key in value and value[key] != item:
             raise ValueError(f"flattened feature {key} differs from the published feature map")
-    flops = _positive(features.get("graph.flops"), "full-graph graph.flops")
     # RFC 0019.13 §11.2 (:2003) and §10.6.2 (:1914-1916): the score this model declares
     # `calibrated: true` MUST be trained on `avgTimeMs`. `robustMeanMs` stays on the row
     # as the informational §8.5 statistic, never as the label.
@@ -160,10 +216,18 @@ def normalize_row(value: dict) -> dict:
     elapsed = _positive(value.get("robustMeanMs"), "robustMeanMs")
     spread = _optional_spread(value.get("stddevMs", value.get("stddev_ms")), "stddevMs")
     iterations = _optional_count(value.get("iters", value.get("iterations")), "iters")
-    tflops = flops / average / 1e9
-    _positive(tflops, "derived tflops")
-    if "tflops" in value and not math.isclose(_positive(value["tflops"], "tflops"), tflops, rel_tol=1e-10):
-        raise ValueError(f"supplied tflops differs from graph.flops/({LABEL_STATISTIC}*1e9)")
+    # Only a throughput label needs the logical work count. A `time` collection over graphs
+    # whose provider publishes no FLOP count (conv backward, today) is a complete label;
+    # a count that IS published must still be a real one.
+    tflops = None
+    if binding["metric"] == "tflops" or "graph.flops" in features:
+        flops = _positive(features.get("graph.flops"), "full-graph graph.flops")
+        tflops = flops / average / 1e9
+        _positive(tflops, "derived tflops")
+    if not _missing(value.get("tflops")):
+        supplied = _positive(value["tflops"], "tflops")
+        if tflops is None or not math.isclose(supplied, tflops, rel_tol=1e-10):
+            raise ValueError(f"supplied tflops differs from graph.flops/({LABEL_STATISTIC}*1e9)")
     return {"benchmark": graph, "device": device, "arch": arch, "engine": engine,
             "engine_name": name, "binding": json.dumps(binding, sort_keys=True),
             "features": json.dumps(features, sort_keys=True), "is_valid": True,
@@ -181,16 +245,18 @@ def normalize_corpus(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("immediate corpus must contain one row per engine/graph/device, not a candidate sweep")
     if (result.groupby("engine_name")["engine"].nunique() > 1).any():
         raise ValueError("a canonical engine name cannot refer to multiple public engine identities")
-    if (result.groupby("benchmark")["graph.flops"].nunique() > 1).any():
+    # Rows that publish no count are not a second value: `nunique` skips them.
+    flops = result["graph.flops"] if "graph.flops" in result.columns else pd.Series(index=result.index, dtype=float)
+    if (flops.groupby(result["benchmark"]).nunique() > 1).any():
         raise ValueError("full-graph logical work count cannot change across engines or devices")
     for _, group in result.groupby("engine", sort=False):
         bindings = [validate_binding(value) for value in group["binding"]]
-        recorded = (bindings[0]["selector_revision"], bindings[0]["trained_against"])
-        if any((binding["selector_revision"], binding["trained_against"]) != recorded
+        recorded = (bindings[0]["selector_revision"], bindings[0]["metric"], bindings[0]["trained_against"])
+        if any((binding["selector_revision"], binding["metric"], binding["trained_against"]) != recorded
                for binding in bindings[1:]):
-            raise ValueError("engine selector or descriptor provenance changed within the immediate corpus")
+            raise ValueError("engine selector, metric or descriptor provenance changed within the immediate corpus")
     for _, group in result.groupby(["benchmark", "device"], sort=False):
-        if group["graph.flops"].nunique() != 1 or group["arch"].nunique() != 1:
+        if flops[group.index].nunique() > 1 or group["arch"].nunique() != 1:
             raise ValueError("engines disagree on full-graph work count or device architecture")
     return result
 
@@ -237,13 +303,19 @@ def validate_model(descriptor: dict) -> RankingMetric:
     return metric
 
 
-def check_model_binding(descriptor: dict, frame: pd.DataFrame) -> None:
-    validate_model(descriptor)
+def check_model_binding(descriptor: dict, frame: pd.DataFrame,
+                        feature_evaluator: str | Path | None = None) -> None:
+    """Whether `frame` is data this L1 model may be trained on or scored against."""
+    metric = validate_model(descriptor)
+    selector_revision = descriptor["trained_against"].get("selector_revision")
     for value in frame["binding"].unique():
         binding = validate_binding(value)
+        require_binding_metric(binding, metric.name, f"L1 corpus for {binding['engine']}", selector_revision)
         compare_provenance(descriptor["trained_against"], binding["trained_against"])
-    for value in frame["features"].unique():
-        validate_signature(descriptor.get("features_signature", []), set(_object(value, "features")))
+    signature = descriptor.get("features_signature", [])
+    if signature:
+        check_signature_evaluates(signature, frame["features"].unique(),
+                                  descriptor.get("categorical_encoding"), feature_evaluator)
 
 
 def prediction_scorer(descriptor: dict, responses: list[dict]):
@@ -256,8 +328,9 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
     for response in responses:
         if response.get("model") != identity:
             continue
-        if response.get("status") not in ("AVAILABLE", "available", 1):
-            raise ValueError("runtime prediction is unavailable or invalid")
+        status = response.get("status")
+        if status not in ("AVAILABLE", "available", 1, "UNAVAILABLE", "unavailable", 0, "INVALID", "invalid", 2):
+            raise ValueError(f"runtime prediction has an unknown status {status!r}")
         binding = validate_binding(response.get("binding"))
         compare_provenance(descriptor["trained_against"], binding["trained_against"])
         engine = response.get("engine_id")
@@ -272,10 +345,12 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
         if response.get("metric") != metric:
             raise ValueError(f"runtime prediction answers metric {response.get('metric')!r}, "
                              f"not the model's {metric!r}")
+        # A declined answer -- UNAVAILABLE, INVALID, or a value the metric cannot take,
+        # which the backend demotes to INVALID -- leaves the engine unscored for that
+        # graph. It is what the runtime would do, so it is scored as such, not refused.
         value = response.get("value")
-        if not is_valid_metric_value(metric, value):
-            raise ValueError(f"runtime prediction is not a valid {metric} value: {value!r}")
-        selected[key] = (response, binding, float(value))
+        available = status in ("AVAILABLE", "available", 1) and is_valid_metric_value(metric, value)
+        selected[key] = (response, binding, float(value) if available else float("nan"))
     if not selected:
         raise ValueError(f"no runtime predictions for UHD {identity}")
 
@@ -298,11 +373,35 @@ def prediction_scorer(descriptor: dict, responses: list[dict]):
     return score
 
 
+def _engine_name_to_id(name: str) -> int:
+    """`engineNameToId`: FNV-1a over the registered name, read back as a signed int64."""
+    digest = 0xcbf29ce484222325
+    for byte in name.encode("utf-8"):
+        digest = ((digest ^ byte) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return digest - (1 << 64) if digest >= 1 << 63 else digest
+
+
+_STATIC_PRECEDENCE = {_engine_name_to_id(name): rank for name, rank in (
+    ("MIOPEN_ENGINE", 0), ("ASM_SDPA_ENGINE", 1), ("ROCKE_ENGINE", 2), ("MIOPEN_ENGINE_DETERMINISTIC", 4))}
+
+
+def _static_engine_rank(engine_id: int) -> tuple[int, int]:
+    """Where the runtime's static rules put an engine it could not score.
+
+    `sortEngineIds` (EngineOrdering.hpp): MIOPEN_ENGINE, ASM_SDPA_ENGINE, ROCKE_ENGINE,
+    every other engine, MIOPEN_ENGINE_DETERMINISTIC. "Every other engine" keeps the order
+    the providers enumerated it in, which a corpus does not record, so the public ID stands
+    in for it; HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is an operator override and is not applied.
+    """
+    return _STATIC_PRECEDENCE.get(engine_id, 3), engine_id
+
+
 def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: float, seed: int,
-                       include_per_problem: bool = False) -> dict:
+                       include_per_problem: bool = False, feature_evaluator: str | Path | None = None) -> dict:
     """Physical score error and selection regret against other immediate engines only."""
     import numpy as np
-    from .evaluate import REPORT_SCHEMA, problem_keys, resolve_grouping, split_problems, regret_of, _summarise
+    from .evaluate import (REPORT_SCHEMA, _holdout_integrity, _summarise, problem_keys, regret_of,
+                           resolve_grouping, split_problems)
 
     frame = normalize_corpus(frame)
     grouping = resolve_grouping(frame)
@@ -318,13 +417,7 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
         if engine in by_engine:
             raise ValueError(f"multiple models supplied for immediate engine {engine}")
         by_engine[engine] = bundle
-        recorded = bundle.manifest.get("training_problem_keys")
-        if recorded is None:
-            integrity.append("unknown")
-        elif set(map(tuple, recorded)) & set(split.eval_problems):
-            integrity.append("COMPROMISED")
-        else:
-            integrity.append("held_out")
+        integrity.append(_holdout_integrity(bundle, split.eval_problems)["status"])
     # Engines are compared in one metric at a time (RFC 0019 §4.4): a `time` model and a
     # `tflops` model rank in opposite directions and different units.
     if len(metrics) != 1:
@@ -340,7 +433,7 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
     declined: dict[str, int] = {}
     for engine, group in frame.groupby("engine_name", sort=False):
         bundle = by_engine[engine]
-        check_model_binding(bundle.descriptor, group)
+        check_model_binding(bundle.descriptor, group, feature_evaluator)
         recorded_arch = bundle.manifest.get("arch", "default")
         if recorded_arch != "default" and not group["arch"].eq(recorded_arch).all():
             raise ValueError("model training architecture differs from corpus")
@@ -366,9 +459,8 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
         declined[engine] = int(impossible.sum())
         predicted.loc[selected.index] = values
     held_out = held_out.assign(**{predicted_column: predicted})
-    unscored = int(held_out[predicted_column].isna().sum())
-    held_out = held_out[held_out[predicted_column].notna()].copy()
-    if held_out.empty:
+    scored = held_out[held_out[predicted_column].notna()]
+    if scored.empty:
         raise ValueError(f"L1 model scored no evaluation row with a valid {name} value")
 
     # Keyed by the metric so a `time` report never carries a field named for throughput;
@@ -383,20 +475,33 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
                 "signed_relative_bias": float(np.mean(relative)),
                 "mean_absolute_relative_error": float(np.mean(np.abs(relative)))}
 
+    # The oracle is every valid measurement, scored or not: an engine whose model declined
+    # is still on the device, and dropping it hid exactly the loss a decline causes -- the
+    # fastest engine unscored, a slower scored one picked, and the problem reported as
+    # having nothing to compare. The pick is the runtime's (PredictionPolicy): scored
+    # engines best-first in the metric's direction, then the unscored tail, both tied by
+    # the static rules; with nothing scored the static order alone decides.
     per_problem, regrets = [], []
+    better = -1.0 if metric.objective == "max" else 1.0
+
+    def runtime_rank(row):
+        value = row[predicted_column]
+        unscored = bool(np.isnan(value))
+        return unscored, 0.0 if unscored else better * value, _static_engine_rank(int(row["engine"]))
+
     for key, group in held_out.groupby(list(grouping.columns), sort=True):
-        # Best first in the metric's direction; stable engine identity breaks prediction
-        # ties, independent of import order.
-        ordered = group.sort_values("engine", kind="stable")
-        scores = ordered[predicted_column]
-        picked = ordered.loc[scores.idxmax() if metric.objective == "max" else scores.idxmin()]
+        picked = min((row for _, row in group.iterrows()), key=runtime_rank)
         best = float(group[label].max() if metric.objective == "max" else group[label].min())
         regret = regret_of(float(picked[label]), best, metric.objective) if len(group) > 1 else None
         if regret is not None:
             regrets.append(regret)
-        per_problem.append({"key": list(key), "engines": len(group), "picked_engine": int(picked["engine"]),
+        per_problem.append({"key": list(key), "engines": len(group),
+                            "scored_engines": int(group[predicted_column].notna().sum()),
+                            "picked_engine": int(picked["engine"]),
+                            "picked_by": "static_order" if np.isnan(picked[predicted_column]) else "prediction",
                             f"picked_{name}": float(picked[label]), f"best_immediate_{name}": best,
                             "immediate_selection_regret": regret})
+    rows_per_engine = held_out.groupby("engine_name")[predicted_column]
     status = "COMPROMISED" if "COMPROMISED" in integrity else "unknown" if "unknown" in integrity else "held_out"
     warnings = []
     if status != "held_out":
@@ -411,12 +516,23 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
                   "eval_fraction": eval_fraction, "train_problems": len(split.train_problems),
                   "eval_problems": len(split.eval_problems),
                   "eval_problem_keys": [list(key) for key in split.eval_problems]},
-        "metrics": {"problems_scored": len(per_problem), "calibration": calibration(held_out),
-                    "unscored_rows": {"total": unscored, "per_engine": declined,
+        "metrics": {"problems_scored": len(per_problem), "calibration": calibration(scored),
+                    "prediction_coverage": {
+                        "rows": len(held_out), "scored_rows": len(scored),
+                        "fraction": len(scored) / len(held_out),
+                        "per_engine": {engine: {"rows": int(values.size), "scored_rows": int(values.notna().sum())}
+                                       for engine, values in rows_per_engine},
+                        "problems_fully_scored": sum(item["scored_engines"] == item["engines"] for item in per_problem),
+                        "problems_picked_by_static_order": sum(item["picked_by"] == "static_order"
+                                                               for item in per_problem),
+                        "detail": "Coverage is separate from accuracy: calibration is over scored rows "
+                                  "only, while selection regret counts every measured engine and places "
+                                  "unscored ones in static order after the scored ones, as the runtime does"},
+                    "unscored_rows": {"total": len(held_out) - len(scored), "per_engine": declined,
                                       "detail": f"predictions the runtime would refuse as "
                                                 f"invalid {name} values; the engine is "
                                                 f"unscored for these"},
-                    "per_engine": {engine: calibration(group) for engine, group in held_out.groupby("engine_name")},
+                    "per_engine": {engine: calibration(group) for engine, group in scored.groupby("engine_name")},
                     "immediate_selection": {"problems_compared": len(regrets),
                                             "regret": _summarise(regrets),
                                             "baseline": "best measured immediate engine; never tuned configurations"}},
@@ -429,5 +545,5 @@ def evaluate_immediate(frame: pd.DataFrame, bundles: list, *, eval_fraction: flo
                               f"measured_{name}": row[label], predicted_column: row[predicted_column],
                               f"signed_error_{name}": row[predicted_column] - row[label],
                               "signed_relative_error": row[predicted_column] / row[label] - 1}
-                             for row in held_out.to_dict(orient="records")]
+                             for row in scored.to_dict(orient="records")]
     return report

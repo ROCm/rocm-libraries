@@ -93,10 +93,17 @@ def validate_provenance(snapshot: object) -> dict:
     return recorded
 
 
-def compare_provenance(trained: object, actual: object) -> None:
+def compare_provenance(trained: object, actual: object, *, foreign_matchers=frozenset()) -> None:
     """Existing dependencies must retain identity/major and not regress minor.
 
     Additional pack matchers are coverage changes, not contract breakages.
+
+    `foreign_matchers` are matchers the engine's packs for OTHER architectures own and none
+    of `actual`'s architecture's packs do (`foreign_matcher_ids`). A model collected over
+    several arches' packs records their union, and one UUID bound under each of those arch
+    keys is one model (D2), so on any one arch the matchers of the others are ignored
+    rather than refused -- the rule `DescriptorLoader.hpp`'s `provenanceError` applies. A
+    recorded matcher no pack of the engine owns at all is still a removed dependency.
 
     A selector revision is compared for equality, not compatibility: it is an opaque
     provider build string that only the provider can interpret, and the loader refuses a
@@ -126,6 +133,8 @@ def compare_provenance(trained: object, actual: object) -> None:
         for dependency in recorded:
             identity = dependency["id"]
             current = by_id.get(identity)
+            if current is None and kind == "umd" and identity in foreign_matchers:
+                continue
             if current is None:
                 raise ProvenanceError(f"trained_against.{kind}: dependency {identity} is missing or not owned by this engine/architecture")
             expected = revision(dependency["revision"], kind)
@@ -169,19 +178,11 @@ def select_engine(index: dict, engine: str | None) -> tuple[Path, dict]:
     return matches[0]
 
 
-def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> dict:
-    def resolve(kind: str, identity: object) -> dict:
-        identity = descriptor_id(identity, kind)
-        entry = index[kind].get(identity)
-        if entry is None:
-            raise ProvenanceError(f"missing {kind.upper()} dependency {identity}")
-        return {"id": identity, "revision": entry[1].get("revision", "1.0")}
+def _pack_matchers(index: dict, ued_id: str, arch: str | None) -> set[str]:
+    """Matcher ids of the engine's packs that serve `arch` (every pack for None/default).
 
-    ued_id = descriptor_id(ued.get("id"), "UED")
-    # Use the supplied UED revision so promotion can evaluate an explicitly planned
-    # knob-removal revision, without modifying the training snapshot.
-    ued_dependency = resolve("ued", ued_id)
-    ued_dependency["revision"] = ued.get("revision", "1.0")
+    A pack with no `arch` list serves every architecture, exactly as the loader reads it.
+    """
     matchers = set()
     for path, pack in index["kdp"].values():
         owner = descriptor_id(pack.get("engine"), f"{path}.engine")
@@ -197,6 +198,33 @@ def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> di
             raise ProvenanceError(f"{path}.matchers must be an array")
         for identity in refs:
             matchers.add(descriptor_id(identity, f"{path}.matchers"))
+    return matchers
+
+
+def foreign_matcher_ids(index: dict, ued: dict, arch: str | None) -> frozenset[str]:
+    """Matchers only the engine's packs for other architectures own, as seen from `arch`.
+
+    `compare_provenance` ignores these when a model recorded them: they are the other
+    arches' share of a multi-arch collection, not a dependency this arch lost.
+    """
+    ued_id = descriptor_id(ued.get("id"), "UED")
+    return frozenset(_pack_matchers(index, ued_id, None) - _pack_matchers(index, ued_id, arch))
+
+
+def provenance_for_engine(index: dict, ued: dict, arch: str | None = None) -> dict:
+    def resolve(kind: str, identity: object) -> dict:
+        identity = descriptor_id(identity, kind)
+        entry = index[kind].get(identity)
+        if entry is None:
+            raise ProvenanceError(f"missing {kind.upper()} dependency {identity}")
+        return {"id": identity, "revision": entry[1].get("revision", "1.0")}
+
+    ued_id = descriptor_id(ued.get("id"), "UED")
+    # Use the supplied UED revision so promotion can evaluate an explicitly planned
+    # knob-removal revision, without modifying the training snapshot.
+    ued_dependency = resolve("ued", ued_id)
+    ued_dependency["revision"] = ued.get("revision", "1.0")
+    matchers = _pack_matchers(index, ued_id, arch)
     return validate_provenance({
         "ued": ued_dependency,
         "kmd": resolve("kmd", ued.get("metadata")),

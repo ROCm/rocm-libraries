@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -36,6 +37,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/GbdtModelTestBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
@@ -548,6 +550,100 @@ TEST(TestDescriptorLoader, ChangedKernelMatcherDisablesOnlyTheAffectedArchitectu
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(firstBlockSize(sets.front(), "gfx942"), 64);
     EXPECT_EQ(firstBlockSize(sets.front(), "gfx950"), 256);
+}
+
+namespace
+{
+
+/// makeSetDocuments' engine split into a gfx942 pack and a gfx950 pack that share the graph
+/// matcher and each use their own kernel matcher, plus a `predict_engine` model bound under
+/// both arch keys by one UUID (D2). The model records the matchers of every pack -- what
+/// enginePredictionProvenance publishes, so what every collected L1 model records.
+///
+/// The model is the last document, so a case can amend what it recorded.
+Documents twoArchPackDocuments(const std::string& engineName, const std::string& modelId)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx942"});
+    auto gfx950Pack = documentOfType(documents, ".kdp.json");
+    auto gfx950Matcher = secondDocumentOfType(documents, ".umd.json");
+    gfx950Matcher["id"] = testUuid('2', ROLE_KERNEL_MATCHER);
+    gfx950Matcher["name"] = "gfx950 kernel dtype";
+    gfx950Pack["id"] = testUuid('1', 'e');
+    gfx950Pack["name"] = "gfx950 pack";
+    gfx950Pack["arch"] = nlohmann::json::array({"gfx950"});
+    gfx950Pack["matchers"] = {testUuid('1', ROLE_GRAPH_MATCHER), gfx950Matcher["id"]};
+    documents.push_back({".umd.json", std::move(gfx950Matcher)});
+    documents.push_back({".kdp.json", std::move(gfx950Pack)});
+
+    auto model = metricUhd(documents, modelId, "tflops");
+    model["trained_against"] = provenanceOf(documents);
+    documentOfType(documents, ".ued.json")["predict_engine"]
+        = {{"gfx942", modelId}, {"gfx950", modelId}};
+    documents.push_back({".uhd.json", std::move(model)});
+    return documents;
+}
+
+} // namespace
+
+/// R5 with D2: an L1 model collected over both packs records both kernel matchers, and each
+/// arch key checks only the matchers its own packs use. The other arch's matcher is
+/// ignored there, not refused, so the one model is valid under both keys it is bound to.
+TEST(TestDescriptorLoader, AMultiArchModelRecordingEveryPacksMatchersIsValidOnEachBoundArch)
+{
+    const auto modelId = testUuid('1', 'c');
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("multi_arch_umd"));
+    writeDocuments(dir.path(), twoArchPackDocuments("test:multi_arch_umd", modelId));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 2u);
+    EXPECT_TRUE(sets.front().unavailableEnginePredictionArches.empty());
+    ASSERT_EQ(sets.front().enginePredictionsByMetric.count("tflops"), 1u);
+    const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+    ASSERT_EQ(bound.size(), 2u);
+    EXPECT_EQ(toString(bound.at("gfx942").id), modelId);
+    EXPECT_EQ(toString(bound.at("gfx950").id), modelId);
+}
+
+/// The other side of the arch-scoped rule: what the bound arch's packs use is still checked.
+/// A recorded matcher the arch uses, now at an incompatible revision, refuses the model on
+/// that arch alone; a recorded matcher no pack of the engine uses any more refuses it on
+/// every arch, because the model was trained against a matcher this engine does not have.
+TEST(TestDescriptorLoader, ArchScopedMatcherProvenanceStillRefusesWhatTheBoundArchUses)
+{
+    const auto modelId = testUuid('1', 'c');
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_bumped"));
+        auto documents = twoArchPackDocuments("test:umd_bumped", modelId);
+        // gfx942's own kernel matcher; the model recorded it at 1.0.
+        secondDocumentOfType(documents, ".umd.json")["revision"] = "2.0";
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& bound = sets.front().enginePredictionsByMetric.at("tflops");
+        EXPECT_EQ(bound.count("gfx942"), 0u);
+        EXPECT_EQ(bound.count("gfx950"), 1u);
+        EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+                  std::set<std::string>{"gfx942"});
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("umd_retired"));
+        auto documents = twoArchPackDocuments("test:umd_retired", modelId);
+        documents.back().body["trained_against"]["umd"].push_back(
+            {{"id", testUuid('3', ROLE_KERNEL_MATCHER)}, {"revision", "1.0"}});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        EXPECT_TRUE(sets.front().enginePredictionsByMetric.empty());
+        EXPECT_EQ(sets.front().unavailableEnginePredictionArches.at("tflops"),
+                  (std::set<std::string>{"gfx942", "gfx950"}));
+    }
 }
 
 TEST(TestDescriptorLoader, AModelTrainedAgainstAnotherMetadataIdentityCannotRank)
@@ -2005,6 +2101,39 @@ TEST(TestDescriptorLoader, WarnsWhenAModelArtifactIsAbsentAndKeepsTheEngine)
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "never_packaged.bin"));
 }
 
+/// R6: a UHD declaring no artifact hash is identified by the bytes present at load, so
+/// replacing its weights changes the engine's model identity -- the directory its persisted
+/// rankings live under -- and its selector revision, with no descriptor edit at all. With
+/// nothing deployed there is no content identity, and the persistent cache is declined; a
+/// native ranker has no artifact and keeps its descriptor identity.
+TEST(TestDescriptorLoader, ReplacingUndeclaredWeightsChangesTheEngineModelIdentity)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("undeclared_weights"));
+    writeModelHeuristicSet(dir.path(), "test:undeclared_weights", "model.bin");
+    const auto loadWith = [&](const std::string& weights) {
+        std::ofstream(dir.path() / "model.bin", std::ios::binary) << weights;
+        return loadFrom(dir.path()).at(0);
+    };
+
+    const auto original = loadWith("weights, first training");
+    const auto retrained = loadWith("weights, second training");
+    EXPECT_EQ(original.heuristic->modelHash,
+              hipdnn_plugin_sdk::uhd::sha256(std::string("weights, first training")));
+    EXPECT_TRUE(engineIdentity(original).contentIdentified);
+    EXPECT_TRUE(engineIdentity(retrained).contentIdentified);
+    EXPECT_NE(engineIdentity(original).modelHash, engineIdentity(retrained).modelHash);
+    EXPECT_NE(engineSelectorRevision(original), engineSelectorRevision(retrained));
+
+    ASSERT_TRUE(std::filesystem::remove(dir.path() / "model.bin"));
+    EXPECT_FALSE(engineIdentity(loadFrom(dir.path()).at(0)).contentIdentified);
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory nativeDir(uniqueDirectory("native_identity"));
+    writeDocuments(nativeDir.path(), makeSetDocuments('1', "test:native_identity"));
+    const auto native = engineIdentity(loadFrom(nativeDir.path()).at(0));
+    EXPECT_TRUE(native.contentIdentified);
+    EXPECT_FALSE(native.modelHash.empty());
+}
+
 TEST(TestDescriptorLoader, EscapingModelArtifactIsDisabledWithoutDroppingTheEngine)
 {
     const ScopedSymbols symbols;
@@ -2408,6 +2537,59 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionsResolvePerMetric)
         EXPECT_EQ(prediction.uhd_id, id);
         EXPECT_NEAR(prediction.value, 42.0, 1e-12) << metric;
     }
+}
+
+/// D2 for a declared model: one UUID declared for gfx942 and gfx950 is one model, bound
+/// under both keys with one content identity and no duplicate-identity refusal. Coverage is
+/// the artifact's `training_arches`: trained on gfx942 only, it answers there and is
+/// UNAVAILABLE on gfx950 with the reason saying so.
+TEST(TestDescriptorLoader, ADeclaredModelBoundForTwoArchesAnswersOnlyWhereItWasTrained)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_d2"));
+    const auto modelId = testUuid('e', 'e');
+    auto document = declaredL1Document(modelId);
+    document["adapter"] = "tree_data";
+    document.erase("native");
+    document["tree_data"] = {{"artifact", "l1.bin"}};
+    ASSERT_TRUE(hipdnn_test_sdk::utilities::GbdtModelTestBuilder()
+                    .setNumFeatures(1)
+                    .setFeaturesHash(document.at("features_hash").get<std::string>())
+                    .setBaseScore(std::log1p(42.0))
+                    .setTrainingArches({"gfx942"})
+                    .buildToFile((dir.path() / "l1.bin").string()));
+    writeDocument(dir.path(), {".uhd.json", std::move(document)});
+
+    const auto resolved
+        = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                           "test:opaque",
+                                           L1_SELECTOR_REVISION,
+                                           declaration({{"gfx942", modelId}, {"gfx950", modelId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& bound = resolved.byMetric.at("tflops");
+    ASSERT_EQ(bound.size(), 2u);
+    EXPECT_FALSE(bound.at("gfx942").modelHash.empty());
+    EXPECT_EQ(bound.at("gfx942").modelHash, bound.at("gfx950").modelHash);
+
+    hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
+    for(const auto& [arch, model] : bound)
+    {
+        binding.bind("tflops", arch, UhdKernelHeuristic::configFrom(model));
+    }
+    hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
+    features.bind("graph.flops", std::log1p(42.0));
+    const auto ask = [&](const std::string& arch) {
+        return binding.predict(
+            7, "test:opaque", L1_SELECTOR_REVISION, "tflops", arch, features, /*evaluate=*/true);
+    };
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const auto trained = ask("gfx942:sramecc+:xnack-");
+    ASSERT_EQ(trained.status, PredictionStatus::AVAILABLE) << trained.reason;
+    EXPECT_NEAR(trained.value, 42.0, 1e-12);
+    const auto untrained = ask("gfx950");
+    EXPECT_EQ(untrained.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(untrained.reason, "UHD model has no coverage for this architecture");
 }
 
 TEST(TestDescriptorLoader, DropsEveryEngineClaimingTheSameEngineId)

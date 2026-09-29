@@ -132,12 +132,22 @@ struct EngineIdentity
     /// A content hash over every model this engine can resolve, NOT over the UHD document's
     /// declared version. §9.2: "Hash the content, don't trust the id or a version field. A
     /// regenerated model normally keeps the same UHD id ... and a hand-maintained version can
-    /// be forgotten."
+    /// be forgotten." An artifact's content is its digest -- declared, or taken from its bytes
+    /// at load (engineModelHash()).
     ///
-    /// Empty when nothing hashable was declared, which is the case for a native scorer: its
-    /// "model" is code compiled into the provider, and the only thing that versions it is the
-    /// build, which the data-SDK version component already at the head of the path carries.
+    /// Empty when the engine ships no heuristic. A native scorer has no artifact: its "model"
+    /// is code compiled into the provider, versioned by the build, which the data-SDK version
+    /// component already at the head of the path carries.
     std::string modelHash = {};
+
+    /// False when some model this engine can resolve names an artifact that no digest
+    /// identifies: it declared no hash and had no bytes at load to digest (deployment is
+    /// separate from load, RFC 0019 §5). @ref modelHash then cannot tell that model's
+    /// later content apart from any other, so a persisted ranking could outlive the model
+    /// that produced it -- the on-disk cache is declined outright rather than keyed on an
+    /// identity that does not exist. A native scorer or static order has no artifact and
+    /// keeps its descriptor identity.
+    bool contentIdentified = true;
 };
 
 /// Where @p engine's shard for @p gcnArchName lives:
@@ -168,12 +178,17 @@ struct EngineIdentity
 /// after a reboot." Arch selects the shard; `DeviceKey` carries warpSize and
 /// multiProcessorCount inside it.
 ///
-/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, or if
-///     @p gcnArchName does not strip to a plain component; callers must fall back to
+/// @return An empty path if `cacheRoot()` cannot resolve a usable cache directory, if
+///     @p gcnArchName does not strip to a plain component, or if @p engine has no content
+///     identity (EngineIdentity::contentIdentified); callers must fall back to
 ///     in-memory-only behavior. Never throws.
 inline std::filesystem::path winnerCacheShardPath(const EngineIdentity& engine,
                                                   std::string_view gcnArchName)
 {
+    if(!engine.contentIdentified)
+    {
+        return {};
+    }
     const auto root = hipdnn_data_sdk::utilities::cacheRoot();
     if(root.empty())
     {

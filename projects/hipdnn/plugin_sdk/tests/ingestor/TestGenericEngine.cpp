@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <atomic>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -441,6 +442,166 @@ INSTANTIATE_TEST_SUITE_P(KnobTuples,
                          ::testing::Values(ConfigurationCatalog::SINGLETON,
                                            ConfigurationCatalog::DISTINCT_KNOBS,
                                            ConfigurationCatalog::AMBIGUOUS_KNOBS));
+
+/// Regression (R3). A candidate's knob tuple carries ordinals for non-integer knobs, but the
+/// uniqueness check compared each kernel's metadata as a raw int64_t -- so a string knob matched
+/// nothing, the count came out 0, and every candidate was refused as unidentifiable even when
+/// the string was exactly what told the two kernels apart.
+TEST(TestIngestorGenericEngine, AConfigurationDistinguishedByAStringKnobIsPredictable)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    // Equal block sizes: only the string knob addresses either kernel.
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeTestKernel(testId(0x65), "kernel_64_half", 64, "HALF")};
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = SCORE_SYMBOL;
+    model.score = {"tflops", true, "identity"};
+    auto ranker
+        = UhdKernelHeuristic::tryCreate(model, "calibrated configuration", {BLOCK_SIZE, DTYPE});
+    ASSERT_NE(ranker, nullptr);
+    auto manager = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL);
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE, DTYPE}), std::move(manager), resolver);
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6A));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+
+    const auto prediction
+        = engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+
+    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
+    ASSERT_NE(prediction.engine_config, nullptr);
+    // The predicted configuration addresses exactly the kernel that was scored: replaying its
+    // knobs -- the string one as its ordinal -- enumerates that one candidate and no other.
+    flatbuffers::FlatBufferBuilder serialized;
+    serialized.Finish(EngineConfig::Pack(serialized, prediction.engine_config.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper selected(
+        serialized.GetBufferPointer(), serialized.GetSize());
+    hipdnnPluginConstData_t details{};
+    engine.enumerateCandidates(handle, graph, selected, 0, 10, details);
+    const auto* candidates = GetEngineDetails(details.ptr)->candidate_page();
+    ASSERT_NE(candidates, nullptr);
+    EXPECT_EQ(candidates->total_count(), 1U);
+}
+
+/// Counts every kernel a native scorer is asked about, so a test can prove a path ranks nothing.
+constexpr const char* COUNTING_BLOCK_SIZE_SYMBOL
+    = "hipdnn.kernel_ingestor.test.generic_engine.counting_block_size";
+std::atomic<int> scoredKernels{0};
+
+class ScopedCountingScorer
+{
+public:
+    ScopedCountingScorer()
+    {
+        scoredKernels = 0;
+        ScoreRegistry::registerSymbol(
+            COUNTING_BLOCK_SIZE_SYMBOL,
+            +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) {
+                ++scoredKernels;
+                return static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+            });
+    }
+    ~ScopedCountingScorer()
+    {
+        ScoreRegistry::unregisterSymbol(COUNTING_BLOCK_SIZE_SYMBOL);
+    }
+    ScopedCountingScorer(const ScopedCountingScorer&) = delete;
+    ScopedCountingScorer& operator=(const ScopedCountingScorer&) = delete;
+};
+
+/// Regression (R7b). A CONFIGURATION description cleared `uhd_id`, and a capability is a
+/// description naming a model, so getPredictionCapabilities could never list an L2 model. The
+/// description must name the calibrated ranker an evaluation would use -- and, being how a
+/// caller discovers capabilities one (kind, metric) at a time, must rank nothing to do it.
+TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutRanking)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const ScopedTestSymbols symbols;
+    const ScopedCountingScorer scorer;
+    const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeTestKernel(testId(0x65), "kernel_128_float", 128, "FLOAT")};
+    HeuristicDescriptor model;
+    model.id = HEURISTIC_ID;
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = COUNTING_BLOCK_SIZE_SYMBOL;
+    model.score = {"tflops", true, "identity"};
+    // As the loader binds a metric's ranker: per metric, then architecture key.
+    auto ranker = UhdKernelHeuristic::makeResolver(
+        {{"tflops", {{"default", model}}}}, "engine 'test:engine'", {BLOCK_SIZE});
+    auto manager = std::make_unique<KernelIngestorStateManager<StubHandle>>(
+        std::move(schema),
+        std::vector<MatchDescriptor>{},
+        makeStubDispatches(),
+        std::vector<KernelDescriptorPack>{std::move(pack)},
+        std::move(ranker),
+        GRAPH_MATCH_SYMBOL);
+    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6B));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+
+    const auto described = engine.getPrediction(
+        handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, /*evaluate=*/false);
+    EXPECT_EQ(described.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(described.uhd_id, toString(HEURISTIC_ID));
+    const auto binding = nlohmann::json::parse(described.binding_json);
+    EXPECT_EQ(binding.at("role"), "sort_kernel_catalog");
+    EXPECT_EQ(binding.at("uhd_id"), toString(HEURISTIC_ID));
+
+    // The only calibrated ranker estimates tflops, so a time description names no model.
+    const auto timeBuffer = configWithMetric("time");
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper timeConfig(
+        timeBuffer.GetBufferPointer(), timeBuffer.GetSize());
+    const auto inTime = engine.getPrediction(
+        handle, graph, timeConfig, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, /*evaluate=*/false);
+    EXPECT_TRUE(inTime.uhd_id.empty());
+    EXPECT_FALSE(nlohmann::json::parse(inTime.binding_json).contains("uhd_id"));
+
+    (void)engine.getPrediction(
+        handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, /*evaluate=*/false);
+    EXPECT_EQ(scoredKernels.load(), 0) << "describing a prediction ranked the catalog";
+
+    // The counter is live: evaluating the same configuration does rank, and names the same
+    // model the description did.
+    const auto evaluated = engine.getPrediction(
+        handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, /*evaluate=*/true);
+    ASSERT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;
+    EXPECT_EQ(evaluated.uhd_id, described.uhd_id);
+    EXPECT_GT(scoredKernels.load(), 0);
+}
 
 } // namespace
 

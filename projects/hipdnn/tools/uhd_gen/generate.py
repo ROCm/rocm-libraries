@@ -22,17 +22,22 @@ from .catalog import DeterministicCatalogError, candidate_density
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
 from .evaluate import problem_keys, resolve_grouping, split_problems
 from .features import build_features_signature, signature_references
-from .provenance import ROLES, snapshot_provenance
+from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import LABEL_STATISTIC, ROLE, normalize_row, normalize_corpus, training_binding, validate_signature
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 
 logger = logging.getLogger(__name__)
 
+#: The graph list `hipdnn_corpus_gen` writes at a corpus root (CorpusManifest.hpp).
+MANIFEST = "manifest.json"
+
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--graphs", nargs="+", required=True,
                         help="Graph files -- JSON, or the binary FlatBuffers hipdnn_corpus_gen writes "
-                             "as graphs/*.fb -- or corpus directories (recursive)")
+                             "as graphs/*.fb -- or directories. A hipdnn_corpus_gen root (or its "
+                             "manifest.json) is read through the manifest's graph list; any other "
+                             "directory is searched recursively")
     parser.add_argument("--descriptor-tree", required=True, help="Shipping descriptor tree; authored knobs are preserved")
     parser.add_argument("--engine", help="UED name/UUID or canonical immediate engine name")
     parser.add_argument("--engine-id", required=True, type=int, help="Public hipDNN engine ID used by hipdnn_bench")
@@ -53,8 +58,16 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--early-stopping", type=int, default=50)
     parser.add_argument("--name", default="Generated UHD")
-    parser.add_argument("--uhd-id")
     parser.add_argument("--arch", help="Promotion arch; otherwise infer one observed architecture")
+    parser.add_argument("--uhd-id", action="append", default=[], dest="uhd_ids", metavar="METRIC=UUID",
+                        help="UHD id for one metric's model (repeatable). A bare UUID names the "
+                             "model of a single-metric run. An engine with no UED reads only the "
+                             "ids its provider declares per metric: those default to the id its "
+                             "description reports, and are required when it reports none")
+    parser.add_argument("--max-graph-failures", type=float, default=0.05, metavar="FRACTION",
+                        help="Fraction of graphs whose collection may fail and be skipped (each is "
+                             "recorded in generation_manifest.json); more fails the run with the "
+                             "list (default: 0.05)")
     parser.add_argument("--role", default="sort_kernel_catalog", choices=ROLES)
     parser.add_argument("--metric", nargs="+", action="extend", choices=tuple(RANKING_METRICS),
                         help="Ranking metric(s) to train, one UHD per metric from the same "
@@ -340,6 +353,95 @@ def _catalog_label(metric: str, usable: pd.DataFrame, defaulted: bool, role: str
     return None, "robustMeanMs", False, "robustMeanMs"
 
 
+def discover_graphs(supplied: list[str]) -> list[Path]:
+    """The graph files `--graphs` names, sorted and each once.
+
+    A `hipdnn_corpus_gen` root is read through its `manifest.json` graph list rather than
+    searched: the manifest sits beside the graphs, is JSON, and is not one of them (T6 --
+    collected as a graph, it aborted the run). A listed graph that is absent is an error,
+    because a silently shorter corpus is not the one the manifest describes.
+    """
+    graphs = set()
+    for text in supplied:
+        path = Path(text).resolve()
+        manifest = path / MANIFEST if path.is_dir() else path if path.name == MANIFEST else None
+        if manifest is not None and manifest.is_file():
+            graphs.update(_manifest_graphs(manifest))
+        elif path.is_dir():
+            # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
+            # `graphs/<operation>_<n>.fb`, so a generated corpus composes with `generate`
+            # only if that form is collected alongside hand-written JSON. A nested corpus
+            # root's manifest is not a graph either.
+            graphs.update(found for found in [*path.rglob("*.json"), *path.rglob("*.fb")]
+                          if found.name != MANIFEST)
+        else:
+            graphs.add(path)
+    if not graphs or any(not path.is_file() for path in graphs):
+        raise ValueError("--graphs must identify existing graph .json or .fb files")
+    return sorted(graphs)
+
+
+def _manifest_graphs(manifest: Path) -> list[Path]:
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    rows = document.get("graphs") if isinstance(document, dict) else document
+    if not isinstance(rows, list) or not rows:
+        raise ValueError(f"{manifest}: expected a nonempty graphs list")
+    graphs = []
+    for row in rows:
+        named = row.get("file") if isinstance(row, dict) else None
+        if not isinstance(named, str) or not named:
+            raise ValueError(f"{manifest}: every graphs entry must name its file")
+        graph = (manifest.parent / named).resolve()
+        if not graph.is_file():
+            raise ValueError(f"{manifest} lists {named}, which does not exist")
+        graphs.append(graph)
+    return graphs
+
+
+def _requested_uhd_ids(values: list[str], metrics: list[str]) -> dict[str, str]:
+    """`--uhd-id` as requested metric -> UUID for this run's metrics."""
+    from .promote import parse_uhd_ids
+
+    ids = parse_uhd_ids(values)
+    if None in ids:
+        if len(metrics) != 1:
+            raise ValueError("a bare --uhd-id names one UHD, and this run emits one per metric; "
+                             "name each as METRIC=UUID")
+        return {metrics[0]: ids[None]}
+    unrequested = sorted(set(ids) - set(metrics))
+    if unrequested:
+        raise ValueError(f"--uhd-id names {', '.join(unrequested)}, which --metric does not request")
+    return ids
+
+
+def _declared_uhd_id(binding: dict, metric: str, requested: str | None) -> str | None:
+    """The id an L1 model for `metric` must carry, or None to mint one.
+
+    An engine with no UED binds its models by UUIDs its provider declares per metric, and
+    its description reports the one for the requested metric as `binding.uhd_id`. Training
+    under any other id ships a model the engine never reads, so the declaration is the
+    default, a contradicting --uhd-id is refused, and with neither the run stops here --
+    after one graph, not after the whole corpus -- rather than minting an unread id.
+    """
+    declared = binding.get("uhd_id")
+    if "ued" in binding["trained_against"]:
+        # A UED role map binds whatever id promotion writes into it.
+        return requested
+    if declared is not None:
+        declared = descriptor_id(declared, "binding.uhd_id")
+        if requested is not None and requested != declared:
+            raise ValueError(f"--uhd-id {metric}={requested} contradicts the id "
+                             f"{binding['engine']} declares for {metric} ({declared})")
+        return declared
+    if requested is None:
+        raise ValueError(
+            f"{binding['engine']} owns no UED, so it reads only the UHD ids its provider "
+            f"declares per metric, and its description reports none for {metric}. Pass "
+            f"--uhd-id {metric}=<uuid> naming the id the provider declares; a minted id would "
+            "install a model the engine never reads")
+    return requested
+
+
 def run_generate(args: argparse.Namespace) -> int:
     from .__main__ import main
     from .promote import PromoteError, build_plan, run_promote, add_promote_arguments
@@ -354,9 +456,9 @@ def run_generate(args: argparse.Namespace) -> int:
     metrics = list(dict.fromkeys(args.metric or [DEFAULT_RANKING_METRIC]))
     single = len(metrics) == 1
     try:
-        if args.uhd_id and not single:
-            raise ValueError("--uhd-id names one UHD, and this run emits one per metric; omit it "
-                             "and each metric's UHD is minted its own id")
+        uhd_ids = _requested_uhd_ids(args.uhd_ids, metrics)
+        if not 0 <= args.max_graph_failures < 1:
+            raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
         output = Path(args.output_dir).resolve()
         tree = Path(args.descriptor_tree).resolve()
         if output.exists():
@@ -368,15 +470,7 @@ def run_generate(args: argparse.Namespace) -> int:
         bench = shutil.which(args.bench)
         if bench is None:
             raise ValueError(f"hipdnn_bench executable {args.bench!r} was not found")
-        graphs = set()
-        for supplied in args.graphs:
-            path = Path(supplied).resolve()
-            # `hipdnn_corpus_gen` writes its problems as binary FlatBuffers under
-            # `graphs/<operation>_<n>.fb`, so a generated corpus composes with
-            # `generate` only if that form is collected alongside hand-written JSON.
-            graphs.update([*path.rglob("*.json"), *path.rglob("*.fb")] if path.is_dir() else [path])
-        if not graphs or any(not path.is_file() for path in graphs):
-            raise ValueError("--graphs must identify existing graph .json or .fb files")
+        graphs = discover_graphs(args.graphs)
         if immediate:
             if args.knob or args.dim_tile:
                 raise ValueError("L1 generation cannot use kernel knobs or dimension/tile candidate features")
@@ -422,9 +516,11 @@ def run_generate(args: argparse.Namespace) -> int:
         # is its own measurement.
         sources = metrics if immediate else [None]
         rows = {source: [] for source in sources}
-        commands, graph_inputs = [], []
+        commands, graph_inputs, failed_graphs = [], [], []
         published = set()
-        for graph_index, graph in enumerate(sorted(graphs)):
+        for graph_index, graph in enumerate(graphs):
+            graph_rows = {source: [] for source in sources}
+            graph_names = set()
             payload = graph.read_bytes()
             # `hipdnn_bench` tells the two serialized forms apart by content rather than
             # by extension, so a renamed file still loads; the staged copy follows the
@@ -432,43 +528,69 @@ def run_generate(args: argparse.Namespace) -> int:
             binary = not payload.lstrip().startswith(b"{")
             saved_graph = stage / "graphs" / f"{graph_index:06d}{'.fb' if binary else '.json'}"
             saved_graph.parent.mkdir(exist_ok=True)
-            if immediate and not binary:
-                graph_document = json.loads(payload.decode("utf-8"))
-                if not isinstance(graph_document, dict):
-                    raise ValueError("graph input must be a JSON object")
-                if not graph_document.get("id"):
-                    canonical = json.dumps(graph_document, sort_keys=True, separators=(",", ":"), allow_nan=False)
-                    graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
-                _write_json(saved_graph, graph_document)
-            else:
-                # A serialized graph already carries its own id, and the bench preserves
-                # it across the deserialize/serialize round trip it does for L1, so there
-                # is nothing to inject: the identity the corpus records is the one the
-                # benchmark reports back as `graph_id`, keyed to this copy's sha256.
-                saved_graph.write_bytes(payload)
-            graph_inputs.append({"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
-                                 "sha256": hashlib.sha256(payload).hexdigest()})
-            command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
-            if args.plugin_dir:
-                command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
-            if args.workspace_limit is not None:
-                command.extend(["--workspace-limit", str(args.workspace_limit)])
-            for knob in args.knob:
-                command.extend(["--knob", knob])
-            for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
-                run_env = dict(environment)
-                if device is not None:
-                    run_env["HIP_VISIBLE_DEVICES"] = device
-                for source in sources:
-                    if immediate:
-                        collected, names = collect_immediate_graph(command, run_env, stage / "commands",
-                                                                   commands, metric=source)
-                    else:
-                        collected, names = collect_graph(command, run_env, stage / "commands", commands,
-                                                         addressing_table=ordinals,
-                                                         engine_descriptor_id=ued["id"])
-                    rows[source].extend(collected)
-                    published.update(names)
+            graph_input = {"source": str(graph), "copy": str(saved_graph.relative_to(stage)),
+                           "sha256": hashlib.sha256(payload).hexdigest()}
+            graph_inputs.append(graph_input)
+            # One graph's failure costs that graph, not the run: a bench that crashes or a
+            # response that fails validation on one problem says nothing about the others.
+            # All of the graph's rows go together, for every device and metric, so the
+            # metrics' corpora stay over one problem set. The budget below still ends a run
+            # whose failures are systematic rather than incidental.
+            try:
+                if immediate and not binary:
+                    graph_document = json.loads(payload.decode("utf-8"))
+                    if not isinstance(graph_document, dict):
+                        raise ValueError("graph input must be a JSON object")
+                    if not graph_document.get("id"):
+                        canonical = json.dumps(graph_document, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                        graph_document["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, "hipdnn:graph:" + canonical))
+                    _write_json(saved_graph, graph_document)
+                else:
+                    # A serialized graph already carries its own id, and the bench preserves
+                    # it across the deserialize/serialize round trip it does for L1, so there
+                    # is nothing to inject: the identity the corpus records is the one the
+                    # benchmark reports back as `graph_id`, keyed to this copy's sha256.
+                    saved_graph.write_bytes(payload)
+                command = [bench, "--graph", str(saved_graph), "--engine-id", str(args.engine_id)]
+                if args.plugin_dir:
+                    command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
+                if args.workspace_limit is not None:
+                    command.extend(["--workspace-limit", str(args.workspace_limit)])
+                for knob in args.knob:
+                    command.extend(["--knob", knob])
+                for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
+                    run_env = dict(environment)
+                    if device is not None:
+                        run_env["HIP_VISIBLE_DEVICES"] = device
+                    for source in sources:
+                        if immediate:
+                            collected, names = collect_immediate_graph(command, run_env, stage / "commands",
+                                                                       commands, metric=source)
+                        else:
+                            collected, names = collect_graph(command, run_env, stage / "commands", commands,
+                                                             addressing_table=ordinals,
+                                                             engine_descriptor_id=ued["id"])
+                        graph_rows[source].extend(collected)
+                        graph_names.update(names)
+            except ValueError as error:
+                failed_graphs.append({**graph_input, "error": str(error)})
+                logger.warning("graph %s skipped: %s", graph, error)
+                continue
+            for source in sources:
+                if immediate and not rows[source]:
+                    # Settled on the first measured graph, not after the corpus: the id is
+                    # the engine's declaration and does not vary by graph.
+                    uhd_ids[source] = _declared_uhd_id(json.loads(graph_rows[source][0]["binding"]),
+                                                       source, uhd_ids.get(source))
+                rows[source].extend(graph_rows[source])
+            published.update(graph_names)
+        if len(failed_graphs) > args.max_graph_failures * len(graphs):
+            _write_json(stage / "failed_graphs.json", failed_graphs)
+            listed = "\n".join(f"  {failure['source']}: {failure['error']}" for failure in failed_graphs[:10])
+            more = f"\n  ... and {len(failed_graphs) - 10} more" if len(failed_graphs) > 10 else ""
+            raise ValueError(f"{len(failed_graphs)} of {len(graphs)} graph(s) failed collection, over "
+                             f"the --max-graph-failures budget of {args.max_graph_failures:g}:\n"
+                             f"{listed}{more}")
 
         # One corpus per source, named plainly when there is only one.
         def staged(stem: str, source) -> str:
@@ -564,7 +686,9 @@ def run_generate(args: argparse.Namespace) -> int:
         if not isinstance(signature, list) or not signature:
             raise ValueError("the feature recipe must be a nonempty canonical array")
         if immediate:
-            validate_signature(signature, published)
+            # Leakage only; whether every entry evaluates on each graph's published features
+            # is the shared evaluator's answer, which training asks once the encoding exists.
+            validate_signature(signature)
         unknown = {ref[1:] for ref in signature_references(signature)} - published
         if unknown:
             raise ValueError(f"features are not published by this engine: {sorted(unknown)}")
@@ -597,8 +721,8 @@ def run_generate(args: argparse.Namespace) -> int:
                 train_args.append("--calibrated")
             if immediate:
                 train_args.extend(["--arch", args.arch or arches[0]])
-            if args.uhd_id:
-                train_args.extend(["--uhd-id", args.uhd_id])
+            if uhd_ids.get(requested):
+                train_args.extend(["--uhd-id", uhd_ids[requested]])
             if args.feature_evaluator:
                 train_args.extend(["--feature-evaluator", args.feature_evaluator])
             if main(train_args):
@@ -631,12 +755,16 @@ def run_generate(args: argparse.Namespace) -> int:
             report["holdout_integrity"] = {"status": "held_out", "detail": "Verified disjoint graph/device identities in recorded training and evaluation slices"}
             _write_json(report_path, report)
             models.append({"metric": declared, "requested_metric": requested,
+                           "uhd_id": uhd_ids.get(requested),
                            "model_dir": str(model_dir), "corpus": str(corpora[source]),
                            "training_arguments": train_args, "evaluation_arguments": eval_args,
                            "training_problem_keys": sorted(training_keys),
                            "eval_problem_keys": sorted(evaluated_keys)})
         _write_json(stage / "generation_manifest.json", {
             "schema": "uhd_gen.generation/2", "trained_against": provenance, "graphs": graph_inputs,
+            # Graphs whose collection failed and were skipped, each with its error, within
+            # the --max-graph-failures budget; their staged copies stay under graphs/.
+            "failed_graphs": failed_graphs, "max_graph_failures": args.max_graph_failures,
             "commands": commands, "features_signature": signature, "omitted_proposals": omitted,
             # One entry per UHD emitted: its metric (null for a metric-less ranker), where it
             # was trained, and the exact commands that trained and evaluated it.
@@ -660,10 +788,12 @@ def run_generate(args: argparse.Namespace) -> int:
         # Validate installation against the original tree before publishing any artifacts.
         for model in models:
             build_plan(Path(model["model_dir"]), tree, args.engine, role=args.role,
-                       arch=args.arch or arches[0], corpus=Path(model["corpus"]))
+                       arch=args.arch or arches[0], corpus=Path(model["corpus"]),
+                       uhd_ids={None: model["uhd_id"]} if model["uhd_id"] else None)
         # Where each model and its corpus land once the stage is renamed into place.
         published_models = [(output / Path(model["model_dir"]).relative_to(stage),
-                             output / Path(model["corpus"]).relative_to(stage)) for model in models]
+                             output / Path(model["corpus"]).relative_to(stage), model["uhd_id"])
+                            for model in models]
         # Recorded paths must refer to the final output rather than the staging directory.
         old_root = str(stage)
         for path in stage.rglob("*.json"):
@@ -686,15 +816,17 @@ def run_generate(args: argparse.Namespace) -> int:
             add_promote_arguments(parser)
             # In sequence, each against the role map the previous one wrote: promotion adds a
             # UHD beside the other metrics' and replaces only its own metric's.
-            for model_dir, corpus in published_models:
+            for model_dir, corpus, identity in published_models:
                 promote_args = ["--model-dir", str(model_dir), "--descriptor-tree", str(tree),
                                 "--role", args.role, "--arch", args.arch or arches[0],
                                 "--corpus", str(corpus)]
                 if args.engine:
                     promote_args.extend(["--engine", args.engine])
+                if identity:
+                    promote_args.extend(["--uhd-id", identity])
                 if run_promote(parser.parse_args(promote_args)):
                     raise ValueError(f"promotion failed; validated model and reproducible collection remain at {output}")
-        for model_dir, _ in published_models:
+        for model_dir, _, _ in published_models:
             print(f"Generated {'installable' if args.no_promote else 'installed'} UHD: {model_dir}")
         return 0
     except (OSError, TypeError, ValueError, KeyError, PromoteError) as error:

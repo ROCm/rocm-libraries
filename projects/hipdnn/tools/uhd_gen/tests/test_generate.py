@@ -275,6 +275,64 @@ UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
 
 
+def _immediate_bench(monkeypatch, provenance, *, flops=True, declared=None, broken=(), engine="provider:engine7"):
+    """A `--collect-immediate` stand-in; returns the metrics it was asked in, in order.
+
+    `declared` maps metric -> the id the engine's description reports (binding.uhd_id);
+    graphs whose id is in `broken` make the bench fail the way a crashing one does.
+    """
+    requested = []
+
+    def bench(command, environment, log_dir, ordinal, commands):
+        commands.append({"argv": command})
+        metric = command[command.index("--ranking-metric") + 1]
+        requested.append(metric)
+        graph = json.loads(Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8"))
+        if graph["id"] in broken:
+            raise ValueError("hipdnn_bench failed (-11): segmentation fault")
+        # A `time` request lets the engine's time ranker pick a faster kernel.
+        average = (1.0 + graph["size"] / 10) * (0.8 if metric == "time" else 1.0)
+        binding = {"engine": engine, "role": "predict_engine", "arch": "gfx942", "metric": metric,
+                   "selector_revision": "provider-1", "trained_against": provenance}
+        if declared and metric in declared:
+            binding["uhd_id"] = declared[metric]
+        features = {"graph.nodes[0].dy.dims[0]": graph["size"] + 1, "device.cu_count": 120}
+        if flops:
+            features["graph.flops"] = 2e9 * (graph["size"] + 1)
+        return {"engine_id": 7, "engine_name": engine, "graph_id": graph["id"],
+                "device_id": "board", "arch": "gfx942", "metric": metric, "binding": binding,
+                "features": features,
+                "avgTimeMs": average, "robustMeanMs": average * 0.9, "stddevMs": 0.01, "iters": 30,
+                "is_valid": True, "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
+    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    return requested
+
+
+def _graphs(root, count=16):
+    root.mkdir()
+    for index in range(count):
+        (root / f"{index}.json").write_text(json.dumps({"id": f"graph-{index}", "size": index}),
+                                            encoding="utf-8")
+    return root
+
+
+def _ued_tree(root):
+    root.mkdir()
+    (root / "engine.ued.json").write_text(json.dumps(
+        {"version": "1.0", "id": UED, "name": "provider:engine7", "metadata": KMD}), encoding="utf-8")
+    (root / "metadata.kmd.json").write_text(json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8")
+    return root
+
+
+def _l1_args(graphs, tree, output, evaluator, *extra, features="graph.flops"):
+    return ["generate", "--graphs", str(graphs), "--descriptor-tree", str(tree), "--engine-id", "7",
+            "--role", "predict_engine", "--features", features, "--num-boost-round", "4",
+            "--early-stopping", "2", "--eval-fraction", "0.25", "--arch", "gfx942",
+            "--feature-evaluator", evaluator, "--output-dir", str(output), *extra]
+
+
 def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(monkeypatch, tmp_path, evaluator):
     """`--metric tflops time`: each metric's labels are measured under that metric (the
     engine's kernel choice follows it), each trains and evaluates its own UHD, and both
@@ -283,42 +341,11 @@ def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(monkeypatch
     pytest.importorskip("flatbuffers")
     from uhd_gen.__main__ import main
 
-    tree = tmp_path / "descriptors"
-    tree.mkdir()
-    (tree / "engine.ued.json").write_text(json.dumps(
-        {"version": "1.0", "id": UED, "name": "provider:engine7", "metadata": KMD}), encoding="utf-8")
-    (tree / "metadata.kmd.json").write_text(json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8")
-    provenance = snapshot_provenance(tree)
-    graphs = tmp_path / "graphs"
-    graphs.mkdir()
-    for index in range(16):
-        (graphs / f"{index}.json").write_text(json.dumps({"id": f"graph-{index}", "size": index}),
-                                              encoding="utf-8")
-    requested = []
-
-    def bench(command, environment, log_dir, ordinal, commands):
-        commands.append({"argv": command})
-        metric = command[command.index("--ranking-metric") + 1]
-        requested.append(metric)
-        graph = json.loads(Path(command[command.index("--graph") + 1]).read_text(encoding="utf-8"))
-        # A `time` request lets the engine's time ranker pick a faster kernel.
-        average = (1.0 + graph["size"] / 10) * (0.8 if metric == "time" else 1.0)
-        return {"engine_id": 7, "engine_name": "provider:engine7", "graph_id": graph["id"],
-                "device_id": "board", "arch": "gfx942", "metric": metric,
-                "binding": {"engine": "provider:engine7", "role": "predict_engine", "arch": "gfx942",
-                            "selector_revision": "provider-1", "trained_against": provenance},
-                "features": {"graph.flops": 2e9 * (graph["size"] + 1), "device.cu_count": 120},
-                "avgTimeMs": average, "robustMeanMs": average * 0.9, "stddevMs": 0.01, "iters": 30,
-                "is_valid": True, "selection_mode": "immediate", "timing_statistic": "robustMeanMs"}
-
-    monkeypatch.setattr("uhd_gen.generate._run_json", bench)
-    monkeypatch.setattr("uhd_gen.generate.shutil.which", lambda name: name)
+    tree = _ued_tree(tmp_path / "descriptors")
+    requested = _immediate_bench(monkeypatch, snapshot_provenance(tree))
     output = tmp_path / "out"
-    common = ["generate", "--graphs", str(graphs), "--descriptor-tree", str(tree), "--engine-id", "7",
-              "--role", "predict_engine", "--features", "graph.flops", "--num-boost-round", "4",
-              "--early-stopping", "2", "--eval-fraction", "0.25", "--arch", "gfx942",
-              "--feature-evaluator", evaluator, "--output-dir", str(output)]
-    # One id cannot name two UHDs.
+    common = _l1_args(_graphs(tmp_path / "graphs"), tree, output, evaluator)
+    # One bare id cannot name two UHDs.
     assert main([*common, "--metric", "tflops", "time", "--uhd-id", UED]) == 1
     assert not requested
     assert main([*common, "--metric", "tflops", "--metric", "time"]) == 0
@@ -338,3 +365,96 @@ def test_one_generate_run_emits_and_installs_one_l1_model_per_metric(monkeypatch
     assert [model["metric"] for model in manifest["models"]] == ["tflops", "time"]
     ued = json.loads((tree / "engine.ued.json").read_text(encoding="utf-8"))
     assert ued["predict_engine"] == {"gfx942": [emitted["tflops"], emitted["time"]]}
+
+
+TFLOPS_ID = "c47e1b3a-8f60-4a92-b5d4-1e08c9a27f63"
+TIME_ID = "30284ebe-6e15-4f8e-968d-09f92d8a9480"
+
+
+def test_an_opaque_time_model_over_a_corpus_without_flops_skips_one_bad_graph(monkeypatch, tmp_path, evaluator):
+    """T6 + 0.2: L1 `time` needs no work count (a conv-bwd corpus publishes none), one
+    crashing graph is recorded and skipped rather than ending the run, and an engine with
+    no UED trains and installs under the id its provider declares for the metric."""
+    pytest.importorskip("lightgbm")
+    from uhd_gen.__main__ import main
+
+    tree = tmp_path / "descriptors"
+    tree.mkdir()
+    _immediate_bench(monkeypatch, {"selector_revision": "provider-1"}, flops=False,
+                     declared={"time": TIME_ID}, broken={"graph-3"}, engine="MIOPEN_ENGINE")
+    output = tmp_path / "out"
+    assert main(_l1_args(_graphs(tmp_path / "graphs", 20), tree, output, evaluator,
+                         "--metric", "time", "--engine", "MIOPEN_ENGINE", "--max-graph-failures", "0.1",
+                         features="graph.nodes[0].dy.dims[0]")) == 0
+
+    manifest = json.loads((output / "generation_manifest.json").read_text(encoding="utf-8"))
+    [failure] = manifest["failed_graphs"]
+    assert failure["source"].endswith("3.json") and "segmentation fault" in failure["error"]
+    assert "graph-3" not in {row["benchmark"] for row in json.loads((output / "corpus.json").read_text(encoding="utf-8"))}
+    assert json.loads((output / "model" / "heuristic.uhd.json").read_text(encoding="utf-8"))["id"] == TIME_ID
+    [installed] = tree.rglob("*.uhd.json")
+    assert json.loads(installed.read_text(encoding="utf-8"))["id"] == TIME_ID
+
+
+def test_graph_failures_over_the_budget_fail_the_run_with_the_list(monkeypatch, tmp_path, evaluator, caplog):
+    tree = _ued_tree(tmp_path / "descriptors")
+    _immediate_bench(monkeypatch, snapshot_provenance(tree), broken={"graph-3", "graph-4"})
+    from uhd_gen.__main__ import main
+
+    assert main(_l1_args(_graphs(tmp_path / "graphs"), tree, tmp_path / "out", evaluator,
+                         "--max-graph-failures", "0.1")) == 1
+    assert "2 of 16 graph(s) failed" in caplog.text and "3.json" in caplog.text and "4.json" in caplog.text
+
+
+@pytest.mark.parametrize("requested,declared,message", [
+    ([], None, "--uhd-id time=<uuid>"),
+    ([f"time={TFLOPS_ID}"], {"time": TIME_ID}, "contradicts"),
+])
+def test_an_opaque_engine_is_never_trained_under_an_undeclared_id(monkeypatch, tmp_path, evaluator, caplog,
+                                                                  requested, declared, message):
+    """Refused after the first graph, not after the whole corpus has been measured."""
+    from uhd_gen.__main__ import main
+
+    tree = tmp_path / "descriptors"
+    tree.mkdir()
+    calls = _immediate_bench(monkeypatch, {"selector_revision": "provider-1"}, declared=declared,
+                             engine="MIOPEN_ENGINE")
+    uhd_ids = [argument for value in requested for argument in ("--uhd-id", value)]
+    assert main(_l1_args(_graphs(tmp_path / "graphs"), tree, tmp_path / "out", evaluator,
+                         "--metric", "time", *uhd_ids)) == 1
+    assert message in caplog.text
+    assert len(calls) == 1
+
+
+def _corpus_root(root):
+    """What `hipdnn_corpus_gen --output` writes: graphs/ beside manifest.json and .csv."""
+    (root / "graphs").mkdir(parents=True)
+    rows = []
+    for index in range(3):
+        (root / "graphs" / f"conv_{index}.json").write_text(json.dumps({"id": f"g{index}"}), encoding="utf-8")
+        rows.append({"benchmark": f"g{index}", "name": f"conv_{index}", "file": f"graphs/conv_{index}.json"})
+    (root / "graphs" / "stray.json").write_text("{}", encoding="utf-8")
+    (root / "manifest.json").write_text(json.dumps({"tool": "hipdnn_corpus_gen", "graphs": rows}), encoding="utf-8")
+    return root
+
+
+def test_a_corpus_root_is_read_through_its_manifest_graph_list(tmp_path):
+    """T6: the manifest is never collected as a graph, and it -- not a directory walk --
+    decides which graphs the corpus holds."""
+    from uhd_gen.generate import discover_graphs
+
+    root = _corpus_root(tmp_path / "corpus")
+    expected = [(root / "graphs" / f"conv_{index}.json").resolve() for index in range(3)]
+    assert discover_graphs([str(root)]) == expected
+    assert discover_graphs([str(root / "manifest.json")]) == expected
+    # A directory above corpus roots is walked, and their manifests are skipped.
+    assert all(path.name != "manifest.json" for path in discover_graphs([str(tmp_path)]))
+
+
+def test_a_manifest_listing_a_missing_graph_is_refused(tmp_path):
+    from uhd_gen.generate import discover_graphs
+
+    root = _corpus_root(tmp_path / "corpus")
+    (root / "graphs" / "conv_1.json").unlink()
+    with pytest.raises(ValueError, match="conv_1.json"):
+        discover_graphs([str(root)])

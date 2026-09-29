@@ -780,6 +780,35 @@ TEST(TestIngestorWinnerCacheStateManager, ANewModelDoesNotInheritTheOldModelsPer
     EXPECT_EQ(rereader->winnerFor(key)->front().kernelId, testId(0x21));
 }
 
+/// R6's other half: a model whose artifact had no bytes to digest at load has no content
+/// identity, so nothing can tell its later weights apart and a persisted ranking could
+/// outlive the model that measured it. The disk cache is declined for such an engine --
+/// nothing written, nothing served to a later process -- while in-memory behaviour stays.
+///
+/// Falsifying mutation: drop the contentIdentified checks. The writer then persists under
+/// the "unhashed" directory and the fresh reader below is served that ranking.
+TEST(TestIngestorWinnerCacheStateManager, AnEngineWithoutContentIdentityPersistsNoRankings)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const ScopedCacheDir cacheDir("no_content_identity");
+    const ContentCarryingTestGraph graph{ContentCarryingTestGraph::Spec{}};
+    const auto properties = suffixedDeviceProperties();
+    const auto key = keyFor(graph, properties);
+
+    EngineIdentity unidentified{"test:NoContentIdentity", {1, 0, 0}, UHD_ID};
+    unidentified.contentIdentified = false;
+    EXPECT_TRUE(winnerCacheShardPath(unidentified, properties.gcnArchName).empty());
+    {
+        const auto writer = makeIdentifiedStateManager(unidentified);
+        writer->recordWinner(key, recordFor(0x23, 1.5), WinnerWriteCause::FRESH_MISS);
+        ASSERT_TRUE(writer->winnerFor(key).has_value())
+            << "declining the disk cache must not cost the in-memory one";
+    }
+
+    EXPECT_FALSE(makeIdentifiedStateManager(unidentified)->winnerFor(key).has_value())
+        << "a model with no content identity must not hand a later process its ranking";
+}
+
 /// The other half of the persisted identity: the engine's own descriptor revision. A UED
 /// revision bump can change which kernels a pack admits or what a knob means without the
 /// UHD changing at all, so a measured order from the previous revision is not evidence
@@ -1036,7 +1065,8 @@ TEST(TestIngestorWinnerCacheStateManager, ALineWithAWrongFormatVersionIsSkipped)
         writer->recordWinner(key, recordFor(0x31, 1.0), WinnerWriteCause::FRESH_MISS);
     }
 
-    const auto path = winnerCacheShardPath({"test:FormatFieldWrongVersion"}, properties.gcnArchName);
+    const auto path
+        = winnerCacheShardPath({"test:FormatFieldWrongVersion"}, properties.gcnArchName);
     ASSERT_TRUE(std::filesystem::exists(path));
     {
         auto malformed

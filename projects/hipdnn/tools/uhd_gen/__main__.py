@@ -56,7 +56,8 @@ import pandas as pd
 
 from .benchmark_log import main as benchmark_log_main
 from .catalog import require_rankable
-from .evaluate import BENCHMARK_COLUMN, Grouping, add_evaluate_arguments, run_evaluate
+from .evaluate import (BENCHMARK_COLUMN, Grouping, add_evaluate_arguments, problem_keys,
+                       resolve_grouping, run_evaluate)
 from .corpus_io import read_corpus_frame
 from .coverage import device_field_coverage, enforce_device_coverage
 from .knobs import add_knob_arguments, run_knobs
@@ -66,6 +67,7 @@ from .features import (
     compute_features_hash,
     derive_categorical_encoding,
     evaluate_feature_rows,
+    feature_reference,
     parse_signature_entry,
     signature_references,
 )
@@ -440,7 +442,8 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
 
 def _run_train(args: argparse.Namespace) -> int:
     from .provenance import snapshot_provenance, validate_provenance
-    from .immediate import LABEL_STATISTIC, ROLE, read_corpus, training_binding, validate_signature
+    from .immediate import (LABEL_STATISTIC, ROLE, check_signature_evaluates, read_corpus,
+                            require_binding_metric, training_binding, validate_signature)
 
     immediate = args.role == ROLE
     binding = None
@@ -456,7 +459,18 @@ def _run_train(args: argparse.Namespace) -> int:
         if immediate:
             if args.report_regret:
                 raise ValueError("L1 evaluation compares immediate engines, not within-engine candidate regret")
+            if args.group_by_feature:
+                # The runtime scores an engine-level model's root ensemble only, and one group
+                # chosen across unrelated graphs has no per-row meaning: until an L1 contract
+                # for grouped artifacts exists, training one would ship a model nobody scores
+                # the way it was fitted.
+                raise ValueError(f"--group-by-feature is not supported for {ROLE}: a grouped "
+                                 "artifact has no engine-level (per-row) scoring contract")
             df, binding = training_binding(read_corpus(input_path), args.engine)
+            # Every row, not the first: the selector that picked each measured kernel answered
+            # in the binding's metric, so rows of another metric describe another selector.
+            for index, row_binding in enumerate(df["binding"]):
+                require_binding_metric(json.loads(row_binding), args.metric, f"{input_path} row {index}")
             trained_against = binding["trained_against"]
             if args.provenance:
                 recorded = validate_provenance(json.loads(Path(args.provenance).read_text(encoding="utf-8")))
@@ -591,16 +605,22 @@ def _run_train(args: argparse.Namespace) -> int:
         requested_signature = list(signature)
         references = signature_references(signature)
         if immediate:
-            for published in df["features"].unique():
-                validate_signature(signature, set(json.loads(published)))
-        missing = {reference[1:] for reference in references} - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing feature columns: {sorted(missing)}")
+            validate_signature(signature)
+        if not any(isinstance(entry, dict) for entry in signature):
+            # A raw reference is a column gather; an expression's inputs may be legally absent
+            # (value_or_default/present), so the shared evaluator decides for those.
+            missing = {reference[1:] for reference in references} - set(df.columns)
+            if missing:
+                raise ValueError(f"Missing feature columns: {sorted(missing)}")
         if args.target not in df.columns:
             raise ValueError(f"Missing target column: {args.target}")
         coverage = device_field_coverage(df)
         enforce_device_coverage(signature, coverage)
         categorical_encoding = derive_categorical_encoding(df, [ref[1:] for ref in references])
+        if immediate:
+            # After the encoding, because a published string is only evaluable through it.
+            check_signature_evaluates(signature, df["features"], categorical_encoding,
+                                      args.feature_evaluator)
         # The branch decides where the VALUES come from, never where the digest comes from:
         # RFC 0019 §6.3 gives features_hash one definition and both kinds of signature take
         # it from the shared evaluator. Values still split, because a raw reference is a
@@ -704,6 +724,11 @@ def _run_train(args: argparse.Namespace) -> int:
                     "to be one of them"
                 )
             group_index = names.index(args.group_by_feature)
+            # The runtime compares a row's group SLOT -- the value the feature row carries,
+            # which for a string column is its categorical code -- against each group's
+            # value. Exported as the raw value, "1"/"2" became 1.0/2.0 against codes 0/1 and
+            # "A"/"B" could not be exported at all.
+            codes = categorical_encoding.get(feature_reference(args.group_by_feature))
             tagged = df.assign(_uhd_row=np.arange(len(df)))
             for value, rows in tagged.groupby(args.group_by_feature, sort=True):
                 at = rows["_uhd_row"].to_numpy()
@@ -713,7 +738,7 @@ def _run_train(args: argparse.Namespace) -> int:
                 # does not describe ranks by layer 1 rather than being discarded.
                 try:
                     group_models.append((
-                        float(value),
+                        float(codes[value]) if codes is not None else float(value),
                         train_model(
                             df.iloc[at].reset_index(drop=True), names, args.target, groups,
                             num_boost_round=args.num_boost_round,
@@ -812,6 +837,10 @@ def _run_train(args: argparse.Namespace) -> int:
     if immediate:
         manifest.update(role=ROLE, binding=binding, arch=args.arch,
                         training_problem_keys=sorted(set(zip(df["benchmark"], df["device"]))))
+    elif BENCHMARK_COLUMN in df.columns:
+        # The problems this model saw, in `evaluate`'s own identity, so a later standalone
+        # evaluation can prove its slice held out from content rather than from a path.
+        manifest["training_problem_keys"] = sorted(set(problem_keys(df, resolve_grouping(df))))
     (output_dir / "train_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if metrics is not None:
         (output_dir / "regret.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")

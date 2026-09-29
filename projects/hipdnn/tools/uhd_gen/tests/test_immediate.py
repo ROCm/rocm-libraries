@@ -27,11 +27,11 @@ PROVENANCE = {"ued": {"id": UED, "revision": "1.0"},
               "kmd": {"id": KMD, "revision": "1.0"}, "umd": []}
 
 
-def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5):
+def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5, metric="tflops"):
     name = f"provider:engine{engine}"
     return {"engine_id": engine, "engine_name": name, "graph_id": graph, "device_id": "board",
             "arch": "gfx942", "binding": {"engine": name, "role": ROLE, "arch": "gfx942",
-            "selector_revision": "provider-1/immediate-2/library-3",
+            "metric": metric, "selector_revision": "provider-1/immediate-2/library-3",
             "trained_against": copy.deepcopy(PROVENANCE)},
             "features": {"graph.flops": 2e12, "graph.nodes": 1, "device.cu_count": 120},
             # RFC 0019.13 §11.2 (:2003) pins a calibrated score to `avgTimeMs`, so that
@@ -45,24 +45,25 @@ def measurement(*, engine=7, graph="graph", elapsed=2.0, robust=2.5):
 
 # Callers take the `evaluator` fixture: the digest below is the runtime's, computed by the
 # shared binary, because RFC 0019 §6.3 leaves features_hash with exactly one definition.
-def descriptor(row, metric="tflops"):
+def descriptor(row, metric="tflops", signature=("$graph.flops",)):
     return {"version": "1.0", "id": UHD, "name": "immediate model", "adapter": "tree_data",
             "trained_against": row["binding"]["trained_against"],
             "objective": {"tflops": "max", "time": "min"}[metric],
             "score": {"metric": metric, "calibrated": True, "transform": "log1p"},
-            "features_signature": ["$graph.flops"],
-            "features_hash": compute_features_hash(["$graph.flops"]),
+            "features_signature": list(signature),
+            "features_hash": compute_features_hash(list(signature)),
             "tree_data": {"artifact": "model.bin"}}
 
 
-def bundle(row, prediction, training_keys=(), metric="tflops"):
+def bundle(row, prediction, training_keys=(), metric="tflops", signature=("$graph.flops",)):
     # The owning engine is recorded by the training manifest's binding, never by the
     # descriptor: RFC 0019 Section 3.1 leaves that binding to the UED role map.
-    return SimpleNamespace(descriptor=descriptor(row, metric),
+    scorer = prediction if callable(prediction) else lambda frame: np.full(len(frame), prediction)
+    return SimpleNamespace(descriptor=descriptor(row, metric, signature),
                            manifest={"training_problem_keys": list(training_keys),
                                      "binding": copy.deepcopy(row["binding"]),
                                      "arch": row["arch"]},
-                           scorer=lambda frame: np.full(len(frame), prediction))
+                           scorer=scorer)
 
 
 def test_import_derives_physical_throughput_from_full_graph_and_mean_timing():
@@ -189,7 +190,7 @@ def test_runtime_prediction_must_match_measured_request_but_can_use_new_l1_model
 def test_time_predictions_rank_lower_first_and_report_in_milliseconds(evaluator):
     """RFC 0019 §4.4: `time` is avgTimeMs directly and lower wins, so the engine with the
     lower predicted time is picked and the report is keyed by `time`, not throughput."""
-    fast, slow = measurement(), measurement(engine=8, elapsed=4)
+    fast, slow = measurement(metric="time"), measurement(engine=8, elapsed=4, metric="time")
     report = evaluate_immediate(pd.DataFrame([fast, slow]),
                                 [bundle(fast, 3.0, metric="time"), bundle(slow, 2.5, metric="time")],
                                 eval_fraction=1, seed=0, include_per_problem=True)
@@ -250,7 +251,7 @@ def test_time_l1_training_declares_the_metric_its_label_and_direction(tmp_path, 
 
     rows = []
     for index in range(24):
-        row = measurement(graph=f"graph-{index}")
+        row = measurement(graph=f"graph-{index}", metric="time")
         row["features"]["graph.flops"] = float(2e9 * (index + 1))
         row["avgTimeMs"] = 1.0 + index / 10
         rows.append(row)
@@ -293,3 +294,142 @@ def test_a_model_that_can_score_nothing_is_still_a_failure(evaluator):
     row = measurement()
     with pytest.raises(ValueError, match="scored no evaluation row"):
         evaluate_immediate(pd.DataFrame([row]), [bundle(row, -1)], eval_fraction=1, seed=0)
+
+
+def test_rows_collected_for_one_metric_cannot_score_a_model_of_another(evaluator):
+    """T2: the engine's selector answers in the requested metric, so rows described under
+    the tflops selector are not what a `time` model is about. Refused, naming both."""
+    row = measurement()
+    with pytest.raises(ValueError, match="collected for metric 'tflops'.*predicts 'time'"):
+        evaluate_immediate(pd.DataFrame([row]), [bundle(row, 2.0, metric="time")], eval_fraction=1, seed=0)
+    # The selector revision the model was trained against is held to the rows' too.
+    model = bundle(row, 1000)
+    model.descriptor["trained_against"] = {**PROVENANCE, "selector_revision": "provider-1/immediate-9/library-3"}
+    with pytest.raises(ValueError, match="selector revision"):
+        evaluate_immediate(pd.DataFrame([row]), [model], eval_fraction=1, seed=0)
+
+
+def test_a_measurement_must_name_the_metric_it_was_described_under():
+    row = measurement()
+    row["binding"].pop("metric")
+    with pytest.raises(ValueError, match="binding.metric"):
+        normalize_row(row)
+    # The bench's own record of what it asked for must agree with the description.
+    row = measurement()
+    row["metric"] = "time"
+    with pytest.raises(ValueError, match="collected for metric 'tflops'"):
+        normalize_row(row)
+
+
+def test_a_time_label_needs_no_flop_count_but_a_throughput_label_does():
+    """0.9: a provider that publishes no FLOP count (conv backward) still yields `time`
+    labels; a corpus mixing graphs with and without a count is not inconsistent."""
+    counted, uncounted = measurement(metric="time"), measurement(graph="bwd", metric="time")
+    uncounted["features"].pop("graph.flops")
+    frame = normalize_corpus(pd.DataFrame([counted, uncounted]))
+    assert frame.set_index("benchmark").loc["bwd", "avgTimeMs"] == 2.0
+    assert pd.isna(frame.set_index("benchmark").loc["bwd", "tflops"])
+    throughput = measurement(graph="bwd")
+    throughput["features"].pop("graph.flops")
+    with pytest.raises(ValueError, match="graph.flops"):
+        normalize_row(throughput)
+
+
+DY = "graph.nodes[0].dy.dims[0]"
+
+
+def test_a_mixed_operation_corpus_scores_with_a_signature_that_defaults_absent_inputs(evaluator):
+    """T1: a conv-fwd row publishes no `dy`. The runtime evaluates `value_or_default` over
+    it, so requiring every referenced name to be published rejected a model the engine
+    loads and scores. A bare reference to the same name is what the runtime refuses."""
+    forward, backward = measurement(), measurement(graph="bwd")
+    backward["features"][DY] = 4
+    frame = pd.DataFrame([forward, backward])
+    defaulted = [{"value_or_default": [f"${DY}", 0]}]
+    report = evaluate_immediate(frame, [bundle(forward, 1000, signature=defaulted)], eval_fraction=1, seed=0)
+    assert report["metrics"]["calibration"]["rows"] == 2
+    with pytest.raises(ValueError, match="does not evaluate"):
+        evaluate_immediate(frame, [bundle(forward, 1000, signature=[f"${DY}"])], eval_fraction=1, seed=0)
+
+
+def test_a_declined_fastest_engine_is_still_the_oracle_and_its_loss_is_reported(evaluator):
+    """T3: A runs at 1000 TFLOPS but its model declines; B runs at 500 and is scored. The
+    runtime picks B, so the problem loses half its throughput. Dropping A before building
+    the oracle left B alone and reported nothing to compare."""
+    fast, slow = measurement(elapsed=2.0), measurement(engine=8, elapsed=4.0)
+    report = evaluate_immediate(pd.DataFrame([fast, slow]), [bundle(fast, -1), bundle(slow, 500)],
+                                eval_fraction=1, seed=0, include_per_problem=True)
+    problem = report["per_problem"][0]
+    assert (problem["picked_engine"], problem["picked_by"]) == (8, "prediction")
+    assert problem["best_immediate_tflops"] == 1000
+    assert problem["immediate_selection_regret"] == pytest.approx(0.5)
+    assert report["metrics"]["immediate_selection"]["regret"]["mean"] == pytest.approx(0.5)
+    coverage = report["metrics"]["prediction_coverage"]
+    assert (coverage["rows"], coverage["scored_rows"], coverage["problems_fully_scored"]) == (2, 1, 0)
+    assert report["metrics"]["calibration"]["rows"] == 1, "accuracy is over scored rows only"
+
+
+def test_a_problem_no_engine_scores_is_picked_by_the_static_rules(evaluator):
+    """With nothing scored the runtime falls to `sortEngineIds`, which puts the
+    deterministic MIOpen engine last whatever its ID. Its FNV-1a ID is negative, so an
+    ID-ordered fallback would pick it first."""
+    deterministic = -6748551569128940061  # engineNameToId("MIOPEN_ENGINE_DETERMINISTIC")
+    rows = [measurement(engine=engine, graph=graph) for graph in ("graph", "declined")
+            for engine in (7, deterministic)]
+    frame = pd.DataFrame(rows)
+
+    def declines_one_graph(prediction):
+        return lambda frame: np.where(frame["benchmark"].eq("declined"), -1.0, prediction)
+
+    report = evaluate_immediate(frame, [bundle(rows[0], declines_one_graph(1000)),
+                                        bundle(rows[1], declines_one_graph(900))],
+                                eval_fraction=1, seed=0, include_per_problem=True)
+    picked = {tuple(item["key"]): (item["picked_engine"], item["picked_by"]) for item in report["per_problem"]}
+    assert picked[("declined", "board")] == (7, "static_order")
+    assert picked[("graph", "board")] == (7, "prediction")
+
+
+def test_a_declined_runtime_prediction_is_unscored_not_an_error(evaluator):
+    """An INVALID or UNAVAILABLE answer is the engine declining that graph; the runtime then
+    orders it statically, so the evaluator does too instead of refusing the whole run."""
+    row = measurement()
+    response = copy.deepcopy(row)
+    response.update(model=UHD, status="INVALID", metric="tflops", value=0)
+    scorer = prediction_scorer(descriptor(row), [response])
+    assert np.isnan(scorer(normalize_corpus(pd.DataFrame([row])))).all()
+    response["status"] = "SOMETHING"
+    with pytest.raises(ValueError, match="unknown status"):
+        prediction_scorer(descriptor(row), [response])
+
+
+def test_a_mixed_forward_backward_corpus_trains_and_evaluates_end_to_end(tmp_path, evaluator):
+    """0.4 acceptance: forward rows publish `x` and a FLOP count, backward rows publish
+    `dy` and no count. A `time` model over `value_or_default` of both trains, and the
+    evaluator scores it, without NaN reaching the feature pipe or a name-membership check
+    refusing what the runtime evaluates."""
+    pytest.importorskip("lightgbm")
+    pytest.importorskip("flatbuffers")
+    from uhd_gen.__main__ import main
+
+    rows = []
+    for index in range(24):
+        row = measurement(graph=f"graph-{index}", metric="time")
+        if index % 2:
+            row["features"].pop("graph.flops")
+            row["features"][DY] = index + 1
+        else:
+            row["features"]["graph.nodes[0].x.dims[0]"] = index + 1
+        row["avgTimeMs"] = 1.0 + index / 10
+        rows.append(row)
+    corpus, recipe = tmp_path / "mixed.json", tmp_path / "features.json"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    recipe.write_text(json.dumps([{"value_or_default": [f"${DY}", 0]},
+                                  {"value_or_default": ["$graph.nodes[0].x.dims[0]", 0]}]), encoding="utf-8")
+    model_dir, report = tmp_path / "model", tmp_path / "report.json"
+    assert main(["train", "--role", ROLE, "--input", str(corpus), "--feature-signature", str(recipe),
+                 "--metric", "time", "--feature-evaluator", evaluator, "--num-boost-round", "4",
+                 "--early-stopping", "2", "--output-dir", str(model_dir)]) == 0
+    assert main(["evaluate", "--input", str(corpus), "--model-dir", str(model_dir), "--eval-fraction", "1",
+                 "--feature-evaluator", evaluator, "--output", str(report)]) == 0
+    scored = json.loads(report.read_text(encoding="utf-8"))["metrics"]["prediction_coverage"]
+    assert scored["scored_rows"] == scored["rows"] == 24

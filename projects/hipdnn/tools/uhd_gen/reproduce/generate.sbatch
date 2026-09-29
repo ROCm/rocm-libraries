@@ -13,7 +13,11 @@
 # Ordering is load-bearing (uhd_gen README, "Engine-level immediate predictions"): L2 is
 # trained and installed FIRST, because it decides which kernel an immediate run executes,
 # and L1's labels are measurements of exactly that run. UHD_ROLES=l1 skips L2 for an
-# opaque engine, which has no catalog to rank.
+# opaque engine (AITER, MIOpen), which has no catalog to rank.
+#
+# A MIOpen convolution run: UHD_PROVIDERS=miopen-provider UHD_ENGINE=MIOPEN_ENGINE
+# UHD_ROLES=l1 UHD_METRICS=tflops+time UHD_GRAPHS=<conv corpus root>. Its declared UHD ids
+# (per metric) are passed to generate, and its models are promoted under `default`.
 #
 # Sharding: UHD_SHARDS/UHD_SHARD take an interleaved slice of the corpus (every Nth graph,
 # offset by the shard index), so each shard keeps the whole shape distribution instead of
@@ -41,6 +45,17 @@ SHARDS=${UHD_SHARDS:-1}
 SHARD=${UHD_SHARD:-0}
 ARCH=${UHD_ARCH:-gfx942}
 KEEP=${UHD_KEEP:-/exchange/uhd-gen-${SLURM_JOB_ID:-manual}}
+# Providers to build, `+`-separated for the same reason. `miopen-provider` adds
+# MIOPEN_ENGINE and MIOPEN_ENGINE_DETERMINISTIC (convolutions), built against the MIOpen the
+# ROCm install ships; `hip-kernel-provider` is rocKE/AITER/flyDSL. Either or both.
+PROVIDERS=${UHD_PROVIDERS:-hip-kernel-provider}
+# The L1 role-map arch. MIOpen declares its ids under `default` (one model per metric
+# covers every arch it was trained on; an untrained arch answers "no coverage"), so its
+# models are promoted there.
+case "$ENGINE" in
+    MIOPEN_ENGINE|MIOPEN_ENGINE_DETERMINISTIC) L1_ARCH=${UHD_L1_ARCH:-default} ;;
+    *) L1_ARCH=${UHD_L1_ARCH:-$ARCH} ;;
+esac
 # sbatch's --output lands in the job's OWN view of the submit directory, which inside a
 # --container-remap-root container is thrown away with the container: a job that dies
 # before it copies anything into $KEEP leaves nothing to read, and every diagnosis costs
@@ -101,18 +116,30 @@ if [ -n "${UHD_BUNDLE:-}" ]; then
         || { echo "FATAL: bundle $UHD_BUNDLE did not apply"; tail -8 /tmp/uhd/clone.log; exit 1; }
 fi
 git -C "$SRC" log --oneline -1
+# An engine with no UED reads only the UHD ids its provider declares, one per metric, and its
+# description reports the one for the requested metric -- generate defaults to that. Passing
+# the declared table (declared_ids.sh) as well makes a declaration that drifted from it fail
+# the run instead of training a model nobody reads. UHD_IDS=tflops=<uuid>+time=<uuid>
+# overrides the table.
+source "$SRC/projects/hipdnn/tools/uhd_gen/reproduce/declared_ids.sh"
+mapfile -t ID_ARGS < <(uhd_id_args "${UHD_IDS:-$(declared_uhd_ids "$ENGINE" "$ARCH")}" "${UHD_METRICS:-tflops}")
+echo "declared ids: ${ID_ARGS[*]:-none (a UED engine, or ids reported by the engine description)}"
 
-step "configure"
+step "configure: $PROVIDERS"
+HKP_ARGS=()
+if [[ "+$PROVIDERS+" == *"+hip-kernel-provider+"* ]]; then
+    HKP_ARGS=(-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON
+              -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON
+              -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors")
+fi
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH="${ROCM_PATH:-/opt/rocm}" -DROCM_PATH="${ROCM_PATH:-/opt/rocm}" \
     -DCMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
     -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
-    -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hipdnn-integration-tests;hip-kernel-provider" \
+    -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;hipdnn-integration-tests;${PROVIDERS//+/;}" \
     -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPDNN_ENABLE_SDPA=ON \
-    -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON -DHIPKERNELPROVIDER_PRODUCTION_ENABLE_ROCKE=ON \
-    -DHIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON \
-    -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$SRC/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
+    "${HKP_ARGS[@]}" \
     -DGPU_TARGETS="$ARCH" -DCMAKE_HIP_ARCHITECTURES="$ARCH" \
     -DENABLE_CLANG_FORMAT=OFF -DENABLE_CLANG_TIDY=OFF > /tmp/uhd/configure.log 2>&1
 echo "configure rc=$?"
@@ -131,7 +158,9 @@ step "runtime layout"
 BENCH=$(find "$BUILD" -name hipdnn_bench -type f -perm -u+x | head -1)
 LIST_ENGINES=$(find "$BUILD" -name hipdnn_list_engines -type f -perm -u+x | head -1)
 FEATURE_EVAL=$(find "$BUILD" -name hipdnn_uhd_features -type f -perm -u+x | head -1)
-PLUGIN_DIR=$(dirname "$(find "$BUILD" -name "libhip_kernel_provider*.so" -path "*plugins*" | head -1)")
+# Every provider built installs its plugin into the one engine-plugin directory.
+PLUGIN_DIR=$(dirname "$(find "$BUILD" \( -name "libhip_kernel_provider*.so" -o -name "libmiopen_plugin*.so" \) \
+    -path "*plugins*" | head -1)")
 # The generator benchmarks against a COPY of --descriptor-tree, and HIPDNN_DESCRIPTOR_DIR
 # REPLACES the search roots rather than adding to them. A kpack archive lives once per arch
 # at the arch root and every descriptor climbs out of its own folder to reach it, so the
@@ -140,6 +169,12 @@ PLUGIN_DIR=$(dirname "$(find "$BUILD" -name "libhip_kernel_provider*.so" -path "
 # config_not_applicable (measured, run 67926620).
 TREE_ROOT=$(find "$BUILD" -type d -name kpack -path "*arch_content*" | head -1)
 TREE_ROOT=${TREE_ROOT%/kpack}
+if [ -z "$TREE_ROOT" ] && [[ "+$PROVIDERS+" != *"+hip-kernel-provider+"* ]]; then
+    # MIOpen alone ships no descriptors: its L1 models are installed into (and read from)
+    # a root of their own.
+    TREE_ROOT="$OUT/descriptors"
+    mkdir -p "$TREE_ROOT"
+fi
 echo "bench:        ${BENCH:-MISSING}"
 echo "features:     ${FEATURE_EVAL:-MISSING}"
 echo "plugin dir:   ${PLUGIN_DIR:-MISSING}"
@@ -299,7 +334,7 @@ if [[ "+$ROLES+" == *"+l1+"* ]]; then
         --engine "$ENGINE" --engine-id "$ENGINE_ID" \
         --bench "$BENCH" --plugin-dir "$PLUGIN_DIR" \
         --feature-evaluator "$FEATURE_EVAL" \
-        --role predict_engine "${METRIC_ARGS[@]}" --arch "$ARCH" \
+        --role predict_engine "${METRIC_ARGS[@]}" "${ID_ARGS[@]}" --arch "$L1_ARCH" \
         --name "$ENGINE estimate ($ARCH, $ADMITTED graphs)" \
         --output-dir "$OUT/l1" > "$OUT/l1.stdout" 2> "$OUT/l1.stderr"
     echo "L1 generate rc=$? in $(( $(date +%s) - L1_START ))s"

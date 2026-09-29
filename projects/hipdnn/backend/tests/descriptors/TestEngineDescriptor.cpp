@@ -71,8 +71,8 @@ public:
             HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId));
     }
 
-    /// Sets every mock expectation finalize() consumes except the engine name
-    /// resolution, which the caller pins separately.
+    /// Sets every mock expectation finalize() consumes: the applicability check, and nothing
+    /// else -- engine details load on the first details-derived read (expectDetailsLoad).
     void expectFinalizeCalls(int64_t engineId) const
     {
         setGraph();
@@ -82,9 +82,22 @@ public:
             .WillOnce(Return(_mockEnginePluginResourceManager));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillOnce(Return(std::vector<int64_t>{engineId}));
+    }
+
+    /// Sets every mock expectation the first details-derived read consumes except the engine
+    /// name resolution, which the caller pins separately. @p details (default: the fixture's
+    /// serialized details) is read when the provider is asked, not when this is called.
+    /// Call it after finalize(): gmock matches the newest expectation even once saturated, so
+    /// set earlier, its getHandle() would also absorb finalize()'s call.
+    void expectDetailsLoad(const hipdnnPluginConstData_t* details = nullptr) const
+    {
+        const auto* source = details != nullptr ? details : &_serializedEngineDetails;
+        EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
+        EXPECT_CALL(*_mockHandle, getPluginResourceManager())
+            .WillOnce(Return(_mockEnginePluginResourceManager));
         EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
-            .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
-                *d = this->_serializedEngineDetails;
+            .WillOnce(Invoke([source](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
+                *d = *source;
             }));
         EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
     }
@@ -92,8 +105,15 @@ public:
     void makeEngineFinalized() const
     {
         expectFinalizeCalls(ENGINE_ID);
-        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
         ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    }
+
+    /// makeEngineFinalized(), for a test that goes on to read a details-derived attribute.
+    void makeEngineFinalizedExpectingDetails() const
+    {
+        makeEngineFinalized();
+        expectDetailsLoad();
+        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
     }
 
     /// Captures the candidate name the descriptor hands to the resolver and
@@ -331,7 +351,7 @@ TEST_F(TestEngineDescriptor, GetEngineDescriptorUnsupportedAttr)
 TEST_F(TestEngineDescriptor, GetBehaviorNotesCountWithNoNotes)
 {
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
     ASSERT_NO_THROW(engine->getAttribute(
@@ -347,7 +367,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotes)
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION)});
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = 0;
     ASSERT_NO_THROW(engine->getAttribute(
@@ -374,7 +394,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesReturnsNotesWithoutElementCount)
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)});
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     std::vector<hipdnnBackendBehaviorNote_t> notes(2);
     ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE,
@@ -393,7 +413,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesNullOutputReturnsCount)
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
     ASSERT_NO_THROW(engine->getAttribute(
@@ -408,7 +428,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesZeroRequestedWithOutputReturnsCount
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
     int64_t noteCount = -1;
@@ -421,7 +441,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesZeroRequestedWithOutputReturnsCount
 TEST_F(TestEngineDescriptor, GetBehaviorNotesCountQueryRequiresElementCount)
 {
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     ASSERT_THROW_HIPDNN_STATUS(
         engine->getAttribute(
@@ -448,7 +468,7 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesInsufficientOutputCount)
         {static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
          static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY)});
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT;
     int64_t returnedCount = 0;
@@ -458,27 +478,13 @@ TEST_F(TestEngineDescriptor, GetBehaviorNotesInsufficientOutputCount)
         HIPDNN_STATUS_BAD_PARAM);
 }
 
-TEST_F(TestEngineDescriptor, FinalizePreservesUnknownBehaviorNote)
+TEST_F(TestEngineDescriptor, PreservesUnknownBehaviorNote)
 {
     constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
     serializeEngineDetailsWithBehaviorNotes(0, {UNKNOWN_NOTE});
 
-    setGraph();
-    setGlobalIndex(0);
-    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
-    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
-        .WillOnce(Return(_mockEnginePluginResourceManager));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-        .WillOnce(Return(std::vector<int64_t>{0}));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
-        .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
-            *d = this->_serializedEngineDetails;
-        }));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
-
     auto engine = getEngineDescriptor();
-    ASSERT_NO_THROW(engine->finalize());
+    makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendBehaviorNote_t note = HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION;
     int64_t returnedCount = 0;
@@ -488,24 +494,20 @@ TEST_F(TestEngineDescriptor, FinalizePreservesUnknownBehaviorNote)
     EXPECT_EQ(note, UNKNOWN_NOTE);
 }
 
-TEST_F(TestEngineDescriptor, FinalizeFailsWithNegativeBehaviorNote)
+/// Regression. finalize() used to load engine details, and a provider builds its knob list --
+/// defaults included -- by ranking the engine's catalog. Every prediction description and
+/// candidate page starts with a finalized engine descriptor and reads no knob, so each one paid
+/// a cold catalog ranking it never used. Details now wait for a details-derived read.
+TEST_F(TestEngineDescriptor, FinalizeDoesNotQueryEngineDetails)
 {
-    serializeEngineDetailsWithBehaviorNotes(0, {-1});
+    expectFinalizeCalls(ENGINE_ID);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _)).Times(0);
+    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _)).Times(0);
 
-    setGraph();
-    setGlobalIndex(0);
-    EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
-    EXPECT_CALL(*_mockHandle, getPluginResourceManager())
-        .WillOnce(Return(_mockEnginePluginResourceManager));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-        .WillOnce(Return(std::vector<int64_t>{0}));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
-        .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
-            *d = this->_serializedEngineDetails;
-        }));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
-
-    ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    // Neither do the attributes finalize() itself fixes.
+    EXPECT_EQ(getEngineDescriptor()->getEngineId(), ENGINE_ID);
+    (void)getEngineDescriptor()->toString();
 }
 
 TEST_F(TestEngineDescriptor, HeuristicResultMaterializesWithoutSelectorOrMetadataQueries)
@@ -677,14 +679,14 @@ TEST_F(TestEngineDescriptor, GetEngineNameForwardsEngineDetailsNameAsTheCandidat
     serializeEngineDetailsWithName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
 
     expectFinalizeCalls(ENGINE_ID);
-    expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    expectDetailsLoad();
+    expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
 
+    EXPECT_EQ(getEngineName(), "EXAMPLE_PROVIDER_RELU_ENGINE");
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_EQ(*_capturedDetailsName, "EXAMPLE_PROVIDER_RELU_ENGINE");
-
-    EXPECT_EQ(getEngineName(), "EXAMPLE_PROVIDER_RELU_ENGINE");
 }
 
 TEST_F(TestEngineDescriptor, GetEngineNamePublishesResolverAnswerNotItsOwnCandidate)
@@ -695,14 +697,15 @@ TEST_F(TestEngineDescriptor, GetEngineNamePublishesResolverAnswerNotItsOwnCandid
     serializeEngineDetailsWithName(registeredEngineId, "DETAILS_ENGINE");
 
     expectFinalizeCalls(registeredEngineId);
-    expectResolveEngineName(registeredEngineId, "PACK_SUPPLIED_ENGINE");
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    expectDetailsLoad();
+    expectResolveEngineName(registeredEngineId, "PACK_SUPPLIED_ENGINE");
 
+    EXPECT_EQ(getEngineName(), "PACK_SUPPLIED_ENGINE");
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_EQ(*_capturedDetailsName, "DETAILS_ENGINE");
 
-    EXPECT_EQ(getEngineName(), "PACK_SUPPLIED_ENGINE");
     EXPECT_NE(getEngineName(), "DETAILS_ENGINE");
     EXPECT_NE(getEngineName(), hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
 }
@@ -711,14 +714,14 @@ TEST_F(TestEngineDescriptor, GetEngineNameWithoutNameInEngineDetails)
 {
     // Default fixture buffer: engine ID only, so the candidate is present but empty.
     expectFinalizeCalls(ENGINE_ID);
-    expectResolveEngineName(ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    expectDetailsLoad();
+    expectResolveEngineName(ENGINE_ID, std::nullopt);
 
+    EXPECT_EQ(getEngineName(), hipdnn_data_sdk::utilities::formatEngineIdHex(ENGINE_ID));
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_TRUE(_capturedDetailsName->empty());
-
-    EXPECT_EQ(getEngineName(), hipdnn_data_sdk::utilities::formatEngineIdHex(ENGINE_ID));
 }
 
 TEST_F(TestEngineDescriptor, GetEngineNameForUnknownEngineIdUsesHex)
@@ -726,11 +729,12 @@ TEST_F(TestEngineDescriptor, GetEngineNameForUnknownEngineIdUsesHex)
     serializeEngineDetails(UNREGISTERED_ENGINE_ID);
 
     expectFinalizeCalls(UNREGISTERED_ENGINE_ID);
-    expectResolveEngineName(UNREGISTERED_ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    expectDetailsLoad();
+    expectResolveEngineName(UNREGISTERED_ENGINE_ID, std::nullopt);
 
-    EXPECT_TRUE(_resolverCalled);
     EXPECT_EQ(getEngineName(), "0x0123456789ABCDEF");
+    EXPECT_TRUE(_resolverCalled);
 }
 
 TEST_F(TestEngineDescriptor, GetEngineNameEmptyNameInEngineDetails)
@@ -738,42 +742,44 @@ TEST_F(TestEngineDescriptor, GetEngineNameEmptyNameInEngineDetails)
     serializeEngineDetailsWithName(ENGINE_ID, "");
 
     expectFinalizeCalls(ENGINE_ID);
-    expectResolveEngineName(ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    expectDetailsLoad();
+    expectResolveEngineName(ENGINE_ID, std::nullopt);
 
+    EXPECT_EQ(getEngineName(), hipdnn_data_sdk::utilities::formatEngineIdHex(ENGINE_ID));
     // An unset schema string reads back as an empty one and is forwarded as an
     // engaged candidate.
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_TRUE(_capturedDetailsName->empty());
-
-    EXPECT_EQ(getEngineName(), hipdnn_data_sdk::utilities::formatEngineIdHex(ENGINE_ID));
 }
 
-TEST_F(TestEngineDescriptor, FinalizeFailsBeforeNameResolutionWhenEngineDetailsMissing)
+TEST_F(TestEngineDescriptor, ReadingTheNameFailsBeforeResolutionWhenEngineDetailsMissing)
 {
-    // The plugin answers with no engine details at all. finalize() declares a
+    // The plugin answers with no engine details at all. The name read declares a
     // disengaged candidate for this case, but never reaches it: EngineDetailsWrapper
-    // refuses to construct around an empty buffer, so finalize() fails first.
-    setGraph();
-    setGlobalIndex(ENGINE_ID);
+    // refuses to construct around an empty buffer, so the read fails first.
+    expectFinalizeCalls(ENGINE_ID);
+    ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
     EXPECT_CALL(*_mockHandle, getPluginResourceManager())
         .WillOnce(Return(_mockEnginePluginResourceManager));
-    EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-        .WillOnce(Return(std::vector<int64_t>{ENGINE_ID}));
-
     EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _));
     EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _)).Times(0);
 
-    ASSERT_THROW_HIPDNN_STATUS(getEngineDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    int64_t elementCount = 0;
+    ASSERT_THROW_HIPDNN_STATUS(
+        getEngineDescriptor()->getAttribute(
+            HIPDNN_ATTR_ENGINE_NAME_EXT, HIPDNN_TYPE_CHAR, 0, &elementCount, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
     EXPECT_FALSE(_resolverCalled);
 }
 
 TEST_F(TestEngineDescriptor, GetEngineNameInvalidType)
 {
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     int64_t elementCount = 0;
     ASSERT_THROW_HIPDNN_STATUS(
@@ -810,10 +816,11 @@ TEST_F(TestEngineDescriptor, ToStringReportsEngineName)
     serializeEngineDetailsWithName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
 
     expectFinalizeCalls(ENGINE_ID);
-    expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+    expectDetailsLoad();
+    expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
 
-    EXPECT_TRUE(_resolverCalled);
+    EXPECT_EQ(getEngineName(), "EXAMPLE_PROVIDER_RELU_ENGINE");
     EXPECT_NE(getEngineDescriptor()->toString().find("engineName=EXAMPLE_PROVIDER_RELU_ENGINE"),
               std::string::npos);
 }
@@ -864,28 +871,10 @@ protected:
 
     void makeEngineFinalizedWithKnobs() const
     {
-        EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
-        ASSERT_NO_THROW(getEngineDescriptor()->setAttribute(HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
-                                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                            1,
-                                                            &_mockGraphWrapper));
-
-        int64_t engineId = 0;
-        ASSERT_NO_THROW(getEngineDescriptor()->setAttribute(
-            HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, &engineId));
-
-        EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));
-        EXPECT_CALL(*_mockHandle, getPluginResourceManager())
-            .WillOnce(Return(_mockEnginePluginResourceManager));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
-            .WillOnce(Return(std::vector<int64_t>{0}));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _))
-            .WillOnce(Invoke([this](int64_t, const GraphDescriptor*, hipdnnPluginConstData_t* d) {
-                *d = this->_serializedEngineDetailsWithKnobs;
-            }));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, destroyEngineDetails(_, _));
-        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
+        expectFinalizeCalls(0);
         ASSERT_NO_THROW(getEngineDescriptor()->finalize());
+        expectDetailsLoad(&_serializedEngineDetailsWithKnobs);
+        EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
     }
 
     flatbuffers::DetachedBuffer _engineDetailsWithKnobsBuffer;
@@ -895,7 +884,7 @@ protected:
 TEST_F(TestEngineDescriptor, GetKnobInfoCountWithNoKnobs)
 {
     auto engine = getEngineDescriptor();
-    makeEngineFinalized();
+    makeEngineFinalizedExpectingDetails();
 
     int64_t knobCount = -1;
     ASSERT_NO_THROW(engine->getAttribute(HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE,
@@ -1031,7 +1020,7 @@ TEST_F(TestEngineDescriptor, CandidatePageForwardsPagingAndScopeAndIsEnumeratedO
     auto* knobPtr = knobWrapper.get();
 
     expectFinalizeCalls(ENGINE_ID);
-    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _)).Times(0);
     ASSERT_NO_THROW(engine->setAttribute(
         HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT, HIPDNN_TYPE_INT64, 1, &offset));
     ASSERT_NO_THROW(
@@ -1156,7 +1145,9 @@ TEST_F(TestEngineDescriptor, EnginePredictionCarriesTheEngineKindEvaluateFlagAnd
     const int64_t evaluate = 0;
 
     expectFinalizeCalls(ENGINE_ID);
-    EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
+    // Describing a prediction reads no knob, so it must not load engine details: a provider
+    // ranks its catalog to build them.
+    EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _)).Times(0);
     ASSERT_NO_THROW(engine->setAttribute(
         HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT, HIPDNN_TYPE_INT64, 1, &evaluate));
     const std::string metric = "time";

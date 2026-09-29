@@ -918,3 +918,34 @@ def test_an_uncalibrated_score_is_declined_rather_than_measured_meaninglessly():
     assert not any(
         "calibration metrics" in entry for entry in report["not_implemented"]
     ), "§11.2 calibration is implemented; it must not still be listed as a gap"
+
+
+def _trained(keys=None, trained_on="training.json"):
+    from types import SimpleNamespace
+
+    manifest = {"input_file": trained_on}
+    if keys is not None:
+        manifest["training_problem_keys"] = keys
+    return SimpleNamespace(manifest=manifest, trained_on=trained_on)
+
+
+def test_a_renamed_copy_of_the_training_corpus_is_not_held_out():
+    """T5: the file name differed, so a byte-identical renamed copy of the training corpus
+    was reported `held_out`. Only problem identity decides; without recorded keys the
+    answer is `unknown`, and with them the copy's shared problems are a leak."""
+    from uhd_gen.evaluate import _holdout_integrity
+
+    evaluated = [["identical-problem", "board"]]
+    assert _holdout_integrity(_trained(), evaluated)["status"] == "unknown"
+    assert _holdout_integrity(_trained([["identical-problem", "board"]]), evaluated)["status"] == "COMPROMISED"
+    assert _holdout_integrity(_trained([["other-problem", "board"]]), evaluated)["status"] == "held_out"
+
+
+def test_keys_without_device_identity_compare_on_the_graph_alone():
+    """A degraded grouping keys on the graph only: a shared graph might have been measured
+    on another device, so it proves nothing either way; no shared graph is still disjoint."""
+    from uhd_gen.evaluate import _holdout_integrity
+
+    trained = _trained([["g1", "board"]])
+    assert _holdout_integrity(trained, [["g1"]])["status"] == "unknown"
+    assert _holdout_integrity(trained, [["g2"]])["status"] == "held_out"

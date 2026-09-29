@@ -106,9 +106,15 @@ def encode_feature_value(reference: str, value) -> float:
 
 
 def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[str, int]]:
-    """Stable per-reference codes, preserving the exact published string values."""
+    """Stable per-reference codes, preserving the exact published string values.
+
+    An absent binding (a column no row publishes, or a row that does not publish it) has no
+    code: it reaches the evaluator as JSON null, never as a vocabulary entry.
+    """
     encoding = {}
     for column in feature_cols:
+        if column not in df.columns:
+            continue
         series = df[column]
         if getattr(series.dtype, "kind", "O") in "biuf":
             continue
@@ -117,7 +123,7 @@ def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[s
         for value in series:
             if isinstance(value, str):
                 values.add(value)
-            else:
+            elif not _is_absent(value):
                 other_types.add(type(value).__name__)
         if not values:
             continue
@@ -127,6 +133,22 @@ def derive_categorical_encoding(df, feature_cols: list[str]) -> dict[str, dict[s
             value: code for code, value in enumerate(sorted(values))
         }
     return encoding
+
+
+def _is_absent(value) -> bool:
+    """A binding the row does not publish: None, or pandas' NaN/NA filling for a missing key.
+
+    Published values are finite (the §8.3 envelope rejects anything else), so a NaN in a
+    corpus frame is the hole pandas leaves when rows of different operations publish
+    different names -- a conv-fwd row has no `dy`. Arrays are values, never absent.
+    """
+    if value is None:
+        return True
+    if isinstance(value, (str, bytes, list, tuple, dict)) or getattr(value, "ndim", 0):
+        return False
+    import pandas as pd
+
+    return bool(pd.isna(value))
 
 
 EVALUATOR_NAME = "hipdnn_uhd_features"
@@ -222,14 +244,30 @@ def _run_feature_evaluator(signature: list, categorical_encoding: dict | None, r
     return digest, values
 
 
+def evaluate_feature_maps(rows: list[dict], signature: list, categorical_encoding: dict | None = None,
+                          executable: str | Path | None = None) -> tuple[str, list[list[float]]]:
+    """Feature maps (name -> value, None for absent) through the runtime's FeatureExtractor.
+
+    A map that leaves a bare reference unbound fails the whole batch, exactly as the engine
+    refuses that row; `value_or_default`/`present` over an absent name evaluate as they do
+    at runtime. That is the only definition of "this signature evaluates" there is.
+    """
+    return _run_feature_evaluator(signature, categorical_encoding, rows, executable)
+
+
 def evaluate_feature_rows(df, signature: list, categorical_encoding: dict | None = None,
                           executable: str | Path | None = None) -> tuple[str, list[list[float]]]:
-    """One batch through the exact C++ expression implementation used at runtime."""
-    references = signature_references(signature)
-    columns = [reference[1:] for reference in references]
-    missing = set(columns) - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing feature columns: {sorted(missing)}")
-    # to_dict preserves full floating-point precision and native list-valued bindings.
-    rows = df[columns].to_dict(orient="records")
-    return _run_feature_evaluator(signature, categorical_encoding, rows, executable)
+    """One batch through the exact C++ expression implementation used at runtime.
+
+    Every referenced name goes over as JSON null where the row does not publish it,
+    including a column no row has: absence is the evaluator's to interpret, and NaN is not
+    JSON at all.
+    """
+    columns = [reference[1:] for reference in signature_references(signature)]
+    present = [column for column in columns if column in df.columns]
+    # to_dict preserves full floating-point precision and native list-valued bindings. With
+    # no referenced column present it returns no records at all, not one empty map per row.
+    records = df[present].to_dict(orient="records") if present else [{} for _ in range(len(df))]
+    rows = [{column: None if _is_absent(record.get(column)) else record[column] for column in columns}
+            for record in records]
+    return evaluate_feature_maps(rows, signature, categorical_encoding, executable)

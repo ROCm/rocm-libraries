@@ -35,14 +35,18 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            return TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
+            return TreeDataAdapter::load(
+                cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash, cfg.objective);
         }
     }
     else if(cfg.adapterType == "table")
     {
         if(!cfg.modelArtifactPath.empty())
         {
-            return TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
+            // The digest travels with the path for every artifact adapter: it is the
+            // model's content identity (declared, or taken at parse), and a table scored
+            // under an identity its bytes do not have poisons every cache keyed on it.
+            return TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
         }
     }
     else if(cfg.adapterType == "native")

@@ -1991,9 +1991,19 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     {
         return "incompatible KMD identity or semantic revision";
     }
+    // Checked per bound architecture (D2): one model may be bound under several arch keys,
+    // and an L1 model records the matchers of every pack the engine has
+    // (enginePredictionProvenance), not just the ones this key's packs use. So a recorded
+    // matcher is judged by which packs own it:
+    //   - owned by a pack serving @p arch: must be loaded at a compatible revision;
+    //   - owned only by the engine's other-arch packs: says nothing about this arch, ignored;
+    //   - owned by no pack at all: the model was trained against a matcher this engine no
+    //     longer has, which is a contract break on every arch.
     std::set<DescriptorId> relevant;
+    std::set<DescriptorId> owned;
     for(const auto& pack : packs)
     {
+        owned.insert(pack.matcherIds.begin(), pack.matcherIds.end());
         if(arch == "default" || pack.arch.empty()
            || std::find(pack.arch.begin(), pack.arch.end(), arch) != pack.arch.end())
         {
@@ -2002,6 +2012,10 @@ inline std::string provenanceError(const HeuristicDescriptor& model,
     }
     for(const auto& dependency : trained.umd)
     {
+        if(relevant.count(dependency.id) == 0 && owned.count(dependency.id) != 0)
+        {
+            continue;
+        }
         const auto found
             = std::find_if(matchers.begin(), matchers.end(), [&](const MatchDescriptor& matcher) {
                   return matcher.id == dependency.id;

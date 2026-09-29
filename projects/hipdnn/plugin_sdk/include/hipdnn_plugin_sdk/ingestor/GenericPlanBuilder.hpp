@@ -726,15 +726,16 @@ public:
                                             "Ranker returned an unknown candidate");
             }
             const auto knobs = candidateKnobs(*selected);
+            // The same comparison the replay's knob filter makes (applyKnobFilter): the tuple
+            // holds ordinals for non-integer knobs, so reading the metadata as a raw int64_t
+            // found no match for a string, bool, float or list knob, and every candidate that
+            // carried one was refused as unidentifiable.
             const auto matching = std::count_if(
-                catalog.entries.begin(), catalog.entries.end(), [&knobs](const auto& kernel) {
-                    return std::all_of(knobs.begin(), knobs.end(), [&kernel](const auto& setting) {
-                        const auto field = kernel.metadata.find(setting.first);
-                        const auto* value = field == kernel.metadata.end()
-                                                ? nullptr
-                                                : std::get_if<int64_t>(&field->second);
-                        return value != nullptr && *value == setting.second;
-                    });
+                catalog.entries.begin(), catalog.entries.end(), [this, &knobs](const auto& kernel) {
+                    return std::all_of(
+                        knobs.begin(), knobs.end(), [this, &kernel](const auto& setting) {
+                            return _stateManager.knobMatches(kernel, setting.first, setting.second);
+                        });
                 });
             if(matching != 1)
             {

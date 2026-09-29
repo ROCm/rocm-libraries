@@ -36,10 +36,13 @@ public:
     /// @param modelPath Path to the .fb model file.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @param expectedModelHash Optional checksum of the model file for integrity validation.
+    /// @param objective The UHD's `objective`: `min` when the model predicts a cost. Only a
+    ///        grouped model reads it -- see scoreBatch.
     /// @returns Adapter or nullptr if loading/validation fails.
     static std::unique_ptr<TreeDataAdapter> load(const std::string& modelPath,
                                                  const std::string& expectedFeaturesHash,
-                                                 const std::string& expectedModelHash = "");
+                                                 const std::string& expectedModelHash = "",
+                                                 const std::string& objective = "max");
 
     /// Load from an in-memory buffer.
     /// @param buffer FlatBuffer data. Used only during this call; prepared nodes
@@ -47,12 +50,14 @@ public:
     /// @param size Size of buffer in bytes.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
     /// @param expectedModelHash Optional checksum of the model file for integrity validation.
+    /// @param objective The UHD's `objective`, as for load().
     /// @returns Adapter or nullptr if validation fails.
     static std::unique_ptr<TreeDataAdapter> loadFromBuffer(const uint8_t* buffer,
                                                            size_t size,
                                                            const std::string& expectedFeaturesHash,
                                                            const std::string& expectedModelHash
-                                                           = "");
+                                                           = "",
+                                                           const std::string& objective = "max");
 
     ~TreeDataAdapter() override = default;
 
@@ -65,7 +70,8 @@ public:
     ///
     /// A single-layer model answers per row, so the base implementation's loop is right for
     /// it and this override reduces to that. A grouped model cannot: picking the group is a
-    /// decision across rows, and no per-row call can express it.
+    /// decision across rows, and no per-row call can express it. Scores are returned raw --
+    /// unoriented, like score()'s -- so only the group choice depends on the objective.
     std::vector<double> scoreBatch(const std::vector<std::vector<double>>& batch) const override;
 
     /// The slot `scoreBatch` groups on, so a ranker reports the same group the model used.
@@ -141,26 +147,26 @@ private:
                     size_t numFeatures,
                     double baseScore,
                     std::vector<std::string> trainingArches,
-                    std::string modelVersion);
+                    std::string modelVersion,
+                    bool lowerIsBetter);
 
     /// Prepare one ensemble. Takes the tree vector rather than the model so that a group's
     /// trees go through exactly the validation layer 1's do -- a group whose trees were
     /// trusted where layer 1's were checked would be the one path into the walker that can
     /// index outside a row.
-    static bool
-        prepareTrees(const flatbuffers::Vector<
-                         flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
-                     int32_t numFeatures,
-                     std::vector<Node>& nodes,
-                     std::vector<uint32_t>& roots);
+    static bool prepareTrees(
+        const flatbuffers::Vector<
+            flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::GbdtTree>>* trees,
+        int32_t numFeatures,
+        std::vector<Node>& nodes,
+        std::vector<uint32_t>& roots);
 
     template <bool CheckFeatureCount>
     double scorePrepared(const std::vector<double>& features,
                          const std::vector<uint32_t>& roots) const;
 
     /// Sum one ensemble over a row, choosing the short-row path the same way `score` does.
-    double scoreRoots(const std::vector<double>& features,
-                      const std::vector<uint32_t>& roots) const
+    double scoreRoots(const std::vector<double>& features, const std::vector<uint32_t>& roots) const
     {
         if(roots.empty())
         {
@@ -178,6 +184,11 @@ private:
     size_t _numFeatures;
     double _baseScore;
 
+    /// Which way layer 1's score points. The artifact does not record it -- the UHD's
+    /// `objective` does -- and the group choice is the one decision this adapter makes rather
+    /// than hands back, so it is the one place the adapter has to know.
+    bool _lowerIsBetter;
+
     // RFC 0019 §9.2, §13: Model provenance for out-of-distribution detection
     std::vector<std::string> _trainingArches;
     std::string _modelVersion;
@@ -188,7 +199,8 @@ namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 inline std::unique_ptr<TreeDataAdapter>
     TreeDataAdapter::load(const std::string& modelPath,
                           const std::string& expectedFeaturesHash,
-                          const std::string& expectedModelHash)
+                          const std::string& expectedModelHash,
+                          const std::string& objective)
 {
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
@@ -209,14 +221,16 @@ inline std::unique_ptr<TreeDataAdapter>
         return nullptr;
     }
 
-    return loadFromBuffer(buffer.data(), buffer.size(), expectedFeaturesHash, expectedModelHash);
+    return loadFromBuffer(
+        buffer.data(), buffer.size(), expectedFeaturesHash, expectedModelHash, objective);
 }
 
 inline std::unique_ptr<TreeDataAdapter>
     TreeDataAdapter::loadFromBuffer(const uint8_t* buffer,
                                     size_t size,
                                     const std::string& expectedFeaturesHash,
-                                    const std::string& expectedModelHash)
+                                    const std::string& expectedModelHash,
+                                    const std::string& objective)
 {
     // Guard against null/empty buffer
     if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4 || size > 256 * 1024 * 1024)
@@ -309,10 +323,9 @@ inline std::unique_ptr<TreeDataAdapter>
         // would be read for every candidate of every ranking.
         if(groupFeatureIndex < 0 || groupFeatureIndex >= model->num_features())
         {
-            HIPDNN_SDK_LOG_ERROR(
-                "TreeDataAdapter: grouped model's group_by_feature_index "
-                << groupFeatureIndex << " is outside the declared feature count "
-                << model->num_features());
+            HIPDNN_SDK_LOG_ERROR("TreeDataAdapter: grouped model's group_by_feature_index "
+                                 << groupFeatureIndex << " is outside the declared feature count "
+                                 << model->num_features());
             return nullptr;
         }
         groups.reserve(model->groups()->size());
@@ -360,7 +373,8 @@ inline std::unique_ptr<TreeDataAdapter>
                                                                 numFeatures,
                                                                 baseScore,
                                                                 std::move(trainingArches),
-                                                                modelVersion));
+                                                                modelVersion,
+                                                                objective == "min"));
 }
 
 inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
@@ -371,7 +385,8 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
                                         size_t numFeatures,
                                         double baseScore,
                                         std::vector<std::string> trainingArches,
-                                        std::string modelVersion)
+                                        std::string modelVersion,
+                                        bool lowerIsBetter)
     : _nodes(std::move(nodes))
     , _roots(std::move(roots))
     , _groups(std::move(groups))
@@ -379,6 +394,7 @@ inline TreeDataAdapter::TreeDataAdapter(std::vector<Node> nodes,
     , _featuresHash(std::move(featuresHash))
     , _numFeatures(numFeatures)
     , _baseScore(baseScore)
+    , _lowerIsBetter(lowerIsBetter)
     , _trainingArches(std::move(trainingArches))
     , _modelVersion(std::move(modelVersion))
 {
@@ -538,9 +554,12 @@ inline std::vector<double>
 
     // Layer 1 ranks the groups. Its score for a row stands for the group that row belongs
     // to, so the group's standing is the best its members achieve -- the same "achievable
-    // when tuned" quantity layer 1 was trained on.
+    // when tuned" quantity layer 1 was trained on. "Best" is in the objective's direction: a
+    // `min` model predicts a cost, and taking its largest would choose the slowest group.
+    // The raw score is compared, before any transform inversion, which is safe because every
+    // registered transform is increasing and so preserves the direction.
     const auto slot = static_cast<size_t>(_groupFeatureIndex);
-    double bestGroupScore = -std::numeric_limits<double>::infinity();
+    double bestGroupScore = 0.0;
     double chosenGroup = 0.0;
     bool chosen = false;
     for(const auto& row : batch)
@@ -550,7 +569,9 @@ inline std::vector<double>
             continue;
         }
         const double groupScore = score(row);
-        if(!chosen || groupScore > bestGroupScore)
+        const bool better
+            = _lowerIsBetter ? groupScore < bestGroupScore : groupScore > bestGroupScore;
+        if(!chosen || better)
         {
             bestGroupScore = groupScore;
             chosenGroup = row[slot];
@@ -586,8 +607,9 @@ inline std::vector<double>
         // A group layer 1 picked but layer 2 does not describe: rank it by layer 1 rather
         // than discarding it, so a partially trained artifact degrades instead of refusing
         // the only group it chose.
-        scores[i] = within == nullptr || within->roots.empty() ? score(batch[i])
-                                                               : scoreRoots(batch[i], within->roots);
+        scores[i] = within == nullptr || within->roots.empty()
+                        ? score(batch[i])
+                        : scoreRoots(batch[i], within->roots);
     }
     return scores;
 }

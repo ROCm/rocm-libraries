@@ -31,16 +31,17 @@ class MiopenEngine : public hipdnn_plugin_sdk::
 {
 public:
     /// @param name        This engine's hipDNN name, as its container declared it.
-    /// @param l1ModelIds  Architecture (`default`, or a gcnArchName prefix) to the UUIDs
-    ///                    of the `predict_engine` UHDs this engine binds, at most one per
-    ///                    ranking metric; each model's metric is its own `score.metric`.
-    ///                    See MiopenContainer::getEngineDefinitions(), which is where the
-    ///                    declaration lives: MIOpen serves two engines from this one
-    ///                    class and they perform differently, so each declares its own
-    ///                    ids. Empty, or an id nothing deploys, means no L1 estimate.
-    MiopenEngine(int64_t id,
-                 std::string name,
-                 std::map<std::string, std::vector<std::string>> l1ModelIds);
+    /// @param l1ModelIds  Registered ranking metric to the UUID of the `predict_engine`
+    ///                    UHD this engine binds for it. Every id binds under `default`:
+    ///                    one model may serve several architectures, and its artifact's
+    ///                    `training_arches` decides which per query. A deployed model
+    ///                    whose `score.metric` differs from the metric its id is declared
+    ///                    for is refused. See MiopenContainer::getEngineDefinitions(),
+    ///                    which is where the declaration lives: MIOpen serves two engines
+    ///                    from this one class and they perform differently, so each
+    ///                    declares its own ids. Empty, or an id nothing deploys, means no
+    ///                    L1 estimate.
+    MiopenEngine(int64_t id, std::string name, std::map<std::string, std::string> l1ModelIds);
 
     int64_t id() const override;
 
@@ -59,7 +60,9 @@ public:
     /// by naming those UHDs' UUIDs in its provider's own engine definition rather than
     /// through a UED role map (§3.1). The document itself claims nothing -- §4.1 keeps a
     /// UHD free of `engine`, `role` and `arch` members -- so the binding identity is
-    /// entirely in compiled provider code.
+    /// entirely in compiled provider code. A description (@p evaluate false) names the
+    /// id declared for the requested metric as the binding's `uhd_id` even when nothing
+    /// is deployed, so collection knows what to promote a first model under.
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(HipdnnMiopenHandle& handle,
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
@@ -87,11 +90,14 @@ private:
     int64_t _id;
     std::string _name;
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    /// `<provider>/<provider version>/<selector>/<library>`, resolved once at
-    /// construction: it queries the MIOpen library version, and it is both what a
-    /// deployed model must have recorded (RFC 0019 §4.1
-    /// `trained_against.selector_revision`) and what the prediction reports.
+    /// `miopen-provider/<major.minor.patch>/<engine>-<policy revision>/miopen-<x.y.z>`,
+    /// resolved once at construction: it queries the MIOpen library version, and it is
+    /// both what a deployed model must have recorded (RFC 0019 §4.1
+    /// `trained_against.selector_revision`) and what the prediction reports. Never the
+    /// build's commit, so a model survives a rebuild at another commit.
     std::string _selectorRevision;
+    /// Metric to declared UHD id, as the container passed it.
+    std::map<std::string, std::string> _l1ModelIds;
     /// Resolved once at construction from the declared ids. Empty when no descriptor root
     /// is installed, which the engine reports as UNAVAILABLE rather than an error.
     hipdnn_plugin_sdk::uhd::EngineModelBinding _l1Models;

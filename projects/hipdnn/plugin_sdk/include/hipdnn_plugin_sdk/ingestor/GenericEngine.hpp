@@ -241,13 +241,24 @@ public:
         {
             result.kind = PredictionKind::CONFIGURATION;
             result.status = PredictionStatus::UNAVAILABLE;
-            result.uhd_id.clear();
+            // The model a configuration prediction evaluates is the L2 ranker's, not the L1
+            // model the binding above named. Clearing the id instead -- which this did -- left
+            // getPredictionCapabilities unable to list any L2 model, since a capability is a
+            // description that names one. Read off the bindings: describing ranks nothing.
+            result.uhd_id = _stateManager->calibratedModelId(metric, arch);
             result.reason = "Exact configuration prediction was not evaluated";
             if(!result.binding_json.empty())
             {
                 auto binding = nlohmann::json::parse(result.binding_json);
                 binding["role"] = "sort_kernel_catalog";
-                binding.erase("uhd_id");
+                if(result.uhd_id.empty())
+                {
+                    binding.erase("uhd_id");
+                }
+                else
+                {
+                    binding["uhd_id"] = result.uhd_id;
+                }
                 result.binding_json = binding.dump();
             }
         }

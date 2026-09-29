@@ -22,7 +22,6 @@ class KnobSettingDescriptor;
 namespace plugin
 {
 class EngineDetailsWrapper;
-class EnginePluginResourceManager;
 }
 
 class EngineDescriptor : public HipdnnBackendDescriptorImpl<EngineDescriptor>
@@ -56,8 +55,9 @@ private:
     /// Resolved with details; publication is guarded by _detailsOnce/_detailsLoaded.
     mutable std::string _engineName;
 
-    void ensureDetailsLoaded(const std::shared_ptr<plugin::EnginePluginResourceManager>& manager
-                             = nullptr) const;
+    /// Queries the provider for engine details once, on the first read of an attribute
+    /// derived from them (knobs, behavior notes, name). finalize() does not load them.
+    void ensureDetailsLoaded() const;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,
                   int64_t elementCount,

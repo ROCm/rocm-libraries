@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/table_model_generated.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/Sha256.hpp>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -50,17 +51,22 @@ public:
     /// Load a table model from a FlatBuffer file.
     /// @param modelPath Path to the .fb model file.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
+    /// @param expectedModelHash The UHD's artifact digest (SHA-256 hex); empty skips it.
     /// @returns Adapter or nullptr if loading/validation fails.
     static std::unique_ptr<TableAdapter> load(const std::string& modelPath,
-                                              const std::string& expectedFeaturesHash);
+                                              const std::string& expectedFeaturesHash,
+                                              const std::string& expectedModelHash = "");
 
     /// Load from an in-memory buffer.
     /// @param buffer FlatBuffer data. Copied into the adapter.
     /// @param size Size of buffer in bytes.
     /// @param expectedFeaturesHash Hash from UHD features_signature.
+    /// @param expectedModelHash The UHD's artifact digest (SHA-256 hex); empty skips it.
     /// @returns Adapter or nullptr if validation fails.
-    static std::unique_ptr<TableAdapter>
-        loadFromBuffer(const uint8_t* buffer, size_t size, const std::string& expectedFeaturesHash);
+    static std::unique_ptr<TableAdapter> loadFromBuffer(const uint8_t* buffer,
+                                                        size_t size,
+                                                        const std::string& expectedFeaturesHash,
+                                                        const std::string& expectedModelHash = "");
 
     ~TableAdapter() override = default;
 
@@ -146,7 +152,8 @@ inline std::size_t VectorHash::operator()(const std::vector<uint32_t>& vec) cons
 }
 
 inline std::unique_ptr<TableAdapter> TableAdapter::load(const std::string& modelPath,
-                                                        const std::string& expectedFeaturesHash)
+                                                        const std::string& expectedFeaturesHash,
+                                                        const std::string& expectedModelHash)
 {
     std::ifstream file(modelPath, std::ios::binary | std::ios::ate);
     if(!file)
@@ -155,7 +162,7 @@ inline std::unique_ptr<TableAdapter> TableAdapter::load(const std::string& model
     }
 
     auto size = file.tellg();
-    if(size <= 0)
+    if(size <= 0 || size > static_cast<std::streamoff>(256 * 1024 * 1024))
     {
         return nullptr;
     }
@@ -167,16 +174,38 @@ inline std::unique_ptr<TableAdapter> TableAdapter::load(const std::string& model
         return nullptr;
     }
 
-    return loadFromBuffer(buffer.data(), buffer.size(), expectedFeaturesHash);
+    return loadFromBuffer(buffer.data(), buffer.size(), expectedFeaturesHash, expectedModelHash);
 }
 
-inline std::unique_ptr<TableAdapter> TableAdapter::loadFromBuffer(
-    const uint8_t* buffer, size_t size, const std::string& expectedFeaturesHash)
+inline std::unique_ptr<TableAdapter>
+    TableAdapter::loadFromBuffer(const uint8_t* buffer,
+                                 size_t size,
+                                 const std::string& expectedFeaturesHash,
+                                 const std::string& expectedModelHash)
 {
     // Guard against null/empty buffer
-    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4)
+    if(buffer == nullptr || size < sizeof(flatbuffers::uoffset_t) + 4 || size > 256 * 1024 * 1024)
     {
         return nullptr;
+    }
+
+    // RFC 0019 §9.2 integrity validation, exactly as TreeDataAdapter runs it: the digest is
+    // what identifies this model's content to every cache that outlives the process, so a
+    // table artifact whose bytes differ from it must not be scored under that identity. The
+    // check ran for tree_data and custom_library but not here, so a substituted table was
+    // used silently. ERROR for the reason TreeDataAdapter gives.
+    if(!expectedModelHash.empty())
+    {
+        const std::string actualHash = sha256(buffer, size);
+        if(actualHash != expectedModelHash)
+        {
+            HIPDNN_SDK_LOG_ERROR(
+                "TableAdapter: model hash mismatch - expected='"
+                << expectedModelHash << "' actual='" << actualHash
+                << "'; the model is not used -- ranking degrades to static_order and an "
+                   "engine estimate is reported as 0");
+            return nullptr;
+        }
     }
 
     // Verify file identifier

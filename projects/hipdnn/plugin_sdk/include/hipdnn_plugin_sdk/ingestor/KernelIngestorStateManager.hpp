@@ -267,6 +267,14 @@ public:
         return restrictRanking(ranking, filtered);
     }
 
+    /// The model calibratedRanking() would answer with for @p metric on @p arch, from the
+    /// heuristic's bindings alone: builds no catalog and ranks nothing. See
+    /// IKernelHeuristic::calibratedModelId.
+    std::string calibratedModelId(const std::string& metric, const std::string& arch) const
+    {
+        return _heuristic->calibratedModelId(metric, arch);
+    }
+
     /// Every kernel that applies to the graph and device @p context names, unordered.
     std::vector<KernelDefinition> unsortedDefinitions(const MatchContext& context) const
     {
@@ -1018,10 +1026,11 @@ private:
     {
         const std::string shardArch(stripArchFeatures(gcnArchName));
 
-        if(_engine.name.empty())
+        if(_engine.name.empty() || !_engine.contentIdentified)
         {
-            // No engine name means no shard path; mark it loaded so later lookups take
-            // the fast in-memory-only path.
+            // No engine name means no shard path, and no content identity means no shard
+            // that could be tied to the model producing it; mark it loaded so later lookups
+            // take the fast in-memory-only path.
             const std::lock_guard<std::mutex> guard(_winnerCacheMutex);
             _loadedWinnerShards.insert(shardArch);
             return;
@@ -1124,7 +1133,7 @@ private:
     WinnerRecord
         writeBackToShard(const WinnerKey& key, WinnerRecord record, WinnerWriteCause cause) const
     {
-        if(_engine.name.empty())
+        if(_engine.name.empty() || !_engine.contentIdentified)
         {
             return record;
         }

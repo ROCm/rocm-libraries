@@ -109,6 +109,22 @@ submission runs on either.
 `UHD_ROLES` is `+`-separated: sbatch's own `--export` parser splits its value on commas.
 `UHD_METRICS` (e.g. `tflops+time`, same separator) trains one UHD per ranking metric per
 role from the same run; unset, each role trains its default `tflops` model as before.
+`UHD_PROVIDERS` (same separator, default `hip-kernel-provider`) picks the providers built;
+`miopen-provider` adds `MIOPEN_ENGINE` and `MIOPEN_ENGINE_DETERMINISTIC` (convolutions):
+
+```bash
+$SUBMIT --constraint=GFX950 --time=06:00:00 \
+    --export=ALL,UHD_PROVIDERS=miopen-provider,UHD_GRAPHS=/exchange/conv-corpus-950,UHD_ENGINE=MIOPEN_ENGINE,UHD_ROLES=l1,UHD_METRICS=tflops+time,UHD_ARCH=gfx950,UHD_KEEP=/exchange/out-950-miopen \
+    generate.sbatch
+```
+
+An engine with no UED (AITER, MIOpen) reads only the UHD ids its provider declares, one
+per metric (`declared_ids.sh` mirrors the provider tables); `generate.sbatch` and
+`bakeoff.sbatch` pass them as `--uhd-id METRIC=UUID` (`UHD_IDS` overrides for generate)
+and `generate` refuses an id that contradicts what the engine reports. MIOpen declares its
+ids under `default`, so its models are promoted there (`UHD_L1_ARCH` overrides). A corpus
+root is read through its `manifest.json`; a graph whose collection fails is skipped and
+recorded (`failed_graphs` in `generation_manifest.json`) unless more than 5% fail.
 
 Each run keeps `l1/corpus.csv` (one measured row per graph), `l1/model/` (the artifact and
 `eval_report.json`) and `declined.txt`. With several metrics these become
@@ -132,7 +148,8 @@ mostly solving different problems.
 ## 4. Check the models the way the runtime will
 
 `bakeoff.sbatch` installs several trained models into one runtime and asks every engine to
-predict every graph — the cross-engine question L1 exists for.
+predict every graph — the cross-engine question L1 exists for — once per metric in
+`UHD_METRICS` (default `tflops`). `UHD_PROVIDERS` works as for `generate.sbatch`.
 
 ```bash
 $SUBMIT --constraint=GFX950 \
@@ -140,19 +157,24 @@ $SUBMIT --constraint=GFX950 \
     bakeoff.sbatch
 ```
 
-Then score it — predicted winner against measured winner, per regime, with the throughput
-given up when they disagree:
+A MIOpen convolution bake-off for both metrics names each metric's model directory:
+`UHD_PROVIDERS=miopen-provider+hip-kernel-provider`, `UHD_METRICS=tflops+time`,
+`UHD_MODELS=miopen-tflops=<out>/l1/model_tflops:MIOPEN_ENGINE;miopen-time=<out>/l1/model_time:MIOPEN_ENGINE;...`.
+
+Then score it — predicted winner against measured winner, per metric and per regime, with
+the regret of the predicted pick when they disagree:
 
 ```bash
 python3 score_predictions.py --manifest /tmp/corpus-950/manifest.json \
     --predictions /exchange/bakeoff-950/predictions.json \
-    --measured rocKE=/exchange/out-950-dense/l1/corpus.csv \
-    --measured AITER=/exchange/out-950-aiter/l1/corpus.csv
+    --measured /exchange/out-950-dense/l1/corpus.csv \
+    --measured /exchange/out-950-aiter/l1/corpus.csv
 ```
 
-Then join its `predictions.json` against the measured `corpus.csv` files: for every graph
-both engines serve, does the model that predicts the higher figure belong to the engine
-that measured faster? That ratio is the number to judge L1 by — not its absolute error.
+Engines are named as the runtime names them, so any engine scores. Each metric is scored
+in its own direction: the winner of `tflops` is the highest figure, of `time` the lowest,
+and a measured row counts only toward the metric its `binding` was collected under. The
+agreement ratio is the number to judge L1 by — not its absolute error.
 
 **Every model in one bake-off must come from builds that report the same selector
 revision.** The loader refuses a model whose recorded `trained_against.selector_revision`

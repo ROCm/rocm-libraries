@@ -1266,6 +1266,8 @@ def _flatbuffer_scorer(
     signature: list | None = None,
     feature_evaluator: str | None = None,
     expected_hash: str | None = None,
+    model_hash: str | None = None,
+    objective: str | None = None,
     score_transform: str = "log1p",
 ) -> Scorer:
     """Score with the artifact that actually ships.
@@ -1278,15 +1280,20 @@ def _flatbuffer_scorer(
     `TreeDataAdapter::score()` does -- unit learning rate, LightGBM having folded the
     shrinkage into the dumped leaf values -- and the log1p inverse is applied for
     callers who want the value, not because ranking needs it.
+
+    The bytes pass the loader's own checks first (`verify_tree_artifact`: declared digest,
+    `HGBM` identifier, structure) and then its features-hash comparison, so a file the
+    engine refuses -- and silently replaces with static order -- is never reported here as
+    a model with a regret.
     """
     import uhd_gen  # noqa: F401  puts _generated/ on sys.path
 
     from hipdnn_flatbuffers_sdk.data_objects.GbdtModel import GbdtModelT
 
+    from .artifact import verify_tree_artifact
     from .train_uhd import build_feature_matrix
 
-    with open(artifact, "rb") as handle:
-        model = GbdtModelT.InitFromPackedBuf(bytearray(handle.read()), 0)
+    model = GbdtModelT.InitFromPackedBuf(bytearray(verify_tree_artifact(artifact, model_hash)), 0)
     if expected_hash is not None:
         stored_hash = model.featuresHash.decode("utf-8") if isinstance(model.featuresHash, bytes) else model.featuresHash
         if stored_hash != expected_hash:
@@ -1315,6 +1322,9 @@ def _flatbuffer_scorer(
     # single-layer model produces, so nothing about the output would look wrong.
     group_slot = int(model.groupByFeatureIndex if model.groupByFeatureIndex is not None else -1)
     groups = {float(group.value): arrays_of(group.trees) for group in (model.groups or [])}
+    if groups and objective not in ("max", "min"):
+        raise ValueError(f"{artifact}: a grouped artifact chooses its group in the objective's "
+                         f"direction, and the descriptor declares none ({objective!r})")
 
     def ensemble(arrays: list[tuple[np.ndarray, ...]], matrix: np.ndarray,
                  rows: np.ndarray) -> np.ndarray:
@@ -1351,8 +1361,10 @@ def _flatbuffer_scorer(
         # `evaluate_corpus` calls a scorer with one problem's candidates, which is the batch
         # TreeDataAdapter::scoreBatch is handed, so the group decision is made over exactly
         # this frame. Choosing one group across several problems would let one problem's
-        # winner blank out another's candidates.
-        chosen = matrix[int(np.argmax(layer_one)), group_slot]
+        # winner blank out another's candidates. The best layer-1 score is the smallest one
+        # under `min`: taking the largest picked the slowest group of a time model.
+        best_row = np.argmin(layer_one) if objective == "min" else np.argmax(layer_one)
+        chosen = matrix[int(best_row), group_slot]
         inside = np.flatnonzero(matrix[:, group_slot] == chosen)
         raw = np.full(len(frame), -np.inf, dtype=np.float64)
         # A group layer 1 picked but layer 2 does not describe is ranked by layer 1, matching
@@ -1479,9 +1491,15 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
                                      signature=signature, feature_evaluator=feature_evaluator,
                                      score_transform=transform)
         else:
+            # The declared digest guards the artifact the descriptor names; an explicitly
+            # supplied other file (--model) has no declaration to hold it to.
+            declared = descriptor.get("tree_data", {})
+            named = model_dir / declared["artifact"] if declared.get("artifact") else None
+            model_hash = declared.get("hash") if named is not None and candidate.resolve() == named.resolve() else None
             scorer = _flatbuffer_scorer(candidate, features, categorical_encoding,
                                         signature=signature, feature_evaluator=feature_evaluator,
-                                        expected_hash=expected_hash, score_transform=transform)
+                                        expected_hash=expected_hash, model_hash=model_hash,
+                                        objective=objective, score_transform=transform)
 
     return ModelBundle(
         scorer=scorer, features=list(features),
@@ -1492,43 +1510,47 @@ def load_model(model_dir: Path, model_file: Path | None = None, *, feature_evalu
     )
 
 
-def _holdout_integrity(corpus: Path, bundle: ModelBundle) -> dict[str, str]:
+def _holdout_integrity(bundle: ModelBundle, evaluated: Iterable[Sequence[str]]) -> dict[str, str]:
     """Was the model kept away from the problems it is about to be scored on?
 
-    A model fitted on the whole corpus has already seen every evaluation problem, and
-    §5.6.4 is explicit that scoring a problem with a model that saw it is a leak. This
-    cannot be proved from the artifacts -- only the training input's path is recorded --
-    but the common case, evaluating the same CSV that was trained on, IS detectable,
-    and it is exactly the case that produces a flattering number.
+    Only problem identity can answer that. The training manifest records the keys the model
+    was fitted on (`training_problem_keys`, the same `problem_keys` identity the split
+    uses): disjoint from every evaluated key is `held_out`, any shared key is `COMPROMISED`.
+    A file name proves nothing either way -- a renamed copy of the training corpus is the
+    same problems -- so without recorded keys the answer is `unknown`.
     """
-    if bundle.trained_on is None:
-        return {
-            "status": "unknown",
-            "detail": "the model directory has no train_manifest.json, so what it was "
-            "trained on cannot be checked; if it was this corpus, the regret below is "
-            "optimistic (RFC 0019.13 §5.6.4).",
-        }
-    try:
-        same = Path(bundle.trained_on).resolve() == corpus.resolve()
-    except OSError:
-        same = str(bundle.trained_on) == str(corpus)
-    if same:
-        return {
-            "status": "COMPROMISED",
-            "detail": f"the model was trained on this very corpus ({bundle.trained_on}), "
-            "so it has already seen every evaluation problem. §5.6.4: scoring a problem "
-            "with a model that trained on it is a leak, and the regret below is "
-            "optimistic by an unknown amount. Use --emit-train-slice to write the "
-            "training side of this split, train on THAT, then evaluate again with the "
-            "same --seed and --eval-fraction.",
-        }
-    return {
-        "status": "held_out",
-        "detail": f"the model was trained on {bundle.trained_on}, which is not this "
-        "corpus file. Whether that file overlaps this one's evaluation problems is not "
-        "checkable from the artifacts; with --emit-train-slice it does not overlap by "
-        "construction.",
-    }
+    evaluated = {tuple(str(part) for part in key) for key in evaluated}
+    recorded = bundle.manifest.get("training_problem_keys")
+    if recorded is None:
+        trained_on = getattr(bundle, "trained_on", None)
+        trained_on = f" ({trained_on})" if trained_on else ""
+        return {"status": "unknown",
+                "detail": f"the model records no training problem keys{trained_on}, so whether it "
+                "saw this corpus's evaluation problems cannot be shown; if it did, the regret "
+                "below is optimistic (RFC 0019.13 §5.6.4)."}
+    trained = {tuple(str(part) for part in key) for key in recorded}
+    # A corpus without device identity groups by graph alone. Keys of different widths are
+    # compared on the graph both still carry: no shared graph is disjoint, but a shared
+    # graph may have been measured on another device, which neither side can tell.
+    narrowed = len({len(key) for key in trained | evaluated}) > 1
+    if narrowed:
+        trained = {key[:1] for key in trained}
+        evaluated = {key[:1] for key in evaluated}
+    overlap = trained & evaluated
+    if overlap and narrowed:
+        return {"status": "unknown",
+                "detail": "training and evaluation keys differ in width (one corpus has no device "
+                "identity) and share graphs, so disjointness cannot be shown"}
+    if overlap:
+        return {"status": "COMPROMISED",
+                "detail": f"{len(overlap)} of {len(evaluated)} evaluated problem(s) are among the "
+                "model's recorded training problems. §5.6.4: scoring a problem with a model that "
+                "trained on it is a leak, and the regret below is optimistic by an unknown "
+                "amount. Use --emit-train-slice to write the training side of this split, train "
+                "on THAT, then evaluate again with the same --seed and --eval-fraction."}
+    return {"status": "held_out",
+            "detail": f"none of the {len(evaluated)} evaluated problem(s) is among the "
+            f"{len(trained)} recorded training problem(s)"}
 
 
 # --------------------------------------------------------------------------------------
@@ -1690,7 +1712,8 @@ def run_evaluate(args: argparse.Namespace) -> int:
                                   for path in args.additional_model_dir]
             frame = read_corpus(corpus_path)
             report = evaluate_immediate(frame, bundles, eval_fraction=args.eval_fraction, seed=args.seed,
-                                        include_per_problem=args.include_per_problem)
+                                        include_per_problem=args.include_per_problem,
+                                        feature_evaluator=args.feature_evaluator)
             report["corpus"]["path"] = str(corpus_path)
             report["models"] = [{"artifact": item.source, "uhd_id": item.descriptor.get("id")} for item in bundles]
             if args.emit_train_slice:
@@ -1770,7 +1793,7 @@ def run_evaluate(args: argparse.Namespace) -> int:
         "trained_on": bundle.trained_on,
         "training_rows": bundle.training_rows,
     }
-    report["holdout_integrity"] = _holdout_integrity(corpus_path, bundle)
+    report["holdout_integrity"] = _holdout_integrity(bundle, report["split"]["eval_problem_keys"])
     if report["holdout_integrity"]["status"] == "COMPROMISED":
         report["warnings"].append(
             "HELD-OUT SLICE COMPROMISED: " + report["holdout_integrity"]["detail"]

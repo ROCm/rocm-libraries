@@ -12,7 +12,7 @@ pytest.importorskip("flatbuffers")
 
 from uhd_gen.__main__ import main
 from uhd_gen.evaluate import load_model
-from uhd_gen.features import compute_features_hash, evaluate_feature_rows
+from uhd_gen.features import compute_features_hash, derive_categorical_encoding, evaluate_feature_rows
 
 PROVENANCE = {"ued": {"id": "13ab344f-4818-4772-bb8e-8e1441fec82c", "revision": "2.3"},
               "kmd": {"id": "46d64d06-18eb-483d-9bb4-94472d32b78d", "revision": "1.4"}, "umd": []}
@@ -27,6 +27,26 @@ def test_inline_ast_and_categorical_leaves_match_runtime(evaluator):
     digest, values = evaluate_feature_rows(frame, signature, encoding, evaluator)
     assert values == [[5, 1, 1], [1, 0, 0]]
     assert digest == compute_features_hash(signature, encoding, evaluator)
+
+
+DY = "graph.nodes[0].dy.dims[0]"
+
+
+def test_an_unpublished_binding_is_null_for_the_evaluator_not_nan_or_an_error(evaluator):
+    """A conv-fwd row publishes no `dy`; pandas fills the hole with NaN, which is not JSON,
+    and a column no row publishes is not in the frame at all. Both reach the evaluator as
+    absent, where `value_or_default` answers exactly as it does at runtime."""
+    signature = [{"value_or_default": [f"${DY}", 0]}]
+    mixed = pd.DataFrame([{"graph.flops": 1e12}, {"graph.flops": 1e12, DY: 4}])
+    assert evaluate_feature_rows(mixed, signature, executable=evaluator)[1] == [[0], [4]]
+    unpublished = pd.DataFrame([{"graph.flops": 1e12}])
+    assert evaluate_feature_rows(unpublished, signature, executable=evaluator)[1] == [[0]]
+    # A bare reference has no default: the runtime refuses the row, and so does this.
+    with pytest.raises(ValueError, match="Undefined variable"):
+        evaluate_feature_rows(mixed, [f"${DY}"], executable=evaluator)
+    # An absent string binding is not a second type in the column, and has no code.
+    layouts = pd.DataFrame([{"x.layout": "NHWC"}, {}])
+    assert derive_categorical_encoding(layouts, ["x.layout", "dy.layout"]) == {"$x.layout": {"NHWC": 0}}
 
 
 def test_computed_training_ships_provenance_and_scores_real_artifact(tmp_path, evaluator):

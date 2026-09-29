@@ -176,14 +176,13 @@ TEST_F(TestTreeDataAdapter, AContractCheckThatDisablesTheModelReportsAnError)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
-    EXPECT_EQ(TreeDataAdapter::loadFromBuffer(
-                  buffer.data(), buffer.size(), "sha256:different_hash"),
-              nullptr);
+    EXPECT_EQ(
+        TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "sha256:different_hash"),
+        nullptr);
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
         << "the features-hash check must report at ERROR:\n"
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
-        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 
     recorder.clearLogs();
 
@@ -193,8 +192,7 @@ TEST_F(TestTreeDataAdapter, AContractCheckThatDisablesTheModelReportsAnError)
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U)
         << "the model-digest check must report at ERROR:\n"
         << recorder.getRecordedLogsAsString();
-    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U)
-        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 0U) << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestTreeDataAdapter, LoadSucceedsWithEmptyExpectedHash)
@@ -1286,6 +1284,24 @@ TEST(TestTreeDataAdapterGrouped, RowsOutsideTheChosenGroupAreUnusable)
     EXPECT_DOUBLE_EQ(scores[1], 200.0);
     EXPECT_EQ(scores[0], -std::numeric_limits<double>::infinity());
     EXPECT_EQ(scores[2], -std::numeric_limits<double>::infinity());
+}
+
+TEST(TestTreeDataAdapterGrouped, AMinObjectiveChoosesTheGroupWithTheLowestLayerOneScore)
+{
+    // Regression. Layer 1 of a `min` model predicts a cost, and the group was chosen by the
+    // largest layer-1 score regardless -- the slowest group. The same artifact, loaded as a
+    // `min` model, has to flip the choice to group 0.0 (leaf 1.0 against 9.0).
+    const auto buffer = groupedBuilder().build();
+    const auto adapter = TreeDataAdapter::loadFromBuffer(
+        buffer.data(), buffer.size(), "sha256:grouped", /*expectedModelHash=*/"", "min");
+    ASSERT_NE(adapter, nullptr);
+
+    const auto scores = adapter->scoreBatch({{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}});
+    ASSERT_EQ(scores.size(), 3u);
+    // Raw, unoriented layer-2 scores: orientation is the ranker's job, not the adapter's.
+    EXPECT_DOUBLE_EQ(scores[0], 100.0);
+    EXPECT_DOUBLE_EQ(scores[2], 100.0);
+    EXPECT_EQ(scores[1], -std::numeric_limits<double>::infinity());
 }
 
 TEST(TestTreeDataAdapterGrouped, TheSurvivingRowsAreScoredByTheirOwnGroupsTrees)

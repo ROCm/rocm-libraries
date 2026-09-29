@@ -18,9 +18,20 @@ selection mode. Existing tuning results may still be reused, and the process-wid
 benchmarking override retains its normal precedence over the knob.
 
 Missing or incompatible models leave ordinary engine execution available.
-The selector revision identifies the untuned execution policy and the provider
-and MIOpen versions; models collected for the removed isolated cache-bypass path
-are not compatible.
+The selector revision a model must record is
+`miopen-provider/<major.minor.patch>/<engine>-<policy revision>/miopen-<x.y.z>`: the
+provider's semantic version from `version.json`, the engine, the selector policy
+revision (`MIOPEN_SELECTOR_POLICY_REVISION`, bumped when what the provider asks MIOpen
+changes), and the MIOpen library version. It never contains the build's git commit, so
+rebuilding at another commit keeps deployed models valid; the commit remains provenance
+only, in the plugin's reported version. Models collected for the removed isolated
+cache-bypass path are not compatible.
+
+Each engine declares one model id per ranking metric (`tflops`, `time`) in
+`MiopenContainer.cpp`, bound for every architecture; the model's `training_arches`
+decides where it answers. A description (`--describe-engine-prediction`) names the id
+declared for the requested metric as the binding's `uhd_id`, which is the id a first
+model is promoted under.
 See the [UHD generation guide](../../../projects/hipdnn/tools/uhd_gen/README.md)
 for collection, training, promotion, and Mode A/B selection.
 

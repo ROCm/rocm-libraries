@@ -133,6 +133,11 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
 ///
 /// Empty when the engine ships no heuristic at all: there is no model content to version,
 /// and `winnerCacheShardPath()` renders that as its own directory.
+///
+/// `model_hash` is the artifact's content digest -- declared, or taken from the bytes
+/// present when the UHD was parsed (uhd::parseUhdConfig) -- so replacing a model's weights
+/// changes this hash even when its UHD declares none. A model with an artifact but no
+/// digest has no content identity; engineContentIdentified() reports that.
 inline std::string engineModelHash(const DescriptorSet& set)
 {
     const auto rankerIdentity = [](const HeuristicDescriptor& descriptor) {
@@ -167,6 +172,29 @@ inline std::string engineModelHash(const DescriptorSet& set)
     return uhd::sha256(nlohmann::json(rankers).dump());
 }
 
+/// @brief Whether every ranker @p set can resolve has a content identity.
+///
+/// False when one names an artifact but carries no digest: none was declared and no bytes
+/// were present to digest at load. engineModelHash() cannot version such a model, so the
+/// persistent winner cache is declined for the engine (EngineIdentity::contentIdentified).
+inline bool engineContentIdentified(const DescriptorSet& set)
+{
+    const auto identified = [](const HeuristicDescriptor& descriptor) {
+        return descriptor.modelArtifactPath.empty() || !descriptor.modelHash.empty();
+    };
+    for(const auto& byMetric : set.heuristicsByMetric)
+    {
+        for(const auto& byArch : byMetric.second)
+        {
+            if(!identified(byArch.second))
+            {
+                return false;
+            }
+        }
+    }
+    return !set.heuristic || identified(*set.heuristic);
+}
+
 /// @brief What identifies this engine to the caches that outlive one ranking.
 inline EngineIdentity engineIdentity(const DescriptorSet& set)
 {
@@ -182,7 +210,9 @@ inline EngineIdentity engineIdentity(const DescriptorSet& set)
     {
         uhdId = toString(set.heuristic->id);
     }
-    return EngineIdentity{set.engine.name, set.engine.revision, uhdId, engineModelHash(set)};
+    EngineIdentity identity{set.engine.name, set.engine.revision, uhdId, engineModelHash(set)};
+    identity.contentIdentified = engineContentIdentified(set);
+    return identity;
 }
 
 /// Takes @p set by value so a caller building both an engine and its state manager

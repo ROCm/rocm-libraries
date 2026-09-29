@@ -211,8 +211,10 @@ struct HeuristicDescriptor
     std::string nativeSymbol;
     /// TREE_DATA / TABLE / CUSTOM_LIBRARY: the artifact path, relative to @ref baseDir.
     std::string modelArtifactPath;
-    /// Checksum of the artifact, for integrity validation. Empty when the author
-    /// declared none.
+    /// SHA-256 of the artifact (lowercase hex): the declared digest, else the digest of the
+    /// bytes present when the UHD was parsed. Both verify the artifact at load and identify
+    /// the model's content. Empty only when neither exists -- no artifact, or none deployed
+    /// yet -- which leaves the model without content identity.
     std::string modelHash;
     /// CUSTOM_LIBRARY: the scorer function's symbol name inside the `.so`.
     std::string customLibrarySymbol;

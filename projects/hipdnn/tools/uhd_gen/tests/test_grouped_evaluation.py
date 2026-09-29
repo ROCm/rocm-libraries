@@ -51,7 +51,7 @@ def _booster(rows: list[tuple[float, float, float]], num_trees: int = 8) -> lgb.
     )
 
 
-def _write_model(directory: Path, *, grouped: bool) -> Path:
+def _write_model(directory: Path, *, grouped: bool, objective: str = "max") -> Path:
     """A trained pair on disk, as `train --output-dir` leaves it."""
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -84,14 +84,14 @@ def _write_model(directory: Path, *, grouped: bool) -> Path:
     manifest = {
         "features": FEATURES,
         "target": "tflops",
-        "objective": "max",
+        "objective": objective,
         "num_samples": 22,
         "group_by_feature": "kernel.group" if grouped else None,
         "group_models": len(group_models or []),
     }
     (directory / "train_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (directory / "heuristic.uhd.json").write_text(
-        json.dumps({"objective": "max", "tree_data": {"artifact": "model.bin"},
+        json.dumps({"objective": objective, "tree_data": {"artifact": "model.bin"},
                     "features_signature": [f"${name}" for name in FEATURES]}),
         encoding="utf-8",
     )
@@ -165,6 +165,18 @@ def test_the_group_decision_is_made_per_problem():
         frame = pd.DataFrame([{"q.size": size, "kernel.group": g} for g in GROUPS])
         scores = bundle.scorer(frame)
         assert np.isfinite(scores).any(), f"every candidate rejected at q.size={size}"
+
+
+@pytest.mark.parametrize("objective, expected", [("max", 1.0), ("min", 0.0)])
+def test_layer_one_picks_the_group_in_the_objective_direction(objective, expected):
+    """At q.size 9 layer 1 scores group 1 near 19 and group 0 near 11. A `max` model keeps
+    the larger; a `min` (time) model the smaller -- taking the argmax there kept the
+    slowest group, the same inversion TreeDataAdapter::scoreBatch had."""
+    with_tmp = Path(__import__("tempfile").mkdtemp())
+    bundle = load_model(_write_model(with_tmp / objective, grouped=True, objective=objective))
+    frame = pd.DataFrame([{"q.size": 9.0, "kernel.group": g} for g in GROUPS])
+    scores = bundle.scorer(frame)
+    assert frame.loc[np.isfinite(scores), "kernel.group"].tolist() == [expected]
 
 
 def _corpus() -> pd.DataFrame:
@@ -263,7 +275,7 @@ def _strict_less_than_model(directory: Path) -> Path:
     model.groupByFeatureIndex = -1
 
     builder = flatbuffers.Builder(1024)
-    builder.Finish(model.Pack(builder))
+    builder.Finish(model.Pack(builder), file_identifier=b"HGBM")
 
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "model.bin").write_bytes(bytes(builder.Output()))

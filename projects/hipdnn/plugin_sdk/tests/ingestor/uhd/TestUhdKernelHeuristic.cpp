@@ -2095,10 +2095,11 @@ namespace
 {
 /// A grouped artifact over SIGNATURE, grouping on slot 0 (`$kernel.tile_m`).
 ///
-/// Layer 1 is a stump preferring the large tile, so group 128 wins; layer 2 is a constant per
-/// group, so a score identifies which ensemble ran. The catalog's two kernels therefore sit in
-/// different groups, which is what lets a test tell a per-candidate group from a per-ranking one.
-Fixture writeGroupedFixture(const std::filesystem::path& dir)
+/// Layer 1 is a stump scoring the large tile higher, so group 128 wins under `max` and group 64
+/// under @p objective `min`; layer 2 is a constant per group, so a score identifies which
+/// ensemble ran. The catalog's two kernels therefore sit in different groups, which is what lets
+/// a test tell a per-candidate group from a per-ranking one.
+Fixture writeGroupedFixture(const std::filesystem::path& dir, const std::string& objective = "max")
 {
     const std::string signatureHash = uhd::FeatureExtractor::computeHash(SIGNATURE);
 
@@ -2131,7 +2132,7 @@ Fixture writeGroupedFixture(const std::filesystem::path& dir)
     model.addGroup(128.0, {constantTree(7.0)});
     model.buildToFile((dir / "model.bin").string());
 
-    return {"model.bin", signatureHash, "max", true, "identity", SIGNATURE};
+    return {"model.bin", signatureHash, objective, true, "identity", SIGNATURE};
 }
 } // namespace
 
@@ -2183,6 +2184,33 @@ TEST(TestIngestorUhdKernelHeuristicGrouped, TheReportedGroupIsTheOneThatScored)
     ASSERT_FALSE(scored.empty());
     EXPECT_DOUBLE_EQ(scored.front().score, 7.0);
     EXPECT_DOUBLE_EQ(scored.front().group, 128.0);
+}
+
+TEST(TestIngestorUhdKernelHeuristicGrouped, AMinObjectiveChoosesTheCheapestGroup)
+{
+    // Regression. Layer 1 of a `min` model predicts a cost, but the adapter chose the group
+    // with the largest layer-1 score whatever the objective -- the slowest group -- and layer 2
+    // then ranked within it. The same artifact as the `max` cases: only the objective differs,
+    // so the group has to flip from 128 to 64.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir("uhd_grouped_min");
+    const auto fixture = writeGroupedFixture(dir.path(), "min");
+    const auto heuristic
+        = makeKernelHeuristic(modelDescriptor(dir.path(), fixture), {}, KNOBS, FIELDS);
+    ASSERT_NE(heuristic, nullptr);
+
+    const testing::TestGraph graph;
+    const auto properties = gfx942();
+    const MatchContext context{graph, 0, properties, "time"};
+    const auto scored = heuristic->rankScored(catalogAgainstPriority(2048), context);
+
+    ASSERT_EQ(scored.size(), 2U);
+    // Group 64's layer 2 predicts 3, negated for `min`: the model ranked, from the right group.
+    EXPECT_EQ(scored.front().kernelId, testId(0x01));
+    EXPECT_DOUBLE_EQ(scored.front().group, 64.0);
+    EXPECT_DOUBLE_EQ(scored.front().score, -3.0) << "the winner was not scored by group 64";
+    // Group 128 was declined, so it reports no measurement.
+    EXPECT_DOUBLE_EQ(scored.back().group, 128.0);
+    EXPECT_DOUBLE_EQ(scored.back().score, 0.0) << "the slower group was not excluded";
 }
 
 TEST(TestIngestorUhdKernelHeuristicGrouped, ExcludingAGroupIsNotReportedAsATrainingDefect)
