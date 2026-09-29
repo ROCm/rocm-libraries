@@ -30,9 +30,20 @@ include: rocblas_common.yaml
 # ranges -- and one chunk above, which bounds the most plausible wrong fix. The
 # overrun is then reported as a guard trip instead of faulting, and a fault would
 # abort the process and take every later test in the binary with it. That is
-# 24 GiB for one negative increment and 32 GiB for two, hence nightly; the
-# all-positive control needs no guard and is 16 GiB. The test skips rather than
-# fails where the device cannot supply it.
+# 24 GiB for one negative increment and 32 GiB for two; the all-positive control
+# needs no guard and is 16 GiB. The test skips rather than fails where the device
+# cannot supply it.
+#
+# Category. stress, which is what every other row in the tree at this scale uses
+# -- rot_ILP64 in rot_gtest.yaml, asum_ILP64, axpy_ILP64 -- and not nightly.
+# 16 to 32 GiB is the footprint the stress category exists for and documents
+# ROCBLAS_CLIENT_RAM_GB_LIMIT against, while a nightly level-1 row is budgeted at
+# 70 to 200 seconds for a whole function. It also keeps these rows out of a bare
+# ./rocblas-test, which drops *stress* by default, and that is what excludes them
+# from a -DROCBLAS_DEV_TEST_ILP64 build: there c_i64_grid_X_chunk becomes 512
+# while n stays pinned at 2^31 by the defect, so the launcher would make 2^22
+# chunk calls for the same 16 to 32 GiB. The existing ILP64 stress rows have the
+# same property and are not guarded against that mode either.
 
 Tests:
 # Control. With both increments positive the offsets reduce to n_base * inc,
@@ -45,7 +56,7 @@ Tests:
 # is the last to be skipped for want of memory and the most likely to run on a
 # small device.
 - name: rot_ilp64_chunk_control_positive
-  category: nightly
+  category: stress
   arguments:
     - { incx: 1, incy: 1 }
   function:
@@ -53,7 +64,7 @@ Tests:
   os_flags: [ LINUX ]
 
 - name: rot_ilp64_chunk_neg_incx
-  category: nightly
+  category: stress
   arguments:
     - { incx: -1, incy: 1 }
   function:
@@ -61,7 +72,7 @@ Tests:
   os_flags: [ LINUX ]
 
 - name: rot_ilp64_chunk_neg_incy
-  category: nightly
+  category: stress
   arguments:
     - { incx: 1, incy: -1 }
   function:
@@ -71,7 +82,7 @@ Tests:
 # Largest footprint, so the first to skip on a smaller device. It is not the
 # only row for that reason.
 - name: rot_ilp64_chunk_neg_both
-  category: nightly
+  category: stress
   arguments:
     - { incx: -1, incy: -1 }
   function:

@@ -93,6 +93,13 @@ namespace
     // (n_64 - 1 - n_base) instead of (n_64 - n - n_base) overruns the top by up to
     // one chunk, and without a guard there that would be a fault rather than a
     // reported failure.
+    //
+    // These are the production values of the library constants. A
+    // -DROCBLAS_DEV_TEST_ILP64 build drops c_i64_grid_X_chunk to 512 without
+    // moving n, which the defect pins at 2^31, so the chunk count rises to 2^22
+    // and the guard below is no longer the union of the out-of-bounds ranges.
+    // These rows are stress for that reason among others, and a build in that mode
+    // does not run stress by default; see the category note in the YAML.
     constexpr int64_t c_grid_x_chunk = int64_t(1) << 28; // c_i64_grid_X_chunk
     constexpr int64_t c_n            = int64_t(1) << 31; // 8 * c_grid_x_chunk
     constexpr int64_t c_below        = 7 * c_grid_x_chunk; // union of OOB chunks
@@ -111,14 +118,23 @@ namespace
     // immediately, so a hand-written hipFree further down is not reached, and
     // these allocations are large enough that leaking one would push every later
     // test in the binary into a VRAM skip.
+    //
+    // The hipMalloc status is kept rather than reduced to a null pointer, so the
+    // caller can hand it to CHECK_DEVICE_ALLOCATION and get a skip only on
+    // hipErrorOutOfMemory and a failure on anything else. Reading every failure as
+    // "not enough VRAM" would drop all coverage of this regression whenever the
+    // allocation failed for an unrelated reason, which is the one outcome a
+    // regression test must not have.
     template <typename T>
     struct device_buffer
     {
-        T* device = nullptr;
+        T*         device = nullptr;
+        hipError_t status = hipSuccess;
 
         explicit device_buffer(size_t count)
         {
-            if((hipMalloc)(&device, count * sizeof(T)) != hipSuccess)
+            status = (hipMalloc)(&device, count * sizeof(T));
+            if(status != hipSuccess)
                 device = nullptr;
         }
 
@@ -214,14 +230,21 @@ namespace
         const size_t y_total = below_y + size_t(c_n) + above_y;
         const size_t needed  = (x_total + y_total) * sizeof(T) + (256u << 20);
 
+        // A failed query is a failure, not a skip: it says nothing about the free
+        // capacity, and silently skipping on it would hide a broken run. Only the
+        // capacity the query reports decides whether the device can supply this.
         size_t free_bytes = 0, total_bytes = 0;
-        if(hipMemGetInfo(&free_bytes, &total_bytes) != hipSuccess || free_bytes < needed)
+        CHECK_HIP_ERROR(hipMemGetInfo(&free_bytes, &total_bytes));
+        if(free_bytes < needed)
             GTEST_SKIP() << LIMITED_VRAM_STRING;
 
+        // The query above is advisory -- it can pass and the allocation still fail,
+        // for instance against another process -- so the status of each allocation
+        // is checked as well, and only hipErrorOutOfMemory skips.
         device_buffer<T> x_buf(x_total);
+        CHECK_DEVICE_ALLOCATION(x_buf.status);
         device_buffer<T> y_buf(y_total);
-        if(!x_buf.device || !y_buf.device)
-            GTEST_SKIP() << LIMITED_VRAM_STRING;
+        CHECK_DEVICE_ALLOCATION(y_buf.status);
 
         // The pointers rocBLAS is given sit above their lower guard regions.
         T* const dx = x_buf.device + below_x;
@@ -363,7 +386,7 @@ namespace
         // non-sample element.
         //
         // The cost is a device-to-host pass over each operand, reusing the same
-        // slice-sized staging buffer as the guard scan. That is time on a nightly
+        // slice-sized staging buffer as the guard scan. That is time on a stress
         // row, not memory, and coverage is worth more than the time.
         auto expect_vector_correct = [&](const T* base, bool want_x, const char* which) {
             // Away from the sample sites the expectation is the same for every
@@ -462,7 +485,11 @@ namespace
         }
     };
 
-    TEST_P(rot_ilp64_chunk_gtest, nightly)
+    // PrintToStringParamName already prefixes each test name with the YAML
+    // category, so this name must not be a category as well: calling it nightly
+    // would let --gtest_filter=*nightly* select rows the YAML marks stress. The
+    // other blas1 suites use the BLAS level here, which is what this follows.
+    TEST_P(rot_ilp64_chunk_gtest, blas1)
     {
         CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(
             rocblas_simple_dispatch<rot_ilp64_chunk_fun>(GetParam()));
