@@ -7,6 +7,7 @@
 #include <amd_comgr/amd_comgr.h>
 #include <hip/hip_runtime_api.h>
 
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <cstdint>
@@ -929,5 +930,58 @@ namespace hipblaslt_jit::code_object
         {
             return {};
         }
+    }
+
+    const char* toString(ComgrCache setting) noexcept
+    {
+        switch(setting)
+        {
+        case ComgrCache::Default:
+            return "comgr's default";
+        case ComgrCache::UserValue:
+            return "the user's AMD_COMGR_CACHE";
+        case ComgrCache::Disabled:
+            return "disabled at library load";
+        case ComgrCache::DisabledLate:
+            return "disabled after library load";
+        }
+        return "unknown";
+    }
+
+    ComgrCache comgrCachePolicy(const char* jitMode, const char* comgrCache) noexcept
+    {
+        if(!jitMode || (std::strcmp(jitMode, "1") != 0 && std::strcmp(jitMode, "2") != 0))
+            return ComgrCache::Default;
+        return comgrCache ? ComgrCache::UserValue : ComgrCache::Disabled;
+    }
+
+    namespace
+    {
+        std::atomic<ComgrCache> setByHipblaslt{ComgrCache::Default};
+
+        ComgrCache applyComgrCachePolicy(ComgrCache disabled) noexcept
+        {
+            if(const auto set = setByHipblaslt.load(); set != ComgrCache::Default)
+                return set;
+            const auto policy = comgrCachePolicy(rocblaslt_secure_getenv("HIPBLASLT_JIT"),
+                                                 std::getenv("AMD_COMGR_CACHE"));
+            if(policy != ComgrCache::Disabled)
+                return policy;
+#ifdef _WIN32
+            if(_putenv_s("AMD_COMGR_CACHE", "0") != 0)
+#else
+            if(setenv("AMD_COMGR_CACHE", "0", 0) != 0)
+#endif
+                return ComgrCache::Default;
+            setByHipblaslt = disabled;
+            return disabled;
+        }
+
+        [[maybe_unused]] const ComgrCache atLoad = applyComgrCachePolicy(ComgrCache::Disabled);
+    }
+
+    ComgrCache prepareProcessEnvironment() noexcept
+    {
+        return applyComgrCachePolicy(ComgrCache::DisabledLate);
     }
 }

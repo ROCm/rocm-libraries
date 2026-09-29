@@ -219,6 +219,11 @@ namespace hipblaslt_jit
     // object for GenerationRequest::target.
     std::shared_ptr<const CodeObjectBuilder> makeComgrBuilder();
 
+    // Runs code_object::prepareProcessEnvironment once per process and logs the
+    // comgr cache setting at info level; the comgr builder calls it before its
+    // first build.
+    void prepareComgr();
+
     class SolutionLoader
     {
     public:

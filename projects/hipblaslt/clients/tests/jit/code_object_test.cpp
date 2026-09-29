@@ -40,6 +40,7 @@ namespace
         int                      tensileCov = 4;
         std::string              rocm;
         std::vector<std::string> only;
+        std::string              comgrCache; // "present" or "absent"
     };
 
     Config cfg;
@@ -1072,6 +1073,60 @@ extern "C" __global__ void triple(const int* in, int* out, int n)
                     failures.empty() ? "10 malformed inputs rejected with the expected status"
                                      : detail};
         });
+
+        addTest("h_comgr_cache_policy", [](const fs::path&) -> Outcome {
+            using C = co::ComgrCache;
+            const struct
+            {
+                const char* jit;
+                const char* cache;
+                C           want;
+            } cases[] = {{nullptr, nullptr, C::Default},
+                         {"0", nullptr, C::Default},
+                         {"", nullptr, C::Default},
+                         {"3", nullptr, C::Default},
+                         {"1 ", nullptr, C::Default},
+                         {nullptr, "1", C::Default},
+                         {"0", "0", C::Default},
+                         {"1", nullptr, C::Disabled},
+                         {"2", nullptr, C::Disabled},
+                         {"1", "1", C::UserValue},
+                         {"2", "0", C::UserValue},
+                         {"1", "", C::UserValue}};
+            std::string failures;
+            for(const auto& c : cases)
+                if(const auto got = co::comgrCachePolicy(c.jit, c.cache); got != c.want)
+                    failures += std::string("HIPBLASLT_JIT=") + (c.jit ? c.jit : "unset")
+                                + " AMD_COMGR_CACHE=" + (c.cache ? c.cache : "unset") + ": "
+                                + co::toString(got) + "; ";
+            return {failures.empty(),
+                    failures.empty() ? std::to_string(std::size(cases)) + " precedence cases"
+                                     : failures};
+        });
+
+        // Runs in the environment the caller set up: XDG_CACHE_HOME and HOME name
+        // existing scratch directories, and HIPBLASLT_JIT / AMD_COMGR_CACHE select
+        // the case. The load-time policy has already run before main.
+        if(!cfg.comgrCache.empty())
+            addTest("h_comgr_cache_environment", [](const fs::path& dir) -> Outcome {
+                const auto  setting = co::prepareProcessEnvironment();
+                const char* value   = std::getenv("AMD_COMGR_CACHE");
+                const char* xdg     = std::getenv("XDG_CACHE_HOME");
+                const char* home    = std::getenv("HOME");
+                if(!xdg || !home || !fs::is_directory(xdg) || !fs::is_directory(home))
+                    return {false, "XDG_CACHE_HOME and HOME must name existing directories"};
+                const auto result = co::compileHip(
+                    {{"cache_probe.hip", hipTripleSource}}, target(), baseOptions());
+                writeText(dir / "compile.log", result.log);
+                if(!result.ok())
+                    return {false, std::string(co::toString(result.status)) + ": " + result.log};
+                const bool present = fs::exists(fs::path(xdg) / "comgr")
+                                     || fs::exists(fs::path(home) / ".cache" / "comgr");
+                return {present == (cfg.comgrCache == "present"),
+                        std::string(co::toString(setting)) + ", AMD_COMGR_CACHE="
+                            + (value ? value : "unset") + ", cache directory "
+                            + (present ? "present" : "absent")};
+            });
     }
 
     void usage()
@@ -1079,7 +1134,7 @@ extern "C" __global__ void triple(const int* in, int* out, int n)
         std::fprintf(stderr,
                      "usage: hipblaslt-jit-code-object-test --out DIR [--target ID] [--gpu | --ffm] "
                      "[--bundle BUNDLE_DIR]... [--tensile-cov N] [--rocm PREFIX] "
-                     "[--only NAME]...\n");
+                     "[--expect-comgr-cache present|absent] [--only NAME]...\n");
     }
 }
 
@@ -1112,6 +1167,15 @@ int main(int argc, char** argv)
             cfg.rocm = next();
         else if(a == "--only")
             cfg.only.push_back(next());
+        else if(a == "--expect-comgr-cache")
+        {
+            cfg.comgrCache = next();
+            if(cfg.comgrCache != "present" && cfg.comgrCache != "absent")
+            {
+                usage();
+                return 2;
+            }
+        }
         else
         {
             usage();

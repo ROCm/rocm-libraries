@@ -217,4 +217,28 @@ namespace hipblaslt_jit::code_object
     // prefix of the loaded HIP runtime (<prefix>/lib/libamdhip64.so). Empty if
     // neither is known.
     std::string rocmPath() noexcept;
+
+    // Who decides whether comgr uses its on-disk cache in this process.
+    enum class ComgrCache
+    {
+        Default, // HIPBLASLT_JIT is not 1 or 2: comgr's own default applies
+        UserValue, // the user set AMD_COMGR_CACHE, and it is kept
+        Disabled, // hipBLASLt set AMD_COMGR_CACHE=0 when it was loaded
+        DisabledLate, // hipBLASLt set AMD_COMGR_CACHE=0 after it was loaded
+    };
+
+    const char* toString(ComgrCache setting) noexcept;
+
+    // The precedence rule alone: Disabled when jitMode (HIPBLASLT_JIT) is "1" or
+    // "2" and comgrCache (AMD_COMGR_CACHE) is unset, UserValue when it is set,
+    // otherwise Default.
+    ComgrCache comgrCachePolicy(const char* jitMode, const char* comgrCache) noexcept;
+
+    // Applies comgrCachePolicy to the environment, setting AMD_COMGR_CACHE=0
+    // without overwriting a user value. comgr reads AMD_COMGR_CACHE and its cache
+    // directory once, at the first cached action of any comgr user in the process
+    // (hipRTC and rocRoller included), so this also runs when the library is
+    // loaded, and the setting then applies to all of them. DisabledLate means a
+    // comgr action before this call may already have fixed the previous value.
+    ComgrCache prepareProcessEnvironment() noexcept;
 }
