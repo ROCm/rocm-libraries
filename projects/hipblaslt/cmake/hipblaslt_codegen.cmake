@@ -316,8 +316,12 @@ function(create_device_library)
     # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
     file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
          "${_cdl_LOGIC_PATH}/*.yaml")
+    # .py generators, plus the packaged static headers (resources.py) and the
+    # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
     file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
-         "${_codegen_dir}/Tensile/*.py")
+         "${_codegen_dir}/Tensile/*.py"
+         "${_codegen_dir}/Tensile/*.h"
+         "${_codegen_dir}/Tensile/*.s")
     # Tests is pytest, not codegen input, and is 3/4 of the .py under Tensile/.
     list(FILTER _codegen_sources EXCLUDE REGEX "/Tensile/Tests/")
     # Coarser than each step's import closure on purpose: that closure is not
