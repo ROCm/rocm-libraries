@@ -324,6 +324,9 @@ class TestGtestName(unittest.TestCase):
             "/abs/integration-test-bundles/quick/A/B.json",
             "integration-test-bundles/B.json",
             "integration-test-bundles/quick/../A/B.json",
+            "integration-test-bundles/quick/./A/B.json",
+            "integration-test-bundles/quick//B.json",
+            "integration-test-bundles/quick/A/B.bin",
         ):
             with self.subTest(bundle=bundle):
                 self.assertIsNone(gtest_name(bundle, ""))

@@ -88,7 +88,6 @@ from support_sidecar import Claim, SidecarError, load, parse, render, sidecar_pa
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
 MODES = ("enforcing", "warning_only")  # modeNames in SupportClaimReport.cpp
-BUNDLE_PREFIX = "integration-test-bundles/"
 
 # VerificationDepth in src/harness/bundle/VerificationOutcome.hpp.
 DEPTHS = {
@@ -274,14 +273,14 @@ def gtest_name(bundle: str, case: str) -> Optional[str]:
 
     Suite: the bundle's directories under integration-test-bundles/, each
     sanitized, joined with "_".  Test: the sanitized case id for a sweep,
-    else the sanitized file stem.  None when the path is not under
-    integration-test-bundles/.
+    else the sanitized file stem.  None when the path is not one that
+    support_sidecar.sidecar_path accepts, so it has no sidecar to write.
     """
-    if not bundle.startswith(BUNDLE_PREFIX):
+    try:
+        sidecar_path(bundle)
+    except SidecarError:
         return None
-    parts = PurePosixPath(bundle[len(BUNDLE_PREFIX) :]).parts
-    if len(parts) < 2 or any(p in ("..", ".") for p in parts):
-        return None
+    parts = bundle.split("/")[1:]
     suite = "_".join(_sanitize(p) for p in parts[:-1])
     test = _sanitize(case) if case else _sanitize(PurePosixPath(parts[-1]).stem)
     return f"{suite}.{test}"
