@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "stinkytofu/transforms/asm/AsmMovePropagationPass.hpp"
 
+#include <array>
 #include <unordered_map>
 #include <vector>
 
@@ -168,6 +169,54 @@ bool overlapsWithKey(const MoveMapKey& key, const StinkyRegister& reg) {
     const uint32_t regBegin = reg.reg.idx;
     const uint32_t regEnd = reg.reg.idx + reg.reg.num;
     return !(keyEnd <= regBegin || regEnd <= keyBegin);
+}
+
+// Registers named by read-write dest fields. Hardware reads such a dest on the
+// path where it does not write it: s_cmov_b32 d, s is "if (SCC) d = s; else d = d".
+// The IR models that as an extra source of the same register. The emitter prints
+// the dest field, so substituting a different register is invalid. Match ties by
+// name: rocisa appends dest to getSrcParams, so position varies by opcode.
+struct ReadWriteDestKeys {
+    // Overflow refuses the instruction: a partial key set would let a move
+    // propagate through an unrecorded tie.
+    static constexpr size_t kCapacity = 4;
+
+    std::array<MoveMapKey, kCapacity> keys{};
+    size_t count = 0;
+    bool overflowed = false;
+
+    bool covers(const StinkyRegister& reg) const {
+        if (overflowed) return true;
+        for (size_t i = 0; i < count; ++i) {
+            if (overlapsWithKey(keys[i], reg)) return true;
+        }
+        return false;
+    }
+};
+
+ReadWriteDestKeys collectReadWriteDestKeys(const StinkyInstruction& inst) {
+    ReadWriteDestKeys result;
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    if (desc->operandFields.empty()) return result;
+
+    const std::vector<StinkyRegister>& destRegs = inst.getDestRegs();
+    size_t destIdx = 0;
+    for (const HwInstDesc::OperandFieldDesc& field : desc->operandFields) {
+        if (!field.isDest) continue;
+        const size_t destSlot = destIdx++;
+        if (!field.isReadWrite) continue;
+        if (destSlot >= destRegs.size()) continue;
+        // operandFields describes the printed operands, so a dest the emitter
+        // skips carries no field a source could be tied to.
+        const StinkyRegister& dest = destRegs[destSlot];
+        if (!dest.isRegister() || isPseudoReg(dest) || isImplicitDest(dest, inst)) continue;
+        if (result.count == ReadWriteDestKeys::kCapacity) {
+            result.overflowed = true;
+            break;
+        }
+        result.keys[result.count++] = toMoveMapKey(dest);
+    }
+    return result;
 }
 
 struct RegLaneKey {
@@ -350,6 +399,8 @@ class AsmMovePropagationPassImpl : public Pass {
                 continue;
             }
 
+            const ReadWriteDestKeys rwDests = collectReadWriteDestKeys(*inst);
+
             for (size_t i = 0; i < inst->getNumSrcRegs(); ++i) {
                 const StinkyRegister& oldSrc = inst->getSrcReg(i);
                 if (!oldSrc.isRegister()) continue;
@@ -357,6 +408,8 @@ class AsmMovePropagationPassImpl : public Pass {
                 // (inline reg modifiers or VOP3 source modifiers).
                 if (hasRegisterSourceModifier(oldSrc) || hasInstructionSourceModifier(*inst, i))
                     continue;
+                // Skip a source tied to a read-write dest; it shares the dest field.
+                if (rwDests.covers(oldSrc)) continue;
 
                 StinkyRegister newSrc = resolveMappedSrc(oldSrc);
                 if (hasRegisterSourceModifier(newSrc)) continue;

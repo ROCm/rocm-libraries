@@ -426,9 +426,9 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 
 ### Backward Knob Changes
 
-- `pipeline="basic"` (CK `pipeline_basic`): single LDS buffer, global-read / compute overlap. wgrad and forward only; dgrad has no `basic` branch.
+- `pipeline="basic"`: now uses a bounded runtime `scf.for` K-loop (load → sync → MFMA → sync per tile), identical to the `"mem"` path. No K-trip-count limit, no `split_k=0` restriction on wgrad. dgrad has no `basic` branch.
 - `async_dma` is a swept axis on the wgrad sweep driver, not a run-level flag. Unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the K-outer row pad to 0 and coarsens the load-width ladder to the widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes.
-- `_MAX_UNROLLED_K_ITERS = 128` (wgrad) now caps **both** statically-unrolled loops, `pipeline="basic"` and `async_dma`. It previously guarded only `"basic"`, leaving async uncapped: a deep reduction at a low split-K degree then unrolled five figures of load+MFMA bodies into one kernel and exhausted host memory during the IR build rather than failing validation. Mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine.
+- `_MAX_UNROLLED_K_ITERS = 128` (wgrad) caps the statically-unrolled `async_dma` loop only. `pipeline="basic"` is no longer unrolled and is not bounded by this constant. Mirrored as `ROCKE_MAX_UNROLLED_K_ITERS` in the C engine.
 - Removed: the `--lds-k-outer`, `--lds-k-pad` and `--dtype-d` CLI flags and the `ROCKE_WGRAD_LDS_K_OUTER` env override. All replaced by deduction or dropped.
 
 ## Direct Grouped Convolution

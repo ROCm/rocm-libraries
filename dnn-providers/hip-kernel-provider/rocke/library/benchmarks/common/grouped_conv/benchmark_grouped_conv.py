@@ -73,10 +73,7 @@ class Result:
 def _verify_kernel(
     *,
     rt,
-    launcher,
-    values: dict,
-    grid: tuple,
-    block: tuple,
+    launch,
     out_dev,
     out_t,
     zero_init_out: bool,
@@ -90,6 +87,13 @@ def _verify_kernel(
 
     Parameters
     ----------
+    launch:
+        Zero-argument callable that performs one fenced launch of the kernel
+        under test. Taking a closure rather than ``(launcher, values, grid)``
+        keeps this helper agnostic to whether the thing being verified is a
+        single ``KernelLauncher`` or the two-stage ``PipelineLauncher``, whose
+        call signature differs -- and guarantees verification launches exactly
+        the geometry the benchmark times.
     zero_init_out:
         Zero the output buffer before launching (required for split-K atomic
         accumulation; not needed for direct-store kernels).
@@ -112,9 +116,7 @@ def _verify_kernel(
     if zero_init_out:
         rt.memset(out_dev, 0, out_t.nbytes)
 
-    from rocke.runtime.launcher import LaunchConfig
-
-    launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+    launch()
 
     out_cpu = torch.empty_like(out_t)
     rt.memcpy_d2h(u8(out_cpu), out_dev, out_t.nbytes)
@@ -1006,10 +1008,12 @@ def _run_fwd(
         if args.verify or args.dump_fail:
             stopped, kernel_passed = _verify_kernel(
                 rt=rt,
-                launcher=launcher,
-                values=values,
-                grid=grid,
-                block=block,
+                launch=lambda: launcher(
+                    values,
+                    config=LaunchConfig(
+                        grid=grid, block=block, stream=stream, fence=True
+                    ),
+                ),
                 out_dev=D_dev,
                 out_t=D_t,
                 zero_init_out=False,
@@ -1121,6 +1125,13 @@ def _run_wgrad(
 ) -> int:
     import torch
     from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        build_implicit_gemm_conv_wgrad_two_stage,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        _DEFAULT_TILE_M as _WGRAD_REDUCE_TILE_M,
+        _DEFAULT_TILE_N as _WGRAD_REDUCE_TILE_N,
+    )
 
     _u8 = u8
     p = problem
@@ -1139,14 +1150,20 @@ def _run_wgrad(
             else torch.empty(*shape).uniform_(-1.0, 1.0)
         )
 
+    # dW is the PyTorch grouped-weight layout [K, (Z,) Y, X, C/groups]: the
+    # filter of output channel k only spans its own group's input channels, so
+    # the inner dim is cpg, not the dense C. Allocating the dense C here
+    # over-allocates by a factor of `groups` and, worse, puts the reference and
+    # the kernel on different strides for every grouped shape.
+    _cpg = p.C // p.groups
     if p.is_3d:
         _X_f32 = _make(p.N, p.Di, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Do, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, p.C, dtype=_torch_dtype)
+        dW_t = torch.empty(p.K, p.Z, p.Y, p.X, _cpg, dtype=_torch_dtype)
     else:
         _X_f32 = _make(p.N, p.Hi, p.Wi, p.C)
         _dY_f32 = _make(p.N, p.Ho, p.Wo, p.K)
-        dW_t = torch.empty(p.K, p.Y, p.X, p.C, dtype=_torch_dtype)
+        dW_t = torch.empty(p.K, p.Y, p.X, _cpg, dtype=_torch_dtype)
 
     X_t = _X_f32.to(_torch_dtype)
     dY_t = _dY_f32.to(_torch_dtype)
@@ -1191,50 +1208,129 @@ def _run_wgrad(
             flush=True,
         )
 
+    from dispatch.grouped_convolution import _wgrad_grid
+
+    ws_dev = None
     for dspec in specs:
         instance_spec = dspec.to_wgrad_spec(problem)
 
+        # These specs come from the dispatcher, which has already run its
+        # support predicate -- exactly one candidate, already vetted. A raise
+        # here is a dispatcher/instance disagreement, i.e. a bug, not an
+        # expected miss in a sweep. Swallowing it is why a depthwise wgrad used
+        # to report only "No valid wgrad configurations found".
         try:
-            kernel = build_implicit_gemm_conv_wgrad(instance_spec, arch=arch)
-        except ValueError:
+            if instance_spec.two_stage:
+                launcher, ws_nbytes = build_implicit_gemm_conv_wgrad_two_stage(
+                    instance_spec, arch=arch
+                )
+            else:
+                kernel = build_implicit_gemm_conv_wgrad(instance_spec, arch=arch)
+                ws_nbytes = 0
+        except ValueError as exc:
+            print(
+                f"  [skip] dispatcher-selected spec failed to build: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
             continue
 
-        artifact = compile_kernel(kernel, arch=arch)
-
-        launcher = KernelLauncher(
-            hsaco=artifact.hsaco,
-            kernel_name=artifact.kernel_name,
-            signature=sig,
-        )
-        wg_N = (p.Z if p.is_3d else 1) * p.Y * p.X * p.C
-        gx = (wg_N + dspec.tile_n - 1) // dspec.tile_n
-        gy = (p.K + dspec.tile_m - 1) // dspec.tile_m
-        grid = (gx, gy, instance_spec.split_k)
         block = (instance_spec.block_size, 1, 1)
         stream = 0
+        # Use the dispatcher's own grid. Re-deriving it here is how the two
+        # drift: the local copy used the dense C and K and dropped the groups
+        # factor from z entirely, so every grouped launch covered group 0 only.
+        grid = _wgrad_grid(dspec, req)
 
-        values = {
-            "A": dY_dev,
-            "B": X_dev,
-            "D": dW_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": X_t.nbytes,
-            "D_bytes": dW_t.nbytes,
-        }
-        cfg = LaunchConfig(grid=grid, block=block, stream=stream)
+        if instance_spec.two_stage:
+            if ws_dev is not None:
+                rt.free(ws_dev)
+            ws_dev = rt.alloc(ws_nbytes)
+            wg_M_v = p.K // p.groups
+            wg_N_v = (p.Z if p.is_3d else 1) * p.Y * p.X * (p.C // p.groups)
+            s2_grid = (
+                (wg_N_v + _WGRAD_REDUCE_TILE_N - 1) // _WGRAD_REDUCE_TILE_N,
+                (wg_M_v + _WGRAD_REDUCE_TILE_M - 1) // _WGRAD_REDUCE_TILE_M,
+                p.groups,
+            )
+            values = (
+                {
+                    "A": dY_dev,
+                    "B": X_dev,
+                    "D": dW_dev,
+                    "A_bytes": dY_t.nbytes,
+                    "B_bytes": X_t.nbytes,
+                    "D_bytes": dW_t.nbytes,
+                    "ws_ptr": ws_dev,
+                    "ws_bytes": ws_nbytes,
+                },
+                {
+                    "ws_ptr": ws_dev,
+                    "dw_ptr": dW_dev,
+                    "wg_M": wg_M_v,
+                    "wg_N": wg_N_v,
+                    "split_k": instance_spec.split_k,
+                    "ws_bytes": ws_nbytes,
+                    "dw_bytes": dW_t.nbytes,
+                    "groups": p.groups,
+                },
+            )
+            kernel_name = instance_spec.kernel_name() + "+reduce"
+
+            def _launch(fence: bool, _L=launcher, _v=values, _g=grid, _s2=s2_grid):
+                _L(
+                    _v,
+                    (
+                        LaunchConfig(grid=_g, block=block, stream=stream),
+                        LaunchConfig(
+                            grid=_s2,
+                            block=(
+                                _WGRAD_REDUCE_TILE_M * _WGRAD_REDUCE_TILE_N,
+                                1,
+                                1,
+                            ),
+                            stream=stream,
+                            fence=fence,
+                        ),
+                    ),
+                )
+
+        else:
+            artifact = compile_kernel(kernel, arch=arch)
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=sig,
+            )
+            values = {
+                "A": dY_dev,
+                "B": X_dev,
+                "D": dW_dev,
+                "A_bytes": dY_t.nbytes,
+                "B_bytes": X_t.nbytes,
+                "D_bytes": dW_t.nbytes,
+            }
+            kernel_name = artifact.kernel_name
+
+            def _launch(fence: bool, _L=launcher, _v=values, _g=grid):
+                _L(
+                    _v,
+                    config=LaunchConfig(
+                        grid=_g, block=block, stream=stream, fence=fence
+                    ),
+                )
 
         if args.verify or args.dump_fail:
             stopped, _ = _verify_kernel(
                 rt=rt,
-                launcher=launcher,
-                values=values,
-                grid=grid,
-                block=block,
+                launch=lambda: _launch(True),
                 out_dev=dW_dev,
                 out_t=dW_t,
-                zero_init_out=(instance_spec.split_k > 1),
+                zero_init_out=(
+                    instance_spec.split_k > 1 and not instance_spec.two_stage
+                ),
                 ref_out=ref_out,
-                kernel_name=artifact.kernel_name,
+                kernel_name=kernel_name,
                 dump_fail=args.dump_fail,
                 extra_tensors={"dY": dY_t, "X": X_t},
                 u8=_u8,
@@ -1245,15 +1341,18 @@ def _run_wgrad(
                 rt.free(dW_dev)
                 return 1
 
-        if instance_spec.split_k > 1:
+        # Atomic split-K accumulates into dW, so it must start from zero on
+        # every timed iteration. The two-stage path stores (not accumulates)
+        # into the workspace and Stage 2 overwrites dW, so it needs no memset.
+        if instance_spec.split_k > 1 and not instance_spec.two_stage:
 
             def _launch_spk():
                 rt.memset(dW_dev, 0, dW_t.nbytes)
-                launcher(values, config=cfg)
+                _launch(False)
 
             timed_fn = _launch_spk
         else:
-            timed_fn = lambda: launcher(values, config=cfg)
+            timed_fn = lambda: _launch(False)
 
         ms = time_launches(
             timed_fn,
@@ -1268,7 +1367,7 @@ def _run_wgrad(
 
         results.append(
             Result(
-                kernel_name=artifact.kernel_name,
+                kernel_name=kernel_name,
                 tile_m=dspec.tile_m,
                 tile_n=dspec.tile_n,
                 tile_k=dspec.tile_k,
@@ -1297,6 +1396,8 @@ def _run_wgrad(
     rt.free(dY_dev)
     rt.free(X_dev)
     rt.free(dW_dev)
+    if ws_dev is not None:
+        rt.free(ws_dev)
 
     if not results:
         print("No valid wgrad configurations found.", file=sys.stderr)
