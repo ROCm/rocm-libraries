@@ -24,6 +24,8 @@ from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rul
     values as _values,
 )
 
+from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+
 
 # AMDGPU ``sched_barrier`` ABI: 0 is a full fence, and each bit lets one
 # instruction class cross it (ALU, VALU, SALU, MFMA, VMEM, VMEM rd, VMEM wr,
@@ -205,8 +207,9 @@ def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
 # off, so each can only be reached once the others are decided. Then
 # prerequisites-first: the tile sets the query-block count the CTA counts and
 # decodes are exact for, persist_decode's gqa_pair modes need an exact
-# num_persistent, interleave is read only on the resolved qb_major decode, and
-# the fence mask / DS-read count / rescale threshold follow their parents.
+# num_persistent, interleave is read only on the resolved qb_major decode,
+# nonpersist_decode only by the grid body, and the fence mask / DS-read count /
+# rescale threshold follow their parents.
 _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("pv_sched_fence", None, (True, False), enabler=True),
     _values("pv_sched_group_template", None, (True, False), enabler=True),
@@ -220,6 +223,7 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
         ("qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"),
     ),
     _flag("interleave"),
+    _values("nonpersist_decode", "auto", tuple(NONPERSIST_DECODES)),
     _values("lazy_rescale", True, (False,)),
     _values("lazy_rescale_threshold", 8.0, _DENSE_LAZY_THRESHOLDS),
     _values("pv_sched_fence_mask", 0, _SCHED_BARRIER_MASKS),
@@ -242,7 +246,8 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
 # limit (e.g. D64 block_n=256 fits only with lds_k_group_pad=0). Then
 # prerequisites-first: exp2 policy reads persistent, v_row_pad policy reads
 # block_n, a non-derived v_row_pad needs the swizzle off, interleave is read
-# only on the resolved qb_major decode, and iglp_mode / the PV fence follow iglp.
+# only on the resolved qb_major decode, nonpersist_decode only on the
+# non-persistent grid, and iglp_mode / the PV fence follow iglp.
 _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _values("use_cfvst", None, (True, False), enabler=True),
     _values("lds_row_pad", 8, _GFX942_LDS_ROW_PADS, enabler=True),
@@ -253,6 +258,7 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _num_persistent_axis(_GFX942_NUM_PERSISTENT_POLICIES),
     _values("persist_decode", "auto", ("qb_major", "hkv_major")),
     _flag("interleave"),
+    _values("nonpersist_decode", "auto", tuple(NONPERSIST_DECODES)),
     _values("use_v_swizzle", None, (True, False)),
     _values("v_row_pad", None, _GFX942_V_ROW_PADS),
     _values("use_exp2_fast", None, (True, False)),
