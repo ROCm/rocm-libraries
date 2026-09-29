@@ -18,7 +18,8 @@ arch modules, and adding an arch touches exactly one line here.
 
 from __future__ import annotations
 
-from typing import Iterator, Sequence, Tuple
+from dataclasses import replace
+from typing import Dict, Iterator, Sequence, Tuple
 
 from rocke.core.arch import ArchTarget
 from rocke.dispatch.core import (
@@ -50,6 +51,7 @@ from .common import (
     _request_errors,
     _resolve_num_cus,
     _selector_matches,
+    canonical_arch,
 )
 
 _FAMILY = FAMILY
@@ -385,6 +387,47 @@ def dispatch_attention(
     )
 
 
+def dispatch_for_arches(
+    req: AttentionRequest,
+    arches: str,
+    *,
+    ranker: Ranker | None = None,
+) -> Dict[str, DispatchResult]:
+    """Run :func:`dispatch_attention` for each arch in a comma-separated list.
+
+    Returns a ``{canonical_arch: DispatchResult}`` mapping so the caller can
+    compare selections across architectures from a single host without probing
+    any GPU.
+
+    Example::
+
+        results = dispatch_for_arches(req, "gfx942,gfx950")
+        print(results["gfx942"].candidate.name)
+        print(results["gfx950"].candidate.name)
+
+    Each arch is canonicalized via :func:`canonical_arch` (strips suffixes such
+    as ``:sramecc+``, normalizes case) before dispatch, so ``"GFX950"`` and
+    ``"gfx950:sramecc+"`` both appear in the output under the key ``"gfx950"``.
+    Duplicate arches after canonicalization are dispatched only once.
+
+    Args:
+        req:    Base :class:`AttentionRequest`. Its ``arch`` field is overridden
+                for each target; all other fields are preserved.
+        arches: Comma-separated arch names, e.g. ``"gfx942,gfx950"`` or a
+                single name ``"gfx942"``.
+        ranker: Optional ranker forwarded to :func:`dispatch_attention`.
+    """
+    results: Dict[str, DispatchResult] = {}
+    for raw in arches.split(","):
+        arch = canonical_arch(raw)
+        if not arch:
+            raise ValueError(f"invalid arch {raw!r} in arches string {arches!r}")
+        if arch in results:
+            continue  # deduplicate after canonicalization
+        results[arch] = dispatch_attention(replace(req, arch=arch), ranker=ranker)
+    return results
+
+
 __all__ = [
     "ATTENTION_ABI_VERSION",
     "ATTENTION_DIM_VOCABULARY",
@@ -405,6 +448,7 @@ __all__ = [
     "attention_sweep_space",
     "dense_spec_for_request",
     "dispatch_attention",
+    "dispatch_for_arches",
     "dispatch_attention_all",
     "iter_dispatch_attention_all",
     "iter_registered_attention_combos",
