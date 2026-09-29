@@ -37,16 +37,22 @@
 //
 // The kernels then read the block index back into a plain int and indexed blocks
 // directly, so the value was truncated twice: once narrowing into dim3 and again
-// when the kernel read it. The fix clamps every grid.x against
-// handle->properties.maxGridSize[0], grid-strides the kernels over the full
-// count, and widens the block index to 64 bits.
+// when the kernel read it. The fix clamps every grid.x with
+// rocsparse::get_grid_size_x, i.e. to min(maxGridSize[0], (2^32 - 1) / blockDim.x)
+// blocks, grid-strides the kernels over the full count, and widens the block
+// index to 64 bits.
 //
-// WHY NOT TEST THE REAL THRESHOLD. Overflowing grid.x needs block_count >
-// INT32_MAX, i.e. roughly 5.5e11 non-zeros. That is not allocatable on any
-// current device. These tests instead shrink the limit the new code clamps
-// against with ScopedMaxGridSizeX and run a small problem through the same code
-// path, so the grid-stride loops carry essentially all of the work. This is the
-// AISPARSE-702 idiom.
+// WHY NOT TEST THE REAL THRESHOLD. The limit that binds is the work-item count,
+// gridDim.x * blockDim.x < 2^32, not maxGridSize[0]. The nnz split grids run one
+// 256-thread block per 256 non-zeros, so they clamp once nnz exceeds
+// 16,777,215 * 256, about 4.3e9 non-zeros. The 1024-thread block reduction runs
+// one block per dense column and clamps at n >= 4,194,304, which is easy to
+// allocate. The merge path kernels clamp from m + nnz of about 4.3e9 (256 lanes
+// per merge block) to 1.4e11 (8 lanes). These tests shrink the limit with
+// ScopedMaxGridSizeX for speed, not because the real threshold is unreachable:
+// a small problem then runs through the same code path in milliseconds, and the
+// grid-stride loops carry essentially all of the work. This is the AISPARSE-702
+// idiom.
 //
 // WHAT MAKES EACH CASE LOAD-BEARING. The matrix is sized so that the unclamped
 // grid is many blocks wide for every kernel under test:
