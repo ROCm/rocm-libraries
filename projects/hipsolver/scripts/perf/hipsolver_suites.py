@@ -32,25 +32,64 @@ This module provides:
 - Test suite generator functions for various hipSOLVER routines
 - Common benchmark parameters
 - Size configurations for different test cases
-
-(Note: All the used sizes "n" are even. Relatively better performance is observed when the leading dimension "ld" is 
-not exaclty equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
-This could be revisited and changed in the future)   
 """
 
 from itertools import chain, repeat
 
-# Common benchmark arguments - always do 7 iterations in perf mode
+# Common benchmark arguments - always do 5 iterations in perf mode
 COMMON_ARGS = '--iters 5 --perf 1'
+
+
+# Common helpers
+###########################################
+
+def get_ld(s):
+    """
+    Gets leading dimension depending on the size. 
+    All the used sizes "n" are even. Relatively better performance is observed when the leading dimension "ld" is 
+    not exaclty equal to the size. Based on observations, we are taking ld = n + 1 if n < 4000, and ld = n + 64 otherwise.
+    This could be revisited and changed in the future   
+    """
+    if s < 4000: ld = s + 1
+    else: ld = s + 64
+    return ld
+
+
+def get_uplo(s_uplo):
+    """
+    Gets uplo (default is upper U)
+    """
+    if s_uplo == 'lower': uplo = 'L'
+    else: uplo = 'U'
+    return uplo
+
+
+def get_nrhs(s_nrhs, s):
+    """
+    Gets nrhs (default is 1)
+    """
+    if s_nrhs == 'n': nrhs = s
+    elif s_nrhs == 'half_n': nrhs = s//2
+    else: nrhs = 1
+    return nrhs 
+
+
+def get_n(s_shape, s, mode):
+    """
+    Gets the number of columns depending of the shape (default is square-normal)
+    """
+    if s_shape == 'skinny':
+        if mode == 'batched': n = 26
+        else: n = 160
+    else: n = s
+    return n
 
 
 def get_size_configurations(case):
     """
     Get size configurations for normal and batched tests.
-    Args:
-        case: a list with one or more of 'small', 'medium', 'large' or 'huge'
-    Returns:
-        tuple: (sizenormal, sizebatch) lists
+    Args: a list with one or more of 'small', 'medium', 'large' or 'huge'
+    Returns: (sizenormal, sizebatch) lists
     """
     sizenormal = []
     sizebatch = []
@@ -61,14 +100,18 @@ def get_size_configurations(case):
         elif c == 'medium':
             sizenormal += list(chain(range(1024, 2048, 64), range(2048, 4096, 128)))
             sizebatch += list(chain(zip(range(168, 260, 8), repeat(2500)), zip(range(272, 520, 16), repeat(1000))))
-        elif c == 'large':
+        elif c == 'large': 
             sizenormal += list(chain(range(4096, 8192, 256), range(8192, 12800, 512)))
             sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
         elif c == 'huge': # huge == large for batch cases
             sizenormal += list(chain(range(12800, 23040, 2048), range(23040, 32768, 4096)))
-            sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
+            if 'large' not in case:
+                sizebatch += list(chain(zip(range(544, 1050, 32), repeat(500)), zip(range(1088, 2050, 64), repeat(50))))
     return sizenormal, sizebatch
 
+
+# Benchmark suites
+########################################
 
 def potrf_suite(*, suite, precision, sizenormal, sizebatch):
     """
@@ -81,14 +124,12 @@ def potrf_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'potrf'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L' 
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
 def potrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
@@ -102,14 +143,12 @@ def potrfBatch_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'potrf_batched'
     size = sizebatch
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
         for s, bc in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'uplo': shape, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {upl} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'uplo': s_uplo, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {uplo} -n {s} --lda {ld}')
 
 
 def potrs_suite(*, suite, precision, sizenormal, sizebatch):
@@ -122,18 +161,14 @@ def potrs_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'potrs'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
-        for nv in ['one', 'half_n', 'n']:
-            nrhs = 1
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
+        for s_nrhs in ['one', 'half_n', 'n']:
             for s in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                if nv == 'half_n': nrhs = s//2
-                elif nv == 'n': nrhs = s 
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'nrhs': nv, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+                nrhs = get_nrhs(s_nrhs, s)
+                ld = get_ld(s)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'nrhs': s_nrhs, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
 def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
@@ -146,18 +181,14 @@ def potrsBatch_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'potrs_batched'
     size = sizebatch
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
-        for nv in ['one']: #['one', 'half_n', 'n'] cuda currently only supports 1 rhs 
-            nrhs = 1
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
+        for s_nrhs in ['one']: #['one', 'half_n', 'n'] cuda currently only supports 1 rhs 
             for s, bc in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                if nv == 'half_n': nrhs = s//2
-                elif nv == 'n': nrhs = s
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'uplo': shape, 'nrhs': nv, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {upl} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+                nrhs = get_nrhs(s_nrhs, s)
+                ld = get_ld(s)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'uplo': s_uplo, 'nrhs': s_nrhs, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --uplo {uplo} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
 def potri_suite(*, suite, precision, sizenormal, sizebatch):
@@ -169,14 +200,12 @@ def potri_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'potri'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
 def sytrf_suite(*, suite, precision, sizenormal, sizebatch):
@@ -186,14 +215,12 @@ def sytrf_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'sytrf'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
 def sytrs_suite(*, suite, precision, sizenormal, sizebatch):
@@ -203,18 +230,14 @@ def sytrs_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'sytrs_64'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
-        else: upl = 'L'
-        for nv in ['one', 'half_n', 'n']:
-            nrhs = 1
+    for s_uplo in ['upper', 'lower']:
+        uplo = get_uplo(s_uplo)
+        for s_nrhs in ['one', 'half_n', 'n']:
             for s in size:
-                if s < 4000: ld = s + 1
-                else: ld = s + 64
-                if nv == 'half_n': nrhs = s//2
-                elif nv == 'n': nrhs = s
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'nrhs': nv, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
+                nrhs = get_nrhs(s_nrhs, s)
+                ld = get_ld(s)
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'nrhs': s_nrhs, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
 def getrf_suite(*, suite, precision, sizenormal, sizebatch):
@@ -224,8 +247,7 @@ def getrf_suite(*, suite, precision, sizenormal, sizebatch):
     fn = 'getrf'
     size = sizenormal
     for s in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
+        ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
@@ -237,8 +259,7 @@ def getrf_suite(*, suite, precision, sizenormal, sizebatch):
 #    fn = 'getrf_batched'
 #    size = sizebatch
 #    for s, bc in size:
-#        if s < 4000: ld = s + 1
-#        else: ld = s + 64
+#        ld = get_ld(s)
 #        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
 #        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
 
@@ -250,8 +271,7 @@ def getrfNpvt_suite(*, suite, precision, sizenormal, sizebatch):
     fn = 'getrf_npvt'
     size = sizenormal
     for s in size:
-        if s < 4000: ld = s + 1
-        else: ld = s + 64
+        ld = get_ld(s)
         row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'n': s}
         yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {s} --lda {ld}')
 
@@ -263,8 +283,7 @@ def getrfNpvt_suite(*, suite, precision, sizenormal, sizebatch):
 #    fn = 'getrf_npvt_batched'
 #    size = sizebatch
 #    for s, bc in size:
-#        if s < 4000: ld = s + 1
-#        else: ld = s + 64
+#        ld = get_ld(s)
 #        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
 #        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {s} --lda {ld}')
 
@@ -276,14 +295,11 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'getrs'
     size = sizenormal
-    for nv in ['one', 'half_n', 'n']:
-        nrhs = 1
+    for s_nrhs in ['one', 'half_n', 'n']:
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nv == 'half_n': nrhs = s//2
-            elif nv == 'n': nrhs = s 
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
+            nrhs = get_nrhs(s_nrhs, s)
+            ld = get_ld(s)
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': s_nrhs, 'n': s}
             yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
@@ -294,14 +310,11 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
 #    """
 #    fn = 'getrs_batched'
 #    size = sizebatch
-#    for nv in ['one', 'half_n', 'n']:
-#        nrhs = 1
+#    for s_nrhs in ['one', 'half_n', 'n']:
 #        for s, bc in size:
-#            if s < 4000: ld = s + 1
-#            else: ld = s + 64
-#            if nv == 'half_n': nrhs = s//2
-#            elif nv == 'n': nrhs = s
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
+#            nrhs = get_nrhs(s_nrhs, s)
+#            ld = get_ld(s)
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': s_nrhs, 'n': s}
 #            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
@@ -312,14 +325,11 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
 #    """
 #    fn = 'getrs_npvt'
 #    size = sizenormal
-#    for nv in ['one', 'half_n', 'n']:
-#        nrhs = 1
+#    for s_nrhs in ['one', 'half_n', 'n']:
 #        for s in size:
-#            if s < 4000: ld = s + 1
-#            else: ld = s + 64
-#            if nv == 'half_n': nrhs = s//2
-#            elif nv == 'n': nrhs = s
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': nv, 'n': s}
+#            nrhs = get_nrhs(s_nrhs, s)
+#            ld = get_ld(s)
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'nrhs': s_nrhs, 'n': s}
 #            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
@@ -330,14 +340,11 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
 #    """
 #    fn = 'getrs_npvt_batched'
 #    size = sizebatch
-#    for nv in ['one', 'half_n', 'n']:
-#        nrhs = 1
+#    for s_nrhs in ['one', 'half_n', 'n']:
 #        for s, bc in size:
-#            if s < 4000: ld = s + 1
-#            else: ld = s + 64
-#            if nv == 'half_n': nrhs = s//2
-#            elif nv == 'n': nrhs = s
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': nv, 'n': s}
+#            nrhs = get_nrhs(s_nrhs, s)
+#            ld = get_ld(s)
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'nrhs': s_nrhs, 'n': s}
 #            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} --nrhs {nrhs} -n {s} --lda {ld} --ldb {ld}')
 
 
@@ -348,8 +355,7 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
 #    fn = 'getri_batched'
 #    size = sizebatch
 #    for s, bc in size:
-#        if s < 4000: ld = s + 1
-#        else: ld = s + 64
+#        ld = get_ld(s)
 #        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'n': s}
 #        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {s} --lda {ld} --ldc {ld}')
 
@@ -366,14 +372,12 @@ def getrs_suite(*, suite, precision, sizenormal, sizebatch):
 #    """
 #    fn = 'trtri'
 #    size = sizenormal
-#    for shape in ['upper', 'lower']:
-#        if shape == 'upper': upl = 'U'
-#        else: upl = 'L'
+#    for s_uplo in ['upper', 'lower']:
+#        uplo = get_uplo(s_uplo)
 #        for s in size:
-#            if s < 4000: ld = s + 1
-#            else: ld = s + 64
-#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
-#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
+#            ld = get_ld(s)
+#            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'n': s}
+#            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
 def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
@@ -386,16 +390,12 @@ def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'geqrf'
     size=sizenormal
-    for nc in [0, 160]:
-        if nc == 0: nn = 'sq'
-        else: nn = nc
+    for s_shape in ['square', 'skinny']:
         for s in size:
-            if s < 4000: ld = s + 1
-            else: ld = s + 64
-            if nc == 0: n = s
-            else: n = nc
+            n = get_n(s_shape, s, 'normal')
+            ld = get_ld(s)
             if s >= n:
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'cols': nn, 'n': s}
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'shape': s_shape, 'n': s}
                 yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -n {n} -m {s} --lda {ld}')
 
 
@@ -409,16 +409,12 @@ def geqrf_suite(*, suite, precision, sizenormal, sizebatch):
 #    """
 #    fn = 'geqrf_batched'
 #    size = sizebatch
-#    for nc in [0, 26]:
-#        if nc == 0: nn = 'sq'
-#        else: nn = nc
+#    for s_shape in ['square', 'skinny']:
 #        for s, bc in size:
-#            if s < 4000: ld = s + 1
-#            else: ld = s + 64
-#            if nc == 0: n = s
-#            else: n = nc
+#            n = get_n(s_shape, s, 'batched')
+#            ld = get_ld(s)
 #            if s >= n:
-#                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'cols': nn, 'n': s}
+#                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'shape': s_shape, 'n': s}
 #                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -n {n} -m {s} --lda {ld}')
 
 
@@ -437,13 +433,13 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
     fn = 'gels'
     size = sizenormal
     for tt in ['overdet']: #['overdet', 'underdet'] underdetermined systems are not currently supported in cuda
-        for nv in ['one', 'half_n', 'n']:
+        for s_nrhs in ['one', 'half_n', 'n']:
             nrhs = 1
             for s in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                if nv == 'half_n': nrhs = s//2
-                elif nv == 'n': nrhs = s
+                if s_nrhs == 'half_n': nrhs = s//2
+                elif s_nrhs == 'n': nrhs = s
                 if s >= 160:
                     if tt == 'overdet':
                         mm = s
@@ -457,7 +453,7 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
                         ld_a = 161
                         ld_b = ld
                         ld_x = ld
-                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'type': tt, 'nrhs': nv, 'n': s}
+                    row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'type': tt, 'nrhs': s_nrhs, 'n': s}
                     yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} -m {mm} --nrhs {nrhs} -n {nn} --lda {ld_a} --ldb {ld_b} --ldx {ld_x}')
 
 
@@ -480,13 +476,13 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
 #        for ops in ['none']: #['none', 'trans'] transposed is not currently supported in cuda.
 #            if ops == 'none': op = 'N'
 #            else: op = tr
-#            for nv in ['one', 'half_n', 'n']:
+#            for s_nrhs in ['one', 'half_n', 'n']:
 #                nrhs = 1
 #                for s, bc in size:
 #                    if s < 4000: ld = s + 1
 #                    else: ld = s + 64
-#                    if nv == 'half_n': nrhs = s//2
-#                    elif nv == 'n': nrhs = s
+#                    if s_nrhs == 'half_n': nrhs = s//2
+#                    elif s_nrhs == 'n': nrhs = s
 #                    if s >= 26:
 #                        if tt == 'overdet':
 #                            mm = s
@@ -498,7 +494,7 @@ def gels_suite(*, suite, precision, sizenormal, sizebatch):
 #                            nn = s
 #                            ld_a = 27
 #                            ld_b = ld
-#                        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'type': tt, 'trans': ops, 'nrhs': nv, 'n': s}
+#                        row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'batch_count': bc, 'type': tt, 'trans': ops, 'nrhs': s_nrhs, 'n': s}
 #                        yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --batch_count {bc} -m {mm} --trans {op} --nrhs {nrhs} -n {mm} --lda {ld_a} --ldb {ld_b}')
 
 
@@ -576,14 +572,14 @@ def xxtrd_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'sytrd' if precision == 's' or precision == 'd' else 'hetrd'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
+    for s_uplo in ['upper', 'lower']:
+        if s_uplo == 'upper': upl = 'U'
         else: upl = 'L'
         for s in size:
             if s < 4000: ld = s + 1
             else: ld = s + 64
-            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'n': s}
-            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {upl} -n {s} --lda {ld}')
+            row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'n': s}
+            yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --uplo {uplo} -n {s} --lda {ld}')
 
 
 def xxgtr_suite(*, suite, precision, sizenormal, sizebatch):
@@ -701,8 +697,8 @@ def xxgvd_suite(*, suite, precision, sizenormal, sizebatch):
     """
     fn = 'sygvd' if precision == 's' or precision == 'd' else 'hegvd'
     size = sizenormal
-    for shape in ['upper', 'lower']:
-        if shape == 'upper': upl = 'U'
+    for s_uplo in ['upper', 'lower']:
+        if s_uplo == 'upper': upl = 'U'
         else: upl = 'L'
         for ty in ['AX', 'BAX']:
             if ty == 'AX': ity = 1
@@ -710,8 +706,8 @@ def xxgvd_suite(*, suite, precision, sizenormal, sizebatch):
             for s in size:
                 if s < 4000: ld = s + 1
                 else: ld = s + 64
-                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': shape, 'type': ty, 'n': s}
-                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --jobz V --uplo {upl} --itype {ity} -n {s} --lda {ld} --ldb {ld}')
+                row = {'name': precision+suite, 'name_test': suite, 'function': fn, 'precision': precision, 'uplo': s_uplo, 'type': ty, 'n': s}
+                yield (row, s, f'{COMMON_ARGS} -f {fn} -r {precision} --jobz V --uplo {uplo} --itype {ity} -n {s} --lda {ld} --ldb {ld}')
 
 
 def xxevBatch_suite(*, suite, precision, sizenormal, sizebatch):
@@ -859,7 +855,9 @@ def gesvdjBatch_suite(*, suite, precision, sizenormal, sizebatch):
 
 
 # Registry of all available benchmark suites
+#####################################################
 #### TODO: add back missing functions when they become available in hipsolver ####
+
 SUITES = {
     # Symmetric linear systems
     'potrf': potrf_suite,
