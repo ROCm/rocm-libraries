@@ -19,33 +19,7 @@ import math
 
 from rocjitsu_sweep_plan import make_plan, sha256
 
-TYPE_OPTIONS = {
-    "problem-identifier": "operationIdentifier",
-    "a-type": "aType",
-    "b-type": "bType",
-    "c-type": "cType",
-    "d-type": "dType",
-    "e-type": "eType",
-    "alpha-type": "computeType",
-    "beta-type": "computeType",
-    "activation-compute-type": "activationComputeDataType",
-    "f32-xdl-math-op": "f32XdlMathOp",
-    "use-gradient": "useGradient",
-    "use-bias": "useBias",
-    "use-e": "useE",
-    "output-amaxD": "outputAmaxD",
-    "use-scaleAB": "useScaleAB",
-    "use-scaleCD": "useScaleCD",
-    "use-scaleAlphaVec": "useScaleAlphaVec",
-    "swizzle-tensor-a": "swizzleTensorA",
-    "swizzle-tensor-b": "swizzleTensorB",
-    "sparse": "sparse",
-    "high-precision-accumulate": "highPrecisionAccumulate",
-    "strided-batched": "stridedBatched",
-    "grouped-gemm": "groupedGemm",
-    "activation-type": "activationType",
-    "activation-no-guard": "activationNoGuard",
-}
+from Tensile.Utilities.ClientConfig import problemTypeOptions
 
 
 def write_text(path, value):
@@ -86,7 +60,7 @@ def render_report(manifest, summary):
         f"Seed: `{cell(manifest['seed'])}`; policy: `{cell(manifest['policy'])}`; "
         f"inventory/preparation: {manifest['preparation_seconds']:.2f} s.",
         f"Artifact fingerprint: `{manifest['artifact_fingerprint']}`.",
-        f"Sample: {len(manifest['jobs'])} kernels; eligible/inventory kernel names: "
+        f"Selected solutions: {len(manifest['jobs'])}; eligible/inventory kernel names: "
         f"{inventory.get('eligible_kernel_names', '?')}/{inventory.get('unique_kernel_names', '?')}.",
         "",
         "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit.",
@@ -130,6 +104,7 @@ def prepare(args):
         base["vm"]["gpu"]["device"],
         args.kernels,
         args.seed,
+        args.solution_indices,
     )
     manifest.update(
         backend=args.backend,
@@ -154,22 +129,13 @@ def prepare(args):
 
 def client_options(job, results):
     problem = job["problem_type"]
-    options = {
-        key: problem[field] for key, field in TYPE_OPTIONS.items() if field in problem
-    }
+    options = problemTypeOptions(problem)
     options.update(
         {
             "library-file": job["library"],
             "results-file": str(results),
             "solution-start-idx": job["solutions"][0]["index"],
             "num-solutions": len(job["solutions"]),
-            "compute-input-type-A": problem.get(
-                "computeInputTypeA", problem.get("computeInputType", problem["aType"])
-            ),
-            "compute-input-type-B": problem.get(
-                "computeInputTypeB", problem.get("computeInputType", problem["bType"])
-            ),
-            "bias-source": problem["biasSrcWhiteList"][0],
             "bias-type-args": (
                 problem["biasDataTypeWhiteList"] or [problem["computeType"]]
             )[0],
@@ -571,6 +537,12 @@ def run(args):
     args.reports.mkdir(parents=True, exist_ok=False)
     try:
         manifest, config = prepare(args)
+        print(
+            f"{args.backend}: selected {len(manifest['jobs'])} solutions, "
+            f"{manifest['planned_cases']} cases; preparation {manifest['preparation_seconds']:.2f}s. "
+            f"Reports: {args.reports}",
+            flush=True,
+        )
         write_text(
             args.reports / "summary.md", render_report(manifest, {"results": []})
         )
@@ -783,7 +755,15 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--target", choices=("gfx942", "gfx950"), required=True)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--kernels", type=int, default=100)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--kernels", type=int, default=100)
+    selection.add_argument(
+        "--solution-index",
+        dest="solution_indices",
+        action="append",
+        type=int,
+        help="Run this artifact-specific index; repeat for multiple solutions (including aliases)",
+    )
     parser.add_argument("--backend", choices=("tensile", "bench"), required=True)
     parser.add_argument(
         "--seed",

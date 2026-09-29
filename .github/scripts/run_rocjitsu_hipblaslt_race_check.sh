@@ -17,7 +17,7 @@ set -euo pipefail
 #   4. Run hipblaslt-bench and a reduced TensileLite smoke with the race and
 #      logging plugins enabled in per-workload configs.
 #   5. Reconstruct, sample and exercise packaged kernels through each client;
-#      see rocjitsu_race_sweep.md for the metadata-derived case policy.
+#      see projects/hipblaslt/clients/scripts/rocjitsu/README.md for the metadata-derived case policy.
 
 # These defaults match the GitHub Actions workspace layout: ROCM_PATH is the
 # unpacked TheRock artifact tree, ROCJITSU_SOURCE_DIR is the checked-out
@@ -527,24 +527,20 @@ tensilelite_status=$?
 # Each backend gets 25 minutes, leaving 25 minutes of the enclosing CI step for
 # the emulator build, old smokes and reporting. Preparation consumes that budget.
 sweep_seed="${ROCJITSU_SWEEP_SEED:-${GITHUB_SHA:-local}}"
-run_timed "TensileLite sampled race sweep" \
-  python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
-    --backend tensile --seed "${sweep_seed}" \
-    --rocjitsu "${ROCJITSU_BIN}" --client "${TENSILELITE_CLIENT}" \
-    --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
-    --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
-    --reports "${RACE_REPORT_DIR}/sweep-tensile" \
-    --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
-tensile_sweep_status=$?
-run_timed "hipBLASLt-bench sampled race sweep" \
-  python3 "$(dirname "${BASH_SOURCE[0]}")/rocjitsu_race_sweep.py" \
-    --backend bench --seed "${sweep_seed}" \
-    --rocjitsu "${ROCJITSU_BIN}" --client "${HIPBLASLT_BENCH}" \
-    --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
-    --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
-    --reports "${RACE_REPORT_DIR}/sweep-bench" \
-    --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
-bench_sweep_status=$?
+declare -A sweep_status
+for backend in tensile bench; do
+  client="${TENSILELITE_CLIENT}"
+  [[ "${backend}" == bench ]] && client="${HIPBLASLT_BENCH}"
+  run_timed "${backend} sampled race sweep" \
+    python3 "${ROCM_PATH}/share/hipblaslt/rocjitsu/rocjitsu_race_sweep.py" \
+      --backend "${backend}" --seed "${sweep_seed}" \
+      --rocjitsu "${ROCJITSU_BIN}" --client "${client}" \
+      --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
+      --library-dir "${ROCM_PATH}/lib/hipblaslt/library" \
+      --reports "${RACE_REPORT_DIR}/sweep-${backend}" \
+      --workers 4 --kernels 100 --timeout 120 --suite-timeout 1500
+  sweep_status[${backend}]=$?
+done
 set -e
 
 if [[ "${hipblaslt_status}" -ne 0 ]]; then
@@ -557,8 +553,8 @@ if [[ "${tensilelite_status}" -ne 0 ]]; then
   check_status=1
 fi
 
-if [[ "${tensile_sweep_status}" -ne 0 || "${bench_sweep_status}" -ne 0 ]]; then
-  echo "sampled sweeps: tensile=${tensile_sweep_status}, bench=${bench_sweep_status}; see separate sweep reports" >&2
+if [[ "${sweep_status[tensile]}" -ne 0 || "${sweep_status[bench]}" -ne 0 ]]; then
+  echo "sampled sweeps: tensile=${sweep_status[tensile]}, bench=${sweep_status[bench]}; see separate sweep reports" >&2
   check_status=1
 fi
 

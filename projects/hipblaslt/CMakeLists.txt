@@ -757,6 +757,15 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "*.pyc" EXCLUDE
     )
 
+    # Component-owned paired-client race sweep and its CPU-only tests.
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+        COMPONENT tests
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.md"
+        PATTERN "__pycache__" EXCLUDE
+    )
+
     # Scripts used by unit tests
     install(
         FILES

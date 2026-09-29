@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import zlib
+from Tensile.Utilities.LibraryIO import readMessagePack
 
 POLICY = "tile-depth-v1"
 CASES_PER_KERNEL = 4
@@ -19,12 +19,7 @@ def sha256(path):
 
 
 def read_library(path):
-    import msgpack
-
-    payload = path.read_bytes()
-    if path.name.endswith(".zlib"):
-        payload = zlib.decompress(payload)
-    data = msgpack.unpackb(payload, raw=False)
+    data = readMessagePack(path)
     if not isinstance(data, dict):
         raise ValueError(f"Expected a library mapping: {path}")
     return data
@@ -55,6 +50,7 @@ def ordinary_problem(problem):
         problem.get(k, False)
         for k in (
             "groupedGemm",
+            "fusedGemmA2A",
             "sparse",
             "useGradient",
             "useE",
@@ -226,7 +222,7 @@ class KernelSample:
         return [self.entries[k][1:] for k in sorted(self.entries)]
 
 
-def make_plan(library_dir, target, device, count, seed):
+def make_plan(library_dir, target, device, count, seed, solution_indices=None):
     library_dir = (
         library_dir / target if (library_dir / target).is_dir() else library_dir
     )
@@ -241,7 +237,8 @@ def make_plan(library_dir, target, device, count, seed):
         raise ValueError(f"No {target} packaged metadata under {library_dir}")
     counts, sample, inputs = Counter(), KernelSample(count, seed), {}
     names, eligible_names = set(), set()
-    indices = set()
+    indices, requested = set(), {}
+    wanted = set(solution_indices or [])
     for path in sorted(libraries.values()):
         inputs[path.name] = sha256(path)
         for solution in read_library(path).get("solutions", []):
@@ -251,6 +248,8 @@ def make_plan(library_dir, target, device, count, seed):
                 )
             indices.add(solution["index"])
             counts["solutions"] += 1
+            if solution["index"] in wanted:
+                requested[solution["index"]] = (path, solution)
             name = hashlib.sha256(solution["kernelName"].encode()).digest()
             names.add(name)
             if not matches_hardware(solution["hardwarePredicate"], target, device):
@@ -260,12 +259,18 @@ def make_plan(library_dir, target, device, count, seed):
             else:
                 counts["eligible_solutions"] += 1
                 eligible_names.add(name)
-                sample.consider(path, solution)
+                if not wanted:
+                    sample.consider(path, solution)
     counts.update(
         unique_kernel_names=len(names), eligible_kernel_names=len(eligible_names)
     )
+    if wanted - requested.keys():
+        raise ValueError(
+            f"Requested solution indices not found: {sorted(wanted - requested.keys())}"
+        )
+    selected = [requested[i] for i in sorted(wanted)] if wanted else sample.selected()
     jobs = []
-    for job_id, (metadata, s) in enumerate(sample.selected()):
+    for job_id, (metadata, s) in enumerate(selected):
         job = {
             "id": job_id,
             "library": str(metadata),
@@ -278,6 +283,14 @@ def make_plan(library_dir, target, device, count, seed):
             ],
         }
         try:
+            if not matches_hardware(s["hardwarePredicate"], target, device):
+                raise ValueError(
+                    "Requested solution does not match the emulated hardware"
+                )
+            if not ordinary_problem(s["problemType"]):
+                raise ValueError(
+                    "Requested solution is outside the client adapter scope"
+                )
             job["cases"] = derive_cases(s)
         except (ValueError, KeyError, IndexError, TypeError) as error:
             job["cases"] = [
@@ -308,8 +321,9 @@ def make_plan(library_dir, target, device, count, seed):
         "policy": POLICY,
         "seed": seed,
         "target": target,
-        "kernels": count,
-        "planned_cases": count * CASES_PER_KERNEL,
+        "selection": "solution-indices" if wanted else "sampled-kernels",
+        "kernels": len({s["kernelName"] for _, s in selected}),
+        "planned_cases": len(jobs) * CASES_PER_KERNEL,
         "inventory": dict(counts),
         "input_sha256": inputs,
         "artifact_fingerprint": fingerprint,

@@ -13,6 +13,10 @@ import zlib
 from pathlib import Path
 from typing import List
 
+# This build-time script also runs directly from a source checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tensilelite"))
+from Tensile.Utilities.LibraryIO import readMessagePack
+
 try:
     import msgpack
 except ImportError:
@@ -52,36 +56,12 @@ def _scanSubtrees(libDir: Path):
     return subtrees
 
 
-def _strictDecompress(data: bytes) -> bytes:
-    """Decompress a single zlib stream, rejecting any trailing bytes.
-
-    Mirrors the C++ loader (readCompressedMsgObject), which treats leftover
-    input after the zlib stream as corruption. One-shot zlib.decompress
-    silently ignores such trailing bytes, so the integrity check would
-    otherwise pass files the runtime loader rejects.
-    """
-    decompressor = zlib.decompressobj()
-    raw = decompressor.decompress(data)
-    raw += decompressor.flush()
-    if not decompressor.eof:
-        raise zlib.error("incomplete zlib stream")
-    if decompressor.unused_data:
-        raise zlib.error(
-            f"trailing bytes after zlib stream: {decompressor.unused_data!r}"
-        )
-    return raw
-
-
 def _loadMapping(archDir: Path, arch: str, where: str):
     base = archDir / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     gz_path = Path(str(base) + ".zlib")
     src = gz_path if gz_path.is_file() else base
     try:
-        if src == gz_path:
-            raw = _strictDecompress(src.read_bytes())
-            return msgpack.unpackb(raw, raw=False, strict_map_key=False)
-        with open(src, "rb") as f:
-            return msgpack.unpack(f, raw=False, strict_map_key=False)
+        return readMessagePack(src)
     except (OSError, ValueError, zlib.error, *_MSGPACK_ERRORS) as exc:
         raise _MappingLoadError(
             f"{where}: failed to read/decode Mapping ({src.name}): {exc}"
