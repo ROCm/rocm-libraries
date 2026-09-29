@@ -25,7 +25,10 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
+#include "TestHelpers.hpp"
+#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/transforms/asm/dag/SchedulingKnobHeuristics.hpp"
@@ -262,6 +265,7 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
     EXPECT_NE(line.find("[SchedulingKnobs] module=Cijk_kernel"), std::string::npos);
     EXPECT_NE(line.find("wmma=4"), std::string::npos);
     EXPECT_NE(line.find("dsLoad=12"), std::string::npos);
+    EXPECT_NE(line.find("dsOverlapsPriorWmmaSrc=0"), std::string::npos);
     EXPECT_NE(line.find("dsReadThrottleLatency=160(policy)"), std::string::npos);
     EXPECT_NE(line.find("dsReadPerCap=3(policy)"), std::string::npos);
     EXPECT_NE(line.find("rule3SignalLeadCycles=100(static)"), std::string::npos);
@@ -291,4 +295,116 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsIfDebugHonorsDebugOnly)
         EXPECT_NE(captured.str().find("[SchedulingKnobs] module=on"), std::string::npos);
     }
     PassManagerDebugConfig::clearDebugOnly();
+}
+
+// loopWithPrefetch program order, not a DAG. ds_load_b128 writes four VGPRs.
+// A load counts once when any of those overlap a VGPR read by an earlier WMMA.
+TEST(SchedulingKnobHeuristics, DsLoadDestOverlapCountsPriorWmmaSrcOnly) {
+    StinkyAsmModule::ModuleOptions opts{};
+    opts.OptLevel = 0;
+    StinkyAsmModule module("overlap", kGfx1250, opts);
+    std::string group(kMainLoopGroupName);
+    module.addGroup(group);
+
+    BasicBlock& bb = *module.getFunction().getEntryBlock();
+    const GfxArchID archId = getGfxArchID(kGfx1250[0], kGfx1250[1], kGfx1250[2]);
+    AsmIRBuilder builder(bb, archId);
+
+    auto addDs = [&](int dest, bool inGroup) {
+        const size_t before = bb.size();
+        stinkytofu::test::createDsReadB128InBlock(&bb, archId, dest, /*addrReg=*/400);
+        std::vector<const std::string*> groups;
+        if (inGroup) groups.push_back(&group);
+        module.updateInstructionGroups(groups, before);
+    };
+    auto addWmma = [&](const StinkyRegister& src, bool inGroup) {
+        const size_t before = bb.size();
+        StinkyInstruction* inst =
+            builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, archId));
+        EXPECT_NE(inst, nullptr);
+        if (!inst) return;
+        inst->addSrcReg(src);
+        std::vector<const std::string*> groups;
+        if (inGroup) groups.push_back(&group);
+        module.updateInstructionGroups(groups, before);
+    };
+
+    addDs(/*dest=*/10, /*inGroup=*/false);                  // before the group
+    addDs(/*dest=*/0, /*inGroup=*/true);                    // before any WMMA
+    addWmma(StinkyRegister("s", 16, 1), /*inGroup=*/true);  // SGPR src is ignored
+    addDs(/*dest=*/16, /*inGroup=*/true);                   // v[16:20) vs s16
+    addWmma(StinkyRegister("v", 10, 8), /*inGroup=*/true);  // v[10:18)
+    addDs(/*dest=*/16, /*inGroup=*/true);                   // overlaps v16, v17
+    addDs(/*dest=*/40, /*inGroup=*/true);                   // no prior VGPR src
+    addWmma(StinkyRegister("v", 40, 1), /*inGroup=*/true);  // too late for the ds above
+    addDs(/*dest=*/40, /*inGroup=*/true);                   // overlaps v40
+
+    const SchedulingIRStats stats = countMainLoopSchedulingIRStats(module);
+    EXPECT_EQ(stats.wmmaCount, 3);
+    EXPECT_EQ(stats.dsLoadCount, 5);
+    EXPECT_EQ(stats.dsLoadDestOverlapsPriorWmmaSrc, 2);
+    ASSERT_EQ(stats.dsLoadByToken.size(), 1u);
+    EXPECT_FALSE(stats.dsLoadByToken[0].token.has_value());
+    EXPECT_EQ(stats.dsLoadByToken[0].dsLoadCount, 5);
+    EXPECT_EQ(stats.dsLoadByToken[0].dsLoadDestOverlapsPriorWmmaSrc, 2);
+    EXPECT_EQ(stats.dsLoadByToken[0].overlappingWmmaCount, 2);
+}
+
+// A ds_load is counted in every MemTokenData token it carries. The global
+// overlap count still counts that load once.
+TEST(SchedulingKnobHeuristics, DsLoadOverlapSplitsByMemToken) {
+    StinkyAsmModule::ModuleOptions opts{};
+    opts.OptLevel = 0;
+    StinkyAsmModule module("tokens", kGfx1250, opts);
+    std::string group(kMainLoopGroupName);
+    module.addGroup(group);
+
+    BasicBlock& bb = *module.getFunction().getEntryBlock();
+    const GfxArchID archId = getGfxArchID(kGfx1250[0], kGfx1250[1], kGfx1250[2]);
+    AsmIRBuilder builder(bb, archId);
+
+    auto addDs = [&](int dest, const std::vector<int>& tokens) {
+        const size_t before = bb.size();
+        StinkyInstruction* inst =
+            stinkytofu::test::createDsReadB128InBlock(&bb, archId, dest, /*addrReg=*/400);
+        if (!tokens.empty()) inst->addModifier<MemTokenData>(MemTokenData{tokens});
+        module.updateInstructionGroups({&group}, before);
+    };
+    auto addWmma = [&](int src, int num) {
+        const size_t before = bb.size();
+        StinkyInstruction* inst =
+            builder.create(getMCIDByUOp(GFX::v_wmma_f32_16x16x16_bf16, archId));
+        ASSERT_NE(inst, nullptr);
+        inst->addSrcReg(StinkyRegister("v", src, num));
+        module.updateInstructionGroups({&group}, before);
+    };
+
+    addDs(/*dest=*/0, /*tokens=*/{0});         // before any WMMA
+    addWmma(/*src=*/10, /*num=*/8);            // v[10:18)
+    addDs(/*dest=*/16, /*tokens=*/{0});        // overlaps, token 0
+    addDs(/*dest=*/16, /*tokens=*/{0, 1, 0});  // overlaps, both tokens, dup ignored
+    addDs(/*dest=*/40, /*tokens=*/{1});        // token 1, no overlap yet
+    addWmma(/*src=*/40, /*num=*/4);            // v[40:44)
+    addDs(/*dest=*/40, /*tokens=*/{1});        // overlaps the second WMMA only
+    addDs(/*dest=*/50, /*tokens=*/{});         // no token, no overlap
+
+    const SchedulingIRStats stats = countMainLoopSchedulingIRStats(module);
+    EXPECT_EQ(stats.dsLoadCount, 6);
+    EXPECT_EQ(stats.dsLoadDestOverlapsPriorWmmaSrc, 3);
+    ASSERT_EQ(stats.dsLoadByToken.size(), 3u);
+
+    EXPECT_EQ(stats.dsLoadByToken[0].token, 0);
+    EXPECT_EQ(stats.dsLoadByToken[0].dsLoadCount, 3);
+    EXPECT_EQ(stats.dsLoadByToken[0].dsLoadDestOverlapsPriorWmmaSrc, 2);
+    EXPECT_EQ(stats.dsLoadByToken[0].overlappingWmmaCount, 1);
+
+    EXPECT_EQ(stats.dsLoadByToken[1].token, 1);
+    EXPECT_EQ(stats.dsLoadByToken[1].dsLoadCount, 3);
+    EXPECT_EQ(stats.dsLoadByToken[1].dsLoadDestOverlapsPriorWmmaSrc, 2);
+    EXPECT_EQ(stats.dsLoadByToken[1].overlappingWmmaCount, 2);
+
+    EXPECT_FALSE(stats.dsLoadByToken[2].token.has_value());
+    EXPECT_EQ(stats.dsLoadByToken[2].dsLoadCount, 1);
+    EXPECT_EQ(stats.dsLoadByToken[2].dsLoadDestOverlapsPriorWmmaSrc, 0);
+    EXPECT_EQ(stats.dsLoadByToken[2].overlappingWmmaCount, 0);
 }

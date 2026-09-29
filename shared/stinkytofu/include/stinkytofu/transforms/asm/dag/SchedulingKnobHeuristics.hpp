@@ -23,6 +23,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
@@ -40,6 +41,21 @@ inline constexpr int kStaticDefaultDsReadPerCap = 3;
 /// Historical ModuleOptions / InsertClusterBarrierPass default.
 inline constexpr int kStaticDefaultClusterBarrierRule3SignalLeadCycles = 100;
 
+/// One memory-token bucket of main-loop ds_loads.
+/// `token == nullopt` is the ds_loads that carry no MemTokenData.
+struct DsLoadTokenStats {
+    std::optional<int> token;
+    int dsLoadCount = 0;
+    /// Same overlap rule as SchedulingIRStats::dsLoadDestOverlapsPriorWmmaSrc,
+    /// counted inside this token. A ds_load with several tokens is counted in
+    /// each of them. Does not affect the knob formulas.
+    int dsLoadDestOverlapsPriorWmmaSrc = 0;
+    /// Distinct earlier matrix instructions whose src VGPR overlaps a ds_load
+    /// dest in this bucket. One WMMA counts once even if it overlaps several
+    /// loads. Does not affect the knob formulas.
+    int overlappingWmmaCount = 0;
+};
+
 enum class SchedulingKnobSource : uint8_t {
     User,           ///< Explicit ModuleOptions override
     Policy,         ///< SchedulingKnobPolicy::propose()
@@ -53,6 +69,13 @@ struct SchedulingIRStats {
     int sumWmmaLatencyCycles = 0;
     /// `latencyCycles` of the first main-loop matrix instruction (0 if none).
     int firstWmmaLatencyCycles = 0;
+    /// ds_loads in `loopWithPrefetch` whose dest VGPR overlaps the src VGPR of
+    /// any matrix instruction earlier in that group. Program order, one count
+    /// per ds_load. Does not affect the knob formulas.
+    int dsLoadDestOverlapsPriorWmmaSrc = 0;
+    /// Per MemTokenData token, sorted by token id. The no-token bucket, when
+    /// present, is last. Does not affect the knob formulas.
+    std::vector<DsLoadTokenStats> dsLoadByToken;
 
     bool degenerate() const {
         return wmmaCount <= 0 || dsLoadCount <= 0;

@@ -6,11 +6,16 @@
 #include <algorithm>
 #include <cassert>
 #include <iostream>
+#include <map>
 #include <ostream>
 #include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
 // Enable via PassManagerDebugConfig::addDebugOnly("SchedulingKnobHeuristics")
 // or `StinkyTofuDebugPass: "SchedulingKnobHeuristics"` in YAML.
@@ -22,6 +27,25 @@ namespace {
 int ceilDivPositive(int num, int den) {
     assert(den > 0);
     return (num + den - 1) / den;
+}
+
+void collectVgprIndices(const std::vector<StinkyRegister>& regs,
+                        std::unordered_set<uint32_t>& out) {
+    for (const StinkyRegister& reg : regs) {
+        if (!reg.isRegister() || isPseudoReg(reg) || reg.reg.type != RegType::V) continue;
+        for (uint32_t off = 0; off < reg.reg.num; ++off) out.insert(reg.reg.idx + off);
+    }
+}
+
+bool destVgprHits(const StinkyInstruction& inst, const std::unordered_set<uint32_t>& prior) {
+    if (prior.empty()) return false;
+    for (const StinkyRegister& reg : inst.getDestRegs()) {
+        if (!reg.isRegister() || isPseudoReg(reg) || reg.reg.type != RegType::V) continue;
+        for (uint32_t off = 0; off < reg.reg.num; ++off) {
+            if (prior.count(reg.reg.idx + off)) return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -46,6 +70,17 @@ SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module) 
     if (!range) return stats;
 
     auto [begin, end] = *range;
+    struct TokenAccum {
+        DsLoadTokenStats stats;
+        std::unordered_set<int> wmmaIds;
+    };
+    std::unordered_set<uint32_t> priorWmmaSrcVgpr;
+    std::vector<std::unordered_set<uint32_t>> priorWmmaSrcs;
+    std::map<int, TokenAccum> byToken;
+    TokenAccum untokened;
+    auto noteOverlap = [](TokenAccum& bucket, const std::vector<int>& hitWmmas) {
+        bucket.wmmaIds.insert(hitWmmas.begin(), hitWmmas.end());
+    };
     for (auto it = begin; it != end; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!inst) continue;
@@ -53,10 +88,46 @@ SchedulingIRStats countMainLoopSchedulingIRStats(const StinkyAsmModule& module) 
             if (stats.wmmaCount == 0) stats.firstWmmaLatencyCycles = inst->latencyCycles;
             ++stats.wmmaCount;
             stats.sumWmmaLatencyCycles += inst->latencyCycles;
+            std::unordered_set<uint32_t> srcVgpr;
+            collectVgprIndices(inst->getSrcRegs(), srcVgpr);
+            collectVgprIndices(inst->getSrcRegs(), priorWmmaSrcVgpr);
+            priorWmmaSrcs.push_back(std::move(srcVgpr));
         } else if (isDSRead(*inst)) {
             ++stats.dsLoadCount;
+            const bool overlaps = destVgprHits(*inst, priorWmmaSrcVgpr);
+            if (overlaps) ++stats.dsLoadDestOverlapsPriorWmmaSrc;
+            std::vector<int> hitWmmas;
+            if (overlaps) {
+                for (int i = 0; i < static_cast<int>(priorWmmaSrcs.size()); ++i) {
+                    if (destVgprHits(*inst, priorWmmaSrcs[i])) hitWmmas.push_back(i);
+                }
+            }
+
+            const auto* memToken = inst->getModifier<MemTokenData>();
+            if (memToken == nullptr || memToken->tokens.empty()) {
+                ++untokened.stats.dsLoadCount;
+                if (overlaps) ++untokened.stats.dsLoadDestOverlapsPriorWmmaSrc;
+                noteOverlap(untokened, hitWmmas);
+                continue;
+            }
+            std::unordered_set<int> seen;
+            for (int token : memToken->tokens) {
+                if (!seen.insert(token).second) continue;
+                TokenAccum& bucket = byToken[token];
+                bucket.stats.token = token;
+                ++bucket.stats.dsLoadCount;
+                if (overlaps) ++bucket.stats.dsLoadDestOverlapsPriorWmmaSrc;
+                noteOverlap(bucket, hitWmmas);
+            }
         }
     }
+    auto finish = [](TokenAccum& accum) {
+        accum.stats.overlappingWmmaCount = static_cast<int>(accum.wmmaIds.size());
+        return std::move(accum.stats);
+    };
+    stats.dsLoadByToken.reserve(byToken.size() + (untokened.stats.dsLoadCount > 0 ? 1 : 0));
+    for (auto& entry : byToken) stats.dsLoadByToken.push_back(finish(entry.second));
+    if (untokened.stats.dsLoadCount > 0) stats.dsLoadByToken.push_back(finish(untokened));
     return stats;
 }
 
@@ -227,6 +298,7 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
                                 const ResolvedSchedulingKnobs& resolved) {
     os << "[SchedulingKnobs] module=" << moduleName << " wmma=" << features.stats.wmmaCount
        << " dsLoad=" << features.stats.dsLoadCount
+       << " dsOverlapsPriorWmmaSrc=" << features.stats.dsLoadDestOverlapsPriorWmmaSrc
        << " firstWmmaLat=" << features.stats.firstWmmaLatencyCycles
        << " sumWmmaLat=" << features.stats.sumWmmaLatencyCycles
        << " dsReadThrottleLatency=" << resolved.dsReadThrottleLatency << "("
@@ -235,6 +307,16 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << schedulingKnobSourceName(resolved.dsReadPerCapSource) << ")"
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
        << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")\n";
+    for (const DsLoadTokenStats& bucket : features.stats.dsLoadByToken) {
+        os << "[SchedulingKnobs token] token=";
+        if (bucket.token.has_value())
+            os << *bucket.token;
+        else
+            os << "none";
+        os << " dsLoad=" << bucket.dsLoadCount
+           << " dsOverlapsPriorWmmaSrc=" << bucket.dsLoadDestOverlapsPriorWmmaSrc
+           << " overlappingWmma=" << bucket.overlappingWmmaCount << "\n";
+    }
 }
 
 void logResolvedSchedulingKnobsIfDebug(std::string_view moduleName,
