@@ -180,17 +180,8 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_calloc(std::size_t n, 
   }
 
   auto p = __hipstdpar_malloc(bytes);
-  if (!p)
-  {
-    // A zero-sized request may return nullptr; nullptr alone does not imply ENOMEM.
-    if (bytes != 0)
-    {
-      errno = ENOMEM;
-    }
-    return nullptr;
-  }
 
-  return std::memset(p, 0, bytes);
+  return p ? std::memset(p, 0, bytes) : nullptr;
 }
 
 extern "C" inline __attribute__((used)) int __hipstdpar_posix_aligned_alloc(void** p, std::size_t a, std::size_t n)
@@ -198,12 +189,6 @@ extern "C" inline __attribute__((used)) int __hipstdpar_posix_aligned_alloc(void
   if (!p || a < sizeof(void*) || (a & (a - 1)) != 0)
   {
     return EINVAL;
-  }
-
-  if (n == 0)
-  {
-    *p = nullptr;
-    return 0;
   }
 
   const auto saved_errno = errno;
