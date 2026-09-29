@@ -313,11 +313,15 @@ void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
     CHECK_HIP_ERROR(hipGetDevice(&device));
     CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, device));
 
-    // One thread block converts one block-row, so a block size of one makes the number of
-    // block-rows exceed the maximum grid dimension by exactly one block-row. The single
-    // trailing block-row is only reached if the grid is clamped and the kernels stride.
+    // The dense2bell kernels launch one 256-thread block per block-row, and their grid is
+    // clamped to min(maxGridSize[0], (2^32 - 1) / 256) blocks, i.e. 16,777,215 blocks. With a
+    // block size of one, m exceeds that clamp by exactly one block-row. The single trailing
+    // block-row is only reached if the grid is clamped and the kernels stride.
+    const int64_t block_threads  = 256;
+    const int64_t grid_x_max     = std::min(static_cast<int64_t>(prop.maxGridSize[0]),
+                                        static_cast<int64_t>(UINT32_MAX) / block_threads);
     const int64_t ell_block_size = 1;
-    const int64_t m              = static_cast<int64_t>(prop.maxGridSize[0]) + 1;
+    const int64_t m              = grid_x_max + 1;
     const int64_t n              = 1;
     const int64_t ld             = m;
 
