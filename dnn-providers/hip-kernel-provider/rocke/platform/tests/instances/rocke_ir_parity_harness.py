@@ -12,8 +12,8 @@ import traceback
 from collections import Counter
 from pathlib import Path
 
-from rocke.core import ir_golden
 from rocke.core.ir_golden import GOLDEN_FLAVORS
+from rocke.core.ir_golden import check_golden as _check_golden
 
 
 def sha(text: str) -> str:
@@ -3223,7 +3223,7 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
     With no ``flavor``, every flavor in :data:`GOLDEN_FLAVORS` is checked, not
     just the one this host autodetects; see :func:`rocke.core.ir_golden.check_golden`.
     """
-    return ir_golden.check_golden(golden_path, lambda fl: run(flavor=fl), flavor)
+    return _check_golden(golden_path, lambda fl: run(flavor=fl), flavor)
 
 
 def main():

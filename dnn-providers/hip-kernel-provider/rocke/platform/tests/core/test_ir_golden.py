@@ -39,9 +39,12 @@ class TestIrGolden(unittest.TestCase):
     def test_every_flavor_checked(self):
         self._write(GOLDEN_FLAVORS)
         seen = []
-        self.assertEqual(
-            check_golden(self.path, lambda fl: seen.append(fl) or _sub()), []
-        )
+
+        def run(fl):
+            seen.append(fl)
+            return _sub()
+
+        self.assertEqual(check_golden(self.path, run), [])
         self.assertEqual(tuple(seen), GOLDEN_FLAVORS)
 
     def test_new_flavor_fails_until_reblessed(self):

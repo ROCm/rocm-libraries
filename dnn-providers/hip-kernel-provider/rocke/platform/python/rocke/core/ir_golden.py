@@ -19,8 +19,9 @@ shipped so ``library/`` goldens can share it (the dependency stays
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, List, Mapping, Optional
+from typing import Any
 
 from .lower_llvm import LLVM_FLAVORS
 
@@ -31,7 +32,7 @@ GOLDEN_FLAVORS = LLVM_FLAVORS
 __all__ = ["GOLDEN_FLAVORS", "check_golden", "compare"]
 
 
-def compare(base: Mapping[str, Any], cur: Mapping[str, Any]) -> List[str]:
+def compare(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[str]:
     """Diff one flavor sub-document against a fresh run. Empty list == OK."""
     errors = []
     for section in ("cases", "expected_failures"):
@@ -61,8 +62,8 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any]) -> List[str]:
 def check_golden(
     golden_path: Path,
     run: Callable[[str], Mapping[str, Any]],
-    flavor: Optional[str] = None,
-) -> List[str]:
+    flavor: str | None = None,
+) -> list[str]:
     """Compare fresh runs against a golden's flavor sub-documents.
 
     ``run(flavor)`` lowers every case at ``flavor`` and returns a sub-document
@@ -74,7 +75,7 @@ def check_golden(
     doc = json.loads(Path(golden_path).read_text())
     have = doc.get("flavors", {})
     wanted = [flavor] if flavor else list(GOLDEN_FLAVORS)
-    errors: List[str] = []
+    errors: list[str] = []
     for fl in wanted:
         base = have.get(fl)
         if base is None:
