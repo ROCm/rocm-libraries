@@ -572,9 +572,10 @@ class GlobalWriteBatchWriter:
         waitLoadCnt += self.gateLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load Gate)"%self.gateLoadIssued[elementIdx])
       # Calculate local loads
-      # UseSubtileImpl with bias/SAV: skip bias/SAV LDS loads from interleaved
-      # waitcnt and rely on the batch-start barrier for LDS synchronization.
-      subtileBarrierDrains = self.kernel.get("UseSubtileImpl") and \
+      # Only multi-DU drains bias/SAV before _emitAdd. Single-DU emits that
+      # drain after the consumers, so keep its LDS loads in the ordinary
+      # per-element wait accounting.
+      subtileBarrierDrains = isSubtileMultiDU(self.kernel) and self.kernel.get("UseSubtileImpl") and \
         (self.parentWriter.states.useBias != DataDirection.NONE or \
          self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
       if self.parentWriter.states.useBias == DataDirection.READ and not subtileBarrierDrains:
