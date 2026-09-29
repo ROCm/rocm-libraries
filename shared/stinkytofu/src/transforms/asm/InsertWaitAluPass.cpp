@@ -367,8 +367,6 @@ struct VgprStamp {
     // Oldest op holding a ticket in both classes that issued after this producer; 0 when none.
     unsigned anchorLds = 0;
     unsigned anchorTex = 0;
-    // Ordinal step this producer took.
-    unsigned vaInc = 1;
     // This producer's ticket in the shared VA order.
     unsigned vaOrdShared = 0;
     // Shared ticket just before the nearest anchor issued after this producer, or 0 until one has.
@@ -557,7 +555,6 @@ class WaitcntBrackets {
                 RegKey k = keyer.producerKey(idx, half);
                 VgprStamp& s = scores[k];
                 s.vaOrd[pipe] = ord;
-                s.vaInc = inc;
                 s.vaOrdShared = vaUB;
                 s.xdlSince = 0;
                 s.nextAnchorShared = 0;
@@ -741,10 +738,10 @@ class WaitcntBrackets {
         unsigned followers = vaPipeUB[p] - s.vaOrd[p];
         if (g_waitHide == nullptr || xdlFormMixed) return followers;
         if (p == PIPE_XDL) {
-            if (waitHideSatisfied(followers, s.vaInc, xdlHideXdl)) {
+            if (waitHideSatisfied(followers, xdlInc, xdlHideXdl)) {
                 PASS_DEBUG(std::cerr
                            << "[InsertWaitAlu]     skip va_vdst [XDL followers=" << followers
-                           << " >= " << xdlHideXdl << "*" << s.vaInc << "]\n");
+                           << " >= " << xdlHideXdl << "*" << xdlInc << "]\n");
                 return ~0u;
             }
             // Ops from the anchor onward are ordered behind this producer; live keeps it in frame.
@@ -950,14 +947,25 @@ class WaitcntBrackets {
                          strictDom, "vmTex");
             mergeSlotOrd(s.vaOrdShared, o ? o->vaOrdShared : 0, myShiftShared, otherShiftShared,
                          myOldFloorShared, otherOldFloorShared, strictDom, "vaOrdShared");
-            mergeSlotOrd(s.nextAnchorShared, o ? o->nextAnchorShared : 0, myShiftShared,
-                         otherShiftShared, myOldFloorShared, otherOldFloorShared, strictDom,
-                         "nextAnchorShared");
-            // Scales the hide threshold: falling back to the default 1 would halve it.
-            if (o != nullptr && o->vaInc > s.vaInc) {
-                s.vaInc = o->vaInc;
-                strictDom = true;
+            // An anchor holds only if every path carrying a producer issued one.
+            const unsigned wasNextAnchor = s.nextAnchorShared;
+            if (myVa && oVa) {
+                if (s.nextAnchorShared == 0 || o->nextAnchorShared == 0) {
+                    s.nextAnchorShared = 0;
+                } else {
+                    mergeSlotOrd(s.nextAnchorShared, o->nextAnchorShared, myShiftShared,
+                                 otherShiftShared, myOldFloorShared, otherOldFloorShared, strictDom,
+                                 "nextAnchorShared");
+                }
+            } else if (oVa) {
+                // The merged ordinals came from the other side, so its anchor comes too.
+                s.nextAnchorShared = rebase(o->nextAnchorShared, otherShiftShared,
+                                            otherOldFloorShared, "nextAnchorShared");
+            } else if (s.nextAnchorShared != 0) {
+                s.nextAnchorShared += myShiftShared;
             }
+            // Report a loss: it tightens the wait, so successors must be reprocessed too.
+            if ((wasNextAnchor == 0) != (s.nextAnchorShared == 0)) strictDom = true;
             mergeStampAge(s, o, myVa, oVa, strictDom);
             mergeStampVm(s, o, myVm, oVm, vm, strictDom);
         }
@@ -1058,7 +1066,7 @@ class WaitcntBrackets {
     // Hide counts of this kernel's form, latched on the first XDL op.
     int xdlHideXdl = 0;
     int xdlHideCsmacc = 0;
-    // Ordinal step of the most recent XDL op, for scaling the CSMACC hide threshold.
+    // Ordinal step of the latched form, for scaling both hide thresholds.
     unsigned xdlInc = 1;
     bool xdlIncSeen = false;
     // Set when a second matrix-op form issues; a mixed kernel falls back to the per-pipe count.
