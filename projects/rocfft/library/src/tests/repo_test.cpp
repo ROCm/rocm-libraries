@@ -87,10 +87,10 @@ TEST_F(repo_test, twiddles_1d_differ_by_precision)
 
 TEST_F(repo_test, twiddles_2d_are_reused)
 {
-    auto first = Repo::GetTwiddles2D(
-        64, 64, rocfft_precision_single, deviceProp, false, false, {8, 8}, {8, 8});
-    auto second = Repo::GetTwiddles2D(
-        64, 64, rocfft_precision_single, deviceProp, false, false, {8, 8}, {8, 8});
+    auto first
+        = Repo::GetTwiddles2D(64, 64, rocfft_precision_single, deviceProp, false, {8, 8}, {8, 8});
+    auto second
+        = Repo::GetTwiddles2D(64, 64, rocfft_precision_single, deviceProp, false, {8, 8}, {8, 8});
 
     ASSERT_NE(first.first, nullptr);
     EXPECT_EQ(first.first, second.first);
