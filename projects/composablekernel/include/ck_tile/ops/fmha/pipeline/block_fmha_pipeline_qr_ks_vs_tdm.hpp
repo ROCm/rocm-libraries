@@ -68,7 +68,10 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr index_t kNWarp        = BlockFmhaShape::Gemm0BlockWarps::at(I1);
     static constexpr index_t kNXdl         = BlockFmhaShape::Gemm0WarpTile::at(I1);
 
-    static_assert(kSubQKHeaddim <= 256, "hdim bigger than 256 is not suitable for this pipeline!");
+    // 512 is the last head dim this pipeline can stage: its arena needs a whole
+    // 320 KiB of LDS, i.e. one workgroup per CU. See QrTdmLdsArenaLayout's
+    // kLdsOccupancyTarget for the budget it switches to at that size.
+    static_assert(kSubQKHeaddim <= 512, "hdim bigger than 512 is not suitable for this pipeline!");
 
     static constexpr bool kIsGroupMode = Problem::kIsGroupMode;
     static constexpr bool kPadSeqLenQ  = Problem::kPadSeqLenQ;

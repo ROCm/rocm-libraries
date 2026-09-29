@@ -990,8 +990,16 @@ struct QrTdmLdsArenaLayout
                   (kK1Offset - kK0Offset) % KPadding::kIntervalBytes == 0);
     static_assert(!kUseDoubleKVLdsBuffer || !VPadding::kEnabled ||
                   (kV1Offset - kV0Offset) % VPadding::kIntervalBytes == 0);
-    static_assert(kArenaBytes <= 128 * 1024);
-    static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * 2 <= 320 * 1024);
+    // gfx1250 has 320 KiB of LDS per CU handed out in 64 KiB granules, so the
+    // invariant is (granule-rounded arena) x (workgroups per CU) <= 320 KiB.
+    // D512 cannot reach two workgroups per CU no matter how small the arena
+    // gets -- its register pressure caps it at one -- so budget it for one
+    // workgroup and let it spend the whole 320 KiB; every smaller head dim
+    // keeps the two-workgroup budget and the values it had before.
+    static constexpr index_t kLdsOccupancyTarget = Shape::kQKHeaddim >= 512 ? 1 : 2;
+    static_assert(kArenaBytes <= (kLdsOccupancyTarget == 2 ? 128 * 1024 : 320 * 1024));
+    static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * kLdsOccupancyTarget <=
+                  320 * 1024);
 };
 
 template <typename TensorTag, typename Problem, bool LoadOnce>

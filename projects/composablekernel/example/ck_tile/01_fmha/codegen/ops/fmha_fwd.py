@@ -53,6 +53,7 @@ K0_MAX_SUBMAX_MAP = {
     160: 256,
     192: 192,
     256: 256,
+    512: 512,
 }
 
 # TDM stores the head dim at its true length (see tdm_ceil_to_qualified_tile_length
@@ -1553,8 +1554,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             # Most entries pair a bm0=64 tile guarded by the per-dim crossover
             # constraint (see GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q) with a bm0=128
             # fallback: the dispatcher picks bm0=64 below the crossover max_seqlen_q
-            # and bm0=128 at/above it. (256,256) is the exception -- a single unguarded
-            # bm0=64 tile with no fallback. _validate_qr_tdm_bm0_crossover_pairs enforces
+            # and bm0=128 at/above it. (256,256) and (512,512) are the exceptions --
+            # a single unguarded bm0=64 tile with no fallback, because bm0=128 does
+            # not fit their LDS arena. _validate_qr_tdm_bm0_crossover_pairs enforces
             # that any non-final tile keeps a constraint so a bm0=64 entry can never
             # silently shadow its bm0=128 fallback in dispatch order.
             return _validate_qr_tdm_bm0_crossover_pairs({
@@ -1572,6 +1574,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (192, 128) : [FmhaFwdTileSize( 64,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, _gfx125_qr_tdm_crossover_constraint((192, 128))),
                               FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
                 (256, 256) : [FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
+                (512, 512) : [FmhaFwdTileSize( 64,  64,  32, 512,  32,  512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             })  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
             return {
@@ -1627,13 +1630,14 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (160, 160),
                 (192, 128),
                 (256, 256),
+                (512, 512),
             }:
-                # D256 keeps single K/V LDS buffers: its double-buffer arena
-                # already fills the LDS budget, leaving no room for the
-                # bank-conflict padding its row pitch needs. Progressive K
-                # reload stays on: the single-buffer path also stages whole K
-                # tiles now.
-                tdm_double_kv = "f" if (hdim, hdim_v) == (256, 256) else "t"
+                # D256 and D512 keep single K/V LDS buffers: their
+                # double-buffer arenas leave no room for the bank-conflict
+                # padding their row pitch needs, and at D512 one would not fit
+                # in LDS at all. Progressive K reload stays on for both: the
+                # single-buffer path also stages whole K tiles now.
+                tdm_double_kv = "f" if (hdim, hdim_v) in ((256, 256), (512, 512)) else "t"
                 tdm_prog_k = "t"
                 tdm_masks = list(get_mask_map(mask_impl))
                 if mask_impl == "simplified":
@@ -1661,19 +1665,24 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "f", "f", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_tdm", "row", "t", "t", "t", "t", logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
 
-            # qr: generic pipeline fallback for trait combos not covered by
-            # qr_tdm (e.g., bias, dropout, skip, d!=128).
-            for logits, mask, bias, lse, dropout, skip, sink in itertools.product(
-                ["t", "f"],
-                get_mask_map(mask_impl).keys(),
-                BIAS_MAP.keys(),
-                ["t", "f"],
-                ["t", "f"],
-                ["t", "f"],
-                ["t", "f"],
-            ):
-                pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
-                pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
+            # qr: generic pipeline fallback for the trait combos qr_tdm does
+            # not emit -- dropout, skip, logits soft cap -- and for head dim
+            # pairs outside the qr_tdm table above. Capped at 256: qr keeps
+            # its own kSubQKHeaddim <= 256 assert, and only qr_tdm has the LDS
+            # arena accounting that lets a 512 head dim fit. Head dim 512 is
+            # therefore qr_tdm only -- the trait combos above are all it serves.
+            if hdim <= 256 and hdim_v <= 256:
+                for logits, mask, bias, lse, dropout, skip, sink in itertools.product(
+                    ["t", "f"],
+                    get_mask_map(mask_impl).keys(),
+                    BIAS_MAP.keys(),
+                    ["t", "f"],
+                    ["t", "f"],
+                    ["t", "f"],
+                    ["t", "f"],
+                ):
+                    pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
+                    pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
             # slope-dependent quantization bias the OUT gain check reads as a systematic error.

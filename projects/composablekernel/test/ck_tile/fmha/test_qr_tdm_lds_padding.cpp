@@ -397,6 +397,19 @@ constexpr bool validate_aligned_head_dim()
            ck_tile::detail::validate_qr_tdm_reader_segments<SelVTag<Problem>, Problem>();
 }
 
+// Same, for head dims whose production tile is not the M0=128 prefill one.
+template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK, ck_tile::index_t VN1>
+constexpr bool validate_head_dim_m()
+{
+    using Problem = HeadDimProblemM<DataType, M, QK, VN1>;
+    return ck_tile::detail::validate_qr_tdm_issue_geometry<SelQTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<SelKTag<Problem>, Problem, true>() &&
+           ck_tile::detail::validate_qr_tdm_issue_geometry<SelVTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<SelQTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<SelKTag<Problem>, Problem>() &&
+           ck_tile::detail::validate_qr_tdm_reader_segments<SelVTag<Problem>, Problem>();
+}
+
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
 static_assert(validate_production_geometries<ck_tile::bf16_t>());
 static_assert(validate_production_geometries<ck_tile::half_t>());
@@ -418,6 +431,11 @@ static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 64, 64>());
 static_assert(validate_aligned_head_dim<ck_tile::bf16_t, 64, 32>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 64, 64>());
 static_assert(validate_aligned_head_dim<ck_tile::half_t, 64, 32>());
+// 256 and 512 run on the M0=64 tile.
+static_assert(validate_head_dim_m<ck_tile::bf16_t, 64, 256, 256>());
+static_assert(validate_head_dim_m<ck_tile::half_t, 64, 256, 256>());
+static_assert(validate_head_dim_m<ck_tile::bf16_t, 64, 512, 512>());
+static_assert(validate_head_dim_m<ck_tile::half_t, 64, 512, 512>());
 #endif
 
 template <typename Layout>
@@ -537,6 +555,43 @@ constexpr bool validate_arena_layouts()
 
 static_assert(validate_arena_layouts<ck_tile::bf16_t>());
 static_assert(validate_arena_layouts<ck_tile::half_t>());
+
+// gfx125 hands out LDS in 64 KiB granules out of 320 KiB per CU, so the budget
+// is granule(arena) * occupancy <= 320 KiB rather than a fixed per-workgroup
+// cap. d512 spends its whole allowance on one workgroup; everything below it
+// still leaves room for two.
+template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK>
+using HeadDimArena = typename ck_tile::BlockFmhaPipelineQRKSVSTdmDefaultPolicy::
+    template LdsArenaLayout<HeadDimProblemM<DataType, M, QK, QK>>;
+
+template <typename DataType, ck_tile::index_t M, ck_tile::index_t QK>
+constexpr bool fits_lds_budget()
+{
+    using Arena = HeadDimArena<DataType, M, QK>;
+    return ck_tile::integer_least_multiple(Arena::kArenaBytes, 64 * 1024) *
+               Arena::kLdsOccupancyTarget <=
+           320 * 1024;
+}
+
+static_assert(HeadDimArena<ck_tile::bf16_t, 64, 512>::kLdsOccupancyTarget == 1);
+static_assert(HeadDimArena<ck_tile::half_t, 64, 512>::kLdsOccupancyTarget == 1);
+static_assert(HeadDimArena<ck_tile::bf16_t, 64, 256>::kLdsOccupancyTarget == 2);
+static_assert(HeadDimArena<ck_tile::bf16_t, 128, 128>::kLdsOccupancyTarget == 2);
+static_assert(HeadDimArena<ck_tile::bf16_t, 64, 512>::kArenaBytes == 200704);
+static_assert(HeadDimArena<ck_tile::half_t, 64, 512>::kArenaBytes == 200704);
+static_assert(HeadDimArena<ck_tile::bf16_t, 64, 256>::kArenaBytes == 102400);
+static_assert(fits_lds_budget<ck_tile::bf16_t, 64, 512>());
+static_assert(fits_lds_budget<ck_tile::half_t, 64, 512>());
+static_assert(fits_lds_budget<ck_tile::bf16_t, 64, 256>());
+static_assert(fits_lds_budget<ck_tile::bf16_t, 128, 128>());
+
+// d512 keeps its bank-conflict padding: one row is 1024 B, so the pad lands
+// once per row for K and once per row for V.
+static_assert(std::is_same_v<PaddingGateSelection<ck_tile::bf16_t, 64, 512, false>::K,
+                             ck_tile::detail::LdsPaddingConfig<true, 1024, 16>>);
+static_assert(std::is_same_v<PaddingGateSelection<ck_tile::bf16_t, 64, 512, false>::V,
+                             ck_tile::detail::LdsPaddingConfig<true, 1024, 32>>);
+static_assert(has_single_buffer_kv_padding<ck_tile::half_t, 64, 512>());
 
 template <typename DataType,
           ck_tile::index_t M,
