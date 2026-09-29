@@ -21,7 +21,6 @@
 # THE SOFTWARE.
 
 from typing import Optional, OrderedDict, Callable
-from math import log2
 import sys
 import os
 
