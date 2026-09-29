@@ -32,6 +32,9 @@
           "3_16_128_fp32_ncl_dabc7b"
         ],
         "support": {
+          "gfx1101": [
+            "windows"
+          ],
           "gfx1150": [
             "linux"
           ],

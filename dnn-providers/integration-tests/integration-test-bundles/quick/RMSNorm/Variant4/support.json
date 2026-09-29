@@ -85,6 +85,9 @@
           "2_3_4_4_fp32_nhwc_dd6c31"
         ],
         "support": {
+          "gfx1101": [
+            "windows"
+          ],
           "gfx1150": [
             "linux"
           ],

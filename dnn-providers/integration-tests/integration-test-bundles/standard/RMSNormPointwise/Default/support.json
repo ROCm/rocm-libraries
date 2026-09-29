@@ -95,6 +95,9 @@
           "32_3_1_14_fp32_nhwc_f47192"
         ],
         "support": {
+          "gfx1101": [
+            "windows"
+          ],
           "gfx1150": [
             "linux"
           ],
