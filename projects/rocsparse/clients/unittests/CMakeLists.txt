@@ -147,6 +147,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_shfl.cpp
   # read_first_lane 64-bit truncation (append-only leaf)
   unit_test_internal_collectives_readfirstlane.cpp
+  # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
+  unit_test_internal_grid.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts

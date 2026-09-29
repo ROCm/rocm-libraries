@@ -14,6 +14,33 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(rocke_dtypes core/test_dtypes.cpp)
+  target_link_libraries(rocke_dtypes PRIVATE rocke_core)
+  add_test(NAME rocke_dtypes COMMAND rocke_dtypes)
+  set_tests_properties(rocke_dtypes PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_dtypes)
+  set_target_properties(rocke_dtypes
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_dtypes
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_dtypes)
+
+  add_executable(rocke_mma_catalog_lookup core/test_mma_catalog_lookup.cpp)
+  find_package(Threads REQUIRED)
+  target_link_libraries(rocke_mma_catalog_lookup PRIVATE rocke_core Threads::Threads)
+  target_include_directories(rocke_mma_catalog_lookup PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/core/arch")
+  add_test(NAME rocke_mma_catalog_lookup COMMAND rocke_mma_catalog_lookup)
+  set_tests_properties(rocke_mma_catalog_lookup PROPERTIES LABELS
+    "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_mma_catalog_lookup)
+  set_target_properties(rocke_mma_catalog_lookup
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_mma_catalog_lookup
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_mma_catalog_lookup)
+
   add_executable(rocke_arch_target_identity core/test_arch_target_identity.cpp)
   target_link_libraries(rocke_arch_target_identity PRIVATE rocke_core)
   add_test(NAME rocke_arch_target_identity COMMAND rocke_arch_target_identity)
@@ -63,6 +90,22 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_future_intrinsic_lowering)
+  endif()
+
+  # Direct f32 tanh lowering and narrow-type rejection in the C++ engine.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_tanh_lowering.cpp")
+    add_executable(rocke_tanh_lowering core/test_tanh_lowering.cpp)
+    target_link_libraries(rocke_tanh_lowering PRIVATE rocke_core)
+    add_test(NAME rocke_tanh_lowering COMMAND rocke_tanh_lowering)
+    set_tests_properties(rocke_tanh_lowering
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_tanh_lowering)
+    set_target_properties(rocke_tanh_lowering
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_tanh_lowering
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_tanh_lowering)
   endif()
 
   # Holds the ISA-layer and lower_llvm-layer flavor->datalayout tables together.
