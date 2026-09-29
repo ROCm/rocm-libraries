@@ -28,6 +28,7 @@
 
 #include "ellmv_device.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -99,24 +100,24 @@ namespace rocsparse
         // Run different ellmv kernels
         if(trans == rocsparse_operation_none)
         {
-#define LAUNCH_ELLMVN(DIM)                                                          \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                             \
-        (rocsparse::ellmvn_kernel<DIM>),                                            \
-        dim3(rocsparse::get_grid_size_x(                                            \
-            handle->properties, (static_cast<int64_t>(m) - 1) / (DIM) + 1, (DIM))), \
-        dim3(DIM),                                                                  \
-        0,                                                                          \
-        stream,                                                                     \
-        m,                                                                          \
-        n,                                                                          \
-        ell_width,                                                                  \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),               \
-        ell_col_ind,                                                                \
-        ell_val,                                                                    \
-        x,                                                                          \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                \
-        y,                                                                          \
-        descr->base,                                                                \
+#define LAUNCH_ELLMVN(DIM)                                                                         \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                            \
+        (rocsparse::ellmvn_kernel<DIM>),                                                           \
+        dim3(                                                                                      \
+            rocsparse::get_grid_size_x(handle, (static_cast<int64_t>(m) - 1) / (DIM) + 1, (DIM))), \
+        dim3(DIM),                                                                                 \
+        0,                                                                                         \
+        stream,                                                                                    \
+        m,                                                                                         \
+        n,                                                                                         \
+        ell_width,                                                                                 \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                              \
+        ell_col_ind,                                                                               \
+        ell_val,                                                                                   \
+        x,                                                                                         \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                               \
+        y,                                                                                         \
+        descr->base,                                                                               \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
             // Launch tuning for the one-thread-per-row non-transpose kernel.

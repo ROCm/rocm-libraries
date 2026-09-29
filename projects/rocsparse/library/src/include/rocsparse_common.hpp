@@ -60,30 +60,6 @@
 
 namespace rocsparse
 {
-    // The AQL dispatch packet stores grid extents as 32-bit work-item counts.
-    // Convert that limit to workgroups for the requested block size.
-    static constexpr int64_t max_grid_size_x(int64_t block_size)
-    {
-        return static_cast<int64_t>(UINT32_MAX) / block_size;
-    }
-
-    template <typename J>
-    static inline uint32_t
-        get_grid_size_x(const hipDeviceProp_t& properties, J count, int64_t block_size)
-    {
-        const int64_t requested  = static_cast<int64_t>(count);
-        const int64_t device_cap = static_cast<int64_t>(properties.maxGridSize[0]);
-        const int64_t dispatch_cap
-            = (device_cap < max_grid_size_x(block_size)) ? device_cap : max_grid_size_x(block_size);
-        return static_cast<uint32_t>((requested < dispatch_cap) ? requested : dispatch_cap);
-    }
-
-    template <typename J>
-    static uint16_t get_batch_grid_size(J batch_count)
-    {
-        return (batch_count > 65535) ? 65535 : batch_count;
-    }
-
     // Compile-time log2 for power-of-2 (e.g. log2_pow2<32>::value == 5). Use for WF_SIZE, etc.
     template <uint32_t N>
     struct log2_pow2

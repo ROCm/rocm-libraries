@@ -41,7 +41,9 @@ from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple
 from .codegen_policy import codegen_policy_for_kernel
 from .ir import (
     BF16,
+    F32,
     F16,
+    I1,
     I16,
     I32,
     KernelDef,
@@ -481,7 +483,6 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "rcp.f32": "declare float @llvm.amdgcn.rcp.f32(float)",
-    "tanh.f32": "declare float @llvm.tanh.f32(float)",
     "maxnum.f32": "declare float @llvm.maxnum.f32(float, float)",
     "maxnum.f16": "declare half @llvm.maxnum.f16(half, half)",
     "maxnum.bf16": "declare bfloat @llvm.maxnum.bf16(bfloat, bfloat)",
@@ -1083,11 +1084,16 @@ _INTRINSIC_DECLS_LLVM22_OVERRIDES: Dict[str, str] = {
     ),
 }
 
-# LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for the declares rocke
-# emits today. Split entries here if an LLVM 23 host proves drift.
-_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = dict(
-    _INTRINSIC_DECLS_LLVM22_OVERRIDES
-)
+# LLVM 23 (ROCm 7.13+) inherits the LLVM 22 overrides except where an
+# intrinsic's ABI changed again.
+_INTRINSIC_DECLS_LLVM23_OVERRIDES: Dict[str, str] = {
+    **_INTRINSIC_DECLS_LLVM22_OVERRIDES,
+    "mfma.scale.f32.16x16x128.f8f6f4": (
+        "declare <4 x float> @llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+        "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
+        "i32 immarg, i32, i32 immarg, i32)"
+    ),
+}
 
 
 def _llvm_type(t: Type) -> str:
@@ -1636,6 +1642,48 @@ class _Lowerer:
 
     def _operand_with_type(self, v: Value) -> str:
         return f"{_llvm_type(v.type)} {self._operand(v)}"
+
+    @staticmethod
+    def _composed_constant(value: int | float, ty: Type, ity: str) -> Value:
+        """Make an inline constant for a lowering-time operation expansion."""
+
+        result = Value("", ty)
+        producer = Op(
+            "arith.constant",
+            results=[result],
+            attrs={"value": value, "ity": ity},
+        )
+        result.op = producer
+        return result
+
+    def _lower_composed_op(
+        self,
+        name: str,
+        operands: List[Value],
+        result_type: Type,
+        hint: str,
+        *,
+        attrs: Optional[Dict[str, object]] = None,
+        result_name: Optional[str] = None,
+    ) -> Value:
+        """Lower one synthetic primitive while expanding a higher-level op.
+
+        The synthetic operation is not inserted into the public rocKE IR. It is
+        dispatched through the normal primitive lowering handler, so composite
+        operations do not have to duplicate LLVM spelling, intrinsic tracking,
+        or type handling.
+        """
+
+        result = Value(result_name or self._fresh(hint), result_type)
+        expanded = Op(
+            name,
+            operands=list(operands),
+            results=[result],
+            attrs=dict(attrs or {}),
+        )
+        result.op = expanded
+        self.lower_op(expanded)
+        return result
 
     def _anyptr_space(
         self, op: str, ptr: Value, allowed: Dict[int, str]
@@ -2805,10 +2853,57 @@ class _Lowerer:
     def _op_math_tanh(self, op: Op) -> None:
         (v,) = op.operands
         if v.type.name != "f32":
-            raise NotImplementedError("math.tanh currently supports f32")
-        self._need("tanh.f32")
-        self._current().emit(
-            f"  {op.result.name} = call float @llvm.tanh.f32(float {self._operand(v)})"
+            raise ValueError(f"math.tanh requires f32 operand, got {v.type.name}")
+
+        # OCML f32 tanh small-argument minimax polynomial for |x| < 0.625.
+        # Coefficients are in Horner power-basis order, not Taylor coefficients.
+        # Source: amd/device-libs/ocml/src/tanhF.cl.
+        f32 = lambda value: self._composed_constant(value, F32, "f32")
+        i32 = lambda value: self._composed_constant(value, I32, "i32")
+        lower = self._lower_composed_op
+
+        one = f32(1.0)
+        neg_two = f32(-2.0)
+        two_log2e = f32(2.0 * 1.4426950408889634)
+        cutoff = f32(0.625)
+        c0 = f32(float.fromhex("-0x1.758e7ap-8"))
+        c1 = f32(float.fromhex("0x1.521192p-6"))
+        c2 = f32(float.fromhex("-0x1.b8389cp-5"))
+        c3 = f32(float.fromhex("0x1.110704p-3"))
+        c4 = f32(float.fromhex("-0x1.555532p-2"))
+
+        x_bits = lower("arith.bitcast", [v], I32, "tanh.xbits")
+        sign = lower("arith.and", [x_bits, i32(-0x80000000)], I32, "tanh.sign")
+        abs_bits = lower("arith.and", [x_bits, i32(0x7FFFFFFF)], I32, "tanh.abits")
+        abs_x = lower("arith.bitcast", [abs_bits], F32, "tanh.abs")
+        y2 = lower("arith.fmul", [abs_x, abs_x], F32, "tanh.y2")
+        p0 = lower("arith.fma", [y2, c0, c1], F32, "tanh.p0")
+        p1 = lower("arith.fma", [y2, p0, c2], F32, "tanh.p1")
+        p2 = lower("arith.fma", [y2, p1, c3], F32, "tanh.p2")
+        p3 = lower("arith.fma", [y2, p2, c4], F32, "tanh.p3")
+        yp = lower("arith.fmul", [abs_x, p3], F32, "tanh.yp")
+        poly = lower("arith.fma", [y2, yp, abs_x], F32, "tanh.poly")
+        exp_scaled = lower("arith.fmul", [two_log2e, abs_x], F32, "tanh.escaled")
+        exp = lower("math.exp2", [exp_scaled], F32, "tanh.exp")
+        exp_den = lower("arith.fadd", [exp, one], F32, "tanh.eden")
+        exp_inv = lower("math.rcp_fast", [exp_den], F32, "tanh.einv")
+        exp_mag = lower("arith.fma", [neg_two, exp_inv, one], F32, "tanh.emag")
+        use_poly = lower(
+            "arith.fcmp",
+            [abs_x, cutoff],
+            I1,
+            "tanh.small",
+            attrs={"pred": "olt"},
+        )
+        mag = lower("arith.select", [use_poly, poly, exp_mag], F32, "tanh.mag")
+        mag_bits = lower("arith.bitcast", [mag], I32, "tanh.mbits")
+        signed_bits = lower("arith.or", [mag_bits, sign], I32, "tanh.sbits")
+        lower(
+            "arith.bitcast",
+            [signed_bits],
+            F32,
+            "tanh.result",
+            result_name=op.result.name,
         )
 
     # gpu
@@ -3396,14 +3491,24 @@ class _Lowerer:
             )
         else:
             b_packed = self._operand(b)
-        self._current().emit(
-            f"  {op.result.name} = call <4 x float> "
-            f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
-            f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
-            f"<4 x float> {self._operand(c)}, "
-            f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
-            f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
-        )
+        if self._flavor == LLVM_FLAVOR_LLVM23:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)})"
+            )
+        else:
+            self._current().emit(
+                f"  {op.result.name} = call <4 x float> "
+                f"@llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4("
+                f"<8 x i32> {a_packed}, <8 x i32> {b_packed}, "
+                f"<4 x float> {self._operand(c)}, "
+                f"i32 0, i32 0, i32 0, i32 0, i32 {self._operand(a_scale)}, "
+                f"i32 0, i32 {self._operand(b_scale)}, i32 0)"
+            )
 
     def _op_tile_mfma_f32_16x16x128_fp4(self, op: Op) -> None:
         a, b, c = op.operands
@@ -3470,9 +3575,8 @@ class _Lowerer:
         value 0 (exponent 0 => 2^0 == 1.0), making it numerically a plain
         unscaled fp8 MFMA. ``cbsz=0`` / ``blgp=0`` select fp8e4m3 for A and
         B; ``op_sel`` scale-byte selectors are 0. This is ADDITIVE — it
-        reuses the existing scaled intrinsic decl and emits the same call
-        shape as :meth:`_op_tile_mfma_scale_f32_16x16x128_f8f6f4`, but with
-        constant zero scales (so no scale registers are loaded).
+        uses a dedicated declaration key for the nine-argument form and pins
+        both scale operands to zero (so no scale registers are loaded).
 
         A / B arrive as ``<32 x fp8e4m3>`` (== ``<32 x i8>``, 32 f8 bytes
         per lane) and are bitcast to the intrinsic's ``<8 x i32>``.
@@ -3480,9 +3584,8 @@ class _Lowerer:
         """
         a, b, c = op.operands
         # ADDITIVE: a dedicated decl key for the unscaled hero atom (the
-        # 9-arg LLVM22 f8f6f4 scale-MFMA signature). We do NOT touch the
-        # existing ``mfma.scale.f32.16x16x128.f8f6f4`` decl (different,
-        # frozen, 11-arg form used by the MX-scaled lowering).
+        # 9-arg f8f6f4 scale-MFMA signature). The separate key preserves the
+        # LLVM20/22 MX-scaled declaration, which remains the 11-arg form.
         self._need("mfma.f32.16x16x128.fp8.hero")
         a_packed = self._fresh("a_fp8_128")
         b_packed = self._fresh("b_fp8_128")

@@ -25,6 +25,7 @@
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_coomv_aos.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "coomv_device.h"
@@ -161,8 +162,7 @@ namespace rocsparse
         {
             const int64_t one_loop_blocks = (nnz - 1) / 256 + 1;
             const bool    use_two_loops
-                = rocsparse::get_grid_size_x(handle->properties, one_loop_blocks, 256)
-                  < one_loop_blocks;
+                = rocsparse::get_grid_size_x(handle, one_loop_blocks, 256) < one_loop_blocks;
 
             if(use_two_loops)
             {
