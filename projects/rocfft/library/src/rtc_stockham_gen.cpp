@@ -122,6 +122,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
         kernel_name += std::to_string(specs.static_dim);
     }
 
+    kernel_name += rtc_kint_name(specs.itype);
     kernel_name += rtc_precision_name(precision);
 
     if(placement == rocfft_placement_inplace)
@@ -454,6 +455,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     src += common_h;
     src += device_enum_h;
     src += rtc_precision_type_decl(precision);
+    src += rtc_kint_type_decl(specs.itype);
     src += load_store_decls(loadOps, storeOps, cbtype);
     src += memory_gfx_h;
     src += callback_h;

@@ -31,7 +31,7 @@ Quantized-weight GEMM:
 32. Its validator accepts gfx1151 and gfx1201.
 
 Deep fusion:
-[`deep_fused_conv_pool.py`](../../python/rocke/instances/common/deep_fused_conv_pool.py)
+[`deep_fused_conv_pool.py`](../../../library/kernels/common/deep_fused_conv_pool.py)
 ships the conv -> epilogue -> conv -> maxpool prototype. gfx950 and gfx1201 use
 the shared target-selected `MmaOp` body; gfx1151 has a target-specific
 implementation.
@@ -102,6 +102,18 @@ Three kernels: a fused prefill, and a two-phase split path (per-chunk tile
 builder, then state scan). gfx942 and gfx950 are bf16-only; prefill only, no varlen.
 Dispatch is `library/dispatch/kda/` (`dispatch_kda`), which defaults to the
 fused kernel and keeps the split halves opt-in.
+
+### GDN
+
+| File | Spec | Doc |
+|-----------------------------------|-------------------------------------------------------------------|------------------------------|
+| `gfx950/gdn_decode.py` | `GdnDecodeSpec` (gated delta rule; single-token decode over a paged recurrent state) | `instances/gdn.md` |
+
+Runtime entry points: `dispatch_gdn_decode(GdnDecodeRequest(...))` (single-token decode) and `dispatch_gdn_prefill(GdnPrefillRequest(...))` (split chunkwise prefill — the shared KDA chunkwise kernels run in `gate_kind="gdn"` mode; there is no fused single-kernel GDN prefill, so the caller pins `chunk_prep` then `chunk_scan`).
+
+Linear attention carries a fixed-size recurrent state per value head instead of re-reading past tokens, so cost per token does not grow with sequence length. GDN ships a single-token decode kernel and a split chunkwise prefill mode; gfx950.
+
+Both kernels carry a tuned table, and they band on different quantities: decode picks its tile per **batch**, prefill picks `value_splits` per **`batch_heads`**. Both tune the same tension -- splitting a head's value dimension across workgroups buys parallelism when the natural grid starves, and costs redundant tile reads once it does not.
 
 ## Small Ops
 

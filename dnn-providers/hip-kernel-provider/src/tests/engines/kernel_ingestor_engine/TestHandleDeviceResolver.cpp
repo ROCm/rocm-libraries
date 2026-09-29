@@ -3,7 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <cstdint>
+#include <array>
 #include <thread>
 #include <vector>
 
@@ -53,6 +53,76 @@ public:
     }
 };
 
+/// Distinguishes a concrete stream's owner from the caller's changing current device.
+class ChangingCurrentDeviceResolver : public HandleDeviceResolver
+{
+public:
+    static constexpr int STREAM_DEVICE = 7;
+    int currentDevice = 3;
+
+    hipError_t queryStreamDevice(hipStream_t /*stream*/, int* deviceId) const override
+    {
+        *deviceId = STREAM_DEVICE;
+        return hipSuccess;
+    }
+
+    hipError_t queryCurrentDevice(int* deviceId) const override
+    {
+        *deviceId = currentDevice;
+        return hipSuccess;
+    }
+};
+
+/// Answers the fallthrough with an ordinal no single-device machine reports.
+class UnwrittenStreamDeviceResolver : public HandleDeviceResolver
+{
+public:
+    static constexpr int FALLTHROUGH_DEVICE = 3;
+
+    hipError_t queryStreamDevice(hipStream_t /*stream*/, int* /*deviceId*/) const override
+    {
+        return hipSuccess;
+    }
+
+    hipError_t queryCurrentDevice(int* deviceId) const override
+    {
+        *deviceId = FALLTHROUGH_DEVICE;
+        return hipSuccess;
+    }
+};
+
+/// Reports success from the stream query alongside an ordinal no device can have.
+class NegativeStreamDeviceResolver : public HandleDeviceResolver
+{
+public:
+    static constexpr int BOGUS_DEVICE = -42;
+
+    hipError_t queryStreamDevice(hipStream_t /*stream*/, int* deviceId) const override
+    {
+        *deviceId = BOGUS_DEVICE;
+        return hipSuccess;
+    }
+};
+
+/// What deviceId() must fall through to once a stream ordinal is rejected.
+hipdnn_plugin_sdk::ingestor::DeviceId currentDeviceOrNone()
+{
+    int currentDevice = -1;
+    if(hipGetDevice(&currentDevice) != hipSuccess)
+    {
+        return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
+    }
+    return currentDevice;
+}
+
+/// A stream the overridden seam never dereferences; only its non-null-ness is read.
+/// Backed by a real object rather than a literal address so the cast stays pointer-to-pointer.
+hipStream_t unusedStream()
+{
+    static int s_placeholder = 0;
+    return reinterpret_cast<hipStream_t>(&s_placeholder);
+}
+
 // deviceId()
 
 TEST(TestHandleDeviceResolver, ResolvesTheCurrentDeviceForANullStream)
@@ -67,6 +137,38 @@ TEST(TestHandleDeviceResolver, ResolvesTheCurrentDeviceForANullStream)
     ASSERT_EQ(hipGetDevice(&currentDevice), hipSuccess);
 
     EXPECT_EQ(resolver.deviceId(handle), currentDevice);
+}
+
+TEST(TestHandleDeviceResolver, ResolvesDefaultStreamsFromTheLiveCurrentDevice)
+{
+    ChangingCurrentDeviceResolver resolver;
+    Handle handle;
+    const std::array<hipStream_t, 3> defaultStreams
+        = {nullptr, hipStreamLegacy, hipStreamPerThread};
+
+    for(const auto stream : defaultStreams)
+    {
+        SCOPED_TRACE(stream);
+        handle.setStream(stream);
+
+        resolver.currentDevice = 3;
+        EXPECT_EQ(resolver.deviceId(handle), 3);
+
+        resolver.currentDevice = 5;
+        EXPECT_EQ(resolver.deviceId(handle), 5);
+    }
+}
+
+TEST(TestHandleDeviceResolver, KeepsTheConcreteStreamOwnerAcrossCurrentDeviceChanges)
+{
+    ChangingCurrentDeviceResolver resolver;
+    Handle handle;
+    handle.setStream(unusedStream());
+
+    EXPECT_EQ(resolver.deviceId(handle), ChangingCurrentDeviceResolver::STREAM_DEVICE);
+
+    resolver.currentDevice = 5;
+    EXPECT_EQ(resolver.deviceId(handle), ChangingCurrentDeviceResolver::STREAM_DEVICE);
 }
 
 TEST(TestHandleDeviceResolver, ResolvesTheStreamsOwnDeviceWhenItDiffersFromCurrent)
@@ -106,6 +208,31 @@ TEST(TestHandleDeviceResolver, FallsThroughToTheCurrentDeviceWhenTheStreamCannot
     handle.setStream(stream);
 
     EXPECT_EQ(resolver.deviceId(handle), currentDevice);
+
+    static_cast<void>(hipGetLastError());
+    static_cast<void>(hipExtGetLastError());
+}
+
+TEST(TestHandleDeviceResolver, RejectsAStreamOrdinalTheRuntimeNeverWrote)
+{
+    // hipSuccess with the out-parameter untouched must not read as device 0: the seed has
+    // to be out of range so the guard rejects it and the fallthrough ordinal comes back.
+    const UnwrittenStreamDeviceResolver resolver;
+    Handle handle;
+    handle.setStream(unusedStream());
+
+    EXPECT_EQ(resolver.deviceId(handle), UnwrittenStreamDeviceResolver::FALLTHROUGH_DEVICE);
+}
+
+TEST(TestHandleDeviceResolver, RejectsANegativeStreamOrdinalReportedAsSuccess)
+{
+    // A negative ordinal is never a device, whatever status came back with it.
+    const NegativeStreamDeviceResolver resolver;
+    Handle handle;
+    handle.setStream(unusedStream());
+
+    EXPECT_NE(resolver.deviceId(handle), NegativeStreamDeviceResolver::BOGUS_DEVICE);
+    EXPECT_EQ(resolver.deviceId(handle), currentDeviceOrNone());
 
     static_cast<void>(hipGetLastError());
     static_cast<void>(hipExtGetLastError());
