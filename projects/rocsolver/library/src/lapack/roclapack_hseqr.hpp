@@ -519,54 +519,64 @@ struct hseqr_workT_layout
     }
 };
 
-/** HSEQR_HOST_SCHUR computes the Schur form of the n-by-n window T (and the Schur vectors,
-    accumulated in V = I) on the host, for the aggressive early deflation of the hybrid mode
-    (lahqr_block with BS = 1), and returns its info. The library is built for the baseline
-    x86-64 instruction set; on x86-64 hosts, the routine is also compiled for x86-64-v3 (AVX2,
-    FMA) and x86-64-v4 (AVX-512) and the best version that the processor supports is used
-    (flatten inlines lahqr_block into each version, so that it is compiled for its
-    instruction set; the versions are distinct functions, so their code is never mixed). **/
-template <typename T, typename I>
-__attribute__((flatten)) I hseqr_host_schur_base(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
-{
-    I s_ired[2][1];
-    int ibuf = 0;
-    return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf);
-}
+/** HSEQR_HOST_OPS returns the host versions of the routines of the aggressive early
+    deflation of the hybrid mode (see hqr_host_ops) for the processor. The library is built
+    for the baseline x86-64 instruction set; on x86-64 hosts, the routines are also compiled
+    for x86-64-v3 (AVX2, FMA) and x86-64-v4 (AVX-512), and the best versions that the
+    processor supports are used. (flatten inlines the generic routine into each version, so
+    that it is compiled for that instruction set; the versions are distinct functions, so
+    the code of different instruction sets is never mixed.) **/
+#define HSEQR_HOST_VERSION(suffix, attrs)                                                         \
+    template <typename T, typename I>                                                             \
+    attrs I hseqr_host_schur_##suffix(I n, T* Tw, I ldt, T* W, T* V, I ldv)                       \
+    {                                                                                             \
+        I s_ired[2][1];                                                                           \
+        int ibuf = 0;                                                                             \
+        return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf); \
+    }                                                                                             \
+    template <typename T, typename I>                                                             \
+    attrs void hseqr_host_trexc_##suffix(I n, T* A, I ldt, T* Q, I ldq, I ifst, I ilst)           \
+    {                                                                                             \
+        trexc_block<1>(true, n, A, ldt, Q, ldq, ifst, ilst);                                      \
+    }                                                                                             \
+    template <typename T, typename I>                                                             \
+    attrs void hseqr_host_larf_left_##suffix(I m, I n, const T* v, T tau, T* C, I ldc)            \
+    {                                                                                             \
+        hqr_block_larf_left<1>(m, n, v, tau, C, ldc);                                             \
+    }                                                                                             \
+    template <typename T, typename I>                                                             \
+    attrs void hseqr_host_larf_right_##suffix(I m, I n, const T* v, T tau, T* C, I ldc)           \
+    {                                                                                             \
+        hqr_block_larf_right<1>(m, n, v, tau, C, ldc);                                            \
+    }
 
+HSEQR_HOST_VERSION(base, __attribute__((flatten)))
 #if defined(__x86_64__) && !defined(__HIP_DEVICE_COMPILE__)
-template <typename T, typename I>
-__attribute__((target("arch=x86-64-v3"), flatten))
-I hseqr_host_schur_v3(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
-{
-    I s_ired[2][1];
-    int ibuf = 0;
-    return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf);
-}
-
-template <typename T, typename I>
-__attribute__((target("arch=x86-64-v4"), flatten))
-I hseqr_host_schur_v4(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
-{
-    I s_ired[2][1];
-    int ibuf = 0;
-    return lahqr_block<1>(true, true, n, I(1), n, Tw, ldt, W, I(1), n, V, ldv, s_ired, ibuf);
-}
+HSEQR_HOST_VERSION(v3, __attribute__((target("arch=x86-64-v3"), flatten)))
+HSEQR_HOST_VERSION(v4, __attribute__((target("arch=x86-64-v4"), flatten)))
 #endif
+#undef HSEQR_HOST_VERSION
 
 template <typename T, typename I>
-I hseqr_host_schur(const I n, T* Tw, const I ldt, T* W, T* V, const I ldv)
+const hqr_host_ops<T, I>* hseqr_host_ops()
 {
+#define HSEQR_HOST_OPS(suffix)                                                          \
+    {                                                                                   \
+        &hseqr_host_schur_##suffix<T, I>, &hseqr_host_trexc_##suffix<T, I>,             \
+            &hseqr_host_larf_left_##suffix<T, I>, &hseqr_host_larf_right_##suffix<T, I> \
+    }
+    static const hqr_host_ops<T, I> base = HSEQR_HOST_OPS(base);
 #if defined(__x86_64__) && !defined(__HIP_DEVICE_COMPILE__)
-    static const int level = __builtin_cpu_supports("x86-64-v4") ? 4
-        : __builtin_cpu_supports("x86-64-v3")                    ? 3
-                                                                 : 0;
-    if(level == 4)
-        return hseqr_host_schur_v4(n, Tw, ldt, W, V, ldv);
-    if(level == 3)
-        return hseqr_host_schur_v3(n, Tw, ldt, W, V, ldv);
+    static const hqr_host_ops<T, I> v3 = HSEQR_HOST_OPS(v3);
+    static const hqr_host_ops<T, I> v4 = HSEQR_HOST_OPS(v4);
+    static const hqr_host_ops<T, I>* ops = __builtin_cpu_supports("x86-64-v4") ? &v4
+        : __builtin_cpu_supports("x86-64-v3")                                  ? &v3
+                                                                               : &base;
+    return ops;
+#else
+    return &base;
 #endif
-    return hseqr_host_schur_base(n, Tw, ldt, W, V, ldv);
+#undef HSEQR_HOST_OPS
 }
 
 /** HSEQR_AED_WINDOW_CAP returns the cap of the (initial) deflation window for an active
@@ -780,13 +790,16 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 const I kwtop = st[LAQR0_KWTOP];
                 const I kv = n - nwc + 1;
                 const I kt = nwc + 1;
-                hT.resize(size_t(jw) * jw);
-                hV.assign(size_t(jw) * jw, T(0));
+                // (the host copies have leading dimension jw + 1: with a power of two, the
+                // accesses along the rows would map to few cache sets)
+                const I ldj = jw + 1;
+                hT.resize(size_t(ldj) * jw);
+                hV.assign(size_t(ldj) * jw, T(0));
                 hWsh.resize(jw);
                 hwork.resize(jw);
                 for(I i = 0; i < jw; i++)
-                    hV[i + size_t(i) * jw] = T(1);
-                HIP_CHECK(hipMemcpy2DAsync(hT.data(), sizeof(T) * jw, h(kv, kt), sizeof(T) * ldh,
+                    hV[i + size_t(i) * ldj] = T(1);
+                HIP_CHECK(hipMemcpy2DAsync(hT.data(), sizeof(T) * ldj, h(kv, kt), sizeof(T) * ldh,
                                            sizeof(T) * jw, jw, hipMemcpyDeviceToHost, stream));
                 HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -796,18 +809,18 @@ rocblas_status hseqr_multishift(rocblas_handle handle,
                 I ns, nd;
                 bool update;
                 T spike;
-                aed_core_block<1>(n, jw, stT[LAQR0_SPIKE_IN], hT.data(), jw, hV.data(), jw,
+                aed_core_block<1>(n, jw, stT[LAQR0_SPIKE_IN], hT.data(), ldj, hV.data(), ldj,
                                   hwork.data(), hWsh.data(), ns, nd, update, spike, s_ired, s_sred,
                                   ibuf, sbuf, (T*)nullptr, (I*)nullptr, (T*)nullptr,
-                                  (T(*)[3]) nullptr, &hseqr_host_schur<T, I>);
+                                  (T(*)[3]) nullptr, hseqr_host_ops<T, I>());
                 st[LAQR0_LS] = ns;
                 st[LAQR0_LD] = nd;
                 st[LAQR0_UPDATE] = update ? 1 : 0;
                 stT[LAQR0_SPIKE_OUT] = spike;
 
-                HIP_CHECK(hipMemcpy2DAsync(h(kv, kt), sizeof(T) * ldh, hT.data(), sizeof(T) * jw,
+                HIP_CHECK(hipMemcpy2DAsync(h(kv, kt), sizeof(T) * ldh, hT.data(), sizeof(T) * ldj,
                                            sizeof(T) * jw, jw, hipMemcpyHostToDevice, stream));
-                HIP_CHECK(hipMemcpy2DAsync(h(kv, 1), sizeof(T) * ldh, hV.data(), sizeof(T) * jw,
+                HIP_CHECK(hipMemcpy2DAsync(h(kv, 1), sizeof(T) * ldh, hV.data(), sizeof(T) * ldj,
                                            sizeof(T) * jw, jw, hipMemcpyHostToDevice, stream));
                 HIP_CHECK(hipMemcpyAsync(W + (kwtop - 1), hWsh.data(), sizeof(T) * jw,
                                          hipMemcpyHostToDevice, stream));

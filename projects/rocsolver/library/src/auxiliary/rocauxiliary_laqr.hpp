@@ -406,6 +406,21 @@ __device__ I laqr4_block(const I n,
                          int& sbuf,
                          T* lds_ws);
 
+/** HQR_HOST_OPS holds host versions of the routines that aed_core_block uses (BS = 1),
+    which may be compiled for other instruction sets than the rest of the library (see
+    hseqr_host_ops); the generic routines are used for the null members. **/
+template <typename T, typename I>
+struct hqr_host_ops
+{
+    // Schur form and vectors of the n-by-n T (V = I on entry), as lahqr_block; returns info
+    I (*schur)(I n, T* Tw, I ldt, T* W, T* V, I ldv);
+    // trexc_block (with wantq)
+    void (*trexc)(I n, T* A, I ldt, T* Q, I ldq, I ifst, I ilst);
+    // hqr_block_larf_left and hqr_block_larf_right
+    void (*larf_left)(I m, I n, const T* v, T tau, T* C, I ldc);
+    void (*larf_right)(I m, I n, const T* v, T tau, T* C, I ldc);
+};
+
 /** AED_CORE_BLOCK performs the part of ZLAQR2 that only involves the jw-by-jw
     window (jw > 1): given the spike s, T (the window in upper Hessenberg form, zero
     below) and V = I, it computes the Schur form of T (ZLAHQR), tests the spike for
@@ -420,8 +435,8 @@ __device__ I laqr4_block(const I n,
     On the device it is executed by all the threads of a thread-block of BS threads;
     on the host, with BS = 1. On the device, lds_ws (shared memory of HQR_LDS_WS_SIZE
     entries, if given, with BS >= HQR_LDS_NMAX) is used for the Schur form of windows of
-    at most HQR_LDS_NMAX entries (lahqr_lds_block). On the host, host_schur (if given) computes
-    the Schur form of the window in place of lahqr_block (see hseqr_host_schur). With MULTISHIFT (on the device, with st4, stT4 and sV4, the
+    at most HQR_LDS_NMAX entries (lahqr_lds_block). On the host, the routines of host_ops (if
+    given) replace the generic ones (see hqr_host_ops). With MULTISHIFT (on the device, with st4, stT4 and sV4, the
     status arrays and the reflections of laqr4_block in shared memory), windows with
     jw > LAQR4_NMIN are reduced to Schur form by laqr4_block (the multishift QR
     algorithm, as LAPACK ZLAQR3 calls ZLAQR4), whose own deflation windows use this
@@ -449,13 +464,36 @@ __host__ __device__ void aed_core_block(const I n,
                                         I* st4 = nullptr,
                                         T* stT4 = nullptr,
                                         T (*sV4)[3] = nullptr,
-                                        I (*host_schur)(I, T*, I, T*, T*, I) = nullptr)
+                                        const hqr_host_ops<T, I>* host_ops = nullptr)
 {
     using S = decltype(std::real(T{}));
 
     const I tid = hqr_tid();
     auto t = [&](const I i, const I j) -> T& { return Tw[idx2D(i - 1, j - 1, ldt)]; };
     auto v = [&](const I i, const I j) -> T& { return V[idx2D(i - 1, j - 1, ldv)]; };
+
+    // (on the host, the routines of host_ops, if given, replace the generic ones)
+    auto trexc = [&](const I ifst, const I ilst) {
+#if !defined(__HIP_DEVICE_COMPILE__)
+        if(host_ops && host_ops->trexc)
+            return host_ops->trexc(jw, Tw, ldt, V, ldv, ifst, ilst);
+#endif
+        trexc_block<BS>(true, jw, Tw, ldt, V, ldv, ifst, ilst);
+    };
+    auto larf_left = [&](const I m, const I nc, const T* x, const T tau, T* C, const I ldc) {
+#if !defined(__HIP_DEVICE_COMPILE__)
+        if(host_ops && host_ops->larf_left)
+            return host_ops->larf_left(m, nc, x, tau, C, ldc);
+#endif
+        hqr_block_larf_left<BS>(m, nc, x, tau, C, ldc);
+    };
+    auto larf_right = [&](const I m, const I nc, const T* x, const T tau, T* C, const I ldc) {
+#if !defined(__HIP_DEVICE_COMPILE__)
+        if(host_ops && host_ops->larf_right)
+            return host_ops->larf_right(m, nc, x, tau, C, ldc);
+#endif
+        hqr_block_larf_right<BS>(m, nc, x, tau, C, ldc);
+    };
 
     const S safmin = hqr_safmin<S>();
     const S ulp = hqr_ulp<S>();
@@ -491,8 +529,8 @@ __host__ __device__ void aed_core_block(const I n,
         infqr = lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired,
                                 ibuf);
 #else
-    infqr = host_schur
-        ? host_schur(jw, Tw, ldt, Wsh, V, ldv)
+    infqr = (host_ops && host_ops->schur)
+        ? host_ops->schur(jw, Tw, ldt, Wsh, V, ldv)
         : lahqr_block<BS>(true, true, jw, I(1), jw, Tw, ldt, Wsh, I(1), jw, V, ldv, s_ired, ibuf);
 #endif
     hqr_sync();
@@ -515,7 +553,7 @@ __host__ __device__ void aed_core_block(const I n,
         {
             // one undeflatable eigenvalue; move it up out of the way
             hqr_sync();
-            trexc_block<BS>(true, jw, Tw, ldt, V, ldv, ns, ilst);
+            trexc(ns, ilst);
             ilst = ilst + 1;
         }
     }
@@ -536,7 +574,7 @@ __host__ __device__ void aed_core_block(const I n,
             if(ifst != i)
             {
                 hqr_sync();
-                trexc_block<BS>(true, jw, Tw, ldt, V, ldv, ifst, i);
+                trexc(ifst, i);
             }
         }
     }
@@ -563,10 +601,10 @@ __host__ __device__ void aed_core_block(const I n,
                 t(i, j) = T(0);
         hqr_sync();
 
-        hqr_block_larf_left<BS>(ns, jw, work, conj(tau), Tw, ldt);
+        larf_left(ns, jw, work, conj(tau), Tw, ldt);
         hqr_sync();
-        hqr_block_larf_right<BS>(ns, ns, work, tau, Tw, ldt);
-        hqr_block_larf_right<BS>(jw, ns, work, tau, V, ldv);
+        larf_right(ns, ns, work, tau, Tw, ldt);
+        larf_right(jw, ns, work, tau, V, ldv);
         hqr_sync();
 
         // Hessenberg reduction of T(1:ns, 1:ns) (ZGEHRD with ilo = 1 and ihi = ns),
@@ -584,10 +622,10 @@ __host__ __device__ void aed_core_block(const I n,
 
             // apply H(i) to T(1:ns, i+1:ns) from the right, to T(i+1:ns, i+1:jw) from the
             // left, and to V(1:jw, i+1:ns) from the right
-            hqr_block_larf_right<BS>(ns, ns - i, &t(i + 1, i), taui, &t(1, i + 1), ldt);
+            larf_right(ns, ns - i, &t(i + 1, i), taui, &t(1, i + 1), ldt);
             hqr_sync();
-            hqr_block_larf_left<BS>(ns - i, jw - i, &t(i + 1, i), conj(taui), &t(i + 1, i + 1), ldt);
-            hqr_block_larf_right<BS>(jw, ns - i, &t(i + 1, i), taui, &v(1, i + 1), ldv);
+            larf_left(ns - i, jw - i, &t(i + 1, i), conj(taui), &t(i + 1, i + 1), ldt);
+            larf_right(jw, ns - i, &t(i + 1, i), taui, &v(1, i + 1), ldv);
             hqr_sync();
             if(tid == 0)
                 t(i + 1, i) = alpha;
