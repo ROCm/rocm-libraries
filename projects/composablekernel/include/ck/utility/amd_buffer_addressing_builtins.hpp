@@ -1274,7 +1274,7 @@ __device__ void amd_async_load_global_to_lds_assembly(const T* global_base_ptr,
     // further
     constexpr index_t offset_limit = 1 << 16; // 65536
     constexpr uint32_t static_dst_offset_ =
-        std::min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
+        min(static_dst_offset, static_cast<index_t>(offset_limit / sizeof(T) - 1));
 
     __attribute__((address_space(1))) const T* global_ptr =
         reinterpret_cast<__attribute__((address_space(1))) T*>(
