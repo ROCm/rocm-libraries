@@ -160,8 +160,10 @@ function(create_device_library)
     endif()
     set(_known_bugs_resource "${_codegen_dir}/tensilelite/tensilelite_logic/known_bugs.yaml")
     foreach(_required_path
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
-            "${_codegen_dir}/tensilelite/tensilelite_create_library/__main__.py"
+            "${_codegen_dir}/tensilelite/__main__.py"
+            "${_codegen_dir}/tensilelite/cli.py"
+            "${_codegen_dir}/tensilelite/tensilelite_logic/run.py"
+            "${_codegen_dir}/tensilelite/tensilelite_create_library/run.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
             message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
@@ -301,6 +303,9 @@ function(create_device_library)
         --use-bundled-known-bugs
         --check-all
     )
+    if(_cdl_LOGIC_FILTER)
+        list(APPEND _tensile_logic_args "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")
+    endif()
     if(_cdl_REQUIRE_GFX1250V0_OVERLAY)
         list(APPEND _tensile_logic_args --require-gfx1250v0-overlay)
     endif()
@@ -313,9 +318,8 @@ function(create_device_library)
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
-        COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
-        COMMAND ${_python_command}
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
+        COMMENT "Validating library logic (tensilelite logic --check-all) for ${_cdl_TARGET} ..."
+        COMMAND ${_python_command} -m tensilelite logic
             ${_tensile_logic_args}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
         DEPENDS ${_codegen_dependencies}
@@ -325,7 +329,7 @@ function(create_device_library)
 
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_python_command} -m tensilelite.tensilelite_create_library
+        ${_python_command} -m tensilelite create-library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"

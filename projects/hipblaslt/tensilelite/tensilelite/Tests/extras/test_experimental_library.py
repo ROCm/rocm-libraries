@@ -34,12 +34,19 @@ from tensilelite.ExperimentalLibrary import (
     _library_type,
     _placeholder_problem_size_groups,
     _resolve_logic_sources,
+    _tensile_create_library_cmd,
     _unique_staged_name,
     cmd_build_lib,
     cmd_extract,
     cmd_list_solutions,
     cmd_patch_logic,
 )
+
+
+def test_create_library_subprocess_uses_package_command():
+    command = _tensile_create_library_cmd("python", "/logic", "/output", "gfx942")
+
+    assert command[:4] == ["python", "-m", "tensilelite", "create-library"]
 
 
 def _require_validparameters():
@@ -413,6 +420,7 @@ def test_gen_logic_matching_arch_passes_guard_and_omits_cpu_only(monkeypatch, tm
         E.cmd_gen_logic(_gen_logic_ns(tmp_path, "gfx950", config=cfg))
 
     cmd = captured["cmd"]
+    assert cmd[:4] == ["python", "-m", "tensilelite", "run"]
     assert "--cpu-only" not in cmd  # regression guard: benchmarking is now default
     assert "--gpu-targets" in cmd
     assert "gfx950" in cmd

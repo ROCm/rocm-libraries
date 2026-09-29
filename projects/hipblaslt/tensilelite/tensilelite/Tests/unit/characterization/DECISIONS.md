@@ -513,6 +513,16 @@ Configuration, asymmetric aligned layouts in segment_interleave, consolidated
 derived-state cases in Solution, LDS token selection in Component, and focused
 reduction/fixup paths in GSU and StreamK.
 
+
+## D29 — TensileLogic filter is part of the command contract
+
+**Decision:** Record the `logic_filter="**/*.yaml"` parser default and translate
+the create-library stem filter into an equivalent recursive YAML glob for the
+preceding validation command. See
+[ADR 0014](adr/0014-align-logic-filter-validation.md).
+
+**Classification:** intended command-line behavior. The three added snapshot
+fields expose one new parser default; no existing saved value was re-recorded.
 ## D29 — Remove unstable set-cover basename snapshots
 
 **ADR:** [`adr/0026-remove-setcover-basename-snapshots.md`](adr/0026-remove-setcover-basename-snapshots.md)
