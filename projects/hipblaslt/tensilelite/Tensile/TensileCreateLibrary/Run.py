@@ -1057,6 +1057,12 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             for _, sol in lib.solutions.items():
                 sol.index = solnReIndex
                 solnReIndex += 1
+    # hipBLASLt reserves indices from 2**30 for solutions it generates at run time.
+    if solnReIndex > 2**30:
+        raise RuntimeError(
+            f"{solnReIndex} solutions exceed the {2**30} indices below the range "
+            "hipBLASLt reserves for JIT solutions"
+        )
 
     if args["GenSolTable"]:
         matchTable = {}
