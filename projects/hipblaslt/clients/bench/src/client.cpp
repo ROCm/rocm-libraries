@@ -443,6 +443,9 @@ try
          "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
          "fp16_accumulator_probe")
 
+        ("host_side_fill_kernel",
+         "Initialize matrix data on the host and copy it to the device. Applies to all YAML/data records.")
+
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
          "N = no transpose, T = transpose, C = conjugate transpose")
@@ -794,6 +797,12 @@ try
     if(vm.find("version") != vm.end())
     {
         return 0;
+    }
+
+    if(vm.count("host_side_fill_kernel"))
+    {
+        set_host_side_fill_kernel_state(true);
+        hipblaslt_cout << "info: --host_side_fill_kernel enabled" << std::endl;
     }
 
     if(api_method_str.compare("c") == 0)
