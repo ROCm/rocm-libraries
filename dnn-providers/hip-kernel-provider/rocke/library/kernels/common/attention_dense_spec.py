@@ -16,6 +16,12 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
+from kernels.common.attention_dense_decode import (
+    PERSIST_DECODES,
+    PersistHkvMajor,
+    PersistQbMajor,
+)
+
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
@@ -28,7 +34,6 @@ DENSE_TILE_GEOMETRIES = MappingProxyType(
 )
 DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 
-_COMMON_PERSIST_DECODES = frozenset({"auto", "qb_major", "hkv_major"})
 
 # Signed 32-bit ceiling for tensor extents. See ``check_dense_spec_preflight``
 # check 4 for why the SIGNED bound binds even though the buffer-resource
@@ -76,9 +81,11 @@ class AttentionDenseSpec:
     # Appended for positional compatibility with existing concrete specs.
     causal_bottom_right: bool = field(default=False, kw_only=True)
 
-    def supported_persist_decodes(self) -> frozenset[str]:
-        """Decode values the concrete kernel type can actually emit."""
-        return _COMMON_PERSIST_DECODES
+    @classmethod
+    def supported_persist_decodes(cls) -> frozenset[str]:
+        """``persist_decode`` values the concrete kernel type can emit. The shared
+        spec accepts every known decode; each arch's spec lists its own."""
+        return frozenset({"auto", *PERSIST_DECODES})
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -138,16 +145,21 @@ class AttentionDenseSpec:
                 f"num_query_heads ({self.num_query_heads}) must be a positive "
                 f"multiple of num_kv_heads ({self.num_kv_heads})"
             )
-        if self.persistent and self.num_persistent <= 0:
-            raise ValueError(
-                f"num_persistent must be positive, got {self.num_persistent}"
-            )
         if self.persist_decode not in self.supported_persist_decodes():
             raise ValueError(
                 f"persist_decode must be one of "
                 f"{sorted(self.supported_persist_decodes())}, "
                 f"got {self.persist_decode!r}"
             )
+        if self.persistent:
+            if self.num_persistent <= 0:
+                raise ValueError(
+                    f"num_persistent must be positive, got {self.num_persistent}"
+                )
+            if self.persist_decode != "auto":
+                why = PERSIST_DECODES[self.persist_decode].check(self)
+                if why:
+                    raise ValueError(why)
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
@@ -241,8 +253,8 @@ class AttentionDenseSpec:
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
-            return "hkv_major"
-        return "qb_major"
+            return PersistHkvMajor.name
+        return PersistQbMajor.name
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -293,7 +305,7 @@ class AttentionDenseSpec:
         return ("lazyrs",) if self.lazy_rescale else ()
 
     def _persist_decode_name_part(self) -> str:
-        return "hkvmaj" if self.resolved_persist_decode == "hkv_major" else ""
+        return PERSIST_DECODES[self.resolved_persist_decode].tag
 
     def kernel_name(self) -> str:
         parts = [
