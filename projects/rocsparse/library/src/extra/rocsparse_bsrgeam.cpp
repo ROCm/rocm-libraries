@@ -24,6 +24,7 @@
 
 #include "internal/extra/rocsparse_bsrgeam.h"
 #include "rocsparse_csrgeam.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsrgeam_device.h"
@@ -445,11 +446,8 @@ namespace rocsparse
                 // With BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to
                 // dim3 unclamped narrows it to unsigned int and silently drops most
                 // of the matrix. The kernel grid-strides over the block rows, so an
-                // undersized grid still covers [0, mb). Replace with
-                // rocsparse::get_grid_size(mb, handle->properties.maxGridSize[0])
-                // once PR #11512 lands.
-                dim3(rocsparse::min(static_cast<int64_t>(mb),
-                                    static_cast<int64_t>(handle->properties.maxGridSize[0]))),
+                // undersized grid still covers [0, mb).
+                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,
@@ -483,11 +481,8 @@ namespace rocsparse
                 // With BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to
                 // dim3 unclamped narrows it to unsigned int and silently drops most
                 // of the matrix. The kernel grid-strides over the block rows, so an
-                // undersized grid still covers [0, mb). Replace with
-                // rocsparse::get_grid_size(mb, handle->properties.maxGridSize[0])
-                // once PR #11512 lands.
-                dim3(rocsparse::min(static_cast<int64_t>(mb),
-                                    static_cast<int64_t>(handle->properties.maxGridSize[0]))),
+                // undersized grid still covers [0, mb).
+                dim3(rocsparse::get_grid_size_x(handle, mb, BSRGEAM_DIM)),
                 dim3(BSRGEAM_DIM),
                 0,
                 stream,

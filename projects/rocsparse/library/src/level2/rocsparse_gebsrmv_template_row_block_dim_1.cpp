@@ -23,6 +23,7 @@
 
 #include "gebsrmv_device.h"
 
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 
 #include "rocsparse_utility.hpp"
@@ -35,48 +36,44 @@ namespace rocsparse
 // BUILD_ROCSPARSE_ILP64=ON `mb` is an int64_t, so handing it to dim3 unclamped
 // narrows it to unsigned int and silently drops most of the matrix. The kernels
 // grid-stride over the block rows, so an undersized grid still covers [0, mb).
-// Replace with rocsparse::get_grid_size(mb, handle->properties.maxGridSize[0])
-// once PR #11512 lands.
-#define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)                               \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                                 \
-        (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>),                                  \
-        dim3(rocsparse::min(static_cast<int64_t>(mb),                                  \
-                            static_cast<int64_t>(handle->properties.maxGridSize[0]))), \
-        dim3(BLOCKSIZE),                                                               \
-        0,                                                                             \
-        handle->stream,                                                                \
-        mb,                                                                            \
-        dir,                                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                  \
-        bsr_row_ptr,                                                                   \
-        bsr_col_ind,                                                                   \
-        bsr_val,                                                                       \
-        row_block_dim,                                                                 \
-        col_block_dim,                                                                 \
-        x,                                                                             \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                   \
-        y,                                                                             \
-        base,                                                                          \
+#define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)              \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
+        (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>),                 \
+        dim3(rocsparse::get_grid_size_x(handle, mb, BLOCKSIZE)),      \
+        dim3(BLOCKSIZE),                                              \
+        0,                                                            \
+        handle->stream,                                               \
+        mb,                                                           \
+        dir,                                                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        bsr_row_ptr,                                                  \
+        bsr_col_ind,                                                  \
+        bsr_val,                                                      \
+        row_block_dim,                                                \
+        col_block_dim,                                                \
+        x,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        base,                                                         \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_GEBSRMV_1XN_KERNEL(BLOCKSIZE, COLBSRDIM, WFSIZE)                        \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                                 \
-        (gebsrmvn_1xn_kernel<BLOCKSIZE, COLBSRDIM, WFSIZE>),                           \
-        dim3(rocsparse::min(static_cast<int64_t>((mb - 1) / (BLOCKSIZE / WFSIZE) + 1), \
-                            static_cast<int64_t>(handle->properties.maxGridSize[0]))), \
-        dim3(BLOCKSIZE),                                                               \
-        0,                                                                             \
-        handle->stream,                                                                \
-        mb,                                                                            \
-        dir,                                                                           \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                  \
-        bsr_row_ptr,                                                                   \
-        bsr_col_ind,                                                                   \
-        bsr_val,                                                                       \
-        x,                                                                             \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                   \
-        y,                                                                             \
-        base,                                                                          \
+#define LAUNCH_GEBSRMV_1XN_KERNEL(BLOCKSIZE, COLBSRDIM, WFSIZE)                                   \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                                            \
+        (gebsrmvn_1xn_kernel<BLOCKSIZE, COLBSRDIM, WFSIZE>),                                      \
+        dim3(rocsparse::get_grid_size_x(handle, (mb - 1) / (BLOCKSIZE / WFSIZE) + 1, BLOCKSIZE)), \
+        dim3(BLOCKSIZE),                                                                          \
+        0,                                                                                        \
+        handle->stream,                                                                           \
+        mb,                                                                                       \
+        dir,                                                                                      \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                             \
+        bsr_row_ptr,                                                                              \
+        bsr_col_ind,                                                                              \
+        bsr_val,                                                                                  \
+        x,                                                                                        \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                              \
+        y,                                                                                        \
+        base,                                                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T>
