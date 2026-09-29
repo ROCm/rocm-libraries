@@ -1097,7 +1097,7 @@ endfunction()
 #   arch_matches() for at least one arch in <arches>. Mirrors that predicate exactly: an
 #   absent `arch` key and an empty `arch` array are both wildcards, anything else is
 #   exact string membership in the wired arch list. Consulted for the default root alone
-#   (hkp_add_packaging below).
+#   (_hkp_product_dormant_reason below).
 #
 #   Only FALSE is authoritative. kdp_survives() tests arch_matches() first, so a root no
 #   arch matches is provably empty; TRUE claims nothing beyond "not provably empty",
@@ -1136,6 +1136,54 @@ function(_hkp_root_covers_any_arch out_var root arches)
             return()
         endif()
     endforeach()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_root_selects_only_rocke(<out_var> <root> <arches>)
+#   TRUE when the packer would select at least one UKD under <root> for <arches> and
+#   every one it selects is `kind: "rocke"`. Consulted for the default root alone, and
+#   only with rocKE disabled (_hkp_product_dormant_reason below).
+#
+#   Answered by the packer's own selection (hkp_pack.pipeline.selects_only_rocke) under
+#   the base interpreter, rather than mirrored here: which UKDs survive turns on the KDP
+#   arch list, each UKD's own arch list and standalone-UKD resolution, and a KDP of a few
+#   hundred inline UKDs takes CMake's JSON reader seconds per configure to walk.
+#
+#   Only TRUE is authoritative, the reverse of _hkp_root_covers_any_arch: TRUE makes
+#   the root dormant. A probe that fails for any reason -- a malformed root, an
+#   interpreter that cannot run it -- answers FALSE, so the root stays wired and the
+#   packer reports what is wrong with it.
+#
+#   Every descriptor under <root> is a configure dependency: the verdict turns on the
+#   contents of standalone UKDs as much as on the KDPs.
+# ---------------------------------------------------------------------------
+function(_hkp_root_selects_only_rocke out_var root arches)
+    set(${out_var} FALSE PARENT_SCOPE)
+    if(NOT root)
+        return()
+    endif()
+
+    file(GLOB_RECURSE _descriptors CONFIGURE_DEPENDS "${root}/*.json")
+    set_property(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_descriptors})
+
+    set(_probe_py "import sys
+from hkp_pack.descriptors import load_flat_input
+from hkp_pack.pipeline import selects_only_rocke
+flat = load_flat_input(sys.argv[1], log=lambda *_args: None)
+print('rocke-only' if selects_only_rocke(flat, sys.argv[2:]) else 'other')
+")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HKP_PYTHON_ROOT}" --
+                "${Python3_EXECUTABLE}" -c "${_probe_py}" "${root}" ${arches}
+        RESULT_VARIABLE _rc
+        OUTPUT_VARIABLE _out
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(_rc EQUAL 0 AND _out STREQUAL "rocke-only")
+        set(${out_var} TRUE PARENT_SCOPE)
+    endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1379,6 +1427,84 @@ the one named here.")
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_product_dormant_reason(<out_var> <root> <is_default> <arches>)
+#   Why the production root packs nothing in this configuration, or empty when it is
+#   wired: `empty-root`, `no-kdp`, `no-arch` or `rocke-disabled`.
+#
+#   The last two are consulted for the DEFAULT root alone, which builds inherit without
+#   asking for it; a named root in either state reaches the packer and fails there.
+# ---------------------------------------------------------------------------
+function(_hkp_product_dormant_reason out_var root is_default arches)
+    set(${out_var} "" PARENT_SCOPE)
+
+    # A KDP is what arch pruning consumes, so a root holding none has nothing to ship.
+    # Standalone UKD/UMD/UED/UDD/KMD/UHD files, kernel sources and READMEs do not make
+    # a pack.
+    if(NOT root)
+        set(${out_var} "empty-root" PARENT_SCOPE)
+        return()
+    endif()
+    _hkp_root_has_kdp(_has_kdp "${root}")
+    if(NOT _has_kdp)
+        set(${out_var} "no-kdp" PARENT_SCOPE)
+        return()
+    endif()
+    if(NOT is_default)
+        return()
+    endif()
+
+    # Safe in one direction only: arch_matches() runs first inside kdp_survives(), so
+    # "no KDP declares an arch this build packs for" proves no KDP survives, and a root
+    # this misses stays wired for the packer to report.
+    _hkp_root_covers_any_arch(_covers_arch "${root}" "${arches}")
+    if(NOT _covers_arch)
+        set(${out_var} "no-arch" PARENT_SCOPE)
+        return()
+    endif()
+
+    # Without rocKE, a root whose every kernel for these architectures is a rocKE kernel
+    # has nothing the hip producer can ship, and packing it could only fail on
+    # --no-rocke. A root holding any hip kernel for them stays wired, so its rocKE
+    # kernels still fail the pack rather than silently leaving it.
+    if(NOT HIPKERNELPROVIDER_ENABLE_ROCKE)
+        _hkp_root_selects_only_rocke(_rocke_only "${root}" "${arches}")
+        if(_rocke_only)
+            set(${out_var} "rocke-disabled" PARENT_SCOPE)
+        endif()
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# _hkp_report_dormant_product(<reason> <root> <arches>)
+#   One STATUS line per _hkp_product_dormant_reason() verdict. The arch lines name the
+#   arch list because that is the value to change to make packing happen.
+# ---------------------------------------------------------------------------
+function(_hkp_report_dormant_product reason root arches)
+    if(reason STREQUAL "empty-root")
+        message(STATUS
+            "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is empty; production "
+            "packaging dormant (tests still run against the fixtures).")
+    elseif(reason STREQUAL "no-arch")
+        message(STATUS
+            "hkp: the default production root '${root}' declares no "
+            "descriptor for any architecture this build packs for (${arches}), "
+            "so every descriptor under it would prune; production packaging "
+            "dormant (tests still run against the fixtures).")
+    elseif(reason STREQUAL "rocke-disabled")
+        message(STATUS
+            "hkp: every kernel the default production root '${root}' "
+            "ships for this build's architectures (${arches}) is a rocKE kernel, "
+            "and rocKE is disabled (HIPKERNELPROVIDER_ENABLE_ROCKE=OFF); "
+            "production packaging dormant (tests still run against the fixtures). "
+            "Configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON to ship them.")
+    else()
+        message(STATUS
+            "hkp: no *.kdp.json under '${root}'; production packaging "
+            "dormant (tests still run against the fixtures).")
+    endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_add_packaging()
 #   Gate production packaging on ONE source root; producer selection is per-UKD on
 #   kernel_source.kind, so every enabled producer is available to every root. Runs only
@@ -1395,9 +1521,10 @@ endfunction()
 #   gfx950 attention_dense descriptors, so production packaging runs wherever the build
 #   packs for an architecture a descriptor under it declares. Root empty, or holding no
 #   descriptor = dormant. The default root also goes dormant when no descriptor under it
-#   declares an architecture this build packs for; a named root in the same state is the
-#   packer's hard failure. Root set but not a directory = fatal. The tests are wired
-#   regardless.
+#   declares an architecture this build packs for, or, with rocKE disabled, when every
+#   kernel it would ship for those architectures is a rocKE kernel; a named root in
+#   either state is the packer's hard failure. Root set but not a directory = fatal. The
+#   tests are wired regardless.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -1420,31 +1547,11 @@ function(hkp_add_packaging)
             "the hip producer only")
     endif()
 
-    # A KDP is what arch pruning consumes, so a root holding none has nothing to ship.
-    # Standalone UKD/UMD/UED/UDD/KMD/UHD files, kernel sources and READMEs do not make
-    # a pack.
-    _hkp_root_has_kdp(_product_has_content "${_source_root}")
-    if(NOT _source_root)
-        set(_product_dormant_reason "empty-root")
-    else()
-        set(_product_dormant_reason "no-kdp")
-    endif()
-
-    # Arch coverage is consulted for the DEFAULT root alone, which builds inherit without
-    # asking for it; a named root reaches the packer and fails there. Safe in one
-    # direction only: arch_matches() runs first inside kdp_survives(), so "no KDP
-    # declares an arch this build packs for" proves no KDP survives, and a root this
-    # misses stays wired for the packer to report.
-    if(_product_has_content AND _source_root_is_default)
-        _hkp_root_covers_any_arch(_product_covers_arch "${_source_root}" "${_arches}")
-        if(NOT _product_covers_arch)
-            set(_product_has_content FALSE)
-            set(_product_dormant_reason "no-arch")
-        endif()
-    endif()
+    _hkp_product_dormant_reason(_product_dormant_reason "${_source_root}"
+                                "${_source_root_is_default}" "${_arches}")
 
     # Production descriptors.
-    if(_source_root AND _product_has_content)
+    if(NOT _product_dormant_reason)
         hkp_wire_pack_target(
             NAME product
             SOURCE_ROOT "${_source_root}"
@@ -1464,23 +1571,8 @@ function(hkp_add_packaging)
         if(HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR)
             file(REMOVE_RECURSE "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}")
         endif()
-        # One message per reason. The arch line names the arch list because that is the
-        # value to change to make packing happen.
-        if(_product_dormant_reason STREQUAL "empty-root")
-            message(STATUS
-                "hkp: HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT is empty; production "
-                "packaging dormant (tests still run against the fixtures).")
-        elseif(_product_dormant_reason STREQUAL "no-arch")
-            message(STATUS
-                "hkp: the default production root '${_source_root}' declares no "
-                "descriptor for any architecture this build packs for (${_arches}), "
-                "so every descriptor under it would prune; production packaging "
-                "dormant (tests still run against the fixtures).")
-        else()
-            message(STATUS
-                "hkp: no *.kdp.json under '${_source_root}'; production packaging "
-                "dormant (tests still run against the fixtures).")
-        endif()
+        _hkp_report_dormant_product("${_product_dormant_reason}" "${_source_root}"
+                                    "${_arches}")
     endif()
 
     # Test descriptors, one pack per authored set. The shared root is packed into both

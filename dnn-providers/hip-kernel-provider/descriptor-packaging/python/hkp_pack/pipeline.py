@@ -413,6 +413,26 @@ def _reject_rocke_entries(surviving, arch, ukd_by_id):
                 )
 
 
+def selects_only_rocke(flat, arches):
+    """Whether flat selects at least one UKD for arches and every one is rocke.
+
+    The question a build without rocKE asks of its default production root:
+    True means a pack of that root for arches can only fail in
+    _reject_rocke_entries and has nothing else to ship. Walks the same selection
+    the gate does, so a rocke UKD pruned out of every arch counts neither way, and
+    a root that selects nothing is not rocke-only.
+    """
+    ukd_by_id = flat.ukd_by_id()
+    selected = False
+    for arch in arches:
+        for kdp in flat.kdps():
+            for _sid, ukd, _sdesc in _selected_entries(kdp.doc, arch, ukd_by_id):
+                if ukd["kernel_source"]["kind"] != "rocke":
+                    return False
+                selected = True
+    return selected
+
+
 def _agreement_inputs(flat, arch):
     """Every consumer's declaration and observation request, before any compile.
 

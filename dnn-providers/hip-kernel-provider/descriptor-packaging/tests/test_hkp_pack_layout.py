@@ -25,7 +25,12 @@ import pytest
 from hkp_pack.descriptors import kdp_survives, load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.hip_compile import hip_variant_key
-from hkp_pack.pipeline import _agreement_inputs, compile_intermediate, run_pipeline
+from hkp_pack.pipeline import (
+    _agreement_inputs,
+    compile_intermediate,
+    run_pipeline,
+    selects_only_rocke,
+)
 from pack_helpers import (
     ARCH,
     EXAMPLE_ROOT,
@@ -34,6 +39,7 @@ from pack_helpers import (
     _nest,
     _read,
     _run,
+    _silent,
 )
 
 
@@ -1997,3 +2003,31 @@ def test_an_arch_pruned_rocke_ukd_does_not_trip_the_rocke_gate(
     message = str(excinfo.value)
     assert "HIPKERNELPROVIDER_ENABLE_ROCKE" not in message
     assert f"failed to compile for {ARCH}" in message
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("form", _AUTHORING_FORMS)
+def test_a_root_is_rocke_only_when_every_kernel_it_selects_is_rocke(
+    tmp_path, main_fixture, rocke_fixture, form
+):
+    """What leaves the default root dormant without rocKE: at least one kernel
+    selected for the arches, and none of them hip.
+
+    A root that selects nothing is not rocke-only, and a rocKE UKD pruned out of
+    the arches counts neither way, so the hip kernels beside it keep the root
+    wired and the gate still sees any rocKE kernel that would ship.
+    """
+    rocke_only = load_flat_input(
+        _rocke_root(tmp_path / "rocke", rocke_fixture, form), log=_silent
+    )
+    assert selects_only_rocke(rocke_only, [ROCKE_ARCH])
+    assert selects_only_rocke(rocke_only, [ARCH, ROCKE_ARCH])
+    assert not selects_only_rocke(rocke_only, [ARCH])
+
+    mixed_root = tmp_path / "mixed"
+    kdp_path = _nest(mixed_root, "hip/pointwise", main_fixture) / "pointwise.kdp.json"
+    (ukd,) = _read(rocke_fixture / "attention.kdp.json")["kernelDescriptors"]
+    _add_rocke_ukd(kdp_path, ukd, form)
+    mixed = load_flat_input(mixed_root, log=_silent)
+    assert not selects_only_rocke(mixed, [ARCH])
+    assert not selects_only_rocke(mixed, [ARCH, ROCKE_ARCH])

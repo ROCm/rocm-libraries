@@ -9,6 +9,7 @@ them.
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -189,3 +190,20 @@ def test_the_registered_suites_collect_tests_rocke_only_with_rocke(
             if arg.startswith("--ignore")
         ]
         assert ignored == ([rocke_tests] if enable_rocke == "OFF" else []), name
+
+
+@pytest.mark.parametrize(("arch", "verdict"), [("gfx950", "TRUE"), ("gfx942", "FALSE")])
+def test_the_rocke_only_probe_answers_under_a_base_interpreter_without_pip(
+    consumer, rocke_fixture, arch, verdict
+):
+    """The probe that leaves a rocKE-only default root dormant runs the packer's
+    selection under the pip-less interpreter, through a path with spaces. The
+    fixture's rocKE kernel is scoped to gfx950: selected there, pruned for gfx942.
+    A probe that could not run would answer FALSE for both."""
+    shutil.copytree(rocke_fixture, consumer.source / "authored" / "rocKE" / "attention")
+    consumer._write(
+        f"""_hkp_root_selects_only_rocke(_only "${{CMAKE_CURRENT_SOURCE_DIR}}/authored" {arch})
+message(STATUS "rocke-only=${{_only}}")
+"""
+    )
+    assert f"rocke-only={verdict}" in consumer.configure()

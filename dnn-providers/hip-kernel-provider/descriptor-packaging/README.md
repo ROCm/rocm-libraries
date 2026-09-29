@@ -18,7 +18,9 @@ only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`. With it OFF every root packs wit
 producer alone, and the packer is run with `--no-rocke`: a `rocke` UKD selected for any
 requested arch fails that root's pack rather than being skipped, while one that arch
 pruning drops is never looked at. Configure with `-DHIPKERNELPROVIDER_ENABLE_ROCKE=ON`,
-or remove the rocKE descriptors from the root.
+or remove the rocKE descriptors from the root. The inherited default production root is
+the one exception: when every UKD it selects for the build's arches is `rocke`, it has
+nothing the hip producer can ship, so it goes **dormant** instead (below).
 
 The provider wires six roots: production, plus five over the four authored test sets
 (`shared` packs twice, once into each test binary's discovery root).
@@ -32,7 +34,12 @@ Production wiring is gated on the root holding at least one non-hidden `*.kdp.js
 since a KDP is what arch pruning consumes. With none, packaging is **dormant** and any
 stale product tree is removed; neither is an error. A root set but not a directory is
 fatal. A KDP that prunes on every arch is a hard failure for a root the build NAMED, and
-dormancy for the inherited default root.
+dormancy for the inherited default root. The same split applies with rocKE OFF to a root
+whose every selected UKD is `rocke`: fatal at pack time when named, dormant when inherited.
+A default root that selects any hip UKD stays wired, so a `rocke` UKD beside it still
+fails the pack. The rocKE-only verdict is the packer's own selection
+(`pipeline.selects_only_rocke`), run at configure; a probe that cannot answer leaves the
+root wired for the packer to report.
 
 Two rules govern the walk:
 
@@ -292,7 +299,8 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
 
 `tests/test_hkp_pack_wiring.py` drives real sub-configures of `HkpPackaging.cmake` to
 hold that build's CMake wiring: a root wired with `ENABLE_ROCKE OFF` packs under an
-interpreter without pip, and the registered entries ignore `tests/rocke/`.
+interpreter without pip, the rocKE-only probe answers under that interpreter, and the
+registered entries ignore `tests/rocke/`.
 
 The two `conftest.py` files both import as `conftest`, so neither exports helpers, and no
 test module imports from another. Helpers both sides use live in plain modules:
