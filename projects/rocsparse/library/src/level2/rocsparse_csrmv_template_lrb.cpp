@@ -806,8 +806,8 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 // groups so that all workgroups cooperating on a row stay within one grid-stride
                 // wave (required by the spin-loop hand-off). The kernel grid-strides over the full
                 // logical range [0, count).
-                int64_t capped   = rocsparse::get_grid_size_x(handle, count, block_size);
-                capped           = (capped / num_wgs_per_row) * num_wgs_per_row;
+                int64_t capped = rocsparse::get_grid_size_x(handle, count, block_size);
+                capped         = (capped / num_wgs_per_row) * num_wgs_per_row;
                 if(capped < num_wgs_per_row)
                 {
                     capped = num_wgs_per_row;
