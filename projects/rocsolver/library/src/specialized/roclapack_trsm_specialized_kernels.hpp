@@ -942,7 +942,7 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
     T minone = -1; // constant -1 in host
 
     I dimx, dimy, blocks, nextpiv;
-    I const max_blocks = 1024;
+    I const max_blocks = 64 * 1024;
     dim3 grid, threads;
     size_t lmemsize;
 
@@ -1206,7 +1206,7 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
     T minone = -1; // constant -1 in host
 
     I dimx, dimy, blocks, nextpiv;
-    I const max_blocks = 1024;
+    I const max_blocks = 64 * 1024;
     dim3 grid, threads;
     size_t lmemsize;
 
