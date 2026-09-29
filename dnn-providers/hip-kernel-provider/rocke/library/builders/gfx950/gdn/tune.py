@@ -28,16 +28,7 @@ import argparse
 import dataclasses as dc
 import sys
 
-import torch
 
-from builders.gfx950.gdn.gdn_decode import (
-    TOL,
-    launch,
-    launcher_for,
-    make_inputs,
-    prepare,
-    ref_fp32,
-)
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
@@ -49,6 +40,24 @@ DEFAULT_BATCHES = (1, 16, 64, 256)
 _NUM_WARPS = (1, 2, 4, 8, 16)
 _WARP_THREADS_K = (1, 2, 4, 8, 16, 32)
 _BLOCKS_PER_V = (1, 2, 4, 8, 16, 32)
+
+def device_is_visible() -> bool:
+    """Load the ROCm-only measurement backend only when tuning is requested."""
+    global TOL, launch, launcher_for, make_inputs, prepare, ref_fp32, torch
+    try:
+        import torch as torch_module
+        from builders.gfx950.gdn.gdn_decode import (
+            TOL,
+            launch,
+            launcher_for,
+            make_inputs,
+            prepare,
+            ref_fp32,
+        )
+    except ModuleNotFoundError:
+        return False
+    torch = torch_module
+    return torch.cuda.is_available()
 
 
 def legal_configs(base: GdnDecodeSpec):
@@ -234,9 +243,8 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=8, help="rows to print per cell")
     args = parser.parse_args()
 
-    import torch
 
-    if not torch.cuda.is_available():
+    if not device_is_visible():
         print("no HIP device visible", file=sys.stderr)
         return 2
 

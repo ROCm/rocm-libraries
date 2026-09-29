@@ -56,7 +56,7 @@ def test_incomplete_sweep_returns_failure_and_names_every_cell(capsys):
 
 
 def test_main_fails_when_any_requested_registry_cell_is_missing(monkeypatch, capsys):
-    monkeypatch.setattr(tune.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(tune, "device_is_visible", lambda: True)
 
     def fake_results(request):
         return () if request.num_k_heads == 16 and request.batch == 2 else (object(),)
