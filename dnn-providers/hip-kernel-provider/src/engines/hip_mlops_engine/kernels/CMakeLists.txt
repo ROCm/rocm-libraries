@@ -32,8 +32,8 @@ add_kernels_for_embedding(
     FILES ${HIP_MLOPS_KERNEL_FILES})
 
 # Embedded kernels are never compiled by the build, so nothing would otherwise put them in
-# front of clang-tidy. This target does: it compiles a generated wrapper per kernel that
-# supplies the hipRTC-time macros and includes the kernel.
+# front of clang-tidy. This target does: it runs clang-tidy over them directly, with the
+# macros the host plan supplies at hipRTC time force-included from the prelude.
 add_kernel_tidy_target(
     NAME hip_mlops_kernel_tidy
     PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/tidy/KernelTidyPrelude.hpp

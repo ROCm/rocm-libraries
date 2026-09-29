@@ -10,8 +10,8 @@
 // clang-tidy could not be pointed at them directly.
 //
 // The values below are a representative instantiation, NOT the values any plan produces.
-// They exist so that the tidy wrapper translation units parse; they are never compiled
-// into the provider. Where a plan has a documented default (see
+// They exist so that the kernels parse under clang-tidy; they are never compiled into the
+// provider. Where a plan has a documented default (see
 // plans/batchnorm/BatchnormKernelCompileOptions.hpp) that default is used, so the
 // configuration stays recognisable to someone reading the plan code.
 //
@@ -21,15 +21,22 @@
 // thoroughly than the configuration named here. Adding a second prelude and a second
 // tidy target is the way to widen that coverage.
 //
-// A kernel that starts using a new HIP_PLUGIN_* macro must add it here, otherwise its
-// wrapper stops compiling and the `tidy` target fails.
+// A kernel that starts using a new HIP_PLUGIN_* macro must add it here, otherwise it no
+// longer parses and the `tidy` target fails.
 
 #pragma once
 
 // The kernels rely on the HIP device runtime (blockIdx, __syncthreads, __launch_bounds__,
-// the __half types). hipRTC injects it implicitly; here it has to be included.
+// the __half types). hipRTC injects it implicitly; under clang-tidy it has to be
+// included, and this header is force-included ahead of every kernel.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+
+// This file is an analysis fixture, not code the provider ships, and the macros below
+// stand in for -D options: they cannot become the enums modernize-macro-to-enum asks for
+// without ceasing to do their job. Checking the fixture would only ever report on itself,
+// so it is excluded; the kernels it enables are still fully checked.
+// NOLINTBEGIN
 
 // --- provider-wide options (compilation/KernelCompileOptions.hpp) ---------------------
 #define HIP_PLUGIN_LAYOUT_NHWC 0
@@ -168,3 +175,5 @@
 #define HIP_PLUGIN_RESAMPLE_PRE_PAD_W 0
 #define HIP_PLUGIN_RESAMPLE_OUTPUT_ELEMENT_COUNT 16
 #define HIP_PLUGIN_RESAMPLE_DX_ELEMENT_COUNT 64
+
+// NOLINTEND
