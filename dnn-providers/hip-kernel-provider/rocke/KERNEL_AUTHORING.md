@@ -400,11 +400,12 @@ Python emitter and the compiled C emitter for each config index and diffs the
 1. Confirm the change is expected and reviewed — a golden diff is a claim that
    the IR *should* change.
 2. Re-bless the flavor-keyed golden in the **same change** (the golden stores one
-   sub-document per LLVM flavor; the gate compares only the host's autodetected
-   flavor). The bless path is the `--bless`/build-golden flow in the parity
-   harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
+   sub-document per flavor in `LLVM_FLAVORS`, and every one is checked from any
+   host, so a new flavor fails until re-blessed). The bless path is `--write` on
+   the parity harness ([rocke_ir_parity_harness.py](platform/tests/instances/rocke_ir_parity_harness.py),
    golden at
-   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json)).
+   [rocke_representative_ir_sha256.json](platform/tests/golden/rocke_representative_ir_sha256.json));
+   library goldens re-bless with `--write` on their own `library/tests/test_*_golden.py`.
 3. Re-run the gate GREEN at **both** flavors before considering it done.
 4. A default-OFF, unwired knob must produce **no** golden diff — a clean gate
    with no re-bless is the proof it is inert.
