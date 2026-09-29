@@ -160,6 +160,12 @@ class TestFiles(unittest.TestCase):
         with self.assertRaises(SidecarError):
             parse(self.dir / "support.json", text)
 
+    def test_refuses_invalid_utf8(self):
+        path = self.dir / "X.support.json"
+        path.write_bytes(b"\xff")
+        with self.assertRaisesRegex(SidecarError, "unreadable"):
+            load(path)
+
     def test_refuses_invalid_json(self):
         path = self.dir / "X.support.json"
         path.write_text("{", encoding="utf-8")

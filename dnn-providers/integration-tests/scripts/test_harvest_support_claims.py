@@ -913,6 +913,15 @@ class TestWrite(unittest.TestCase):
         self.assertFalse(self.sweep.exists())
         self.assertEqual(self.single.read_bytes(), text.encode("utf-8"))
 
+    def test_undecodable_sidecar_writes_nothing(self) -> None:
+        self.single.write_bytes(b"\xff")
+        code, err = self._main(*self._WRITE)
+        self.assertEqual(code, 1)
+        self.assertIn(f"{self.single}: unreadable: ", err)
+        self.assertIn("; wrote nothing\n", err)
+        self.assertFalse(self.sweep.exists())
+        self.assertEqual(self.single.read_bytes(), b"\xff")
+
     def test_missing_bundle_writes_nothing(self) -> None:
         (self.root / _SINGLE).unlink()
         code, err = self._main(*self._WRITE)

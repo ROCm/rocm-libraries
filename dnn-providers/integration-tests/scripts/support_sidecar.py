@@ -63,7 +63,11 @@ def load(path: Path) -> Set[Claim]:
     """The claims of a sidecar; none if it does not exist."""
     if not path.exists():
         return set()
-    return parse(path, path.read_bytes().decode("utf-8"))
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SidecarError(f"{path}: unreadable: {exc!r}") from exc
+    return parse(path, text)
 
 
 def parse(path: Path, text: str) -> Set[Claim]:
