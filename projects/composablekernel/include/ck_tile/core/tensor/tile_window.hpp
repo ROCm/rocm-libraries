@@ -1032,12 +1032,11 @@ struct tile_window_with_static_distribution
                     // Clamp remaining dimensions so out-of-bounds boxes load zeros.
                     // The extent comes from the pre-pad length: a padded descriptor
                     // would let TDM pull real neighbouring memory into the padding.
-                    auto dims =
-                        to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
-                            [](auto x) { return max(index_t{0}, x); },
-                            detail::tdm_real_lengths(glb_tensor_descriptor) -
-                                this->get_window_origin() -
-                                window_adaptor_thread_coord.get_bottom_index())));
+                    auto dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
+                        transform_tuples([](auto x) { return max(index_t{0}, x); },
+                                         detail::tdm_real_lengths(glb_tensor_descriptor) -
+                                             this->get_window_origin() -
+                                             window_adaptor_thread_coord.get_bottom_index())));
                     dims[0] /= Traits::PackedSize;
                     return dims;
                 }

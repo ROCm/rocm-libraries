@@ -284,8 +284,7 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
         static_assert(Rows % warpNum == 0, "rows must divide by the warp count");
         return make_static_tile_distribution(
             tile_distribution_encoding<sequence<>,
-                                       tuple<sequence<warpNum, Rows / warpNum>,
-                                             sequence<Cols>>,
+                                       tuple<sequence<warpNum, Rows / warpNum>, sequence<Cols>>,
                                        tuple<sequence<1>>,
                                        tuple<sequence<0>>,
                                        sequence<1, 2>,
@@ -532,29 +531,29 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsWriteBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::KDataType,
-                                            Problem::BlockFmhaShape::kN0,
-                                            Problem::BlockFmhaShape::kQKHeaddim>();
+                                          Problem::BlockFmhaShape::kN0,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsWriteBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::VDataType,
-                                            Problem::BlockFmhaShape::kN0,
-                                            Problem::BlockFmhaShape::kVHeaddim>();
+                                          Problem::BlockFmhaShape::kN0,
+                                          Problem::BlockFmhaShape::kVHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsWriteBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::QDataType,
-                                            Problem::BlockFmhaShape::kM0,
-                                            Problem::BlockFmhaShape::kQKHeaddim>();
+                                          Problem::BlockFmhaShape::kM0,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsWriteBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::OGradDataType,
-                                            Problem::BlockFmhaShape::kM0,
-                                            Problem::BlockFmhaShape::kQKHeaddim>();
+                                          Problem::BlockFmhaShape::kM0,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeBiasLdsBlockDescriptor()
@@ -641,29 +640,29 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsReadBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::KDataType,
-                                           Problem::BlockFmhaShape::kN0,
-                                           Problem::BlockFmhaShape::kQKHeaddim>();
+                                          Problem::BlockFmhaShape::kN0,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsReadBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::VDataType,
-                                           Problem::BlockFmhaShape::kN0,
-                                           Problem::BlockFmhaShape::kVHeaddim>();
+                                          Problem::BlockFmhaShape::kN0,
+                                          Problem::BlockFmhaShape::kVHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsReadBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::QDataType,
-                                           Problem::BlockFmhaShape::kM0,
-                                           Problem::BlockFmhaShape::kQKHeaddim>();
+                                          Problem::BlockFmhaShape::kM0,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeOGradLdsReadBlockDescriptor()
     {
         return MakeXLdsTdmBlockDescriptor<typename Problem::OGradDataType,
-                                           Problem::BlockFmhaShape::kM0,
-                                           Problem::BlockFmhaShape::kQKHeaddim>();
+                                          Problem::BlockFmhaShape::kM0,
+                                          Problem::BlockFmhaShape::kQKHeaddim>();
     }
 
     template <typename Problem>
@@ -959,8 +958,8 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
     CK_TILE_HOST_DEVICE static constexpr index_t GetPaddedSmemSize()
     {
         constexpr index_t base =
-            sizeof(T) * MakeXLdsTdmBlockDescriptor<T, MNPerBlock, KPerBlock>()
-                            .get_element_space_size();
+            sizeof(T) *
+            MakeXLdsTdmBlockDescriptor<T, MNPerBlock, KPerBlock>().get_element_space_size();
         return base + sizeof(T) * kTdmLdsPad;
     }
 
@@ -1122,7 +1121,6 @@ struct BlockFmhaBwdPipelineTrLoadTdmPolicy
         static constexpr index_t OGradT_LDS_WRITE =
             kM0 * kVHeaddim / kBlockSize / GetTransposedAlignmentOGrad<Problem>();
         static constexpr index_t SGradT_LDS_WRITE = kM0 * kN0 / kBlockSize;
-
 
         // --- scheduler rewrite (see file header) -------------------------
         // Emit stream `Count`s I-th share of barriers when walking N steps.

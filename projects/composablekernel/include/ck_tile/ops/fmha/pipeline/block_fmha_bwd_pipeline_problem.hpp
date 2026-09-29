@@ -29,7 +29,7 @@ template <typename QDataType_,
           typename FmhaDropout_,
           bool kUseTrLoad_,
           typename Traits_,
-          bool kUseTdmKRKTR_ = false,
+          bool kUseTdmKRKTR_  = false,
           bool kUseTdmDecode_ = false>
 struct BlockFmhaBwdPipelineProblem
 {

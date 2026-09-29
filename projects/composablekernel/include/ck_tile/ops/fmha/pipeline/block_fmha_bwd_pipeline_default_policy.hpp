@@ -1688,12 +1688,12 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     {
 #if defined(__gfx125__)
         {
-            using BG_C = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
-            using BG_A = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
+            using BG_C           = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+            using BG_A           = remove_cvref_t<decltype(GetPTOGradTBlockGemm<Problem>())>;
             constexpr auto cfg_c = BG_C::Policy::template GetWarpGemmMWarpNWarp<Problem>();
             constexpr auto cfg_a = BG_A::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-            using WG_C = remove_cvref_t<decltype(cfg_c.template at<0>())>;
-            using WG_A = remove_cvref_t<decltype(cfg_a.template at<0>())>;
+            using WG_C           = remove_cvref_t<decltype(cfg_c.template at<0>())>;
+            using WG_A           = remove_cvref_t<decltype(cfg_a.template at<0>())>;
 
             constexpr index_t MWarpC = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<0>{});
             constexpr index_t NWarpC = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{});
@@ -1704,8 +1704,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             constexpr index_t AM = Problem::BlockFmhaShape::kN0 / (MWarpA * WG_A::kM);
             constexpr index_t AK = Problem::BlockFmhaShape::kK1 / WG_A::kK;
 
-            static_assert(CN == AM && CM == AK * 2,
-                          "gfx125 C->A fragment counts do not line up");
+            static_assert(CN == AM && CM == AK * 2, "gfx125 C->A fragment counts do not line up");
 
             constexpr index_t kChunk = WG_C::kM * WG_C::kN / get_warp_size();
 
@@ -1790,12 +1789,12 @@ struct BlockFmhaBwdPipelineDefaultPolicy
     {
 #if defined(__gfx125__)
         {
-            using BG_C = remove_cvref_t<decltype(GetOGradVBlockGemm<Problem>())>;
-            using BG_A = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
+            using BG_C           = remove_cvref_t<decltype(GetOGradVBlockGemm<Problem>())>;
+            using BG_A           = remove_cvref_t<decltype(GetSGradTQTBlockGemm<Problem>())>;
             constexpr auto cfg_c = BG_C::Policy::template GetWarpGemmMWarpNWarp<Problem>();
             constexpr auto cfg_a = BG_A::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-            using WG_C = remove_cvref_t<decltype(cfg_c.template at<0>())>;
-            using WG_A = remove_cvref_t<decltype(cfg_a.template at<0>())>;
+            using WG_C           = remove_cvref_t<decltype(cfg_c.template at<0>())>;
+            using WG_A           = remove_cvref_t<decltype(cfg_a.template at<0>())>;
 
             constexpr index_t MWarpC = Problem::BlockFmhaShape::Gemm2BlockWarps::at(number<0>{});
             constexpr index_t NWarpC = Problem::BlockFmhaShape::Gemm2BlockWarps::at(number<1>{});
@@ -1806,8 +1805,7 @@ struct BlockFmhaBwdPipelineDefaultPolicy
             constexpr index_t AM = Problem::BlockFmhaShape::kN0 / (MWarpA * WG_A::kM);
             constexpr index_t AK = Problem::BlockFmhaShape::kK3 / WG_A::kK;
 
-            static_assert(CN == AM && CM == AK * 2,
-                          "gfx125 C->A fragment counts do not line up");
+            static_assert(CN == AM && CM == AK * 2, "gfx125 C->A fragment counts do not line up");
 
             constexpr index_t kChunk = WG_C::kM * WG_C::kN / get_warp_size();
 

@@ -27,22 +27,18 @@ class BlockFmhaBwdDQDKDVPipelineSelector
 
     public:
     template <typename... TS>
-    using type_ =
-        std::conditional_t<Problem::kUseTrLoad,
-                           std::conditional_t<
-                               is_decode,
-                               std::conditional_t<
-                                   use_tdm_decode,
-                                   BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM<TS...>,
-                                   BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>>,
-                               BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
-                           std::conditional_t<
-                               Problem::kUseTdmKRKTR,
-                               BlockFmhaBwdDQDKDVPipelineTdmKRKTR<TS...>,
-                               std::conditional_t<
-                                   has_dpad1,
-                                   BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
-                                   BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
+    using type_ = std::conditional_t<
+        Problem::kUseTrLoad,
+        std::conditional_t<is_decode,
+                           std::conditional_t<use_tdm_decode,
+                                              BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDORTDM<TS...>,
+                                              BlockFmhaBwdDQDKDVPipelineTrLoadQRQTRDOR<TS...>>,
+                           BlockFmhaBwdDQDKDVPipelineTrLoadKRKTRVR<TS...>>,
+        std::conditional_t<Problem::kUseTdmKRKTR,
+                           BlockFmhaBwdDQDKDVPipelineTdmKRKTR<TS...>,
+                           std::conditional_t<has_dpad1,
+                                              BlockFmhaBwdDQDKDVPipelineKRKTRVR<TS...>,
+                                              BlockFmhaBwdDQDKDVPipelineKRKTRVRIGLP<TS...>>>>;
     using type = std::conditional_t<std::is_same_v<Policy, void>, //
                                     type_<Problem>,
                                     type_<Problem, Policy>>;
