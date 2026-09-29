@@ -88,7 +88,15 @@ from typing import (
     Tuple,
 )
 
-from support_sidecar import Claim, SidecarError, load, parse, render, sidecar_path
+from support_sidecar import (
+    BUNDLE_DIR,
+    Claim,
+    SidecarError,
+    load,
+    parse,
+    render,
+    sidecar_path,
+)
 
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
@@ -817,14 +825,18 @@ def plan_claims(cells: Sequence[Cell], root: Path, git: Git) -> Dict[Path, Chang
     """The change adding cells makes to each sidecar under root it changes.
 
     A sidecar that lacks a claim its develop version has is behind develop,
-    and is refused (SidecarError) like a missing bundle or a sidecar that
-    support_sidecar.load refuses.
+    and is refused (SidecarError) like a missing bundle, a sidecar that
+    resolves outside the bundle folder, or one support_sidecar.load refuses.
     """
+    bundles = (root / BUNDLE_DIR).resolve()
     new: Dict[Path, Set[Claim]] = {}
     for cell in cells:
         if not (root / cell.bundle).is_file():
             raise SidecarError(f"{cell.bundle}: no such bundle under {root}")
         path = root / sidecar_path(cell.bundle)
+        # A symlinked folder or sidecar could point the write anywhere.
+        if not path.resolve().is_relative_to(bundles):
+            raise SidecarError(f"{cell.bundle}: sidecar resolves outside {bundles}")
         claim = Claim(cell.case, cell.engine, cell.arch, cell.platform)
         new.setdefault(path, set()).add(claim)
     if not new:

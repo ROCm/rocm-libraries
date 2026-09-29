@@ -979,6 +979,21 @@ class TestWrite(unittest.TestCase):
         self.assertIn(f"{_SINGLE}: no such bundle", err)
         self.assertFalse(self.sweep.exists() or self.single.exists())
 
+    def test_sidecar_resolving_outside_the_bundle_folder_writes_nothing(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        outside = Path(tmp.name) / "quick"
+        quick = self.root / "integration-test-bundles" / "quick"
+        quick.rename(outside)
+        try:
+            quick.symlink_to(outside, target_is_directory=True)
+        except OSError as exc:  # Windows without symlink privilege
+            self.skipTest(f"cannot create a symlink: {exc!r}")
+        code, err = self._main(*self._WRITE)
+        self.assertEqual(code, 1)
+        self.assertIn("sidecar resolves outside", err)
+        self.assertEqual(list(outside.rglob("*support.json")), [])
+
     def test_rejected_log_writes_nothing(self) -> None:
         code, err = self._main(*self._WRITE, summary=_summary(schema_version=2))
         self.assertEqual(code, 1)
