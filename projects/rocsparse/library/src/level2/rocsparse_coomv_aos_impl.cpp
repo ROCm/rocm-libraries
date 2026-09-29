@@ -160,46 +160,21 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-            const int64_t one_loop_blocks = (nnz - 1) / 256 + 1;
-            const bool    use_two_loops
-                = rocsparse::get_grid_size_x(handle, one_loop_blocks, 256) < one_loop_blocks;
-
-            if(use_two_loops)
-            {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::coomvn_aos_atomic_loops<256, 2>),
-                    dim3((nnz - 1) / (2 * 256) + 1),
-                    dim3(256),
-                    0,
-                    stream,
-                    nnz,
-                    m,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    coo_ind,
-                    coo_val,
-                    x,
-                    y,
-                    descr->base,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
-            }
-            else
-            {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::coomvn_aos_atomic_loops<256, 1>),
-                    dim3(one_loop_blocks),
-                    dim3(256),
-                    0,
-                    stream,
-                    nnz,
-                    m,
-                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                    coo_ind,
-                    coo_val,
-                    x,
-                    y,
-                    descr->base,
-                    handle->pointer_mode == rocsparse_pointer_mode_host);
-            }
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coomvn_aos_atomic_loops<256, 1>),
+                dim3(rocsparse::get_grid_size_x(handle, (nnz - 1) / 256 + 1, 256)),
+                dim3(256),
+                0,
+                stream,
+                nnz,
+                m,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                coo_ind,
+                coo_val,
+                x,
+                y,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
             break;
         }
         case rocsparse_operation_transpose:
@@ -207,7 +182,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvt_aos_kernel<1024>),
-                dim3((nnz - 1) / 1024 + 1),
+                dim3(rocsparse::get_grid_size_x(handle, (nnz - 1) / 1024 + 1, 1024)),
                 dim3(1024),
                 0,
                 handle->stream,
@@ -366,7 +341,7 @@ namespace rocsparse
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvt_aos_kernel<1024>),
-                dim3((nnz - 1) / 1024 + 1),
+                dim3(rocsparse::get_grid_size_x(handle, (nnz - 1) / 1024 + 1, 1024)),
                 dim3(1024),
                 0,
                 handle->stream,

@@ -542,14 +542,15 @@ namespace rocsparse
               typename X,
               typename Y,
               typename T>
-    ROCSPARSE_DEVICE_ILF void coomvn_aos_atomic_loops_device(int64_t nnz,
-                                                             I       m,
-                                                             T       alpha,
-                                                             const I* __restrict__ coo_ind,
-                                                             const A* __restrict__ coo_val,
-                                                             const X* __restrict__ x,
-                                                             Y* __restrict__ y,
-                                                             rocsparse_index_base idx_base)
+    ROCSPARSE_DEVICE_ILF void coomvn_aos_atomic_loops_tile_device(int64_t tile,
+                                                                  int64_t nnz,
+                                                                  I       m,
+                                                                  T       alpha,
+                                                                  const I* __restrict__ coo_ind,
+                                                                  const A* __restrict__ coo_val,
+                                                                  const X* __restrict__ x,
+                                                                  Y* __restrict__ y,
+                                                                  rocsparse_index_base idx_base)
     {
         const int tid = hipThreadIdx_x;
 
@@ -561,7 +562,7 @@ namespace rocsparse
         T val;
 
         // Current threads index into COO structure
-        int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * LOOPS * BLOCKSIZE + tid;
+        int64_t idx = tile * LOOPS * BLOCKSIZE + tid;
 
         if(idx < nnz)
         {
@@ -677,6 +678,36 @@ namespace rocsparse
         }
     }
 
+    // Each tile covers LOOPS * BLOCKSIZE entries. Blocks stride over the tiles,
+    // so a grid clamped below nnz / (LOOPS * BLOCKSIZE) still covers every entry.
+    template <uint32_t BLOCKSIZE,
+              uint32_t LOOPS,
+              typename I,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
+    ROCSPARSE_DEVICE_ILF void coomvn_aos_atomic_loops_device(int64_t nnz,
+                                                             I       m,
+                                                             T       alpha,
+                                                             const I* __restrict__ coo_ind,
+                                                             const A* __restrict__ coo_val,
+                                                             const X* __restrict__ x,
+                                                             Y* __restrict__ y,
+                                                             rocsparse_index_base idx_base)
+    {
+        const int64_t tile_size = static_cast<int64_t>(LOOPS) * BLOCKSIZE;
+
+        for(int64_t tile = hipBlockIdx_x; tile * tile_size < nnz; tile += hipGridDim_x)
+        {
+            rocsparse::coomvn_aos_atomic_loops_tile_device<BLOCKSIZE, LOOPS>(
+                tile, nnz, m, alpha, coo_ind, coo_val, x, y, idx_base);
+
+            // The next tile overwrites the shared buffers this tile still reads.
+            __syncthreads();
+        }
+    }
+
     template <typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_DEVICE_ILF void coomvt_device(rocsparse_operation  trans,
                                             int64_t              nnz,
@@ -716,19 +747,19 @@ namespace rocsparse
                                                 Y*                   y,
                                                 rocsparse_index_base idx_base)
     {
-        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * hipBlockDim_x;
 
-        if(gid >= nnz)
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * hipBlockDim_x + hipThreadIdx_x;
+            gid < nnz;
+            gid += stride)
         {
-            return;
+            const I row = coo_ind[2 * gid] - idx_base;
+            const I col = coo_ind[2 * gid + 1] - idx_base;
+            const A val = (trans == rocsparse_operation_conjugate_transpose)
+                              ? rocsparse::conj(coo_val[gid])
+                              : coo_val[gid];
+
+            rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
         }
-
-        const I row = coo_ind[2 * gid] - idx_base;
-        const I col = coo_ind[2 * gid + 1] - idx_base;
-        const A val = (trans == rocsparse_operation_conjugate_transpose)
-                          ? rocsparse::conj(coo_val[gid])
-                          : coo_val[gid];
-
-        rocsparse::atomic_add(y, col, n, alpha * val * x[row]);
     }
 }
