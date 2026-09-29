@@ -132,9 +132,11 @@ satisfies recipes whose synchronization state is bound to that stream.
 
 The library retains the compiled algorithm's modules until process exit, so
 copies of the algorithm remain usable in that process on their original
-device. Algorithm bytes and indices are not a persistent library format today.
-The API does not expose loading a retained bundle in a later process. Compile
-before stream capture.
+device. These algorithm bytes are not a library index and do not outlive the
+process. The generic `jit::getLibraryAlgos` publishes solutions into the
+[persistent solution library](JIT.md#persistent-solution-library) instead, and
+returns solution indices that later processes run. Compile before stream
+capture.
 
 ### Artifacts and failures
 
@@ -183,7 +185,6 @@ the roadmap step that changes it.
 | Concern | Current | Planned |
 | --- | --- | --- |
 | Entry point | Internal direct `tensilelite::getGemmAlgo` and `tensilelite::createBackend`, both used by tests and the benchmark. | Reached from the heuristic query. The headers remain for unit tests (step 5). |
-| Persistence | Process-local; each program invocation compiles again. | Solutions are published into the per-`ProblemType` JIT solution library and reused across processes (step 4). |
 
 TensileLite remains one of several independent backends. rocRoller and
 HipKittens are future backends behind the same interface; they do not route

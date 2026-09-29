@@ -182,5 +182,6 @@ support; numerical correctness also requires execution on that GPU.
 
 The [target design](../../JIT.md#target-design) moves generation behind the
 heuristic query, controlled by `HIPBLASLT_JIT`, with a persistent JIT solution
-library. Roadmap steps 4 and 5 in the [JIT guide](../../JIT.md#roadmap) add that
-library and the heuristic integration, and step 5 removes `--jit-gemm`.
+library. The library exists (roadmap step 4 in the [JIT guide](../../JIT.md#roadmap)),
+but `--jit-gemm` does not use it. Step 5 adds the heuristic integration and
+removes `--jit-gemm`.

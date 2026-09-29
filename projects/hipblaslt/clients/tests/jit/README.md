@@ -28,15 +28,17 @@ cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
   hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-mock-backend-test \
   hipblaslt-jit-component-test hipblaslt-jit-process-test hipblaslt-jit-artifacts-test \
-  hipblaslt-jit-code-object-test
+  hipblaslt-jit-code-object-test hipblaslt-jit-library-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
 
 Choose a fresh output directory. When other work shares the host, set
 `HIP_VISIBLE_DEVICES` to keep the tests on one GPU. The driver checks that the shared library and
-Python modules come from the checkout/build, and points device-library lookup
-at an empty directory. It records commands, logs, generated bundles, and a
+Python modules come from the checkout/build, points device-library lookup at
+an empty directory, and points `HIPBLASLT_JIT_LIBRARY_PATH` into the output
+directory so that no case uses the default JIT solution library. It records
+commands, logs, generated bundles, and a
 `summary.json`. A failed case makes the driver return a failing status.
 
 The default run tests the disabled configuration last. It reconfigures the same
@@ -54,8 +56,10 @@ points and the shared execution assertions:
 ```
 
 `--case helper-failures` and `--case bundle-failures` also build a valid split-K
-source bundle before damaging its files, and `--case mock-backend` and
-`--case code-object` build the same bundle to replay or rebuild it.
+source bundle before damaging its files, and `--case mock-backend`,
+`--case mock-backend-library`, `--case jit-library`,
+`--case jit-library-concurrency` and `--case code-object` build the same bundle
+to replay, publish or rebuild it.
 
 ## What each layer checks
 
@@ -68,6 +72,9 @@ source bundle before damaging its files, and `--case mock-backend` and
 | `code-object-gfx1250` | The hardware-free part of `code-object` for gfx1250, on any host |
 | `comgr-cache` | In fresh processes with private cache directories: `HIPBLASLT_JIT=1` leaves no comgr cache, `AMD_COMGR_CACHE=1` creates one, which shows the check can detect it, and a user-set `AMD_COMGR_CACHE` is kept under `HIPBLASLT_JIT=1` |
 | `mock-backend` | The in-process mock backend replaying the `splitk-api` source bundle through Jit and the comgr builder: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation and build faults, and bundle lifetime |
+| `mock-backend-library` | `getLibraryAlgos` publishes the mock solution into a fresh JIT solution library and returns a reserved index, which `getAlgosFromIndex` and `hipblasLtMatmul` run with checked numerics. A second process then runs that index before any lookup, and `getLibraryAlgos` finds it there with a backend that aborts the process if it generates |
+| `jit-library` | The JIT solution library without a GPU: cache-key fields and compiler-environment filtering; rejected group- or other-writable, linked and non-directory roots; the stock TensileLite loader reading a published library; exact-size matching with the solution predicates still applied; deduplication, hash collisions, order, count and excluded kernels; mismatched and tampered keys ignored and left untouched; index allocation up to `INT32_MAX` and exhaustion; a publisher killed after each publication step; and readers reloading after another instance publishes |
+| `jit-library-concurrency` | Eight processes publish shared and private entries into one library while another process looks them up: shared entries get one index, private ones unique indices with no gaps, and every reader snapshot loads |
 | `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
 | `generic-gemm` | Backend/request/solution flow followed by checked C and C++ GEMM execution |
 | `generic-api` | Shared execution, ownership and failure assertions from the direct API test, selected through the generic interface |
@@ -132,9 +139,22 @@ that `Tensile.SingleSolution --source-only` wrote; the driver passes
 `<output>/splitk-api/bundle`. It creates the mock backend with
 `jit::mock::createBackend` from `hipblaslt-jit-mock.hpp`, so generation runs no
 Python and no subprocess, and checks the same FP16 problem as the direct and
-generic tests.
+generic tests. With `--library` after the bundle it runs the
+`mock-backend-library` checks instead, and starts its second process itself.
+That mode refuses to run unless `HIPBLASLT_JIT_LIBRARY_PATH` is set, so that it
+never publishes into the default library.
 `hipblaslt-jit-component-test` takes one argument, a fresh directory that it
 uses as the scratch parent; it needs no GPU.
+
+## JIT solution library tests
+
+`hipblaslt-jit-library-test` compiles the JIT solution library directly and
+needs no GPU. It takes the `splitk-api` source bundle, whose library entry it
+publishes under several kernel names, and a scratch directory for the libraries
+it creates; it ignores `HIPBLASLT_JIT_LIBRARY_PATH`. Adding
+`--writers N --per-writer M` runs the multi-process check instead: N writer
+processes each publish M entries shared by all writers and M of their own,
+while one reader process looks them up.
 
 ## Code-object tests
 
@@ -153,8 +173,8 @@ and `HOME` to name existing scratch directories. `--only` selects tests by name.
 
 The shared `hipblaslt-jit-gemm-ci.yml` workflow builds the JIT test binaries and
 the benchmark, then runs the driver: direct and generic GEMM tests, the mock
-backend and Jit component checks, the comgr code-object and cache checks, and
-the prediction/benchmark layer. The workflow obtains native
+backend and Jit component checks, the JIT solution library checks, the comgr
+code-object and cache checks, and the prediction/benchmark layer. The workflow obtains native
 runner labels from the shared GPU map for gfx90a, gfx942, gfx950 and gfx1250.
 Missing native runners fail setup instead of silently substituting another GPU.
 The SDK supplies build dependencies; project libraries are built from the source
@@ -173,6 +193,6 @@ ranked recipes lacking required subtile choices fail with candidate-specific
 reasons. Complex, zero-K, alpha-zero, and mixed MAC-type cases verify the absence
 of a usable ranking and the absence of generation. These are diagnostic checks,
 not successful numerical executions. Explicit supported recipes have their own
-builder/runtime coverage. None of these tests establishes the future searchable
-JIT library, persistent cache, exact epilogue specialization, or tuning-blueprint
-behavior described in the roadmap.
+builder/runtime coverage. None of these tests establishes the heuristic
+integration, exact epilogue specialization, or tuning-blueprint behavior
+described in the roadmap.
