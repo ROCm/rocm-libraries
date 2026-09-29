@@ -181,6 +181,7 @@ def bench_dense(
     warmup: int,
     iters: int,
     seed: int,
+    fp8_two_phase: bool = False,
 ):
     """Returns (dense_ms, tflops, max_abs, kernel_name)."""
     import torch
@@ -273,6 +274,7 @@ def bench_dense(
             persistent=persistent,
             num_persistent=num_persistent,
             kv_storage_dtype="fp8e4m3" if is_fp8 else None,
+            fp8_two_phase=fp8_two_phase,
         )
         lch = _dense_launcher(spec)
         cfg = LaunchConfig(
@@ -471,6 +473,10 @@ def main() -> int:
         default="all",
     )
     ap.add_argument("--dtype", choices=["bf16", "fp16", "fp8"], default="bf16")
+    ap.add_argument(
+        "--fp8-two-phase", action="store_true",
+        help="fp8: use the opt-in two-phase async loader (default = sync-dequant)",
+    )
     ap.add_argument("--hq", type=int, default=128, help="query heads (GQA/SWA/varlen)")
     ap.add_argument("--hkv", type=int, default=8, help="kv heads (GQA/SWA/varlen)")
     ap.add_argument("--d", type=int, default=128, help="head size")
@@ -546,6 +552,7 @@ def main() -> int:
                 warmup=args.warmup,
                 iters=args.iterations,
                 seed=args.seed,
+                fp8_two_phase=args.fp8_two_phase,
             )
         except Exception as exc:  # noqa: BLE001 - per-shape failures never abort
             import traceback
