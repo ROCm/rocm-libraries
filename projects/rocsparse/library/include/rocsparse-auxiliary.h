@@ -638,6 +638,12 @@ rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb);
  *  internal layout changes, e.g. widening \p ell_nnz). Any of the output
  *  pointers may be \p nullptr if that field is not needed.
  *
+ *  \note
+ *  The returned array pointers are borrowed: they remain owned by \p hyb and
+ *  stay valid until \p hyb is destroyed with \ref rocsparse_destroy_hyb_mat or
+ *  the corresponding array is replaced with \ref rocsparse_hyb_mat_set_info.
+ *  The caller must not free them.
+ *
  *  @param[in]
  *  hyb         the hybrid matrix structure.
  *  @param[out]
@@ -651,17 +657,19 @@ rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb);
  *  @param[out]
  *  ell_width   width of the ELL part.
  *  @param[out]
- *  ell_col_ind column indices of the ELL part.
+ *  ell_col_ind column indices of the ELL part (device memory owned by \p hyb).
  *  @param[out]
- *  ell_val     values of the ELL part.
+ *  ell_val     values of the ELL part (device memory owned by \p hyb).
  *  @param[out]
  *  coo_nnz     number of non-zero elements of the COO part.
  *  @param[out]
- *  coo_row_ind row indices of the COO part.
+ *  coo_row_ind row indices of the COO part (device memory owned by \p hyb).
  *  @param[out]
- *  coo_col_ind column indices of the COO part.
+ *  coo_col_ind column indices of the COO part (device memory owned by \p hyb).
  *  @param[out]
- *  coo_val     values of the COO part.
+ *  coo_val     values of the COO part (device memory owned by \p hyb).
+ *  @param[out]
+ *  data_type   data type of the values stored in \p ell_val and \p coo_val.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer \p hyb pointer is invalid.
@@ -678,7 +686,8 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
                                             rocsparse_int*           coo_nnz,
                                             const rocsparse_int**    coo_row_ind,
                                             const rocsparse_int**    coo_col_ind,
-                                            const void**             coo_val);
+                                            const void**             coo_val,
+                                            rocsparse_datatype*      data_type);
 
 /*! \ingroup aux_module
  *  \brief Set the internal fields of a \p HYB matrix structure.
@@ -688,7 +697,19 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  and is intended for test and internal use, so that callers never need to
  *  reinterpret the opaque \ref rocsparse_hyb_mat as a raw struct. Any of the
  *  input pointers may be \p nullptr, in which case the corresponding field is
- *  left untouched.
+ *  left untouched. All arguments are validated before \p hyb is modified, so
+ *  on error \p hyb is left unchanged.
+ *
+ *  \note
+ *  Ownership of the arrays passed in \p ell_col_ind, \p ell_val, \p coo_row_ind,
+ *  \p coo_col_ind and \p coo_val is transferred to \p hyb. They must have been
+ *  allocated with \p hipMalloc, must not be freed by the caller, and must be
+ *  distinct allocations; they are released by \ref rocsparse_destroy_hyb_mat.
+ *  An array previously held by \p hyb that is replaced by a different pointer
+ *  (and is not kept in another field) is released by this function; passing the
+ *  pointer \p hyb already holds is a no-op. A \p nullptr value (as opposed to a
+ *  \p nullptr argument) releases the previously held array and leaves the field
+ *  empty.
  *
  *  @param[inout]
  *  hyb         the hybrid matrix structure.
@@ -699,24 +720,31 @@ rocsparse_status rocsparse_hyb_mat_get_info(const rocsparse_hyb_mat  hyb,
  *  @param[in]
  *  partition   the \p HYB partitioning type.
  *  @param[in]
- *  ell_nnz     number of non-zero elements of the ELL part.
+ *  ell_nnz     number of non-zero elements of the ELL part. It must be
+ *              non-negative and representable by the internal ELL non-zero count.
  *  @param[in]
  *  ell_width   width of the ELL part.
  *  @param[in]
- *  ell_col_ind column indices of the ELL part.
+ *  ell_col_ind column indices of the ELL part (\p hipMalloc'd, ownership transferred).
  *  @param[in]
- *  ell_val     values of the ELL part.
+ *  ell_val     values of the ELL part (\p hipMalloc'd, ownership transferred).
  *  @param[in]
  *  coo_nnz     number of non-zero elements of the COO part.
  *  @param[in]
- *  coo_row_ind row indices of the COO part.
+ *  coo_row_ind row indices of the COO part (\p hipMalloc'd, ownership transferred).
  *  @param[in]
- *  coo_col_ind column indices of the COO part.
+ *  coo_col_ind column indices of the COO part (\p hipMalloc'd, ownership transferred).
  *  @param[in]
- *  coo_val     values of the COO part.
+ *  coo_val     values of the COO part (\p hipMalloc'd, ownership transferred).
+ *  @param[in]
+ *  data_type   data type of the values stored in \p ell_val and \p coo_val.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer \p hyb pointer is invalid.
+ *  \retval rocsparse_status_invalid_size \p m, \p n, \p ell_nnz, \p ell_width or
+ *          \p coo_nnz is negative, or \p ell_nnz does not fit the internal ELL
+ *          non-zero count.
+ *  \retval rocsparse_status_invalid_value \p partition or \p data_type is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
@@ -730,7 +758,8 @@ rocsparse_status rocsparse_hyb_mat_set_info(rocsparse_hyb_mat              hyb,
                                             const rocsparse_int*           coo_nnz,
                                             rocsparse_int* const*          coo_row_ind,
                                             rocsparse_int* const*          coo_col_ind,
-                                            void* const*                   coo_val);
+                                            void* const*                   coo_val,
+                                            const rocsparse_datatype*      data_type);
 
 /*! \ingroup aux_module
  *  \brief Create a matrix info structure.
