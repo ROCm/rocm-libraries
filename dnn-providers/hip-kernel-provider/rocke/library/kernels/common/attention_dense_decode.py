@@ -55,6 +55,8 @@ class DecodeShape:
     A runtime divide goes through ``fastdiv(n, name)`` when the builder passes one
     (the persistent loop: host-computed magic/shift pairs, no division in the
     loop), else it is a plain division (once per CTA on the default grid).
+    ``scale`` divides an extent by a baked factor that divides it: ``n // (d/k)``
+    is computed as ``(n*k) // d``, which needs only ``d``'s fastdiv pair.
     """
 
     def __init__(self, b, spec, values=None, fastdiv=None):
@@ -89,39 +91,42 @@ class DecodeShape:
         """The baked value, or None when ``name`` is runtime."""
         return None if self.runtime(name) else self._baked(name)
 
-    def val(self, name: str):
-        """``name`` as an IR value."""
+    def val(self, name: str, scale: int = 1):
+        """``name // scale`` as an IR value."""
         b = self.b
         if not self.runtime(name):
-            return b.const_i32(self._baked(name))
+            return b.const_i32(self._baked(name) // scale)
         if name in self.values:
-            return self.values[name]
-        if name == "nqb":
+            v = self.values[name]
+        elif name == "nqb":
             bm = self.spec.block_m
             q = self.values["seqlen_q"]
-            return b.div(b.add(q, b.const_i32(bm - 1)), b.const_i32(bm))
-        # w
-        return b.mul(
-            b.mul(self.val("nqb"), self.val("num_query_heads")), self.val("batch")
-        )
+            v = b.div(b.add(q, b.const_i32(bm - 1)), b.const_i32(bm))
+        else:  # w
+            v = b.mul(
+                b.mul(self.val("nqb"), self.val("num_query_heads")), self.val("batch")
+            )
+        return v if scale == 1 else b.div(v, b.const_i32(scale))
 
-    def div(self, n, name: str):
-        """``n // name``."""
+    def div(self, n, name: str, scale: int = 1):
+        """``n // (name // scale)``."""
         b = self.b
         if not self.runtime(name):
-            return b.div(n, b.const_i32(self._baked(name)))
+            return b.div(n, b.const_i32(self._baked(name) // scale))
         if self.fastdiv is None:
-            return b.div(n, self.val(name))
+            return b.div(n, self.val(name, scale))
+        if scale != 1:
+            n = b.mul(n, b.const_i32(scale))
         return self.fastdiv(n, name)
 
-    def mod(self, n, name: str):
-        """``n % name``."""
+    def mod(self, n, name: str, scale: int = 1):
+        """``n % (name // scale)``."""
         b = self.b
         if not self.runtime(name):
-            return b.mod(n, b.const_i32(self._baked(name)))
+            return b.mod(n, b.const_i32(self._baked(name) // scale))
         if self.fastdiv is None:
-            return b.mod(n, self.val(name))
-        return b.sub(n, b.mul(self.div(n, name), self.val(name)))
+            return b.mod(n, self.val(name, scale))
+        return b.sub(n, b.mul(self.div(n, name, scale), self.val(name, scale)))
 
     def balance(self):
         """Whether the decodes balance causal work (longest-first, fold, pair
@@ -212,7 +217,44 @@ class NonpersistBtHkvMinor(NonpersistDecode):
         return Decoded(qb, hq, bx)
 
 
-NONPERSIST_DECODES = _registry(NonpersistQbMinor, NonpersistBtHkvMinor)
+class NonpersistHqMinorSwz(NonpersistDecode):
+    """Swizzled Head-first (arXiv 2511.02132, Fig. 11): grid
+    ``(M*nqb, Hq/M, B)`` with M = ``chiplet_num_xcds``, so XCD ``a`` owns the
+    contiguous query-head band ``[a*Hq/M, (a+1)*Hq/M)`` and runs all its query
+    blocks before the next head. Batch is the slowest digit. Query blocks run
+    longest-first under causal masking."""
+
+    name = "hq_minor_swz"
+    tag = "nphqminswz"
+
+    def check(self, spec):
+        if spec.num_query_heads % spec.chiplet_num_xcds != 0:
+            return (
+                f"{self.name} needs num_query_heads ({spec.num_query_heads}) "
+                f"divisible by chiplet_num_xcds ({spec.chiplet_num_xcds})"
+            )
+        return None
+
+    def grid(self, spec):
+        M = spec.chiplet_num_xcds
+        return (M * _spec_nqb(spec), spec.num_query_heads // M, spec.batch)
+
+    def emit_decode(self, b, spec, bx, by, bz, shape):
+        M = spec.chiplet_num_xcds
+        # Head band of Hq/M heads per XCD.
+        hq = b.add(
+            b.mul(b.mod(bx, b.const_i32(M)), shape.val("num_query_heads", M)), by
+        )
+        blk = b.div(bx, b.const_i32(M))
+        qb = shape.branch(
+            shape.balance(), lambda: emit_reverse(b, blk, shape), lambda: blk
+        )
+        return Decoded(qb, hq, bz)
+
+
+NONPERSIST_DECODES = _registry(
+    NonpersistQbMinor, NonpersistBtHkvMinor, NonpersistHqMinorSwz
+)
 
 
 # --------------------------------------------------------------------------- #
