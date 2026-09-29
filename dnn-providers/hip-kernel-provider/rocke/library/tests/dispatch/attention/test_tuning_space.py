@@ -678,7 +678,7 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
         kernels = [spec.kernel_spec for spec in specs]
         self.assertEqual(
             {k.resolved_persist_decode for k in kernels},
-            {"qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"},
+            Gfx950AttentionDenseSpec.supported_persist_decodes() - {"auto"},
         )
         swept_counts = {k.num_persistent for k in kernels}
         for policy in ("gqa_pair", "gqa_pair_2phase", "0.75x", "1.25x", "2x"):

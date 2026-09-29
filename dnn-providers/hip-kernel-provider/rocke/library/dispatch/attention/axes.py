@@ -24,7 +24,9 @@ from rocke.dispatch.tuning.axes import (  # noqa: F401  (re-exported for the rul
     values as _values,
 )
 
-from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+from kernels.common.attention_dense_decode import NONPERSIST_DECODES, PERSIST_DECODES
+from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
 
 
 # AMDGPU ``sched_barrier`` ABI: 0 is a full fence, and each bit lets one
@@ -184,7 +186,7 @@ _GFX950_NUM_PERSISTENT_POLICIES = _NUM_PERSISTENT_MULTIPLES + (
     "gqa_pair_2phase",
     "work",
 )
-# gfx942 implements only the qb_major / hkv_major decodes.
+# gfx942 has no gqa_pair decodes, so none of their exact CTA counts.
 _GFX942_NUM_PERSISTENT_POLICIES = _NUM_PERSISTENT_MULTIPLES + ("work",)
 _GFX942_LDS_ROW_PADS = (0, 4, 8, 12, 16, 24, 32)
 _GFX942_V_ROW_PADS = (0, 8, 16, 32, 64)
@@ -202,6 +204,12 @@ def _num_persistent_axis(policies: Tuple[str, ...]) -> KnobAxis:
     )
 
 
+def _decode_axis(name: str, registry: Mapping, supported) -> KnobAxis:
+    """``name`` over the registry's decodes (in registry order) that the arch's
+    spec accepts; ``auto`` is the default."""
+    return _values(name, "auto", tuple(d for d in registry if d in supported))
+
+
 # One axis per spec field. The PV scheduling knobs lead as enablers: IGLP needs
 # the manual fence and sched_group template off, and a manual one needs IGLP
 # off, so each can only be reached once the others are decided. Then
@@ -217,13 +225,17 @@ _GFX950_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _choices_axis("block_m", _GFX950_BLOCK_M),
     _choices_axis("block_n", _GFX950_BLOCK_N),
     _num_persistent_axis(_GFX950_NUM_PERSISTENT_POLICIES),
-    _values(
+    _decode_axis(
         "persist_decode",
-        "auto",
-        ("qb_major", "hkv_major", "gqa_pair", "gqa_pair_2phase"),
+        PERSIST_DECODES,
+        Gfx950AttentionDenseSpec.supported_persist_decodes(),
     ),
     _flag("interleave"),
-    _values("nonpersist_decode", "auto", tuple(NONPERSIST_DECODES)),
+    _decode_axis(
+        "nonpersist_decode",
+        NONPERSIST_DECODES,
+        Gfx950AttentionDenseSpec.supported_nonpersist_decodes(),
+    ),
     _values("lazy_rescale", True, (False,)),
     _values("lazy_rescale_threshold", 8.0, _DENSE_LAZY_THRESHOLDS),
     _values("pv_sched_fence_mask", 0, _SCHED_BARRIER_MASKS),
@@ -256,9 +268,17 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
     _choices_axis("block_m", _GFX942_BLOCK_M),
     _choices_axis("block_n", _GFX942_BLOCK_N),
     _num_persistent_axis(_GFX942_NUM_PERSISTENT_POLICIES),
-    _values("persist_decode", "auto", ("qb_major", "hkv_major")),
+    _decode_axis(
+        "persist_decode",
+        PERSIST_DECODES,
+        Gfx942AttentionDenseSpec.supported_persist_decodes(),
+    ),
     _flag("interleave"),
-    _values("nonpersist_decode", "auto", tuple(NONPERSIST_DECODES)),
+    _decode_axis(
+        "nonpersist_decode",
+        NONPERSIST_DECODES,
+        Gfx942AttentionDenseSpec.supported_nonpersist_decodes(),
+    ),
     _values("use_v_swizzle", None, (True, False)),
     _values("v_row_pad", None, _GFX942_V_ROW_PADS),
     _values("use_exp2_fast", None, (True, False)),
