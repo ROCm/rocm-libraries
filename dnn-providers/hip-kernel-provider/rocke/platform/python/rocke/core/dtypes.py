@@ -20,6 +20,14 @@ _DTYPE_ALIASES = {
     "f32": "fp32",
     "float": "fp32",
     "fp32": "fp32",
+    # XF32 is a *selection tag*, not a storage format: it means "fp32 operands,
+    # reduced-precision matrix path" and picks either a native XF32 MMA or the
+    # BF16x3 emulation. Operands stay fp32 in memory and in registers, so xf32
+    # deliberately has no IR scalar type and no load/store/convert support --
+    # only the arch catalog and matrix-instruction selection ever see it.
+    # "tf32" is the NVIDIA/CK spelling of the same tag; both canonicalise here.
+    "xf32": "xf32",
+    "tf32": "xf32",
     "fp8": "fp8e4m3",
     "fp8e4m3": "fp8e4m3",
     "bf8": "bf8e5m2",

@@ -34,6 +34,12 @@ static const rocke_dtype_alias_t k_dtype_aliases[] = {
     {"f32", "fp32"},
     {"float", "fp32"},
     {"fp32", "fp32"},
+    /* Selection tag only: "fp32 operands, reduced-precision matrix path". No IR
+     * scalar type (rocke_scalar_by_name returns NULL for it) and no load/store,
+     * by design -- only the arch catalog and MMA selection see it. "tf32" is the
+     * NVIDIA/CK spelling of the same tag. */
+    {"xf32", "xf32"},
+    {"tf32", "xf32"},
     {"iu8", "iu8"},
     {"iu4", "iu4"},
     {"i8", "i8"},

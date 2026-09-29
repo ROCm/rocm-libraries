@@ -19,6 +19,8 @@ int main()
                               {"BF6", "fp6e3m2"},
                               {"FP4", "fp4e2m1"},
                               {"int32", ROCKE_DTYPE_I32},
+                              {"XF32", "xf32"},
+                              {" TF32 ", "xf32"},
                               {" Custom_Format ", "custom_format"},
                               {"", ""}};
     for(const auto& entry : cases)

@@ -164,11 +164,17 @@ ready to enable on day one.** `MmaOp._require_layout` already raises
 
 ### 3.1 `xf32` as a logical dtype
 
-Add `xf32` to the dtype normalization table in `python/rocke/core/dtypes.py` and the
-mirrored scalar registry in `cpp/core/ir/core_types.cpp`. Constraints:
+Add `xf32` to the dtype normalization table in
+[`python/rocke/core/dtypes.py`](../../python/rocke/core/dtypes.py) and its C mirror
+[`cpp/core/dtypes.cpp`](../../cpp/core/dtypes.cpp). Note this is the *logical* dtype
+registry, **not** the IR scalar type system in `cpp/core/ir/core_types.cpp` — `xf32`
+must stay out of the latter, exactly as `fp6e2m3` does. Accept `tf32` as an alias
+spelling that canonicalises to `xf32`. Constraints:
 
 - **Selection tag only.** No memref element type, no load/store, no conversion op.
-  Guard this with a test asserting `xf32` is rejected by the tile load/store builders.
+  This falls out of the existing design rather than needing new code: `io_ir_type`
+  already raises for anything but f16/bf16, and `rocke_scalar_by_name` already
+  returns NULL for unknown names. Pin both with tests so it stays true.
 - Physical A/B registers stay `f32`. The atom's `a_frag_len` describes **f32** slots.
 
 ### 3.2 Catalog rows
@@ -249,10 +255,15 @@ first.
 
 ## 4. Work breakdown
 
-| # | Step | Touches | Blocking |
-|---|---|---|---|
-| 1 | Add independent `d_dtype` to atom metadata (`MmaOp`, catalog JSON, C mirror, `_op_id_c_dtype` twin for D) | `core/arch/target.py`, `arch_specs.json`, `cpp/core/arch/data.cpp`, `cpp/.../query.cpp` | **yes — prerequisite** |
-| 2 | Register `xf32` logical dtype in both dtype registries; test that it is rejected for memory ops | `core/dtypes.py`, `cpp/core/ir/core_types.cpp` | |
+Each completed step leaves a note under
+[`xf32_bf16x3_steps/`](xf32_bf16x3_steps/) recording what it actually turned out to
+be, the design calls, and how it was verified — including where the step diverged
+from this plan.
+
+| # | Step | Touches | Blocking | Notes |
+|---|---|---|---|---|
+| 1 | Add independent `d_dtype` to atom metadata (`MmaOp`, catalog JSON, C mirror, `_op_id_c_dtype` twin for D) | `core/arch/target.py`, `arch_specs.json`, `cpp/core/arch/data.cpp`, `cpp/.../query.cpp` | **yes — prerequisite** | ✅ [step 1](xf32_bf16x3_steps/step-01-mma-result-dtype.md) |
+| 2 | Register `xf32` logical dtype in both dtype registries; test that it is rejected for memory ops | `core/dtypes.py`, `cpp/core/dtypes.cpp` (**not** `cpp/core/ir/core_types.cpp` — see the step note) | | ✅ [step 2](xf32_bf16x3_steps/step-02-xf32-logical-dtype.md) |
 | 3 | Add `emulation` descriptor to catalog schema; derive frag/layout from `physical_op_id`; native-preferred comparator in `MmaCatalog.enumerate` | `core/arch/target.py`, catalog JSON + C mirror | after 1 |
 | 4 | Add the two gfx950 emulated rows | catalog JSON + C mirror | after 3 |
 | 5 | BF16x3 expansion in the Python lowering | `core/lower_llvm.py` | after 4 |
