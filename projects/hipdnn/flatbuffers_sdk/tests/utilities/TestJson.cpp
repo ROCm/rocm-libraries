@@ -141,7 +141,8 @@ TEST(TestJson, GraphToJsonAndBack)
             context = "(valid batchnorm forward training graph)";
             break;
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes:
-            graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph();
+            graphBuilder = hipdnn_test_sdk::utilities::createPointwiseGraph(
+                hipdnn_test_sdk::utilities::PointwiseGraphSpec::fullyPopulated());
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid pointwise graph)";
             break;
@@ -549,6 +550,7 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     const int64_t uid = 5;
     const int64_t raggedOffsetUid = 42;
     const int64_t alignment = 128;
+    const int64_t raggedOffsetMultiplier = 512;
     const std::vector<int64_t> dims = {4, 8, 1, 1};
     const std::vector<int64_t> strides = {8, 1, 1, 1};
 
@@ -564,7 +566,8 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
                                                    /*value*/ 0,
                                                    false,
                                                    flatbuffers::Optional<int64_t>(raggedOffsetUid),
-                                                   alignment);
+                                                   alignment,
+                                                   raggedOffsetMultiplier);
     builder.Finish(attrOffset);
 
     auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
@@ -573,11 +576,13 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     ASSERT_TRUE(attr->ragged_offset_tensor_uid().has_value());
     EXPECT_EQ(attr->ragged_offset_tensor_uid().value(), raggedOffsetUid);
     EXPECT_EQ(attr->alignment(), alignment);
+    EXPECT_EQ(attr->ragged_offset_multiplier(), raggedOffsetMultiplier);
 
     // JSON round-trip
     const nlohmann::json attrJson = *attr;
     EXPECT_EQ(attrJson.at("ragged_offset_tensor_uid").get<int64_t>(), raggedOffsetUid);
     EXPECT_EQ(attrJson.at("alignment").get<int64_t>(), alignment);
+    EXPECT_EQ(attrJson.at("ragged_offset_multiplier").get<int64_t>(), raggedOffsetMultiplier);
 
     flatbuffers::FlatBufferBuilder roundTripBuilder;
     auto newAttrOffset
@@ -588,6 +593,26 @@ TEST(TestJson, TensorAttributesRaggedOffsetAndAlignmentRoundTrip)
     ASSERT_TRUE(newAttr->ragged_offset_tensor_uid().has_value());
     EXPECT_EQ(newAttr->ragged_offset_tensor_uid().value(), raggedOffsetUid);
     EXPECT_EQ(newAttr->alignment(), alignment);
+    EXPECT_EQ(newAttr->ragged_offset_multiplier(), raggedOffsetMultiplier);
+}
+
+// A JSON entry omitting ragged_offset_multiplier deserializes to the schema default (1),
+// keeping legacy graphs byte-identical.
+TEST(TestJson, TensorAttributesOmittedRaggedOffsetMultiplierDefaultsToOne)
+{
+    const nlohmann::json attrJson = {{"uid", 7},
+                                     {"name", "legacy"},
+                                     {"data_type", DataType::FLOAT},
+                                     {"dims", std::vector<int64_t>{4, 8, 1, 1}},
+                                     {"strides", std::vector<int64_t>{8, 1, 1, 1}},
+                                     {"virtual", false}};
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto attrOffset = hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(builder, attrJson);
+    builder.Finish(attrOffset);
+
+    auto* attr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    EXPECT_EQ(attr->ragged_offset_multiplier(), 1);
 }
 
 TEST(TestJson, TensorAttributesDefaultAlignmentAndNoRaggedOffset)
