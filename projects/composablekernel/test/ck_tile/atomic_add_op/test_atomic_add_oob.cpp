@@ -10,17 +10,19 @@
 #include "ck_tile/core.hpp"
 
 // On gfx942, bf16 atomic adds are issued as global atomics instead of buffer atomics.
-// They must still drop accesses past the buffer size, as buffer atomics do in hardware.
+// They must still drop accesses outside the buffer, as buffer atomics do in hardware.
 
 namespace {
 
 using ck_tile::bf16_t;
 using ck_tile::index_t;
 
+constexpr index_t kGuardElements  = 16; // allocated before the buffer, to catch negative offsets
 constexpr index_t kBufferElements = 32;
-constexpr index_t kAllocElements  = 64;
+constexpr index_t kAllocElements  = kGuardElements + 64;
 constexpr index_t kInRange        = 10;
-constexpr index_t kPastTheEnd     = 40;
+// Pairs not fully inside the buffer: straddling its end, past its end, before its start.
+constexpr index_t kOutOfRange[] = {kBufferElements - 1, 40, -2};
 
 template <bool Raw>
 __global__ void atomic_add_bf16_pair([[maybe_unused]] bf16_t* p, [[maybe_unused]] index_t offset)
@@ -52,8 +54,10 @@ std::vector<float> RunPairAdds()
     bf16_t* d = nullptr;
     EXPECT_EQ(hipMalloc(&d, kAllocElements * sizeof(bf16_t)), hipSuccess);
     EXPECT_EQ(hipMemset(d, 0, kAllocElements * sizeof(bf16_t)), hipSuccess);
-    atomic_add_bf16_pair<Raw><<<1, 64>>>(d, kInRange);
-    atomic_add_bf16_pair<Raw><<<1, 64>>>(d, kPastTheEnd);
+    bf16_t* buffer = d + kGuardElements;
+    atomic_add_bf16_pair<Raw><<<1, 64>>>(buffer, kInRange);
+    for(index_t offset : kOutOfRange)
+        atomic_add_bf16_pair<Raw><<<1, 64>>>(buffer, offset);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     std::vector<bf16_t> h(kAllocElements);
     EXPECT_EQ(hipMemcpy(h.data(), d, kAllocElements * sizeof(bf16_t), hipMemcpyDeviceToHost),
@@ -71,10 +75,12 @@ void CheckPairAdds()
     if(!IsGfx942())
         GTEST_SKIP() << "bf16 global-atomic fallback is gfx942-only";
     const auto out = RunPairAdds<Raw>();
-    EXPECT_EQ(out[kInRange], 1.0f);
-    EXPECT_EQ(out[kInRange + 1], 1.0f);
-    for(index_t i = kBufferElements; i < kAllocElements; ++i)
-        EXPECT_EQ(out[i], 0.0f) << "element " << i << " is past the buffer end";
+    for(index_t i = 0; i < kAllocElements; ++i)
+    {
+        const index_t offset = i - kGuardElements;
+        const bool updated   = offset == kInRange || offset == kInRange + 1;
+        EXPECT_EQ(out[i], updated ? 1.0f : 0.0f) << "buffer element " << offset;
+    }
 }
 
 } // namespace
