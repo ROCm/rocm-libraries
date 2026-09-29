@@ -132,6 +132,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_link_libraries(hipdnn_validate_descriptors PRIVATE hipdnn_plugin_sdk hip::host)
     install(TARGETS hipdnn_validate_descriptors RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # ALMIOPEN-2812 POC tooling, build tree only: the DescriptorSet dump the POC's
+    # invariant is checked against, and the device-free plugin load timer.
+    add_executable(hipdnn_poc_dump_descriptor_sets ingestor_load_poc/DumpDescriptorSets.cpp)
+    target_compile_definitions(hipdnn_poc_dump_descriptor_sets PRIVATE __HIP_PLATFORM_AMD__)
+    target_link_libraries(hipdnn_poc_dump_descriptor_sets PRIVATE hipdnn_plugin_sdk hip::host)
+    if(NOT WIN32)
+        add_executable(hipdnn_poc_plugin_load_timing ingestor_load_poc/PluginLoadTiming.cpp)
+        target_link_libraries(hipdnn_poc_plugin_load_timing PRIVATE ${CMAKE_DL_LIBS})
+    endif()
+
     # Smoke test: run the validator over a real descriptor bundle and assert it reports
     # that bundle's engine. Same generated-driver-script shape as
     # hipdnn_list_engines_smoke above.
