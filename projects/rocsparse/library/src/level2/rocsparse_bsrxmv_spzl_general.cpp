@@ -100,8 +100,10 @@ namespace rocsparse
 
 #define LBSR_IND(j, bi, bj, dir) \
     ((dir == rocsparse_direction_row) ? LBSR_IND_R(j, bi, bj) : LBSR_IND_C(j, bi, bj))
-#define LBSR_IND_R(j, bi, bj) (size_t(block_dim) * block_dim * (j) + block_dim * (bi) + (bj))
-#define LBSR_IND_C(j, bi, bj) (size_t(block_dim) * block_dim * (j) + (bi) + block_dim * (bj))
+#define LBSR_IND_R(j, bi, bj) \
+    (static_cast<size_t>(block_dim) * block_dim * (j) + block_dim * (bi) + (bj))
+#define LBSR_IND_C(j, bi, bj) \
+    (static_cast<size_t>(block_dim) * block_dim * (j) + (bi) + block_dim * (bj))
 
                     sum = rocsparse::fma<T>(
                         bsr_val[LBSR_IND(j, bi, bj, dir)], x[block_dim * col + bj], sum);
