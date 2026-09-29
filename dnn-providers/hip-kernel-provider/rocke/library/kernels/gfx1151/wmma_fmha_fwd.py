@@ -119,8 +119,12 @@ class WmmaFmhaFwdSpec:
     transposed_qk: bool = False
     block_n: int = 32
     num_waves: int = 1
+    scheduler_strategy: str | None = None
 
     def __post_init__(self) -> None:
+        from rocke.core.codegen_policy import normalize_scheduler_strategy
+
+        object.__setattr__(self, "scheduler_strategy", normalize_scheduler_strategy(self.scheduler_strategy))
         if self.dtype not in ("fp16", "f16", "bf16"):
             raise ValueError(
                 f"WmmaFmhaFwdSpec supports fp16/bf16, got {self.dtype!r}"
@@ -198,6 +202,7 @@ class WmmaFmhaFwdSpec:
             f"kv{self.kv_dtype}" if self.kv_dtype else "",
             f"bn{self.block_n}" if self.transposed_qk else "",
             f"w{self.num_waves}" if self.transposed_qk else "",
+            "sched_" + self.scheduler_strategy.replace("-", "_") if self.scheduler_strategy else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
@@ -423,6 +428,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         raise ValueError(f"invalid wmma_fmha_fwd spec: {why}")
 
     from rocke.core.arch import ArchTarget
+    from rocke.core.codegen_policy import CodegenPolicy, apply_codegen_policy
     from rocke.helpers.mfma_attention import mfma_attention_fwd_inner_body
 
     target = ArchTarget.from_gfx(arch)
@@ -430,6 +436,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = wave * (spec.num_waves if spec.transposed_qk else 1)
+    apply_codegen_policy(b.kernel, CodegenPolicy(scheduler_strategy=spec.scheduler_strategy))
     p = _declare_params(b, spec)
 
     c16 = b.const_i32(16)

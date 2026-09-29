@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 94 configurations
- * by argv[1] (0..93), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 99 configurations
+ * by argv[1] (0..98), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,23 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 94 && idx < 99)
+    {
+        static const char* strategies[] = {
+            "max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc"};
+        spec->head_size = 64;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 8;
+        spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
+        spec->causal_bottom_right = true;
+        spec->layout = "ragged";
+        spec->query_tail = true;
+        spec->kv_tail = true;
+        spec->v_lds_stage = true;
+        spec->sliding_window = 320;
+        spec->scheduler_strategy = strategies[idx - 94];
+        return 0;
+    }
     if(idx >= 86 && idx < 94)
     {
         static const int bases[] = {74, 75, 76, 77, 82, 83, 84, 85};
@@ -146,7 +163,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..93>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..98>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

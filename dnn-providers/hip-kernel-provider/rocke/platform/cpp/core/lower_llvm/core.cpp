@@ -2090,9 +2090,7 @@ static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_att
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
     }
     const char* strategy = v->u.s;
-    if(strcmp(strategy, "max-ilp") != 0 && strcmp(strategy, "max-memory-clause") != 0
-       && strcmp(strategy, "iterative-ilp") != 0 && strcmp(strategy, "iterative-minreg") != 0
-       && strcmp(strategy, "iterative-maxocc") != 0)
+    if(!rocke_scheduler_strategy_is_valid(strategy))
     {
         rocke_ll_fail(L,
                       ROCKE_ERR_VALUE,

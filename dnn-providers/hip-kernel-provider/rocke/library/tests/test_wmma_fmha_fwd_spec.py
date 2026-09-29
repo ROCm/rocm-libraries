@@ -146,6 +146,18 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         for left, right in combinations(variants, 2):
             self.assertNotEqual(left.kernel_name(), right.kernel_name())
 
+    def test_scheduler_policies_do_not_alias_compiled_kernels(self):
+        from rocke.core.codegen_policy import SchedulerStrategy
+
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
+        variants = [base] + [replace(base, scheduler_strategy=strategy) for strategy in SchedulerStrategy]
+        for left, right in combinations(variants, 2):
+            self.assertNotEqual(left.kernel_name(), right.kernel_name())
+
+    def test_unknown_scheduler_policy_is_rejected(self):
+        with self.assertRaises(ValueError):
+            WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, scheduler_strategy="unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -117,6 +117,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.transposed_qk = false;
     s.block_n = 32;
     s.num_waves = 1;
+    s.scheduler_strategy = NULL;
     return s;
 }
 
@@ -132,12 +133,13 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 {
     const char* name;
     const char* mask;
-    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32];
-    const char* parts[13];
+    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32];
+    const char* parts[14];
     const char* dtype = wmma_dtype(spec);
 
     if(spec == NULL || out == NULL || dtype == NULL
-       || !wmma_valid_layout(spec) || !wmma_valid_kv_dtype(spec))
+       || !wmma_valid_layout(spec) || !wmma_valid_kv_dtype(spec)
+       || !rocke_scheduler_strategy_is_valid(spec->scheduler_strategy))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -183,6 +185,14 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
         parts[num_parts++] = block_n;
         parts[num_parts++] = waves;
     }
+    if(spec->scheduler_strategy != NULL)
+    {
+        snprintf(scheduler, sizeof(scheduler), "sched_%s", spec->scheduler_strategy);
+        for(char* c = scheduler; *c; ++c)
+            if(*c == '-')
+                *c = '_';
+        parts[num_parts++] = scheduler;
+    }
     const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias"};
     const int flag_on[] = {spec->query_tail || packed, spec->kv_tail || packed,
                           spec->use_softcap, spec->use_sinks, spec->use_alibi, spec->use_qq_bias};
@@ -216,6 +226,11 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(spec == NULL)
     {
         wmma_set_reason(reason, reason_cap, "null spec");
+        return false;
+    }
+    if(!rocke_scheduler_strategy_is_valid(spec->scheduler_strategy))
+    {
+        wmma_set_reason(reason, reason_cap, "unsupported scheduler_strategy");
         return false;
     }
     if(arch == NULL)
@@ -569,6 +584,8 @@ static rocke_status_t
 
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size",
                       wave * (spec->transposed_qk ? spec->num_waves : 1));
+    if(spec->scheduler_strategy != NULL)
+        rocke_attr_set_str(b, &b->kernel->attrs, "scheduler_strategy", spec->scheduler_strategy);
 
     /* _declare_params(b) */
     wmma_declare_params(b, spec);

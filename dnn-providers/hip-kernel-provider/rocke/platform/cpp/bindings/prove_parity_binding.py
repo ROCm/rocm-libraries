@@ -706,6 +706,13 @@ def cfgs_gfx1151_wmma_fmha_fwd():
     return configs + transposed + [
         dict(config, causal_bottom_right=True)
         for config in transposed if config["mask_mode"] == "causal"
+    ] + [
+        dict(
+            head_size=64, num_query_heads=8, num_kv_heads=8, mask_mode="causal",
+            causal_bottom_right=True, layout="ragged", query_tail=True, kv_tail=True,
+            v_lds_stage=True, sliding_window=320, scheduler_strategy=strategy,
+        )
+        for strategy in ("max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc")
     ]
 
 

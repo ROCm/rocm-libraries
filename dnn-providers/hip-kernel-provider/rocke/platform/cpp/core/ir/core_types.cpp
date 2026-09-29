@@ -410,6 +410,15 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
     }
 }
 
+bool rocke_scheduler_strategy_is_valid(const char* strategy)
+{
+    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
+           || strcmp(strategy, "max-memory-clause") == 0
+           || strcmp(strategy, "iterative-ilp") == 0
+           || strcmp(strategy, "iterative-minreg") == 0
+           || strcmp(strategy, "iterative-maxocc") == 0;
+}
+
 /* ============================ OPCODE TABLE ============================== */
 
 /* Canonical dotted name per opcode, indexed by the enum value. Order MUST match

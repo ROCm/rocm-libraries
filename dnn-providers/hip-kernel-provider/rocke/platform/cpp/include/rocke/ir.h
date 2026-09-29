@@ -622,6 +622,9 @@ bool rocke_attr_get_float(const rocke_attr_map_t* m, const char* key, double* ou
 const char* rocke_attr_get_str(const rocke_attr_map_t* m, const char* key); /* NULL if absent */
 bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
 
+/* Matches Python normalize_scheduler_strategy; NULL selects the backend default. */
+bool rocke_scheduler_strategy_is_valid(const char* strategy);
+
 /* ============================ OPCODE TABLE ============================== */
 
 /* Canonical dotted name for an opcode ("arith.add"); "" for ROCKE_OP_INVALID. */

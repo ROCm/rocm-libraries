@@ -177,7 +177,7 @@ configurations retain their ABI and emitted code. Numeric regressions cover
 empty query/KV sequences, mixed lengths, shuffled pages, poisoned padding,
 output guards, both dtypes, and both V-staging choices.
 
-### Compiler launch bounds
+### Compiler policy and launch bounds
 
 LLVM launch bounds use the target's wave size as the minimum, capped by the
 kernel's declared maximum. A single-wave gfx1151 kernel therefore declares
@@ -187,6 +187,15 @@ and substitutes its defaults, which loses the intended register-allocation
 constraint. Both engines emit the corrected bounds. The GPU regression queries
 the compiled function's maximum block size through HIP rather than checking
 source text.
+
+`WmmaFmhaFwdSpec.scheduler_strategy` selects the existing typed LLVM scheduler
+policy: `max-ilp`, `max-memory-clause`, `iterative-ilp`, `iterative-minreg`, or
+`iterative-maxocc`. `None` preserves the backend default and legacy cache names.
+An explicit policy is part of the kernel name, complete spec cache key, and
+serialized kernel attributes in both engines. Unsupported values are rejected.
+The HIPCC alternative does not support this LLVM scheduler option. Native
+callers must rebuild against the extended spec header and keep its policy
+string alive while using the spec.
 
 ### FP8 KV storage
 
@@ -210,6 +219,15 @@ tail bounds, both V-staging choices, and the score features above.
 preserves legacy conventions on other architectures. `use_fp8`,
 `use_softcap`, `use_sinks`, `use_alibi`, and `use_qq_bias` describe required
 features before selection, not features inferred silently at bind time.
+
+For FP16 D64 ragged causal requests without additional score features or an
+explicit window, dispatch uses V-LDS staging and `max-ilp`. Its effective
+window spans both advertised maximum sequence lengths, preserving every
+causally-visible key for either alignment, including top-left `Sq > Sk`.
+Those maxima must bound the device-resident sequence lengths. The profile
+admits maxima up to `2**30` to keep context/window arithmetic within I32;
+other requests retain their existing policy. No sequence metadata is copied
+to the host to choose the profile.
 
 `dispatch_attention(request).bind_torch(tensors, **scalars)` accepts caller-owned
 `q`, `k`, `v`, `out` and the selected metadata/auxiliary tensors. Despite the

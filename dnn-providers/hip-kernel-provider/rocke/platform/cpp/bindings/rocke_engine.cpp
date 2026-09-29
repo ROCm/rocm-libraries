@@ -3279,6 +3279,8 @@ rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<st
             s.kv_dtype = keep(v);
         if(dict_str(d, "name", v))
             s.name = keep(v);
+        if(dict_str(d, "scheduler_strategy", v))
+            s.scheduler_strategy = keep(v);
     }
     return s;
 }

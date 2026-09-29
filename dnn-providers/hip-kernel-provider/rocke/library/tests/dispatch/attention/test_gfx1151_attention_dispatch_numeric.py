@@ -199,6 +199,7 @@ def _launch_and_check(case, *, stream: int = 0, fp8_scales=None):
         actual = buffers.read_output("rocke_out")
         expected = reference(case, inputs)
         np.testing.assert_allclose(actual, expected, rtol=0, atol=case.atol, equal_nan=False)
+        return actual
     finally:
         rt.sync()
         release_retained_for_stream(stream)
@@ -459,3 +460,25 @@ def test_dispatch_aligned_gqa_on_nondefault_stream():
         _launch_and_check(case, stream=stream)
     finally:
         _destroy_stream(stream)
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize(
+    "mask,q_lengths,k_lengths",
+    [
+        ("causal_topleft", (32, 128), (64, 32)),
+        ("causal_bottomright", (64, 96), (128, 32)),
+    ],
+)
+def test_ragged_full_window_preserves_all_causal_keys(mask, q_lengths, k_lengths):
+    case = _case(
+        name="dispatch_ragged_full_window", group="dispatch", dtype="fp16", batch=2,
+        seqlen_q=0, seqlen_k=0, heads_q=8, heads_kv=2, head_dim=64,
+        layout="ragged", mask=mask, q_lengths=q_lengths, k_lengths=k_lengths, seed=104,
+    )
+    actual = _launch_and_check(case)
+    if mask == "causal_bottomright":
+        begin = q_lengths[0]
+        end = begin + q_lengths[1] - k_lengths[1]
+        np.testing.assert_array_equal(actual[begin:end], np.zeros_like(actual[begin:end]))

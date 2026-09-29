@@ -85,6 +85,17 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
                  or req.use_sinks or req.use_alibi or req.use_qq_bias)
     )
     wide = transposed and seqlen_q >= 512 and seqlen_q % 32 == 0 and seqlen_k % 64 == 0
+    maximum_length = max(seqlen_q, seqlen_k)
+    tuned_ragged = (
+        layout == "ragged" and req.dtype.strip().lower() == "fp16"
+        and int(req.hdim_q) == 64
+        and mask_type in (AttentionMaskType.TOP_LEFT_CAUSAL, AttentionMaskType.BOTTOM_RIGHT_CAUSAL)
+        and not (req.sliding_window or req.use_fp8 or req.use_softcap
+                 or req.use_sinks or req.use_alibi or req.use_qq_bias)
+        and maximum_length <= (1 << 30)
+    )
+    # A window covering both advertised maxima removes no causally-visible key.
+    # The admission bound also keeps context/window arithmetic within I32.
     return WmmaFmhaFwdSpec(
         head_size=int(req.hdim_q),
         num_query_heads=int(req.nhead_q),
@@ -93,7 +104,9 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         mask_mode="none" if mask_type == AttentionMaskType.NO_MASK else "causal",
         # Equal maxima can still describe unequal packed sequence lengths.
         causal_bottom_right=mask_type == AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
-        sliding_window=int(req.sliding_window),
+        sliding_window=maximum_length if tuned_ragged else int(req.sliding_window),
+        v_lds_stage=tuned_ragged,
+        scheduler_strategy="max-ilp" if tuned_ragged else None,
         query_tail=query_tail,
         kv_tail=kv_tail,
         use_softcap=bool(req.use_softcap),
