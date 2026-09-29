@@ -2898,10 +2898,12 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         # Sanity: the two waves_per_eu variants are otherwise indistinguishable,
         # so the split above is attributable to waves_per_eu alone. The name
         # tags a non-default waves_per_eu (2 keeps the shipped symbol), so the
-        # names differ by exactly that tag.
+        # names differ by exactly that tag (wherever the block-order tags put it).
+        wpe1 = specs[1].kernel_name().split("_")
+        wpe1.remove("wpe1")
         self.assertEqual(
-            specs[1].kernel_name(),
-            specs[2].kernel_name() + "_wpe1",
+            wpe1,
+            specs[2].kernel_name().split("_"),
             "kernel_name() differed beyond the waves_per_eu tag — test setup error",
         )
 
@@ -3709,10 +3711,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         base = self._spec(**self._BASE_KWARGS, persistent=True, num_persistent=64)
         self.assertEqual(base.persist_decode, "auto")
-        # gqa=4, NP=64: hkv_major iff gqa*nqb*B >= 2*NP (nqb = Sq/256 here).
+        # Aligned causal: bt_hkv_minor below the XCD count, else qb_major.
         shapes = {
-            "qb_major": ((1, 512, 512), (1, 1024, 1024)),
-            "hkv_major": ((8, 2048, 2048), (64, 4096, 8192)),
+            "bt_hkv_minor": ((1, 512, 512), (1, 1024, 1024)),
+            "qb_major": ((8, 2048, 2048), (64, 4096, 8192)),
         }
 
         def artifact(spec):
@@ -3745,9 +3747,9 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
         for i, part in enumerate(("cache key", "IR", "kernel name")):
             self.assertNotEqual(
+                by_order["bt_hkv_minor"][i],
                 by_order["qb_major"][i],
-                by_order["hkv_major"][i],
-                f"auto resolving to qb_major and hkv_major share one {part}; the "
+                f"auto resolving to bt_hkv_minor and qb_major share one {part}; the "
                 "cache would serve one decode body to the other order's shapes",
             )
 
@@ -3870,7 +3872,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 "gfx942_dense",
             ).kernel_spec
 
-        specs = [spec_for(8, 8192, 32, 8), spec_for(2, 16384, 64, 8)]
+        specs = [spec_for(8, 8192, 32, 8), spec_for(16, 4096, 64, 8)]
         if not all(s.persistent for s in specs):
             self.skipTest(
                 "shipped gfx942 dispatch no longer selects persistent for these "
@@ -3878,20 +3880,22 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             )
         self.assertEqual(
             {s.resolved_persist_decode for s in specs},
-            {"hkv_major"},
+            {"qb_major"},
             "test setup error: the requests no longer resolve to one decode order",
         )
         for spec in specs:
             with self.subTest(b=spec.batch, sq=spec.seqlen_q, hq=spec.num_query_heads):
                 self.assertTrue(spec.runtime_shape)
                 self.assertEqual(spec.runtime_param_fields, self._RUNTIME_FIELDS)
-                self.assertEqual(spec.fastdiv_divisors, ("batch", "gqa", "nqb"))
+                self.assertEqual(
+                    spec.fastdiv_divisors, ("batch", "num_query_heads", "gqa")
+                )
                 name = spec.kernel_name()
                 self.assertIsNone(
                     re.search(self._SHAPE_TOKEN_RE, name),
                     f"persistent gfx942 name still carries a shape token: {name}",
                 )
-                self.assertIn(f"_persist{spec.num_persistent}_hkvmaj", name)
+                self.assertNotIn("_hkvmaj", name)
         self.assertEqual(
             len({attention_dense_cache_key(s, arch="gfx942") for s in specs}),
             1,
@@ -4460,7 +4464,8 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
 
         self.assertEqual(
             AttentionDenseSpec(**self._BASE_KWARGS).kernel_name(),
-            "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs",
+            "rocke_attention_dense_d128_hq128_kv8_bn64_bf16_sq2048_sk2048_causal_lazyrs"
+            "_npbthkvmin",
         )
         gfx950 = Gfx950AttentionDenseSpec(**self._BASE_KWARGS)
         self.assertIn("_hq128_kv8_", gfx950.kernel_name())

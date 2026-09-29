@@ -247,7 +247,7 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
             Gfx942AttentionDenseSpec(**common)
 
     def test_equal_length_bottom_right_preserves_persistent_policy(self):
-        common = dict(seqlen_q=8192, seqlen_k=8192)
+        common = dict(batch=16, seqlen_q=2048, seqlen_k=2048)
         mask_pairs = (
             (AttentionMaskType.TOP_LEFT_CAUSAL, 2),
             (1, AttentionMaskType.BOTTOM_RIGHT_CAUSAL),
@@ -340,7 +340,7 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
         with _Gfx942Arch():
             for persistent, tail in (
                 (False, []),
-                # Every shape here resolves 'auto' to qb_major (asserted below).
+                # Every shape here resolves 'auto' to bt_hkv_minor (asserted below).
                 (
                     True,
                     [
@@ -348,8 +348,6 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                         "batch_shift",
                         "num_query_heads_magic",
                         "num_query_heads_shift",
-                        "gqa_magic",
-                        "gqa_shift",
                     ],
                 ),
             ):
@@ -370,7 +368,8 @@ class TestGfx942DenseSpecIdentity(unittest.TestCase):
                     self.assertNotRegex(name, r"_s[qk]\d+")
                     if persistent:
                         self.assertEqual(
-                            {s.resolved_persist_decode for s in specs}, {"qb_major"}
+                            {s.resolved_persist_decode for s in specs},
+                            {"bt_hkv_minor"},
                         )
                         self.assertIn("persist304", name)
                     names = [p["name"] for p in attention_dense_signature(specs[0])]
@@ -524,17 +523,17 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
         lands in the same slot as the 'auto' that resolves to it."""
         common = dict(seqlen_q=8192, seqlen_k=8192)
         groups = {
-            # gqa*nqb*B < 2*NP (608), or gqa == 1
-            "qb_major": [
+            # Batch below the XCD count
+            "bt_hkv_minor": [
                 dict(batch=1, nhead_q=128, nhead_k=8),
                 dict(batch=1, nhead_q=40, nhead_k=8),
                 dict(batch=4, nhead_q=32, nhead_k=32),
             ],
-            # gqa > 1 and gqa*nqb*B >= 2*NP
-            "hkv_major": [
-                dict(batch=2, nhead_q=128, nhead_k=8),
-                dict(batch=4, nhead_q=128, nhead_k=8),
-                dict(batch=4, nhead_q=40, nhead_k=8),
+            # From the XCD count on
+            "qb_major": [
+                dict(batch=8, nhead_q=128, nhead_k=8),
+                dict(batch=8, nhead_q=40, nhead_k=8),
+                dict(batch=8, nhead_q=32, nhead_k=32),
             ],
         }
         keys, names = {}, {}
@@ -561,10 +560,12 @@ class TestGfx942DensePersistentRuntimeShape(unittest.TestCase):
                         keys[decode],
                     )
                     self.assertEqual(explicit.kernel_name(), names[decode])
-            self.assertNotEqual(keys["qb_major"], keys["hkv_major"])
-            self.assertNotEqual(names["qb_major"], names["hkv_major"])
-            self.assertIn("hkvmaj", names["hkv_major"])
-            self.assertNotIn("hkvmaj", names["qb_major"])
+            self.assertEqual(len(set(keys.values())), len(groups))
+            self.assertEqual(len(set(names.values())), len(groups))
+            for decode, tag in (("bt_hkv_minor", "bthkvmin"),):
+                self.assertEqual(
+                    [n for n in names.values() if tag in n], [names[decode]]
+                )
 
     def test_work_item_count_at_the_fastdiv_limit_raises(self):
         """The decode's fast division is exact only below 2**30; past it the

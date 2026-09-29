@@ -968,8 +968,8 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
         num_persistent=304,
         persist_decode="auto",
     )
-    assert spec.resolved_persist_decode == "hkv_major"
-    assert "hkvmaj" in spec.kernel_name()
+    assert spec.resolved_persist_decode == "bt_hkv_minor"
+    assert "bthkvmin" in spec.kernel_name()
     assert "gqapair" not in spec.kernel_name()
 
 
@@ -1165,7 +1165,7 @@ def test_supports_true_implies_build_succeeds(row):
 # launch geometry
 # --------------------------------------------------------------------------- #
 def test_grid_and_block_geometry():
-    s = _spec(seqlen_q=2048, num_query_heads=128, batch=1)
+    s = _spec(seqlen_q=2048, num_query_heads=128, batch=1, nonpersist_decode="qb_minor")
     assert attention_dense_grid(s) == (2048 // _BLOCK_M, 128, 1)
     assert attention_dense_block(s) == (s.num_waves * 64, 1, 1)
     assert attention_dense_block(s) == (_EXPECTED_WORKGROUP_SIZE, 1, 1)
@@ -1174,7 +1174,12 @@ def test_grid_and_block_geometry():
 def test_grid_covers_every_query_row_and_head():
     for sq, hq, batch in ((2048, 128, 1), (512, 16, 4), (4096, 40, 2)):
         s = _spec(
-            seqlen_q=sq, seqlen_kv=sq, num_query_heads=hq, num_kv_heads=8, batch=batch
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=hq,
+            num_kv_heads=8,
+            batch=batch,
+            nonpersist_decode="qb_minor",
         )
         nqb, ghq, gb = attention_dense_grid(s)
         assert (
@@ -2092,16 +2097,21 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     the raw ``"auto"`` would let two shapes that resolve differently share one slot
     and serve one decode's binary for the other.
 
-    gqa=4, NQB=16, NP=228: per-kv-head work 64*B crosses 2*NP between B=4 and B=8.
-    Same-order shapes share key, name and body; cross-order shapes differ in all
-    three; and an ``"auto"`` that resolves to an order is the SAME kernel as that
-    order spelled explicitly.
+    gqa=4, NQB=16, NP=228, causal: batch below the XCD count resolves to
+    bt_hkv_minor, and from there on to qb_major. Same-order shapes share key, name
+    and body; cross-order shapes differ in all three; and an ``"auto"`` that
+    resolves to an order is the SAME kernel as that order spelled explicitly.
     """
     by_batch = {
         b: _persistent_spec(batch=b, persist_decode="auto") for b in (1, 2, 8, 16)
     }
     order = {b: s.resolved_persist_decode for b, s in by_batch.items()}
-    assert order == {1: "qb_major", 2: "qb_major", 8: "hkv_major", 16: "hkv_major"}
+    assert order == {
+        1: "bt_hkv_minor",
+        2: "bt_hkv_minor",
+        8: "qb_major",
+        16: "qb_major",
+    }
 
     def ident(spec):
         return (
@@ -2115,13 +2125,13 @@ def test_auto_persist_decode_keys_on_the_resolved_order():
     assert ids[8] == ids[16]
     lo, hi = ids[1], ids[8]
     assert all(a != b for a, b in zip(lo, hi)), "key, name and body must all split"
-    assert "hkvmaj" in hi[1] and "hkvmaj" not in lo[1]
-    for b, resolved in ((1, "qb_major"), (8, "hkv_major")):
+    assert "bthkvmin" in lo[1] and "bthkvmin" not in hi[1]
+    for b, resolved in ((1, "bt_hkv_minor"), (8, "qb_major")):
         explicit = dataclasses.replace(by_batch[b], persist_decode=resolved)
         assert ident(explicit) == ids[b]
     # The fast-division ABI follows the resolved order as well.
-    assert by_batch[1].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["qb_major"]
-    assert by_batch[8].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["hkv_major"]
+    assert by_batch[1].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["bt_hkv_minor"]
+    assert by_batch[8].fastdiv_divisors == _EXPECTED_FASTDIV_DIVISORS["qb_major"]
 
 
 def test_persistent_runtime_args_reject_work_past_the_fastdiv_bound():
