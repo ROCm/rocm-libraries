@@ -63,6 +63,10 @@ GemmTileConfig configFromOptions(std::array<int, 3> arch,
                                  const StinkyAsmModule::ModuleOptions& opts) {
     GemmTileConfig cfg;
     cfg.arch = arch;
+    // Carry the concrete stepping identity so ToStinkyAsmPass can disambiguate
+    // steppings that share an ISA triple (e.g. gfx1250 vs gfx1250v0) and select
+    // the matching per-arch cost table, mirroring rocisa's toStinkyTofuModule.
+    cfg.archName = opts.ArchName;
     cfg.TileA0 = static_cast<uint32_t>(opts.TileA0);
     cfg.TileB0 = static_cast<uint32_t>(opts.TileB0);
     cfg.TileM0 = static_cast<uint32_t>(opts.TileM0);
@@ -84,7 +88,7 @@ AsmCapsConfig capsFromOptions(std::array<int, 3> arch, const StinkyAsmModule::Mo
     AsmCapsConfig caps;
     caps.vgprMsbMode = static_cast<VgprMsbMode>(msbVal);
     if (caps.vgprMsbMode == VgprMsbMode::None) {
-        caps = ToolchainCaps::probe(getGfxArchID(arch[0], arch[1], arch[2]));
+        caps = ToolchainCaps::probe(resolveArchId(arch, opts.ArchName));
     }
     caps.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
     caps.enableXnackReplay = opts.EnableXnackReplay;
@@ -109,7 +113,10 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     BasicBlock* entryBB = func.getEntryBlock();
     assert(entryBB && "StinkyAsmModule must have an entry basic block");
 
-    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    // Honor the concrete stepping identity (ModuleOptions.ArchName) when the two
+    // steppings share an ISA triple (gfx1250 vs gfx1250v0), so the emitted asm
+    // uses the correct per-arch cost table -- matching rocisa's toStinkyTofuModule.
+    GfxArchID archId = resolveArchId(arch, moduleOptions.ArchName);
 
     {
         const auto& instructions = module.getInstructions();

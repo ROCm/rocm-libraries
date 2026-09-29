@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <limits>
@@ -136,6 +137,29 @@ inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping)
 
 inline GfxArchID getGfxArchID(const std::string& name) {
     return ArchHelper::getInstance().getGfxArchID(name);
+}
+
+// Resolve the concrete GfxArchID for a kernel, honoring an optional concrete
+// stepping identity name. Steppings that share an ISA triple (e.g. gfx1250 v1
+// vs gfx1250v0) resolve to the first-registered stepping when keyed on the
+// triple alone; @p archName disambiguates within the same triple. The name is
+// honored only when the named arch's triple matches @p arch, so a build-wide
+// name set for a different arch (e.g. a gfx942;gfx1250v0 build) never retags a
+// kernel of another triple. This is the single definition of the disambiguation
+// used by both lowering paths (rocisa native toStinkyTofuModule and the
+// logical-IR ToStinkyAsmPass), keeping their per-arch cost-table selection in
+// sync.
+inline GfxArchID resolveArchId(const std::array<int, 3>& arch, const std::string& archName) {
+    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    if (!archName.empty()) {
+        const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archName);
+        if (namedInfo && namedInfo->major == static_cast<uint32_t>(arch[0]) &&
+            namedInfo->minor == static_cast<uint32_t>(arch[1]) &&
+            namedInfo->stepping == static_cast<uint32_t>(arch[2])) {
+            archId = ArchHelper::getInstance().getGfxArchID(archName);
+        }
+    }
+    return archId;
 }
 
 inline uint32_t getWaveFrontSize(GfxArchID archID) {

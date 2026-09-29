@@ -490,9 +490,11 @@ class ToStinkyAsmPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        GfxArchID arch =
-            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
-                         passCtx.getGemmTileConfig().arch[2]);
+        // resolveArchId (not the triple-only getGfxArchID) so a kernel targeting a
+        // stepping that shares its ISA triple with another (gfx1250 vs gfx1250v0)
+        // selects the matching per-arch cost table, mirroring toStinkyTofuModule.
+        const GemmTileConfig& tileConfig = passCtx.getGemmTileConfig();
+        GfxArchID arch = resolveArchId(tileConfig.arch, tileConfig.archName);
 
         bool hasVgprMsb = passCtx.getAsmCapsConfig().vgprMsbMode != VgprMsbMode::None;
 

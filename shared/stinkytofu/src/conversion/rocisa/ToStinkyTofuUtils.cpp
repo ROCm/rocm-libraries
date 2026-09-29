@@ -1037,16 +1037,9 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     // instead -- but only to disambiguate *within the same triple*. In a multi-arch build (e.g.
     // gfx942;gfx1250v0) ArchName is set build-wide, so we must not retag a kernel of a different
     // arch: honor the name only when the named arch's triple matches this kernel's triple.
-    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
-    if (!moduleOptions.ArchName.empty()) {
-        const GfxArchID named = getGfxArchID(moduleOptions.ArchName);
-        const auto* namedInfo = ArchHelper::getInstance().getArchInfo(named);
-        if (namedInfo && namedInfo->major == static_cast<uint32_t>(arch[0]) &&
-            namedInfo->minor == static_cast<uint32_t>(arch[1]) &&
-            namedInfo->stepping == static_cast<uint32_t>(arch[2])) {
-            archId = named;
-        }
-    }
+    // resolveArchId() is shared with the logical-IR path (ToStinkyAsmPass) so both select the same
+    // per-arch cost table.
+    GfxArchID archId = resolveArchId(arch, moduleOptions.ArchName);
 
     // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
     // sees VgprMsbMode::None, so no need to read it from rocisa caps here.

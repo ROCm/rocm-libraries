@@ -54,6 +54,7 @@ struct GemmTileConfig {
     // The tile sizes default to 0, which is NOT a valid tile, so 0 there means
     // "nobody configured this" and is worth complaining about.
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
+    std::string archName;              ///< Stepping, e.g. "gfx1250v0"; empty = resolve by arch only
     uint32_t TileA0 = 0;               ///< Tile size for A dimension 0; 0 = unset
     uint32_t TileB0 = 0;               ///< Tile size for B dimension 0; 0 = unset
     uint32_t TileM0 = 0;               ///< Tile size for M dimension 0; 0 = unset
