@@ -358,7 +358,7 @@ class TestBlockCells(unittest.TestCase):
             },
         )
         self.assertEqual(cells.dropped, {})
-        self.assertEqual(cells.kept.pop().lane, "gfx1030/windows")
+        self.assertEqual(cells.kept.pop().arch_platform, "gfx1030/windows")
 
     def test_failed_sweep_case_is_dropped(self) -> None:
         failed = "quick_ConvolutionFwdPointwise_Default.2_8_3_3_fp32_nchw"
@@ -412,7 +412,7 @@ class TestBlockCells(unittest.TestCase):
         )
         self.assertEqual(block_cells(_block(summary)).drops, {DROP_BAD_PATH: 1})
 
-    def test_entry_lane_overrides_run(self) -> None:
+    def test_entry_arch_overrides_run(self) -> None:
         summary = _summary(
             unclaimed_support=[
                 {
@@ -440,7 +440,7 @@ class TestBlockCells(unittest.TestCase):
                 with self.assertRaises(MalformedSummary):
                     block_cells(_block(_summary(unclaimed_support=entries)))
 
-    def test_failures_are_carried_with_their_lane(self) -> None:
+    def test_failures_are_carried_with_their_arch_platform(self) -> None:
         failure = {
             "bundle": _SINGLE,
             "verdict": "broken",
@@ -484,7 +484,7 @@ class TestReadLog(unittest.TestCase):
     def test_reprinted_block_counts_once(self) -> None:
         report, cells = read_log("a.log", _doubled(_summary(), failed=[_FP32]))
         self.assertEqual((report.blocks, report.unique), (2, 1))
-        self.assertEqual(report.lanes, {"gfx1030/windows"})
+        self.assertEqual(report.arch_platforms, {"gfx1030/windows"})
         self.assertEqual(
             report.status(), "2 blocks (1 unique) gfx1030/windows enforcing"
         )
@@ -577,7 +577,7 @@ class TestHarvest(unittest.TestCase):
         self.assertEqual(result.drops, {})
         self.assertIsNotNone(result.logs[1].error)
 
-    def test_lane_filter(self) -> None:
+    def test_arch_platform_filter(self) -> None:
         other = _summary(run=_GFX942, claim_failures=[_failure()])
         result = harvest(
             [
@@ -586,9 +586,9 @@ class TestHarvest(unittest.TestCase):
                     ("b.log", _single_log(other)),
                 ]
             ],
-            lane="gfx942/linux",
+            arch_platform="gfx942/linux",
         )
-        self.assertEqual({c.lane for c in result.claims}, {"gfx942/linux"})
+        self.assertEqual({c.arch_platform for c in result.claims}, {"gfx942/linux"})
         self.assertEqual(len(result.claims), 3)
         self.assertEqual(result.drops, {})
         self.assertEqual([_failure(**_GFX942)], result.claim_failures)
@@ -598,9 +598,9 @@ class TestHarvest(unittest.TestCase):
         result = harvest(
             [[("a.log", _doubled(summary))], [("b.log", _single_log(summary))]]
         )
-        lane = {"engine": "MIOPEN_ENGINE", "arch": "gfx1030", "platform": "windows"}
-        self.assertEqual(result.claim_failures, [_failure(**lane)])
-        self.assertEqual(result.failed_in_use, [_failure(**lane)])
+        keys = {"engine": "MIOPEN_ENGINE", "arch": "gfx1030", "platform": "windows"}
+        self.assertEqual(result.claim_failures, [_failure(**keys)])
+        self.assertEqual(result.failed_in_use, [_failure(**keys)])
 
 
 class TestMain(unittest.TestCase):
@@ -643,7 +643,7 @@ class TestMain(unittest.TestCase):
         report = json.loads(out)
         self.assertEqual(report["logs"][0]["modes"], ["enforcing"])
         self.assertEqual(
-            report["lanes"], {"gfx1030/windows": {"claims": 3, "drops": {}}}
+            report["arch_platforms"], {"gfx1030/windows": {"claims": 3, "drops": {}}}
         )
         self.assertIn(
             {
@@ -679,13 +679,15 @@ class TestMain(unittest.TestCase):
             "directory without logs": [str(self.root / "empty")],
             "min-runs above runs": [log, "--min-runs", "2"],
             "min-runs zero": [log, "--min-runs", "0"],
-            "lane without platform": [log, "--lane", "gfx942"],
-            "lane with bad platform": [log, "--lane", "gfx942/macos"],
+            "arch without platform": [log, "--arch", "gfx942"],
+            "platform without arch": [log, "--platform", "linux"],
+            "arch not a gfx target": [log, "--arch", "942", "--platform", "linux"],
+            "unknown platform": [log, "--arch", "gfx942", "--platform", "macos"],
             "min-runs above the default nightly": ["--min-runs", "2"],
             "run ID zero": ["--run", "0"],
             "run ID twice": ["--run", "7", "--run", "7"],
             "jobs not a regex": ["--run", "7", "--jobs", "("],
-            "write without lane": [log, "--write"],
+            "write without arch and platform": [log, "--write"],
         }
         for name, argv in cases.items():
             with self.subTest(name):
@@ -725,8 +727,8 @@ class FakeGit:
 
 
 class TestWrite(unittest.TestCase):
-    _LANE = ("--lane", "gfx1030/windows")
-    _WRITE = (*_LANE, "--write")
+    _ONLY = ("--arch", "gfx1030", "--platform", "windows")
+    _WRITE = (*_ONLY, "--write")
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -769,7 +771,7 @@ class TestWrite(unittest.TestCase):
     def test_without_write_names_the_changes_and_writes_nothing(self) -> None:
         old = {self._claim("2_8_3_3_fp16_nchw")}
         self.sweep.write_bytes(render(self.sweep, old).encode("utf-8"))
-        code, err = self._main(*self._LANE)
+        code, err = self._main(*self._ONLY)
         self.assertEqual(code, 0)
         self.assertIn(f"would change {self._rel(self.sweep)} (+1)\n", err)
         self.assertIn(f"would change {self._rel(self.single)} (+1)\n", err)
@@ -812,7 +814,7 @@ class TestWrite(unittest.TestCase):
     def test_sidecar_behind_develop_is_refused(self) -> None:
         claim = Claim("", "MIOPEN_ENGINE", "gfx942", "linux")
         self.git.develop = {self._rel(self.single): render(self.single, {claim})}
-        for argv, suffix in ((self._LANE, "\n"), (self._WRITE, "; wrote nothing\n")):
+        for argv, suffix in ((self._ONLY, "\n"), (self._WRITE, "; wrote nothing\n")):
             with self.subTest(argv=argv):
                 code, err = self._main(*argv)
                 self.assertEqual(code, 1)
@@ -872,12 +874,13 @@ class TestWrite(unittest.TestCase):
         self.assertIn("0 sidecars changed, +0 claims", err)
         self.assertEqual((self.sweep.read_bytes(), self.single.read_bytes()), before)
 
-    def test_other_lane_writes_nothing_and_fetches_nothing(self) -> None:
-        self.assertEqual(self._main("--lane", "gfx942/linux", "--write")[0], 0)
+    def test_other_arch_platform_writes_nothing_and_fetches_nothing(self) -> None:
+        argv = ("--arch", "gfx942", "--platform", "linux", "--write")
+        self.assertEqual(self._main(*argv)[0], 0)
         self.assertFalse(self.sweep.exists() or self.single.exists())
         self.assertEqual(self.git.calls, [])
 
-    def test_without_lane_fetches_nothing(self) -> None:
+    def test_without_arch_platform_fetches_nothing(self) -> None:
         self.assertEqual(self._main()[0], 0)
         self.assertEqual(self.git.calls, [])
 

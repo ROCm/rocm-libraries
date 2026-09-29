@@ -3,7 +3,7 @@
 
 RFC 0015: a run of hipdnn_integration_tests prints a SUPPORT CLAIM SUMMARY
 block after its tests.  Its unclaimed_support list names graphs that reached
-the depth their bundle requires on this lane (arch + platform + engine) but
+the depth their bundle requires on this arch, platform and engine but
 that no support.json sidecar claims yet.  This script reads CI job logs,
 extracts those blocks, and prints the claim cells to add; with --write it
 adds them to the sidecars.
@@ -19,9 +19,9 @@ Log handling
    that does not parse, schema_version != 1, a mode other than enforcing or
    warning_only, an invalid run arch, platform or engine,
    counters_consistent != true, or a harness_defects count other than 0 is
-   rejected whole.  Each log is listed with the lanes and modes of its
-   blocks.  A warning_only block is harvested like an enforcing one: both
-   report the same results.
+   rejected whole.  Each log is listed with the arch/platform pairs and
+   modes of its blocks.  A warning_only block is harvested like an
+   enforcing one: both report the same results.
 3. Each unclaimed_support entry becomes one cell per case: (bundle, case,
    arch, platform, engine).  "reached: verified" means the comparison ran,
    not that it passed, so a cell whose gtest FAILED or was SKIPPED in the
@@ -46,10 +46,11 @@ Runs
 
 Writing
 -------
-7. With --lane, the claims are added to the current sidecars of their
-   bundles, and each sidecar that would change is named; --write writes
-   them.  --write needs --lane, so one change covers one lane.  Claims are
-   only added: a sidecar becomes its old claims plus the new ones.
+7. With --arch and --platform, the claims for that arch/platform are added
+   to the current sidecars of their bundles, and each sidecar that would
+   change is named; --write writes them.  --write needs both, so one change
+   covers one arch/platform.  Claims are only added: a sidecar becomes its
+   old claims plus the new ones.
 8. The sidecars must be up to date.  The tip of develop is fetched from
    GitHub with git, and a sidecar that lacks any claim its develop version
    has is refused: rebase onto develop first.
@@ -120,7 +121,6 @@ _SUMMARY_HEADER = re.compile(r"^==== SUPPORT CLAIM SUMMARY \((.+)\) ====$")
 _GTEST_NOT_PASSED = re.compile(r"^\[\s+(?:FAILED|SKIPPED)\s+\] ([^\s,]+\.[^\s,]+)")
 _GTEST_RAN = re.compile(r"^\[==========\] \d+ tests? from \d+ test suites? ran\.")
 _ARCH = re.compile(r"^gfx[0-9a-f]+$")
-_LANE = re.compile(r"^gfx[0-9a-f]+/(?:linux|windows)$")
 
 
 @dataclass
@@ -240,7 +240,7 @@ class Cell(NamedTuple):
     engine: str
 
     @property
-    def lane(self) -> str:
+    def arch_platform(self) -> str:
         return f"{self.arch}/{self.platform}"
 
 
@@ -286,19 +286,19 @@ def gtest_name(bundle: str, case: str) -> Optional[str]:
     return f"{suite}.{test}"
 
 
-def _lane_of(entry: dict, run: dict) -> Dict[str, str]:
+def _engine_arch_platform(entry: dict, run: dict) -> Dict[str, str]:
     """An entry's engine/arch/platform: its own when present, else the run's."""
-    lane = {}
+    keys = {}
     for key in ("engine", "arch", "platform"):
         value = entry.get(key, run[key])
         if not isinstance(value, str) or not value:
             raise MalformedSummary(f"entry {key} {value!r} is not a string")
-        lane[key] = value
-    if not _ARCH.match(lane["arch"]):
-        raise MalformedSummary(f"entry arch {lane['arch']!r} is not a gfx target")
-    if lane["platform"] not in VALID_PLATFORMS:
-        raise MalformedSummary(f"entry platform {lane['platform']!r} is invalid")
-    return lane
+        keys[key] = value
+    if not _ARCH.match(keys["arch"]):
+        raise MalformedSummary(f"entry arch {keys['arch']!r} is not a gfx target")
+    if keys["platform"] not in VALID_PLATFORMS:
+        raise MalformedSummary(f"entry platform {keys['platform']!r} is invalid")
+    return keys
 
 
 def _entries(summary: dict, key: str) -> List[dict]:
@@ -310,8 +310,8 @@ def _entries(summary: dict, key: str) -> List[dict]:
     return entries
 
 
-def _with_lane(entry: dict, run: dict) -> dict:
-    return {**entry, **_lane_of(entry, run)}
+def _resolved(entry: dict, run: dict) -> dict:
+    return {**entry, **_engine_arch_platform(entry, run)}
 
 
 def block_cells(block: Block) -> BlockCells:
@@ -332,13 +332,13 @@ def block_cells(block: Block) -> BlockCells:
             raise MalformedSummary(
                 f"cases of {entry['bundle']} is not a non-empty string list"
             )
-        lane = _lane_of(entry, run)
+        keys = _engine_arch_platform(entry, run)
         reached = DEPTHS.get(entry.get("reached"))
         required = DEPTHS.get(entry.get("required"))
 
         for case in cases:
             cell = Cell(
-                entry["bundle"], case, lane["arch"], lane["platform"], lane["engine"]
+                entry["bundle"], case, keys["arch"], keys["platform"], keys["engine"]
             )
             name = gtest_name(cell.bundle, case)
             if name is None:
@@ -355,10 +355,10 @@ def block_cells(block: Block) -> BlockCells:
             result.dropped.setdefault(cell, reason)
 
     result.claim_failures = [
-        _with_lane(e, run) for e in _entries(summary, "claim_failures")
+        _resolved(e, run) for e in _entries(summary, "claim_failures")
     ]
     result.failed_in_use = [
-        _with_lane(e, run) for e in _entries(summary, "failed_in_use")
+        _resolved(e, run) for e in _entries(summary, "failed_in_use")
     ]
     return result
 
@@ -368,7 +368,7 @@ class LogReport:
     path: str
     blocks: int = 0
     unique: int = 0
-    lanes: Set[str] = field(default_factory=set)
+    arch_platforms: Set[str] = field(default_factory=set)
     modes: Set[str] = field(default_factory=set)
     error: Optional[str] = None
 
@@ -378,18 +378,18 @@ class LogReport:
         if not self.blocks:
             return "no block"
         noun = "block" if self.blocks == 1 else "blocks"
-        lanes = " ".join(sorted(self.lanes) + sorted(self.modes))
-        return f"{self.blocks} {noun} ({self.unique} unique) {lanes}"
+        seen = " ".join(sorted(self.arch_platforms) + sorted(self.modes))
+        return f"{self.blocks} {noun} ({self.unique} unique) {seen}"
 
 
 @dataclass
 class Harvest:
     runs: int
     min_runs: int
-    lane: Optional[str]
+    arch_platform: Optional[str]
     logs: List[LogReport]
     claims: List[Cell]
-    drops: Dict[str, Counter]  # lane -> DROP_* reason -> distinct cells
+    drops: Dict[str, Counter]  # arch/platform -> DROP_* reason -> distinct cells
     claim_failures: List[dict]
     failed_in_use: List[dict]
     missing: List[dict] = field(default_factory=list)  # see missing_logs
@@ -442,21 +442,21 @@ def read_log(path: str, text: str) -> Tuple[LogReport, List[BlockCells]]:
         except MalformedSummary as exc:
             return LogReport(path, error=f"{_stream_name(block.stream)}: {exc}"), []
         run = block.summary["run"]
-        report.lanes.add(f"{run['arch']}/{run['platform']}")
+        report.arch_platforms.add(f"{run['arch']}/{run['platform']}")
         report.modes.add(block.summary["mode"])
     report.blocks = len(blocks)
     report.unique = len({_canonical([b.summary, sorted(b.not_passed)]) for b in blocks})
     return report, cells
 
 
-def _entry_lane(entry: dict) -> str:
+def _entry_arch_platform(entry: dict) -> str:
     return f"{entry['arch']}/{entry['platform']}"
 
 
 def harvest(
     runs: Sequence[Sequence[Tuple[str, str]]],
     min_runs: int = 1,
-    lane: Optional[str] = None,
+    arch_platform: Optional[str] = None,
 ) -> Harvest:
     """Merges runs, each a list of (log path, log text), into claims."""
     logs: List[LogReport] = []
@@ -480,32 +480,38 @@ def harvest(
                     in_use.setdefault(_canonical(entry), entry)
         runs_kept.update(kept)
 
-    def wanted(cell_lane: str) -> bool:
-        return lane is None or cell_lane == lane
+    def wanted(seen: str) -> bool:
+        return arch_platform is None or seen == arch_platform
 
     drops: Dict[str, Counter] = {}
     for cell, reason in vetoed.items():
-        if wanted(cell.lane):
-            drops.setdefault(cell.lane, Counter())[reason] += 1
+        if wanted(cell.arch_platform):
+            drops.setdefault(cell.arch_platform, Counter())[reason] += 1
 
     claims: List[Cell] = []
     for cell, count in runs_kept.items():
-        if cell in vetoed or not wanted(cell.lane):
+        if cell in vetoed or not wanted(cell.arch_platform):
             continue
         if count < min_runs:
-            drops.setdefault(cell.lane, Counter())[DROP_MIN_RUNS] += 1
+            drops.setdefault(cell.arch_platform, Counter())[DROP_MIN_RUNS] += 1
         else:
             claims.append(cell)
 
     def selected(entries: Dict[str, dict]) -> List[dict]:
-        return [entries[k] for k in sorted(entries) if wanted(_entry_lane(entries[k]))]
+        return [
+            entries[k]
+            for k in sorted(entries)
+            if wanted(_entry_arch_platform(entries[k]))
+        ]
 
     return Harvest(
         runs=len(runs),
         min_runs=min_runs,
-        lane=lane,
+        arch_platform=arch_platform,
         logs=logs,
-        claims=sorted(claims, key=lambda c: (c.lane, c.engine, c.bundle, c.case)),
+        claims=sorted(
+            claims, key=lambda c: (c.arch_platform, c.engine, c.bundle, c.case)
+        ),
         drops=drops,
         claim_failures=selected(failures),
         failed_in_use=selected(in_use),
@@ -519,38 +525,39 @@ def _cell_json(cell: Cell) -> dict:
     return result
 
 
-def _lanes(result: Harvest) -> List[str]:
-    """Every lane seen in an accepted log, or only --lane."""
-    seen = {lane for log in result.logs for lane in log.lanes}
-    seen |= set(result.drops) | {c.lane for c in result.claims}
-    return sorted(seen if result.lane is None else seen & {result.lane})
+def _arch_platforms(result: Harvest) -> List[str]:
+    """Every arch/platform seen in an accepted log, or only the one selected."""
+    seen = {name for log in result.logs for name in log.arch_platforms}
+    seen |= set(result.drops) | {c.arch_platform for c in result.claims}
+    if result.arch_platform is not None:
+        seen &= {result.arch_platform}
+    return sorted(seen)
 
 
 def render_json(result: Harvest) -> str:
-    claims_by_lane = Counter(c.lane for c in result.claims)
-    lanes = _lanes(result)
+    claims_by = Counter(c.arch_platform for c in result.claims)
     return json.dumps(
         {
             "runs": result.runs,
             "min_runs": result.min_runs,
-            "lane": result.lane,
+            "arch_platform": result.arch_platform,
             "logs": [
                 {
                     "path": log.path,
                     "blocks": log.blocks,
                     "unique_blocks": log.unique,
-                    "lanes": sorted(log.lanes),
+                    "arch_platforms": sorted(log.arch_platforms),
                     "modes": sorted(log.modes),
                     "error": log.error,
                 }
                 for log in result.logs
             ],
-            "lanes": {
-                lane: {
-                    "claims": claims_by_lane[lane],
-                    "drops": dict(sorted(result.drops.get(lane, {}).items())),
+            "arch_platforms": {
+                name: {
+                    "claims": claims_by[name],
+                    "drops": dict(sorted(result.drops.get(name, {}).items())),
                 }
-                for lane in lanes
+                for name in _arch_platforms(result)
             },
             "missing": result.missing,
             "claims": [_cell_json(c) for c in result.claims],
@@ -565,14 +572,14 @@ def _entry_line(entry: dict) -> str:
     case = f" [{entry['case']}]" if entry.get("case") else ""
     verdict = f" {entry['verdict']}:" if entry.get("verdict") else ""
     return (
-        f"  {_entry_lane(entry)} {entry['engine']} {entry['bundle']}{case}"
+        f"  {_entry_arch_platform(entry)} {entry['engine']} {entry['bundle']}{case}"
         f"{verdict} {entry.get('reason', '')}".rstrip()
     )
 
 
 def render_table(result: Harvest) -> str:
-    lane = f"  lane: {result.lane}" if result.lane else ""
-    out = [f"runs: {result.runs}  min-runs: {result.min_runs}{lane}", "", "Logs"]
+    only = f"  arch/platform: {result.arch_platform}" if result.arch_platform else ""
+    out = [f"runs: {result.runs}  min-runs: {result.min_runs}{only}", "", "Logs"]
     width = max((len(log.path) for log in result.logs), default=0)
     out += [f"  {log.path:<{width}}  {log.status()}" for log in result.logs]
 
@@ -582,23 +589,24 @@ def render_table(result: Harvest) -> str:
         for m in result.missing
     ]
 
-    out += ["", "Lanes"]
-    claims_by_lane = Counter(c.lane for c in result.claims)
-    lanes = _lanes(result)
-    if not lanes:
+    out += ["", "Arch/platform"]
+    claims_by = Counter(c.arch_platform for c in result.claims)
+    names = _arch_platforms(result)
+    if not names:
         out.append("  (none)")
-    for name in lanes:
+    for name in names:
         drops = ", ".join(
             f"{n} {reason}" for reason, n in sorted(result.drops.get(name, {}).items())
         )
         out.append(
-            f"  {name:<18} {claims_by_lane[name]:>5} claims"
+            f"  {name:<18} {claims_by[name]:>5} claims"
             + (f"; dropped: {drops}" if drops else "")
         )
 
     out += ["", f"Claims ({len(result.claims)})"]
     out += [
-        f"  {c.lane} {c.engine} {c.bundle}" + (f" [{c.case}]" if c.case else "")
+        f"  {c.arch_platform} {c.engine} {c.bundle}"
+        + (f" [{c.case}]" if c.case else "")
         for c in result.claims
     ]
     for title, entries in (
@@ -693,11 +701,9 @@ def fetch_run(
     return logs, found
 
 
-def _lane_arg(text: str) -> str:
-    if not _LANE.match(text):
-        raise argparse.ArgumentTypeError(
-            f"{text!r} is not arch/platform, e.g. gfx942/linux"
-        )
+def _arch_arg(text: str) -> str:
+    if not _ARCH.match(text):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a gfx target, e.g. gfx942")
     return text
 
 
@@ -841,19 +847,28 @@ def main(
         help="claim a cell only when kept in this many runs (default: 1)",
     )
     parser.add_argument(
-        "--lane", type=_lane_arg, help="only this arch/platform, e.g. gfx942/linux"
+        "--arch", type=_arch_arg, help="only this arch, e.g. gfx942 (needs --platform)"
+    )
+    parser.add_argument(
+        "--platform",
+        choices=sorted(VALID_PLATFORMS),
+        help="only this platform (needs --arch)",
     )
     parser.add_argument("--format", choices=("table", "json"), default="table")
     parser.add_argument(
         "--write",
         action="store_true",
-        help="add the claims to the sidecars (needs --lane)",
+        help="add the claims to the sidecars (needs --arch and --platform)",
     )
     args = parser.parse_args(argv)
 
-    if args.write and args.lane is None:
-        print("error: --write needs --lane", file=sys.stderr)
+    if (args.arch is None) != (args.platform is None):
+        print("error: --arch and --platform go together", file=sys.stderr)
         return 2
+    if args.write and args.arch is None:
+        print("error: --write needs --arch and --platform", file=sys.stderr)
+        return 2
+    arch_platform = f"{args.arch}/{args.platform}" if args.arch else None
     repeated = sorted(i for i, n in Counter(args.run_ids).items() if n > 1)
     if repeated:
         print(f"error: --run given twice for {repeated}", file=sys.stderr)
@@ -881,7 +896,7 @@ def main(
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    result = harvest(runs, args.min_runs, args.lane)
+    result = harvest(runs, args.min_runs, arch_platform)
     result.missing = missing_logs(result.logs, jobs)
     print(render_json(result) if args.format == "json" else render_table(result))
     if result.missing:
@@ -895,7 +910,7 @@ def main(
         if args.write:
             print("error: a log was rejected; wrote nothing", file=sys.stderr)
         return 1
-    if args.lane is None:
+    if arch_platform is None:
         return 0
     wrote_nothing = "; wrote nothing" if args.write else ""
     try:
