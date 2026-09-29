@@ -464,6 +464,38 @@ void heuristics_database_t::initialize_defaults() {
     key.max_k       = 511;
     add_entry(key, reject_params);
   }
+
+  // ========================================================================
+  // HEURISTIC 4: gfx1201 TN tuned genome (fp16 and bf16)
+  // ========================================================================
+  // Fitted offline on gfx1201 (Radeon AI PRO R9700) HHS TN measurements. gfx1201 WMMA
+  // costs are identical for f16 and bf16 (v_wmma_*_16x16x16, 16 cycles, 2-byte inputs),
+  // so the same weights apply to both. 1-byte types keep the defaults: their catalogs
+  // are tuned under default-weight ranking and measured worse with these weights.
+  {
+    heuristic_params_t g1201;
+    g1201.weight_compute                 = 0.4663523880483756;
+    g1201.weight_memory                  = 2.413787556602907;
+    g1201.weight_mem_l2                  = 3.091542149623161;
+    g1201.main_loop_efficiency           = 0.2;
+    g1201.weight_loop_overhead           = 1342.0918673471194;
+    g1201.weight_mem_dram                = 0.15087731514591923;
+    g1201.epilogue_scalar_store_penalty  = 7.7549449890231035;
+    g1201.occupancy_decay_base           = 0.8744185930103232;
+    g1201.postgsu_kernel_launch_overhead = 82061.33672906409;
+    g1201.weight_epilogue                = 16.0;
+    g1201.weight_prologue                = 9.632545056916285;
+    g1201.weight_tile_total              = 0.05;
+
+    for (const auto dt : {data_type_t::Half, data_type_t::BFloat16}) {
+      heuristic_key_t key;
+      key.arch        = hardware_t::architecture_t::gfx1201;
+      key.mi_dtype    = dt;
+      key.a_transpose = transpose_t::T;
+      key.b_transpose = transpose_t::N;
+      add_entry(key, g1201);
+    }
+  }
 }
 
 // ============================================================================
