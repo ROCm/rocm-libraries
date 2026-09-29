@@ -15,6 +15,7 @@ Documentation for rocSPARSE is available at
 
 ### Optimized
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
+* Optimized `rocsparse_spgemm`, `rocsparse_csrgemm_nnz`, `rocsparse_Xcsrgemm`, `rocsparse_csrgemm_symbolic`, and `rocsparse_Xcsrgemm_numeric` for rows of `C` whose hash table does not fit in shared memory. The temporary buffer size returned by `rocsparse_Xcsrgemm_buffer_size` and by the `rocsparse_spgemm` buffer size stage grows by up to 8 MB plus 16 to 24 bytes per row of `C`, or by about 28 to 36 bytes per row of `C` when `C` has more than about 700,000 rows.
 
 ### Resolved issues
 * Fixed an integer overflow in `rocsparse_prune_dense2csr_by_percentage` and `rocsparse_prune_csr2csr_by_percentage`, which computed the matrix element count in 32-bit arithmetic. For matrices with more than `INT32_MAX` (~2.1 billion) elements the count overflowed to a negative value, resulting in out-of-bounds pointer construction and an invalid kernel launch grid. The element count is now computed in 64-bit arithmetic.

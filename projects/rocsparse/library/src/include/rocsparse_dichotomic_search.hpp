@@ -36,7 +36,7 @@ namespace rocsparse
         {
             while(left < right)
             {
-                const J mid = (left + right) / 2;
+                const J mid = left + ((right - left) >> 1);
                 if(array[mid + 1] <= val)
                 {
                     left = mid + 1;

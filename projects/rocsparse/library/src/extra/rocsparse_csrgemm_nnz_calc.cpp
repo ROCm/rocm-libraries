@@ -24,10 +24,10 @@
 
 #include "rocsparse_csrgemm_nnz_calc.hpp"
 #include "../conversion/rocsparse_identity.hpp"
-#include "csrgemm_bitmap.hpp"
 #include "csrgemm_device.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_csrgemm_bitmap.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_primitives.hpp"
@@ -612,25 +612,27 @@ rocsparse_status rocsparse::csrgemm_nnz_calc(rocsparse_handle          handle,
             return rocsparse_status_requires_sorted_storage;
         }
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_nnz_bitmap<I, J>(
-            handle,
-            rocsparse::csrgemm_bitmap_scratch_after(
-                temp_buffer, info_C->csrgemm_info->buffer_size, d_perm, m),
-            n,
-            h_group_size[10],
-            &d_group_offset[10],
-            d_perm,
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            base_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            base_B,
-            info_C->csrgemm_info->add,
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            base_D,
-            csr_row_ptr_C)));
+        rocsparse::csrgemm_bitmap_region<I, J> region;
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_bitmap_region_at_tail<I, J>(
+            handle, temp_buffer, info_C->csrgemm_info->buffer_size, m, n, region)));
+
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_nnz_bitmap<I, J>(handle,
+                                                                       region,
+                                                                       n,
+                                                                       h_group_size[10],
+                                                                       &d_group_offset[10],
+                                                                       d_perm,
+                                                                       csr_row_ptr_A,
+                                                                       csr_col_ind_A,
+                                                                       base_A,
+                                                                       csr_row_ptr_B,
+                                                                       csr_col_ind_B,
+                                                                       base_B,
+                                                                       info_C->csrgemm_info->add,
+                                                                       csr_row_ptr_D,
+                                                                       csr_col_ind_D,
+                                                                       base_D,
+                                                                       csr_row_ptr_C)));
     }
 
     // Exclusive sum to obtain row pointers of C

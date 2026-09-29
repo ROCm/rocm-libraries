@@ -23,11 +23,11 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_identity.hpp"
-#include "csrgemm_bitmap.hpp"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_csrgemm_bitmap.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrgemm_mult.hpp"

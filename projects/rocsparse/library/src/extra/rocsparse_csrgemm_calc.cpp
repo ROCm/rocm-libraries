@@ -24,11 +24,11 @@
 
 #include "rocsparse_csrgemm_calc.hpp"
 #include "../conversion/rocsparse_identity.hpp"
-#include "csrgemm_bitmap.hpp"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
+#include "rocsparse_csrgemm_bitmap.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "rocsparse_primitives.hpp"
@@ -668,33 +668,37 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             return rocsparse_status_requires_sorted_storage;
         }
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_numeric_bitmap<I, J, T>(
-            handle,
-            rocsparse::csrgemm_bitmap_scratch_after(
-                temp_buffer, info_C->csrgemm_info->buffer_size, d_perm, m),
-            n,
-            h_group_size[10],
-            &d_group_offset[10],
-            d_perm,
-            alpha_device_host,
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            base_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            base_B,
-            info_C->csrgemm_info->add,
-            beta_device_host,
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            base_D,
-            csr_row_ptr_C,
-            descr_C->base,
-            csr_col_ind_C,
-            csr_val_C)));
+        rocsparse::csrgemm_bitmap_region<I, J> region;
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrgemm_bitmap_region_at_tail<I, J>(
+            handle, temp_buffer, info_C->csrgemm_info->buffer_size, m, n, region)));
+
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrgemm_numeric_bitmap<I, J, T>(handle,
+                                                        region,
+                                                        m,
+                                                        n,
+                                                        h_group_size[10],
+                                                        &d_group_offset[10],
+                                                        d_perm,
+                                                        alpha_device_host,
+                                                        csr_row_ptr_A,
+                                                        csr_col_ind_A,
+                                                        csr_val_A,
+                                                        base_A,
+                                                        csr_row_ptr_B,
+                                                        csr_col_ind_B,
+                                                        csr_val_B,
+                                                        base_B,
+                                                        info_C->csrgemm_info->add,
+                                                        beta_device_host,
+                                                        csr_row_ptr_D,
+                                                        csr_col_ind_D,
+                                                        csr_val_D,
+                                                        base_D,
+                                                        csr_row_ptr_C,
+                                                        descr_C->base,
+                                                        csr_col_ind_C,
+                                                        csr_val_C)));
     }
 
 #undef CSRGEMM_FILL_BLOCK_PER_ROW
