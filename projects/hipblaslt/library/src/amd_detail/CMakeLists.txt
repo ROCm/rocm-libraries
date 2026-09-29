@@ -79,12 +79,22 @@ if(HIPBLASLT_BUILD_TESTING)
 endif()
 
 if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
-    add_executable(hipblaslt-jit-backend-test
-        "${PROJECT_SOURCE_DIR}/clients/tests/jit/alternate_backend_test.cpp")
-    target_include_directories(hipblaslt-jit-backend-test PRIVATE
+    add_executable(hipblaslt-jit-mock-backend-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/mock_backend_test.cpp")
+    target_include_directories(hipblaslt-jit-mock-backend-test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/include")
-    target_link_libraries(hipblaslt-jit-backend-test PRIVATE roc::hipblaslt hip::device)
-    target_compile_features(hipblaslt-jit-backend-test PRIVATE cxx_std_17)
+    target_link_libraries(hipblaslt-jit-mock-backend-test PRIVATE roc::hipblaslt hip::device)
+    target_compile_features(hipblaslt-jit-mock-backend-test PRIVATE cxx_std_17)
+
+    # Compiles the Jit stages directly; runs without a GPU.
+    add_executable(hipblaslt-jit-component-test
+        "${PROJECT_SOURCE_DIR}/clients/tests/jit/jit_component_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-tensilelite-defaults.cpp")
+    target_include_directories(hipblaslt-jit-component-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(hipblaslt-jit-component-test PRIVATE
+        roc::hipblaslt hip::host Threads::Threads)
+    target_compile_features(hipblaslt-jit-component-test PRIVATE cxx_std_17)
 
     add_executable(hipblaslt-jit-generic-api-test
         "${PROJECT_SOURCE_DIR}/clients/tests/jit/public_gemm_test.cpp")
@@ -92,6 +102,7 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
     target_compile_definitions(hipblaslt-jit-generic-api-test PRIVATE HIPBLASLT_TEST_GENERIC_JIT)
     target_compile_features(hipblaslt-jit-generic-api-test PRIVATE cxx_std_17)
     target_link_libraries(hipblaslt-jit-generic-api-test PRIVATE roc::hipblaslt hip::device)
-    set_target_properties(hipblaslt-jit-backend-test hipblaslt-jit-generic-api-test PROPERTIES
+    set_target_properties(hipblaslt-jit-mock-backend-test hipblaslt-jit-component-test
+                          hipblaslt-jit-generic-api-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
 endif()

@@ -31,7 +31,8 @@ def main():
             "direct-gemm",
             "generic-gemm",
             "generic-api",
-            "alternate-backend",
+            "mock-backend",
+            "jit-component",
             "streamk-api",
             "amax-api",
             "alpha-zero-api",
@@ -122,37 +123,16 @@ def main():
             {},
             60,
         ),
+        (
+            "jit-component",
+            [
+                str(staging / "hipblaslt-jit-component-test"),
+                str(output / "jit-component"),
+            ],
+            {},
+            60,
+        ),
     ]
-    if not args.case or "alternate-backend" in args.case:
-        code_object = output / "alternate-backend.hsaco"
-        compile_command = [
-            str(Path(compiler).parent / "hipcc"),
-            "--genco",
-            "--offload-arch=" + args.architecture,
-            str(
-                source
-                / "projects/hipblaslt/clients/tests/jit/alternate_backend_kernels.hip"
-            ),
-            "-o",
-            str(code_object),
-        ]
-        with (output / "alternate-backend-build.log").open("w") as log:
-            subprocess.run(
-                compile_command,
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                check=True,
-                timeout=300,
-            )
-        commands.append(
-            (
-                "alternate-backend",
-                [str(staging / "hipblaslt-jit-backend-test"), str(code_object)],
-                {},
-                120,
-            )
-        )
 
     fixture_suffix = "_gfx1250" if args.architecture == "gfx1250" else ""
     for name in ("direct-gemm", "generic-gemm"):
@@ -214,10 +194,8 @@ def main():
         )
         commands.append((name, command, streamk, 420))
 
-    if not args.case or any(
-        case in args.case
-        for case in ("splitk-api", "helper-failures", "bundle-failures")
-    ):
+    replays = ("helper-failures", "bundle-failures", "mock-backend")
+    if not args.case or any(case in args.case for case in ("splitk-api", *replays)):
         commands.append(
             (
                 "splitk-api",
@@ -274,6 +252,17 @@ def main():
                 420,
             )
         )
+        commands.append(
+            (
+                "mock-backend",
+                [
+                    str(staging / "hipblaslt-jit-mock-backend-test"),
+                    str(output / "splitk-api/bundle"),
+                ],
+                {},
+                120,
+            )
+        )
 
     bench_script = source / "projects/hipblaslt/clients/bench/test_jit_gemm.py"
     commands.append(
@@ -304,10 +293,7 @@ def main():
             args.case
             and name not in args.case
             and not (
-                name == "splitk-api"
-                and any(
-                    case in args.case for case in ("helper-failures", "bundle-failures")
-                )
+                name == "splitk-api" and any(case in args.case for case in replays)
             )
         ):
             continue
