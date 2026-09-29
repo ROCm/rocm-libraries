@@ -211,7 +211,7 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         uint32_t block_size      = WG_SIZE;
         uint32_t bin_max_row_len = (1 << j);
         uint32_t num_wgs_per_row = (bin_max_row_len - 1) / (BLOCK_MULTIPLIER * block_size) + 1;
-        int64_t  grid_size       = int64_t(csrmv_info->lrb.nRowsBins[j]) * num_wgs_per_row;
+        int64_t  grid_size = static_cast<int64_t>(csrmv_info->lrb.nRowsBins[j]) * num_wgs_per_row;
 
         max_required_grid = rocsparse::max(grid_size, max_required_grid);
     }
@@ -580,7 +580,8 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 {
                     // Overflow-safe integer ceiling division (float ceil loses precision for
                     // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
-                    int64_t  num_wgs   = (int64_t(info->lrb.nRowsBins[j]) - 1) / block_size + 1;
+                    int64_t num_wgs
+                        = (static_cast<int64_t>(info->lrb.nRowsBins[j]) - 1) / block_size + 1;
                     uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, block_size);
 
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -613,7 +614,8 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     uint32_t rows_per_wg = CSRMV_LRB_SHORT_ROWS_2_LDS_ELEMS >> j;
                     // Overflow-safe integer ceiling division (float ceil loses precision for
                     // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
-                    int64_t  num_wgs   = (int64_t(info->lrb.nRowsBins[j]) - 1) / rows_per_wg + 1;
+                    int64_t num_wgs
+                        = (static_cast<int64_t>(info->lrb.nRowsBins[j]) - 1) / rows_per_wg + 1;
                     uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, block_size);
 
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -800,7 +802,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 // Total cooperating workgroups for this bin. Widen to 64-bit before multiplying to
                 // avoid the 32-bit product wrapping (which would both undersize the launch and, via
                 // wg_flags sizing, corrupt the cross-workgroup synchronization).
-                int64_t count = int64_t(info->lrb.nRowsBins[j]) * num_wgs_per_row;
+                int64_t count = static_cast<int64_t>(info->lrb.nRowsBins[j]) * num_wgs_per_row;
 
                 // Clamp the launch grid, rounded down to a whole number of per-row workgroup
                 // groups so that all workgroups cooperating on a row stay within one grid-stride

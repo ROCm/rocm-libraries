@@ -182,8 +182,9 @@ namespace rocsparse
 
         // The launch grid is clamped to the device's maximum grid size, so iterate with a
         // grid-stride loop to cover every element that needs scaling.
-        const int64_t stride = (int64_t)WG_SIZE * hipGridDim_x;
-        for(int64_t gid = (int64_t)hipBlockIdx_x * WG_SIZE + hipThreadIdx_x; gid < required_threads;
+        const int64_t stride = static_cast<int64_t>(WG_SIZE) * hipGridDim_x;
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * WG_SIZE + hipThreadIdx_x;
+            gid < required_threads;
             gid += stride)
         {
             if(gid < first_row)
@@ -765,13 +766,13 @@ namespace rocsparse
         // device's maximum grid size, so iterate with a grid-stride loop to cover every block.
         const J num_wgs = (bin_num_rows + BLOCKSIZE - 1) / BLOCKSIZE;
 
-        for(J gid = hipBlockIdx_x; gid < num_wgs; gid += (J)hipGridDim_x)
+        for(J gid = hipBlockIdx_x; gid < num_wgs; gid += static_cast<J>(hipGridDim_x))
         {
             // Row offsets within the bin need J (the bin can hold 2^32 or more rows when
             // J = int64_t); offsets within the workgroup are bounded by BLOCKSIZE.
-            const J        wg_row_start = gid * (J)BLOCKSIZE;
-            const uint32_t wg_num_rows
-                = (uint32_t)rocsparse::min(bin_num_rows - wg_row_start, (J)BLOCKSIZE);
+            const J        wg_row_start = gid * static_cast<J>(BLOCKSIZE);
+            const uint32_t wg_num_rows  = static_cast<uint32_t>(
+                rocsparse::min(bin_num_rows - wg_row_start, static_cast<J>(BLOCKSIZE)));
             const J* wg_rows_bins = rows_bins + bin_start + wg_row_start;
 
             // Load a block of row data using all threads in the WG.
@@ -887,13 +888,13 @@ namespace rocsparse
         // device's maximum grid size, so iterate with a grid-stride loop to cover every block.
         const J num_wgs = (bin_num_rows + rows_per_wg - 1) / rows_per_wg;
 
-        for(J gid = hipBlockIdx_x; gid < num_wgs; gid += (J)hipGridDim_x)
+        for(J gid = hipBlockIdx_x; gid < num_wgs; gid += static_cast<J>(hipGridDim_x))
         {
             // Row offsets within the bin need J (the bin can hold 2^32 or more rows when
             // J = int64_t); offsets within the workgroup are bounded by rows_per_wg.
-            const J        wg_row_start = gid * (J)rows_per_wg;
-            const uint32_t wg_num_rows
-                = (uint32_t)rocsparse::min(bin_num_rows - wg_row_start, (J)rows_per_wg);
+            const J        wg_row_start = gid * static_cast<J>(rows_per_wg);
+            const uint32_t wg_num_rows  = static_cast<uint32_t>(
+                rocsparse::min(bin_num_rows - wg_row_start, static_cast<J>(rows_per_wg)));
             const J wg_bin_start = bin_start + wg_row_start;
 
             // Load a block of row data using all threads in the WG.
@@ -1012,8 +1013,8 @@ namespace rocsparse
         // One wavefront reduces one row. The launch grid is clamped to the device's maximum
         // grid size, so iterate with a grid-stride loop (in units of wavefronts) to cover every
         // row. This kernel uses no block-wide barriers, so divergent iteration counts are safe.
-        const int64_t warps_per_grid = (int64_t)(BLOCKSIZE / WF_SIZE) * hipGridDim_x;
-        for(int64_t gid = (int64_t)(BLOCKSIZE / WF_SIZE) * bid + wid; gid < count;
+        const int64_t warps_per_grid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * hipGridDim_x;
+        for(int64_t gid = static_cast<int64_t>(BLOCKSIZE / WF_SIZE) * bid + wid; gid < count;
             gid += warps_per_grid)
         {
             const J row = rows_bins[bin_start + gid];
@@ -1100,7 +1101,7 @@ namespace rocsparse
         // One block reduces one row. The launch grid is clamped to the device's maximum grid
         // size, so iterate with a grid-stride loop to cover every row. All threads in a block
         // share the same gid, so the block-wide barriers below stay uniform.
-        for(int64_t gid = hipBlockIdx_x; gid < count; gid += (int64_t)hipGridDim_x)
+        for(int64_t gid = hipBlockIdx_x; gid < count; gid += static_cast<int64_t>(hipGridDim_x))
         {
             const J row = rows_bins[bin_start + gid];
 
@@ -1203,7 +1204,7 @@ namespace rocsparse
         // is a multiple of num_wgs_per_row, every workgroup cooperating on a given row falls within
         // the same grid-stride wave, preserving the cross-workgroup spin-loop synchronization
         // contract (all workgroups of a row must run concurrently for the flag hand-off to work).
-        for(int64_t gid = hipBlockIdx_x; gid < count; gid += (int64_t)hipGridDim_x)
+        for(int64_t gid = hipBlockIdx_x; gid < count; gid += static_cast<int64_t>(hipGridDim_x))
         {
             const J row_idx = gid / num_wgs_per_row;
             const J wg      = gid % num_wgs_per_row;
@@ -1217,10 +1218,11 @@ namespace rocsparse
             // TODO: Can the wg_flags-based coordination be done instead with cooperative-groups?
 
             // Each workgroup computes exactly one row.
-            const I vecStart
-                = (I)wg * (I)BLOCK_MULTIPLIER * BLOCKSIZE + csr_row_ptr[row] - idx_base;
-            const I vecEnd = rocsparse::min(csr_row_ptr[row + 1] - idx_base,
-                                            vecStart + I(BLOCK_MULTIPLIER * BLOCKSIZE));
+            const I vecStart = static_cast<I>(wg) * static_cast<I>(BLOCK_MULTIPLIER) * BLOCKSIZE
+                               + csr_row_ptr[row] - idx_base;
+            const I vecEnd
+                = rocsparse::min(csr_row_ptr[row + 1] - idx_base,
+                                 vecStart + static_cast<I>(BLOCK_MULTIPLIER * BLOCKSIZE));
 
             T temp_sum = static_cast<T>(0);
 
