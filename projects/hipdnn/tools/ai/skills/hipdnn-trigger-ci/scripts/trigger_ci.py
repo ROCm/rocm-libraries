@@ -5,30 +5,31 @@ Defaults to the current git branch. Override with --branch.
 
 Examples:
     # Dispatch TheRock CI for integration-tests on gfx94X (current branch)
-    python3 .github/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X \\
+    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X \\
         --projects "dnn-providers/integration-tests"
 
     # Dry-run: print the gh command without executing
-    python3 .github/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X --dry-run
+    python3 <skill>/scripts/trigger_ci.py dispatch -w therock-ci --gfx gfx94X --dry-run
 
     # Dispatch on a specific branch
-    python3 .github/scripts/trigger_ci.py --branch users/someone/feature dispatch \\
+    python3 <skill>/scripts/trigger_ci.py --branch users/someone/feature dispatch \\
         -w hipdnn-superbuild
 
     # Multi-arch CI with test labels
-    python3 .github/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950
+    python3 <skill>/scripts/trigger_ci.py dispatch -w multi-arch --gfx gfx94X,gfx950 \\
+        --test-labels test:hipdnn,test:miopenprovider
 
     # Check CI status for a PR
-    python3 .github/scripts/trigger_ci.py --pr 10770 status
+    python3 <skill>/scripts/trigger_ci.py --pr 10770 status
 
     # Check CI status for the current branch (no --pr needed)
-    python3 .github/scripts/trigger_ci.py status
+    python3 <skill>/scripts/trigger_ci.py status
 
     # Watch the most recent active run on the current branch
-    python3 .github/scripts/trigger_ci.py watch
+    python3 <skill>/scripts/trigger_ci.py watch
 
     # Watch a specific run by ID
-    python3 .github/scripts/trigger_ci.py watch --run-id 33443403983
+    python3 <skill>/scripts/trigger_ci.py watch --run-id 33443403983
 """
 
 import json
@@ -304,9 +305,18 @@ def main():
         description="Trigger CI on a rocm-libraries branch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-available GFX families: gfx94X, gfx950, gfx125X, gfx1151, gfx110X, gfx120X
-available test labels:  test:hipdnn, test:integration-tests, test:hipblaslt, test:miopen, ...
-available test_type:    test_type:quick, test_type:standard, test_type:comprehensive, test_type:full
+GPU families (case-insensitive; from TheRock build_tools/github_actions/amdgpu_family_matrix.py):
+  presubmit:   gfx94X, gfx110X, gfx1151, gfx120X, gfx125X
+  postsubmit:  gfx90a, gfx950
+  nightly:     gfx900, gfx90c, gfx906, gfx908, gfx101X, gfx103X, gfx1150, gfx1152, gfx1153
+  multi-arch only: gfx1250-strict, all, none
+  Families without an entry for the target platform are dropped.
+
+hipDNN test labels (multi-arch; from TheRock fetch_test_configurations.py test_matrix):
+  test:hipdnn, test:hipdnn_install, test:hipdnn-integration-tests, test:hipdnn-samples,
+  test:miopenprovider, test:hipblasltprovider, test:hipkernelprovider
+  The test: prefix is optional. Any test label selects the full test tier; add
+  test_filter:<quick|standard|comprehensive|full> to the same list to pick the tier.
         """,
     )
     parser.add_argument(
@@ -339,19 +349,22 @@ available test_type:    test_type:quick, test_type:standard, test_type:comprehen
         "--windows-gfx", dest="windows_gfx", default="", help="Windows GPU families"
     )
     dispatch.add_argument(
-        "--projects", default="", help="Projects to build (therock-ci only)"
+        "--projects",
+        default="",
+        help="Space-separated subtree paths from .github/scripts/therock_matrix.py, "
+        "or 'all' (therock-ci only)",
     )
     dispatch.add_argument(
         "--test-labels",
         dest="test_labels",
         default="",
-        help="Test labels (multi-arch only)",
+        help="Linux test labels, comma-separated (multi-arch only)",
     )
     dispatch.add_argument(
         "--windows-test-labels",
         dest="windows_test_labels",
         default="",
-        help="Windows test labels",
+        help="Windows test labels, comma-separated (multi-arch only)",
     )
     dispatch.add_argument(
         "--dry-run", action="store_true", help="Print the gh command without executing"
