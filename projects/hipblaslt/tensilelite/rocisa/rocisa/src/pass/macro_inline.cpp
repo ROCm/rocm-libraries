@@ -117,6 +117,13 @@ namespace rocisa
                 val = std::get<1>(*find_it);
             }
 
+            // Macro conditions select instructions during kernel generation. For
+            // example, the scheduler uses "\useGR == 0 && \usePLR == 1" to choose
+            // waits for one loop stage. Token positions repeat as:
+            //   0: lhs, 1: == or !=, 2: rhs, 3: &&
+            // Case 2 records each comparison's result; case 3 records the && so
+            // the reduction below combines every result. The final comparison
+            // ends at position 2, with no trailing &&.
             switch(tokenIdx)
             {
             case 0: lhs = val; break;
