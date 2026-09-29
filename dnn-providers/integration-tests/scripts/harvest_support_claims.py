@@ -35,7 +35,9 @@ Runs
    a job log, or a directory of *.log job logs.  Each --run ID is a run
    fetched from GitHub with the gh CLI: the logs of its jobs whose name
    matches --jobs and that succeeded or failed.  With neither, the latest
-   completed scheduled run of the develop nightly is fetched.
+   completed scheduled run of the develop nightly is fetched.  A log whose
+   text appears in two runs is refused, so no run counts twice toward
+   --min-runs.
 5. A log with a rejected block contributes nothing, and the exit status is
    1.  A log with no block, and a matching job that neither succeeded nor
    failed, is listed under Missing: its engines are absent from the
@@ -65,6 +67,7 @@ refused, 2 on a usage error or when a run or develop cannot be fetched.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -750,6 +753,20 @@ def _read_run(path: Path) -> List[Tuple[str, str]]:
     return [(str(f), f.read_text(encoding="utf-8", errors="replace")) for f in files]
 
 
+def repeated_log(
+    runs: Sequence[Sequence[Tuple[str, str]]],
+) -> Optional[Tuple[str, str]]:
+    """Two paths of logs with the same text in different runs, or None."""
+    seen: Dict[str, Tuple[int, str]] = {}
+    for index, run in enumerate(runs):
+        for path, text in run:
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            first = seen.setdefault(digest, (index, path))
+            if first[0] != index:
+                return first[1], path
+    return None
+
+
 Git = Callable[[List[str]], bytes]
 
 
@@ -913,6 +930,14 @@ def main(
             jobs += found
     except (OSError, FetchError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    repeated_pair = repeated_log(runs)
+    if repeated_pair:
+        first, second = repeated_pair
+        print(
+            f"error: {first} and {second} are the same log in two runs",
+            file=sys.stderr,
+        )
         return 2
 
     result = harvest(runs, args.min_runs, arch_platform)

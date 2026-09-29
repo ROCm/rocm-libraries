@@ -743,6 +743,28 @@ class TestMain(unittest.TestCase):
                 self.assertEqual(self._main(*argv, gh=gh)[0], 2)
                 self.assertEqual(gh.calls, [])
 
+    def test_same_log_in_two_runs_exits_2(self) -> None:
+        log = self._write("run/a.log", _single_log(_summary()))
+        copy = self._write("b.log", _single_log(_summary()))
+        cases = {
+            "path twice": [log, log],
+            "file and its directory": [log, str(self.root / "run")],
+            "copy of a log": [log, copy],
+        }
+        for name, argv in cases.items():
+            with self.subTest(name):
+                code, out, err = self._main(*argv, "--min-runs", "2")
+                self.assertEqual(code, 2)
+                self.assertEqual(out, "")
+                self.assertIn("are the same log in two runs", err)
+
+    def test_distinct_logs_satisfy_min_runs(self) -> None:
+        first = self._write("a.log", _single_log(_summary()))
+        second = self._write("b.log", _doubled(_summary()))
+        code, out, _ = self._main(first, second, "--min-runs", "2")
+        self.assertEqual(code, 0)
+        self.assertIn("gfx1030/windows        3 claims", out)
+
 
 class FakeGit:
     """Serves the git commands that read sidecars from the tip of develop."""
@@ -1122,10 +1144,23 @@ class TestFetch(unittest.TestCase):
         log = tempfile.NamedTemporaryFile("w", suffix=".log", delete=False)
         self.addCleanup(Path(log.name).unlink)
         with log:
-            log.write(_single_log(_summary()))
+            log.write(_doubled(_summary()))
         code, out, _ = self._main(self._gh(), log.name, "--run", "7", "--min-runs", "2")
         self.assertEqual(code, 0)
         self.assertIn("gfx1030/windows        3 claims", out)
+
+    def test_downloaded_copy_of_a_fetched_log_exits_2(self) -> None:
+        log = tempfile.NamedTemporaryFile("w", suffix=".log", delete=False)
+        self.addCleanup(Path(log.name).unlink)
+        with log:
+            log.write(_single_log(_summary()))
+        code, _, err = self._main(self._gh(), log.name, "--run", "7", "--min-runs", "2")
+        self.assertEqual(code, 2)
+        self.assertIn(
+            f"{log.name} and https://github.com/ROCm/rocm-libraries/actions/runs/7/job/11"
+            " are the same log in two runs",
+            err,
+        )
 
     def test_jobs_selects_by_name(self) -> None:
         gh = self._gh()
