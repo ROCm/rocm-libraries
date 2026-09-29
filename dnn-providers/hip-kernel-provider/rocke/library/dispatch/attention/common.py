@@ -130,17 +130,19 @@ class AttentionRequest(OperatorRequest):
     #     ``attention_dense`` candidate; ignored by the unified 2D/3D paths).
     #     Defaults deliver the best qualified persistent prefill path for large Sq:
     #     ``dense_persistent="auto"`` turns on the grid-stride variant once there
-    #     is enough work to fill the persistent grid, and ``persist_decode="auto"``
-    #     resolves through the selected architecture's concrete dense spec.
-    #     gfx950 may select one-/two-phase GQA pairing and wide DMA; gfx942
-    #     supports only qb-major/hkv-major ordering. ---
+    #     is enough work to fill the persistent grid, and the ``*_decode="auto"``
+    #     block orders resolve through the selected architecture's concrete
+    #     dense spec. ---
     dense_persistent: str = "auto"  # "auto" | "on" | "off"
     dense_num_persistent: int = 256
     # 0 keeps the architecture's shipped policy; 1..8 pins the emitted
     # amdgpu-waves-per-eu attribute. Dense sweeps expand an unpinned request.
     dense_waves_per_eu: int = 0
-    # Common: auto/qb_major/hkv_major; gfx950 also supports gqa_pair variants.
+    # Block order of the persistent grid (the spec's persist_decode values).
     dense_persist_decode: str = "auto"
+    # Block order of the non-persistent grid (the spec's nonpersist_decode
+    # values); ignored when dispatch picks the persistent grid.
+    dense_nonpersist_decode: str = "auto"
     # gfx950 dense variant pins. ``auto`` does not filter that axis; the
     # ranker / ``dense_spec_for_request`` still apply the historical policy.
     # ``dense_tile`` names a DENSE_TILE_GEOMETRIES key (``default`` / ``bm128``).

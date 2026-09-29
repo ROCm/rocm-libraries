@@ -1003,6 +1003,27 @@ class TestGfx950DenseVariants(unittest.TestCase):
         self.assertFalse(spec.wide_lds_dma)
         self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
 
+    def test_nonpersist_decode_request_pin_reaches_spec(self):
+        req = _gfx950_dense_req(dense_nonpersist_decode="hq_minor_swz")
+        spec = dense_spec_for_request(req)
+        self.assertFalse(spec.persistent)
+        self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
+
+    def test_pinned_nonpersist_decode_keeps_large_mha_persistent(self):
+        req = _gfx950_dense_req(
+            batch=4,
+            nhead_q=64,
+            nhead_k=64,
+            seqlen_q=8192,
+            seqlen_k=8192,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="fp16",
+            dense_nonpersist_decode="bt_hkv_minor",
+        )
+        spec = dense_spec_for_request(req)
+        self.assertTrue(spec.persistent)
+
     def test_registered_combos_include_dense_not_unified_2d(self):
         from dispatch.attention import registered_attention_combos
 

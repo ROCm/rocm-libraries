@@ -1437,7 +1437,7 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_nonpersist_decode_builds_names_and_rejects_on_both_arches(self):
         """Every nonpersist decode builds, fills the grid and gets its own name;
-        an explicit value on the persistent grid, or an unknown one, is rejected."""
+        the persistent grid ignores it, and an unknown value is rejected."""
         from kernels.common.attention_dense_decode import NONPERSIST_DECODES
         from kernels.gfx942 import attention_dense as k942
         from kernels.gfx950 import attention_dense as k950
@@ -1464,9 +1464,10 @@ class TestAttentionHelpers(unittest.TestCase):
                                  names[auto.resolved_nonpersist_decode])
                 with self.assertRaisesRegex(ValueError, "nonpersist_decode"):
                     Spec(**base, nonpersist_decode="nope")
-                with self.assertRaisesRegex(ValueError, "non-persistent grid"):
-                    Spec(**base, persistent=True, num_persistent=256,
-                         nonpersist_decode="bt_hkv_minor")
+                persistent = dict(base, persistent=True, num_persistent=256)
+                self.assertEqual(
+                    Spec(**persistent, nonpersist_decode="bt_hkv_minor").kernel_name(),
+                    Spec(**persistent).kernel_name())
 
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill

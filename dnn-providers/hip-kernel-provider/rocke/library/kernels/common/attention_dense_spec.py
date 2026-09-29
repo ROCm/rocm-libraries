@@ -89,7 +89,7 @@ class AttentionDenseSpec:
     use_sinks: bool = False
     # Appended for positional compatibility with existing concrete specs.
     causal_bottom_right: bool = field(default=False, kw_only=True)
-    # Block order of the non-persistent grid (persistent specs use persist_decode).
+    # Block order of the non-persistent grid; ignored on the persistent one.
     nonpersist_decode: str = field(default="auto", kw_only=True)
     # XCDs the hardware round-robins workgroups over. A wrong value keeps results
     # correct and only weakens the L2 locality of the XCD-aware block orders.
@@ -181,12 +181,7 @@ class AttentionDenseSpec:
                 f"{sorted({'auto', *NONPERSIST_DECODES})}, "
                 f"got {self.nonpersist_decode!r}"
             )
-        if self.nonpersist_decode != "auto":
-            if self.persistent:
-                raise ValueError(
-                    "nonpersist_decode applies to the non-persistent grid; "
-                    "use persist_decode with persistent=True"
-                )
+        if self.nonpersist_decode != "auto" and not self.persistent:
             why = NONPERSIST_DECODES[self.nonpersist_decode].check(self)
             if why:
                 raise ValueError(why)

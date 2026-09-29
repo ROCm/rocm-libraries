@@ -220,6 +220,7 @@ def _dense_spec(req: OperatorRequest):
         persistent=persistent,
         num_persistent=np,
         persist_decode=req.dense_persist_decode.strip().lower(),
+        nonpersist_decode=req.dense_nonpersist_decode.strip().lower(),
         ragged=ragged,
         sliding_window=int(req.sliding_window),
         waves_per_eu=_resolve_dense_waves_per_eu(
