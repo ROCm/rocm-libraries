@@ -91,8 +91,8 @@ namespace rocsparse
         // (Sub)wavefront id within the block
         int wid = hipThreadIdx_x / WFSIZE;
 
-        // Each (sub)wavefront processes a row, grid-strided so a grid clamped to
-        // maxGridSize[0] still covers every row
+        // Each (sub)wavefront processes a row, grid-strided so a grid clamped by
+        // get_grid_size_x still covers every row
         for(int64_t row = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; row < m;
             row += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
@@ -491,7 +491,8 @@ namespace rocsparse
         // Local hash table
         J* table = &stable[wid * HASHSIZE];
 
-        // Grid-stride over the (sub)wavefront rows so a grid clamped to maxGridSize[0] covers all
+        // Grid-stride over the (sub)wavefront rows so a grid clamped by get_grid_size_x
+        // covers all rows
         for(int64_t idx = static_cast<int64_t>(hipBlockIdx_x) * (BLOCKSIZE / WFSIZE) + wid; idx < m;
             idx += static_cast<int64_t>(hipGridDim_x) * (BLOCKSIZE / WFSIZE))
         {
@@ -600,7 +601,7 @@ namespace rocsparse
         extern __shared__ char shared_memory[];
         J*                     table = (J*)shared_memory;
 
-        // Grid-stride over the block rows so a grid clamped to maxGridSize[0] covers all
+        // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
         for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             // Each block processes a row (apply permutation)
@@ -733,7 +734,7 @@ namespace rocsparse
         // current chunk
         __shared__ J next_chunk;
 
-        // Grid-stride over the block rows so a grid clamped to maxGridSize[0] covers all
+        // Grid-stride over the block rows so a grid clamped by get_grid_size_x covers all rows
         for(J block_id = hipBlockIdx_x; block_id < size; block_id += hipGridDim_x)
         {
             // Each block processes a row (apply permutation)
@@ -954,7 +955,7 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WFSIZE;
 
         // Each (sub)wavefront processes a row (block_offset supplied by the grid-stride
-        // loop in the kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        // loop in the kernel wrapper so a grid clamped by get_grid_size_x still covers all rows)
         J row = block_offset + wid;
 
         // Hash table in shared memory
@@ -1137,7 +1138,7 @@ namespace rocsparse
         __syncthreads();
 
         // Each block processes a row (apply permutation; block_id supplied by the grid-stride
-        // loop in the kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        // loop in the kernel wrapper so a grid clamped by get_grid_size_x still covers all rows)
         J row = perm[block_id + *offset_];
 
         // alpha * A * B part
@@ -1343,7 +1344,7 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WFSIZE;
 
         // Each block processes a row (apply permutation; block_id supplied by the grid-stride
-        // loop in the kernel wrapper so a grid clamped to maxGridSize[0] still covers all rows)
+        // loop in the kernel wrapper so a grid clamped by get_grid_size_x still covers all rows)
         J row = perm[block_id + *offset_];
 
         // Row entry marker and value accumulator
