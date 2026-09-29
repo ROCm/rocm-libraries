@@ -71,7 +71,7 @@ class Tuner(BaseTuner):
 
         for key_type in COMMON_KEY_TYPES:
             for value_type in VALUE_TYPES:
-                self.tune_type(key_type, value_type)
+                self.tune_type({"key_type" : key_type, "value_type" : value_type})
 
 
 if __name__ == "__main__":

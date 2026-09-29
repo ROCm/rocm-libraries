@@ -69,10 +69,8 @@ class Tuner(BaseTuner):
     def tune_all(self) -> None:
         """Tune for all value type combinations"""
 
-        VALUE_TYPES = COMMON_VALUE_TYPES
-
-        for value_type in VALUE_TYPES:
-            self.tune_type(value_type)
+        for value_type in COMMON_VALUE_TYPES:
+            self.tune_type({"value_type" : value_type})
 
 
 if __name__ == "__main__":

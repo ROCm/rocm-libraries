@@ -90,7 +90,7 @@ class Tuner(BaseTuner):
         """Tune for all value type combinations"""
 
         for key_type in COMMON_KEY_TYPES:
-                self.tune_type(key_type)
+            self.tune_type({"key_type" : key_type})
 
 
 if __name__ == "__main__":
