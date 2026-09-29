@@ -780,12 +780,9 @@ TEST_F(IntegrationGpuKernelIngestorKpack, TheModelsChoiceExecutesCorrectly)
     ASSERT_EQ(servingEngineId, modelEngineId())
         << "engine id " << servingEngineId << " served the graph, not " << MODEL_ENGINE_NAME;
 
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    ASSERT_GE(workspaceSize, 0);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, /*seed=*/0);
 }
 
 // ---------------------------------------------------------------------------
@@ -910,13 +907,21 @@ protected:
         ASSERT_EQ(servingEngineId, engineId)
             << "engine id " << servingEngineId << " served the pinned graph, not " << engineName;
 
-        int64_t workspaceSize = 0;
-        result = graph.get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-        executeAndVerify(graph, workspace.get(), /*seed=*/0);
+        // BF16 attention against the CPU reference: the tolerance the ASM SDPA forward
+        // suites use for the same dtype. What this fixture proves is the reset, so the
+        // bound only has to rule out garbage from a dropped or corrupted module.
+        constexpr float BF16_ATTENTION_TOLERANCE = 1e-2f;
+        GraphVerificationContext context(graph);
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& output : node.getNodeOutputTensorAttributes())
+            {
+                if(!output->get_is_virtual())
+                {
+                    registerValidator(context, output, BF16_ATTENTION_TOLERANCE);
+                }
+            }
+        });
+        verifyBuiltGraph(context, /*seed=*/0);
     }
 };
 

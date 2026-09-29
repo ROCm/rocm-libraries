@@ -720,11 +720,9 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesAModelSelectedKernelOnDevice)
     auto graph = buildPointwiseAddGraph();
     buildAndCompile(*graph, modelEngineId());
 
-    int64_t workspaceSize = 0;
-    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
-    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-    executeAndVerify(*graph, workspace.get(), 0U);
+    GraphVerificationContext context(*graph);
+    registerValidatorsForOutputs(context, POINTWISE_TOLERANCE_EPSILONS);
+    verifyBuiltGraph(context, 0U);
 }
 
 TEST_F(IntegrationGpuKernelIngestor, BothPointwiseEnginesOfferTheSameGraph)
