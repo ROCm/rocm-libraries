@@ -30,7 +30,6 @@ Run the KDA work-keying study across several head geometries::
 from __future__ import annotations
 
 import argparse
-import dataclasses as dc
 import sys
 
 import torch
@@ -43,34 +42,12 @@ from builders.gfx950.gdn.gdn_decode import (
     prepare,
     ref_fp32,
 )
-from dispatch.gdn.gfx950 import tile_for_batch, tile_for_work
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode, dispatch_gdn_decode_all
+from dispatch.gdn.gfx950 import tile_for_work
 from kernels.gfx950.gdn_decode import GdnDecodeSpec, is_valid_spec
 
 ARCH = "gfx950"
 DEFAULT_BATCHES = (1, 16, 64, 256)
-
-# Search space. Anything illegal for the requested shape is pruned by the
-# kernel's own validator rather than by a second copy of its rules here.
-_NUM_WARPS = (1, 2, 4, 8, 16)
-_WARP_THREADS_K = (1, 2, 4, 8, 16, 32)
-_BLOCKS_PER_V = (1, 2, 4, 8, 16, 32)
-
-
-def legal_configs(base: GdnDecodeSpec):
-    out = []
-    for num_warps in _NUM_WARPS:
-        for warp_threads_k in _WARP_THREADS_K:
-            for blocks_per_v_dim in _BLOCKS_PER_V:
-                spec = dc.replace(
-                    base,
-                    num_warps=num_warps,
-                    warp_threads_k=warp_threads_k,
-                    blocks_per_v_dim=blocks_per_v_dim,
-                )
-                ok, _ = is_valid_spec(spec, arch=ARCH)
-                if ok:
-                    out.append((num_warps, warp_threads_k, blocks_per_v_dim))
-    return out
 
 
 def device_us(values, cfg, launcher, reps: int = 32):
@@ -101,8 +78,9 @@ def device_us(values, cfg, launcher, reps: int = 32):
     return best
 
 
-def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
-    """Correct, timed configurations for one batch, fastest first."""
+def sweep_batch(batch: int, results):
+    """Return correct, timed registry candidates for one batch, fastest first."""
+    base = results[0].spec
     inp = make_inputs(base, batch)
     ref_out, ref_state = ref_fp32(base, inp)
     written = inp["write_indices"].long()
@@ -116,17 +94,13 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
     untouched[written] = False
 
     rows = []
-    for tile in configs:
-        spec = dc.replace(
-            base,
-            num_warps=tile[0],
-            warp_threads_k=tile[1],
-            blocks_per_v_dim=tile[2],
-        )
+    for result in results:
+        spec = result.spec
+        tile = (spec.num_warps, spec.warp_threads_k, spec.blocks_per_v_dim)
         try:
             launcher = launcher_for(spec, arch=ARCH)
         except Exception as exc:
-            print(f"  {tile} compile failed: {type(exc).__name__}", file=sys.stderr)
+            print(f"  {result.candidate.spec_id} compile failed: {type(exc).__name__}", file=sys.stderr)
             continue
         values, cfg = prepare(spec, inp, batch)
         launch(launcher, values, cfg)
@@ -136,19 +110,19 @@ def sweep_batch(base: GdnDecodeSpec, batch: int, configs):
             (values["state"].float()[written] - ref_state).abs().max().item(),
         )
         if untouched.any():
-            spill = (
-                (values["state"][untouched].float() - inp["state"][untouched].float())
-                .abs()
-                .max()
-                .item()
+            err = max(
+                err,
+                (values["state"][untouched] != inp["state"][untouched])
+                .any()
+                .to(torch.float32)
+                .item(),
             )
-            err = max(err, spill)
         if err > TOL:
-            print(f"  {tile} INCORRECT err={err:.3e}", file=sys.stderr)
+            print(f"  {result.candidate.spec_id} INCORRECT err={err:.3e}", file=sys.stderr)
             continue
         micros = device_us(values, cfg, launcher)
         if micros is not None:
-            rows.append((micros, tile, err))
+            rows.append((micros, tile, result.candidate.spec_id, err))
     rows.sort()
     return rows
 
@@ -164,11 +138,11 @@ def report_missing_cells(missing_cells) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument(
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
         "--batches",
-        default=",".join(str(b) for b in DEFAULT_BATCHES),
-        help="comma-separated decode batch sizes to tune for",
+        default=",".join(str(batch) for batch in DEFAULT_BATCHES),
+        help="comma-separated decode batch sizes",
     )
     ap.add_argument(
         "--gate-kind",

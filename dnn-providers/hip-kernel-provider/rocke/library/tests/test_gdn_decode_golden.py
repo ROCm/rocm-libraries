@@ -48,10 +48,10 @@ if sys.path and sys.path[0] != _LIB_ROOT:
 def _cases():
     """case id -> zero-arg builder returning a KernelDef.
 
-    Covers the default spec, the reference path, and every tile the dispatcher
-    can select, so a change to any shipped configuration is visible.
+    Covers the default spec, the reference path, and every legal registered
+    tile, so a change to any selectable configuration is visible.
     """
-    from dispatch.gdn.gfx950 import _TUNED_TILES_GDN, _TUNED_TILES_KDA
+from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
     from kernels.gfx950.gdn_decode import GdnDecodeSpec, build_gdn_decode
 
     def build(**overrides):
@@ -69,14 +69,10 @@ def _cases():
         "kda_simple": build(gate_kind="kda", simple=True),
         "kda_raw_gate": build(gate_kind="kda", fuse_gate=False),
     }
-    # Each gate kind has its own tuned table, so each is pinned against its own
-    # tiles. Pinning KDA against GDN's tiles would cover a configuration the
-    # dispatcher can never select.
-    for _, tile, spec_id in _TUNED_TILES_GDN:
-        cases[f"tuned_{spec_id}"] = build(
-            num_warps=tile[0],
-            warp_threads_k=tile[1],
-            blocks_per_v_dim=tile[2],
+    request = GdnDecodeRequest(batch=16, arch=_ARCH)
+    for result in dispatch_gdn_decode_all(request):
+        cases[f"registered_{result.candidate.spec_id}"] = (
+            lambda spec=result.spec: build_gdn_decode(spec, arch=_ARCH)
         )
     for _, tile, spec_id in _TUNED_TILES_KDA:
         cases[f"tuned_{spec_id}"] = build(

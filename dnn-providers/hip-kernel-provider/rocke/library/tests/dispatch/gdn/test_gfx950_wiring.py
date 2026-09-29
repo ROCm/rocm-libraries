@@ -28,6 +28,7 @@ from dispatch.gdn.gfx950 import (
     tile_for_batch,
     tile_for_work,
 )
+from dispatch.gdn.gfx950 import ARCH, CONFIGURED_TILES, DEFAULT_TILE
 from kernels.gfx950.gdn_decode import (
     gdn_decode_grid,
     gdn_decode_signature,
@@ -43,39 +44,25 @@ def _req(batch: int, **kw) -> GdnDecodeRequest:
 
 
 class TestRegistration(unittest.TestCase):
-    def test_every_tuned_tile_is_registered(self):
+    def test_every_configured_tile_is_registered(self):
         names = {c.spec_id for c in gdn_candidates()}
-        self.assertEqual(names, set(TUNED_SPEC_IDS))
+        expected = {f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES}
+        self.assertEqual(names, expected)
 
     def test_registry_family_is_consistent(self):
         for cand in gdn_candidates():
             self.assertEqual(cand.family, GDN_REGISTRY.family)
 
 
-class TestTunedSelection(unittest.TestCase):
-    """The measured anchors must select the tile the sweep actually won with."""
+class TestStaticSelection(unittest.TestCase):
+    """Production auto must use one static default rather than batch winners."""
 
-    ANCHORS = {1: (4, 16, 8), 16: (2, 8, 2), 64: (1, 8, 1), 256: (8, 16, 1)}
-
-    def test_measured_anchors_select_their_tile(self):
-        for batch, tile in self.ANCHORS.items():
+    def test_all_batch_anchors_select_the_default_tile(self):
+        for batch in (1, 16, 64, 256):
             with self.subTest(batch=batch):
-                self.assertEqual(_TILE(dispatch_gdn_decode(_req(batch)).spec), tile)
-
-    def test_band_edges_are_where_the_table_says(self):
-        # Guards against an off-by-one that would silently mis-tune a whole band.
-        for batch, expected in (
-            (4, (4, 16, 8)),
-            (5, (2, 8, 2)),
-            (32, (2, 8, 2)),
-            (33, (1, 8, 1)),
-            (128, (1, 8, 1)),
-            (129, (8, 16, 1)),
-        ):
-            with self.subTest(batch=batch):
-                spec = dispatch_gdn_decode(_req(batch)).spec
-                self.assertEqual(_TILE(spec), expected)
-                self.assertEqual(_TILE(spec), tile_for_batch(batch))
+                self.assertEqual(
+                    _TILE(dispatch_gdn_decode(_req(batch)).spec), DEFAULT_TILE
+                )
 
     def test_selected_spec_is_always_buildable(self):
         for batch in (1, 4, 5, 16, 33, 64, 129, 256, 8192):
@@ -85,15 +72,12 @@ class TestTunedSelection(unittest.TestCase):
                 )
                 self.assertTrue(ok, why)
 
-    def test_supported_geometry_falls_back_when_tuned_tile_is_invalid(self):
-        # batch 1's tuned tile is b4 (warp_threads_k=16 -> warp_tile_k=128), which
-        # is invalid for head_k_dim=64; b32 (warp_tile_k=64) is a valid fallback,
-        # so a kernel-supported request must still dispatch, not fail.
+    def test_supported_geometry_falls_back_when_default_is_invalid(self):
         result = dispatch_gdn_decode(_req(1, head_k_dim=64))
         ok, why = is_valid_spec(result.spec, arch=ARCH)
         self.assertTrue(ok, why)
         self.assertEqual(result.spec.head_k_dim, 64)
-        self.assertNotEqual(result.candidate.spec_id, "b4")  # fell off the tuned tile
+        self.assertNotEqual(_TILE(result.spec), DEFAULT_TILE)
 
 
 class TestRequestRejection(unittest.TestCase):
@@ -153,30 +137,41 @@ class TestRequestRejection(unittest.TestCase):
 
 
 class TestSpecIdPin(unittest.TestCase):
-    def test_pin_overrides_the_tuning_table(self):
-        # A tuner must be able to force a non-default tile, otherwise the tuned
-        # table could never be re-measured or challenged.
-        result = dispatch_gdn_decode(_req(256, spec_id="b4"))
-        self.assertEqual(result.candidate.spec_id, "b4")
+    def test_pin_selects_the_exact_registered_tile(self):
+        result = dispatch_gdn_decode(
+            _req(256, algorithm="warp_tiled", spec_id="nw4_wtk16_bpv8")
+        )
+        self.assertEqual(result.candidate.spec_id, "nw4_wtk16_bpv8")
         self.assertEqual(_TILE(result.spec), (4, 16, 8))
 
-    def test_every_pin_is_reachable_with_its_own_gate_kind(self):
-        # Each tuned tile belongs to exactly one gate kind's table, so a pin is
-        # reachable from a request of that kind and only that kind.
+    def test_every_legal_gdn_pin_is_reachable_at_any_batch(self):
+        for candidate in gdn_candidates():
+            if candidate.spec_id.startswith("kda_"):
+                continue
+            req = _req(64, algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+            if not candidate.admits(req)[0]:
+                continue
+            with self.subTest(spec_id=candidate.spec_id):
+                got = dispatch_gdn_decode(req)
+                self.assertEqual(got.candidate.spec_id, candidate.spec_id)
+
+    def test_every_kda_pin_is_reachable_with_kda_gate(self):
         for spec_id in TUNED_SPEC_IDS:
-            gate_kind = "kda" if spec_id.startswith("kda_") else "gdn"
-            with self.subTest(spec_id=spec_id, gate_kind=gate_kind):
+            with self.subTest(spec_id=spec_id):
                 got = dispatch_gdn_decode(
                     GdnDecodeRequest(
-                        batch=64, arch=ARCH, spec_id=spec_id, gate_kind=gate_kind
+                        batch=64,
+                        arch=ARCH,
+                        spec_id=spec_id,
+                        gate_kind="kda",
+                        num_k_heads=32,
+                        num_v_heads=32,
                     )
                 )
                 self.assertEqual(got.candidate.spec_id, spec_id)
-                self.assertEqual(got.spec.gate_kind, gate_kind)
+                self.assertEqual(got.spec.gate_kind, "kda")
 
-    def test_a_pin_cannot_cross_gate_kinds(self):
-        # Serving a KDA pin to a GDN request would hand it a tile tuned for a
-        # different kernel. That must fail loudly, not silently fall back.
+    def test_a_kda_pin_cannot_serve_gdn(self):
         with self.assertRaises(ValueError):
             dispatch_gdn_decode(
                 GdnDecodeRequest(
@@ -251,23 +246,23 @@ class TestKernelIdentity(unittest.TestCase):
         self.assertEqual(a.compile_key, b.compile_key)
 
     def test_different_tiles_do_not_share_a_cache_key(self):
-        # Two batches in different bands must not collide, or one would run the
-        # other's compiled kernel -- the same failure mode the kernel name guards.
-        seen = {}
-        for batch in (1, 16, 64, 256):
-            kid = dispatch_gdn_decode(_req(batch)).kernel_id
-            self.assertNotIn(
-                kid.compile_key,
-                seen,
-                f"batch {batch} collides with batch {seen.get(kid.compile_key)}",
+        seen = set()
+        for spec_id in ("nw1_wtk8_bpv1", "nw2_wtk8_bpv2", "nw4_wtk16_bpv8"):
+            result = dispatch_gdn_decode(
+                _req(16, algorithm="warp_tiled", spec_id=spec_id)
             )
-            seen[kid.compile_key] = batch
+            self.assertNotIn(result.kernel_id.compile_key, seen)
+            seen.add(result.kernel_id.compile_key)
 
     def test_spec_hash_covers_the_tile(self):
         from rocke.dispatch.core import stable_json_hash
 
-        a = dispatch_gdn_decode(_req(1)).spec
-        b = dispatch_gdn_decode(_req(256)).spec
+        a = dispatch_gdn_decode(
+            _req(16, algorithm="warp_tiled", spec_id="nw1_wtk8_bpv1")
+        ).spec
+        b = dispatch_gdn_decode(
+            _req(16, algorithm="warp_tiled", spec_id="nw2_wtk8_bpv2")
+        ).spec
         self.assertNotEqual(
             stable_json_hash(asdict(a), n=16), stable_json_hash(asdict(b), n=16)
         )
