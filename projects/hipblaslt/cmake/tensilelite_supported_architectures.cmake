@@ -27,6 +27,14 @@ set(SUPPORTED_ARCHITECTURES
     "gfx950:xnack+"
 )
 
+# Build-time aliases: a stepping's kernels under the name a runtime that
+# predates the stepping reports. Mirrors REVISION_ALIASES in
+# Tensile/Common/Architectures.py. Deliberately not in SUPPORTED_ARCHITECTURES:
+# these are never names a user asks for.
+set(REVISION_ALIASES
+    "gfx1250v0"
+)
+
 # Base architectures - used when "all" is specified for GPU_TARGETS
 # Different base architectures will be chosen depending on the build mode.
 # All base architectures must be in the SUPPORTED_ARCHITECTURES list.
@@ -97,6 +105,41 @@ endfunction()
 
 function(tensilelite_get_base_architectures output_var)
     set(${output_var} ${BASE_ARCHITECTURES} PARENT_SCOPE)
+endfunction()
+
+# Each named architecture's revision aliases, appended after it.
+#
+# The CMake half of withRevisionAliasesOfNamedArchs in
+# Tensile/Common/Architectures.py. Naming gfx1250 has to build gfx1250v0 as
+# well: the build cannot know which silicon revision it will run on, and a rev-0
+# part reported under the base name can load nothing else. tensilelite fans out
+# on its own for the kernels it generates, but everything CMake builds -- the
+# source kernels, the ExtOp library, the matrix-transform kernels and the
+# clients' own device code -- follows GPU_TARGETS, which never saw the
+# expansion. The result was a revision subtree holding only Tensile code
+# objects, so the runtime selected it and then failed to load the helper kernels
+# that were never built for it.
+#
+# The stepping itself is not added. It is loadable only where its own name is
+# reported, so putting it in every gfx1250 build would produce a subtree most
+# systems can never open; ask for it by name instead:
+#   -a "gfx1250;gfx1250-strict"
+#
+# Idempotent, so it is safe on a list that already names the alias -- which is
+# what BASE_ARCHITECTURES does for `all`.
+function(tensilelite_with_revision_aliases output_var)
+    set(_result ${ARGN})
+    foreach(_arch IN LISTS ARGN)
+        # Features are colon-delimited and carry hyphens of their own
+        # (gfx950:sramecc+:xnack-), so cut there before testing the name.
+        string(REGEX REPLACE ":.*$" "" _base "${_arch}")
+        foreach(_alias IN LISTS REVISION_ALIASES)
+            if(_alias MATCHES "^${_base}v[0-9]+$" AND NOT "${_alias}" IN_LIST _result)
+                list(APPEND _result "${_alias}")
+            endif()
+        endforeach()
+    endforeach()
+    set(${output_var} "${_result}" PARENT_SCOPE)
 endfunction()
 
 function(tensilelite_get_supported_architectures output_var)

@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Union, NamedTuple
 
 from Tensile.Common import ensurePath, print1, print2, printWarning
 from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common.Architectures import isaToGfx, libraryArchOf
 from Tensile.Common.Types import IsaVersion
 from Tensile.CustomKernels import validateCustomKernelMetadata
 from ..SolutionStructs import Solution
@@ -128,12 +128,18 @@ def buildAssemblyCodeObjectFiles(
         continue
 
       name = archNames.get(arch) or isaToGfx(arch)
+      # The directory is the architecture that was asked for; the code object's
+      # own name is the one it is built as, so an alias's files sit under a
+      # directory of their own while keeping the base architecture's filenames.
+      # `name` is also what the bundler tags the entry with, via
+      # toolchainTargetOf -- the name the agent has to report to load it.
+      fileName = libraryArchOf(name)
       destDir = Path(ensurePath(destRoot / name))
 
       objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)
       if len(objectFiles):
-        coFileMap[asmDir / ("TensileLibrary_"+ name + extCoRaw)] = objectFiles
+        coFileMap[asmDir / ("TensileLibrary_"+ fileName + extCoRaw)] = objectFiles
       for kernel in archKernels:
         coName = kernel.get("codeObjectFile", None)
         if coName:

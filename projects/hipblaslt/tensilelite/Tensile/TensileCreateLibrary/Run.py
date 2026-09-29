@@ -58,7 +58,7 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import archNamesByIsa, architectureMap, baseArchName, gfxToIsa, isaCollisionFreeGroups, isaToGfx, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf
+from Tensile.Common.Architectures import archNamesByIsa, architectureMap, baseArchName, codegenArchOf, gfxToIsa, isaCollisionFreeGroups, isaToGfx, libraryArchOf, withRevisionAliasesOfNamedArchs, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, steppingArchOf
 from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
@@ -1322,6 +1322,14 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
 
+    # Before the grouping, not after: the pair this produces is what the
+    # partitioner below exists to split. Skipped in a fan-out's children, which
+    # were each handed the exact group to build -- expanding again there spawns a
+    # grandchild that shares its sibling's scratch directory, and two processes
+    # over one set of .s files surfaces as an assembler crash.
+    if not os.environ.get(_GROUP_BUILD_ENV):
+        archs = withRevisionAliasesOfNamedArchs(archs)
+
     # More than one group only when a stepping was asked for beside the
     # architecture it steps from, which no single run can name. Everything else
     # takes the one path below, unchanged.
@@ -1380,12 +1388,18 @@ def run():
     else:
         printExit(f"Unrecognized LogicFormat: {arguments['LogicFormat']}")
 
+    # The architectures whose tuning this build reads. An alias has none of its
+    # own -- it ships a stepping's kernels under another name -- so it has to
+    # look for that stepping's logic files; matching on its own name would
+    # select nothing and the build would produce an empty library.
+    logicArchs = [codegenArchOf(a) for a in archs]
+
     def validLogicFile(p: Path):
         if p.suffix != logicExtFormat:
             return False
         # archs came through expandAllArchitectures, which replaces "all" with
         # the architectures it covers, so there is no keyword left to honour.
-        return archMatch(load_logic_gfx_arch(p), archs)
+        return archMatch(load_logic_gfx_arch(p), logicArchs)
 
     globPattern = os.path.join(
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
@@ -1508,7 +1522,7 @@ def run():
         if archMapping:
             archDir = libraryDir(outputPath, archName)
             archMappingFile = os.path.join(
-                archDir, "TensileLiteLibrary_lazy_" + archName + "_Mapping"
+                archDir, "TensileLiteLibrary_lazy_" + libraryArchOf(archName) + "_Mapping"
             )
             LibraryIO.write(archMappingFile, archMapping, "msgpack")
 
@@ -1516,15 +1530,19 @@ def run():
     for archName, newMasterLibrary in masterLibraries.items():
         if archName in archs:
             archDir = libraryDir(outputPath, archName)
+            # Only the directory carries the revision; the master file keeps the
+            # base architecture's name, so the runtime reaches an alias's subtree
+            # by changing which directory it opens and nothing else.
+            fileArch = libraryArchOf(archName)
             def writeMsl(name, lib, archDir=archDir):
                 filename = os.path.join(archDir, name)
                 lib.applyNaming(splitGSU)
                 LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
 
             if arguments["LazyLibraryLoading"]:
-                masterFile = os.path.join(archDir, "TensileLibrary_lazy_" + archName)
+                masterFile = os.path.join(archDir, "TensileLibrary_lazy_" + fileArch)
             else:
-                masterFile = os.path.join(archDir, "TensileLibrary_" + archName)
+                masterFile = os.path.join(archDir, "TensileLibrary_" + fileArch)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
 

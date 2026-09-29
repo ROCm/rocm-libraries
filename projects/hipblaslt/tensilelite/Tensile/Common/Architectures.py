@@ -72,6 +72,10 @@ architectureMap = {
     # Spelled as clang and ROCr both spell it. Shares gfx1250's ISA, so
     # SUPPORTED_ISA cannot name it; this entry is where `all` picks it up.
     "gfx1250-strict": "gfx1250-strict",
+    # The same kernels under the name a runtime that predates the stepping
+    # reports; see REVISION_ALIASES. Its tuning is the stepping's, which is what
+    # this map records, and like the stepping it is invisible to SUPPORTED_ISA.
+    "gfx1250v0": "gfx1250-strict",
 }
 
 gfxVariantMap = {
@@ -98,6 +102,31 @@ ARCH_CAP_OVERRIDES = {
         },
     },
 }
+
+# The same silicon under the name a runtime that has not been told about the
+# stepping reports for it.
+#
+# HSA_DISABLE_GFX12_STRICT decides whether an A0 comes back as gfx1250 or
+# gfx1250-strict, and HIP picks a bundle entry by string-matching that name. So
+# an A0 needs a package under each spelling, and they are the same kernels:
+# gfx1250v0 shares gfx1250-strict's logic YAML and its capability overrides,
+# and differs only in the compiler target it is built at and the names it is
+# installed under. That is the layout develop shipped before the stepping
+# existed, which is what keeps a gfx1250-only package working on an A0.
+#
+# Build-time names only. An alias is never a GPU_TARGETS entry a user types and
+# never a name a runtime reports; it appears because naming the architecture it
+# aliases pulls it in, and nowhere else.
+REVISION_ALIASES = {
+    "gfx1250v0": "gfx1250-strict",
+}
+
+# An alias is the stepping, so it takes the stepping's deltas rather than
+# repeating them -- repeating them is how the two would drift apart, and a
+# gfx1250v0 that silently regained multicast is a package that hangs an A0.
+ARCH_CAP_OVERRIDES.update(
+    {alias: ARCH_CAP_OVERRIDES[stepping] for alias, stepping in REVISION_ALIASES.items()}
+)
 
 
 SUPPORTED_ISA = [
@@ -244,6 +273,46 @@ def expandAllArchitectures(archs: List[str]) -> List[str]:
     ]
 
 
+def withRevisionAliasesOfNamedArchs(archs: List[str]) -> List[str]:
+    """``archs`` with the revision aliases of any architecture it names appended.
+
+    Naming gfx1250 asks for a package that serves gfx1250 hardware, which is two
+    silicon revisions; covering only one leaves an A0 on kernels built for
+    features it does not have. So the alias comes along, and the build produces
+    both gfx1250 and gfx1250v0.
+
+    The stepping itself does not, and that is the difference from the alias: the
+    stepping is loadable only where its own name is reported, so adding it to
+    every gfx1250 build would produce a subtree most systems can never open.
+    Ask for it by name -- ``-a "gfx1250;gfx1250-strict"`` -- and it is built
+    beside the other two.
+
+    One-way in the other direction too: ``gfx1250-strict`` alone stays alone, so
+    a strict-only build still fails on a B0 rather than serving it A0 kernels.
+
+    Call before ``isaCollisionFreeGroups``, never after: the names share an ISA
+    and have to reach the partitioner that splits them into separate processes.
+
+    Args:
+        archs: Requested architecture specs.
+
+    Returns:
+        ``archs`` plus the alias of any architecture it names but does not
+            already name itself, in ``REVISION_ALIASES`` order.
+    """
+    named = {baseArchName(a) for a in archs}
+    return archs + [
+        alias
+        for alias, stepping in REVISION_ALIASES.items()
+        if steppingArchOf(stepping) in named and alias not in named
+    ]
+
+
+# The name this had while the alias was spelled gfx1250-strict. Kept so the
+# call site and the tests can move in separate changes.
+withSteppingsOfNamedArchs = withRevisionAliasesOfNamedArchs
+
+
 def baseArchName(spec: str) -> str:
     """The bare architecture name in a spec, without predicates or qualifiers."""
     return spec.split("[")[0].split(":")[0].strip()
@@ -293,6 +362,74 @@ def steppingArchOf(spec: str) -> Optional[str]:
         return None
     derived = isaToGfx(isa)
     return derived if derived != base else None
+
+
+def codegenArchOf(spec: str) -> str:
+    """The architecture whose tuning and capabilities ``spec`` is generated from.
+
+    An alias has none of its own: it exists to ship a stepping's kernels under a
+    different name, so every codegen input -- the logic YAML to select, the
+    capability overrides to layer on -- is read from the stepping it aliases.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        The stepping an alias aliases (``gfx1250v0`` -> ``gfx1250-strict``), or
+            ``spec``'s bare name when it is not an alias.
+    """
+    base = baseArchName(spec)
+    return REVISION_ALIASES.get(base, base)
+
+
+def toolchainTargetOf(spec: str) -> str:
+    """The target the toolchain is handed for ``spec``.
+
+    A stepping is its own compiler target and is built as itself, so the object
+    carries the stepping's ELF machine and loads only where that name is
+    reported.
+
+    An alias is the case that moves. It exists to be loadable where the base
+    architecture's name is reported, which means the compiler has to produce a
+    base-architecture object; the stepping's capability overrides only remove
+    features, so the kernels it generated are valid ones. Only the compiler
+    target moves -- the alias keeps naming its own directory, and see
+    ``libraryArchOf`` for the filenames.
+
+    It is also the name the object is offered under: each subtree answers one
+    reported name, so the bundle carries this target and nothing else.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        The architecture an alias is compiled as (``gfx1250v0`` -> ``gfx1250``),
+            or ``spec`` unchanged otherwise.
+    """
+    base = baseArchName(spec)
+    aliased = REVISION_ALIASES.get(base)
+    if aliased is None:
+        return spec
+    return steppingArchOf(aliased) or aliased
+
+
+def libraryArchOf(spec: str) -> str:
+    """The architecture name an alias's library files are named after.
+
+    Only the directory carries the revision; the files inside keep the base
+    architecture's name. That split is what lets the runtime reach the subtree
+    by changing one thing -- which directory it opens -- while the master file
+    name, the code-object filter and the lazy-loading key all go on spelling the
+    name the agent reported. It is also the layout develop already ships.
+
+    Args:
+        spec: A requested architecture spec, qualified or not.
+
+    Returns:
+        The name an alias's files carry (``gfx1250v0`` -> ``gfx1250``), or
+            ``spec``'s bare name otherwise.
+    """
+    return toolchainTargetOf(spec) if baseArchName(spec) in REVISION_ALIASES else baseArchName(spec)
 
 
 def archNamesByIsa(specs: List[str]) -> Dict[IsaVersion, str]:

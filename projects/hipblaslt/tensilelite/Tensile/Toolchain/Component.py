@@ -31,6 +31,7 @@ from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
 from Tensile.Common import SemanticVersion, print2
+from Tensile.Common.Architectures import toolchainTargetOf
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -201,6 +202,8 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
+        # A stepping assembles as the architecture it steps; see toolchainTargetOf.
+        targetGfx = toolchainTargetOf(targetGfx)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
         # Enable true16 on all gfx11*/gfx12* (NoSDWA); gfx10* stays fake16.
@@ -279,7 +282,11 @@ class Compiler(Component):
         Raises:
             RuntimeError: If the compilation command fails.
         """
-        archFlags = [f"--offload-arch={gfx}" for gfx in target_list]
+        # A stepping compiles as the architecture it steps, so it can collide with
+        # that architecture in the same list; dict.fromkeys drops the duplicate and
+        # keeps the order. See toolchainTargetOf.
+        targets = dict.fromkeys(toolchainTargetOf(gfx) for gfx in target_list)
+        archFlags = [f"--offload-arch={gfx}" for gfx in targets]
         args = [
             *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
         ]
@@ -323,20 +330,25 @@ class Bundler(Component):
         Args:
             srcPath: The source path of the code object file to be compressed.
             destPath: The destination path for the compressed code object file.
-            target: The compiler target to tag the bundle entry with. This is the
-                stepping's own name where one was asked for, not the ISA-derived
-                name, since the runtime unbundles by matching the agent's target.
+            target: The name the code object is offered under. The runtime
+                unbundles by matching the agent's reported target against it, and
+                each subtree serves exactly one reported name -- the revision
+                alias is built at the base architecture's target and offered
+                under that name, the stepping under its own -- so one entry is
+                all any of them needs.
 
         Raises:
             RuntimeError: If compressing the code object file fails.
         """
         devnull = "/dev/null" if os_name != "nt" else "NUL"
+        entry = toolchainTargetOf(target)
         args = [
             self._component_path,
             "--compress",
             "--type=o",
             "--bundle-align=4096",
-            f"--targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa-unknown-{target}",
+            "--targets=host-x86_64-unknown-linux-gnu,"
+            f"hipv4-amdgcn-amd-amdhsa-unknown-{entry}",
             f"--input={devnull}",
             f"--input={srcPath}",
             f"--output={destPath}",

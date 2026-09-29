@@ -138,6 +138,9 @@ if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
 else()
     tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+# After validation, so what the user asked for is what gets checked, and before
+# normalization, so an alias picks up the same feature handling as its base.
+tensilelite_with_revision_aliases(GPU_TARGETS ${GPU_TARGETS})
 tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 

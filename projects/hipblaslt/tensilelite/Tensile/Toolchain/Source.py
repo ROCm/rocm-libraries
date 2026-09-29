@@ -30,6 +30,7 @@ from timeit import default_timer as timer
 from typing import List, Union, NamedTuple
 
 from ..Common import print1, ensurePath
+from ..Common.Architectures import toolchainTargetOf
 from ..Common.TimingInstrumentation import timing_context
 
 from .Component import Compiler, Bundler
@@ -150,19 +151,45 @@ def buildSourceCodeObjectFiles(
     with timing_context("python_kernel_build_src_co.compile"):
         compiler(str(includeDir), cmdlineArchs, str(kernelPath), objPath)
 
+    # The architectures asked for, keyed by the target they were compiled as.
+    #
+    # A stepping compiles as the architecture it steps (toolchainTargetOf), so
+    # the bundler reports the base name back and everything derived from that
+    # token loses the stepping. The assembly path does not have this problem
+    # because it is handed archNames outright; here the destination came from
+    # the bundler, so a gfx1250-strict build wrote its source kernels into
+    # gfx1250/ and shipped a strict subtree with no Kernels.so of its own --
+    # which the runtime then selected on an A0 and could not load.
+    #
+    # Keyed rather than zipped because one compile can serve several requested
+    # names: asking for an architecture and its stepping together yields one
+    # bundle entry and two subtrees, each getting its own copy.
+    requestedByTarget = {}
+    for requested in cmdlineArchs:
+        requestedByTarget.setdefault(toolchainTargetOf(requested), []).append(requested)
+
     with timing_context("python_kernel_build_src_co.unbundle"):
         for target in bundler.targets(objPath):
           match = re.search("gfx.*$", target)
           if match:
             arch, baseArch = _archNamesFromBundlerTarget(match.group())
-            coPathRaw = _computeSourceCodeObjectFilename(target, kernelPath.stem, tmpObjDir, arch)
-            if not coPathRaw: continue
-            bundler(target, objPath, str(coPathRaw))
+            # Fall back to the reported name where nothing asked for it, which
+            # keeps every architecture without a stepping exactly as it was.
+            for requestedArch in requestedByTarget.get(baseArch, [baseArch]):
+                # The directory is the requested name; the filename is it plus
+                # whatever xnack variant the bundler token carried, since that
+                # is the pair the runtime helper-kernel loader probes for.
+                fileArch = requestedArch + arch[len(baseArch):]
+                coPathRaw = _computeSourceCodeObjectFilename(
+                    target, kernelPath.stem, tmpObjDir, fileArch
+                )
+                if not coPathRaw: continue
+                bundler(target, objPath, str(coPathRaw))
 
-            destDir = Path(ensurePath(destRoot / baseArch))
-            coPath = str(destDir / coPathRaw.stem)
-            coPathsRaw.append(coPathRaw)
-            coPaths.append(coPath)
+                destDir = Path(ensurePath(destRoot / requestedArch))
+                coPath = str(destDir / coPathRaw.stem)
+                coPathsRaw.append(coPathRaw)
+                coPaths.append(coPath)
 
     with timing_context("python_kernel_build_src_co.move"):
         for src, dst in zip(coPathsRaw, coPaths):
