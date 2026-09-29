@@ -105,7 +105,7 @@ jobs:
         working-directory: projects/hipblaslt/tensilelite
         run: |
           PY=.tox/coverage-unit/bin/python
-          "$PY" Tensile/Tests/unit/characterization/tools/coverage_split_summary.py \
+          "$PY" tensilelite/Tests/unit/characterization/tools/coverage_split_summary.py \
             --characterization char.json --unit unit.json --combined coverage.json \
             --characterization-junit char_tests.xml --unit-junit unit_tests.xml || true
           exit 0

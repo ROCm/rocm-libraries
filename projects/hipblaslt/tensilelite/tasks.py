@@ -198,7 +198,7 @@ def build_client(
 ):
     """Build the tensilelite-client C++ executable.
 
-    To run Tensile after building, use: Tensile/bin/Tensile <args>
+    To run Tensile after building, use: tensilelite/bin/Tensile <args>
     CMake builds rocisa in the client build directory. When rocisa is
     installed editable, the bindings are refreshed to pick up C++ edits
     (disable with --no-rebuild-rocisa).
