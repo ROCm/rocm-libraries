@@ -65,6 +65,14 @@ def _block_linear(spec, qb, hq, bt, nqb):
         blk = nqb - 1 - qb if spec.causal else qb
         hkv, hql = divmod(hq, gqa)
         return bt + B * (hkv + Hkv * (hql + gqa * blk))
+    if name == "hq_minor_swz":
+        # arXiv 2511.02132 Fig. 11 per batch, with batch the slowest digit:
+        #   head = (w % M)*(Hq/M) + w // (M*nqb),  block = (w % (M*nqb)) // M
+        # inverted to w for (hq, blk); query blocks longest-first under causal.
+        M = spec.chiplet_num_xcds
+        blk = nqb - 1 - qb if spec.causal else qb
+        a, c = divmod(hq, Hq // M)
+        return a + M * blk + M * nqb * c + Hq * nqb * bt
     raise AssertionError(f"no expected order for nonpersist decode {name!r}")
 
 
@@ -80,9 +88,10 @@ def _decode_all(decode, spec, seqlen_q):
 @pytest.mark.parametrize("name", sorted(NONPERSIST_DECODES))
 @pytest.mark.parametrize("causal", (True, False))
 @pytest.mark.parametrize("shape", _SHAPES)
-def test_nonpersist_decode_linearizes_to_its_documented_order(name, causal, shape):
+@pytest.mark.parametrize("xcds", (8, 4))
+def test_nonpersist_decode_linearizes_to_its_documented_order(name, causal, shape, xcds):
     decode = NONPERSIST_DECODES[name]
-    spec = _spec(*shape, causal, nonpersist_decode=name)
+    spec = _spec(*shape, causal, nonpersist_decode=name, chiplet_num_xcds=xcds)
     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
     work = nqb * spec.num_query_heads * spec.batch
     # Baked (None) and runtime (the kernel's seqlen_q param) shapes must agree.

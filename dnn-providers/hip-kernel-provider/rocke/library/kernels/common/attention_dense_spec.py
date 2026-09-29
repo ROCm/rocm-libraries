@@ -90,6 +90,9 @@ class AttentionDenseSpec:
     causal_bottom_right: bool = field(default=False, kw_only=True)
     # Block order of the non-persistent grid (persistent specs use persist_decode).
     nonpersist_decode: str = field(default="auto", kw_only=True)
+    # XCDs the hardware round-robins workgroups over. A wrong value keeps results
+    # correct and only weakens the L2 locality of the XCD-aware block orders.
+    chiplet_num_xcds: int = field(default=8, kw_only=True)
 
     def supported_persist_decodes(self) -> frozenset[str]:
         """Decode values the concrete kernel type can actually emit."""
@@ -167,6 +170,10 @@ class AttentionDenseSpec:
             why = PERSIST_DECODES[self.persist_decode].check(self)
             if why:
                 raise ValueError(why)
+        if self.chiplet_num_xcds <= 0:
+            raise ValueError(
+                f"chiplet_num_xcds must be positive, got {self.chiplet_num_xcds}"
+            )
         if self.nonpersist_decode not in {"auto", *NONPERSIST_DECODES}:
             raise ValueError(
                 f"nonpersist_decode must be one of "
@@ -288,11 +295,13 @@ class AttentionDenseSpec:
         if self._aligned_causal:
             if self.interleave:
                 return PersistQbMajor.name  # the only decode interleave applies to
-            # Batch is the fastest digit of both and xcd = wi % 8, so below 8
-            # batches the second digit still picks the XCD: bt_hkv_minor then
-            # gives each XCD one kv head. From 8 on both place items alike, and
-            # qb_major measured ahead.
-            return PersistBtHkvMinor.name if self.batch < 8 else PersistQbMajor.name
+            # Batch is the fastest digit of both and xcd = wi % num_xcds, so with
+            # fewer batches than XCDs the second digit still picks the XCD:
+            # bt_hkv_minor then gives each XCD one kv head. From there on both
+            # place items alike, and qb_major measured ahead.
+            if self.batch < self.chiplet_num_xcds:
+                return PersistBtHkvMinor.name
+            return PersistQbMajor.name
         gqa = self.num_queries_per_kv
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         per_hkv = gqa * nqb * self.batch
@@ -395,6 +404,8 @@ class AttentionDenseSpec:
             decode = NONPERSIST_DECODES[self.resolved_nonpersist_decode].tag
             if decode:
                 parts.append(decode)
+        if self.chiplet_num_xcds != 8:
+            parts.append(f"xcd{self.chiplet_num_xcds}")
         return kernel_name_join(*parts)
 
 

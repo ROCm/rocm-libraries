@@ -113,7 +113,38 @@ class NonpersistBtHkvMinor(NonpersistDecode):
         return Decoded(qb, hq, bx)
 
 
-NONPERSIST_DECODES = _registry(NonpersistQbMinor, NonpersistBtHkvMinor)
+class NonpersistHqMinorSwz(NonpersistDecode):
+    """Swizzled Head-first (arXiv 2511.02132, Fig. 11): grid
+    ``(M*nqb, Hq/M, B)`` with M = ``chiplet_num_xcds``, so XCD ``a`` owns the
+    contiguous query-head band ``[a*Hq/M, (a+1)*Hq/M)`` and runs all its query
+    blocks before the next head. Batch is the slowest digit. Query blocks run
+    longest-first under causal masking."""
+
+    name = "hq_minor_swz"
+    tag = "nphqminswz"
+
+    def check(self, spec):
+        if spec.num_query_heads % spec.chiplet_num_xcds:
+            return (f"{self.name} needs num_query_heads ({spec.num_query_heads}) "
+                    f"divisible by chiplet_num_xcds ({spec.chiplet_num_xcds})")
+        return None
+
+    def grid(self, spec):
+        M = spec.chiplet_num_xcds
+        return (M * _spec_nqb(spec), spec.num_query_heads // M, spec.batch)
+
+    def emit_decode(self, b, spec, bx, by, bz, seqlen_q):
+        M = spec.chiplet_num_xcds
+        band = spec.num_query_heads // M
+        hq = b.add(b.mul(b.mod(bx, b.const_i32(M)), b.const_i32(band)), by)
+        blk = b.div(bx, b.const_i32(M))
+        qb = emit_reverse(b, blk, spec, seqlen_q) if spec.causal else blk
+        return Decoded(qb, hq, bz)
+
+
+NONPERSIST_DECODES = _registry(
+    NonpersistQbMinor, NonpersistBtHkvMinor, NonpersistHqMinorSwz
+)
 
 
 # --------------------------------------------------------------------------- #
