@@ -1292,11 +1292,8 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
                 return false;
         }
 
-        // MI300X (304 CUs) and MI300A (228 CUs) are both gfx942.
-        // hipBLASLt is only the default backend for DGEMM (double) on the
-        // 228-CU MI300A variant; MI300X and every other dtype on either CU
-        // count fall back to Tensile until more configs are validated.
-        // TODO remove/expand once more gfx942 types are supported.
+        // gfx942: hipBLASLt is used only for DGEMM on the 228-CU MI300A
+        // TODO expand once more gfx942 configs are validated
         if(arch == 942)
         {
             if constexpr(std::is_same<Ti, double>::value)

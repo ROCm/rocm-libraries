@@ -302,9 +302,7 @@ public:
             return batch_count;
     }
 
-    // Only gates eager hipBLASLt handle construction (see handle.cpp); the
-    // actual per-dtype/CU-count restriction for gfx942 is enforced in
-    // useHipBLASLt() in tensile_host.cpp.
+    // Gates eager handle construction only; useHipBLASLt() enforces the gfx942 dtype/CU restriction.
     bool isDefaultHipBLASLtArch()
     {
         int gfx_arch = getArch();
