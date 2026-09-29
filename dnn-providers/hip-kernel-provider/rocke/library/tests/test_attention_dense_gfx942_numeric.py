@@ -637,6 +637,7 @@ _PERSIST_ONE_BINARY = [
     pytest.param("fp16", "hkv_major", False, 0, id="hkv_major"),
     pytest.param("fp16", "qb_major", False, 0, id="qb_major"),
     pytest.param("fp16", "qb_major", True, 0, id="qb_major-interleave"),
+    pytest.param("fp16", "bt_hkv_minor", False, 0, id="bt_hkv_minor"),
     pytest.param("bf16", "hkv_major", False, 128, id="hkv_major-swa128"),
     pytest.param("bf16", "qb_major", False, 128, id="qb_major-swa128"),
 ]

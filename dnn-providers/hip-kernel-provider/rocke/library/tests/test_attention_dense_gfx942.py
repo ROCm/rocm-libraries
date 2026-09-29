@@ -309,7 +309,7 @@ _SPEC_PERTURBATIONS = {
     "persistent": (True, False),
     "num_persistent": (152, 304),
     "interleave": (True, False),
-    "persist_decode": ("qb_major", "hkv_major"),
+    "persist_decode": ("qb_major", "hkv_major", "bt_hkv_minor"),
     "nonpersist_decode": ("bt_hkv_minor", "qb_minor"),
     "lazy_rescale": (False, True),
     "use_sinks": (),  # unbuildable (not yet supported)
@@ -632,7 +632,7 @@ def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     is ONE name, ONE body and ONE cache key per decode order, with no hq/kv token.
 
     The head counts still have to reach the launch: each config gets distinct
-    kernarg values, ``gqa`` magic/shift included. That the IR probe can see baked
+    kernarg values, fast-division pairs included. That the IR probe can see baked
     head counts is the gfx950 control
     (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`), so the
     single-body assertion here is not vacuous."""
@@ -648,10 +648,14 @@ def test_persistent_grid_shares_one_kernel_across_head_configs(decode):
     assert not re.search(r"_(hq|kv)\d+", names.pop())
     assert len({attention_dense_cache_key(s, arch="gfx942") for s in specs}) == 1
     assert len({_ir_body_sha(s) for s in specs}) == 1
-    # Every config has a distinct gqa (16, 5, 7, 1), so its fast-division pair must
-    # differ too; the exact values are pinned by the kernarg-ABI test below.
+    # Every config has a distinct Hq (128, 40, 28, 32) and gqa (16, 5, 7, 1), and
+    # each decode divides by one of them, so the fast-division pairs must differ
+    # too; the exact values are pinned by the kernarg-ABI test below.
     args = [attention_dense_runtime_args(s) for s in specs]
-    assert len({(a["gqa_magic"], a["gqa_shift"]) for a in args}) == len(specs)
+    pairs = [
+        tuple(v for k, v in a.items() if k.endswith(("_magic", "_shift"))) for a in args
+    ]
+    assert len(set(pairs)) == len(specs)
 
 
 def test_kernel_name_drops_heads_on_the_runtime_shape_grid():
@@ -2009,6 +2013,7 @@ def test_persistent_and_default_share_one_inner_body():
 # The divisors each resolved persistent decode order divides by in the grid-stride
 # loop, in kernarg order. Restated (not imported) on purpose: this IS the ABI.
 _EXPECTED_FASTDIV_DIVISORS = {
+    "bt_hkv_minor": ("batch", "num_query_heads"),
     "hkv_major": ("batch", "gqa", "nqb"),
     "qb_major": ("batch", "num_query_heads", "gqa"),
 }

@@ -1419,6 +1419,45 @@ class TestAttentionHelpers(unittest.TestCase):
             [True, False, False],
         )
 
+    def test_persist_decodes_build_with_distinct_names_on_both_arches(self):
+        """Every persist decode an arch supports builds and has its own name,
+        so no two decodes can share a cached binary."""
+        from kernels.gfx942 import attention_dense as k942
+        from kernels.gfx950 import attention_dense as k950
+
+        base = dict(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+            persistent=True,
+        )
+        # gqa_pair* pin num_persistent to their own work split (NQB=8, Hkv=8, gqa=4).
+        num_persistent = {"gqa_pair": 64, "gqa_pair_2phase": 128}
+        for arch, K, Spec in (
+            ("gfx942", k942, k942.Gfx942AttentionDenseSpec),
+            ("gfx950", k950, k950.Gfx950AttentionDenseSpec),
+        ):
+            with self.subTest(arch=arch):
+                names = {}
+                for decode in sorted(
+                    Spec(**base).supported_persist_decodes() - {"auto"}
+                ):
+                    spec = Spec(
+                        **base,
+                        persist_decode=decode,
+                        num_persistent=num_persistent.get(decode, 256),
+                    )
+                    K.build_attention_dense(spec, arch=arch)
+                    names[decode] = spec.kernel_name()
+                self.assertIn("bt_hkv_minor", names)
+                self.assertEqual(len(set(names.values())), len(names), names)
+
     def test_nonpersist_decode_builds_names_and_rejects_on_both_arches(self):
         """Every nonpersist decode builds, fills the grid and gets its own name;
         the persistent grid ignores it, and an unknown value is rejected."""
@@ -3474,6 +3513,10 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
     # under test, or spec construction rejects it. Each maps to the name token its
     # order adds (qb_major adds none).
     _PERSIST_VARIANTS = {
+        "bt_hkv_minor": (
+            dict(persistent=True, num_persistent=64, persist_decode="bt_hkv_minor"),
+            "_bthkvmin",
+        ),
         "hkv_major": (
             dict(persistent=True, num_persistent=64, persist_decode="hkv_major"),
             "_hkvmaj",
@@ -3976,6 +4019,9 @@ class TestAttentionDenseGfx942RuntimeHeads(unittest.TestCase):
     # smallest config under test. gfx950 dense is the baked-heads control
     # (test_gfx950_baked_heads_split_key_ir_and_name).
     _PERSIST_VARIANTS = {
+        "bt_hkv_minor": dict(
+            persistent=True, num_persistent=64, persist_decode="bt_hkv_minor"
+        ),
         "hkv_major": dict(
             persistent=True, num_persistent=64, persist_decode="hkv_major"
         ),

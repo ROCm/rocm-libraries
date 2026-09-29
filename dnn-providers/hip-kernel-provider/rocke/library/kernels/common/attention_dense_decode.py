@@ -304,6 +304,39 @@ class PersistHkvMajor(PersistDecode):
         return Decoded(emit_fold(b, blk, shape), hq, bt, hkv)
 
 
+class PersistBtHkvMinor(PersistDecode):
+    """``wi = ((blk*gqa + hql)*Hkv + hkv)*B + bt``: batch, then kv head, are the
+    fastest digits, so each XCD's CTAs stride over few K/V streams; query
+    blocks are folded under causal masking."""
+
+    name = "bt_hkv_minor"
+    tag = "bthkvmin"
+    fastdiv_divisors = ("batch", "num_query_heads")
+
+    def fastdiv_dividend_bound(self, spec) -> int:
+        # gqa * t with t < Hq, besides the work index itself.
+        return max(
+            super().fastdiv_dividend_bound(spec),
+            spec.num_queries_per_kv * spec.num_query_heads,
+        )
+
+    def emit_decode(self, b, spec, wi, shape):
+        # rem = blk*Hq + t with t = hql*Hkv + hkv < Hq, so the head digits split
+        # on Hq: hql = (gqa*t) // Hq exactly (gqa*hkv < gqa*Hkv = Hq), and no
+        # divide by Hkv is needed.
+        bt = shape.mod(wi, "batch")
+        rem = shape.div(wi, "batch")
+        t = shape.mod(rem, "num_query_heads")
+        blk = shape.div(rem, "num_query_heads")
+        hql = shape.div(b.mul(t, shape.val("gqa")), "num_query_heads")
+        hkv = b.sub(t, b.mul(hql, shape.val("num_kv_heads")))
+        hq = b.add(b.mul(hkv, shape.val("gqa")), hql)
+        qb = shape.branch(
+            shape.balance(), lambda: emit_fold(b, blk, shape), lambda: blk
+        )
+        return Decoded(qb, hq, bt, hkv)
+
+
 def _aligned_causal_error(spec, name: str):
     if not spec.persistent or not spec.causal:
         return f"{name} requires persistent causal attention"
@@ -403,6 +436,7 @@ class PersistGqaPair2Phase(PersistDecode):
 PERSIST_DECODES = _registry(
     PersistQbMajor,
     PersistHkvMajor,
+    PersistBtHkvMinor,
     PersistGqaPair,
     PersistGqaPair2Phase,
 )
