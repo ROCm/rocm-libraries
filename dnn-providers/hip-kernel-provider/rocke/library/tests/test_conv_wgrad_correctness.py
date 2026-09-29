@@ -1573,11 +1573,23 @@ class TestConvWgradTwoStage(unittest.TestCase):
                     self._check(shape, dtype, "mem", split_k=-1, seed=3)
 
     # ------------------------------------------------------------------
-    # Determinism guarantee
+    # Run-to-run stability (NOT a determinism guarantee)
     # ------------------------------------------------------------------
 
     def test_is_deterministic(self):
-        """Two consecutive runs on identical inputs produce bit-exact output."""
+        """Two consecutive runs on identical inputs produce bit-exact output.
+
+        This is an empirical stability check, not a guarantee. Stage 1
+        f32-atomic-adds a group's K-slices into shared replica slabs, so the
+        summation order is scheduler-dependent and f32 addition is not
+        associative -- Stage 2's ordered fold over the replicas does not
+        recover determinism for partial sums that were already reordered.
+        ``rocke_wgrad_conv_spec_is_deterministic`` reports false for every
+        ``split_k > 1`` spec, two-stage included, and that is the answer a host
+        should act on. What this catches is a *change* in behaviour for a fixed
+        launch geometry, which is worth a signal even though a failure here is
+        not by itself a correctness bug.
+        """
         import torch
 
         spec = _make_two_stage_spec(self.ARCH)

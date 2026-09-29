@@ -451,8 +451,10 @@ class WgradConvSpec:
     # buffer (ws_ptr) instead of 16-bit-atomic-adding into dW.  The caller
     # must zero the scratch first and launch a Stage 2 cast kernel
     # (conv_wgrad_workspace_reduce) afterwards on the same stream.
-    # Scratch size: groups * wg_M * wg_N * 4 bytes (always f32, no split_k
-    # factor -- the slices accumulate on top of each other).
+    # Scratch size: groups * ws_replicas * wg_M * wg_N * 4 bytes (always f32) --
+    # ``ws_replicas`` copies of the per-group dW slab, with no split_k factor
+    # since the slices accumulate on top of each other within those copies.
+    # Derive it from ``wgrad_two_stage_workspace_nbytes`` rather than by hand.
     # This is how split-K reaches a 16-bit dW whose row length wg_N is odd,
     # which the packed <2 x dtype> atomic cannot address.
     two_stage: bool = False
@@ -470,8 +472,10 @@ class WgradConvSpec:
     # take the contention off L2, few enough that Stage 2 stays trivial.
     # Scratch size scales with R: groups * R * wg_M * wg_N * 4 bytes.
     #
-    # 8 is the measured knee on gfx950: 1 and 2 leave Stage 1 contention-bound,
-    # 16+ buys nothing further, and the scratch stays a few tens of KB.
+    # The default was picked on gfx950 as the point past which extra replicas
+    # stop taking contention off Stage 1 while the scratch is still small. It
+    # is a knob, not a constant: another arch or a different filter shape can
+    # want a different contention-versus-footprint tradeoff.
     ws_replicas: int = _DEFAULT_WS_REPLICAS
 
     @property
@@ -2895,7 +2899,7 @@ def _emit_wgrad_workspace_store_epilogue(
 
     Under group merging the tile covers a ``Gm x Gm`` block of group pairs and
     only the diagonal is real work, so the predicate gains an equality test.
-    The scratch does NOT merge -- it keeps its true ``[groups, wg_M, wg_N]``
+    The scratch does NOT merge -- it keeps its true ``[groups * R, wg_M, wg_N]``
     shape -- which means the address is rebuilt from true coordinates while the
     accumulator *bounds* come from the merged dims. Getting that backwards
     writes ``(1 - 1/Gm) * K`` silently-zero dW rows, which is what the

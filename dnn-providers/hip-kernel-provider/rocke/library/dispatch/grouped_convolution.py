@@ -153,6 +153,7 @@ from kernels.common.conv_implicit_gemm import (
 )
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
+    _DEFAULT_WS_REPLICAS as _WGRAD_WS_REPLICAS,
     is_valid_wgrad_spec as _wgrad_is_valid_spec,
     wgrad_atomic_epilogue_available as _wgrad_atomic_epilogue_available,
 )
@@ -222,8 +223,9 @@ _GFX950_WGRAD_SCALARB_WARP_M = 4
 _GFX950_WGRAD_SCALARB_WARP_N = 2
 _GFX950_WGRAD_SCALARB_WARP_TILE_MN = 16
 _GFX950_WGRAD_SCALARB_WARP_TILE_K = 32
-# The MFMA-clustering schedule. Worth ~1.3x here and nothing on the vectorised
-# tile, which is why it rides with the variant rather than replacing _PIPELINE.
+# The MFMA-clustering schedule. It helps this address-bound tile and does
+# nothing on the vectorised one, which is why it rides with the variant rather
+# than replacing _PIPELINE.
 _GFX950_WGRAD_SCALARB_PIPELINE = "compv3"
 
 # gfx1250 — wave32, WMMA 16x16x32; pipeline must be "mem", groups=1 only
@@ -576,6 +578,11 @@ class ConvGroupedSpec:
             epilogue="default" if two_stage else self.epilogue,
             split_k=resolved_split_k,
             two_stage=two_stage,
+            # Pin the replica count explicitly rather than inheriting the
+            # dataclass default: _resolve_wgrad_split_k caps the scratch against
+            # the i32 ws_bytes ABI using this same constant, and a cap computed
+            # over a different R than the spec carries bounds nothing.
+            ws_replicas=_WGRAD_WS_REPLICAS,
         )
 
     def to_dgrad_spec(self, problem: "ConvProblem") -> "DgradConvSpec":
@@ -702,10 +709,11 @@ def _resolve_wgrad_split_k(
     # so the epilogue derives the store width from the channel dims.
     _atomic_ok, _ = _wgrad_atomic_epilogue_available(p, spec.dtype.lower(), None)
     two_stage = (not _atomic_ok) and split_k > 1
-    # The scratch is dW-sized now (no split_k factor), so this cap is
-    # effectively unreachable -- kept because it is the one place that bounds
-    # an allocation derived from a request.
-    if two_stage and p.groups * wg_M * wg_N * 4 > _MAX_WGRAD_WS_BYTES:
+    # The scratch carries no split_k factor, but it does carry the replica
+    # factor -- R copies of dW per group. Use the same R this module hands the
+    # spec in to_wgrad_spec, or the cap bounds an allocation nobody makes.
+    ws_bytes = p.groups * _WGRAD_WS_REPLICAS * wg_M * wg_N * 4
+    if two_stage and ws_bytes > _MAX_WGRAD_WS_BYTES:
         two_stage = False
         split_k = 1
     return split_k, two_stage, requested

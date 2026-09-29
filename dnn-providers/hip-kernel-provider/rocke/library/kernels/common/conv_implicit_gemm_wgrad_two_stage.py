@@ -152,10 +152,13 @@ def build_implicit_gemm_conv_wgrad_two_stage(
         ``workspace_nbytes`` is the size (bytes) of the f32 scratch buffer the
         caller must allocate before each pipeline call.
 
-        The scratch has shape ``[groups, wg_M, wg_N]`` (f32) -- the shape of
-        ``dW``, with no ``split_k`` factor.  Stage 1 f32-atomic-adds every
-        element within ``[0, wg_M) × [0, wg_N)``; OOB positions are skipped by
-        a per-element ``scf_if`` guard.
+        The scratch has shape ``[groups * R, wg_M, wg_N]`` (f32), where
+        ``R = spec.ws_replicas``: ``R`` copies of the per-group ``dW`` slab,
+        with no ``split_k`` factor.  Stage 1 f32-atomic-adds every element
+        within ``[0, wg_M) × [0, wg_N)`` of its slab; OOB positions are skipped
+        by a per-element ``scf_if`` guard.  Stage 2 folds the ``R`` slabs.
+        Size it with :func:`wgrad_two_stage_workspace_nbytes` -- the returned
+        ``workspace_nbytes`` is exactly that value.
 
         **The scratch must be zeroed before each pipeline call.** Stage 1
         accumulates into it, so whatever is already there is added to the

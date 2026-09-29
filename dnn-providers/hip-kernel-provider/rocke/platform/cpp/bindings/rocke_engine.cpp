@@ -2241,6 +2241,11 @@ rocke_wgrad_reduce_spec_t conv_wgrad_reduce_build_spec(const py::dict& d,
     s.wg_M = dict_int(d, "wg_M", s.wg_M);
     s.wg_N = dict_int(d, "wg_N", s.wg_N);
     s.groups = dict_int(d, "groups", s.groups);
+    /* Must track the Stage 1 spec's ws_replicas: folding fewer slabs than
+     * Stage 1 wrote drops part of the sum, folding more reads past the
+     * scratch. Defaulting here instead of parsing would silently do one or the
+     * other for every non-default Stage 1 count. */
+    s.ws_replicas = dict_int(d, "ws_replicas", s.ws_replicas);
     {
         std::string v;
         if(dict_str(d, "dtype_d", v))
@@ -3738,8 +3743,8 @@ PYBIND11_MODULE(rocke_engine, m)
             return rocke_wgrad_conv_workspace_bytes(&s);
         },
         py::arg("spec"),
-        "Return workspace bytes for the two-stage deterministic wgrad path.\n"
-        "Formula: groups * split_k * wg_M * wg_N * 4 (always f32).\n"
+        "Return workspace bytes for the two-stage wgrad path.\n"
+        "Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).\n"
         "Returns 0 when two_stage=false, or split_k <= 1.");
 
     /* ---- attention families (separate TU; shared fmha/tiled struct tags) ---- */

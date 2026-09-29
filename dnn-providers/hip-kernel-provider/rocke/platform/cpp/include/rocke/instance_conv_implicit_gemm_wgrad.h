@@ -197,14 +197,14 @@ int rocke_wgrad_conv_spec_wg_M(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 /* spec.wg_N: filter spatial x input channels per group (Z * Y * X * C/groups). */
 int rocke_wgrad_conv_spec_wg_N(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
-/* Returns true when the kernel output is guaranteed bit-exact deterministic:
- * either split_k <= 1 (plain store, no atomics) or two_stage=true
- * (workspace-reduce path).  false means the kernel uses atomic adds and
- * output order is non-deterministic across runs. */
+/* Returns true when the kernel output is guaranteed bit-exact deterministic,
+ * i.e. split_k <= 1 (plain store, no atomics).  false means the kernel adds
+ * atomically and output order is non-deterministic across runs -- including
+ * two_stage=true, whose Stage 1 f32-atomic-adds into shared replica slabs. */
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s);
 
 /* Returns the workspace buffer size in bytes required for the two-stage
- * deterministic wgrad path.  Formula: groups * split_k * wg_M * wg_N * 4.
+ * wgrad path.  Formula: groups * ws_replicas * wg_M * wg_N * 4 (always f32).
  * Returns 0 when two_stage=false or split_k <= 1 (no workspace needed).
  * Analogous to rocke_streamk_gemm_workspace_bytes / rocke_moe_fused_workspace_bytes. */
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s);

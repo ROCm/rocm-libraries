@@ -127,18 +127,21 @@ int rocke_wgrad_conv_spec_wg_K(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 bool rocke_wgrad_conv_spec_is_deterministic(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
 {
     /* split_k == 1 (and the -1 auto sentinel, which only ever resolves to >= 1):
-     *   plain store, always deterministic.
-     * split_k > 1 + two_stage: f32 scratch atomics + Stage 2 cast.
-     * split_k > 1 without either: atomic adds, non-deterministic.
+     *   plain store, no atomics, deterministic.
+     * split_k > 1: non-deterministic, two_stage or not. The two-stage path is
+     *   NOT an exception. It used to be -- Stage 1 wrote one private slab per
+     *   K-slice and Stage 2 folded them in a fixed order -- but Stage 1 now
+     *   f32-atomic-adds into ws_replicas shared slabs, so the order in which a
+     *   group's slices land in a slab is scheduler-dependent and f32 addition
+     *   is not associative. Stage 2's fold over the replicas is ordered, which
+     *   does nothing for partial sums that were already reordered.
      * split_k == 0 is the RUNTIME-degree encoding: the degree rides a kernel
-     *   argument and the epilogue is always packed atomics. It can never be
-     *   promoted to two-stage -- both effective_two_stage_v and the builder's
-     *   promotion require sk > 1 -- so it is never deterministic, and
-     *   two_stage cannot make it so. Treating 0 as "<= 1" here would
-     *   tell a host that an atomic kernel produces reproducible dW. */
+     *   argument and the epilogue is always packed atomics. Treating 0 as
+     *   "<= 1" here would tell a host that an atomic kernel produces
+     *   reproducible dW. */
     if(s->split_k == 0)
         return false;
-    return (s->split_k <= 1) || s->two_stage;
+    return s->split_k <= 1;
 }
 
 size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
@@ -150,7 +153,11 @@ size_t rocke_wgrad_conv_workspace_bytes(const rocke_implicit_gemm_conv_wgrad_spe
     int wg_M = rocke_wgrad_conv_spec_wg_M(s);
     int wg_N = rocke_wgrad_conv_spec_wg_N(s);
     int groups = s->problem.groups > 0 ? s->problem.groups : 1;
-    return (size_t)groups * (size_t)s->split_k * (size_t)wg_M * (size_t)wg_N * sizeof(float);
+    /* R replica slabs per group, no split_k factor: a group's K-slices
+     * atomic-add on top of each other inside those slabs rather than each
+     * getting its own. Mirrors Python wgrad_two_stage_workspace_nbytes. */
+    int reps = s->ws_replicas > 0 ? s->ws_replicas : 1;
+    return (size_t)groups * (size_t)reps * (size_t)wg_M * (size_t)wg_N * sizeof(float);
 }
 
 /* wg_K_padded = ceil(wg_K / (tile_k * split_k)) * (tile_k * split_k) */
@@ -368,6 +375,21 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                      reason_cap,
                      "two_stage=true requires split_k > 1 (got split_k=1); "
                      "with split_k=1 there is nothing to reduce and two_stage is a no-op");
+        return false;
+    }
+    /* Mirrors Python is_valid_wgrad_spec / WgradConvSpec.validate(). Without
+     * this a C++-built spec with a zero or negative count is accepted, the
+     * emitter's `reps > 1` guards elide the slab term, and Stage 1 silently
+     * writes a single slab -- a layout Stage 2 (which validates the same field)
+     * will not fold. */
+    if(s->ws_replicas < 1)
+    {
+        if(reason && reason_cap)
+            snprintf(reason,
+                     reason_cap,
+                     "ws_replicas must be >= 1 (got %d); it is the number of scratch "
+                     "slabs a group's K-slices spread over",
+                     s->ws_replicas);
         return false;
     }
 

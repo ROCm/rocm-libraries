@@ -104,7 +104,7 @@ void rocke_wgrad_reduce_grid(const rocke_wgrad_reduce_spec_t* spec,
                              int* out_gy,
                              int* out_gz);
 
-/* Build the kernel signature (8 entries: ws_ptr, dw_ptr, wg_M, wg_N,
+/* Build the kernel signature (7 entries: ws_ptr, dw_ptr, wg_M, wg_N,
  * ws_bytes, dw_bytes, groups). arena must not be NULL. */
 rocke_status_t rocke_wgrad_reduce_signature(rocke_arena_t* arena,
                                             const rocke_wgrad_reduce_spec_t* spec,
