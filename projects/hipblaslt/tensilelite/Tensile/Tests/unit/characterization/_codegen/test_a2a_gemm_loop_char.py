@@ -319,6 +319,16 @@ class TestA2AGemmEnqueueLoops:
         assert rsv, "no reserve loop inside the queue loop"
         assert "cachedHwReadIndex = hardware rptr" in body[: rsv.start()]
 
+    def test_reservation_size_is_computed_per_queue(self):
+        import re
+
+        body = self._queue_loop_body(self._src())
+        rsv = re.search(r"^label_sdma_reserve_loop\w*:", body, re.M)
+        assert rsv, "no reserve loop inside the queue loop"
+        assert "// reservation = count" in body[: rsv.start()], (
+            "the reservation size is computed outside the queue loop"
+        )
+
     def test_packet_loop_runs_once_per_block(self):
         import re
 

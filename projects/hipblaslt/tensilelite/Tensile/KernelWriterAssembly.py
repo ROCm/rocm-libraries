@@ -7988,9 +7988,6 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCmpEQU32(src0=sgpr(qLeft), src1=0, comment="W == 1?"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="no remote queues"))
 
-    module.add(SMulI32(dst=sgpr(size), src0=sgpr("A2ABlockCount"), src1=pairBytes,
-                       comment="reservation = count * %u (one pair per block)" % pairBytes))
-
     # s walks the remote ranks from myRank+1, wrapping at W (design: rem[i]).
     module.add(self.argLoader.loadKernArg(srank, "KernArgAddress",
         sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
@@ -8027,6 +8024,8 @@ class KernelWriterAssembly(KernelWriter):
                               comment="cursor pair offset = s * %u" % CURSOR_PAIR_BYTES))
     ring.emitLazyInitCursors(module, self, peerGrp, "A2ACounterPtr", curOff)
     ring.emitRefreshCache(module, self, peerGrp, cached)
+    module.add(SMulI32(dst=sgpr(size), src0=sgpr("A2ABlockCount"), src1=pairBytes,
+                       comment="reservation = count * %u (one pair per block)" % pairBytes))
     ring.emitReserveQueueSpace(module, self, peerGrp, "A2ACounterPtr", curOff,
                                cached, sgpr(size), cur, pad)
     module.add(SMovB64(dst=sgpr(pending, 2), src=sgpr(cur, 2), comment="pending = reserved base"))
