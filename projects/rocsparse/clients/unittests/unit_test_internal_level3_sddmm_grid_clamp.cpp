@@ -45,13 +45,12 @@
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
+#include "unit_test_grid_clamp.hpp"
 
-// Internal handle definition, for handle->properties.maxGridSize[0].
-#include "rocsparse_handle.hpp"
-
-// The dense-sample kernel that is driven directly below (library/src/level3 is
+// The dense-sample kernels that are driven directly below (library/src/level3 is
 // on this target's include path).
 #include "rocsparse_sddmm_csx_kernel.hpp"
+#include "rocsparse_sddmm_ell_kernel.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -79,31 +78,6 @@ namespace
     constexpr float sentinel = -1.0f;
 
     using coord_list = std::vector<std::pair<int32_t, int32_t>>;
-
-    // Temporarily shrink the grid.x limit the launches clamp against, restoring it
-    // on scope exit so a failed assertion cannot leak the override into the next
-    // test sharing the fixture's handle.
-    struct scoped_max_grid_x
-    {
-        rocsparse_handle handle;
-        int              saved;
-
-        scoped_max_grid_x(rocsparse_handle h, int limit)
-            : handle(h)
-            , saved(h->properties.maxGridSize[0])
-        {
-            handle->properties.maxGridSize[0] = limit;
-        }
-
-        ~scoped_max_grid_x()
-        {
-            handle->properties.maxGridSize[0] = saved;
-        }
-
-        scoped_max_grid_x(const scoped_max_grid_x&) = delete;
-
-        scoped_max_grid_x& operator=(const scoped_max_grid_x&) = delete;
-    };
 
     // A is m x k column major with A(i,0) = i+1 and zero elsewhere; B is k x n
     // column major with B(0,j) = j+1 and zero elsewhere. So (A*B)(i,j) is exactly
@@ -227,7 +201,7 @@ namespace
                   rocsparse_status_success);
 
         {
-            const scoped_max_grid_x cap(handle, max_grid_x);
+            const ScopedMaxGridSizeX cap(handle, max_grid_x);
 
             ASSERT_EQ(rocsparse_sddmm(handle,
                                       rocsparse_operation_none,
@@ -591,4 +565,86 @@ TEST(internal_level3_sddmm_sample, csr_shape_full_grid)
 TEST(internal_level3_sddmm_sample, csr_shape_single_block)
 {
     ASSERT_NO_FATAL_FAILURE(expect_sampled(run_csx_sample_csr_shape(1), row_major_coords(), 1));
+}
+
+// ---------------------------------------------------------------------------
+// The ELL dense-sample launch, driven through sddmm_ell_sample_launch.
+//
+// Like the CSR/CSC sample, it is only reached through rocsparse_sddmm_alg_dense,
+// which needs rocBLAS. sddmm_ell_sample_launch is the host code
+// rocsparse_sddmm_ell.cpp calls after the gemm: it clamps grid.x with
+// get_grid_size_x and picks the grid-stride kernel only when the clamp binds.
+// With ell_width = n = 64 and 16 ell columns per block the full grid is 4
+// blocks, so the device limit takes the straight-line kernel and the caps of 3
+// and 1 take the grid-stride one.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    template <rocsparse_int WF_SIZE>
+    void check_ell_sample(rocsparse_handle handle, int max_grid_x)
+    {
+        std::vector<int32_t> ell_ind(test_nnz);
+        std::vector<float>   dense(static_cast<size_t>(test_m) * test_n);
+        for(int32_t el = 0; el < test_n; ++el)
+        {
+            for(int32_t i = 0; i < test_m; ++i)
+            {
+                ell_ind[el * test_m + i]                    = el;
+                dense[static_cast<size_t>(el) * test_m + i] = expected_at(i, el);
+            }
+        }
+
+        device_vector<int32_t> d_ind{ell_ind};
+        device_vector<float>   d_dense{dense};
+        device_vector<float>   d_val{sentinel_values()};
+        ASSERT_TRUE(d_ind.ptr && d_dense.ptr && d_val.ptr);
+
+        {
+            const ScopedMaxGridSizeX cap(handle, max_grid_x);
+
+            (void)hipGetLastError();
+            ASSERT_EQ((rocsparse::sddmm_ell_sample_launch<16, WF_SIZE, float>(handle,
+                                                                              test_m,
+                                                                              test_n,
+                                                                              d_dense.ptr,
+                                                                              test_m,
+                                                                              test_n,
+                                                                              d_val.ptr,
+                                                                              d_ind.ptr,
+                                                                              BASE)),
+                      rocsparse_status_success);
+            ASSERT_EQ(hipGetLastError(), hipSuccess);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        }
+
+        const std::vector<float> got    = to_host(d_val.ptr, test_nnz);
+        const coord_list         coords = column_major_coords();
+        for(size_t idx = 0; idx < coords.size(); ++idx)
+        {
+            ASSERT_EQ(got[idx], expected_at(coords[idx].first, coords[idx].second))
+                << "stored coefficient " << idx << " is C(" << coords[idx].first << ","
+                << coords[idx].second << "); grid.x was capped at " << max_grid_x << " (WF_SIZE "
+                << WF_SIZE << ", the full grid is 4 blocks)"
+                << (got[idx] == sentinel ? "; this coefficient was never written." : ".");
+        }
+    }
+}
+
+TEST_F(SddmmGridClamp, ell_dense_sample_wf32)
+{
+    for(int cap : grid_caps(handle))
+    {
+        SCOPED_TRACE(testing::Message() << "grid.x capped at " << cap);
+        ASSERT_NO_FATAL_FAILURE(check_ell_sample<32>(handle, cap));
+    }
+}
+
+TEST_F(SddmmGridClamp, ell_dense_sample_wf64)
+{
+    for(int cap : grid_caps(handle))
+    {
+        SCOPED_TRACE(testing::Message() << "grid.x capped at " << cap);
+        ASSERT_NO_FATAL_FAILURE(check_ell_sample<64>(handle, cap));
+    }
 }

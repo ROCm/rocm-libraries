@@ -223,51 +223,18 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, T, I, J, A, B, C>
                                                               0));
 
             // Sample dense C
+            static constexpr rocsparse_int NELL_COLUMNS_PER_BLOCK = 16;
             if(handle->wavefront_size == 32)
             {
-                static constexpr rocsparse_int WAVEFRONT_SIZE         = 32;
-                static constexpr rocsparse_int NELL_COLUMNS_PER_BLOCK = 16;
-
-                rocsparse_int blocks = (ell_width - 1) / NELL_COLUMNS_PER_BLOCK + 1;
-                dim3          k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NELL_COLUMNS_PER_BLOCK);
-
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, T>),
-                    k_blocks,
-                    k_threads,
-                    0,
-                    handle->stream,
-                    m,
-                    n,
-                    dense,
-                    m,
-                    ell_width,
-                    C_val_data,
-                    C_col_data,
-                    C_base);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::sddmm_ell_sample_launch<NELL_COLUMNS_PER_BLOCK, 32, T>(
+                        handle, m, n, dense, m, ell_width, C_val_data, C_col_data, C_base)));
             }
             else
             {
-                static constexpr rocsparse_int WAVEFRONT_SIZE         = 64;
-                static constexpr rocsparse_int NELL_COLUMNS_PER_BLOCK = 16;
-
-                rocsparse_int blocks = (ell_width - 1) / NELL_COLUMNS_PER_BLOCK + 1;
-                dim3          k_blocks(blocks), k_threads(WAVEFRONT_SIZE * NELL_COLUMNS_PER_BLOCK);
-
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                    (rocsparse::sddmm_ell_sample_kernel<NELL_COLUMNS_PER_BLOCK, WAVEFRONT_SIZE, T>),
-                    k_blocks,
-                    k_threads,
-                    0,
-                    handle->stream,
-                    m,
-                    n,
-                    dense,
-                    m,
-                    ell_width,
-                    C_val_data,
-                    C_col_data,
-                    C_base);
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::sddmm_ell_sample_launch<NELL_COLUMNS_PER_BLOCK, 64, T>(
+                        handle, m, n, dense, m, ell_width, C_val_data, C_col_data, C_base)));
             }
 
             return rocsparse_status_success;

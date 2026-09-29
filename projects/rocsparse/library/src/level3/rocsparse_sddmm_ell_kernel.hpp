@@ -24,6 +24,7 @@
 #include "rocsparse.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_sddmm.hpp"
 #include "rocsparse_utility.hpp"
@@ -200,8 +201,13 @@ namespace rocsparse
         }
     }
 
+    // One wavefront samples one ell column. GRID_STRIDE is set when grid.x was
+    // clamped below the number of ell column groups; otherwise every group has
+    // its own block and the 32-bit column index of the straight-line path is
+    // exact.
     template <rocsparse_int NUM_ELL_COLUMNS_PER_BLOCK,
               rocsparse_int WF_SIZE,
+              bool          GRID_STRIDE,
               typename T,
               typename I,
               typename C>
@@ -215,25 +221,110 @@ namespace rocsparse
                                  const I* __restrict__ ell_col_ind,
                                  rocsparse_index_base ell_base)
     {
-        const auto wavefront_index  = hipThreadIdx_x / WF_SIZE;
-        const auto lane_index       = hipThreadIdx_x % WF_SIZE;
-        const auto ell_column_index = NUM_ELL_COLUMNS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
+        const auto wavefront_index = hipThreadIdx_x / WF_SIZE;
+        const auto lane_index      = hipThreadIdx_x % WF_SIZE;
 
-        if(ell_column_index < ell_width)
+        if constexpr(GRID_STRIDE)
         {
-            //
-            // One wavefront executes one ell column.
-            //
-            for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
+            for(int64_t base = static_cast<int64_t>(hipBlockIdx_x) * NUM_ELL_COLUMNS_PER_BLOCK;
+                base < ell_width;
+                base += static_cast<int64_t>(hipGridDim_x) * NUM_ELL_COLUMNS_PER_BLOCK)
             {
-                const auto ell_idx      = ELL_IND(row_index, ell_column_index, m, ell_width);
-                const auto column_index = ell_col_ind[ell_idx] - ell_base;
+                const I ell_column_index = static_cast<I>(base + wavefront_index);
 
-                if(column_index >= 0 && column_index < n)
+                if(ell_column_index < ell_width)
                 {
-                    ell_val[ell_idx] = dense_val[column_index * ld + row_index];
+                    for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
+                    {
+                        const auto ell_idx = ELL_IND(row_index, ell_column_index, m, ell_width);
+                        const auto column_index = ell_col_ind[ell_idx] - ell_base;
+
+                        if(column_index >= 0 && column_index < n)
+                        {
+                            ell_val[ell_idx] = dense_val[column_index * ld + row_index];
+                        }
+                    }
                 }
             }
         }
+        else
+        {
+            const auto ell_column_index
+                = NUM_ELL_COLUMNS_PER_BLOCK * hipBlockIdx_x + wavefront_index;
+
+            if(ell_column_index < ell_width)
+            {
+                for(I row_index = lane_index; row_index < m; row_index += WF_SIZE)
+                {
+                    const auto ell_idx      = ELL_IND(row_index, ell_column_index, m, ell_width);
+                    const auto column_index = ell_col_ind[ell_idx] - ell_base;
+
+                    if(column_index >= 0 && column_index < n)
+                    {
+                        ell_val[ell_idx] = dense_val[column_index * ld + row_index];
+                    }
+                }
+            }
+        }
+    }
+
+    // Sample the column-major dense C (leading dimension ld) into the ELL values,
+    // with grid.x clamped by get_grid_size_x.
+    template <rocsparse_int NUM_ELL_COLUMNS_PER_BLOCK,
+              rocsparse_int WF_SIZE,
+              typename T,
+              typename I,
+              typename C>
+    rocsparse_status sddmm_ell_sample_launch(rocsparse_handle     handle,
+                                             I                    m,
+                                             I                    n,
+                                             const C*             dense_val,
+                                             int64_t              ld,
+                                             I                    ell_width,
+                                             C*                   ell_val,
+                                             const I*             ell_col_ind,
+                                             rocsparse_index_base ell_base)
+    {
+        static constexpr int64_t BLOCKSIZE = WF_SIZE * NUM_ELL_COLUMNS_PER_BLOCK;
+
+        const int64_t blocks_x
+            = (static_cast<int64_t>(ell_width) - 1) / NUM_ELL_COLUMNS_PER_BLOCK + 1;
+        const uint32_t grid_x = rocsparse::get_grid_size_x(handle, blocks_x, BLOCKSIZE);
+
+        if(grid_x < blocks_x)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::sddmm_ell_sample_kernel<NUM_ELL_COLUMNS_PER_BLOCK, WF_SIZE, true, T>),
+                dim3(grid_x),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                dense_val,
+                ld,
+                ell_width,
+                ell_val,
+                ell_col_ind,
+                ell_base);
+        }
+        else
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::sddmm_ell_sample_kernel<NUM_ELL_COLUMNS_PER_BLOCK, WF_SIZE, false, T>),
+                dim3(grid_x),
+                dim3(BLOCKSIZE),
+                0,
+                handle->stream,
+                m,
+                n,
+                dense_val,
+                ld,
+                ell_width,
+                ell_val,
+                ell_col_ind,
+                ell_base);
+        }
+        return rocsparse_status_success;
     }
 }
