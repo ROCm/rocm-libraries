@@ -301,8 +301,9 @@ identity: `AttentionTuningSpec.identity()` (the kernel cache key), which
 
 Dense kernel specs are also named by `kernel_name()`, which tags every knob
 away from its default: gfx950 folds the codegen knobs into one `cg<hash>`
-token, and gfx942 appends a tag per knob. Both samplers deduplicate by
-`tuning_id`. The benchmark lanes add a backstop: the combo sweep and dense
+token, and gfx942 appends a tag per knob. Every stream -- production, full
+walk, and sampler -- yields each `tuning_id` once, since two walk points can
+canonicalize to the same knobs. The benchmark lanes add a backstop: the combo sweep and dense
 table sweep hash the lowered IR with the kernel name blanked, and record a
 match as `duplicate` instead of running it. Their rows carry `knobs` next to
 `tuning_id`, which is what replays the row (`--run-knobs` for the isolated

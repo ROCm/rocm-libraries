@@ -11,6 +11,7 @@ of its candidates and requests. It goes through the public candidate API only
 from __future__ import annotations
 
 from dataclasses import replace
+from itertools import islice
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 from ..core import KernelCandidate, pin_to_spec, spec_identity
@@ -45,12 +46,13 @@ def _pinned(candidate, req, tuning_id="auto", knobs=()):
     )
 
 
-def _streams(candidate, req, sample: int, seed: int):
+def _streams(candidate, req, sample: int, seed: int, full_limit: int):
     with sweep_level("production"):
         production = list(candidate.sweep_space(req))
     with sweep_level("full"):
         sampled = list(candidate.sample_space(req, sample, seed)) if sample else []
-    return production, sampled
+        full = list(islice(candidate.sweep_space(req), full_limit))
+    return production, sampled, full
 
 
 def _check_spec(candidate, spec):
@@ -59,7 +61,9 @@ def _check_spec(candidate, spec):
     if not spec.tuning_id.endswith(f"@{spec.config_key}"):
         _fail(candidate, f"{spec.tuning_id!r} does not end in its config_key")
     if not names_variant(spec.tuning_id, spec.variant_id):
-        _fail(candidate, f"{spec.tuning_id!r} does not name variant {spec.variant_id!r}")
+        _fail(
+            candidate, f"{spec.tuning_id!r} does not name variant {spec.variant_id!r}"
+        )
     if list(spec.knobs) != sorted(spec.knobs):
         _fail(candidate, f"{spec.tuning_id!r} knobs are not sorted pairs")
     if replace(spec) != spec or spec_identity(replace(spec)) != spec_identity(spec):
@@ -76,6 +80,7 @@ def assert_tuning_contract(
     max_replays: int = 6,
     sample: int = 6,
     seed: int = 0,
+    full_limit: int = 200,
 ) -> dict:
     """Raise :class:`TuningContractError` unless ``candidate`` keeps the contract.
 
@@ -83,8 +88,9 @@ def assert_tuning_contract(
 
     - the pinned ``auto`` request is admitted, and its spec is the first
       production spec;
-    - every production and sampled spec satisfies :class:`TunedSpec`, and ids
-      are unique within each stream;
+    - every production, sampled, and full-walk spec (the first ``full_limit``
+      of the full stream) satisfies :class:`TunedSpec`, and ids are unique
+      within each stream;
     - ``(tuning_id, knobs)`` and knobs alone reselect the same spec, a bare id
       does too, and knobs paired with another spec's id are refused;
     - the request :func:`~rocke.dispatch.core.pin_to_spec` stores reselects
@@ -106,38 +112,65 @@ def assert_tuning_contract(
         if not ok:
             _fail(candidate, f"pinned auto request refused: {why}")
         default = _select(candidate, auto, "auto")
-        production, sampled = _streams(candidate, auto, sample, seed)
+        production, sampled, full = _streams(candidate, auto, sample, seed, full_limit)
         if not production:
             _fail(candidate, "production stream is empty for an admitted request")
         if production[0] != default:
             _fail(candidate, "auto does not select the first production spec")
-        for stream in (production, sampled):
+        for label, stream in (
+            ("production", production),
+            ("sampled", sampled),
+            ("full", full),
+        ):
             ids = [s.tuning_id for s in stream]
             if len(ids) != len(set(ids)):
-                _fail(candidate, "a stream repeats a tuning_id")
+                _fail(candidate, f"the {label} stream repeats a tuning_id")
             for spec in stream:
                 _check_spec(candidate, spec)
-        counts["specs"] += len(production) + len(sampled)
+        counts["specs"] += len(production) + len(sampled) + len(full)
 
         replays = production[:max_replays] + sampled[: max(1, max_replays // 2)]
         for spec in replays:
             by_both = _pinned(candidate, req, spec.tuning_id, spec.knobs)
             if _select(candidate, by_both, f"replaying {spec.tuning_id!r}") != spec:
                 _fail(candidate, f"(id, knobs) do not replay {spec.tuning_id!r}")
-            if _select(candidate, _pinned(candidate, req, knobs=spec.knobs), f"knobs of {spec.tuning_id!r}") != spec:
+            if (
+                _select(
+                    candidate,
+                    _pinned(candidate, req, knobs=spec.knobs),
+                    f"knobs of {spec.tuning_id!r}",
+                )
+                != spec
+            ):
                 _fail(candidate, f"knobs alone do not replay {spec.tuning_id!r}")
             restemmed = f"{spec.variant_id}_wpe0@{spec.config_key}"
-            if _select(candidate, _pinned(candidate, req, restemmed, spec.knobs),
-                       f"restemmed {spec.tuning_id!r}") != spec:
+            if (
+                _select(
+                    candidate,
+                    _pinned(candidate, req, restemmed, spec.knobs),
+                    f"restemmed {spec.tuning_id!r}",
+                )
+                != spec
+            ):
                 _fail(candidate, f"a display-stem change refuses {spec.tuning_id!r}")
             stored = pin_to_spec(auto, candidate, spec)
-            if _select(candidate, stored, f"stored request for {spec.tuning_id!r}") != spec:
+            if (
+                _select(candidate, stored, f"stored request for {spec.tuning_id!r}")
+                != spec
+            ):
                 _fail(candidate, f"stored request does not reselect {spec.tuning_id!r}")
             candidate.grid(spec, stored)
             candidate.block(spec)
             counts["replays"] += 1
         for spec in production[:2]:
-            if _select(candidate, _pinned(candidate, req, spec.tuning_id), f"bare id {spec.tuning_id!r}") != spec:
+            if (
+                _select(
+                    candidate,
+                    _pinned(candidate, req, spec.tuning_id),
+                    f"bare id {spec.tuning_id!r}",
+                )
+                != spec
+            ):
                 _fail(candidate, f"bare id does not resolve {spec.tuning_id!r}")
         mismatched = next(
             (
@@ -154,8 +187,14 @@ def assert_tuning_contract(
 
         if default_knobs:
             pinned = _pinned(candidate, req, knobs=default_knobs)
-            if _select(candidate, pinned, f"default knobs {dict(default_knobs)}") != default:
-                _fail(candidate, f"{dict(default_knobs)} did not canonicalize to the default")
+            if (
+                _select(candidate, pinned, f"default knobs {dict(default_knobs)}")
+                != default
+            ):
+                _fail(
+                    candidate,
+                    f"{dict(default_knobs)} did not canonicalize to the default",
+                )
         for knobs in refused_knobs:
             if candidate.admits(_pinned(candidate, req, knobs=knobs))[0]:
                 _fail(candidate, f"{dict(knobs)} should be refused")
@@ -169,7 +208,10 @@ def assert_tuning_contract(
                 if moved.knobs != spec.knobs:
                     continue  # some knob is inert on this problem and was dropped
                 if moved.config_key != spec.config_key:
-                    _fail(candidate, f"config_key of {spec.tuning_id!r} depends on the problem")
+                    _fail(
+                        candidate,
+                        f"config_key of {spec.tuning_id!r} depends on the problem",
+                    )
                 counts["portable"] += 1
     return counts
 

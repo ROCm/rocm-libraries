@@ -137,7 +137,9 @@ class TestDenseSelection(unittest.TestCase):
         self.assertEqual(attention_tuning_spec(req, _WIDE), specs[0])
         for spec in specs[::4]:
             with self.subTest(tuning_id=spec.tuning_id):
-                self.assertEqual(attention_tuning_spec(req, _WIDE, spec.tuning_id), spec)
+                self.assertEqual(
+                    attention_tuning_spec(req, _WIDE, spec.tuning_id), spec
+                )
         with self.assertRaises(ValueError):
             attention_tuning_spec(req, _WIDE, "grid_default_wpe2@0000")
 
@@ -252,7 +254,9 @@ class TestDenseGqaPairWiring(unittest.TestCase):
         req = _gfx950_dense_req(**_LLAMA_8K, sliding_window=512)
         for spec_id in (_PERSIST, _WIDE):
             with self.subTest(spec_id=spec_id):
-                self.assertEqual(_spec(req, spec_id).resolved_persist_decode, "qb_major")
+                self.assertEqual(
+                    _spec(req, spec_id).resolved_persist_decode, "qb_major"
+                )
 
     def test_mha_falls_back_to_qb_major(self):
         spec = _spec(_gfx950_dense_req(**{**_LLAMA_8K, "nhead_k": 32}), _WIDE)
@@ -435,7 +439,9 @@ class TestDenseSlidingWindowWiring(unittest.TestCase):
         self.assertIn("sliding_window", err_msg)
 
     def test_sliding_window_without_ragged_accepted(self):
-        spec = _spec(_gfx950_dense_req(seqlen_q=2048, seqlen_k=2048, sliding_window=256))
+        spec = _spec(
+            _gfx950_dense_req(seqlen_q=2048, seqlen_k=2048, sliding_window=256)
+        )
         self.assertFalse(spec.ragged)
         self.assertEqual(spec.sliding_window, 256)
 
@@ -459,7 +465,9 @@ class TestDenseCapabilitySlidingWindow(unittest.TestCase):
     def test_every_d128_variant_admits_sinks(self):
         """Admission is the kernel's: wide DMA runs sinks, so its variant admits."""
         names = _admitting(
-            _gfx950_dense_req(use_sinks=True, hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8)
+            _gfx950_dense_req(
+                use_sinks=True, hdim_q=128, hdim_v=128, nhead_q=32, nhead_k=8
+            )
         )
         self.assertIn(_WIDE_NAME, names)
         self.assertIn("attention_gfx950_dense_persist_default", names)
@@ -483,7 +491,9 @@ class TestSWASinkComposition(unittest.TestCase):
         self.assertTrue(spec.use_sinks)
 
     def test_swa_sink_kernel_name_has_both_tokens(self):
-        kname = _spec(_gfx950_dense_req(sliding_window=128, use_sinks=True)).kernel_name()
+        kname = _spec(
+            _gfx950_dense_req(sliding_window=128, use_sinks=True)
+        ).kernel_name()
         self.assertIn("swa128", kname)
         self.assertIn("sinks", kname)
 

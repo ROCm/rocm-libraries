@@ -317,9 +317,7 @@ def sweep(args) -> list[dict]:
                                 req,
                                 algorithm=result.candidate.algorithm,
                                 spec_id=result.candidate.spec_id,
-                                tuning_id=getattr(
-                                    result.spec, "tuning_id", "auto"
-                                ),
+                                tuning_id=getattr(result.spec, "tuning_id", "auto"),
                             )
                         )
                         launch = attention_dispatch_result(req, result.candidate, spec)

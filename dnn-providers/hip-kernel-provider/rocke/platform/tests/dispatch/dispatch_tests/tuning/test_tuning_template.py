@@ -116,9 +116,10 @@ class ToySpace(KnobSpace):
         return replace(base, **knobs, **extra)
 
     def inert(self, base, kernel):
-        if kernel.swizzle is not None and kernel.swizzle == replace(
-            kernel, swizzle=None
-        ).resolved_swizzle():
+        if (
+            kernel.swizzle is not None
+            and kernel.swizzle == replace(kernel, swizzle=None).resolved_swizzle()
+        ):
             return {"swizzle": "restates its policy"}
         return {}
 
@@ -168,7 +169,11 @@ def _candidate(tile: int, space_type=ToySpace):
         priority=30,
         capability=Capability(arches=("gfx950",), dtypes=("bf16",)),
         space=space_type(
-            abi=ABI, arch="gfx950", path="toy", variant_id=variant_id, candidate_name=name
+            abi=ABI,
+            arch="gfx950",
+            path="toy",
+            variant_id=variant_id,
+            candidate_name=name,
         ),
         base=base,
         request_errors=lambda req: [],
@@ -248,10 +253,17 @@ class TestStalePins(unittest.TestCase):
         pin = replace(req, tuning_id=stored.tuning_id, tuning_knobs=stored.knobs)
         self.assertEqual(registry.select(pin).select_spec(pin), stored)
         for label, stale, reason in (
-            ("removed", replace(pin, spec_id="gfx950_tile32"), "no registered candidate"),
+            (
+                "removed",
+                replace(pin, spec_id="gfx950_tile32"),
+                "no registered candidate",
+            ),
             ("mismatch", replace(pin, tuning_knobs={"unroll": 4}), "canonicalize to"),
-            ("unknown", replace(pin, tuning_knobs=(), tuning_id="tile64_wpe2@" + "0" * 16),
-             "unknown tuning_id"),
+            (
+                "unknown",
+                replace(pin, tuning_knobs=(), tuning_id="tile64_wpe2@" + "0" * 16),
+                "unknown tuning_id",
+            ),
         ):
             with self.subTest(label), self.assertRaises(PinRefused) as raised:
                 registry.select(stale)
@@ -260,6 +272,39 @@ class TestStalePins(unittest.TestCase):
     def test_bad_knob_values_fail_when_the_request_is_built(self):
         with self.assertRaisesRegex(TypeError, "JSON scalar"):
             ToyRequest(m=8, tuning_knobs={"unroll": [2]})
+
+
+class _LenientSpace(ToySpace):
+    """A space whose walk emits non-canonical points: its axis declares the
+    wrong default for ``unroll`` (so ``unroll=1`` restates the kernel's), and
+    its ``is_valid`` only checks that the spec builds."""
+
+    def axes(self, base):
+        return (values("unroll", 99, (1, 2, 4)),) + AXES[1:]
+
+    def is_valid(self, base, knobs):
+        try:
+            self.build(base, {**self.fixed(base), **knobs}, None)
+        except ValueError:
+            return False
+        return True
+
+
+class TestFullWalk(unittest.TestCase):
+    def test_the_full_walk_yields_each_config_once(self):
+        space = _LenientSpace(
+            abi=ABI,
+            arch="gfx950",
+            path="toy",
+            variant_id="tile64",
+            candidate_name="toy",
+        )
+        base = ToyKernel(m=1024, tile=64)
+        ids = [s.tuning_id for s in space.stream(base, "full")]
+        self.assertTrue(ids)
+        self.assertEqual(len(ids), len(set(ids)))
+        default_id = space.canonicalize(base, {})[0].tuning_id
+        self.assertEqual(ids.count(default_id), 1)
 
 
 class _IgnoresKnobs(ToySpace):

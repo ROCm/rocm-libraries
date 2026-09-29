@@ -268,10 +268,13 @@ class KnobSpace:
 
         ``production`` walks :meth:`production`; ``full`` walks the pruned
         product of all axes -- consume it through :meth:`sample` unless the
-        space is known to be small.
+        space is known to be small. Either way each ``tuning_id`` is yielded
+        once.
         """
         if level not in SWEEP_LEVELS:
-            raise ValueError(f"sweep level must be one of {SWEEP_LEVELS}, got {level!r}")
+            raise ValueError(
+                f"sweep level must be one of {SWEEP_LEVELS}, got {level!r}"
+            )
         axes = self.axes(base)
 
         def is_valid(knobs) -> bool:
@@ -282,7 +285,11 @@ class KnobSpace:
             if level == "production"
             else iter_knob_sets(axes, self.root(base), is_valid)
         )
-        seen: Optional[set] = set() if level == "production" else None
+        # Walk points are unique, but two can canonicalize to the same knobs
+        # (a lenient is_valid, an axis whose declared default is not the
+        # kernel's), so every stream is deduped by id. The set holds one short
+        # string per spec emitted, which only a full, unsampled walk makes large.
+        seen: set[str] = set()
         fixed = self.fixed(base)
         for knobs in knob_sets:
             kernel, canonical, _why = self._checked(base, knobs, None)
@@ -290,12 +297,9 @@ class KnobSpace:
                 continue
             for waves_per_eu in self.waves(base, level):
                 spec = self._at_waves(base, kernel, fixed, canonical, waves_per_eu)
-                if spec is None:
+                if spec is None or spec.tuning_id in seen:
                     continue
-                if seen is not None:
-                    if spec.tuning_id in seen:
-                        continue
-                    seen.add(spec.tuning_id)
+                seen.add(spec.tuning_id)
                 yield spec
 
     def _at_waves(self, base, kernel, fixed, canonical, waves_per_eu):

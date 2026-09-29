@@ -544,7 +544,9 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
         )
         swept_counts = {k.num_persistent for k in kernels}
         for policy in ("gqa_pair", "gqa_pair_2phase", "0.75x", "1.25x", "2x"):
-            self.assertIn(resolve_dense_num_persistent(kernels[0], policy), swept_counts)
+            self.assertIn(
+                resolve_dense_num_persistent(kernels[0], policy), swept_counts
+            )
 
     def test_redundant_settings_are_pruned(self):
         """A setting that compiles to the default is dropped by
@@ -567,8 +569,14 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
             with self.subTest(**knobs):
                 self.assertEqual(canonical(**knobs), {})
         inert_partner = (
-            (dict(lazy_rescale=False, lazy_rescale_threshold=4.0), "lazy_rescale_threshold"),
-            (dict(pv_sched_fence=False, pv_sched_fence_mask=0x008), "pv_sched_fence_mask"),
+            (
+                dict(lazy_rescale=False, lazy_rescale_threshold=4.0),
+                "lazy_rescale_threshold",
+            ),
+            (
+                dict(pv_sched_fence=False, pv_sched_fence_mask=0x008),
+                "pv_sched_fence_mask",
+            ),
             (
                 dict(pv_sched_group_template=False, pv_sched_group_ds_read=4),
                 "pv_sched_group_ds_read",
@@ -577,7 +585,9 @@ class TestGfx950DenseTuningSpace(unittest.TestCase):
         for knobs, inert in inert_partner:
             with self.subTest(**knobs):
                 self.assertNotIn(inert, canonical(**knobs))
-        self.assertEqual(canonical(pv_loop_order="k_major"), {"pv_loop_order": "k_major"})
+        self.assertEqual(
+            canonical(pv_loop_order="k_major"), {"pv_loop_order": "k_major"}
+        )
         self.assertEqual(canonical(lazy_rescale=False), {"lazy_rescale": False})
 
     def test_full_stream_and_samples_are_distinct_and_reproducible(self):
@@ -681,7 +691,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
             (
                 _gfx942_request(),
                 _gfx942_request(seqlen_q=8192, seqlen_k=8192),
-                _gfx942_request(dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1),
+                _gfx942_request(
+                    dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
+                ),
             )
         )
         missing = _dense_swept_fields("gfx942") - changed
@@ -722,7 +734,9 @@ class TestGfx942DenseTuningSpace(unittest.TestCase):
         )
 
         req = _gfx942_request()
-        d64_req = _gfx942_request(dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1)
+        d64_req = _gfx942_request(
+            dtype="bf16", hdim_q=64, hdim_v=64, nhead_q=8, nhead_k=1
+        )
 
         def canonical(knobs, r=req):
             return tuning_spec_with_knobs(r, "gfx942_dense", knobs)

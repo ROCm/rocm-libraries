@@ -73,7 +73,14 @@ ATTENTION_EXECUTION_REGISTRY = CandidateRegistry(
     require_build=True,
     require_torch_binding=True,
 )
-for _module in (generic, gfx942_dense, gfx942_unified, gfx950_dense, gfx950_unified, gfx1250):
+for _module in (
+    generic,
+    gfx942_dense,
+    gfx942_unified,
+    gfx950_dense,
+    gfx950_unified,
+    gfx1250,
+):
     _module.register(ATTENTION_ROUTE_REGISTRY, ATTENTION_EXECUTION_REGISTRY)
 # Compatibility alias: production auto-dispatch and candidate listing.
 ATTENTION_REGISTRY = ATTENTION_ROUTE_REGISTRY
