@@ -36,7 +36,8 @@ from copy import deepcopy
 from . import LibraryIO
 
 from . import ClientWriter
-from .tensilelite_create_library import tensileLibraryFile, run as createLibrary
+from .tensilelite_create_library import tensileLibraryFile
+from .tensilelite_create_library import run as createLibrary
 from .Common import ensurePath, printExit
 from .Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
 from .Common.GlobalParameters import assignGlobalParameters
@@ -52,7 +53,6 @@ def createLibraryForBenchmark(logicPath, libraryPath):
     """
 
     args = [
-        "--new-client-only", "--no-short-file-names", \
         "--architecture=all", "--code-object-version=default", "--library-format=yaml", \
         os.path.abspath(logicPath), os.path.abspath(libraryPath), "HIP"]
 

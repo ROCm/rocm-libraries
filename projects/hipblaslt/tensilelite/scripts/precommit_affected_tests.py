@@ -174,9 +174,13 @@ def diagnose_env_failure(output: str, tl_root: Path) -> list[str]:
         or "ignoring existing virtual environment" in low
     )
     missing_dep = "modulenotfounderror" in low or "no module named" in low
+    sync = (
+        f'    (cd {tl_disp} && TENSILELITE_ROCM_VERSION="$(<"'
+        '${ROCM_PATH:-/opt/rocm}/.info/version")" uv sync)'
+    )
     recreate = [
         f"    rm -rf {venv_disp}",
-        f"    (cd {tl_disp} && TENSILELITE_ROCM_VERSION=0.0.0 uv sync)",
+        sync,
     ]
 
     if owned_by_other or permission:
@@ -198,7 +202,7 @@ def diagnose_env_failure(output: str, tl_root: Path) -> list[str]:
     if missing_dep:
         return [
             "The test virtualenv is missing required packages. Sync it:",
-            f"    (cd {tl_disp} && TENSILELITE_ROCM_VERSION=0.0.0 uv sync)",
+            sync,
         ]
     return [
         "uv could not prepare the test environment (see its output above).",
@@ -329,10 +333,33 @@ def main() -> int:
         log(bar)
         return 1
 
+    executable = "tensilelite-client.exe" if os.name == "nt" else "tensilelite-client"
+    client = tl_root / "build_tmp" / "tensilelite" / "client" / executable
+    if not client.is_file():
+        log("[tensilelite-tests] ERROR: built TensileLite client is missing.")
+        log("    Run: invoke build-client --gpu-targets <gfx target>")
+        return 1
+    test_env = os.environ.copy()
+    test_env.setdefault("ROCM_PATH", "/opt/rocm")
+    configured = subprocess.run(
+        [
+            "uv", "run", "--no-sync", "python", "-m",
+            "tensilelite_configure_client", "--ensure-client", str(client),
+        ],
+        cwd=tl_root,
+        env=test_env,
+    )
+    if configured.returncode:
+        log("[tensilelite-tests] ERROR: failed to configure the built TensileLite client.")
+        return configured.returncode
+
     # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.
     # -n 8: fixed; -n auto = os.cpu_count() over-subscribes large CI/dev hosts.
-    argv = ["uv", "run", "--no-sync", "pytest", "-q", "-ra", "-n", "8", *nodes]
-    result = subprocess.run(argv, cwd=tl_root)
+    argv = [
+        "uv", "run", "--no-sync", "pytest", "--snapshot-warn-unused",
+        "-q", "-ra", "-n", "8", *nodes,
+    ]
+    result = subprocess.run(argv, cwd=tl_root, env=test_env)
     rc = result.returncode
     if rc == 5:  # pytest: no tests collected
         log("[tensilelite-tests] no tests collected (treated as pass)")
@@ -343,7 +370,10 @@ def main() -> int:
 
     bar = "=" * 64
     update_targets = failed_test_files(tl_root) or nodes
-    update_cmd = "uv run --no-sync pytest --snapshot-update " + " ".join(update_targets)
+    update_cmd = (
+        f"ROCM_PATH={test_env['ROCM_PATH']} uv run --no-sync pytest --snapshot-update "
+        + " ".join(update_targets)
+    )
     log("")
     log(bar)
     log("  X  TENSILELITE TESTS FAILED (rc=%d) -- COMMIT BLOCKED" % rc)

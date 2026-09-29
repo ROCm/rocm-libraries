@@ -114,6 +114,10 @@ def _common_yaml_files():
         path
         for pattern in ("*.yaml", "*.yml")
         for path in _COMMON_DIR.rglob(pattern)
+        if not any(
+            part.startswith(".") or part in {"tmp", "build", "build_tmp"}
+            for part in path.relative_to(_COMMON_DIR).parts
+        )
     })
 
 
