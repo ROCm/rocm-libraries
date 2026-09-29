@@ -196,43 +196,16 @@ def load_CMS_groups(
     make_param: Callable[..., ForkParameter],
     MT_DU: Optional[List] = None,
 ) -> GroupDimension:
-    """Load CMS groups from tensilelite's kernel registry, returned as GroupDimension.
+    """Load CMS groups from TensileLite's kernel registry, returned as GroupDimension.
 
     *make_param* must be a bound ``_make_param`` from a ``BaseParamBuilder``
-    subclass: it attaches default TensileLite metadata comments for ordinary
+    subclass: it attaches default TensileLiteLite metadata comments for ordinary
     parameters. For ``MatrixInstruction``, that default is replaced here with
     a comment derived from ``MIDesign.calculate_mfma_parameters`` (MT, TT, WG,
     MIBlockM), matching the loop below.
     """
-    try:
-        from tensilelite.Components.CustomSchedule import query_cms_kernels
-        from tensilelite.Common.ValidParameters import validParameters
-    except ImportError:
-        import sys
-        import os
-        # Walk up directory tree looking for tensilelite as a sibling directory
-        # This works regardless of where the file is moved within the project structure
-        current_file = os.path.abspath(__file__)
-        current_dir = os.path.dirname(current_file)
-        tensilelite_path = None
-        
-        # Walk up until we find a parent containing 'tensilelite' directory
-        while current_dir != os.path.dirname(current_dir):  # not at filesystem root
-            candidate_path = os.path.join(current_dir, "tensilelite")
-            if os.path.isdir(candidate_path):
-                tensilelite_path = candidate_path
-                break
-            current_dir = os.path.dirname(current_dir)
-        
-        if tensilelite_path:
-            sys.path.insert(0, tensilelite_path)
-            from tensilelite.Components.CustomSchedule import query_cms_kernels
-            from tensilelite.Common.ValidParameters import validParameters
-        else:
-            raise ImportError(
-                "tensilelite not found. Could not locate tensilelite directory "
-                "in parent directories of this file."
-            )
+    from tensilelite.Components.CustomSchedule import query_cms_kernels
+    from tensilelite.Common.ValidParameters import validParameters
     
 
     cms_dtype = _DTYPE_TO_CMS_QUERY.get(datatype.lower())

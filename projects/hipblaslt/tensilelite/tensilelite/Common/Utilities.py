@@ -36,7 +36,7 @@ from math import log
 from pathlib import Path
 from typing import Sequence, Tuple, Optional
 
-from .. import __version__
+from .. import GENERATOR_VERSION as __version__
 
 from rocisa import rocIsa
 

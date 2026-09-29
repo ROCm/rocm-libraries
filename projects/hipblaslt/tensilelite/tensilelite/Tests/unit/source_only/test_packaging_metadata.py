@@ -91,6 +91,9 @@ def test_direct_wheel_build_requires_explicit_rocm_identity(tmp_path, monkeypatc
     (rocm_root / ".info/version").write_text("9.9.9\n", encoding="utf-8")
     monkeypatch.setenv("ROCM_PATH", str(rocm_root))
     monkeypatch.delenv("TENSILELITE_ROCM_VERSION", raising=False)
+    # This is a direct-build contract check, not tox's narrowly scoped
+    # bootstrap fallback for constructing its own editable test package.
+    monkeypatch.delenv("TOX_ENV_NAME", raising=False)
 
     result = subprocess.run(
         [
