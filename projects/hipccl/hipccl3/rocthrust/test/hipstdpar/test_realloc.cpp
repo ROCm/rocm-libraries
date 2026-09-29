@@ -33,8 +33,8 @@
 //   * shrinking preserves the retained prefix,
 //   * reallocarray rejects an overflowing product and leaves the block intact.
 //
-// Interposed allocations are backed by hipMallocManaged, so the storage is
-// host-accessible and the payload can be validated directly on the host.
+// Interposed allocations are host-accessible (managed memory in v0, libc memory
+// in v1), so the payload can be validated directly on the host.
 
 #include <cerrno>
 #include <cstddef>
