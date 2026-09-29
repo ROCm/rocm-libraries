@@ -10,6 +10,16 @@ Documentation for rocThrust available at
 * rocThrust now searches for an existing SQLite3 system library first by default.  SQLITE_USE_SYSTEM_PACKAGE can be set to OFF to force a local download of SQLite3.  The minimum required version of SQLite3 is 3.51.3.
 * Updated the mechanism in which rocThrust looks for and includes libhipcxx to be compliant with libhipcxx packaging changes in ROCm 10.1
 
+### Fixed
+
+* Fixed unchecked size overflow in the `calloc` and `reallocarray` interposed by `--hipstdpar-interpose-alloc`, and a null pointer dereference in `calloc` when the allocation failed.
+* Fixed HIPSTDPAR allocation interposition to follow libc, POSIX, and C++ allocation contracts: `posix_memalign` returns `0` on success, `operator new` calls the `std::new_handler` and throws `std::bad_alloc`, failed `mmap` calls return `MAP_FAILED`, and failed allocations no longer cause the next offloaded algorithm to fail.
+* Fixed the legacy HIPSTDPAR allocation interposer, used when `__HIPSTDPAR_INTERPOSE_ALLOC_V1__` is not defined, which did not compile and leaked memory on sized deallocation.
+
+### Known issues
+
+* With `--hipstdpar-interpose-alloc`, `aligned_alloc` rounds an alignment that is not a power of two up instead of failing, as `memalign` does, because the compiler routes both calls to the same interposed function.
+
 ## rocThrust 4.6.0 for ROCm 10.0.0
  
 ### Added
