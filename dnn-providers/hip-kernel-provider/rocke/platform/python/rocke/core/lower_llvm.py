@@ -102,29 +102,42 @@ _DATALAYOUT_LLVM22 = (
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
-# LLVM 23+ (ROCm 7.13+): drifts from LLVM 22 by two independent edits, both
-# re-derived from an amd-staging host (AMD clang 24.0.0git, ROCm 10.0) and
-# confirmed gfx-invariant across every wired arch (gfx90a/942/950/1100/1151/
-# 1201/1250):
+# Layout emitted for rocKE's ``llvm23`` flavor. Relative to our ``llvm22``
+# constant it adds two independent things:
 #
 #   1. the ELF symbol-mangling spec ``m:e``, which LLVM 20 and LLVM 22 omit;
-#   2. address spaces ``p10``-``p15``, added upstream by ``5bf967cb132b``. These
-#      are what the ``m:e``-only form was missing, and omitting them is not
-#      cosmetic: the backend used to silently overwrite the module's DataLayout
-#      with the target's, which masked the mismatch. Once ``fc6829a3`` ("clang:
-#      Do not overwrite a module's DataLayout in the backend") stopped that, a
-#      module carrying the short form fails codegen with "Can't create a
-#      MachineFunction using a Module with a Target-incompatible DataLayout
-#      attached".
+#   2. address spaces ``p10``-``p15``, introduced upstream by ``5bf967cb132b``.
 #
-# Carrying p10-p15 is safe on every toolchain, because ``5bf967cb132b`` landed
-# before ``fc6829a3``: a backend that enforces the module DataLayout necessarily
-# has ``fc6829a3``, hence ``5bf967cb132b``, hence has p10-p15 and requires them;
-# a backend lacking p10-p15 predates ``5bf967cb132b``, hence ``fc6829a3``, hence
-# still overwrites and tolerates the longer string. Do NOT "fix" a mismatch
-# against an older hipcc by deleting
-# p10-p15 -- that re-breaks every kernel on a current toolchain. Regenerate via
-# ``test_datalayout_matches_hipcc_emitted_ir`` if a future build drifts further.
+# Both were re-derived from the clang on an amd-staging host and confirmed
+# gfx-invariant there across every wired arch
+# (gfx90a/942/950/1100/1151/1201/1250).
+#
+# This is rocKE's flavor constant, NOT a claim about what every LLVM 23+ /
+# ROCm 7.13+ build emits: compiler builds vary, and older ones -- including some
+# builds numbered LLVM 23 or later -- omit ``p10``-``p15``. The drift guard
+# ``test_datalayout_matches_hipcc_emitted_ir`` accommodates exactly that
+# variation.
+#
+# Why we carry the longer form. LLVM's backend has long rejected a module whose
+# DataLayout is incompatible with the target's ("Can't create a MachineFunction
+# using a Module with a Target-incompatible DataLayout attached" -- the check is
+# already in LLVM 22's MachineFunction.cpp, so it predates ``fc6829a3``). What
+# changed in ``fc6829a3`` ("clang: Do not overwrite a module's DataLayout in the
+# backend") is that clang stopped replacing an explicitly supplied layout, which
+# exposes that pre-existing check to the layout rocKE hands it. On the clang
+# builds we tested, the consequence is concrete:
+#
+#   * against staging clang (post-``fc6829a3``), a module carrying the short
+#     form fails codegen outright, and the long form builds and links;
+#   * against the older ``/opt/rocm`` clang we tested, whose own layout omits
+#     ``p10``-``p15``, the long form is still accepted (rc=0) because that clang
+#     overwrites the supplied layout before codegen.
+#
+# That is an observation about the builds we exercised, not a proof about every
+# toolchain. It is still the right trade: do NOT "fix" a mismatch against an
+# older hipcc by deleting ``p10``-``p15``, since that re-breaks every kernel on a
+# current toolchain. Regenerate via ``test_datalayout_matches_hipcc_emitted_ir``
+# if a future build drifts further.
 _DATALAYOUT_LLVM23 = (
     "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
     "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-p10:32:32-p11:32:32"

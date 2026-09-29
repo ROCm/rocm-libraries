@@ -1612,28 +1612,41 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         self.assertIs(_datalayout_kind_from_ir(legacy), LlvmDatalayoutKind.P8_PLAIN)
         self.assertIsNone(_datalayout_kind_from_ir("define void @k() {}"))
 
-    def test_llvm23_datalayout_is_llvm22_plus_me_mangling(self):
+    def test_llvm23_datalayout_is_llvm22_plus_me_and_p10_p15(self):
         """llvm23 is no longer an alias of llvm22: it is the llvm22 layout with
         the ELF ``m:e`` symbol-mangling spec spliced in after the leading
-        endianness field.
+        endianness field AND address spaces ``p10``-``p15`` (upstream
+        ``5bf967cb132b``) spliced in after ``p9``.
 
-        The toolchain drift guard proves this only on a ROCm 7.13+ host with
-        hipcc; this pins the same contract on the bare CI gate, so an accidental
-        re-alias (or a stray edit to either constant) fails here with a precise
-        message instead of surfacing as an opaque byte-identity golden diff.
+        The toolchain drift guard needs a host with hipcc; this pins the same
+        contract on the bare CI gate, so an accidental re-alias (or a stray edit
+        to either constant) fails here with a precise message instead of
+        surfacing as an opaque byte-identity golden diff.
         """
         from rocke.core.lower_llvm import _DATALAYOUT_LLVM22, _DATALAYOUT_LLVM23
+
+        p10_p15 = "-p10:32:32-p11:32:32-p12:32:32-p13:32:32-p14:32:32-p15:32:32"
 
         self.assertNotEqual(
             _DATALAYOUT_LLVM23,
             _DATALAYOUT_LLVM22,
-            "llvm23 is no longer an alias of llvm22 (it adds the m:e spec)",
+            "llvm23 is no longer an alias of llvm22 (it adds m:e and p10-p15)",
+        )
+        # Name the p10-p15 block on its own: dropping it is the regression that
+        # breaks codegen on a clang that enforces the supplied module DataLayout,
+        # and a bare string-equality failure would not say which field went.
+        self.assertIn(
+            "-p9:192:256:256:32" + p10_p15 + "-i64:64",
+            _DATALAYOUT_LLVM23,
+            "llvm23 datalayout must carry address spaces p10-p15 between p9 and i64",
         )
         self.assertEqual(
             _DATALAYOUT_LLVM23,
-            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1),
+            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1).replace(
+                "-i64:64", p10_p15 + "-i64:64", 1
+            ),
             "llvm23 datalayout must be the llvm22 layout plus the m:e "
-            "symbol-mangling spec",
+            "symbol-mangling spec and address spaces p10-p15",
         )
 
     def test_flavor_for_rocm_clamps_at_both_ends(self):
