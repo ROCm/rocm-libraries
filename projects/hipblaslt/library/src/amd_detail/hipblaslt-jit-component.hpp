@@ -251,6 +251,15 @@ namespace hipblaslt_jit
     {
     public:
         virtual ~SolutionStore() = default;
+        // Up to count indices of stored solutions for exactly this request that
+        // need at most maxWorkspaceBytes, best first, without excluded kernels.
+        virtual Status lookup(const OperationRequest&,
+                              const DeviceTarget&,
+                              size_t                          count,
+                              size_t                          maxWorkspaceBytes,
+                              const std::vector<std::string>& excludeKernels,
+                              std::vector<int32_t>&           indices) const
+            = 0;
         // Returns one library index per solution, in order.
         virtual Status publish(const OperationRequest&,
                                const DeviceTarget&,

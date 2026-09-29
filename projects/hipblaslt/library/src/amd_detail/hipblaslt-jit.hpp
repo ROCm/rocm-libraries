@@ -3,8 +3,10 @@
 #pragma once
 
 #include <hipblaslt/hipblaslt.h>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace hipblaslt_jit
 {
@@ -67,13 +69,26 @@ namespace hipblaslt_ext::experimental::jit
 
     // Compile synchronously on the current HIP device (which must equal device).
     // Call before stream capture. Unsupported operation/backend pairs return
-    // NOT_SUPPORTED. There is no persistent cache or reload across invocations.
+    // NOT_SUPPORTED. The solution lives in this process only.
     HIPBLASLT_EXPORT hipblasStatus_t getJitAlgo(int            device,
                                                 const Request& request,
                                                 const Backend& backend,
                                                 size_t         maxWorkspaceBytes,
                                                 Solution&      solution,
                                                 Diagnostics&   diagnostics);
+
+    // Up to count solution indices for exactly this request: those already in the
+    // JIT solution library in the order they were published, then solutions
+    // generated with backend and published now, best first, under the same device
+    // rules as getJitAlgo. The indices persist across processes; pass them to
+    // hipblaslt_ext::getAlgosFromIndex.
+    HIPBLASLT_EXPORT hipblasStatus_t getLibraryAlgos(int                   device,
+                                                     const Request&        request,
+                                                     const Backend&        backend,
+                                                     size_t                count,
+                                                     size_t                maxWorkspaceBytes,
+                                                     std::vector<int32_t>& indices,
+                                                     Diagnostics&          diagnostics);
 
     // Build the implemented GEMM request from existing hipBLASLt descriptors.
     // Other operations can add factories without changing getJitAlgo or Backend.

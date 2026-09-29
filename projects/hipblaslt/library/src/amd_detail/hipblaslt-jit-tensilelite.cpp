@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt-jit-process.hpp"
@@ -30,6 +31,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 
 namespace hipblaslt_ext::experimental::jit::tensilelite
 {
@@ -259,6 +263,99 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
             return solutions;
         }
 
+        std::string fileStamp(const fs::path& path)
+        {
+            std::error_code error;
+            const auto      size = fs::file_size(path, error);
+            if(error)
+                return "missing";
+            const auto modified = fs::last_write_time(path, error);
+            return std::to_string(size) + ":"
+                   + std::to_string(error ? 0 : modified.time_since_epoch().count());
+        }
+
+        // The file a process launch runs for program.
+        fs::path findProgram(const std::string& program)
+        {
+            const auto      path = fs::u8path(program);
+            std::error_code error;
+            if(path.has_parent_path() || program.empty())
+                return path;
+#ifdef _WIN32
+            constexpr char separator = ';';
+#else
+            constexpr char separator = ':';
+#endif
+            const char*        search = std::getenv("PATH");
+            std::istringstream directories(search ? search : "");
+            for(std::string directory; std::getline(directories, directory, separator);)
+                if(!directory.empty() && fs::is_regular_file(fs::u8path(directory) / path, error))
+                    return fs::u8path(directory) / path;
+            return path;
+        }
+
+        void addFiles(hipblaslt_jit::Fnv1a& hash, const fs::path& root, bool recursive)
+        {
+            std::vector<std::pair<std::string, std::string>> files;
+            std::error_code                                  error;
+            for(fs::recursive_directory_iterator next(root, error), end; !error && next != end;
+                next.increment(error))
+            {
+                const auto name = next->path().filename();
+                if(next->is_directory(error))
+                {
+                    if(!recursive || name == "Tests" || name == "__pycache__")
+                        next.disable_recursion_pending();
+                }
+                else if(next->is_regular_file(error))
+                    files.emplace_back(next->path().lexically_relative(root).generic_u8string(),
+                                       fileStamp(next->path()));
+            }
+            std::sort(files.begin(), files.end());
+            hash.add(root.u8string());
+            for(const auto& [name, stamp] : files)
+                hash.add(name).add(stamp);
+        }
+
+        // Changes whenever the generator can produce different solutions: the
+        // hipBLASLt build, the options, the programs they name, the recipe and
+        // the Python sources the generator imports.
+        std::string generatorVersion(const Options& options)
+        {
+            hipblaslt_jit::Fnv1a hash;
+            hash.add(std::to_string(HIPBLASLT_VERSION_MAJOR) + "." + std::to_string(HIPBLASLT_VERSION_MINOR)
+                     + "." + std::to_string(HIPBLASLT_VERSION_PATCH));
+#ifndef _WIN32
+            Dl_info library{};
+            if(dladdr(reinterpret_cast<const void*>(&generatorVersion), &library) && library.dli_fname)
+                hash.add(library.dli_fname).add(fileStamp(library.dli_fname));
+#endif
+            hash.add(options.architecture).add(options.pythonPath).add(options.configPath);
+            for(const auto* program : {&options.pythonExecutable, &options.cxxCompiler})
+            {
+                const auto path = findProgram(*program);
+                hash.add(path.u8string()).add(fileStamp(path));
+            }
+            if(!options.configPath.empty())
+            {
+                std::ifstream      config(fs::u8path(options.configPath), std::ios::binary);
+                std::ostringstream content;
+                content << config.rdbuf();
+                hash.add(config ? content.str() : "missing");
+            }
+            addFiles(hash, fs::u8path(options.tensileSourceDirectory) / "Tensile", true);
+#ifdef _WIN32
+            constexpr char separator = ';';
+#else
+            constexpr char separator = ':';
+#endif
+            std::istringstream entries(options.pythonPath);
+            for(std::string entry; std::getline(entries, entry, separator);)
+                if(!entry.empty())
+                    addFiles(hash, fs::u8path(entry) / "rocisa", false);
+            return "tensilelite:" + hash.hex();
+        }
+
         using hipblaslt_jit::Stage;
         using hipblaslt_jit::Status;
 
@@ -270,7 +367,8 @@ namespace hipblaslt_ext::experimental::jit::tensilelite
                 : m_options(options)
                 , m_info{"tensilelite",
                          "TensileLite",
-                         options.configPath.empty() ? "origami.gemm.dp.v1" : ""}
+                         options.configPath.empty() ? "origami.gemm.dp.v1" : "",
+                         generatorVersion(options)}
             {
             }
             const hipblaslt_jit::BackendInfo& info() const noexcept override

@@ -4,10 +4,12 @@
 #include "hipblaslt-jit-component.hpp"
 #include "hipblaslt-jit-gemm-internal.hpp"
 #include "hipblaslt-jit-library.hpp"
+#include "hipblaslt-jit-problem-type.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_arch_revision.hpp"
 #include <Tensile/hip/HipHardware.hpp>
+#include <algorithm>
 #include <mutex>
 #include <random>
 #include <stdexcept>
@@ -49,6 +51,85 @@ namespace hipblaslt_jit
             return status;
         });
         return *library;
+    }
+
+    namespace
+    {
+        class LibraryStore final : public SolutionStore
+        {
+        public:
+            LibraryStore(JitLibrary& library, BackendInfo backend, int codeObjectVersion)
+                : m_library(library)
+                , m_backend(std::move(backend))
+                , m_codeObjectVersion(codeObjectVersion)
+            {
+            }
+
+            Status lookup(const OperationRequest&         request,
+                          const DeviceTarget&             target,
+                          size_t                          count,
+                          size_t                          maxWorkspaceBytes,
+                          const std::vector<std::string>& excludeKernels,
+                          std::vector<int32_t>&           indices) const override
+            {
+                indices.clear();
+                const auto* gemm = gemmOf(request);
+                if(!gemm || !target.hardware)
+                    return unsupported(Stage::Lookup, target);
+                auto problem = lowerForJit(*gemm);
+                problem.setWorkspaceSize(maxWorkspaceBytes);
+                return m_library.lookup(CacheKey::make(target, m_backend, m_codeObjectVersion),
+                                        target.device,
+                                        problem,
+                                        *target.hardware,
+                                        count,
+                                        excludeKernels,
+                                        indices);
+            }
+
+            Status publish(const OperationRequest&           request,
+                           const DeviceTarget&               target,
+                           const std::vector<BuiltSolution>& solutions,
+                           std::vector<int32_t>&             indices) const override
+            {
+                indices.clear();
+                const auto* gemm = gemmOf(request);
+                if(!gemm || !target.hardware)
+                    return unsupported(Stage::Publish, target);
+                return m_library.publish(CacheKey::make(target, m_backend, m_codeObjectVersion),
+                                         target.device,
+                                         lowerForJit(*gemm),
+                                         solutions,
+                                         indices);
+            }
+
+        private:
+            using GemmRequest = hipblaslt_ext::experimental::jit::detail::GemmRequest;
+
+            static const GemmRequest* gemmOf(const OperationRequest& request)
+            {
+                return request.kind() == GemmRequest::operation
+                           ? dynamic_cast<const GemmRequest*>(&request)
+                           : nullptr;
+            }
+            static Status unsupported(Stage stage, const DeviceTarget& target)
+            {
+                return {Status::Code::NotSupported,
+                        stage,
+                        target.hardware ? "The JIT solution library holds GEMM solutions"
+                                        : "The device has no Tensile hardware description"};
+            }
+
+            JitLibrary& m_library;
+            BackendInfo m_backend;
+            int         m_codeObjectVersion;
+        };
+    }
+
+    std::shared_ptr<const SolutionStore>
+        makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion)
+    {
+        return std::make_shared<const LibraryStore>(library, backend, codeObjectVersion);
     }
 }
 
@@ -393,6 +474,97 @@ namespace hipblaslt_ext::experimental
                 compiled->workspaceLimit = workspaceLimit;
                 compiled->workspaceBytes = required;
                 solution                 = detail::SolutionAccess::make(std::move(compiled));
+                return HIPBLAS_STATUS_SUCCESS;
+            }
+            catch(const std::bad_alloc&)
+            {
+                return HIPBLAS_STATUS_ALLOC_FAILED;
+            }
+            catch(const std::exception& e)
+            {
+                diagnostics.message = e.what();
+                return HIPBLAS_STATUS_INTERNAL_ERROR;
+            }
+            catch(...)
+            {
+                return HIPBLAS_STATUS_INTERNAL_ERROR;
+            }
+        }
+
+        hipblasStatus_t getLibraryAlgos(int                   device,
+                                        const Request&        request,
+                                        const Backend&        backend,
+                                        size_t                count,
+                                        size_t                workspaceLimit,
+                                        std::vector<int32_t>& indices,
+                                        Diagnostics&          diagnostics)
+        {
+            indices.clear();
+            diagnostics = {};
+            try
+            {
+                auto jit       = detail::BackendAccess::get(backend);
+                auto operation = detail::RequestAccess::get(request);
+                if(!operation || !jit)
+                {
+                    diagnostics.message = "A valid request and backend are required";
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
+                auto components     = jit->components();
+                const auto& info    = components.backend->info();
+                diagnostics.backend = info.name;
+                int current         = -1;
+                if(hipGetDevice(&current) != hipSuccess)
+                    return HIPBLAS_STATUS_INTERNAL_ERROR;
+                if(current != device)
+                {
+                    diagnostics.message = "Compile on the requested HIP device";
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
+                hipblaslt_jit::DeviceTarget target;
+                auto status = hipblaslt_jit::DeviceTarget::make(device, target);
+                auto& library = hipblaslt_jit::JitLibrary::process();
+                components.store
+                    = hipblaslt_jit::makeLibraryStore(library, info, hipblaslt_jit::jitCodeObjectVersion);
+                if(status.ok())
+                    status = components.store->lookup(
+                        *operation, target, count, workspaceLimit, {}, indices);
+                const auto found = indices.size();
+                if(status.ok() && found < count)
+                {
+                    std::vector<std::string> published;
+                    for(auto index : indices)
+                    {
+                        hipblaslt_jit::Status why;
+                        if(auto solution
+                           = library.solutionByIndex(device, *target.hardware, index, why))
+                            published.push_back(solution->kernelName);
+                    }
+                    const hipblaslt_jit::Jit generator(std::move(components));
+                    auto outcome = generator.generate(
+                        *operation, target, count - found, workspaceLimit, published);
+                    for(auto index : outcome.indices)
+                        if(std::find(indices.begin(), indices.end(), index) == indices.end())
+                            indices.push_back(index);
+                    if(outcome.indices.empty())
+                        status = outcome.failures.empty()
+                                     ? hipblaslt_jit::Status{hipblaslt_jit::Status::Code::Failed,
+                                                             hipblaslt_jit::Stage::Publish,
+                                                             "Nothing was published"}
+                                     : std::move(outcome.failures.front());
+                    else
+                        diagnostics.message = std::move(outcome.summary);
+                }
+                if(!status.ok())
+                {
+                    diagnostics.message = std::move(status.message);
+                    if(indices.empty())
+                        return detail::toHipStatus(status.code);
+                }
+                else if(diagnostics.message.empty())
+                    diagnostics.message = std::to_string(found) + " of "
+                                          + std::to_string(indices.size())
+                                          + " solutions came from the JIT solution library";
                 return HIPBLAS_STATUS_SUCCESS;
             }
             catch(const std::bad_alloc&)

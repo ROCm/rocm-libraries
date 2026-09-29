@@ -1,12 +1,14 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "hipblaslt-jit-hash.hpp"
 #include "hipblaslt-jit-loader.hpp"
 #include "hipblaslt-jit-mock.hpp"
 #include "hipblaslt-jit-problem-type.hpp"
 #include <Tensile/Tensile.hpp>
 #include <algorithm>
 #include <cstdlib>
+#include <string_view>
 
 namespace hipblaslt_ext::experimental::jit::mock
 {
@@ -29,6 +31,19 @@ namespace hipblaslt_ext::experimental::jit::mock
                       TensileLite::LoadLibraryData<TensileLite::ContractionProblemGemm>(
                           m_solution.entry)))
             {
+                const auto text = [](const std::vector<uint8_t>& bytes) {
+                    return std::string_view(reinterpret_cast<const char*>(bytes.data()),
+                                            bytes.size());
+                };
+                hipblaslt_jit::Fnv1a version;
+                version.add(text(m_solution.entry)).add(m_solution.kernelName);
+                for(const auto& unit : m_solution.units)
+                {
+                    version.add(unit.name).add(text(unit.bytes));
+                    for(const auto& include : unit.includes)
+                        version.add(include.name).add(text(include.bytes));
+                }
+                m_info.version = "mock:" + version.hex();
             }
 
             const hipblaslt_jit::BackendInfo& info() const noexcept override

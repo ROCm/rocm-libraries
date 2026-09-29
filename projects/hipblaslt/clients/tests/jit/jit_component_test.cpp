@@ -279,6 +279,17 @@ namespace
             : log(l)
         {
         }
+        hj::Status lookup(const hj::OperationRequest&,
+                          const hj::DeviceTarget&,
+                          size_t,
+                          size_t,
+                          const std::vector<std::string>&,
+                          std::vector<int32_t>& indices) const override
+        {
+            log.add("lookup");
+            indices.clear();
+            return {};
+        }
         hj::Status publish(const hj::OperationRequest&,
                            const hj::DeviceTarget&,
                            const std::vector<hj::BuiltSolution>& solutions,

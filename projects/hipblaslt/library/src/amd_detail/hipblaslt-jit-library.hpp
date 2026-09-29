@@ -175,4 +175,8 @@ namespace hipblaslt_jit
         std::map<std::string, std::unique_ptr<Directory>> m_directories;
         std::map<int, std::vector<Directory*>>            m_routes;
     };
+
+    // Stores GEMM solutions in library under the cache key of backend.
+    std::shared_ptr<const SolutionStore>
+        makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion);
 }
