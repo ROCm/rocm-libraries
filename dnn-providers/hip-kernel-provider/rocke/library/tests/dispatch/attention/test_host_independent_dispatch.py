@@ -267,66 +267,15 @@ _LIBRARY_ROOT = _GATE_MODULE.parents[2]
 # omit the arch and silently get some other box's answer, so this set is a
 # RATCHET: entries may be removed as gates are tightened, never added. A new
 # name here means a new implicit host dependency was introduced.
+# All selection-path gates now require arch as a positional argument (no default).
+# Only the arch-neutral scalar builder functions remain with an optional arch:
+# they are validated-but-not-consumed (the emitted KernelDef is identical for
+# every target) and kept optional for API uniformity with tiled builders.
 _ARCH_IS_OPTIONAL = frozenset(
     {
-        "_d128_gfx942_swa_fast",
-        "_d256_gfx942_fast",
-        "_d256_gfx950_fast",
-        "_enable_2d_graph_replay",
-        "_enable_3d_graph_replay",
-        "_enable_combo_2d",
-        "_enable_d128_small_tile",
-        "_enable_early_v_schedule",
-        "_enable_fp8_mfma_qk",
-        "_enable_gfx942_3d_invariant_hoist",
-        "_enable_gfx942_3d_wide_kv_load",
-        "_enable_gfx942_bf16_flash",
-        "_enable_gfx942_d128_fp16_flash",
-        "_enable_gfx942_flash_k_sliced_ldsseq",
-        "_enable_gfx942_flash_k_sliced_ring",
-        "_enable_gfx942_flash_mask_limit",
-        "_enable_gfx942_flash_q_direct",
-        "_enable_gfx942_fp16_flash",
-        "_enable_gfx942_l4",
-        "_enable_gfx942_sink_prefill_tuned",
-        "_enable_gfx942_small_q_narrow",
-        "_enable_gfx950_sink_prefill_wpe3",
-        "_enable_k_single_buffer",
-        "_enable_mfma_32x32",
-        "_enable_register_pv",
-        "_enable_sched_barrier",
-        "_enable_single_batch_combo",
-        "_enable_softmax_mfma_interleave",
-        "_enable_transposed_half_local_pv",
-        "_enable_transposed_qk_32x32",
-        "_enable_transposed_subflags",
-        "_enable_v_double_buffer",
-        "_fp8_qk_loader_fits",
-        "_gfx942_3d_tile_size_override",
-        "_gfx942_4warp_eligible",
-        "_gfx942_4warp_fast",
-        "_gfx942_bf16_wide_geometry",
-        "_gfx942_bf16_wide_tile_size",
-        "_num_segments",
-        "_reject_fp8_format_arch_mismatch",
-        "_resolve_gfx1250_tiled3d",
-        "_select_2d_block_m_per_warp",
-        "_select_2d_compile_backend",
-        "_select_2d_num_warps",
-        "_select_2d_tile_size",
-        "_select_2d_waves_per_eu",
-        "_select_3d_waves_per_eu",
-        "_select_gfx942_flash_num_warps",
-        "_select_gfx942_flash_ring_depth",
-        "_tiled_3d_cache_key",
-        "_tiled_3d_spec_from_problem",
-        "_tiled_cache_key",
-        "_tiled_spec_from_problem",
         "build_unified_attention_2d",
         "build_unified_attention_3d",
         "build_unified_attention_reduce",
-        "supports_native_unified_attention_3d_tiled",
-        "supports_native_unified_attention_tiled",
     }
 )
 
@@ -426,7 +375,7 @@ class TestEveryGateCallSiteSuppliesArch(unittest.TestCase):
         required, _ = _gate_signatures()
         self.assertGreater(
             len(required),
-            5,
+            40,
             "expected several required-arch gates in attention_unified; found "
             f"{len(required)} -- the sweep is not looking at what it thinks it is",
         )

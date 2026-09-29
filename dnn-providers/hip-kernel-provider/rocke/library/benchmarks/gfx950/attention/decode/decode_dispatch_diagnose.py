@@ -66,14 +66,17 @@ def dump_shape(label, req):
         f"num_cus={p.num_cus} target_ctas={p._effective_target_ctas} "
         f"num_2d_prgms={n2d} use_2d_kernel={want_2d}"
     )
-    print(f"num_segments={_num_segments(p)} graph_replay={_enable_3d_graph_replay(p)}")
-    ok3, why3 = supports_native_unified_attention_3d_tiled(p)
-    ok2, why2 = supports_native_unified_attention_tiled(p)
+    _arch = req.arch or "gfx950"
+    print(
+        f"num_segments={_num_segments(p, _arch)} graph_replay={_enable_3d_graph_replay(p, _arch)}"
+    )
+    ok3, why3 = supports_native_unified_attention_3d_tiled(p, _arch)
+    ok2, why2 = supports_native_unified_attention_tiled(p, _arch)
     print(f"supports 3d_tiled={ok3} ({why3})")
     print(f"supports 2d_tiled={ok2} ({why2})")
     from builders.common.attention_spec_builder import _tiled_3d_spec_from_problem
 
-    spec3 = _tiled_3d_spec_from_problem(p)
+    spec3 = _tiled_3d_spec_from_problem(p, _arch)
     print(
         f"3d builder kernel={spec3.kernel_name()} tile={spec3.tile_size} "
         f"seg={spec3.num_segments} wpe={spec3.waves_per_eu} "

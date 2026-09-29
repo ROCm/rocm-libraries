@@ -2365,19 +2365,18 @@ class TestAttentionHelpers(unittest.TestCase):
             dtype="bf16",
             use_sinks=True,
         )
-        with _patch_resolved_arch("gfx950"):
-            with mock.patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
-                self.assertFalse(au._enable_3d_graph_replay(decode))
-                self.assertFalse(au._enable_3d_graph_replay(prefill))
-                self.assertFalse(au._enable_3d_graph_replay(sinks))
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
-                self.assertFalse(au._enable_3d_graph_replay(prefill))
-                self.assertFalse(au._enable_3d_graph_replay(sinks))
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):
-                self.assertFalse(au._enable_3d_graph_replay(decode))
-            with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
-                self.assertTrue(au._enable_3d_graph_replay(decode))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HIPDNN_GFX950_3D_GRAPH", None)
+            self.assertFalse(au._enable_3d_graph_replay(decode, "gfx950"))
+            self.assertFalse(au._enable_3d_graph_replay(prefill, "gfx950"))
+            self.assertFalse(au._enable_3d_graph_replay(sinks, "gfx950"))
+        with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+            self.assertFalse(au._enable_3d_graph_replay(prefill, "gfx950"))
+            self.assertFalse(au._enable_3d_graph_replay(sinks, "gfx950"))
+        with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "0"}):
+            self.assertFalse(au._enable_3d_graph_replay(decode, "gfx950"))
+        with mock.patch.dict(os.environ, {"HIPDNN_GFX950_3D_GRAPH": "1"}):
+            self.assertTrue(au._enable_3d_graph_replay(decode, "gfx950"))
 
     def test_tiled_2d_spec_builder_constructs_per_arch_all_branches(self):
         """Drive ``_tiled_spec_from_problem`` through its three branches and
@@ -3548,27 +3547,26 @@ class TestAttentionCdnaPrimitives(unittest.TestCase):
             num_seqs=1,
         )
 
-        with patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
-            # Gate 1: combo must fire, selecting wpe=4
-            self.assertTrue(
-                au._enable_combo_2d(gate1_problem),
-                "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
-            )
-            self.assertEqual(
-                au._select_2d_waves_per_eu(gate1_problem),
-                4,
-                "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
-            )
-            # Gate 2: wpe3 gate must fire, selecting wpe=3
-            self.assertTrue(
-                au._enable_gfx950_sink_prefill_wpe3(gate2_problem),
-                "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
-            )
-            self.assertEqual(
-                au._select_2d_waves_per_eu(gate2_problem),
-                3,
-                "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
-            )
+        # Gate 1: combo must fire, selecting wpe=4
+        self.assertTrue(
+            au._enable_combo_2d(gate1_problem, "gfx950"),
+            "_enable_combo_2d did not fire for fp16+sinks Gate 1 cohort",
+        )
+        self.assertEqual(
+            au._select_2d_waves_per_eu(gate1_problem, "gfx950"),
+            4,
+            "waves_per_eu for fp16+sinks Gate 1 (combo) should be 4",
+        )
+        # Gate 2: wpe3 gate must fire, selecting wpe=3
+        self.assertTrue(
+            au._enable_gfx950_sink_prefill_wpe3(gate2_problem, "gfx950"),
+            "_enable_gfx950_sink_prefill_wpe3 did not fire for fp16+sinks Gate 2 cohort",
+        )
+        self.assertEqual(
+            au._select_2d_waves_per_eu(gate2_problem, "gfx950"),
+            3,
+            "waves_per_eu for fp16+sinks Gate 2 (wpe3) should be 3",
+        )
 
 
 # ---------------------------------------------------------------------
