@@ -151,6 +151,12 @@ namespace rocsparse
 
         static constexpr uint32_t BLOCKSIZE = 1024;
 
+        if(nitems_ == 0)
+        {
+            host_num_invalid[0] = 0;
+            return rocsparse_status_success;
+        }
+
         size_t* dnum_out_of_range_values = (size_t*)handle_->buffer;
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(dnum_out_of_range_values, 0, sizeof(size_t), handle_->stream));
@@ -260,6 +266,12 @@ namespace rocsparse
         const TARGET* target_ = (const TARGET*)target__;
 
         static constexpr uint32_t BLOCKSIZE = 1024;
+
+        if(nitems_ == 0)
+        {
+            host_num_invalid[0] = 0;
+            return rocsparse_status_success;
+        }
 
         size_t* dnum_out_of_range_values = (size_t*)handle_->buffer;
         RETURN_IF_HIP_ERROR(
@@ -646,6 +658,11 @@ namespace rocsparse
         static constexpr uint32_t BLOCKSIZE = 1024;
         floating_data_t<SOURCE>*  derr      = (floating_data_t<SOURCE>*)handle_->buffer;
         floating_data_t<SOURCE>   herr;
+        if(nitems_ == 0)
+        {
+            host_error[0] = 0;
+            return rocsparse_status_success;
+        }
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(derr, 0, sizeof(floating_data_t<SOURCE>), handle_->stream));
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
