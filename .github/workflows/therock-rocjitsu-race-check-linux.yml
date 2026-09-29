@@ -1,7 +1,8 @@
 # This reusable workflow is a narrow post-build instrumentation job for
 # hipBLASLt. It fetches BLAS artifacts from the just-finished TheRock build and
-# runs two small workloads under rocjitsu's race detector. The workloads run
-# entirely under CPU-side emulation, so the workflow uses the CPU build runner
+# runs two small workloads and a four-worker / 100-kernel packaged-library
+# sweep under rocjitsu's race detector. The workloads run entirely under
+# CPU-side emulation, so the workflow uses the CPU build runner
 # instead of consuming GPU test capacity.
 
 name: TheRock rocjitsu race check Linux
@@ -130,14 +131,18 @@ jobs:
           python ./build_tools/install_additional_requirements.py \
             --requirements-files "${ROCM_PATH}/share/hipblaslt/tensilelite/requirements-test.txt"
 
+      - name: Check toy sweep harness
+        run: python3 -B rocm-libraries/.github/scripts/test_rocjitsu_race_sweep.py
+
       - name: Run rocjitsu race check
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
       # Upload even on failure. The report directory contains the per-workload
       # stdout logs, rocjitsu sink files, race.log files, generated reduced
-      # TensileLite input/output, and timing.tsv; without this artifact a failed
-      # detector run is usually not actionable from the console log alone.
+      # TensileLite input/output, toy-sweep manifest/results/reproducers, and
+      # timing.tsv; without this artifact a failed detector run is usually not
+      # actionable from the console log alone.
       - name: Upload race reports
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
