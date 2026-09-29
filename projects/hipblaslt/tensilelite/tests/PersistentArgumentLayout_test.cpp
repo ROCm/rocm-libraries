@@ -427,7 +427,6 @@ namespace
     {
         configurePersistentSolution(solution, 3, 2);
         solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
-        solution.sizeMapping.streamKClusterMulticast = true;
         solution.sizeMapping.clusterDim = {cs, cn, 1};
         solution.sizeMapping.workspaceSizePerElemC = 4;
     }
@@ -567,11 +566,47 @@ TEST(PersistentArgumentLayout, ClusterStreamKBoundsAndUniformOrderAreExplicit)
     EXPECT_FALSE(solution.uniformSummationOrderSupported(problem, device));
 }
 
-TEST(PersistentArgumentLayout, ClusterStreamKRequiresVersionTwoAndSupportedCapabilities)
+TEST(PersistentArgumentLayout, ClusterStreamKVersionZeroKeepsPrebuiltScheduling)
+{
+    ContractionSolution solution;
+    configureClusterStreamK(solution, 2, 1);
+    solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+    EXPECT_FALSE(solution.usesStreamKSpatialCluster());
+    EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+
+    auto problem = clusterProblem();
+    auto device = persistentDevice(8);
+    auto launch = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(launch.argsVersion, 0);
+    EXPECT_FALSE(launch.clusterSchedule.enabled);
+    EXPECT_EQ(launch.totalTiles, 36u);
+    EXPECT_EQ(launch.grid, 8u);
+    auto invocation = solution.generateSingleCall<true>(
+        problem, clusterInputs(), device, launch, GSUSettings{});
+    EXPECT_EQ(invocation.numWorkGroups.x, 8u);
+    EXPECT_EQ(invocation.numWorkGroups.y, 1u);
+    EXPECT_EQ(invocation.numWorkGroups.z, 1u);
+    EXPECT_EQ(invocation.clusterDim.x, 2u);
+    EXPECT_EQ(invocation.clusterDim.y, 1u);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "skGrid"), 8u);
+    const auto expected = streamKStaticSplit(36, 3, 8, device.skFullTiles, false);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "skTiles"), expected.skTiles);
+    EXPECT_EQ(value<uint32_t>(invocation.args, "SKItersPerWG"), expected.skItersPerWG);
+
+    solution.internalArgsSupport.persistentLoopArgsVersion = 2;
+    EXPECT_TRUE(solution.usesStreamKSpatialCluster());
+    auto spatial = solution.resolvePersistentSettings(problem, device);
+    EXPECT_EQ(spatial.argsVersion, 2);
+    EXPECT_TRUE(spatial.clusterSchedule.enabled);
+    EXPECT_EQ(spatial.clusterSchedule.blocks, 24u);
+    EXPECT_EQ(spatial.grid, 4u);
+}
+
+TEST(PersistentArgumentLayout, ClusterStreamKVersionTwoRequiresSupportedCapabilities)
 {
     auto problem = clusterProblem();
     auto device = persistentDevice();
-    for(int version : {0, 1})
+    for(int version : {-1, 1, 3})
     {
         ContractionSolution solution;
         configureClusterStreamK(solution, 2, 1);
@@ -590,6 +625,22 @@ TEST(PersistentArgumentLayout, ClusterStreamKRequiresVersionTwoAndSupportedCapab
         ContractionSolution solution;
         configureClusterStreamK(solution, 2, 1);
         solution.sizeMapping.workAssignment = assignment;
+        EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    }
+    for(auto strategy : {TileProcessingStrategy::None, TileProcessingStrategy::DataParallel})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, 2, 1);
+        solution.sizeMapping.tileProcessingStrategy = strategy;
+        EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
+    }
+    for(auto shape : {TensileLite::dim3(1, 1, 1), TensileLite::dim3(1, 2, 1),
+                      TensileLite::dim3(3, 1, 1), TensileLite::dim3(4, 2, 1),
+                      TensileLite::dim3(2, 8, 1), TensileLite::dim3(2, 1, 2)})
+    {
+        ContractionSolution solution;
+        configureClusterStreamK(solution, shape.x, shape.y);
+        solution.sizeMapping.clusterDim = shape;
         EXPECT_THROW(solution.resolvePersistentSettings(problem, device), std::runtime_error);
     }
     ContractionSolution solution;

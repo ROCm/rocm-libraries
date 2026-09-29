@@ -23,7 +23,7 @@
 ################################################################################
 
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -10461,9 +10461,6 @@ class KernelWriterAssembly(KernelWriter):
           module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
         if self.states.doShadowInit:
           shadowName = Label.getFormatting("ShadowInitStart")
-          if kernel.get("StreamKClusterMulticast", False):
-            assignment = Component.WorkAssignment.find(self)
-            module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
           module.add(SCBranchSCC1(labelName=shadowName, \
               comment="skip to ShadowInitStart iter b/c numIter==0"))
         else:

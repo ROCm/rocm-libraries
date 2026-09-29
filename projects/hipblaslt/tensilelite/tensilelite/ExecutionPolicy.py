@@ -87,6 +87,18 @@ def hasStaticAssignment(state):
     return isPersistent(state) and _policy(state).assignment == WorkAssignment.STATIC_GRID
 
 
+def isStreamKSpatialCluster(state):
+    """Whether StreamK source uses spatial cluster workers sharing a K range.
+
+    Like DataParallel clustering, the schedule is selected by the execution
+    policy and cluster geometry. Prebuilt payload compatibility is tracked
+    separately by PersistentLoopArgsVersion.
+    """
+    policy = _policy(state)
+    return (policy.stream_k and policy.assignment == WorkAssignment.STATIC_GRID
+            and state.get("ClusterDim", [1, 1])[0] > 1)
+
+
 def hasDynamicAssignment(state):
     return _policy(state).assignment == WorkAssignment.DYNAMIC_WORK_QUEUE
 
@@ -227,6 +239,13 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     """
     result = dict(config)
     explicit = set(config if explicit_keys is None else explicit_keys)
+    if "StreamKClusterMulticast" in result:
+        if regenerate:
+            raise ValueError("StreamKClusterMulticast is derived from TileProcessingStrategy=StreamK, "
+                             "WorkAssignment=StaticGrid, and ClusterDim; remove this setting")
+        # Earlier artifacts may carry the removed opt-in. Their declared
+        # payload version, rather than this field, determines their ABI.
+        result.pop("StreamKClusterMulticast")
     if "PersistentLoop" in explicit:
         raise ValueError("PersistentLoop is derived from TileProcessingStrategy and WorkAssignment; it is not a tuning parameter")
     legacy = bool(explicit & {"StreamK", "StreamKForceDPOnly"})
@@ -245,11 +264,11 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
     policy = resolve_policy(result)
     result["WorkAssignment"] = policy.assignment.value
     result["_PersistentLoop"] = policy.persistent
-    for option in ("StreamKAtomic", "StreamKFixupTreeReduction", "StreamKClusterMulticast", "DebugStreamK"):
+    for option in ("StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"):
         if not policy.stream_k:
             if not legacy and option in explicit and result.get(option, 0):
                 raise UnsupportedExecutionPolicy(f"{option} requires TileProcessingStrategy=StreamK")
-            result[option] = False if option == "StreamKClusterMulticast" else 0
+            result[option] = 0
     if result.get("WorkQueueStealing", 0) and (not policy.stream_k or policy.assignment.value == "StaticGrid"):
         if not legacy or policy.persistent:
             raise UnsupportedExecutionPolicy("WorkQueueStealing requires StreamK with DynamicWorkQueue or Hybrid")
@@ -276,20 +295,16 @@ def normalize_execution_policy(config, explicit_keys=None, regenerate=True):
         # it below, while preserving explicit and prebuilt layout contracts.
         if not regenerate or handwritten or "InternalSupportParams" in explicit:
             raise ValueError("PersistentLoopArgsVersion=1 requires DataParallel/StaticGrid")
-    cluster_stream_k = bool(result.get("StreamKClusterMulticast", False))
-    if cluster_stream_k and (not policy.stream_k or policy.assignment != WorkAssignment.STATIC_GRID):
-        raise UnsupportedExecutionPolicy("StreamKClusterMulticast requires StreamK/StaticGrid")
+    cluster_stream_k = isStreamKSpatialCluster(result)
     if version == 2 and not cluster_stream_k:
         if not regenerate or handwritten or "InternalSupportParams" in explicit:
-            raise ValueError("PersistentLoopArgsVersion=2 requires StreamKClusterMulticast")
-    if cluster_stream_k and (not regenerate or handwritten) and version != 2:
-        raise ValueError("StreamKClusterMulticast requires PersistentLoopArgsVersion=2")
+            raise ValueError("PersistentLoopArgsVersion=2 requires StreamK/StaticGrid with ClusterDim[0]>1")
     if version == 2 and outer_version != 3 and (not regenerate or handwritten):
         raise ValueError("PersistentLoopArgsVersion=2 requires KernArgsVersion=3")
     if version == 1 and outer_version != 3 and (not regenerate or handwritten):
         raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
     if regenerate and not handwritten:
-        # DataParallel tile traversal and its argument layout are
+        # Persistent tile traversal and its argument layout are
         # generator capabilities. Regenerating known older logic upgrades both;
         # handwritten/prebuilt artifacts retain the layout they declare.
         support["PersistentLoopArgsVersion"] = 2 if cluster_stream_k else 1 if policy.persistent_data_parallel else 0
