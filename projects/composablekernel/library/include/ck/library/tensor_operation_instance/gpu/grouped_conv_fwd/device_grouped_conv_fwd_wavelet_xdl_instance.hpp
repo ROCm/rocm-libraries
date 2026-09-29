@@ -95,6 +95,46 @@ using device_grouped_conv_fwd_wavelet_xdl_c_shuffle_instances = std::tuple<
     // clang-format on
     >;
 
+template <ck::index_t NDimSpatial,
+          typename ALayout,
+          typename BLayout,
+          typename DsLayout,
+          typename ELayout,
+          ck::tensor_operation::device::ConvolutionForwardSpecialization ConvSpec>
+using device_grouped_conv_fwd_wavelet_xdl_c_shuffle_f32_instances = std::tuple<
+// clang-format off
+        //#########################################################|      NumDim|       A|       B|          Ds|       E| AData| BData| AccData| CShuffle|          Ds| EData|           A|           B|         CDE|    ConvForward|  TileLoad|  TileMath|  MPer|  NPer|  KPer| K1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
+        //#########################################################|     Spatial|  Layout|  Layout|      Layout|  Layout|  Type|  Type|    Type| DataType|    DataType|  Type| Elementwise| Elementwise| Elementwise| Specialization|    Thread|    Thread| Block| Block| Block|   |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
+        //#########################################################|            |        |        |            |        |      |      |        |         |            |      |   Operation|   Operation|   Operation|               | GroupSize| GroupSize|      |      |      |   |     |     | Wave| Wave| Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
+        //#########################################################|            |        |        |            |        |      |      |        |         |            |      |            |            |            |               |          |          |      |      |      |   |     |     |     |     |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |                |
+        // Wavelet DirectLoad pipeline
+#if defined(CK_USE_GFX1250)
+        // --- KPerBlock = 64
+        // NPerBlock = 256
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       512,   256,   256,    64,  4,   16,   16,    2,   16,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           8,              S<1, 32, 1, 16>,               4, F32, F32, 1, true>,
+
+        // NPerBlock = 128
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       256,   256,   128,    64,  4,   16,   16,   16,    2,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           1,              S<1, 16, 1, 16>,               4, F32, F32, 1, true>,
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       512,   256,   128,    64,  4,   16,   16,    8,    2,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           2,           2,              S<1, 32, 1, 16>,               4, F32, F32, 1, true>,
+
+        // NPerBlock = 64
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       512,   256,    64,    64,  4,   16,   16,    2,    4,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           2,              S<1, 32, 1, 16>,               4, F32, F32, 1, true>,
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       256,   256,    64,    64,  4,   16,   16,    8,    2,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S<16, 16, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           1,              S<1, 16, 1, 16>,               4, F32, F32, 1, true>,
+
+        // --- KPerBlock = 32
+        // NPerBlock = 256
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       512,   256,   256,    32,  4,   16,   16,    4,    8,    S<  8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S< 8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           2,              S<1, 32, 1, 16>,               4, F32, F32, 1, true>,
+
+        // NPerBlock = 128
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       512,   256,   128,    32,  4,   16,   16,    8,    2,    S<  8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S< 8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           1,              S<1, 32, 1, 16>,               4, F32, F32, 1, true>,
+
+        // NPerBlock = 64
+        DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3<NDimSpatial, ALayout, BLayout, Empty_Tuple, ELayout,   F32,   F32,     F32,      F32, Empty_Tuple,   F32, PassThrough, PassThrough, PassThrough,       ConvSpec,       256,       256,   256,    64,    32,  4,   16,   16,    8,    2,    S<  8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              2,              4,              4,         1,    S< 8, 32, 1>,     S<1, 0, 2>,     S<1, 0, 2>,             2,              4,              4,         1,           1,           1,              S<1, 16, 1, 16>,               4, F32, F32, 1, true>
+
+#endif
+    // clang-format on
+    >;
+
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation
