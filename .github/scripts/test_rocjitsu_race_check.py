@@ -13,7 +13,7 @@ import yaml
 
 
 class RaceCheckTests(unittest.TestCase):
-    def test_driver_runs_all_stages_and_propagates_each_failure(self):
+    def test_driver_runs_both_sweeps_and_propagates_each_failure(self):
         driver = Path(__file__).with_name("run_rocjitsu_hipblaslt_race_check.sh")
         # Exercise the real post-setup stage sequence with lightweight workloads.
         stages = driver.read_text().split("\ncheck_status=0\n", 1)[1]
@@ -28,18 +28,11 @@ ROCJITSU_CONFIG=config
 ROCJITSU_GPU_TARGET=gfx942
 ROCM_PATH=artifact
 RACE_REPORT_DIR=reports
+SWEEP_DRIVER=artifact/sweep.py
 run_timed() { echo "STAGE: $1"; shift; "$@"; }
-run_hipblaslt_bench_check() { return "$BENCH_STATUS"; }
-run_tensilelite_client_check() { return "$CLIENT_STATUS"; }
 python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TENSILE_SWEEP_STATUS"; else return "$BENCH_SWEEP_STATUS"; fi; }
 """
-        for statuses in [
-            (0, 0, 0, 0),
-            (1, 0, 0, 0),
-            (0, 1, 0, 0),
-            (0, 0, 1, 0),
-            (0, 0, 0, 1),
-        ]:
+        for statuses in [(0, 0), (1, 0), (0, 1), (1, 1)]:
             with self.subTest(statuses=statuses):
                 result = subprocess.run(
                     ["bash", "-c", setup + stages],
@@ -48,8 +41,6 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                         **dict(
                             zip(
                                 [
-                                    "BENCH_STATUS",
-                                    "CLIENT_STATUS",
                                     "TENSILE_SWEEP_STATUS",
                                     "BENCH_SWEEP_STATUS",
                                 ],
@@ -69,8 +60,6 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                         if line.startswith("STAGE:")
                     ],
                     [
-                        "STAGE: hipblaslt-bench race check",
-                        "STAGE: tensilelite-client race check",
                         "STAGE: tensile sampled race sweep",
                         "STAGE: bench sampled race sweep",
                     ],
