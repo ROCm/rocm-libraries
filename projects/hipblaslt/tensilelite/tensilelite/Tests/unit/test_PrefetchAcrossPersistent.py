@@ -1600,7 +1600,7 @@ def _emit_asm(gfx1250_iim, assembler, **overrides):
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.tensilelite_create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
 
     sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
                    assembler, gfx1250_iim)

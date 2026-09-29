@@ -81,8 +81,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
-
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
@@ -129,7 +127,6 @@ mark_as_advanced(HIPBLASLT_ENABLE_THEROCK)
 mark_as_advanced(HIPBLASLT_VALIDATE_INSTALL)
 mark_as_advanced(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
 mark_as_advanced(HIPBLASLT_ENABLE_COVERAGE)
-mark_as_advanced(TENSILELITE_ENABLE_AUTOBUILD)
 
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 

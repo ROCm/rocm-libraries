@@ -234,7 +234,7 @@ def findAvailableArchs(gpu_targets=None):
                 archs.append(base)
         return archs
 
-    from tensilelite.Tests.gpu_detection import get_available_archs
+    from gpu_detection import get_available_archs
     return get_available_archs()
 
 
