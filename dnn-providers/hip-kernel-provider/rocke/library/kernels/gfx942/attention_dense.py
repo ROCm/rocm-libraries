@@ -190,7 +190,10 @@ from rocke.core.ir import (
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
 
 # Shared problem/geometry fields live in an architecture-neutral module.
-from kernels.common.attention_dense_decode import PERSIST_DECODES
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+)
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
@@ -1889,7 +1892,10 @@ def _build_attention_dense_single_buffer(
             )
             _run_work_item(d.qb, d.hq, d.bt)
     else:
-        _run_work_item(b.block_id_x(), b.block_id_y(), b.block_id_z())
+        d = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+            b, spec, b.block_id_x(), b.block_id_y(), b.block_id_z(), seqlen_q_p
+        )
+        _run_work_item(d.qb, d.hq, d.bt)
     b.ret()
     return b.kernel
 
@@ -1899,7 +1905,8 @@ def _build_attention_dense_single_buffer(
 
 def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     """Launch grid: persistent = 1-D grid of ``num_persistent`` CTAs; default =
-    one CTA per (query-block, query-head, batch).
+    one CTA per (query-block, query-head, batch), laid out by the nonpersist
+    decode.
 
     Sized from ``spec.block_m`` (``_BLOCK_M`` at the default) so the grid and the
     body's query tiling cannot disagree -- a mismatch writes some rows twice and
@@ -1909,11 +1916,7 @@ def attention_dense_grid(spec: AttentionDenseSpec) -> tuple[int, int, int]:
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
     spec = _as_gfx942_spec(spec)
-    # ceil kept for parity with the gfx950 helper; on gfx942 it is always exact,
-    # because ragged is rejected and supports_attention_dense then enforces
-    # seqlen_q % block_m == 0.
-    nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
-    return (nqb, spec.num_query_heads, spec.batch)
+    return NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> tuple[int, int, int]:

@@ -6,8 +6,12 @@
 A decode maps a CTA's work index to the (query block, query head, batch) it
 computes. Every decode is a bijection onto the work space, so the choice only
 moves which items run together (L2 locality, causal load balance), never the
-result. One class per ``persist_decode`` value keeps each decode's IR, legality
-check and kernel-name tag together; both arch builders call the same class.
+result. One class per ``persist_decode`` / ``nonpersist_decode`` value keeps
+each decode's IR, grid, legality check and kernel-name tag together; both arch
+builders call the same class.
+
+``seqlen_q`` is the kernel's runtime param, or None when the shape is baked;
+decodes read NQB from the spec in the latter case.
 
 The classes read only spec attributes and emit through the IR builder ``b``.
 """
@@ -28,8 +32,93 @@ class Decoded(NamedTuple):
 
 
 def _spec_nqb(spec) -> int:
-    """Query blocks per head of the spec's (baked) shape."""
+    """Query blocks per head for the spec's shape (a ragged last block counts)."""
     return (spec.seqlen_q + spec.block_m - 1) // spec.block_m
+
+
+def _registry(*classes) -> dict:
+    return {c.name: c() for c in classes}
+
+# --------------------------------------------------------------------------- #
+# Non-persistent grid: one CTA per work item.
+# --------------------------------------------------------------------------- #
+
+
+def emit_reverse(b, blk, spec, seqlen_q):
+    """Longest-first query-block order for causal cost: ``NQB-1-blk``.
+
+    Under a runtime shape one binary serves every seqlen, so NQB must come from
+    the param; a baked NQB would reverse against the wrong extent.
+    """
+    if seqlen_q is None:
+        nqb = _spec_nqb(spec)
+        return b.sub(b.const_i32(nqb - 1), blk) if nqb > 1 else blk
+    bm = spec.block_m
+    nqb = b.div(b.add(seqlen_q, b.const_i32(bm - 1)), b.const_i32(bm))
+    return b.sub(b.sub(nqb, b.const_i32(1)), blk)
+
+
+class NonpersistDecode:
+    """Block ids -> work item, for the one-CTA-per-item grid.
+
+    The hardware dispatches workgroups x-fastest and round-robins them over the
+    XCDs, so the grid shape and the decode together decide which items share an
+    XCD's L2 and which run last.
+    """
+
+    name: ClassVar[str]
+    tag: ClassVar[str] = ""  # kernel-name part; "" = none
+
+    def check(self, spec) -> str | None:
+        """Why ``spec`` cannot use this decode, or None."""
+        return None
+
+    def grid(self, spec) -> tuple[int, int, int]:
+        """Launch grid, from the spec's actual (host-side) shape."""
+        raise NotImplementedError
+
+    def emit_decode(self, b, spec, bx, by, bz, seqlen_q) -> Decoded:
+        raise NotImplementedError
+
+
+class NonpersistQbMinor(NonpersistDecode):
+    """Grid ``(nqb, Hq, B)``: the query block is the fastest digit."""
+
+    name = "qb_minor"
+
+    def grid(self, spec):
+        return (_spec_nqb(spec), spec.num_query_heads, spec.batch)
+
+    def emit_decode(self, b, spec, bx, by, bz, seqlen_q):
+        return Decoded(bx, by, bz)
+
+
+class NonpersistBtHkvMinor(NonpersistDecode):
+    """Grid ``(B, Hq, nqb)`` with the kv head as the low digit of the head axis:
+    batch, then kv head, are the fastest digits, so the XCD round-robin spreads
+    distinct K/V streams over the XCDs. Query blocks run longest-first under
+    causal masking."""
+
+    name = "bt_hkv_minor"
+    tag = "npbthkvmin"
+
+    def grid(self, spec):
+        return (spec.batch, spec.num_query_heads, _spec_nqb(spec))
+
+    def emit_decode(self, b, spec, bx, by, bz, seqlen_q):
+        Hkv, gqa = spec.num_kv_heads, spec.num_queries_per_kv
+        hq = b.add(b.mul(b.mod(by, b.const_i32(Hkv)), b.const_i32(gqa)),
+                   b.div(by, b.const_i32(Hkv)))
+        qb = emit_reverse(b, bz, spec, seqlen_q) if spec.causal else bz
+        return Decoded(qb, hq, bx)
+
+
+NONPERSIST_DECODES = _registry(NonpersistQbMinor, NonpersistBtHkvMinor)
+
+
+# --------------------------------------------------------------------------- #
+# Persistent grid: NP CTAs grid-stride over the work index ``wi``.
+# --------------------------------------------------------------------------- #
 
 
 def _baked_nqb(spec, seqlen_q) -> int:
@@ -200,10 +289,6 @@ class PersistGqaPair2Phase(PersistDecode):
             qb_pair,
         )
         return Decoded(qb, hq, bt, hkv)
-
-
-def _registry(*classes) -> dict:
-    return {c.name: c() for c in classes}
 
 
 PERSIST_DECODES = _registry(

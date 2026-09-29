@@ -1384,6 +1384,37 @@ class TestAttentionHelpers(unittest.TestCase):
                           ("runtime-shape", "sliding-window", "bottom-right")],
                          [True, False, False])
 
+    def test_nonpersist_decode_builds_names_and_rejects_on_both_arches(self):
+        """Every nonpersist decode builds, fills the grid and gets its own name;
+        an explicit value on the persistent grid, or an unknown one, is rejected."""
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+        from kernels.gfx942 import attention_dense as k942
+        from kernels.gfx950 import attention_dense as k950
+
+        base = dict(batch=2, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
+                    num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
+                    block_n=64)
+        work = (2048 // 256) * 32 * 2
+        for arch, K, Spec in (("gfx942", k942, k942.Gfx942AttentionDenseSpec),
+                              ("gfx950", k950, k950.Gfx950AttentionDenseSpec)):
+            with self.subTest(arch=arch):
+                names = {}
+                for decode, impl in NONPERSIST_DECODES.items():
+                    spec = Spec(**base, nonpersist_decode=decode)
+                    K.build_attention_dense(spec, arch=arch)
+                    gx, gy, gz = K.attention_dense_grid(spec)
+                    self.assertEqual(gx * gy * gz, work, decode)
+                    names[decode] = spec.kernel_name()
+                    if impl.tag:
+                        self.assertIn(impl.tag, names[decode])
+                self.assertEqual(len(set(names.values())), len(names))
+                self.assertEqual(Spec(**base).kernel_name(), names["qb_minor"])
+                with self.assertRaisesRegex(ValueError, "nonpersist_decode"):
+                    Spec(**base, nonpersist_decode="nope")
+                with self.assertRaisesRegex(ValueError, "non-persistent grid"):
+                    Spec(**base, persistent=True, num_persistent=256,
+                         nonpersist_decode="bt_hkv_minor")
+
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
@@ -2888,12 +2919,20 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         return hashlib.sha256(lower_kernel_to_llvm(kernel).encode()).hexdigest()
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
-        """Shapes that collapse to one cache key must emit one kernel."""
+        """Shapes that collapse to one cache key must emit one kernel, for every
+        nonpersist decode (a reversed order must read NQB from the param)."""
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+
+        for decode in ("auto", *NONPERSIST_DECODES):
+            with self.subTest(nonpersist_decode=decode):
+                self._check_runtime_shape_collision(nonpersist_decode=decode)
+
+    def _check_runtime_shape_collision(self, **over):
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
-        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        base = AttentionDenseSpec(**self._BASE_KWARGS, **over)
         self.assertTrue(
             base.runtime_shape,
             "test setup error: the base spec is not on the runtime-shape path",
@@ -3024,11 +3063,19 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
 
     def test_runtime_shape_specs_sharing_a_key_lower_to_identical_ir(self):
         """Shapes that collapse to one cache key must emit one kernel -- and,
-        on gfx942, one symbol name."""
+        on gfx942, one symbol name -- for every nonpersist decode (a reversed
+        order must read NQB from the param)."""
+        from kernels.common.attention_dense_decode import NONPERSIST_DECODES
+
+        for decode in ("auto", *NONPERSIST_DECODES):
+            with self.subTest(nonpersist_decode=decode):
+                self._check_runtime_shape_collision(nonpersist_decode=decode)
+
+    def _check_runtime_shape_collision(self, **over):
         from dataclasses import replace
         from kernels.common.attention_dense_spec import attention_dense_cache_key
 
-        base = self._spec(**self._BASE_KWARGS)
+        base = self._spec(**self._BASE_KWARGS, **over)
         self.assertTrue(
             base.runtime_shape,
             "test setup error: the base gfx942 spec is not on the runtime-shape path",

@@ -85,7 +85,10 @@ from kernels.common.attention_dense_spec import (
     attention_dense_cache_key,
     check_dense_spec_preflight,
 )
-from kernels.common.attention_dense_decode import PERSIST_DECODES
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+)
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
 LOG2E = 1.4426950408889634
@@ -420,9 +423,9 @@ def build_attention_dense(
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
 
-    qb = b.block_id_x()
-    hq = b.block_id_y()
-    bt = b.block_id_z()
+    qb, hq, bt, _ = NONPERSIST_DECODES[spec.resolved_nonpersist_decode].emit_decode(
+        b, spec, b.block_id_x(), b.block_id_y(), b.block_id_z(), seqlen_q_p
+    )
     hkv = b.div(hq, b.const_i32(gqa))
     q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
 
@@ -1941,13 +1944,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
 def attention_dense_grid(spec: AttentionDenseSpec) -> Tuple[int, int, int]:
     """Launch grid for ``spec``. Persistent = 1-D grid of ``num_persistent`` CTAs;
-    default = one CTA per (query-block, query-head, batch)."""
+    default = one CTA per (query-block, query-head, batch), laid out by the
+    nonpersist decode."""
     if spec.persistent:
         return (spec.num_persistent, 1, 1)
-    nqb = (
-        spec.seqlen_q + spec.block_m - 1
-    ) // spec.block_m  # ceil: ragged partial block
-    return (nqb, spec.num_query_heads, spec.batch)
+    return NONPERSIST_DECODES[spec.resolved_nonpersist_decode].grid(spec)
 
 
 def attention_dense_block(spec: AttentionDenseSpec) -> Tuple[int, int, int]:

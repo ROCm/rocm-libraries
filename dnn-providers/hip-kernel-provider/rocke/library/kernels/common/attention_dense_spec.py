@@ -16,7 +16,10 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
-from kernels.common.attention_dense_decode import PERSIST_DECODES
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+)
 
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -77,6 +80,8 @@ class AttentionDenseSpec:
     use_sinks: bool = False
     # Appended for positional compatibility with existing concrete specs.
     causal_bottom_right: bool = field(default=False, kw_only=True)
+    # Block order of the non-persistent grid (persistent specs use persist_decode).
+    nonpersist_decode: str = field(default="auto", kw_only=True)
 
     def supported_persist_decodes(self) -> frozenset[str]:
         """Decode values the concrete kernel type can actually emit."""
@@ -152,6 +157,21 @@ class AttentionDenseSpec:
             )
         if self.persist_decode != "auto":
             why = PERSIST_DECODES[self.persist_decode].check(self)
+            if why:
+                raise ValueError(why)
+        if self.nonpersist_decode not in {"auto", *NONPERSIST_DECODES}:
+            raise ValueError(
+                f"nonpersist_decode must be one of "
+                f"{sorted({'auto', *NONPERSIST_DECODES})}, "
+                f"got {self.nonpersist_decode!r}"
+            )
+        if self.nonpersist_decode != "auto":
+            if self.persistent:
+                raise ValueError(
+                    "nonpersist_decode applies to the non-persistent grid; "
+                    "use persist_decode with persistent=True"
+                )
+            why = NONPERSIST_DECODES[self.nonpersist_decode].check(self)
             if why:
                 raise ValueError(why)
         if self.sliding_window < 0:
@@ -251,6 +271,13 @@ class AttentionDenseSpec:
         return "qb_major"
 
     @property
+    def resolved_nonpersist_decode(self) -> str:
+        """Resolve the non-persistent auto policy."""
+        if self.nonpersist_decode != "auto":
+            return self.nonpersist_decode
+        return "qb_minor"
+
+    @property
     def runtime_param_fields(self) -> tuple[str, ...]:
         """Spec fields this kernel reads as runtime kernel params instead of
         baking into the body, so they must NOT split cache identity -- one
@@ -331,6 +358,10 @@ class AttentionDenseSpec:
                 parts.append(decode)
             if self.interleave:
                 parts.append("intl")
+        else:
+            decode = NONPERSIST_DECODES[self.resolved_nonpersist_decode].tag
+            if decode:
+                parts.append(decode)
         return kernel_name_join(*parts)
 
 

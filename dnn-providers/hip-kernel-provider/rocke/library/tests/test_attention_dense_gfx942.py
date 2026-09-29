@@ -131,6 +131,9 @@ def test_bottom_right_field_is_keyword_only_without_shifting_concrete_signatures
             params["causal_bottom_right"].kind is inspect.Parameter.KEYWORD_ONLY
         ), spec_type.__name__
         assert params["causal_bottom_right"].default is False
+        assert (
+            params["nonpersist_decode"].kind is inspect.Parameter.KEYWORD_ONLY
+        ), spec_type.__name__
         positionals = tuple(
             name
             for name, param in params.items()
@@ -296,6 +299,7 @@ _SPEC_PERTURBATIONS = {
     "num_persistent": (152, 304),
     "interleave": (True, False),
     "persist_decode": ("qb_major", "hkv_major"),
+    "nonpersist_decode": ("bt_hkv_minor", "qb_minor"),
     "lazy_rescale": (False, True),
     "use_sinks": (),  # unbuildable (not yet supported)
 }
