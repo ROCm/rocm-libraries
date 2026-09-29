@@ -182,8 +182,7 @@ int main()
     }
     {
       void* p = nullptr;
-      if (posix_memalign(&p, 64, 42) != 0 || !p
-          || reinterpret_cast<std::uintptr_t>(p) % 64 != 0)
+      if (posix_memalign(&p, 64, 42) != 0 || !p || reinterpret_cast<std::uintptr_t>(p) % 64 != 0)
       {
         return EXIT_FAILURE;
       }
@@ -212,9 +211,9 @@ int main()
     {
       int sentinel{};
       void* p = &sentinel;
-      errno = EDOM;
-      if (posix_memalign(&p, 64, (std::numeric_limits<std::size_t>::max)()) != ENOMEM
-          || p != &sentinel || errno != EDOM)
+      errno   = EDOM;
+      if (posix_memalign(&p, 64, (std::numeric_limits<std::size_t>::max)()) != ENOMEM || p != &sentinel
+          || errno != EDOM)
       {
         return EXIT_FAILURE;
       }

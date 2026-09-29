@@ -44,7 +44,7 @@ int main()
   constexpr auto max_size = (std::numeric_limits<std::size_t>::max)();
 
   // An overflowing product must fail instead of allocating the wrapped size.
-  errno = 0;
+  errno                 = 0;
   const auto wrap_count = max_size / 2 + 1;
   if (auto p = runtime_calloc(wrap_count, 2))
   {
@@ -59,7 +59,7 @@ int main()
   // A product that wraps to a small non-zero value must fail too. This is the
   // dangerous shape: a huge request served by a tiny allocation, which the
   // caller then writes to as if it were huge.
-  errno = 0;
+  errno                  = 0;
   const auto wrap_to_two = max_size / 2 + 2;
   if (auto p = runtime_calloc(wrap_to_two, 2))
   {
@@ -88,8 +88,8 @@ int main()
   }
 
   // Allocation failure must be returned instead of passing nullptr to memset.
-  // SIZE_MAX is rejected by the interposer's own size arithmetic; SIZE_MAX / 2
-  // gets past it and fails in the backing allocator instead.
+  // v0 rejects SIZE_MAX in its own size arithmetic, while SIZE_MAX / 2 gets past
+  // it and fails in hipMallocManaged; v1 leaves both to libc.
   const std::size_t failing_sizes[]{max_size, max_size / 2};
   for (const auto failing_size : failing_sizes)
   {
@@ -113,7 +113,7 @@ int main()
   // A successful allocation must still be fully zero-initialized.
   constexpr std::size_t count = 128;
   constexpr std::size_t size  = sizeof(unsigned int);
-  auto p                       = static_cast<unsigned int*>(runtime_calloc(count, size));
+  auto p                      = static_cast<unsigned int*>(runtime_calloc(count, size));
   if (!p)
   {
     return EXIT_FAILURE;
