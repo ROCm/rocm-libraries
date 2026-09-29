@@ -55,12 +55,6 @@ try
         if(!handle)
             return rocblas_status_invalid_handle;
 
-        bool const has_work = (n >= 1) && (nrhs >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-
         // argument checking
         rocblas_status st
             = rocsolver_getrs_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, ipiv, batch_count);
@@ -69,8 +63,35 @@ try
     }
 
     I const max_batch_count = 64 * 1024;
-    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
-    I const bid_inc = ceildiv(batch_count_arg, nsweep);
+    I const nsweep = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    // memory workspace sizes:
+    // size of workspace (for calling TRSM)
+    bool optim_mem;
+    size_t size_work1, size_work2, size_work3, size_work4;
+    {
+        I const lbatch_count = bid_inc;
+        rocsolver_getrs_getMemorySize<true, false, T>(trans, n, nrhs, lbatch_count, &size_work1,
+                                                      &size_work2, &size_work3, &size_work4,
+                                                      &optim_mem, lda, ldb);
+    }
+
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
+                                                      size_work4);
+
+    // memory workspace allocation
+    void *work1, *work2, *work3, *work4;
+    rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
+
+    if(!mem)
+        return rocblas_status_memory_error;
+
+    work1 = mem[0];
+    work2 = mem[1];
+    work3 = mem[2];
+    work4 = mem[3];
 
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
@@ -91,30 +112,6 @@ try
         I incb = 1;
         rocblas_stride strideA = 0;
         rocblas_stride strideB = 0;
-
-        // memory workspace sizes:
-        // size of workspace (for calling TRSM)
-        bool optim_mem;
-        size_t size_work1, size_work2, size_work3, size_work4;
-        rocsolver_getrs_getMemorySize<true, false, T>(trans, n, nrhs, batch_count, &size_work1,
-                                                      &size_work2, &size_work3, &size_work4,
-                                                      &optim_mem, lda, ldb);
-
-        if(rocblas_is_device_memory_size_query(handle))
-            return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2,
-                                                          size_work3, size_work4);
-
-        // memory workspace allocation
-        void *work1, *work2, *work3, *work4;
-        rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
-
-        if(!mem)
-            return rocblas_status_memory_error;
-
-        work1 = mem[0];
-        work2 = mem[1];
-        work3 = mem[2];
-        work4 = mem[3];
 
         // execution
         rocblas_status const istat = rocsolver_getrs_template<true, false, T>(

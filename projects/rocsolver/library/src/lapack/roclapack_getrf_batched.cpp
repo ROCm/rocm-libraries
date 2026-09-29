@@ -57,12 +57,6 @@ try
         if(!handle)
             return rocblas_status_invalid_handle;
 
-        bool const has_work = (m >= 1) && (n >= 1) && (batch_count >= 1);
-        if(!has_work)
-        {
-            return (rocblas_status_success);
-        }
-
         // argument checking
         rocblas_status st
             = rocsolver_getf2_getrf_argCheck(handle, m, n, lda, A, ipiv, info, pivot, batch_count);
@@ -71,8 +65,51 @@ try
     }
 
     I const max_batch_count = 64 * 1024;
-    I const nsweep = ceildiv(batch_count_arg, max_batch_count);
-    I const bid_inc = ceildiv(batch_count_arg, nsweep);
+    I const nsweep = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, max_batch_count);
+    I const bid_inc = (batch_count_arg == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    // memory workspace sizes:
+    // size for constants in rocblas calls
+    size_t size_scalars;
+    // size of reusable workspace (and for calling TRSM)
+    bool optim_mem;
+    size_t size_work1, size_work2, size_work3, size_work4;
+    // extra requirements for calling GETF2
+    size_t size_pivotval, size_pivotidx;
+    // size to store info about singularity of each subblock
+    size_t size_iinfo, size_iipiv;
+
+    {
+        I const lbatch_count = bid_inc;
+        rocsolver_getrf_getMemorySize<true, false, T>(
+            m, n, pivot, lbatch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
+            &size_work4, &size_pivotval, &size_pivotidx, &size_iipiv, &size_iinfo, &optim_mem, lda);
+    }
+
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
+                                                      size_work3, size_work4, size_pivotval,
+                                                      size_pivotidx, size_iipiv, size_iinfo);
+
+    // memory workspace allocation
+    void *scalars, *work1, *work2, *work3, *work4, *pivotval, *pivotidx, *iinfo, *iipiv;
+    rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
+                              size_pivotval, size_pivotidx, size_iipiv, size_iinfo);
+
+    if(!mem)
+        return rocblas_status_memory_error;
+
+    scalars = mem[0];
+    work1 = mem[1];
+    work2 = mem[2];
+    work3 = mem[3];
+    work4 = mem[4];
+    pivotval = mem[5];
+    pivotidx = mem[6];
+    iipiv = mem[7];
+    iinfo = mem[8];
+    if(size_scalars > 0)
+        init_scalars(handle, (T*)scalars);
 
     for(I isweep = 0; isweep < nsweep; isweep++)
     {
@@ -91,46 +128,6 @@ try
         // batched execution
         I inca = 1;
         rocblas_stride strideA = 0;
-
-        // memory workspace sizes:
-        // size for constants in rocblas calls
-        size_t size_scalars;
-        // size of reusable workspace (and for calling TRSM)
-        bool optim_mem;
-        size_t size_work1, size_work2, size_work3, size_work4;
-        // extra requirements for calling GETF2
-        size_t size_pivotval, size_pivotidx;
-        // size to store info about singularity of each subblock
-        size_t size_iinfo, size_iipiv;
-
-        rocsolver_getrf_getMemorySize<true, false, T>(
-            m, n, pivot, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-            &size_work4, &size_pivotval, &size_pivotidx, &size_iipiv, &size_iinfo, &optim_mem, lda);
-
-        if(rocblas_is_device_memory_size_query(handle))
-            return rocblas_set_optimal_device_memory_size(
-                handle, size_scalars, size_work1, size_work2, size_work3, size_work4, size_pivotval,
-                size_pivotidx, size_iipiv, size_iinfo);
-
-        // memory workspace allocation
-        void *scalars, *work1, *work2, *work3, *work4, *pivotval, *pivotidx, *iinfo, *iipiv;
-        rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3,
-                                  size_work4, size_pivotval, size_pivotidx, size_iipiv, size_iinfo);
-
-        if(!mem)
-            return rocblas_status_memory_error;
-
-        scalars = mem[0];
-        work1 = mem[1];
-        work2 = mem[2];
-        work3 = mem[3];
-        work4 = mem[4];
-        pivotval = mem[5];
-        pivotidx = mem[6];
-        iipiv = mem[7];
-        iinfo = mem[8];
-        if(size_scalars > 0)
-            init_scalars(handle, (T*)scalars);
 
         // execution
         rocblas_status const istat = rocsolver_getrf_template<true, false, T>(
