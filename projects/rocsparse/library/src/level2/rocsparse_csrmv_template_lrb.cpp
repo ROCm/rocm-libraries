@@ -25,6 +25,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "internal/generic/rocsparse_v2_spmv.h"
@@ -580,8 +581,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     // Overflow-safe integer ceiling division (float ceil loses precision for
                     // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
                     int64_t  num_wgs   = (int64_t(info->lrb.nRowsBins[j]) - 1) / block_size + 1;
-                    uint32_t grid_size = static_cast<uint32_t>(
-                        rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
+                    uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, block_size);
 
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (csrmvn_lrb_short_rows_kernel),
@@ -614,8 +614,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     // Overflow-safe integer ceiling division (float ceil loses precision for
                     // row counts above 2^24). nRowsBins[j] is guaranteed non-zero here.
                     int64_t  num_wgs   = (int64_t(info->lrb.nRowsBins[j]) - 1) / rows_per_wg + 1;
-                    uint32_t grid_size = static_cast<uint32_t>(
-                        rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
+                    uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, block_size);
 
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (csrmvn_lrb_short_rows_2_kernel),
@@ -661,8 +660,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                         // One wavefront reduces one row, so grid is sized by wavefronts-per-block.
                         constexpr uint32_t mr_block = WG_SIZE_WAVE32;
                         int64_t  num_wgs   = (info->lrb.nRowsBins[j] - 1) / (mr_block / 32) + 1;
-                        uint32_t grid_size = static_cast<uint32_t>(
-                            rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
+                        uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, mr_block);
                         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                             (csrmvn_lrb_medium_rows_warp_reduce_kernel<mr_block, 32>),
                             grid_size,
@@ -692,8 +690,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     {
                         int64_t num_wgs
                             = (info->lrb.nRowsBins[j] - 1) / (256 / handle->wavefront_size) + 1;
-                        uint32_t grid_size = static_cast<uint32_t>(
-                            rocsparse::min(num_wgs, int64_t(handle->properties.maxGridSize[0])));
+                        uint32_t grid_size = rocsparse::get_grid_size_x(handle, num_wgs, 256);
                         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                             (csrmvn_lrb_medium_rows_warp_reduce_kernel<256, 64>),
                             grid_size,
@@ -722,9 +719,10 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 }
                 else // One block per row
                 {
-                    int64_t  count     = info->lrb.nRowsBins[j]; // One WG per row
-                    uint32_t grid_size = static_cast<uint32_t>(
-                        rocsparse::min(count, int64_t(handle->properties.maxGridSize[0])));
+                    int64_t        count = info->lrb.nRowsBins[j]; // One WG per row
+                    const uint32_t mr_block
+                        = (handle->wavefront_size == 32) ? WG_SIZE_WAVE32 : WG_SIZE;
+                    uint32_t grid_size = rocsparse::get_grid_size_x(handle, count, mr_block);
 
                     if(handle->wavefront_size == 32)
                     {
@@ -804,12 +802,11 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                 // wg_flags sizing, corrupt the cross-workgroup synchronization).
                 int64_t count = int64_t(info->lrb.nRowsBins[j]) * num_wgs_per_row;
 
-                // Clamp the launch grid to the device maximum, rounded down to a whole number of
-                // per-row workgroup groups so that all workgroups cooperating on a row stay within
-                // one grid-stride wave (required by the spin-loop hand-off). The kernel grid-strides
-                // over the full logical range [0, count).
-                int64_t max_grid = int64_t(handle->properties.maxGridSize[0]);
-                int64_t capped   = rocsparse::min(count, max_grid);
+                // Clamp the launch grid, rounded down to a whole number of per-row workgroup
+                // groups so that all workgroups cooperating on a row stay within one grid-stride
+                // wave (required by the spin-loop hand-off). The kernel grid-strides over the full
+                // logical range [0, count).
+                int64_t capped   = rocsparse::get_grid_size_x(handle, count, block_size);
                 capped           = (capped / num_wgs_per_row) * num_wgs_per_row;
                 if(capped < num_wgs_per_row)
                 {
