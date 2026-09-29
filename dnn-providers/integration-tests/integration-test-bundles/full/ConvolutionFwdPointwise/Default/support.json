@@ -227,6 +227,9 @@
           "8_16_16_16_fp32_nchw_dil1x1_postpad0x0_prepad0x0_a17ffa"
         ],
         "support": {
+          "gfx1101": [
+            "linux"
+          ],
           "gfx1150": [
             "linux"
           ],

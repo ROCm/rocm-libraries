@@ -83,6 +83,9 @@
           "8_16_16_16_fp32_nchw_cdtfp32_dil1x1_postpad0x0"
         ],
         "support": {
+          "gfx1101": [
+            "linux"
+          ],
           "gfx1150": [
             "linux"
           ],

@@ -158,6 +158,9 @@
           "4_3_1_fp32_nlc"
         ],
         "support": {
+          "gfx1101": [
+            "linux"
+          ],
           "gfx1150": [
             "linux"
           ],
@@ -181,6 +184,9 @@
           "runtime_epsilon"
         ],
         "support": {
+          "gfx1101": [
+            "linux"
+          ],
           "gfx1150": [
             "linux"
           ],
