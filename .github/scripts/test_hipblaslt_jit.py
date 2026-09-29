@@ -33,6 +33,9 @@ def main():
             "generic-api",
             "mock-backend",
             "jit-component",
+            "code-object",
+            "code-object-gfx1250",
+            "comgr-cache",
             "streamk-api",
             "amax-api",
             "alpha-zero-api",
@@ -132,6 +135,34 @@ def main():
             {},
             60,
         ),
+        # Compile-only: comgr builds for gfx1250 on any host.
+        (
+            "code-object-gfx1250",
+            [
+                str(staging / "hipblaslt-jit-code-object-test"),
+                "--target",
+                "gfx1250",
+                "--out",
+                str(output / "code-object-gfx1250"),
+            ],
+            {},
+            300,
+        ),
+        (
+            "comgr-cache",
+            [
+                sys.executable,
+                str(
+                    source / "projects/hipblaslt/clients/tests/jit/test_comgr_cache.py"
+                ),
+                str(staging / "hipblaslt-jit-code-object-test"),
+                str(output / "comgr-cache"),
+                "--architecture",
+                args.architecture,
+            ],
+            {},
+            300,
+        ),
     ]
 
     fixture_suffix = "_gfx1250" if args.architecture == "gfx1250" else ""
@@ -194,7 +225,7 @@ def main():
         )
         commands.append((name, command, streamk, 420))
 
-    replays = ("helper-failures", "bundle-failures", "mock-backend")
+    replays = ("helper-failures", "bundle-failures", "mock-backend", "code-object")
     if not args.case or any(case in args.case for case in ("splitk-api", *replays)):
         commands.append(
             (
@@ -261,6 +292,21 @@ def main():
                 ],
                 {},
                 120,
+            )
+        )
+        commands.append(
+            (
+                "code-object",
+                [
+                    str(staging / "hipblaslt-jit-code-object-test"),
+                    "--gpu",
+                    "--out",
+                    str(output / "code-object"),
+                    "--bundle",
+                    str(output / "splitk-api/bundle"),
+                ],
+                {},
+                300,
             )
         )
 
