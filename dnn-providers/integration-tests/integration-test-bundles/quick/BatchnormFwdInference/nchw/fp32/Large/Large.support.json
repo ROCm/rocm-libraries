@@ -28,6 +28,9 @@
       ]
     },
     "MIOPEN_ENGINE": {
+      "gfx1030": [
+        "windows"
+      ],
       "gfx1101": [
         "linux"
       ],

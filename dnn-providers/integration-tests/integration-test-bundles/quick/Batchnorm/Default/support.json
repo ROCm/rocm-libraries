@@ -122,6 +122,9 @@
           "32_3_1_14_fp32_nhwc"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],

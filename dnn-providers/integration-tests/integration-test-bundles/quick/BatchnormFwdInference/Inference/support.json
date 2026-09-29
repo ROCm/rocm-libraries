@@ -56,6 +56,9 @@
           "tiny_fp32_nchw"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],

@@ -114,6 +114,9 @@
           "8_16_16_16_fp32_nhwc_dil1x1_postpad0x0_prepad0x0"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],
@@ -172,6 +175,9 @@
           "1d_grouped2_fp32_nlc_pad1_stride1"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],

@@ -74,6 +74,9 @@
           "8_32_2048_fp32_nlc"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],

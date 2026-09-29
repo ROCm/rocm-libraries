@@ -146,6 +146,9 @@
           "8_32_2048_fp32_nlc_rlo0p1_norslope_rhi0p5"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],

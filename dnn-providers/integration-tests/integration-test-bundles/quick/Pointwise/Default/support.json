@@ -11,6 +11,9 @@
           "4_8_16_16_fp32_nchw"
         ],
         "support": {
+          "gfx1030": [
+            "windows"
+          ],
           "gfx1101": [
             "linux"
           ],
