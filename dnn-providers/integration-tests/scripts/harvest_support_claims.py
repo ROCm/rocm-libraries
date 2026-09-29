@@ -16,8 +16,10 @@ Log handling
    block therefore often appears twice; identical blocks count once.
 2. Within a stream, each block is paired with the gtest results printed
    before it.  A block with no "[==========] ... ran." line before it, JSON
-   that does not parse, schema_version != 1, an invalid run arch, platform
-   or engine, or counters_consistent != true is rejected whole.
+   that does not parse, schema_version != 1, a mode other than enforcing or
+   warning_only, an invalid run arch, platform or engine,
+   counters_consistent != true, or a harness_defects count other than 0 is
+   rejected whole.
 3. Each unclaimed_support entry becomes one cell per case: (bundle, case,
    arch, platform, engine).  "reached: verified" means the comparison ran,
    not that it passed, so a cell whose gtest FAILED or was SKIPPED in the
@@ -83,6 +85,7 @@ from support_sidecar import Claim, SidecarError, load, parse, render, sidecar_pa
 
 VALID_PLATFORMS = {"linux", "windows"}
 SCHEMA_VERSION = 1
+MODES = ("enforcing", "warning_only")  # modeNames in SupportClaimReport.cpp
 BUNDLE_PREFIX = "integration-test-bundles/"
 
 # VerificationDepth in src/harness/bundle/VerificationOutcome.hpp.
@@ -161,6 +164,8 @@ def _validate_summary(parsed: object) -> str | dict:
             f"schema_version {summary.get('schema_version')!r}, "
             f"expected {SCHEMA_VERSION}"
         )
+    if summary.get("mode") not in MODES:
+        return f"mode {summary.get('mode')!r} is not enforcing or warning_only"
     run = summary.get("run")
     if not isinstance(run, dict):
         return "no run object"
@@ -172,6 +177,12 @@ def _validate_summary(parsed: object) -> str | dict:
         return f"run.engine {run.get('engine')!r} is empty"
     if summary.get("counters_consistent") is not True:
         return "counters_consistent is not true"
+    defects = summary.get("harness_defects")
+    if not isinstance(defects, dict) or "missed_query" not in defects:
+        return "harness_defects has no missed_query count"
+    for name, count in sorted(defects.items()):
+        if type(count) is not int or count != 0:
+            return f"harness_defects.{name} is {count!r}, not 0"
     return summary
 
 

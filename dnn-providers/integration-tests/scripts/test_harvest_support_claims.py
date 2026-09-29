@@ -263,6 +263,30 @@ class TestRejectBlocks(unittest.TestCase):
             "counters_consistent", self._error(_summary(counters_consistent=False))
         )
 
+    def test_unknown_or_missing_mode(self) -> None:
+        for mode in ("enforce", "WARNING ONLY", "", None):
+            with self.subTest(mode=mode):
+                self.assertIn("mode", self._error(_summary(mode=mode)))
+
+    def test_harness_defect(self) -> None:
+        for defects in (
+            {"missed_query": 2},
+            {"missed_query": 0, "other": 1},
+            {"missed_query": False},
+            {"missed_query": "0"},
+        ):
+            with self.subTest(defects=defects):
+                self.assertIn(
+                    "harness_defects.", self._error(_summary(harness_defects=defects))
+                )
+
+    def test_harness_defects_without_missed_query(self) -> None:
+        for defects in ({}, 0, None, [0]):
+            with self.subTest(defects=defects):
+                self.assertIn(
+                    "missed_query", self._error(_summary(harness_defects=defects))
+                )
+
 
 # ---------------------------------------------------------------------------
 # Gtest names
