@@ -141,7 +141,7 @@ invoke rocisa            # editable pip install — picks up Python changes imme
 
 ## Gotchas
 
-- `tox -e unit` skips the client build (hence "fast"); the env itself runs `pip install {toxinidir}/rocisa/` so it does **not** require a prior `invoke build-client` for rocisa to be importable. To run `pytest` directly outside tox, install rocisa once with `invoke rocisa`.
+- `tox -e unit` skips the client build (hence "fast"); the env installs editable rocisa and TensileLite with a temporary `0.0.0` wheel identity. To run `pytest` directly outside tox, install rocisa once with `invoke rocisa`.
 - `tox -e py3` (the full common-tests env) does invoke `build-client` itself inside its `commands` block — that's where the "long client build" happens. Override its CMake/client args via `TENSILELITE_CLIENT_ARGS`, and parallelism via `TENSILE_NUM_PYTEST_WORKERS` (default 4).
 - Two test trees exist: `tensilelite/Tests/` (YAML kernel tests, run via `tox`/`pytest`) vs `tests/` (C++ host-library gtest, gated by CMake `TENSILELITE_BUILD_TESTING=ON`).
 - `rocisa.egg-info/` and `rocisa/build/` in the working tree are normal (left by editable install / cmake build); don't commit them.
