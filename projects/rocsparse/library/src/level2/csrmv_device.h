@@ -1154,9 +1154,8 @@ namespace rocsparse
                 y[row] = temp_sum;
             }
 
-            // Guard against a later grid-stride iteration overwriting partialSums while this
-            // iteration's reduction is still reading it.
-            __syncthreads();
+            // No trailing barrier: blockreduce_sum ends with one, after which only lid 0
+            // reads partialSums[0], and only lid 0 writes that slot in the next iteration.
         }
     }
 
@@ -1323,9 +1322,8 @@ namespace rocsparse
                 rocsparse::atomic_add(y, row, m, extra_sum);
             }
 
-            // Guard against a later grid-stride iteration overwriting partialSums while this
-            // iteration's reduction is still reading it.
-            __syncthreads();
+            // No trailing barrier: blockreduce_sum ends with one, after which only lid 0
+            // reads partialSums[0], and only lid 0 writes that slot in the next iteration.
         }
     }
 }
