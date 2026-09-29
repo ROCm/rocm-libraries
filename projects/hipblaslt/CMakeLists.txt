@@ -762,7 +762,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/"
         DESTINATION "${_tensilelite_install_dest}/rocjitsu"
         COMPONENT tests
-        FILES_MATCHING PATTERN "*.py" PATTERN "*.md"
+        FILES_MATCHING PATTERN "*.py" PATTERN "*.md" PATTERN "requirements.txt"
         PATTERN "__pycache__" EXCLUDE
     )
 

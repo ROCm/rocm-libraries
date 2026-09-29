@@ -95,8 +95,9 @@ findings, native rejection, packaging problems and possible kernel races.
 ## Running locally
 
 Use Linux, Python 3.11+, `msgpack`, `PyYAML`, `taskset` and matching client/runtime
-artifacts. CMake's `HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` installs this tool
-and its tests under `share/hipblaslt/tensilelite/rocjitsu`. Set runtime library paths as in
+artifacts. Install the Python dependencies from `requirements.txt`. CMake's
+`HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS` installs this tool and its tests under
+`share/hipblaslt/tensilelite/rocjitsu`. Set runtime library paths as in
 `.github/scripts/run_rocjitsu_hipblaslt_race_check.sh`.
 
 ```bash
@@ -119,9 +120,11 @@ solutions, replace `--kernels 100` with e.g. `--solution-index 7 --solution-inde
 For source-tree development, put `projects/hipblaslt/tensilelite` on `PYTHONPATH`
 and use this directory as `sweep`.
 
-The existing bench smoke covers heuristic selection and HPL initialization;
-the TensileLite smoke covers the Python front end, rocisa and kernel generation.
-The direct packaged sweep preserves those distinct checks. Measurements should
-guide further speed work: the main candidates are repeated metadata decoding
-and client/module startup, and bench's mandatory second dispatch. The current
-small scheduler needs no general-purpose tuning framework.
+This sidecar targets customer GEMMs and their library helper kernels. It replaces
+the old fixed GEMM checks; client initialization kernels and the Tensile Python
+generation pipeline are outside its coverage goals. Numerical validation and
+exact dispatch evidence remain required for both sweep paths.
+
+Measurements should guide further speed work: the main candidates are repeated
+metadata decoding and client/module startup, and bench's mandatory second
+dispatch. The current small scheduler needs no general-purpose tuning framework.
