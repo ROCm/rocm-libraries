@@ -243,6 +243,7 @@ There is no separate unit-test binary. The host-only tests that do exist are com
 | `benchmark_stats_gtest.cpp` | `ValidateAdaptiveConfig`, `RotatingBufferPlan`, `RatePerSecond` | Adaptive-benchmark statistics helpers |
 | `caching_library_gtest.cpp` | `CachingLibraryCollision` | Solution-cache keying under a forced hash collision |
 | `ulp_gtest.cpp` | `UlpMantissaBits`, `UlpAsDouble`, `UlpDistance`, `UlpAccumulate`, `UlpCheckGeneral` | Units-in-the-last-place error-measurement helpers, pure math with no GPU dependency |
+| `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
 | `arch_revision_gtest.cpp` | `ArchRevisionSmoke` | ASIC-revision-to-library-arch mapping, a pure function reached by relative `#include` of an internal header (see point 1 below) |
 
 That is a handful of test cases of genuinely hardware-independent logic, against a library of
