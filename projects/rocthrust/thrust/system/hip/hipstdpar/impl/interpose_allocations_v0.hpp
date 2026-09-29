@@ -43,6 +43,7 @@
 #    include <hip/hip_runtime.h>
 
 #    include <algorithm>
+#    include <cassert>
 #    include <cerrno>
 #    include <cstddef>
 #    include <cstdint>
@@ -142,12 +143,9 @@ extern "C" inline __attribute__((used)) void* __hipstdpar_aligned_alloc(std::siz
 
   void* aligned = static_cast<std::byte*>(allocation) + header_size;
   auto space    = allocation_size - header_size;
-  if (!std::align(a, n, aligned, space))
-  {
-    hipstd::heap.deallocate(allocation, allocation_size, allocation_alignment);
-    errno = ENOMEM;
-    return nullptr;
-  }
+  // Cannot fail: space is n + a - 1 and aligning advances by at most a - 1.
+  [[maybe_unused]] const auto fits = std::align(a, n, aligned, space);
+  assert(fits);
 
   static_cast<hipstd::Header*>(aligned)[-1] = {allocation, allocation_size, allocation_alignment};
 
