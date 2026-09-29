@@ -80,22 +80,25 @@ TEST(rocfft_internal, twiddle_and_chirp_kernel_names_are_unique)
                                                  TwiddleTableType::PARTIAL_PASS_N};
     const std::vector<rocfft_precision> precisions
         = {rocfft_precision_half, rocfft_precision_single, rocfft_precision_double};
+    const std::vector<KIntType> itypes = {KIntType::U32, KIntType::U64};
 
     std::set<std::string> names;
     size_t                combinations = 0;
 
     for(auto type : types)
         for(auto precision : precisions)
-        {
-            names.insert(twiddle_rtc_kernel_name(type, precision));
-            ++combinations;
-        }
+            for(auto itype : itypes)
+            {
+                names.insert(twiddle_rtc_kernel_name(type, precision, itype));
+                ++combinations;
+            }
 
     for(auto precision : precisions)
-    {
-        names.insert(chirp_rtc_kernel_name(precision));
-        ++combinations;
-    }
+        for(auto itype : itypes)
+        {
+            names.insert(chirp_rtc_kernel_name(precision, itype));
+            ++combinations;
+        }
 
     EXPECT_EQ(names.size(), combinations);
 }
