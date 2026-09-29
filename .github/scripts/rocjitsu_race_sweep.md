@@ -29,6 +29,9 @@ one representative solution when several indices reference the same kernel.
 Both backends receive the same seed so their samples/cases are comparable,
 without consuming each other's output. Changing the PR revision changes the
 sample; the recorded seed allows replay against the same artifact.
+Solution indices are artifact-specific. The planned sample is deterministic;
+the subset actually executed can differ after a failure because workers finish
+their assigned jobs before stopping. The report distinguishes these outcomes.
 
 The initial adapter scope includes ordinary supported GEMM datatypes with
 matching C/D types, optional bias/scaling, and no activation. Grouped, sparse,
@@ -72,7 +75,10 @@ per case. Bench requests explicit indices, norm checks with native tolerance
 assertions, allclose measurements, no optional warmups, and one timed iteration.
 That means one validation and one timed target dispatch per bench case. Both
 parsers require per-case numerical evidence, matching solution/kernel identities
-and the expected target dispatch counts. Bench's YAML schema/generator must be
+and the expected target dispatch counts for each case and the whole process.
+The dispatch lines are emitted by the race plugin itself and must name the
+expected kernel and symbol; normal benchmark output alone cannot satisfy this
+check. Bench's YAML schema/generator must be
 packaged beside its executable, and its embedded HIP initialization kernels
 must support the selected architecture.
 
@@ -93,6 +99,11 @@ emulator tick limit is disabled in favor of the subprocess wall timeout.
 The existing uploaded race-report artifact contains `sweep-tensile/` and
 `sweep-bench/`, each with:
 
+- `summary.md`: one row per selected solution index, showing overall PASS/FAIL,
+  numerical passes, observed/expected target dispatches, runtime and failure
+  reasons. NOT RUN distinguishes unstarted work; partial reports retain
+  PENDING/INCOMPLETE rows. CI publishes both tables in the job summary even on
+  failure. A numerical pass with a race report is an overall FAIL.
 - `manifest.json`: reconstructed inventory counts, seed, policy version, exact
   sampled identities, size mappings/predicates, derived cases and input hashes.
 - `rocjitsu.json`, `settings.json`: emulator settings, CPUs and controlled runtime
@@ -102,10 +113,45 @@ The existing uploaded race-report artifact contains `sweep-tensile/` and
 - `progress.json`, `summary.json`: incremental/final accounting and first-failure
   stop state. Setup/finalization errors leave `setup-or-run-error.json` if writable.
 
+The console prints the solution index and the same evidence as each result
+arrives. The Markdown table is updated atomically after every result, so an
+outer CI timeout can still leave a partial report. Full native output remains
+in the per-process log rather than expanding every kernel name in the table.
+
 Reduce findings to one sampled solution or a tiny instruction sequence before
 proposing a rocJITsu fix. Retain tool/artifact revisions, commands, observed
 behavior and regression criteria. Distinguish emulator findings from native
 predicate rejection, client packaging problems and kernel race candidates.
+
+## Scope, cost and existing smoke checks
+
+The shared planner and runner avoid separate implementations for the two clients,
+but the predicate/option adapters are deliberately incomplete. Native predicate
+checks fail closed; this does not establish complete library or path coverage.
+Human-readable client output is an interface dependency: changes to its format
+must update the parser and tests, and missing evidence fails the stage.
+
+The existing bench smoke also exercises heuristic selection and HPL device input
+initialization. The sweep uses explicit indices and random-integer input instead.
+The existing TensileLite smoke additionally runs the Python front end, rocisa and
+kernel generation. A direct packaged-kernel sweep does not replace those checks.
+Keep them for the first paired CI comparison; retiring them later should explicitly
+decide where that distinct coverage belongs.
+
+Local inventory reconstruction took about 25 seconds per backend for the retained
+gfx942 package. One-solution processes repeat client/module startup, and bench
+requires a validation dispatch plus one timed dispatch with its current interface
+(zero iterations is clamped to one). TensileLite already performs only one target
+dispatch per case. Compatible batching or shared transient planning could reduce
+startup work, but should follow measurements from the paired CI artifact rather
+than add caching or scheduling machinery now.
+
+Each backend can take up to roughly 50 minutes if all 100 processes finish just
+inside their 120-second timeout. The two sequential stages can therefore exceed
+the enclosing 75-minute CI step. A suite-level time budget with explicit unstarted
+accounting is a follow-up before expanding or treating this as a reliable timing
+gate; current incremental reports preserve the partial evidence. The per-case
+buffer estimate is also not a hard cap on native/emulator process memory.
 
 ## Reproduction
 

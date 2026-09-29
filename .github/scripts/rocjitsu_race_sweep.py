@@ -6,6 +6,7 @@
 import argparse
 from collections import Counter
 import csv
+import html
 import json
 import os
 from pathlib import Path
@@ -47,10 +48,75 @@ TYPE_OPTIONS = {
 }
 
 
-def write_json(path, value):
+def write_text(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    temporary.write_text(value, encoding="utf-8")
     temporary.replace(path)
+
+
+def write_json(path, value):
+    write_text(path, json.dumps(value, indent=2) + "\n")
+
+
+def solution_report(job, result, backend):
+    """One row of evidence; numerical success alone never means PASS."""
+    planned = len(job["cases"])
+    observed = sum(c["status"] == "PASSED" for c in result["cases"])
+    return [
+        str(job["solutions"][0]["index"]),
+        "FAIL" if result["failed"] else "PASS",
+        f"{observed}/{planned}",
+        f"{result.get('target_dispatches', '?')}/{planned * (2 if backend == 'bench' else 1)}",
+        f"{result['seconds']:.2f}" if "seconds" in result else "—",
+        "; ".join(result["errors"]) or "Identity, numerical and race checks passed",
+    ]
+
+
+def render_report(manifest, summary):
+    def cell(value):
+        return html.escape(str(value)).replace("|", "&#124;").replace("\n", " ")
+
+    backend = manifest["backend"]
+    client = "hipblaslt-bench" if backend == "bench" else "tensilelite-client"
+    inventory = manifest.get("inventory", {})
+    results = {r["id"]: r for r in summary["results"]}
+    lines = [
+        f"### {client} sampled race sweep",
+        "",
+        f"Seed: `{cell(manifest['seed'])}`; policy: `{cell(manifest['policy'])}`; "
+        f"inventory/preparation: {manifest['preparation_seconds']:.2f} s.",
+        f"Artifact fingerprint: `{manifest['artifact_fingerprint']}`.",
+        f"Sample: {len(manifest['jobs'])} kernels; eligible/inventory kernel names: "
+        f"{inventory.get('eligible_kernel_names', '?')}/{inventory.get('unique_kernel_names', '?')}.",
+        "",
+        "PASS requires all planned cases, matching identities/dispatches, no races or warnings, and a successful exit.",
+        f"Full shapes, identities, commands and logs are in the uploaded `sweep-{backend}/` artifacts.",
+        "",
+        "| Solution index | Result | Numerical passes | Target dispatches | Seconds | Notes |",
+        "|---:|:---|---:|---:|---:|:---|",
+    ]
+    for job in manifest["jobs"]:
+        if job["id"] in results:
+            row = solution_report(job, results[job["id"]], backend)
+        else:
+            final = "unstarted" in summary
+            assigned = job["id"] < summary.get("assigned_jobs", 0)
+            state = "INCOMPLETE" if assigned else "PENDING"
+            if final or (summary.get("stop") and not assigned):
+                state = "NOT RUN"
+            row = [str(job["solutions"][0]["index"]), state, "—", "—", "—", ""]
+        row[-1] += f" (batch-{job['id']:03})"
+        lines.append("| " + " | ".join(map(cell, row)) + " |")
+    lines += [
+        "",
+        (
+            f"Run status: {'PASS' if summary['passed'] else 'FAIL'}."
+            if "passed" in summary
+            else "Run incomplete; this table is updated after each result."
+        ),
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def prepare(args):
@@ -145,6 +211,11 @@ def client_options(job, results):
     return options
 
 
+def target_dispatch_line(job):
+    kernel = job["solutions"][0]["kernel"]
+    return f'[rocjitsu] Kernel dispatch: "{kernel}" symbol="{kernel}"'
+
+
 def classify_tensile(job, text, returncode):
     expected = {
         (s["index"], tuple(c["shape"])): s
@@ -153,7 +224,9 @@ def classify_tensile(job, text, returncode):
     }
     cases = {}
     errors = []
+    launches = 0
     for line in text.splitlines():
+        launches += line == target_dispatch_line(job)
         if not re.match(r"^0,\d+/\d+,\d+/\d+,", line):
             continue
         row = next(csv.reader([line]))
@@ -168,7 +241,10 @@ def classify_tensile(job, text, returncode):
             errors.append(f"Duplicate case: {key}")
         if row[8] != expected[key]["name"]:
             errors.append(f"Wrong solution name: {key}")
-        cases[key] = row[9]
+        cases[key] = {"status": row[9], "target_dispatches": launches}
+        if launches != (1 if row[9] == "PASSED" else 0):
+            errors.append(f"Case {key}: unexpected target dispatches ({launches})")
+        launches = 0
         if row[9] != "PASSED":
             errors.append(f"Case {key}: {row[9]}")
     missing = sorted(set(expected) - set(cases))
@@ -180,12 +256,12 @@ def classify_tensile(job, text, returncode):
             {
                 "index": i,
                 "shape": shape,
-                "status": status,
+                **evidence,
                 "case_id": next(
                     c["id"] for c in job["cases"] if tuple(c["shape"]) == shape
                 ),
             }
-            for (i, shape), status in sorted(cases.items())
+            for (i, shape), evidence in sorted(cases.items())
         ],
     }
     return finish_result(job, text, returncode, result, errors, launches_per_case=1)
@@ -207,7 +283,9 @@ def finish_result(job, text, returncode, result, errors, launches_per_case):
         errors.append(f"{len(races)} race reports (none suppressed)")
     if warnings:
         errors.append(f"{sum(warnings.values())} emulator warnings")
-    if returncode:
+    if returncode == 124:
+        errors.append("Client timed out (exit 124)")
+    elif returncode:
         errors.append(f"Client exited {returncode}")
     result.update(
         failed=bool(errors),
@@ -296,7 +374,9 @@ def classify_bench(job, text, returncode):
     """Require a numeric result and explicit solution identity for every YAML row."""
     records, headers, pending = [], None, None
     errors = []
+    launches = 0
     for line in text.splitlines():
+        launches += line == target_dispatch_line(job)
         header = re.match(r"^\[\d+\]:(.*)", line)
         if header:
             headers = next(csv.reader([header[1]]))
@@ -305,6 +385,8 @@ def classify_bench(job, text, returncode):
             row = next(csv.reader([line.strip()]))
             if len(row) == len(headers):
                 pending = dict(zip(headers, row))
+                pending["target_dispatches"] = launches
+                launches = 0
                 records.append(pending)
                 headers = None
                 continue
@@ -338,7 +420,12 @@ def classify_bench(job, text, returncode):
                 "index": solution["index"],
                 "shape": shape,
                 "status": "PASSED" if passed else "FAILED",
+                "target_dispatches": row["target_dispatches"],
             }
+            if row["target_dispatches"] != 2:
+                errors.append(
+                    f"Case {shape}: unexpected target dispatches ({row['target_dispatches']})"
+                )
             if not passed:
                 errors.append(f"Non-finite bench validation: {shape}")
         except (KeyError, ValueError) as error:
@@ -471,6 +558,9 @@ def run(args):
     args.reports.mkdir(parents=True, exist_ok=False)
     try:
         manifest, config = prepare(args)
+        write_text(
+            args.reports / "summary.md", render_report(manifest, {"results": []})
+        )
         cpus = physical_cpus(args.workers)
         env = {
             k: v
@@ -512,6 +602,7 @@ def run(args):
                 result = {
                     "id": job["id"],
                     "failed": True,
+                    "target_dispatches": 0,
                     "errors": [job["planning_error"]],
                     "cases": [
                         {
@@ -569,18 +660,24 @@ def run(args):
             )
             result.update(cpu=cpus[slot], seconds=time.monotonic() - begin)
             write_json(stem.with_suffix(".result.json"), result)
+            return result
+
+        def progress(value):
+            write_json(args.reports / "progress.json", value)
+            write_text(args.reports / "summary.md", render_report(manifest, value))
+            result = value["results"][-1]
+            row = solution_report(manifest["jobs"][result["id"]], result, args.backend)
             print(
-                f"batch {job['id']}: {'FAILED' if result['failed'] else 'PASSED'} ({result['seconds']:.2f}s)",
+                f"{args.backend} solution {row[0]}: {row[1]}; numerical={row[2]}; dispatches={row[3]}; seconds={row[4]}; {row[5]}",
                 flush=True,
             )
-            return result
 
         start = time.monotonic()
         summary = run_queue(
             manifest["jobs"],
             args.workers,
             execute,
-            lambda value: write_json(args.reports / "progress.json", value),
+            progress,
         )
         by_id = {j["id"]: j for j in manifest["jobs"]}
         counts = Counter()
@@ -630,12 +727,24 @@ def run(args):
             and counts["PASSED"] == summary["planned_cases"]
         )
         write_json(args.reports / "summary.json", summary)
+        write_text(args.reports / "summary.md", render_report(manifest, summary))
         print(
             f"{counts['PASSED']}/{summary['planned_cases']} numerical passes; {len(missing)} missing, {len(unstarted)} unstarted. Reports: {args.reports}"
         )
         return 0 if summary["passed"] else 1
     except Exception as error:
         write_json(args.reports / "setup-or-run-error.json", {"error": repr(error)})
+        report = args.reports / "summary.md"
+        prior = (
+            report.read_text(encoding="utf-8")
+            if report.exists()
+            else f"### {args.backend} sampled race sweep\n"
+        )
+        write_text(
+            report,
+            prior
+            + f"\nRun status: FAIL. Setup/run error: {html.escape(repr(error))}\n",
+        )
         raise
 
 

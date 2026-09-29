@@ -138,6 +138,18 @@ jobs:
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
+      - name: Publish sampled solution results
+        if: ${{ always() }}
+        run: |
+          for backend in tensile bench; do
+            report="${RACE_REPORT_DIR}/sweep-${backend}/summary.md"
+            if [[ -f "${report}" ]]; then
+              cat "${report}" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              printf '\n### %s sampled race sweep\n\nNo report; the sweep was not reached or preparation was interrupted.\n' "${backend}" >> "${GITHUB_STEP_SUMMARY}"
+            fi
+          done
+
       # Upload even on failure. The report directory contains the per-workload
       # stdout logs, rocjitsu sink files, race.log files, generated reduced
       # TensileLite input/output, independent sweep manifests/results/reproducers,
