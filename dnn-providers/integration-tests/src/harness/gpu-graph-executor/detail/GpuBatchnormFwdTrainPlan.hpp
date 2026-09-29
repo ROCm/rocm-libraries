@@ -240,6 +240,12 @@ public:
             return false;
         }
 
+        if(nodeAttributes->peer_stats_tensor_uid() != nullptr
+           && !nodeAttributes->peer_stats_tensor_uid()->empty())
+        {
+            return false;
+        }
+
         // momentum tensor is required for batchnorm forward training
         if(!nodeAttributes->momentum_tensor_uid().has_value())
         {
