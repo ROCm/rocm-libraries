@@ -39,6 +39,7 @@ def _spec_nqb(spec) -> int:
 def _registry(*classes) -> dict:
     return {c.name: c() for c in classes}
 
+
 # --------------------------------------------------------------------------- #
 # Non-persistent grid: one CTA per work item.
 # --------------------------------------------------------------------------- #
@@ -107,8 +108,10 @@ class NonpersistBtHkvMinor(NonpersistDecode):
 
     def emit_decode(self, b, spec, bx, by, bz, seqlen_q):
         Hkv, gqa = spec.num_kv_heads, spec.num_queries_per_kv
-        hq = b.add(b.mul(b.mod(by, b.const_i32(Hkv)), b.const_i32(gqa)),
-                   b.div(by, b.const_i32(Hkv)))
+        hq = b.add(
+            b.mul(b.mod(by, b.const_i32(Hkv)), b.const_i32(gqa)),
+            b.div(by, b.const_i32(Hkv)),
+        )
         qb = emit_reverse(b, bz, spec, seqlen_q) if spec.causal else bz
         return Decoded(qb, hq, bx)
 
@@ -125,8 +128,10 @@ class NonpersistHqMinorSwz(NonpersistDecode):
 
     def check(self, spec):
         if spec.num_query_heads % spec.chiplet_num_xcds:
-            return (f"{self.name} needs num_query_heads ({spec.num_query_heads}) "
-                    f"divisible by chiplet_num_xcds ({spec.chiplet_num_xcds})")
+            return (
+                f"{self.name} needs num_query_heads ({spec.num_query_heads}) "
+                f"divisible by chiplet_num_xcds ({spec.chiplet_num_xcds})"
+            )
         return None
 
     def grid(self, spec):
@@ -281,8 +286,10 @@ class PersistGqaPair(PersistDecode):
         if nqb % 2 or spec.num_queries_per_kv % 2:
             return f"{self.name} requires even NQB and even GQA ratio"
         if spec.num_persistent != expected_np:
-            return (f"{self.name} requires num_persistent == NQB*Hkv*B "
-                    f"({expected_np}), got {spec.num_persistent}")
+            return (
+                f"{self.name} requires num_persistent == NQB*Hkv*B "
+                f"({expected_np}), got {spec.num_persistent}"
+            )
         return None
 
     def emit_decode(self, b, spec, wi, seqlen_q):
@@ -325,8 +332,10 @@ class PersistGqaPair2Phase(PersistDecode):
         if nqb % 2 or gqa < 2:
             return f"{self.name} requires even NQB and GQA ratio >= 2"
         if spec.num_persistent != expected_np:
-            return (f"{self.name} requires num_persistent == W/2 "
-                    f"({expected_np}), got {spec.num_persistent}")
+            return (
+                f"{self.name} requires num_persistent == W/2 "
+                f"({expected_np}), got {spec.num_persistent}"
+            )
         return None
 
     def emit_decode(self, b, spec, wi, seqlen_q):

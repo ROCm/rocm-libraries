@@ -126,7 +126,8 @@ def _dense_launcher(spec: AttentionDenseSpec) -> KernelLauncher:
     # scalars on runtime_shape, which is narrower than _has_shape_params
     # (varlen/ragged/paged/SWA), so those launches packed misaligned kernargs.
     lch = KernelLauncher(
-        hsaco=art.hsaco, kernel_name=art.kernel_name,
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
         signature=attention_dense_signature(spec),
     )
     _LAUNCHER_CACHE[key] = lch

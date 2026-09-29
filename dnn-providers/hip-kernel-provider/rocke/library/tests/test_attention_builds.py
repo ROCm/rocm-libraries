@@ -1358,31 +1358,46 @@ class TestAttentionHelpers(unittest.TestCase):
                 return ptr_type_str(param.type.pointee.name, param.type.space)
             return param.type.name
 
-        base = dict(batch=2, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
-                    num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
-                    block_n=64)
+        base = dict(
+            batch=2,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+        )
         arms = {
             "runtime-shape": AttentionDenseSpec(**base),
             "sliding-window": AttentionDenseSpec(**base, sliding_window=512),
             "bottom-right": AttentionDenseSpec(
-                **{**base, "seqlen_q": 1024}, causal_bottom_right=True),
+                **{**base, "seqlen_q": 1024}, causal_bottom_right=True
+            ),
             "persistent": AttentionDenseSpec(
-                **base, persistent=True, num_persistent=256),
+                **base, persistent=True, num_persistent=256
+            ),
         }
         for arm, spec in arms.items():
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx950").params
                 sig = attention_dense_signature(spec)
-                self.assertEqual([a["name"] for a in sig],
-                                 [p.name for p in params])
-                self.assertEqual([a["type"] for a in sig],
-                                 [type_str(p) for p in params])
-                self.assertEqual(_has_shape_params(spec),
-                                 "batch" in [p.name for p in params])
+                self.assertEqual([a["name"] for a in sig], [p.name for p in params])
+                self.assertEqual(
+                    [a["type"] for a in sig], [type_str(p) for p in params]
+                )
+                self.assertEqual(
+                    _has_shape_params(spec), "batch" in [p.name for p in params]
+                )
         # The predicates really diverge on these arms.
-        self.assertEqual([arms[a].runtime_shape for a in
-                          ("runtime-shape", "sliding-window", "bottom-right")],
-                         [True, False, False])
+        self.assertEqual(
+            [
+                arms[a].runtime_shape
+                for a in ("runtime-shape", "sliding-window", "bottom-right")
+            ],
+            [True, False, False],
+        )
 
     def test_persist_decodes_build_with_distinct_names_on_both_arches(self):
         """Every persist decode an arch supports builds and has its own name,
@@ -1390,19 +1405,34 @@ class TestAttentionHelpers(unittest.TestCase):
         from kernels.gfx942 import attention_dense as k942
         from kernels.gfx950 import attention_dense as k950
 
-        base = dict(batch=1, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
-                    num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
-                    block_n=64, persistent=True)
+        base = dict(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+            persistent=True,
+        )
         # gqa_pair* pin num_persistent to their own work split (NQB=8, Hkv=8, gqa=4).
         num_persistent = {"gqa_pair": 64, "gqa_pair_2phase": 128}
-        for arch, K, Spec in (("gfx942", k942, k942.Gfx942AttentionDenseSpec),
-                              ("gfx950", k950, k950.Gfx950AttentionDenseSpec)):
+        for arch, K, Spec in (
+            ("gfx942", k942, k942.Gfx942AttentionDenseSpec),
+            ("gfx950", k950, k950.Gfx950AttentionDenseSpec),
+        ):
             with self.subTest(arch=arch):
                 names = {}
-                for decode in sorted(Spec(**base).supported_persist_decodes()
-                                     - {"auto"}):
-                    spec = Spec(**base, persist_decode=decode,
-                                num_persistent=num_persistent.get(decode, 256))
+                for decode in sorted(
+                    Spec(**base).supported_persist_decodes() - {"auto"}
+                ):
+                    spec = Spec(
+                        **base,
+                        persist_decode=decode,
+                        num_persistent=num_persistent.get(decode, 256),
+                    )
                     K.build_attention_dense(spec, arch=arch)
                     names[decode] = spec.kernel_name()
                 self.assertIn("bt_hkv_minor", names)
@@ -1427,12 +1457,21 @@ class TestAttentionHelpers(unittest.TestCase):
         ]
         for Spec in (Gfx942AttentionDenseSpec, Gfx950AttentionDenseSpec):
             for (hq, hkv, s, b, causal, extra), want in cases:
-                with self.subTest(spec=Spec.__name__, shape=(hq, hkv, s, b, causal),
-                                  extra=extra):
-                    spec = Spec(batch=b, seqlen_q=s, seqlen_kv=s,
-                                num_query_heads=hq, num_kv_heads=hkv,
-                                head_size=128, causal=causal, dtype="fp16",
-                                block_n=64, **extra)
+                with self.subTest(
+                    spec=Spec.__name__, shape=(hq, hkv, s, b, causal), extra=extra
+                ):
+                    spec = Spec(
+                        batch=b,
+                        seqlen_q=s,
+                        seqlen_kv=s,
+                        num_query_heads=hq,
+                        num_kv_heads=hkv,
+                        head_size=128,
+                        causal=causal,
+                        dtype="fp16",
+                        block_n=64,
+                        **extra,
+                    )
                     self.assertEqual(spec.resolved_nonpersist_decode, want)
 
     def test_nonpersist_decode_builds_names_and_rejects_on_both_arches(self):
@@ -1442,12 +1481,22 @@ class TestAttentionHelpers(unittest.TestCase):
         from kernels.gfx942 import attention_dense as k942
         from kernels.gfx950 import attention_dense as k950
 
-        base = dict(batch=2, seqlen_q=2048, seqlen_kv=2048, num_query_heads=32,
-                    num_kv_heads=8, head_size=128, causal=True, dtype="fp16",
-                    block_n=64)
+        base = dict(
+            batch=2,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            block_n=64,
+        )
         work = (2048 // 256) * 32 * 2
-        for arch, K, Spec in (("gfx942", k942, k942.Gfx942AttentionDenseSpec),
-                              ("gfx950", k950, k950.Gfx950AttentionDenseSpec)):
+        for arch, K, Spec in (
+            ("gfx942", k942, k942.Gfx942AttentionDenseSpec),
+            ("gfx950", k950, k950.Gfx950AttentionDenseSpec),
+        ):
             with self.subTest(arch=arch):
                 names = {}
                 for decode, impl in NONPERSIST_DECODES.items():
@@ -1460,14 +1509,16 @@ class TestAttentionHelpers(unittest.TestCase):
                         self.assertIn(impl.tag, names[decode])
                 self.assertEqual(len(set(names.values())), len(names))
                 auto = Spec(**base)
-                self.assertEqual(auto.kernel_name(),
-                                 names[auto.resolved_nonpersist_decode])
+                self.assertEqual(
+                    auto.kernel_name(), names[auto.resolved_nonpersist_decode]
+                )
                 with self.assertRaisesRegex(ValueError, "nonpersist_decode"):
                     Spec(**base, nonpersist_decode="nope")
                 persistent = dict(base, persistent=True, num_persistent=256)
                 self.assertEqual(
                     Spec(**persistent, nonpersist_decode="bt_hkv_minor").kernel_name(),
-                    Spec(**persistent).kernel_name())
+                    Spec(**persistent).kernel_name(),
+                )
 
     def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for the PAGED gfx950 dense prefill
@@ -3032,10 +3083,12 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
         large = replace(base, batch=16, seqlen_q=4096, seqlen_kv=4096)
         larger = replace(base, batch=32, seqlen_q=4096, seqlen_kv=4096)
         self.assertTrue(small.runtime_shape and large.runtime_shape)
-        self.assertNotEqual(small.resolved_nonpersist_decode,
-                            large.resolved_nonpersist_decode)
-        self.assertEqual(large.resolved_nonpersist_decode,
-                         larger.resolved_nonpersist_decode)
+        self.assertNotEqual(
+            small.resolved_nonpersist_decode, large.resolved_nonpersist_decode
+        )
+        self.assertEqual(
+            large.resolved_nonpersist_decode, larger.resolved_nonpersist_decode
+        )
 
         def key(spec):
             return attention_dense_cache_key(spec, arch="gfx950")
@@ -3218,10 +3271,12 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         large = replace(base, batch=16, seqlen_q=4096, seqlen_kv=4096)
         larger = replace(base, batch=32, seqlen_q=4096, seqlen_kv=4096)
         self.assertTrue(small.runtime_shape and large.runtime_shape)
-        self.assertNotEqual(small.resolved_nonpersist_decode,
-                            large.resolved_nonpersist_decode)
-        self.assertEqual(large.resolved_nonpersist_decode,
-                         larger.resolved_nonpersist_decode)
+        self.assertNotEqual(
+            small.resolved_nonpersist_decode, large.resolved_nonpersist_decode
+        )
+        self.assertEqual(
+            large.resolved_nonpersist_decode, larger.resolved_nonpersist_decode
+        )
 
         def key(spec):
             return attention_dense_cache_key(spec, arch="gfx942")

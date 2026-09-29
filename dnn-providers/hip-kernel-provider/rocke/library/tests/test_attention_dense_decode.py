@@ -48,8 +48,16 @@ _SHAPES = ((32, 8, 2, 2048), (64, 64, 1, 1024), (40, 8, 3, 512))
 
 def _spec(Hq, Hkv, B, S, causal, **over):
     return Gfx950AttentionDenseSpec(
-        batch=B, seqlen_q=S, seqlen_kv=S, num_query_heads=Hq, num_kv_heads=Hkv,
-        head_size=128, causal=causal, dtype="fp16", **over)
+        batch=B,
+        seqlen_q=S,
+        seqlen_kv=S,
+        num_query_heads=Hq,
+        num_kv_heads=Hkv,
+        head_size=128,
+        causal=causal,
+        dtype="fp16",
+        **over,
+    )
 
 
 def _block_linear(spec, qb, hq, bt, nqb):
@@ -89,7 +97,9 @@ def _decode_all(decode, spec, seqlen_q):
 @pytest.mark.parametrize("causal", (True, False))
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize("xcds", (8, 4))
-def test_nonpersist_decode_linearizes_to_its_documented_order(name, causal, shape, xcds):
+def test_nonpersist_decode_linearizes_to_its_documented_order(
+    name, causal, shape, xcds
+):
     decode = NONPERSIST_DECODES[name]
     spec = _spec(*shape, causal, nonpersist_decode=name, chiplet_num_xcds=xcds)
     nqb = (spec.seqlen_q + spec.block_m - 1) // spec.block_m
@@ -111,7 +121,8 @@ def test_nonpersist_decode_reads_nqb_from_the_runtime_param(name):
     built = _spec(32, 8, 2, 2048, True, nonpersist_decode=name)
     launched = _spec(32, 8, 2, 4096, True, nonpersist_decode=name)
     assert _decode_all(decode, launched, launched.seqlen_q) == {
-        wid: v for wid, v in _decode_all(decode, launched, None).items()}
+        wid: v for wid, v in _decode_all(decode, launched, None).items()
+    }
     gx, gy, gz = decode.grid(launched)
     for bz, by, bx in itertools.product(range(gz), range(gy), range(gx)):
         got = decode.emit_decode(B_, built, bx, by, bz, launched.seqlen_q)
@@ -136,14 +147,22 @@ def _iter_persist_specs():
             }.get(name, 256)
             for interleave in ((False, True) if name == "qb_major" else (False,)):
                 try:
-                    spec = _spec(*shape, causal, persistent=True,
-                                 num_persistent=num_persistent,
-                                 persist_decode=name, interleave=interleave)
+                    spec = _spec(
+                        *shape,
+                        causal,
+                        persistent=True,
+                        num_persistent=num_persistent,
+                        persist_decode=name,
+                        interleave=interleave,
+                    )
                 except ValueError:
                     continue  # not legal for this shape (e.g. gqa_pair on MHA)
-                yield pytest.param(spec, id=f"{name}-{Hq}x{Hkv}-B{B}-S{S}-"
-                                   f"{'causal' if causal else 'full'}"
-                                   f"{'-intl' if interleave else ''}")
+                yield pytest.param(
+                    spec,
+                    id=f"{name}-{Hq}x{Hkv}-B{B}-S{S}-"
+                    f"{'causal' if causal else 'full'}"
+                    f"{'-intl' if interleave else ''}",
+                )
 
 
 @pytest.mark.parametrize("spec", _persist_specs())
