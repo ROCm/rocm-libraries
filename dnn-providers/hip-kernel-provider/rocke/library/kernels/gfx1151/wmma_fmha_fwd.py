@@ -120,6 +120,7 @@ class WmmaFmhaFwdSpec:
     block_n: int = 32
     num_waves: int = 1
     scheduler_strategy: str | None = None
+    value_tile_size: int = 0  # 0 => full head; otherwise one output-column tile per CTA
 
     def __post_init__(self) -> None:
         from rocke.core.codegen_policy import normalize_scheduler_strategy
@@ -135,6 +136,12 @@ class WmmaFmhaFwdSpec:
             raise ValueError(
                 f"head_size must be a multiple of 16, got {self.head_size}"
             )
+        if self.value_tile_size and (
+            self.value_tile_size < 16 or self.value_tile_size % 16
+            or self.value_tile_size >= self.head_size or self.head_size % self.value_tile_size
+            or self.transposed_qk
+        ):
+            raise ValueError("value_tile_size must be a proper multiple-of-16 head divisor on the standard WMMA path")
         if self.mask_mode not in ("none", "causal"):
             raise ValueError(
                 f"WMMA FMHA supports mask_mode 'none'/'causal', got {self.mask_mode!r}"
@@ -177,6 +184,10 @@ class WmmaFmhaFwdSpec:
         return self.num_kv_heads or self.num_query_heads
 
     @property
+    def value_tiles(self) -> int:
+        return self.head_size // self.value_tile_size if self.value_tile_size else 1
+
+    @property
     def block_size(self) -> int:
         return 32 * (self.num_waves if self.transposed_qk else 1)
 
@@ -203,6 +214,7 @@ class WmmaFmhaFwdSpec:
             f"bn{self.block_n}" if self.transposed_qk else "",
             f"w{self.num_waves}" if self.transposed_qk else "",
             "sched_" + self.scheduler_strategy.replace("-", "_") if self.scheduler_strategy else "",
+            f"dv{self.value_tile_size}" if self.value_tile_size else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
@@ -218,6 +230,8 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
 
     if spec.transposed_qk and arch != "gfx1151":
         return False, "transposed QK requires gfx1151"
+    if spec.value_tile_size and arch != "gfx1151":
+        return False, "output-column tiling requires gfx1151"
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -241,7 +255,7 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
     # One 16-bit P-staging tile, plus an optional 16-bit V tile.
     bytes_lds = _BLOCK_M * _BLOCK_K * 2
     if spec.v_lds_stage:
-        bytes_lds += _BLOCK_M * spec.head_size * 2
+        bytes_lds += _BLOCK_M * (spec.value_tile_size or spec.head_size) * 2
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap on {arch}"
@@ -416,7 +430,8 @@ def _paged_rows(b, spec, params, batch, kv_head):
 def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelDef:
     """Build the gfx1151 WMMA FMHA forward ``KernelDef``.
 
-    Grid: ``(ceil_div(seqlen_q, spec.q_rows_per_cta), num_query_heads, batch)``.
+    Grid: ``(ceil_div(seqlen_q, spec.q_rows_per_cta), num_query_heads,
+    batch * spec.value_tiles)``.
     The default delegates to the feature-complete shared FMHA inner body.
     ``transposed_qk`` selects the specialized gfx1151 transposed-QK helper for
     aligned FP16 D64/D128 dense attention. Both helpers use the catalogued WMMA
@@ -444,6 +459,13 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     q_tile = b.block_id_x()  # Q-tile index (16 rows)
     head = b.block_id_y()  # query head
     batch = b.block_id_z()  # batch index
+    value_offset = None
+    if spec.value_tile_size:
+        batch_tile = batch
+        tiles = b.const_i32(spec.value_tiles)
+        batch = b.div(batch_tile, tiles)
+        value_tile = b.mod(batch_tile, tiles)
+        value_offset = b.mul(value_tile, b.const_i32(spec.value_tile_size))
 
     # GQA: kv head = query head // (num_query_heads // kv_heads).
     qh = spec.num_query_heads
@@ -554,6 +576,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         arch=arch,
         wmma_seqlen_q=seqlen_q if spec.query_tail or spec.layout != "dense" else None,
         wmma_kv_tail=spec.kv_tail or spec.layout != "dense",
+        wmma_value_tile_size=spec.value_tile_size,
+        wmma_value_offset=value_offset,
         extra_score_transform=score_transform,
         sink_log2=sink,
         k_tile_start=tile_start,
@@ -573,7 +597,9 @@ def wmma_fmha_fwd_grid(spec: WmmaFmhaFwdSpec, *, seqlen_q: int, batch: int):
     block_m = spec.q_rows_per_cta
     if spec.layout == "dense" and not spec.query_tail and seqlen_q % block_m != 0:
         raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {block_m}")
-    return ((seqlen_q + block_m - 1) // block_m, spec.num_query_heads, batch)
+    if spec.value_tile_size and not 0 <= batch <= 0x7FFFFFFF // spec.value_tiles:
+        raise ValueError("batch/output-tile grid does not fit I32")
+    return ((seqlen_q + block_m - 1) // block_m, spec.num_query_heads, batch * spec.value_tiles)
 
 
 def wmma_fmha_fwd_signature(spec: WmmaFmhaFwdSpec):

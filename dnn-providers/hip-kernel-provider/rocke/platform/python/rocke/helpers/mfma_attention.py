@@ -292,6 +292,8 @@ def mfma_attention_fwd_inner_body(
     wmma_kv_tail: bool = False,
     sink_log2: Optional[Value] = None,
     k_scale: Optional[Value] = None,
+    wmma_value_tile_size: int = 0,
+    wmma_value_offset: Optional[Value] = None,
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -316,6 +318,8 @@ def mfma_attention_fwd_inner_body(
     ``wmma_seqlen_q`` bounds query loads and output stores on wave32.
     ``wmma_kv_tail`` includes and masks a final partial KV tile. Both default
     to the aligned path; enabling either on a non-wave32 target is rejected.
+    ``wmma_value_tile_size`` and ``wmma_value_offset`` optionally select a
+    contiguous PV/output-column tile; QK still traverses the full head size.
 
     ``k_token_offset_elems`` / ``v_token_offset_elems`` are added to
     the K / V row base addresses (for varlen / paged-KV layouts).
@@ -508,10 +512,14 @@ def mfma_attention_fwd_inner_body(
             sink_log2=sink_log2,
             kv_dtype=kv_dtype_eff,
             k_scale=k_scale,
+            value_tile_size=wmma_value_tile_size,
+            value_offset=wmma_value_offset,
         )
         return
     if wmma_seqlen_q is not None or wmma_kv_tail:
         raise ValueError("WMMA tail options require a wave32 target")
+    if wmma_value_tile_size or wmma_value_offset is not None:
+        raise ValueError("WMMA output tiling requires a wave32 target")
     if k_scale is not None:
         raise ValueError("explicit K dequant scale requires a wave32 target")
 
@@ -1006,6 +1014,8 @@ def _wmma_attention_fwd_inner_body(
     sink_log2: Optional[Value] = None,
     kv_dtype: Optional[str] = None,
     k_scale: Optional[Value] = None,
+    value_tile_size: int = 0,
+    value_offset: Optional[Value] = None,
 ) -> None:
     """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
 
@@ -1033,8 +1043,12 @@ def _wmma_attention_fwd_inner_body(
     a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
     c_frag = op.c_frag_len  # 8  -- accumulator slots per lane (same both)
 
-    # Number of WMMA steps along the head-dim axis (QK K-dim == PV N-dim).
+    # QK always traverses the full head; only PV/output accumulators are tiled.
     n_dk = head_size // 16
+    value_head_size = value_tile_size or head_size
+    if value_head_size <= 0 or value_head_size > head_size or value_head_size % 16:
+        raise ValueError("WMMA value tile must be a positive multiple of 16 within the head")
+    n_dv = value_head_size // 16
 
     # Row reduction across the 16 lanes that share one accumulator row. The
     # stage count is derived from the atom geometry (log2(16) = 4), not
@@ -1103,7 +1117,7 @@ def _wmma_attention_fwd_inner_body(
     # global gather.
     P_lds = b.smem_alloc(dtype_ir, [16, 16], name_hint="Pwmma")
     V_lds = (
-        b.smem_alloc(dtype_ir, [16, head_size], name_hint="Vwmma")
+        b.smem_alloc(dtype_ir, [16, value_head_size], name_hint="Vwmma")
         if v_lds_stage
         else None
     )
@@ -1115,7 +1129,7 @@ def _wmma_attention_fwd_inner_body(
     for r in range(c_frag):
         iter_args.append((f"m{r}", initial_m))
         iter_args.append((f"l{r}", initial_l))
-    for d in range(n_dk):
+    for d in range(n_dv):
         iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
 
     c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
@@ -1237,12 +1251,12 @@ def _wmma_attention_fwd_inner_body(
             new_ms.append(m_new)
             new_ls.append(l_new)
             ps.append(p_r)
-            for d in range(n_dk):
+            for d in range(n_dv):
                 old = b.vec_extract(new_accs[d], r)
                 new_accs[d] = b.vec_insert(new_accs[d], b.fmul(old, alpha), r)
 
         # ---- V staging into LDS (vectorized load; transposed PV reads) ----
-        # Each lane loads its own k-row's full head_size d-slice as 8-wide
+        # Each lane loads its own k-row's value-column tile as 8-wide
         # vector global loads and writes it row-major into ``V_lds``. The PV
         # B-operand (V in d x k layout) is then a strided *LDS* read, replacing
         # the per-(d,k) scalar global gather the correctness-first version did
@@ -1261,7 +1275,9 @@ def _wmma_attention_fwd_inner_body(
                     ),
                     v_off,
                 )
-            for e in range(head_size // 8):
+            if value_offset is not None:
+                v_stage_base = b.add(v_stage_base, value_offset)
+            for e in range(value_head_size // 8):
                 if fp8_kv:
                     v_g = _load_wmma_fp8(
                         b, V, b.add(v_stage_base, b.const_i32(e * 8)), 8, v_scale, dtype_ir,
@@ -1296,8 +1312,10 @@ def _wmma_attention_fwd_inner_body(
             )
             p_a = b.vec_insert(p_a, p_v, j)
 
-        for d in range(n_dk):
-            d_col = b.add(b.const_i32(d * 16), col)  # this lane's V d-column
+        for d in range(n_dv):
+            d_col = b.add(b.const_i32(d * 16), col)  # local LDS column, or global V column below
+            if not v_lds_stage and value_offset is not None:
+                d_col = b.add(d_col, value_offset)
             v_b = b.zero_vec(dtype_ir, a_frag)
             for j in range(a_frag):
                 # B-operand for d-column ``d_col`` is V[k, d_col]. The K row this
@@ -1360,7 +1378,7 @@ def _wmma_attention_fwd_inner_body(
     accs_final = list(final[2 * c_frag :])
 
     # ---- Epilogue: O[q,d] = acc[q,d] / l[q] (zero-denominator guarded) ----
-    for d in range(n_dk):
+    for d in range(n_dv):
         for r in range(c_frag):
             row_rel, col_n = c_map.coord(b, lane, r)  # (q-row in tile, d-col)
             l_safe = ls_final[r]
@@ -1371,6 +1389,8 @@ def _wmma_attention_fwd_inner_body(
                 v_f32 = b.fmul(v_f32, v_scale)
             o_row = b.add(q_tile_base, row_rel)
             o_col = b.add(b.const_i32(d * 16), col_n)
+            if value_offset is not None:
+                o_col = b.add(o_col, value_offset)
             o_addr = b.add(
                 b.add(
                     b.mul(o_row, stride_o_token),

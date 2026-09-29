@@ -4,7 +4,7 @@
 #
 # tests/parity/gfx1151_wmma_fmha_fwd_emit.py -- Python reference emitter for the
 # gfx1151 (RDNA3.5 / Strix Halo) WMMA FMHA forward instance parity harness.
-# Selects one of 99 sampled configurations by argv[1] (0..98), builds it
+# Selects one of 119 sampled configurations by argv[1] (0..118), builds it
 # via build_wmma_fmha_fwd(arch='gfx1151') and prints
 # lower_kernel_to_llvm(kernel, arch='gfx1151') to stdout so it can be
 # byte-compared with the C emitter gfx1151_wmma_fmha_fwd_emit.c.
@@ -15,6 +15,26 @@ from _emit_common import run_emit
 
 
 def _spec(idx: int) -> WmmaFmhaFwdSpec:
+    if 99 <= idx < 115:
+        variant = idx - 99
+        vlds = bool(variant % 2)
+        return WmmaFmhaFwdSpec(
+            head_size=256, num_query_heads=8, num_kv_heads=2,
+            dtype="fp16" if variant < 8 else "bf16",
+            mask_mode="causal" if vlds else "none", causal_bottom_right=vlds,
+            query_tail=vlds, kv_tail=vlds, v_lds_stage=vlds,
+            value_tile_size=(16, 32, 64, 128)[(variant % 8) // 2],
+        )
+    if 115 <= idx < 119:
+        variant = idx - 115
+        paged = bool(variant % 2)
+        return WmmaFmhaFwdSpec(
+            head_size=256, num_query_heads=8, num_kv_heads=2,
+            dtype="fp16" if variant < 2 else "bf16", mask_mode="causal",
+            causal_bottom_right=True, query_tail=True, kv_tail=True,
+            layout="paged" if paged else "ragged", page_block_size=32 if paged else 0,
+            kv_dtype="fp8e4m3", value_tile_size=128, v_lds_stage=paged,
+        )
     if 94 <= idx < 99:
         strategies = ("max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc")
         return WmmaFmhaFwdSpec(
@@ -128,7 +148,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_wmma_fmha_fwd,
-        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..98>\n",
+        usage="usage: gfx1151_wmma_fmha_fwd_emit.py <config_index 0..118>\n",
         arch="gfx1151",
     )
 

@@ -7,7 +7,7 @@
  *
  * QK^T and PV use dtype-matched gfx11 FP16/BF16 WMMA instructions with
  * a wave32 thread mapping. This adapter owns the gfx1151 kernel ABI, the
- * (seqlen_q // 16, num_query_heads, batch) grid decode, and the per-batch
+ * query/head/batch-and-value-tile grid decode, and the per-batch
  * pointer arithmetic, and hands the wave32 QK -> online-softmax -> PV loop to
  * the already-ported common inner body
  * rocke.helpers.mfma_attention.mfma_attention_fwd_inner_body, which dispatches
@@ -94,6 +94,7 @@ typedef struct rocke_wmma_fmha_fwd_spec
     int block_n; /* transposed-QK key tile: 32 or 64; default 32 */
     int num_waves; /* transposed-QK waves per CTA: 1 or 2; default 1 */
     const char* scheduler_strategy; /* NULL: backend default; otherwise a validated codegen policy */
+    int value_tile_size; /* 0 => full head; proper multiple-of-16 head divisor otherwise */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -120,10 +121,9 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
                                        char* reason,
                                        size_t reason_cap);
 
-/* build_wmma_fmha_fwd(spec, arch). Validates, then builds the gfx1151 WMMA FMHA
- * forward IR (one wave per CTA) and returns the kernel def. `arch` NULL =>
- * "gfx1151". Grid: (seqlen_q // 16, num_query_heads, batch). On an invalid spec
- * or any IR-emission error returns NULL.
+/* build_wmma_fmha_fwd(spec, arch). Validates and emits WMMA FMHA forward IR.
+ * Use wmma_fmha_fwd_grid for query/value-tile geometry. `arch` NULL defaults
+ * to "gfx1151". An invalid spec or any IR-emission error returns NULL.
  *
  * `b` is the destination IR builder to emit into; if NULL this instance owns a
  * transient builder (see the .c note / sibling instance_fmha_mfma entry). For
@@ -133,10 +133,10 @@ rocke_kernel_def_t* rocke_build_wmma_fmha_fwd(rocke_ir_builder_t* b,
                                               const rocke_wmma_fmha_fwd_spec_t* spec,
                                               const char* arch);
 
-/* wmma_fmha_fwd_grid(spec, seqlen_q, batch) ->
- * (ceil(seqlen_q / BLOCK_M), num_query_heads, batch). Writes three axes to out.
- * Dense mode without query_tail rejects a non-multiple of BLOCK_M without
- * modifying out. Packed modes always bound tails; pass the maximum query length. */
+/* wmma_fmha_fwd_grid(spec, seqlen_q, batch) returns query groups, query heads,
+ * and batch * value_tiles. Group width includes transposed-QK waves when used.
+ * Dense partial groups require query_tail; output-partition overflow is rejected
+ * before modifying out. Packed modes always bound tails; pass maximum query length. */
 rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
                                         int seqlen_q,
                                         int batch,

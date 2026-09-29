@@ -2,8 +2,8 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_fmha_fwd_emit.c -- C-side emitter for the gfx1151
- * WMMA FMHA forward parity harness. Selects one of 99 configurations
- * by argv[1] (0..98), builds it exactly as the
+ * WMMA FMHA forward parity harness. Selects one of 119 configurations
+ * by argv[1] (0..118), builds it exactly as the
  * Python emitter gfx1151_wmma_fmha_fwd_emit.py does, and lowers to LLVM .ll
  * text at arch=gfx1151 (flavor AUTO) so the two outputs can be byte-compared.
  *
@@ -26,6 +26,42 @@
 static int make_spec(int idx, rocke_wmma_fmha_fwd_spec_t* spec)
 {
     *spec = rocke_wmma_fmha_fwd_spec_default();
+    if(idx >= 99 && idx < 115)
+    {
+        int variant = idx - 99;
+        static const int tiles[] = {16, 32, 64, 128};
+        bool vlds = variant % 2 != 0;
+        spec->head_size = 256;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->dtype = variant < 8 ? "fp16" : "bf16";
+        spec->mask_mode = vlds ? ROCKE_FMHA_MASK_CAUSAL : ROCKE_FMHA_MASK_NONE;
+        spec->causal_bottom_right = vlds;
+        spec->query_tail = vlds;
+        spec->kv_tail = vlds;
+        spec->v_lds_stage = vlds;
+        spec->value_tile_size = tiles[(variant % 8) / 2];
+        return 0;
+    }
+    if(idx >= 115 && idx < 119)
+    {
+        int variant = idx - 115;
+        bool paged = variant % 2 != 0;
+        spec->head_size = 256;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 2;
+        spec->dtype = variant < 2 ? "fp16" : "bf16";
+        spec->mask_mode = ROCKE_FMHA_MASK_CAUSAL;
+        spec->causal_bottom_right = true;
+        spec->query_tail = true;
+        spec->kv_tail = true;
+        spec->layout = paged ? "paged" : "ragged";
+        spec->page_block_size = paged ? 32 : 0;
+        spec->kv_dtype = "fp8e4m3";
+        spec->value_tile_size = 128;
+        spec->v_lds_stage = paged;
+        return 0;
+    }
     if(idx >= 94 && idx < 99)
     {
         static const char* strategies[] = {
@@ -163,7 +199,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..98>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..118>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

@@ -70,6 +70,13 @@ static bool wmma_valid_kv_dtype(const rocke_wmma_fmha_fwd_spec_t* spec)
            && (spec->kv_dtype[0] == '\0' || strcmp(spec->kv_dtype, "fp8e4m3") == 0);
 }
 
+static bool wmma_valid_value_tile(const rocke_wmma_fmha_fwd_spec_t* spec)
+{
+    int tile = spec->value_tile_size;
+    return tile == 0 || (tile >= 16 && tile % 16 == 0 && tile < spec->head_size
+                         && spec->head_size % tile == 0 && !spec->transposed_qk);
+}
+
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
 static int wmma_kv_heads(const rocke_wmma_fmha_fwd_spec_t* spec)
 {
@@ -118,6 +125,7 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.block_n = 32;
     s.num_waves = 1;
     s.scheduler_strategy = NULL;
+    s.value_tile_size = 0;
     return s;
 }
 
@@ -133,13 +141,14 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 {
     const char* name;
     const char* mask;
-    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32];
-    const char* parts[14];
+    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32], scheduler[32], value_tile[32];
+    const char* parts[15];
     const char* dtype = wmma_dtype(spec);
 
     if(spec == NULL || out == NULL || dtype == NULL
        || !wmma_valid_layout(spec) || !wmma_valid_kv_dtype(spec)
-       || !rocke_scheduler_strategy_is_valid(spec->scheduler_strategy))
+       || !rocke_scheduler_strategy_is_valid(spec->scheduler_strategy)
+       || !wmma_valid_value_tile(spec))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -193,6 +202,11 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
                 *c = '_';
         parts[num_parts++] = scheduler;
     }
+    if(spec->value_tile_size != 0)
+    {
+        snprintf(value_tile, sizeof(value_tile), "dv%d", spec->value_tile_size);
+        parts[num_parts++] = value_tile;
+    }
     const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias"};
     const int flag_on[] = {spec->query_tail || packed, spec->kv_tail || packed,
                           spec->use_softcap, spec->use_sinks, spec->use_alibi, spec->use_qq_bias};
@@ -236,6 +250,11 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(arch == NULL)
     {
         arch = WMMA_FMHA_DEFAULT_ARCH;
+    }
+    if(!wmma_valid_value_tile(spec) || (spec->value_tile_size != 0 && strcmp(arch, "gfx1151") != 0))
+    {
+        wmma_set_reason(reason, reason_cap, "invalid gfx1151 output-column tile");
+        return false;
     }
     const char* dtype = wmma_dtype(spec);
     if(dtype == NULL)
@@ -362,7 +381,8 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     bytes_lds = (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * ROCKE_WMMA_FMHA_FWD_BLOCK_K * 2;
     if(spec->v_lds_stage)
     {
-        bytes_lds += (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->head_size * 2;
+        int value_size = spec->value_tile_size != 0 ? spec->value_tile_size : spec->head_size;
+        bytes_lds += (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * value_size * 2;
     }
     if(!rocke_archtarget_fits_lds(target, bytes_lds))
     {
@@ -596,6 +616,15 @@ static rocke_status_t
     q_tile = rocke_b_block_id_x(b); /* Q-tile index (16 rows) */
     head = rocke_b_block_id_y(b); /* query head             */
     batch = rocke_b_block_id_z(b); /* batch index            */
+    rocke_value_t* value_offset = NULL;
+    if(spec->value_tile_size != 0)
+    {
+        rocke_value_t* batch_tile = batch;
+        rocke_value_t* tiles = rocke_b_const_i32(b, spec->head_size / spec->value_tile_size);
+        batch = rocke_b_div(b, batch_tile, tiles);
+        rocke_value_t* value_tile = rocke_b_mod(b, batch_tile, tiles);
+        value_offset = rocke_b_mul(b, value_tile, rocke_b_const_i32(b, spec->value_tile_size));
+    }
 
     /* GQA: kv_head = head // (num_query_heads // kv_heads). */
     qh = spec->num_query_heads;
@@ -765,6 +794,8 @@ static rocke_status_t
     p.arch = arch;
     p.wmma_seqlen_q = spec->query_tail || packed ? seqlen_q : NULL;
     p.wmma_kv_tail = spec->kv_tail || packed;
+    p.wmma_value_tile_size = spec->value_tile_size;
+    p.wmma_value_offset = value_offset;
     if(spec->kv_dtype[0] != '\0')
     {
         p.kv_dtype = spec->kv_dtype;
@@ -833,7 +864,7 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
                                         int batch,
                                         int out[3])
 {
-    if(spec == NULL || out == NULL || !wmma_valid_layout(spec))
+    if(spec == NULL || out == NULL || !wmma_valid_layout(spec) || !wmma_valid_value_tile(spec))
     {
         return ROCKE_ERR_VALUE;
     }
@@ -845,9 +876,12 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
     {
         return ROCKE_ERR_VALUE;
     }
+    int value_tiles = spec->value_tile_size != 0 ? spec->head_size / spec->value_tile_size : 1;
+    if(spec->value_tile_size != 0 && (batch < 0 || batch > 0x7FFFFFFF / value_tiles))
+        return ROCKE_ERR_VALUE;
     out[0] = (seqlen_q + block_m - 1) / block_m;
     out[1] = spec->num_query_heads;
-    out[2] = batch;
+    out[2] = batch * value_tiles;
     return ROCKE_OK;
 }
 

@@ -91,6 +91,36 @@ rebuild against the updated header. Existing non-transposed specializations
 are unchanged. Numeric regressions cover both tile sizes, wave counts, masks,
 GQA, independent batch/head/column coordinates, and output guards.
 
+### Output-column tiling
+
+`value_tile_size=0` preserves the full-head WMMA path. A nonzero value must
+be a proper multiple-of-16 divisor of `head_size`; it selects that many
+PV/output columns per workgroup without truncating QK's head dimension.
+`value_tiles` reports the number of output partitions, and the grid's Z axis
+is `batch * value_tiles`. The kernel decodes the logical batch and column
+offset; callers still pass full-sized Q/K/V/O tensors and their ordinary strides.
+
+Each partition computes the same complete attention normalization and writes
+disjoint output columns. This trades repeated QK work for fewer live output
+accumulators and more workgroups. V-LDS staging, when enabled, stages only the
+selected columns. Dense, packed and paged addressing and FP8 KV storage retain
+their existing meanings. The knob is independent of sequence tails but cannot
+be combined with `transposed_qk`.
+
+Public dispatch uses this profile for dense D256 requests with Q-matched KV
+storage, no extra score features or window, at least 128 KV tokens, and at most
+128 query workgroups before output tiling. Noncausal prefill uses 32-column tiles with
+V-LDS staging; causal prefill uses 64-column tiles with direct V gathers.
+Queries of at most 16 rows use 64-column tiles with V-LDS staging. Other
+requests retain their existing policy. The tile width is part of the cache
+identity; native consumers must rebuild against the extended spec header.
+
+Numeric regressions place all QK signal in the final head dimension, so an
+incorrectly shortened QK reduction fails even in the first output partition.
+They cover every output column, query/KV tails, both dtypes, packed/paged FP8,
+and exact-zero empty sequences.
+
+
 
 ### Bottom-right causal alignment
 

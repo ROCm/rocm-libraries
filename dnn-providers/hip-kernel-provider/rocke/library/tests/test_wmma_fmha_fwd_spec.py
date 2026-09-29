@@ -158,6 +158,26 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
         with self.assertRaises(ValueError):
             WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, scheduler_strategy="unknown")
 
+    def test_output_tiles_require_complete_nonoverlapping_head_partition(self):
+        for tile in (-16, 1, 48, 96, 256, 512):
+            with self.subTest(tile=tile), self.assertRaises(ValueError):
+                WmmaFmhaFwdSpec(head_size=256, num_query_heads=4, value_tile_size=tile)
+        with self.assertRaises(ValueError):
+            WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, transposed_qk=True, value_tile_size=32)
+
+    def test_output_tile_grid_preserves_batch_and_bounds(self):
+        spec = WmmaFmhaFwdSpec(head_size=256, num_query_heads=4, value_tile_size=64, query_tail=True)
+        self.assertEqual(wmma_fmha_fwd_grid(spec, seqlen_q=17, batch=3), (2, 4, 12))
+        for batch in (-1, 0x7FFFFFFF // 4 + 1):
+            with self.subTest(batch=batch), self.assertRaises(ValueError):
+                wmma_fmha_fwd_grid(spec, seqlen_q=17, batch=batch)
+
+    def test_output_tile_cache_keys_separate_partitions(self):
+        base = WmmaFmhaFwdSpec(head_size=256, num_query_heads=4)
+        variants = [replace(base, value_tile_size=tile) for tile in (0, 16, 32, 64, 128)]
+        for left, right in combinations(variants, 2):
+            self.assertNotEqual(left.kernel_name(), right.kernel_name())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -170,13 +170,14 @@ def _request_for(case) -> AttentionRequest:
     )
 
 
-def _launch_and_check(case, *, stream: int = 0, fp8_scales=None):
+def _launch_and_check(case, *, stream: int = 0, fp8_scales=None, inputs=None, spec_overrides=None):
     from benchmarks.gfx1151.attention.benchmark_sdpa import DeviceBuffers
     from benchmarks.gfx1151.attention.cases import make_inputs, reference
     from rocke.runtime.launcher import release_retained_for_stream
     from rocke.runtime.torch_interop import resolve_stream
 
-    inputs = make_inputs(case)
+    if inputs is None:
+        inputs = make_inputs(case)
     if fp8_scales is not None:
         inputs.k_scale = np.asarray(fp8_scales[0], np.float32)
         inputs.v_scale = np.asarray(fp8_scales[1], np.float32)
@@ -192,7 +193,13 @@ def _launch_and_check(case, *, stream: int = 0, fp8_scales=None):
         if case.kv_dtype:
             kwargs["k_scale"] = float(inputs.k_scale)
             kwargs["v_scale"] = float(inputs.v_scale)
-        binding = result.bind_torch(_tensors_for(buffers, case), **kwargs)
+        if spec_overrides is None:
+            binding = result.bind_torch(_tensors_for(buffers, case), **kwargs)
+        else:
+            from dispatch.attention.bindings import bind_gfx1151_attention_torch
+
+            spec = dataclasses.replace(result.spec, **spec_overrides)
+            binding = bind_gfx1151_attention_torch(req, spec, _tensors_for(buffers, case), **kwargs)
         binding.launch()
         rt.stream_sync(stream)
         release_retained_for_stream(stream)
@@ -482,3 +489,48 @@ def test_ragged_full_window_preserves_all_causal_keys(mask, q_lengths, k_lengths
         begin = q_lengths[0]
         end = begin + q_lengths[1] - k_lengths[1]
         np.testing.assert_array_equal(actual[begin:end], np.zeros_like(actual[begin:end]))
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+@pytest.mark.parametrize(
+    "layout,dtype,storage,tile,vlds",
+    [
+        ("dense", "fp16", "", 128, False),
+        ("dense", "bf16", "", 64, True),
+        ("ragged", "fp16", "fp8e4m3", 32, True),
+        ("paged", "bf16", "fp8e4m3", 16, False),
+    ],
+)
+def test_output_tiles_keep_full_qk_dimension_and_all_output_columns(layout, dtype, storage, tile, vlds):
+    from benchmarks.gfx1151.attention.cases import make_inputs
+
+    lengths = (
+        dict(batch=3, seqlen_q=0, seqlen_k=0, q_lengths=(0, 3, 17), k_lengths=(0, 0, 31))
+        if layout == "ragged" else
+        dict(batch=2, seqlen_q=0, seqlen_k=0, q_lengths=(1, 3), k_lengths=(17, 0), block_size=16)
+        if layout == "paged" else
+        dict(batch=2, seqlen_q=1 if dtype == "fp16" else 17, seqlen_k=32 if dtype == "fp16" else 19)
+    )
+    case = _case(
+        name="dispatch_output_tiles", group="dispatch", dtype=dtype, heads_q=4,
+        heads_kv=2, head_dim=256, layout=layout, kv_dtype=storage,
+        mask="causal_bottomright", seed=105, **lengths,
+    )
+    inputs = make_inputs(case)
+    # The last QK dimension affects even the first output tile. Truncating QK
+    # to the output width would make these logits uniform and fail the oracle.
+    inputs.q.fill(0)
+    inputs.q[..., -1] = 1
+    signs = np.where(np.indices(inputs.k.shape[:-1]).sum(axis=0) % 2, 1.0, -1.0)
+    inputs.k.fill(0)
+    inputs.k[..., -1] = signs * 8
+    inputs.v[...] = signs[..., None] + np.arange(256, dtype=np.float32) / 512
+    actual = _launch_and_check(
+        case, inputs=inputs,
+        spec_overrides=dict(value_tile_size=tile, v_lds_stage=vlds),
+    )
+    if layout == "ragged":
+        np.testing.assert_array_equal(actual[:3], np.zeros_like(actual[:3]))
+    elif layout == "paged":
+        np.testing.assert_array_equal(actual[1:], np.zeros_like(actual[1:]))

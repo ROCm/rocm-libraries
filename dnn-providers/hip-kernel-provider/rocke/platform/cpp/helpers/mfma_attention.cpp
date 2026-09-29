@@ -362,6 +362,11 @@ rocke_status_t rocke_mfma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA tail options require a wave32 target");
         return ROCKE_ERR_VALUE;
     }
+    if(p->wmma_value_tile_size != 0 || p->wmma_value_offset != NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA output tiling requires a wave32 target");
+        return ROCKE_ERR_VALUE;
+    }
     if(p->k_scale != NULL)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "explicit K dequant scale requires a wave32 target");
@@ -769,6 +774,13 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     int a_frag = op->a_frag_len;
     int c_frag = op->c_frag_len;
     int n_dk = head_size / 16;
+    int value_head_size = p->wmma_value_tile_size != 0 ? p->wmma_value_tile_size : head_size;
+    if(value_head_size <= 0 || value_head_size > head_size || value_head_size % 16 != 0)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "WMMA value tile must be a positive multiple of 16 within the head");
+        return ROCKE_ERR_VALUE;
+    }
+    int n_dv = value_head_size / 16;
 
     /* Python evaluates b.mod(b.thread_id_x(), b.const_i32(wave)) left-to-right:
      * thread_id_x is created before the wave constant. C arg eval order is
@@ -851,7 +863,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     rocke_value_t* V_lds = NULL;
     if(v_lds_stage)
     {
-        int v_lds_shape[2] = {16, head_size};
+        int v_lds_shape[2] = {16, value_head_size};
         V_lds = rocke_b_smem_alloc(b, dtype_ir, v_lds_shape, 2, "Vwmma");
     }
 
@@ -872,7 +884,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         iter_args[n_ia].init = initial_l;
         ++n_ia;
     }
-    for(int d = 0; d < n_dk; ++d)
+    for(int d = 0; d < n_dv; ++d)
     {
         snprintf(name_buf[n_ia], sizeof(name_buf[0]), "acc%d", d);
         iter_args[n_ia].name = name_buf[n_ia];
@@ -908,7 +920,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             ms[r] = kloop.iter_vars[2 * r];
             ls[r] = kloop.iter_vars[2 * r + 1];
         }
-        for(int d = 0; d < n_dk; ++d)
+        for(int d = 0; d < n_dv; ++d)
         {
             accs[d] = kloop.iter_vars[2 * c_frag + d];
         }
@@ -972,7 +984,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
         rocke_value_t* new_ls[ROCKE_ATTN_MAX_LANE];
         rocke_value_t* new_accs[ROCKE_ATTN_MAX_ATOMS];
         rocke_value_t* ps_arr[ROCKE_ATTN_MAX_LANE];
-        for(int d = 0; d < n_dk; ++d)
+        for(int d = 0; d < n_dv; ++d)
         {
             new_accs[d] = accs[d];
         }
@@ -1029,7 +1041,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             new_ms[r] = m_new;
             new_ls[r] = l_new;
             ps_arr[r] = p_r;
-            for(int d = 0; d < n_dk; ++d)
+            for(int d = 0; d < n_dv; ++d)
             {
                 rocke_value_t* old = rocke_b_vec_extract(b, new_accs[d], r);
                 new_accs[d] = rocke_b_vec_insert(b, new_accs[d], rocke_b_fmul(b, old, alpha), r);
@@ -1053,7 +1065,9 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
                 rocke_value_t* vs_hd_mul = rocke_b_mul(b, p->kv_head_idx, p->stride_v_head);
                 v_stage_base = rocke_b_add(b, rocke_b_add(b, vs_tok_mul, vs_hd_mul), v_off);
             }
-            for(int e = 0; e < head_size / 8; ++e)
+            if(p->wmma_value_offset != NULL)
+                v_stage_base = rocke_b_add(b, v_stage_base, p->wmma_value_offset);
+            for(int e = 0; e < value_head_size / 8; ++e)
             {
                 rocke_value_t* v_address = rocke_b_add(b, v_stage_base, rocke_b_const_i32(b, e * 8));
                 rocke_value_t* v_g = fp8_kv
@@ -1090,9 +1104,11 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             p_a = rocke_b_vec_insert(b, p_a, p_v, j);
         }
 
-        for(int d = 0; d < n_dk; ++d)
+        for(int d = 0; d < n_dv; ++d)
         {
             rocke_value_t* d_col = rocke_b_add(b, rocke_b_const_i32(b, d * 16), col);
+            if(!v_lds_stage && p->wmma_value_offset != NULL)
+                d_col = rocke_b_add(b, d_col, p->wmma_value_offset);
             rocke_value_t* v_b = rocke_b_zero_vec(b, dtype_ir, a_frag);
             for(int j = 0; j < a_frag; ++j)
             {
@@ -1159,7 +1175,7 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             yields[ny++] = new_ms[r];
             yields[ny++] = new_ls[r];
         }
-        for(int d = 0; d < n_dk; ++d)
+        for(int d = 0; d < n_dv; ++d)
         {
             yields[ny++] = new_accs[d];
         }
@@ -1173,13 +1189,13 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
     {
         ls_final[r] = (kloop.op != NULL) ? kloop.op->results[2 * r + 1] : NULL;
     }
-    for(int d = 0; d < n_dk; ++d)
+    for(int d = 0; d < n_dv; ++d)
     {
         accs_final[d] = (kloop.op != NULL) ? kloop.op->results[2 * c_frag + d] : NULL;
     }
 
     /* ---- Epilogue ---- */
-    for(int d = 0; d < n_dk; ++d)
+    for(int d = 0; d < n_dv; ++d)
     {
         for(int r = 0; r < c_frag; ++r)
         {
@@ -1196,6 +1212,8 @@ rocke_status_t rocke_wmma_attention_fwd_inner_body(rocke_ir_builder_t* b,
             }
             rocke_value_t* o_row = rocke_b_add(b, p->q_tile_base, row_rel);
             rocke_value_t* o_col = rocke_b_add(b, rocke_b_const_i32(b, d * 16), col_n);
+            if(p->wmma_value_offset != NULL)
+                o_col = rocke_b_add(b, o_col, p->wmma_value_offset);
             /* Python: token mul before head mul (left-to-right). */
             rocke_value_t* o_tok_mul = rocke_b_mul(b, o_row, p->stride_o_token);
             rocke_value_t* o_hd_mul = rocke_b_mul(b, p->head_idx, p->stride_o_head);

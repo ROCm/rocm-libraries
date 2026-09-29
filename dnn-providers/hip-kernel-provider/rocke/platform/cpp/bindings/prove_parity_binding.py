@@ -713,6 +713,24 @@ def cfgs_gfx1151_wmma_fmha_fwd():
             v_lds_stage=True, sliding_window=320, scheduler_strategy=strategy,
         )
         for strategy in ("max-ilp", "max-memory-clause", "iterative-ilp", "iterative-minreg", "iterative-maxocc")
+    ] + [
+        dict(
+            head_size=256, num_query_heads=8, num_kv_heads=2, dtype=dtype,
+            mask_mode="causal" if vlds else "none", causal_bottom_right=vlds,
+            query_tail=vlds, kv_tail=vlds, v_lds_stage=vlds, value_tile_size=tile,
+        )
+        for dtype in ("fp16", "bf16")
+        for tile in (16, 32, 64, 128)
+        for vlds in (False, True)
+    ] + [
+        dict(
+            head_size=256, num_query_heads=8, num_kv_heads=2, dtype=dtype,
+            mask_mode="causal", causal_bottom_right=True, query_tail=True, kv_tail=True,
+            layout="paged" if paged else "ragged", page_block_size=32 if paged else 0,
+            kv_dtype="fp8e4m3", value_tile_size=128, v_lds_stage=paged,
+        )
+        for dtype in ("fp16", "bf16")
+        for paged in (False, True)
     ]
 
 
