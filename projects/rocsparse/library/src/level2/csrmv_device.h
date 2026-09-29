@@ -767,18 +767,20 @@ namespace rocsparse
 
         for(J gid = hipBlockIdx_x; gid < num_wgs; gid += (J)hipGridDim_x)
         {
-            const uint32_t wg_row_start = (uint32_t)(gid * BLOCKSIZE);
-            const uint32_t wg_row_end
-                = rocsparse::min(wg_row_start + BLOCKSIZE, uint32_t(bin_num_rows));
-            const uint32_t wg_num_rows = wg_row_end - wg_row_start;
+            // Row offsets within the bin need J (the bin can hold 2^32 or more rows when
+            // J = int64_t); offsets within the workgroup are bounded by BLOCKSIZE.
+            const J        wg_row_start = gid * (J)BLOCKSIZE;
+            const uint32_t wg_num_rows
+                = (uint32_t)rocsparse::min(bin_num_rows - wg_row_start, (J)BLOCKSIZE);
+            const J* wg_rows_bins = rows_bins + bin_start + wg_row_start;
 
             // Load a block of row data using all threads in the WG.
             for(uint32_t base_idx = 0; base_idx < (BLOCKSIZE << bin_id); base_idx += BLOCKSIZE)
             {
-                uint32_t row_idx = wg_row_start + ((base_idx + lid) >> bin_id);
-                if(row_idx < wg_row_start + wg_num_rows)
+                const uint32_t row_offset = (base_idx + lid) >> bin_id;
+                if(row_offset < wg_num_rows)
                 {
-                    const J row_id = rows_bins[row_idx + bin_start];
+                    const J row_id = wg_rows_bins[row_offset];
 
                     const I row_start = csr_row_ptr[row_id] - idx_base;
                     const I row_end   = csr_row_ptr[row_id + 1] - idx_base;
@@ -808,7 +810,7 @@ namespace rocsparse
             if(lid < wg_num_rows)
             {
                 const uint32_t lds_start_idx = (lid << bin_id);
-                const J        row_id        = rows_bins[bin_start + wg_row_start + lid];
+                const J        row_id        = wg_rows_bins[lid];
                 T              acc           = 0;
 
                 for(uint32_t idx = 0; idx < (1 << bin_id); idx++)
@@ -887,19 +889,21 @@ namespace rocsparse
 
         for(J gid = hipBlockIdx_x; gid < num_wgs; gid += (J)hipGridDim_x)
         {
-            const uint32_t wg_row_start = (uint32_t)(gid * rows_per_wg);
-            const uint32_t wg_row_end
-                = rocsparse::min(wg_row_start + rows_per_wg, uint32_t(bin_num_rows));
-            const uint32_t wg_num_rows = wg_row_end - wg_row_start;
+            // Row offsets within the bin need J (the bin can hold 2^32 or more rows when
+            // J = int64_t); offsets within the workgroup are bounded by rows_per_wg.
+            const J        wg_row_start = gid * (J)rows_per_wg;
+            const uint32_t wg_num_rows
+                = (uint32_t)rocsparse::min(bin_num_rows - wg_row_start, (J)rows_per_wg);
+            const J wg_bin_start = bin_start + wg_row_start;
 
             // Load a block of row data using all threads in the WG.
             for(uint32_t base_idx = 0; base_idx < CSRMV_LRB_SHORT_ROWS_2_LDS_ELEMS;
                 base_idx += BLOCKSIZE)
             {
-                uint32_t row_idx = wg_row_start + ((base_idx + lid) >> bin_id);
-                if(row_idx < wg_row_end)
+                const uint32_t row_offset = (base_idx + lid) >> bin_id;
+                if(row_offset < wg_num_rows)
                 {
-                    const J row_id = rows_bins[row_idx + bin_start];
+                    const J row_id = rows_bins[wg_bin_start + row_offset];
 
                     const I row_start = csr_row_ptr[row_id] - idx_base;
                     const I row_end   = csr_row_ptr[row_id + 1] - idx_base;
@@ -931,7 +935,7 @@ namespace rocsparse
                 if(this_row_offset_in_wg < wg_num_rows)
                 {
                     const uint32_t lds_start_idx = (this_row_offset_in_wg << bin_id);
-                    const J row_id = rows_bins[bin_start + wg_row_start + this_row_offset_in_wg];
+                    const J        row_id        = rows_bins[wg_bin_start + this_row_offset_in_wg];
 
                     T acc = 0;
                     for(uint32_t idx = 0; idx < (1 << bin_id); idx++)
