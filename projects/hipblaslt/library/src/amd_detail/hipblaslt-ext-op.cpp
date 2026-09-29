@@ -172,23 +172,52 @@ namespace
             return {};
         }
 
-        const std::string archName = trimArchName(props.gcnArchName);
-        auto              basename = "hipblasltExtOpLibrary_" + archName;
-        auto              relpath  = std::filesystem::path(archName) / (basename + ".dat");
-        if(auto perArchPath = rocblaslt_find_library_relative_path(relpath))
-            return perArchPath->string();
+        // Ask for the architectures this device may be served by, best first,
+        // rather than for the one name the runtime happened to report.
+        //
+        // Taking the reported name here made the ExtOp libraries depend on
+        // HSA_DISABLE_GFX12_STRICT, which is the dependency the rest of this
+        // change removes: on an A0 the variable alone decides between
+        // "gfx1250" and "gfx1250-strict", and only the former directory holds
+        // an ExtOp library -- the ExtOp .dat, Kernels.so and the transform
+        // kernels are built by CMake against GPU_TARGETS, which does not see
+        // tensilelite's stepping fan-out. So with the variable set to "0",
+        // which is what the A0 documentation tells people to set, every ExtOp
+        // call failed to find a library that was sitting right there under the
+        // base architecture's name.
+        //
+        // The candidate list already encodes the right answer: prefer the
+        // stepping, fall back to the base architecture when the stepping's
+        // artefacts were not built. The fallback is what makes this work today
+        // and it stays correct if the stepping does gain its own ExtOp library
+        // later, at which point the first candidate simply starts resolving.
+        const auto  candidates = rocblaslt_internal_get_arch_name_candidates(props);
+        std::string firstRelpath;
 
-        auto relpath_gz = std::filesystem::path(archName) / (basename + ".dat.zlib");
-        if(auto perArchPath = rocblaslt_find_library_relative_path(relpath_gz))
+        for(const std::string& archName : candidates)
         {
-            // Return the base .dat path; fileToMsgObject() probes for .zlib internally
-            auto gz_path = perArchPath->string();
-            return gz_path.substr(0, gz_path.size() - 5);
+            auto basename = "hipblasltExtOpLibrary_" + archName;
+            auto relpath  = std::filesystem::path(archName) / (basename + ".dat");
+            if(firstRelpath.empty())
+                firstRelpath = relpath.string();
+
+            if(auto perArchPath = rocblaslt_find_library_relative_path(relpath))
+                return perArchPath->string();
+
+            auto relpath_gz = std::filesystem::path(archName) / (basename + ".dat.zlib");
+            if(auto perArchPath = rocblaslt_find_library_relative_path(relpath_gz))
+            {
+                // Return the base .dat path; fileToMsgObject() probes for .zlib internally
+                auto gz_path = perArchPath->string();
+                return gz_path.substr(0, gz_path.size() - 5);
+            }
         }
 
+        // Name the preferred candidate in the diagnostic: it is the one whose
+        // absence the reader needs to explain.
         rocblaslt_log_error("getExtOpLibraryPath",
                             "rocblaslt_find_library_relative_path",
-                            relpath.string().c_str());
+                            firstRelpath.c_str());
         return {};
     }
 
@@ -235,6 +264,33 @@ namespace
     {
         static hipblaslt_ext::ExtOpMasterLibrary lib(getExtOpLibraryPath());
         return lib;
+    }
+
+    // The architecture key the loaded ExtOp library is indexed by.
+    //
+    // Must agree with whatever getExtOpLibraryPath() resolved to, not with the
+    // name the runtime reports. Those differ whenever the candidate fallback
+    // fires -- an A0 reported as gfx1250-strict is served by the gfx1250 ExtOp
+    // library, because that is the only one CMake builds -- and getLibrary()
+    // indexes with std::map::at, so a key that does not match the loaded file
+    // throws std::out_of_range rather than missing quietly.
+    //
+    // The layout getExtOpLibraryPath() documents puts the architecture in the
+    // containing directory's name, so read it back from there. Anything else
+    // means HIPBLASLT_EXT_OP_LIBRARY_PATH pointed somewhere with a layout of
+    // its own, and the reported name stays the best guess available.
+    std::string getExtOpArchName()
+    {
+        const std::string folderArch
+            = std::filesystem::path(getExtOpMasterLibrary().getLibraryFolder())
+                  .filename()
+                  .string();
+
+        for(const std::string& candidate : rocblaslt_internal_get_arch_name_candidates())
+            if(candidate == folderArch)
+                return folderArch;
+
+        return trimArchName(TensileLite::hip::GetCurrentDevice()->archName());
     }
 
     std::vector<std::unique_ptr<TensileLite::hip::SolutionAdapter>>& extOpLibraries()
@@ -305,7 +361,7 @@ hipblasStatus_t hipblasltSoftmaxRun(hipDataType datatype,
     auto        err       = hipGetDevice(&currentDeviceId);
     auto&       adapter   = extOpLibraries().at(currentDeviceId);
     auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
+    const auto  archName  = getExtOpArchName();
     auto&       masterLib = getExtOpMasterLibrary();
     const auto& lib       = masterLib
                           .getLibrary(archName,
@@ -367,7 +423,7 @@ hipblasStatus_t hipblasltLayerNormRun(hipDataType datatype,
     auto        err       = hipGetDevice(&currentDeviceId);
     auto&       adapter   = extOpLibraries().at(currentDeviceId);
     auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
+    const auto  archName  = getExtOpArchName();
     auto&       masterLib = getExtOpMasterLibrary();
     const auto& lib       = masterLib
                           .getLibrary(archName,
@@ -436,7 +492,7 @@ hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
     auto        err       = hipGetDevice(&currentDeviceId);
     auto&       adapter   = extOpLibraries().at(currentDeviceId);
     auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
+    const auto  archName  = getExtOpArchName();
     auto&       masterLib = getExtOpMasterLibrary();
     const auto& lib       = masterLib
                           .getLibrary(archName,
