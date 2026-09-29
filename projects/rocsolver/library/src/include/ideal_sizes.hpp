@@ -303,6 +303,24 @@
 #define GEBAL_BLOCKSIZE 256
 #endif
 
+/*! \brief Determines the size from which GEBAL uses several thread-blocks per matrix.
+
+    \details Below it, each matrix is balanced by a single thread-block. From it, the
+    counts of the permutation step and the norms of the scaling step are computed by many
+    thread-blocks: the scaling step visits the rows and columns in batches of
+    GEBAL_BATCH, whose decisions are taken in order by one thread-block (so that they are
+    those of LAPACK), from the norms of the parts of the rows and columns outside the
+    batch, computed beforehand in GEBAL_NSEG segments.*/
+#ifndef GEBAL_MULTI_MIN
+#define GEBAL_MULTI_MIN 256
+#endif
+#ifndef GEBAL_BATCH
+#define GEBAL_BATCH 32
+#endif
+#ifndef GEBAL_NSEG
+#define GEBAL_NSEG 64
+#endif
+
 /***************** hseqr **********************************************
 *******************************************************************************/
 /*! \brief Determines the number of threads of the thread-block that computes
