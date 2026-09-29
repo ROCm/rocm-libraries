@@ -4,7 +4,7 @@ For full build prerequisites and installation, see the [project README](../READM
 
 ## run_tensile_logic_check.py
 
-Runs **TensileLogic --check-all** on the library logic YAMLs (same check as the pre-build gate). This file is cross-platform (Windows and Unix).
+Runs **`tensilelite logic --check-all`** on the library logic YAMLs (the same check as the pre-build gate). This file is cross-platform (Windows and Unix).
 
 ### How to run
 
@@ -16,14 +16,15 @@ python scripts/run_tensile_logic_check.py
 
 **Windows**: `python scripts\run_tensile_logic_check.py` (or use `py` if you have the launcher).
 
-That’s it. Use whatever type of Python you have (system, store, or a venv). If that Python is missing dependencies (e.g. joblib) and the project has a **`.venv`** in the repo root, the script will re-run itself with `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (Unix), so you don’t have to remember to activate.
+The selected Python must already provide the `tensilelite` and `rocisa`
+packages. The Python script does not inject checkout or build-tree paths and
+does not switch interpreters.
 
 ### One-time setup
 
-1. **Build once** so rocisa is present under `build/tensilelite/rocisa/` (nanobind `_rocisa` next to the `rocisa` package) or the legacy `build/tensilelite/rocisa/lib` layout.
-2. **Python deps** – either:
-   - Use the project **.venv**: `python -m venv .venv` then `.venv\Scripts\pip install -r tensilelite/requirements.txt` (Windows) or `.venv/bin/pip install -r tensilelite/requirements.txt` (Unix), or  
-   - Install into your current Python: `pip install -r tensilelite/requirements.txt`.
+From `projects/hipblaslt/tensilelite`, prepare the active environment with
+`invoke install --gpu-targets <gfx target>`. Alternatively, install compatible
+TensileLite and rocisa packages explicitly before invoking this script.
 
 ### Optional: check a single directory
 
@@ -33,7 +34,7 @@ python scripts/run_tensile_logic_check.py library/src/amd_detail/rocblaslt/src/T
 
 ### Known-bugs list (ROCM-7144 / validation exceptions)
 
-This script and the CMake pre-build gate explicitly enable TensileLogic's bundled known-bugs list, loaded through package resources, so specific `(logic file path, solution_name)` pairs are skipped. `solution_name` is a solution's `SolutionNameMin`, a content-derived name that stays stable when the library is re-tuned (the positional `SolutionIndex` is not stable, so it is no longer used as the key). Paths in the `known_bugs.yaml` are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override the list by passing your own `--known-bugs` file; pass an empty YAML file to disable all bundled entries. A direct `TensileLogic --check-all` invocation applies no known-bug skips unless it is given `--known-bugs FILE` or `--use-bundled-known-bugs`.
+This script and the CMake pre-build gate explicitly enable the bundled known-bugs list for `tensilelite logic`, loaded through package resources, so specific `(logic file path, solution_name)` pairs are skipped. `solution_name` is a solution's `SolutionNameMin`, a content-derived name that stays stable when the library is re-tuned (the positional `SolutionIndex` is not stable, so it is no longer used as the key). Paths in the `known_bugs.yaml` are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override the list by passing your own `--known-bugs` file; pass an empty YAML file to disable all bundled entries. A direct `tensilelite logic --check-all` invocation applies no known-bug skips unless it is given `--known-bugs FILE` or `--use-bundled-known-bugs`.
 
 Documented known bugs are still re-validated on every run instead of being blindly skipped. If a listed solution **now passes** validation (the underlying bug was fixed), the run prints a `Stale known-bugs` warning naming the entry to remove. Pass **`--strict-known-bugs`** to make the run exit non-zero on any stale entry; use that in CI or in the PR that lands the fix, so the fixing PR also removes the listing.
 
@@ -46,4 +47,6 @@ The full tree (~2246 files) can take several minutes, so passing a subdirectory 
 
 ### run_tensile_logic_check.sh (Unix only)
 
-Thin wrapper that runs the script with `.venv/bin/python`, if it's present, and with `python3` otherwise. Use the `.py` script directly on Windows.
+Thin wrapper that selects `.venv/bin/python`, if present, and otherwise uses
+`python3`. The selected interpreter must satisfy the installed-package contract
+above. Use the `.py` script directly on Windows.
