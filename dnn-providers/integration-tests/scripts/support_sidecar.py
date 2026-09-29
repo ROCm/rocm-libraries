@@ -89,6 +89,8 @@ def parse(path: Path, text: str) -> Set[Claim]:
             for arch, platforms in support.items()
             for platform in platforms
         }
+        if not all(isinstance(value, str) for claim in result for value in claim):
+            raise TypeError("a case, engine, arch or platform is not a string")
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise SidecarError(f"{path}: unreadable: {exc!r}") from exc
     if render(path, result) != text:

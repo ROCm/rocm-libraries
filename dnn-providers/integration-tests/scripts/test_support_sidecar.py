@@ -139,6 +139,21 @@ class TestFiles(unittest.TestCase):
                 with self.assertRaises(SidecarError):
                     load(path)
 
+    def test_refuses_a_value_that_is_not_a_string(self):
+        cases = {
+            "platform": ("X.support.json", {"E": {"gfx942": [1]}}),
+            "platforms of mixed types": ("X.support.json", {"E": {"gfx942": [1, "a"]}}),
+            "case": (
+                "support.json",
+                {"E": [{"cases": [1], "support": {"gfx942": ["linux"]}}]},
+            ),
+        }
+        for name, (file, claims) in cases.items():
+            with self.subTest(name):
+                path = self._write(file, {"claims": claims, "version": 1})
+                with self.assertRaisesRegex(SidecarError, "not a string"):
+                    load(path)
+
     def test_refuses_a_non_canonical_file(self):
         path = self.dir / "X.support.json"
         path.write_bytes(b'{"version": 1, "claims": {}}\n')
