@@ -15,7 +15,7 @@
 {% block config_constructor -%}
     non_trivial_runs_config_params{ 
         { {{ config.block_size_x }}, {{ config.ipt }} },
-        {{ config.block_load_func }}
+        {{ config.block_load_func }},
         block_scan_algorithm::using_warp_scan
     }
 {%- endblock %}
