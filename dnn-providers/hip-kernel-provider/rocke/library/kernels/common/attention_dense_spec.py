@@ -16,6 +16,8 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
+from kernels.common.attention_dense_decode import PERSIST_DECODES
+
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
 
@@ -148,6 +150,10 @@ class AttentionDenseSpec:
                 f"{sorted(self.supported_persist_decodes())}, "
                 f"got {self.persist_decode!r}"
             )
+        if self.persist_decode != "auto":
+            why = PERSIST_DECODES[self.persist_decode].check(self)
+            if why:
+                raise ValueError(why)
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
@@ -287,7 +293,7 @@ class AttentionDenseSpec:
         return ("lazyrs",) if self.lazy_rescale else ()
 
     def _persist_decode_name_part(self) -> str:
-        return "hkvmaj" if self.resolved_persist_decode == "hkv_major" else ""
+        return PERSIST_DECODES[self.resolved_persist_decode].tag
 
     def kernel_name(self) -> str:
         parts = [
