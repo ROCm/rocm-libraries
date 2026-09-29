@@ -17,6 +17,9 @@
           "5_256_4_14_14_fp32_ndhwc"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],
@@ -49,6 +52,9 @@
           "5_256_4_14_14_fp32_ndhwc"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],

@@ -95,6 +95,9 @@
           "32_3_1_14_fp32_nhwc_fe22df"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],

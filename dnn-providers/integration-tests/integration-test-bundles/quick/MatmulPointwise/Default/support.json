@@ -32,6 +32,9 @@
           "3_16_128_fp32_ncl_dabc7b"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],

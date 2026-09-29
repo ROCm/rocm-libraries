@@ -53,6 +53,9 @@
           "32_3_1_14_fp32_nhwc_00ba43"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],
@@ -109,6 +112,9 @@
           "32_3_1_14_fp32_nhwc"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],
@@ -128,6 +134,9 @@
           "2_3_1_bfp16_ncl_cd34ad"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],

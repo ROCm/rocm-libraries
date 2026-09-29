@@ -17,6 +17,9 @@
           "5_256_14_14_fp32_nhwc"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],
@@ -61,6 +64,9 @@
           "8_32_2048_fp32_nlc"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],

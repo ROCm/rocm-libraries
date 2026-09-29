@@ -227,6 +227,9 @@
           "8_16_16_16_fp32_nchw_cdtfp32_rlo0_norslope"
         ],
         "support": {
+          "gfx1150": [
+            "linux"
+          ],
           "gfx1151": [
             "windows"
           ],

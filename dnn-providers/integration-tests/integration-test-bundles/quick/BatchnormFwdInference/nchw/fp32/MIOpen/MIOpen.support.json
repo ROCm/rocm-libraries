@@ -1,6 +1,9 @@
 {
   "claims": {
     "HIP_MLOPS_ENGINE": {
+      "gfx1150": [
+        "linux"
+      ],
       "gfx1151": [
         "windows"
       ],
@@ -15,6 +18,9 @@
       ]
     },
     "MIOPEN_ENGINE": {
+      "gfx1150": [
+        "linux"
+      ],
       "gfx1151": [
         "windows"
       ],
