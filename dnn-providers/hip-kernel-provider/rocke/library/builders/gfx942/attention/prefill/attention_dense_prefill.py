@@ -74,6 +74,7 @@ from dispatch.attention import (  # noqa: E402
     dense_spec_for_request,
 )
 from kernels.gfx942.attention_dense import (  # noqa: E402
+    GFX942_PERSIST_DECODES,
     Gfx942AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
@@ -151,7 +152,7 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument(
         "--persist-decode",
         dest="persist_decode",
-        choices=["auto", "qb_major", "hkv_major"],
+        choices=sorted(GFX942_PERSIST_DECODES),
         default=None,
         help="persistent work-item decode; default = dispatch's 'auto'",
     )

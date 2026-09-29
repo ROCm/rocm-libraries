@@ -195,6 +195,7 @@ from kernels.common.attention_dense_decode import (
     PERSIST_DECODES,
 )
 from kernels.common.attention_dense_spec import (
+    COMMON_PERSIST_DECODES,
     AttentionDenseSpec,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
@@ -236,6 +237,9 @@ if _BLOCK_M % 32 != 0:
 # and the baseline a conditional name tag compares against.
 _DEFAULT_LDS_ROW_PAD = 8
 _DEFAULT_IGLP = False
+
+
+GFX942_PERSIST_DECODES = COMMON_PERSIST_DECODES
 
 
 @dataclass(frozen=True)

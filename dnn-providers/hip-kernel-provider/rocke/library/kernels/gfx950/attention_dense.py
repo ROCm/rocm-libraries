@@ -80,6 +80,7 @@ from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
 from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from kernels.common.attention_dense_spec import (
+    COMMON_PERSIST_DECODES,
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
@@ -88,6 +89,8 @@ from kernels.common.attention_dense_spec import (
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
+    PersistGqaPair,
+    PersistGqaPair2Phase,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 
@@ -115,6 +118,12 @@ _LDS_PAD = 8
 _LAZY_RESCALE_THRESHOLD = 8.0
 
 
+GFX950_PERSIST_DECODES = COMMON_PERSIST_DECODES | {
+    PersistGqaPair.name,
+    PersistGqaPair2Phase.name,
+}
+
+
 @dataclass(frozen=True)
 class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     """gfx950 dense-attention spec and architecture-specific codegen policy."""
@@ -123,10 +132,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     wide_lds_dma: bool = False
 
     def supported_persist_decodes(self) -> frozenset[str]:
-        return super().supported_persist_decodes() | {
-            "gqa_pair",
-            "gqa_pair_2phase",
-        }
+        return GFX950_PERSIST_DECODES
 
     def __post_init__(self) -> None:
         super().__post_init__()

@@ -199,6 +199,28 @@ class PersistHkvMajor(PersistDecode):
         return Decoded(emit_fold(b, blk, nqb), hq, bt, hkv)
 
 
+class PersistBtHkvMinor(PersistDecode):
+    """``wi = ((blk*gqa + hql)*Hkv + hkv)*B + bt``: batch, then kv head, are the
+    fastest digits, so each XCD's CTAs stride over few K/V streams; query
+    blocks are folded under causal masking."""
+
+    name = "bt_hkv_minor"
+    tag = "bthkvmin"
+
+    def emit_decode(self, b, spec, wi, seqlen_q):
+        nqb = _baked_nqb(spec, seqlen_q)
+        B, Hkv, gqa = spec.batch, spec.num_kv_heads, spec.num_queries_per_kv
+        bt = b.mod(wi, b.const_i32(B))
+        rem = b.div(wi, b.const_i32(B))
+        hkv = b.mod(rem, b.const_i32(Hkv))
+        r2 = b.div(rem, b.const_i32(Hkv))
+        hql = b.mod(r2, b.const_i32(gqa))
+        blk = b.div(r2, b.const_i32(gqa))
+        hq = b.add(b.mul(hkv, b.const_i32(gqa)), hql)
+        qb = emit_fold(b, blk, nqb) if spec.causal else blk
+        return Decoded(qb, hq, bt, hkv)
+
+
 def _aligned_causal_error(spec, name: str):
     if not spec.persistent or not spec.causal:
         return f"{name} requires persistent causal attention"
@@ -218,13 +240,13 @@ class PersistGqaPair(PersistDecode):
     def check(self, spec):
         nqb = _spec_nqb(spec)
         expected_np = nqb * spec.num_kv_heads * spec.batch
-        why = _aligned_causal_error(spec, "gqa_pair")
+        why = _aligned_causal_error(spec, self.name)
         if why:
             return why
         if nqb % 2 or spec.num_queries_per_kv % 2:
-            return "gqa_pair requires even NQB and even GQA ratio"
+            return f"{self.name} requires even NQB and even GQA ratio"
         if spec.num_persistent != expected_np:
-            return ("gqa_pair requires num_persistent == NQB*Hkv*B "
+            return (f"{self.name} requires num_persistent == NQB*Hkv*B "
                     f"({expected_np}), got {spec.num_persistent}")
         return None
 
@@ -260,13 +282,13 @@ class PersistGqaPair2Phase(PersistDecode):
         gqa = spec.num_queries_per_kv
         nqb = _spec_nqb(spec)
         expected_np = nqb * spec.num_kv_heads * spec.batch * gqa // 2
-        why = _aligned_causal_error(spec, "gqa_pair_2phase")
+        why = _aligned_causal_error(spec, self.name)
         if why:
             return why
         if nqb % 2 or gqa < 2:
-            return "gqa_pair_2phase requires even NQB and GQA ratio >= 2"
+            return f"{self.name} requires even NQB and GQA ratio >= 2"
         if spec.num_persistent != expected_np:
-            return ("gqa_pair_2phase requires num_persistent == W/2 "
+            return (f"{self.name} requires num_persistent == W/2 "
                     f"({expected_np}), got {spec.num_persistent}")
         return None
 
@@ -292,5 +314,9 @@ class PersistGqaPair2Phase(PersistDecode):
 
 
 PERSIST_DECODES = _registry(
-    PersistQbMajor, PersistHkvMajor, PersistGqaPair, PersistGqaPair2Phase
+    PersistQbMajor,
+    PersistHkvMajor,
+    PersistBtHkvMinor,
+    PersistGqaPair,
+    PersistGqaPair2Phase,
 )

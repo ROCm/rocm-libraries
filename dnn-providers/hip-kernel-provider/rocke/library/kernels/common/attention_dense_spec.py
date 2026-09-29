@@ -19,6 +19,9 @@ from rocke.helpers.spec import kernel_name_join
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
+    PersistBtHkvMinor,
+    PersistHkvMajor,
+    PersistQbMajor,
 )
 
 
@@ -33,7 +36,10 @@ DENSE_TILE_GEOMETRIES = MappingProxyType(
 )
 DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 
-_COMMON_PERSIST_DECODES = frozenset({"auto", "qb_major", "hkv_major"})
+# persist_decode values every arch supports; arches may add more.
+COMMON_PERSIST_DECODES = frozenset(
+    {"auto", *(d.name for d in (PersistQbMajor, PersistHkvMajor, PersistBtHkvMinor))}
+)
 
 # Signed 32-bit ceiling for tensor extents. See ``check_dense_spec_preflight``
 # check 4 for why the SIGNED bound binds even though the buffer-resource
@@ -85,7 +91,7 @@ class AttentionDenseSpec:
 
     def supported_persist_decodes(self) -> frozenset[str]:
         """Decode values the concrete kernel type can actually emit."""
-        return _COMMON_PERSIST_DECODES
+        return COMMON_PERSIST_DECODES
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:

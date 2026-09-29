@@ -298,7 +298,7 @@ _SPEC_PERTURBATIONS = {
     "persistent": (True, False),
     "num_persistent": (152, 304),
     "interleave": (True, False),
-    "persist_decode": ("qb_major", "hkv_major"),
+    "persist_decode": ("qb_major", "hkv_major", "bt_hkv_minor"),
     "nonpersist_decode": ("bt_hkv_minor", "qb_minor"),
     "lazy_rescale": (False, True),
     "use_sinks": (),  # unbuildable (not yet supported)

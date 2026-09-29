@@ -36,6 +36,7 @@ from dispatch.attention import AttentionRequest, dense_spec_for_request  # noqa:
 from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES  # noqa: E402
 from kernels.gfx950.attention_dense import (  # noqa: E402
     GFX950_DENSE_LAYOUTS,
+    GFX950_PERSIST_DECODES,
     Gfx950AttentionDenseSpec,
     attention_dense_block,
     attention_dense_grid,
@@ -349,13 +350,7 @@ def main():
     ap.add_argument(
         "--persist-decode",
         default="auto",
-        choices=[
-            "auto",
-            "qb_major",
-            "hkv_major",
-            "gqa_pair",
-            "gqa_pair_2phase",
-        ],
+        choices=sorted(GFX950_PERSIST_DECODES),
     )
     ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
