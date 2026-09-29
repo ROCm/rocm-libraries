@@ -27,9 +27,9 @@ sys.path.append(f"{os.path.dirname(__file__)}/../")
 sys.path.append(f"{os.path.dirname(__file__)}")
 
 from tuner.base_tuner import TunerArgs
-from tuning_device_topk_air import Tuner
+from tuning_device_topk_air import Tuner as TunerTopkAirTuner
 
-class SegmentedTopkAirTuner(Tuner):
+class Tuner(TunerTopkAirTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
         return TunerArgs(algo_full_name='device_segmented_topk_air')
@@ -38,5 +38,5 @@ class SegmentedTopkAirTuner(Tuner):
         super().__init__(args)
 
 if __name__ == "__main__":
-    SegmentedTopkAirTuner.cli()
+    Tuner.cli()
     
