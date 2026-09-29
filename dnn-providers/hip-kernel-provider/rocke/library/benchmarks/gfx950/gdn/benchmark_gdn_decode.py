@@ -31,7 +31,6 @@ def registered_results(req: GdnDecodeRequest):
     return dispatch_gdn_decode_all(req)
 
 
-
 def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
     """Median host-observed launch latency in microseconds.
 
@@ -40,7 +39,13 @@ def eager_us(spec: GdnDecodeSpec, batch: int, reps: int = 200) -> float:
     which is the latency a synchronous Python decode loop observes.
     """
     import torch
-    from builders.gfx950.gdn.gdn_decode import launch, launcher_for, make_inputs, prepare
+    from builders.gfx950.gdn.gdn_decode import (
+        launch,
+        launcher_for,
+        make_inputs,
+        prepare,
+    )
+
     launcher = launcher_for(spec)
     values, cfg = prepare(spec, make_inputs(spec, batch), batch)
     for _ in range(50):
@@ -64,7 +69,13 @@ def device_us(spec: GdnDecodeSpec, batch: int, reps: int = 64):
     rather than letting the next caller inherit a poisoned stream.
     """
     import torch
-    from builders.gfx950.gdn.gdn_decode import launch, launcher_for, make_inputs, prepare
+    from builders.gfx950.gdn.gdn_decode import (
+        launch,
+        launcher_for,
+        make_inputs,
+        prepare,
+    )
+
     launcher = launcher_for(spec)
     values, cfg = prepare(spec, make_inputs(spec, batch), batch)
     for _ in range(10):

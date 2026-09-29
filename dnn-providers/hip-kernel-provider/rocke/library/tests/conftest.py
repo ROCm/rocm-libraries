@@ -31,6 +31,7 @@ _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+
 def pytest_addoption(parser):
     parser.addoption(
         "--gdn-batch",

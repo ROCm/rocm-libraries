@@ -100,7 +100,10 @@ def sweep_batch(batch: int, results):
         try:
             launcher = launcher_for(spec, arch=ARCH)
         except Exception as exc:
-            print(f"  {result.candidate.spec_id} compile failed: {type(exc).__name__}", file=sys.stderr)
+            print(
+                f"  {result.candidate.spec_id} compile failed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
             continue
         values, cfg = prepare(spec, inp, batch)
         launch(launcher, values, cfg)
@@ -118,7 +121,9 @@ def sweep_batch(batch: int, results):
                 .item(),
             )
         if err > TOL:
-            print(f"  {result.candidate.spec_id} INCORRECT err={err:.3e}", file=sys.stderr)
+            print(
+                f"  {result.candidate.spec_id} INCORRECT err={err:.3e}", file=sys.stderr
+            )
             continue
         micros = device_us(values, cfg, launcher)
         if micros is not None:

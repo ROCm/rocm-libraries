@@ -136,12 +136,18 @@ def test_all_registry_candidates_are_correct(harness, request):
     """Every legal registry candidate must match the independent FP32 oracle."""
     from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode_all
 
-    batches = [request.config.getoption("--gdn-batch")] if request.config.getoption("--gdn-batch") else [1, 16, 64, 256]
+    batches = (
+        [request.config.getoption("--gdn-batch")]
+        if request.config.getoption("--gdn-batch")
+        else [1, 16, 64, 256]
+    )
     selected_id = request.config.getoption("--gdn-spec-id")
     for batch in batches:
         results = dispatch_gdn_decode_all(GdnDecodeRequest(batch=batch, arch=ARCH))
         if selected_id:
-            results = tuple(result for result in results if result.candidate.spec_id == selected_id)
+            results = tuple(
+                result for result in results if result.candidate.spec_id == selected_id
+            )
             assert len(results) == 1, f"unknown or illegal spec ID {selected_id!r}"
         else:
             assert len(results) == 54
@@ -165,16 +171,24 @@ def test_all_registry_candidates_are_correct(harness, request):
             torch.cuda.synchronize()
             written = inputs["write_indices"].long()
             untouched = torch.ones(
-                values["state"].shape[0], dtype=torch.bool, device=values["state"].device
+                values["state"].shape[0],
+                dtype=torch.bool,
+                device=values["state"].device,
             )
             untouched[written] = False
             assert untouched.any(), result.candidate.spec_id
-            assert torch.equal(values["state"][untouched], before[untouched]), result.candidate.spec_id
+            assert torch.equal(
+                values["state"][untouched], before[untouched]
+            ), result.candidate.spec_id
             assert torch.isfinite(values["out"]).all(), result.candidate.spec_id
-            assert torch.isfinite(values["state"][written]).all(), result.candidate.spec_id
+            assert torch.isfinite(
+                values["state"][written]
+            ).all(), result.candidate.spec_id
             ref_out, ref_state = harness["ref_fp32"](spec, inputs)
             out_err = (values["out"].float() - ref_out).abs().max().item()
-            state_err = (values["state"].float()[written] - ref_state).abs().max().item()
+            state_err = (
+                (values["state"].float()[written] - ref_state).abs().max().item()
+            )
             assert max(out_err, state_err) <= harness["TOL"], (
                 f"batch {batch} spec_id={result.candidate.spec_id} "
                 f"out={out_err:.3e} state={state_err:.3e}"
@@ -211,7 +225,9 @@ def test_production_dispatch_smoke(harness):
     assert torch.isfinite(values["out"]).all()
     assert torch.isfinite(values["state"][written]).all()
     assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
+        "TOL"
+    ]
     assert torch.equal(values["state"][untouched], before[untouched])
 
 
@@ -350,6 +366,7 @@ def test_f16_io_variant_is_correct(harness):
     out_err, state_err = harness["check"](spec, 8)
     assert max(out_err, state_err) <= harness["TOL"]
 
+
 @requires_gfx950
 def test_f16_io_bf16_state_is_correct(harness):
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
@@ -368,7 +385,9 @@ def test_f16_io_bf16_state_is_correct(harness):
     assert torch.isfinite(values["out"]).all()
     assert torch.isfinite(values["state"][written]).all()
     assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
+        "TOL"
+    ]
     assert torch.equal(values["state"][untouched], before[untouched])
 
 
@@ -478,7 +497,9 @@ def test_paged_reorder_matches_reference(harness):
     untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
     untouched[written] = False
     assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+    assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness[
+        "TOL"
+    ]
     assert torch.equal(values["state"][untouched], before[untouched])
 
 
@@ -497,10 +518,14 @@ def test_two_step_continuation(harness):
         harness["launch"](launcher, values, cfg)
         torch.cuda.synchronize()
         written = inp["write_indices"].long()
-        untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+        untouched = torch.ones(
+            values["state"].shape[0], dtype=torch.bool, device="cuda"
+        )
         untouched[written] = False
         assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-        assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+        assert (
+            values["state"].float()[written] - ref_state
+        ).abs().max().item() <= harness["TOL"]
         assert torch.equal(values["state"][untouched], before[untouched])
         inp = dict(inp, state=values["state"].clone())
 
@@ -520,12 +545,16 @@ def test_state_reset_is_bit_exact(harness):
         harness["launch"](launcher, values, cfg)
         torch.cuda.synchronize()
         written = inp["write_indices"].long()
-        untouched = torch.ones(values["state"].shape[0], dtype=torch.bool, device="cuda")
+        untouched = torch.ones(
+            values["state"].shape[0], dtype=torch.bool, device="cuda"
+        )
         untouched[written] = False
         assert torch.isfinite(values["out"]).all()
         assert torch.isfinite(values["state"][written]).all()
         assert (values["out"].float() - ref_out).abs().max().item() <= harness["TOL"]
-        assert (values["state"].float()[written] - ref_state).abs().max().item() <= harness["TOL"]
+        assert (
+            values["state"].float()[written] - ref_state
+        ).abs().max().item() <= harness["TOL"]
         assert torch.equal(values["state"][untouched], before[untouched])
         outputs.append((values["out"].clone(), values["state"].clone()))
     assert torch.equal(outputs[0][0], outputs[1][0])

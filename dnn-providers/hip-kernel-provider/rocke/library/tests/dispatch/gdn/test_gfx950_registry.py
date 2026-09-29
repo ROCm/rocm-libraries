@@ -34,7 +34,9 @@ def _legal_results(req: GdnDecodeRequest | None = None):
 
 def test_configured_count_and_identity_are_stable_and_unique():
     candidates = gdn_candidates()
-    expected_ids = tuple(f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES)
+    expected_ids = tuple(
+        f"nw{nw}_wtk{wtk}_bpv{bpv}" for nw, wtk, bpv in CONFIGURED_TILES
+    )
     assert len(CONFIGURED_TILES) == 180
     assert len(candidates) == 180
     assert tuple(candidate.spec_id for candidate in candidates) == expected_ids
@@ -109,9 +111,7 @@ def test_every_legal_pin_round_trips_and_illegal_pin_fails_loudly():
             )
         )
     with pytest.raises(ValueError, match="does_not_exist"):
-        dispatch_gdn_decode(
-            _req(algorithm="warp_tiled", spec_id="does_not_exist")
-        )
+        dispatch_gdn_decode(_req(algorithm="warp_tiled", spec_id="does_not_exist"))
 
 
 def test_auto_is_static_default_independent_of_batch():
