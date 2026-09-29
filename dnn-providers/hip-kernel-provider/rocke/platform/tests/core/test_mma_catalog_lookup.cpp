@@ -408,7 +408,8 @@ static int test_emulated_rows_mirror_physical()
             }
             if(!physical)
             {
-                fprintf(stderr, "%s: physical atom %s absent from %s\n", op->op_id, physical_id, gfx);
+                fprintf(
+                    stderr, "%s: physical atom %s absent from %s\n", op->op_id, physical_id, gfx);
                 return 1;
             }
             CHECK(rocke_arch_mma_op_is_native(physical));
@@ -427,12 +428,144 @@ static int test_emulated_rows_mirror_physical()
     return 0;
 }
 
+/* The C twin of tests/core/test_xf32_selection_regression.py: no query that
+ * predates XF32 may reach an emulated atom, on any arch, through any entry
+ * point.
+ *
+ * Every pre-existing row is native, so "the catalog as it stood before the
+ * emulated rows" is just the native subset -- which means the expected answer
+ * can be computed here rather than tabulated, and stays correct as native atoms
+ * are added. enumerate() is checked on count *and* order, because instances
+ * that take the first match would otherwise move silently. */
+static int test_pre_existing_selection_is_native_only()
+{
+    int count = 0;
+    const char* const* arches = rocke_known_arches(&count);
+    int checked = 0;
+    for(int g = 0; g < count; ++g)
+    {
+        const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(arches[g]);
+        if(!arch)
+            continue;
+        for(int i = 0; i < arch->mma.num_ops; ++i)
+        {
+            const rocke_mma_op_t* op = &arch->mma.ops[i];
+            if(!rocke_arch_mma_op_is_native(op))
+                continue; /* an xf32 query is allowed to reach an emulated atom */
+            const rocke_mma_scale_filter_t scales
+                = {op->a_scale_dtype, op->b_scale_dtype, op->scale_block_k};
+
+            /* enumerate: same atoms, same order, as filtering natives by hand. */
+            const rocke_mma_op_t* got[64];
+            int n = rocke_mma_catalog_enumerate(&arch->mma,
+                                                op->family,
+                                                op->a_dtype,
+                                                op->b_dtype,
+                                                op->c_dtype,
+                                                -1,
+                                                -1,
+                                                got,
+                                                (int)(sizeof(got) / sizeof(got[0])),
+                                                &scales);
+            CHECK(n >= 1 && n <= (int)(sizeof(got) / sizeof(got[0])));
+            int seen = 0;
+            for(int j = 0; j < arch->mma.num_ops; ++j)
+            {
+                const rocke_mma_op_t* cand = &arch->mma.ops[j];
+                if(strcmp(cand->family, op->family) != 0 || strcmp(cand->a_dtype, op->a_dtype) != 0
+                   || strcmp(cand->b_dtype, op->b_dtype) != 0
+                   || strcmp(cand->c_dtype, op->c_dtype) != 0)
+                    continue;
+                if(cand->a_scale_dtype != op->a_scale_dtype
+                   || cand->b_scale_dtype != op->b_scale_dtype
+                   || cand->scale_block_k != op->scale_block_k)
+                    continue;
+                CHECK(rocke_arch_mma_op_is_native(cand));
+                CHECK(seen < n && got[seen] == cand);
+                ++seen;
+            }
+            CHECK(seen == n);
+
+            /* The narrowing entry points resolve to the atom itself, unchanged. */
+            CHECK(rocke_mma_catalog_has_shape(&arch->mma,
+                                              op->family,
+                                              op->a_dtype,
+                                              op->b_dtype,
+                                              op->c_dtype,
+                                              op->m,
+                                              op->n,
+                                              op->k,
+                                              &scales));
+            const rocke_mma_op_t* exact = rocke_mma_catalog_op_for_shape(&arch->mma,
+                                                                         op->family,
+                                                                         op->a_dtype,
+                                                                         op->b_dtype,
+                                                                         op->c_dtype,
+                                                                         op->m,
+                                                                         op->n,
+                                                                         op->k,
+                                                                         &scales);
+            CHECK(exact == op);
+            const rocke_mma_op_t* largest = rocke_mma_catalog_select_largest_k(&arch->mma,
+                                                                               op->family,
+                                                                               op->a_dtype,
+                                                                               op->b_dtype,
+                                                                               op->c_dtype,
+                                                                               op->m,
+                                                                               op->n,
+                                                                               -1,
+                                                                               &scales);
+            CHECK(largest != NULL && rocke_arch_mma_op_is_native(largest));
+
+            /* Lookup by handle is order-sensitive; the new rows must not shadow. */
+            CHECK(rocke_mma_catalog_by_op_id(&arch->mma, op->op_id) == op);
+            ++checked;
+        }
+    }
+    printf("pre-existing selection: %d native atoms unmoved\n", checked);
+    return 0;
+}
+
+/* fp32 in must never select an emulated xf32 atom: XF32 is opt-in, and a caller
+ * asking for fp32 gets the native fp32 MFMA or nothing. */
+static int test_fp32_never_reaches_an_xf32_atom()
+{
+    int count = 0;
+    const char* const* arches = rocke_known_arches(&count);
+    for(int g = 0; g < count; ++g)
+    {
+        const rocke_arch_target_t* arch = rocke_arch_target_from_gfx(arches[g]);
+        if(!arch)
+            continue;
+        const rocke_mma_scale_filter_t unscaled = {NULL, NULL, ROCKE_MMA_SCALE_NONE};
+        const rocke_mma_op_t* got[64];
+        int n = rocke_mma_catalog_enumerate(&arch->mma,
+                                            "mma",
+                                            "fp32",
+                                            "fp32",
+                                            "fp32",
+                                            -1,
+                                            -1,
+                                            got,
+                                            (int)(sizeof(got) / sizeof(got[0])),
+                                            &unscaled);
+        CHECK(n <= (int)(sizeof(got) / sizeof(got[0])));
+        for(int i = 0; i < n; ++i)
+        {
+            CHECK(rocke_arch_mma_op_is_native(got[i]));
+            CHECK(strcmp(got[i]->a_dtype, "fp32") == 0);
+        }
+    }
+    return 0;
+}
+
 int main()
 {
     // Keep this first: no previous query may prime the shared family index.
     if(test_family_index_first_use() || test_family_index_duplicates() || test_mma_result_names()
        || test_scale_contracts() || test_scale_layouts_and_families()
-       || test_emulated_rows_mirror_physical())
+       || test_emulated_rows_mirror_physical() || test_pre_existing_selection_is_native_only()
+       || test_fp32_never_reaches_an_xf32_atom())
         return 1;
     int checked = 0;
     for(const char* gfx : {"gfx950", "gfx1250"})
