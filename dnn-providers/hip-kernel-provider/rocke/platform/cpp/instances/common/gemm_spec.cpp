@@ -634,6 +634,34 @@ bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
         }
     }
 
+    /* Traits the native engine carries on the spec but does not implement.
+     *
+     * The bindings copy these across so a spec round-trips unchanged, and the
+     * builder ignores them -- which, left unchecked, is a silent divergence:
+     * the native engine would accept a spec Python rejects and emit a kernel
+     * with the trait quietly dropped. The WMMA atom gate above happens to catch
+     * the gfx1250 case (its atom is 16x16x32), but it does not fire on the
+     * wave64 MFMA targets, where a TDM spec sailed straight through.
+     *
+     * Declining is the honest answer until the emission path is mirrored: the
+     * caller falls back to the Python engine, which does implement them. */
+    if(spec->trait.tdm_lds)
+    {
+        CK_GEMM_REJECT("tdm_lds is not implemented in the native engine");
+    }
+    if(spec->trait.tdm_prefetch)
+    {
+        CK_GEMM_REJECT("tdm_prefetch is not implemented in the native engine");
+    }
+    if(spec->trait.tdm_split_barrier)
+    {
+        CK_GEMM_REJECT("tdm_split_barrier is not implemented in the native engine");
+    }
+    if(spec->trait.wmma_async_lds)
+    {
+        CK_GEMM_REJECT("wmma_async_lds is not implemented in the native engine");
+    }
+
     /* Geometry divisibility. */
     if((t->tile_m % (t->warp_m * t->warp_tile_m)) != 0)
     {

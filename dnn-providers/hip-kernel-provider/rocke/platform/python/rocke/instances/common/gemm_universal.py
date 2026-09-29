@@ -661,6 +661,17 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
                 f"wmma_async_lds needs a 4/8/16-byte per-lane payload "
                 f"(load_vec gives {_alds_bytes} bytes)"
             )
+        if spec.trait.pad_k:
+            # The async copy moves a whole per-lane vector or nothing: there is
+            # no per-element predicate, so it cannot honour the K tail the way
+            # the synchronous path does via ``_load_a_pad_k``. With pad_k the
+            # last K tile is partial, and the copy would read columns past K --
+            # feeding garbage into the accumulation, and on the final row
+            # reading past the allocation. Reject rather than emit that.
+            return False, (
+                "wmma_async_lds cannot mask a partial K tile; pad_k must be off "
+                "(the async copy has no per-element predicate)"
+            )
         if spec.trait.lds_swizzle:
             # The swizzle rewrites the *global* column so a lane-linear LDS slot
             # reads back correctly; that inverse does not hold once each lane
@@ -1770,12 +1781,27 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     (A, A_dst, _ld_a_row, block_m_off, batch_off_a, M, block_m),
                     (Bp, B_dst, _ld_b_row, block_n_off, batch_off_b, N, block_n),
                 ):
+                    # Clamp the K offset to the tensor. The prefetch prologue
+                    # issues ``depth - 1`` tiles unconditionally, so for a
+                    # runtime K shorter than ``(depth - 1) * block_k`` some of
+                    # them sit past the end. K is a kernel argument, not part of
+                    # the spec, so no spec-time check can rule this out.
+                    #
+                    # Unclamped, ``K - k_off`` goes negative and is packed into
+                    # the descriptor's unsigned extent field, turning the
+                    # zero-fill bound into a very large one and letting the DMA
+                    # read past the tensor. Clamped, the extent is exactly 0,
+                    # every element of the tile is out of range and reads back
+                    # zero, and the origin stays inside the allocation. A
+                    # zero-filled tile contributes nothing to the accumulator,
+                    # so the result is unchanged for the K values that do fit.
+                    _k_eff = b.smin(k_off, K)
                     # Byte address of the tile origin: base + (batch + row*K + k)*2.
                     # Scale to bytes in **i64**: doing it in i32 would halve the
                     # reachable matrix size relative to the element-offset range
                     # the rest of this emitter assumes.
                     _elem_off = b.add(
-                        _batch_off, b.add(b.mul(_blk_off, K), k_off)
+                        _batch_off, b.add(b.mul(_blk_off, K), _k_eff)
                     )
                     _origin = b.add(
                         b.global_addr_of(_src),
@@ -1802,7 +1828,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         global_addr=_origin,
                         lds_addr=_lds_addr,
                         rows=b.sub(_rows, _blk_off),  # remaining -> free tail
-                        cols=b.sub(K, k_off),
+                        cols=b.sub(K, _k_eff),  # >= 0 by the clamp above
                         row_pitch=K,
                         tile_rows=_tile_rows,
                         tile_cols=block_k,
