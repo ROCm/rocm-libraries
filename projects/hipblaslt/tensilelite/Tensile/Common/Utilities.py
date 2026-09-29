@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistentDataParallel, hasStaticAssignment
+from Tensile.ExecutionPolicy import isPersistentDataParallel, hasStaticAssignment, isStreamKSpatialCluster
 import functools
 import math
 import os
@@ -373,12 +373,12 @@ def isPow2(n):
 def persistentSpatialCluster(d):
     """Whether persistent workers use spatial M/N cluster geometry.
 
-    DataParallel traverses padded peer tiles; opted-in StreamK partitions
+    DataParallel traverses padded peer tiles; StreamK partitions
     spatial blocks in K, with a separate peer identity for output and fixup.
     """
-    return (hasStaticAssignment(d)
-            and d.get("ClusterDim", [1, 1])[0] > 1
-            and (isPersistentDataParallel(d) or bool(d.get("StreamKClusterMulticast", False))))
+    return (isStreamKSpatialCluster(d)
+            or (isPersistentDataParallel(d) and hasStaticAssignment(d)
+                and d.get("ClusterDim", [1, 1])[0] > 1))
 
 def persistentMulticast(d):
     """True when ``persistentSpatialCluster`` also issues TDM-multicast loads.

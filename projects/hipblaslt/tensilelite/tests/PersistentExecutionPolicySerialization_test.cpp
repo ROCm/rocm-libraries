@@ -723,15 +723,16 @@ namespace
         auto grid              = emittedDescriptor.at("grid").as<std::vector<std::string>>();
         EXPECT_EQ(grid, (std::vector<std::string>{"StreamKWithBatch", "One", "One"}));
     }
-    TEST_F(PersistentExecutionPolicySerializationTest, ClusterStreamKVersionTwoRoundTripsWithoutChangingLegacyDefaults)
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterVersionTwoRoundTripsWithoutPublicFlag)
     {
         canonical(policies[2]);
-        size.erase("streamKClusterMulticast");
-        auto legacy = readSolution();
-        EXPECT_FALSE(legacy->sizeMapping.streamKClusterMulticast);
-        EXPECT_EQ(legacy->internalArgsSupport.persistentLoopArgsVersion, 0);
-        size["streamKClusterMulticast"] = object(true);
+        EXPECT_EQ(size.count("streamKClusterMulticast"), 0u);
         size["clusterDim"] = object(std::vector<uint32_t>{2, 4, 1});
+        auto legacy = readSolution();
+        EXPECT_FALSE(legacy->usesStreamKSpatialCluster());
+        EXPECT_EQ(legacy->internalArgsSupport.persistentLoopArgsVersion, 0);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.x, 2u);
+        EXPECT_EQ(legacy->sizeMapping.clusterDim.y, 4u);
         internalArgs["persistentLoopArgsVersion"] = object(2);
         for(int outer : {0, 1, 2})
         {
@@ -740,17 +741,55 @@ namespace
         }
         internalArgs["version"] = object(3);
         auto decoded = readSolution();
-        EXPECT_TRUE(decoded->sizeMapping.streamKClusterMulticast);
+        EXPECT_TRUE(decoded->usesStreamKSpatialCluster());
         EXPECT_EQ(decoded->sizeMapping.clusterDim.x, 2u);
         EXPECT_EQ(decoded->sizeMapping.clusterDim.y, 4u);
         EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, 2);
         size = output(decoded->sizeMapping);
-        EXPECT_TRUE(size.at("streamKClusterMulticast").as<bool>());
-        internalArgs["persistentLoopArgsVersion"] = object(0);
-        EXPECT_THROW(readSolution(), std::runtime_error);
+        EXPECT_EQ(size.count("streamKClusterMulticast"), 0u);
+        EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, ObsoleteClusterFlagDoesNotSelectArgumentLayout)
+    {
+        canonical(policies[2]);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 1, 1});
+        internalArgs["version"] = object(3);
+        for(bool obsoleteFlag : {false, true})
+        for(int layout : {0, 2})
+        {
+            SCOPED_TRACE(::testing::Message() << "flag=" << obsoleteFlag << " layout=" << layout);
+            size["streamKClusterMulticast"] = object(obsoleteFlag);
+            internalArgs["persistentLoopArgsVersion"] = object(layout);
+            auto decoded = readSolution();
+            EXPECT_EQ(decoded->usesStreamKSpatialCluster(), layout == 2);
+            EXPECT_EQ(decoded->internalArgsSupport.persistentLoopArgsVersion, layout);
+            EXPECT_EQ(output(decoded->sizeMapping).count("streamKClusterMulticast"), 0u);
+        }
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest, SpatialClusterLayoutRejectsInvalidPolicyAndShape)
+    {
         internalArgs["persistentLoopArgsVersion"] = object(2);
-        size["streamKClusterMulticast"] = object(false);
-        EXPECT_THROW(readSolution(), std::runtime_error);
+        internalArgs["version"] = object(3);
+        size["clusterDim"] = object(std::vector<uint32_t>{2, 1, 1});
+        for(const auto& policy : policies)
+        {
+            SCOPED_TRACE(::testing::Message() << policy.strategy << '/' << policy.assignment);
+            canonical(policy);
+            if(std::string(policy.strategy) == "StreamK"
+               && std::string(policy.assignment) == "StaticGrid")
+                EXPECT_TRUE(readSolution()->usesStreamKSpatialCluster());
+            else
+                EXPECT_THROW(readSolution(), std::runtime_error);
+        }
+        canonical(policies[2]);
+        for(const auto& shape : std::vector<std::vector<uint32_t>>{
+                {1, 1, 1}, {1, 2, 1}, {3, 1, 1}, {4, 2, 1}, {2, 8, 1}, {2, 1, 2}})
+        {
+            size["clusterDim"] = object(shape);
+            EXPECT_THROW(readSolution(), std::runtime_error);
+        }
     }
 
 }

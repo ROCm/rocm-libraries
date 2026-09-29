@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from rocisa.instruction import SBitcmp1B32
@@ -7302,7 +7302,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       support = kernel["InternalSupportParams"]
       if support.get("PersistentLoopArgsVersion", 0) != 1 or support["KernArgsVersion"] != 3:
         raise ValueError("DataParallel code generation requires PersistentLoopArgsVersion=1 and KernArgsVersion=3")
-    if kernel.get("StreamKClusterMulticast", False):
+    if isStreamKSpatialCluster(kernel):
       support = kernel["InternalSupportParams"]
       if support.get("PersistentLoopArgsVersion", 0) != 2 or support["KernArgsVersion"] != 3:
         raise ValueError("Clustered StreamK requires PersistentLoopArgsVersion=2 and KernArgsVersion=3")
@@ -11795,22 +11795,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     fileString += str(kb)
 
-    if isPersistentDataParallel(kernel):
-      # rocisa emits the outer ABI version. DataParallel kernels must also carry
-      # their policy and payload version when this assembly is reused as a
-      # prebuilt custom kernel without its original solution record.
+    if isPersistentDataParallel(kernel) or isStreamKSpatialCluster(kernel):
+      # rocisa emits the outer ABI version. Persistent kernels with a newer
+      # payload must carry its version when this assembly is reused without
+      # its original solution record. This also prevents unsupported custom
+      # StreamK ABI2 descriptors from being mistaken for legacy ABI0.
       legacyMetadata = "custom.config:\n  InternalSupportParams:\n    KernArgsVersion: 3\n"
-      dataParallelMetadata = (
+      policyMetadata = (
         "custom.config:\n"
-        "  TileProcessingStrategy: DataParallel\n"
+        f"  TileProcessingStrategy: {kernel['TileProcessingStrategy']}\n"
         "  WorkAssignment: StaticGrid\n"
+      )
+      if isStreamKSpatialCluster(kernel):
+        policyMetadata += f"  ClusterDim: {list(kernel['ClusterDim'])}\n"
+      policyMetadata += (
         "  InternalSupportParams:\n"
         "    KernArgsVersion: 3\n"
-        "    PersistentLoopArgsVersion: 1\n"
+        f"    PersistentLoopArgsVersion: {kernel['InternalSupportParams']['PersistentLoopArgsVersion']}\n"
       )
       if legacyMetadata not in fileString:
-        raise ValueError("DataParallel kernel is missing its KernArgsVersion=3 assembly metadata")
-      fileString = fileString.replace(legacyMetadata, dataParallelMetadata, 1)
+        raise ValueError("Persistent kernel is missing its KernArgsVersion=3 assembly metadata")
+      fileString = fileString.replace(legacyMetadata, policyMetadata, 1)
 
     if error != 0:
       if self.debugConfig.forceGenerateKernel:

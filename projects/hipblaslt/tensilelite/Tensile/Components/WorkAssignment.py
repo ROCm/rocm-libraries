@@ -12,7 +12,7 @@ from ..Component import Component
 from ..Common import log2, clusterEnabled, persistentSpatialCluster
 from rocisa.enum import CacheScope
 from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder
-from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment
+from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment, isStreamKSpatialCluster
 
 @dataclass(frozen=True)
 class QueuePartition:
@@ -706,7 +706,7 @@ class StaticGrid(WorkAssignment):
         # cluster remap WorkGroup0 = cluster*Cs + peerX and WorkGroup1 = peerY. Fold
         # them into the cluster-block rank the DataParallel decode expects:
         #   rank = cluster*(Cs*Ck) + peerY*Cs + peerX
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             cs = kernel["ClusterDim"][0]
             with writer.allocTmpSgpr(1, tag="ClusterPeer") as tmp:
                 module.add(SAndB32(dst=sgpr("StreamKClusterPeer"), src0=sgpr("WorkGroup0"), src1=cs - 1,
@@ -746,7 +746,7 @@ class StaticGrid(WorkAssignment):
         # the cluster-barrier pass's first-load wait. Every later tile's wait pairs
         # the arrive at the persistent loop close. ABI2 validates the logical
         # worker's range first, so an idle cluster never signals a barrier.
-        if persistentSpatialCluster(kernel) and not kernel.get("StreamKClusterMulticast", False):
+        if persistentSpatialCluster(kernel) and not isStreamKSpatialCluster(kernel):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
 
         if partition.tile_units:
@@ -755,7 +755,7 @@ class StaticGrid(WorkAssignment):
             module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
         else:
             module.add(processing.initializePartition(writer, kernel))
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             module.add(self.persistentMulticastPrologueSignal(writer, kernel))
         return module
 

@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from Tensile.ExecutionPolicy import isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
@@ -357,7 +357,7 @@ class StreamK(TileProcessingStrategy):
 
     def tileWork(self, kernel):
         completion = ("StreamKTileIdx", "StreamKPartialIdx") if hasDynamicAssignment(kernel) or hasHybridAssignment(kernel) else ()
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             completion += ("PersistentPhantomTile",)
         return TileWork("PersistentTileID", "StreamKLocalStart", "StreamKLocalEnd", completion)
 
@@ -371,27 +371,27 @@ class StreamK(TileProcessingStrategy):
         return StaticPartition("PersistentIteration", "PersistentIterationEnd", "skGrid", "PersistentWorkGroupIndex")
 
     def persistentTileRegisters(self, kernel):
-        peer = ["StreamKClusterPeer"] if kernel.get("StreamKClusterMulticast", False) else []
+        peer = ["StreamKClusterPeer"] if isStreamKSpatialCluster(kernel) else []
         return list(self.tileWork(kernel).completion_identity) + ["StreamKLocalStart", "StreamKLocalEnd"] + peer
 
     def computeTotalTiles(self, writer, kernel, dstSgpr):
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             return ClusterTileMapping.blockCount(writer, kernel, dstSgpr)
         return super().computeTotalTiles(writer, kernel, dstSgpr)
 
     def tileIndexToWorkGroup(self, writer, kernel, sTmp):
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             return ClusterTileMapping.materialize(writer, kernel, sTmp, peer="StreamKClusterPeer")
         return super().tileIndexToWorkGroup(writer, kernel, sTmp)
 
     def skipPhantomTileStore(self, writer, kernel):
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             return ClusterTileMapping.skipPhantomCompletion(writer, kernel)
         return super().skipPhantomTileStore(writer, kernel)
 
     def flagOffset(self, kernel, dst, logicalProducer):
         module = Module("StreamK flag byte offset")
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             module.add(ClusterTileMapping.physicalSlot(kernel, dst, logicalProducer))
             logicalProducer = sgpr(dst)
         module.add(SLShiftLeftB32(dst=sgpr(dst), src=logicalProducer, shiftHex=log2(4),
@@ -1080,7 +1080,7 @@ class StreamK(TileProcessingStrategy):
         # StreamKLocalEnd == ItersPerTile, so the loop count is exactly
         # ItersPerTile (no StreamKLocalStart/End SGPRs to read).
         module.add(SSubU32(dst=sgpr(loopCounterName), src0=sgpr("StreamKLocalEnd"), src1=sgpr("StreamKLocalStart"), comment="StreamK loop counter = localEnd - localStart"))
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             module.add(SCmpEQU32(src0=sgpr("SizesSum+%u" % writer.states.unrollIdx), src1=0, comment="Empty summation"))
             module.add(SCSelectB32(dst=sgpr(loopCounterName), src0=0, src1=sgpr(loopCounterName), comment="K=0 stores without compute"))
         # Short circuit if alpha==0 (set loopCounter to 0 to skip main loop)
@@ -1578,7 +1578,7 @@ class StreamK(TileProcessingStrategy):
         offBytes = hex(kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal)
         tmpHi = writer.sgprPool.checkOut(1, "SKSlotOffsetHi")
         slotTmp = None
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             slotTmp = writer.sgprPool.checkOut(1, "SKPhysicalSlot")
             module.add(ClusterTileMapping.physicalSlot(kernel, slotTmp, sPartialIdx))
             sPartialIdx = sgpr(slotTmp)
@@ -3233,7 +3233,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # Skip to end if not doing the global write
         module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
         skCloseLoopLabel = Label("PersistentLoopClose", "")
-        if kernel.get("StreamKClusterMulticast", False):
+        if isStreamKSpatialCluster(kernel):
             alphaOwner = Label(writer.labels.getNameInc("SKClusterAlphaOwner"), "")
             module.add(SCBranchSCC1(labelName=alphaOwner.getLabelName()))
             module.add(SBarrier(True, True, True, comment="alpha-zero nonowner consumes cluster arrive"))

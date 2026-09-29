@@ -23,7 +23,7 @@
 ################################################################################
 
 
-from Tensile.ExecutionPolicy import isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from Tensile.ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, countSMemLoad, findInstCount
 from rocisa.asmpass import getActFuncModuleName, getActFuncBranchModuleName
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -10429,7 +10429,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SSetPrior(prior=0, comment="optimization store"))
         if self.states.doShadowInit:
           shadowName = Label.getFormatting("ShadowInitStart")
-          if kernel.get("StreamKClusterMulticast", False):
+          if isStreamKSpatialCluster(kernel):
             assignment = Component.WorkAssignment.find(self)
             module.add(assignment.persistentMulticastZeroIterClusterWait(self, kernel))
           module.add(SCBranchSCC1(labelName=shadowName, \

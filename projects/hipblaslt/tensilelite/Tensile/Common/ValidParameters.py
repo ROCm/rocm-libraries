@@ -913,8 +913,6 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
-    # Opt in to ABI2: clusters schedule spatial blocks with a common K range.
-    "StreamKClusterMulticast": [False, True],
     # Codegen-time toggle for single-hop next-neighbor work stealing in the
     # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
     # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
@@ -1237,6 +1235,9 @@ validParameters = { # we need to make sure this matches develop
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
+    # DataParallel and StreamK/StaticGrid derive spatial clustering when x > 1.
+    # StreamK currently requires StreamKFixupTreeReduction=1 and PrefetchAcrossPersistent=0;
+    # its supported shapes are [2,1], [4,1], [2,2], and [2,4].
     "ClusterDim": validClusterDimensions,
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled

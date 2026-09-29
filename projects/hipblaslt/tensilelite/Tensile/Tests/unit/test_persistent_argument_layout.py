@@ -66,6 +66,41 @@ def test_data_parallel_custom_descriptor_round_trips_without_reordering(tmp_path
     assert getKernelFileBase(False, result) == name
 
 
+@pytest.mark.parametrize("outer", [0, 1, 2, 3])
+def test_prebuilt_streamk_cluster_keeps_legacy_metadata_and_assembly(tmp_path, outer):
+    from types import SimpleNamespace
+    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+
+    config = _data_parallel_args_v1_config()
+    config.update(TileProcessingStrategy="StreamK", ClusterDim=[2, 1], ISA=[12, 5, 0])
+    config["InternalSupportParams"] = {"KernArgsVersion": outer}
+    config["CustomKernel"]["args"] = [
+        {"type": "uint32", "semantic": semantic}
+        for semantic in ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                         "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]
+    ]
+    name = _write_custom(tmp_path, config, "prebuilt_streamk_cluster")
+    loaded = getCustomKernelConfig(name, {"KernArgsVersion": 3, "PersistentLoopArgsVersion": 2}, str(tmp_path))
+    state = normalize_execution_policy(loaded)
+    assert state["InternalSupportParams"] == {"KernArgsVersion": outer, "PersistentLoopArgsVersion": 0}
+    assert state["CustomKernel"]["args"] == config["CustomKernel"]["args"]
+    assert getKernelFileBase(False, state) == name
+
+    class Kernel(dict):
+        duplicate = False
+
+    writer = SimpleNamespace(debugConfig=SimpleNamespace(splitGSU=False),
+                             assembler=SimpleNamespace(rocm_version=SimpleNamespace(major=7, patch=0)),
+                             states=SimpleNamespace())
+    writer._getCustomKernelSource = lambda kernel: KernelWriterAssembly._getCustomKernelSource(
+        writer, kernel, str(tmp_path))
+    # A geometry-only test must never send this prebuilt payload into the
+    # source generator, which would switch it to the spatial-cluster schedule.
+    result, source = KernelWriterAssembly.getSourceFileString(writer, Kernel(state))
+    assert result == 0
+    assert source == (tmp_path / (name + ".s")).read_text()
+
+
 @pytest.mark.parametrize("mutation", ["wide", "padding", "separated", "reverse", "duplicate", "legacy", "workspace"])
 def test_data_parallel_custom_descriptor_rejects_incompatible_payload(mutation):
     config = _data_parallel_args_v1_config()
@@ -158,6 +193,27 @@ def test_legacy_disabled_atomic_option_does_not_survive_size_mapping():
     assert mapping.tileProcessingStrategy == "None"
     assert mapping.streamKAtomic == 0
     assert state["StreamKAtomic"] == 1
+
+
+@pytest.mark.parametrize("declared,regenerate,expected", [(0, False, 0), (2, False, 2), (0, True, 2)])
+def test_streamk_cluster_serializes_only_the_internal_payload_capability(declared, regenerate, expected):
+    from Tensile.Common import state as serialized_state
+    from Tensile.Common.GlobalParameters import defaultInternalSupportParams
+    from Tensile.Contractions import InternalArgsSupport
+    from test_streamk_force_dp_only import minimal_size_mapping_state
+
+    source = minimal_size_mapping_state()
+    source.update(ClusterDim=[2, 1], InternalSupportParams=dict(defaultInternalSupportParams))
+    source["InternalSupportParams"].update(KernArgsVersion=3, PersistentLoopArgsVersion=declared)
+    if not regenerate:
+        source["StreamKClusterMulticast"] = True
+    normalized = normalize_execution_policy(source, regenerate=regenerate)
+    mapping = serialized_state(SizeMapping.FromOriginalState(normalized))
+    support = serialized_state(InternalArgsSupport.FromOriginalState(normalized))
+    assert mapping["tileProcessingStrategy"] == "StreamK"
+    assert mapping["workAssignment"] == "StaticGrid"
+    assert "streamKClusterMulticast" not in mapping
+    assert support["persistentLoopArgsVersion"] == expected
 
 
 @pytest.mark.parametrize("use_beta", [False, True])

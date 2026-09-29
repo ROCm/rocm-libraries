@@ -427,7 +427,6 @@ namespace TensileLite
             if(isPersistentDataParallel() && workAssignment != WorkAssignment::StaticGrid)
                 throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
         }
-        bool   streamKClusterMulticast    = false;
         int    streamKAtomic              = 0;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
@@ -1077,6 +1076,14 @@ namespace TensileLite
                                                            Hardware const& hardware) const;
 
         void validatePersistentLoopArgs() const;
+
+        // Prebuilt kernels retain their declared scheduling ABI even when their
+        // cluster geometry also supports the spatial schedule. Policy and shape
+        // compatibility are checked by validatePersistentLoopArgs().
+        bool usesStreamKSpatialCluster() const
+        {
+            return internalArgsSupport.persistentLoopArgsVersion == 2;
+        }
 
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
                                           PersistentLaunchSettings const& launch) const;

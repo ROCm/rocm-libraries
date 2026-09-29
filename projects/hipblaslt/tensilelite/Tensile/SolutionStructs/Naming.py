@@ -175,10 +175,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
-  if not state.get("StreamKClusterMulticast", False):
-    requiredParametersTemp.discard("StreamKClusterMulticast")
   if state.get("TileProcessingStrategy", "None") != "StreamK":
-    requiredParametersTemp.difference_update({"StreamKAtomic", "StreamKFixupTreeReduction", "StreamKClusterMulticast", "DebugStreamK"})
+    requiredParametersTemp.difference_update({"StreamKAtomic", "StreamKFixupTreeReduction", "DebugStreamK"})
   if state.get("TileProcessingStrategy", "None") == "None":
     requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
 
@@ -219,7 +217,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append('CMS')
 
   components.append('SN')
-  if state.get("TileProcessingStrategy") == "DataParallel":
+  if (state.get("TileProcessingStrategy") == "DataParallel"
+      or state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0) == 2):
     components.append(f'PLAV{state.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)}')
 
   # Skip SFA tag if using default wgm algo
