@@ -621,7 +621,11 @@ def run(args):
                     yaml.safe_dump(bench_options(job), sort_keys=False),
                     encoding="utf-8",
                 )
-                client_args = ["--yaml", str(stem.with_suffix(".yaml"))]
+                client_args = [
+                    "--host_side_fill_kernel",
+                    "--yaml",
+                    str(stem.with_suffix(".yaml")),
+                ]
             command = [
                 "taskset",
                 "-c",

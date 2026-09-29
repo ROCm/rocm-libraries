@@ -61,7 +61,11 @@ cases still accounted for. It does not require another runner or scheduler.
 
 TensileLite validates every output element with one target dispatch per case.
 Bench enables native norm assertions and allclose measurements, with one
-validation and one timed dispatch. Both parsers require every planned case,
+validation and one timed dispatch. It uses `--host_side_fill_kernel` to evaluate
+the existing matrix initializers on the CPU and copy the inputs to the device,
+avoiding emulated input-fill kernels. The option applies to every YAML/data
+record; ordinary bench runs continue to initialize on the device by default.
+Both parsers require every planned case,
 matching solution names/indices and exact kernel names/symbols from race-plugin
 dispatch logs. A successful exit or numerical result alone cannot establish PASS.
 The human-readable client output is an interface dependency; format changes must
@@ -126,5 +130,6 @@ generation pipeline are outside its coverage goals. Numerical validation and
 exact dispatch evidence remain required for both sweep paths.
 
 Measurements should guide further speed work: the main candidates are repeated
-metadata decoding and client/module startup, and bench's mandatory second
-dispatch. The current small scheduler needs no general-purpose tuning framework.
+metadata decoding, client/module startup and remaining runtime fill/copy work.
+Bench's second GEMM dispatch remains necessary for its current validation and
+timing path. The current small scheduler needs no general-purpose tuning framework.
