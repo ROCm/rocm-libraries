@@ -66,7 +66,7 @@ namespace rocsparse
         if(alpha != static_cast<T>(0))
         {
             // grid.y carries the dense column panel index (WF_SIZE columns each)
-            // and is capped at 65535, so stride over the WF_SIZE-wide panels to
+            // and is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to
             // cover the "main" columns [0, N - N % WF_SIZE) when the panel count
             // exceeds the cap. The remainder columns are handled separately.
             for(I colB_panel = WF_SIZE * hipBlockIdx_y; colB_panel + WF_SIZE <= N;

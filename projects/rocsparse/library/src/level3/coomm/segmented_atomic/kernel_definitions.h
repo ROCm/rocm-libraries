@@ -62,7 +62,7 @@ namespace rocsparse
         if(alpha != static_cast<T>(0))
         {
             // grid.y carries the dense column panel index (COLS columns each) and
-            // is capped at 65535, so stride over the COLS-wide panels to cover all
+            // is clamped by get_grid_size_y, so stride over the COLS-wide panels to cover all
             // columns [nstart, nstart + panels * COLS) when the panel count
             // exceeds the cap. Every launched panel is fully in-bounds by
             // construction (COLS divides the covered range), so the exact panel

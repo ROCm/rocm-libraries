@@ -24,6 +24,7 @@
 
 #include "rocsparse_common.h"
 #include "rocsparse_common.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
@@ -334,7 +335,7 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::scale_2d_kernel<256>),
-            dim3((int64_t(m) * n - 1) / 256 + 1, rocsparse::get_batch_grid_size(batch_count)),
+            dim3((int64_t(m) * n - 1) / 256 + 1, rocsparse::get_grid_size_y(handle, batch_count)),
             dim3(256),
             0,
             handle->stream,

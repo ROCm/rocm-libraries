@@ -70,7 +70,7 @@ namespace rocsparse
         }
 
         // grid.y carries the dense column panel index (WF_SIZE columns each) and
-        // is capped at 65535, so stride over the WF_SIZE-wide panels to cover all
+        // is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to cover all
         // columns when the panel count exceeds the cap.
         for(J col_panel = hipBlockIdx_y * WF_SIZE; col_panel < n;
             col_panel += hipGridDim_y * WF_SIZE)
@@ -146,7 +146,7 @@ namespace rocsparse
         }
 
         // grid.y carries the dense column panel index (LOOPS columns each) and is
-        // capped at 65535, so stride over the LOOPS-wide panels to cover all
+        // clamped by get_grid_size_y, so stride over the LOOPS-wide panels to cover all
         // columns [start, ...) even when the panel count exceeds the cap. Every
         // launched panel is fully in-bounds by construction, reproduced by the
         // col_panel + LOOPS <= n condition.
@@ -295,7 +295,7 @@ namespace rocsparse
         }
 
         // grid.y carries the dense column panel index (WF_SIZE columns each) and
-        // is capped at 65535, so stride over the WF_SIZE-wide panels to cover all
+        // is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to cover all
         // columns when the panel count exceeds the cap.
         for(J col_panel = hipBlockIdx_y * WF_SIZE; col_panel < n;
             col_panel += hipGridDim_y * WF_SIZE)
@@ -367,7 +367,7 @@ namespace rocsparse
             return;
         }
         // grid.y carries the dense column panel index (WF_SIZE columns each) and
-        // is capped at 65535, so stride over the WF_SIZE-wide panels to cover all
+        // is clamped by get_grid_size_y, so stride over the WF_SIZE-wide panels to cover all
         // columns when the panel count exceeds the cap.
         for(J col_panel = hipBlockIdx_y * WF_SIZE; col_panel < n;
             col_panel += hipGridDim_y * WF_SIZE)

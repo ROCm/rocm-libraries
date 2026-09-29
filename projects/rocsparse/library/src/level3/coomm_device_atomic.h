@@ -374,7 +374,7 @@ namespace rocsparse
         const I col = coo_col_ind[gid] - idx_base;
         const T val = rocsparse::conj_val(coo_val[gid], conj_A);
 
-        // grid.y carries the dense column index and is capped at 65535, so stride
+        // grid.y carries the dense column index and is clamped by get_grid_size_y, so stride
         // over the columns to cover panels beyond the cap.
         for(I l = hipBlockIdx_y; l < n; l += hipGridDim_y)
         {

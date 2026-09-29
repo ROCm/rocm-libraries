@@ -24,6 +24,7 @@
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_indextype_utils.hpp"
 
 namespace rocsparse
@@ -53,34 +54,39 @@ namespace rocsparse
             }
         }
     }
+
+    // assign_async takes no handle, so it reads the grid.y limit that
+    // handle->properties.maxGridSize[1] holds from the current device instead.
+    static rocsparse_status assign_grid_size_y(int64_t n, uint32_t& grid_size_y)
+    {
+        int device;
+        int max_grid_size_y;
+        RETURN_IF_HIP_ERROR(hipGetDevice(&device));
+        RETURN_IF_HIP_ERROR(
+            hipDeviceGetAttribute(&max_grid_size_y, hipDeviceAttributeMaxGridDimY, device));
+        grid_size_y = rocsparse::clamp_grid_extent(n, max_grid_size_y);
+        return rocsparse_status_success;
+    }
 }
 
 template <typename T>
 rocsparse_status
     rocsparse::assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(rocsparse::assign_device_kernel,
-                                       dim3(1, rocsparse::get_batch_grid_size(n)),
-                                       dim3(32),
-                                       0,
-                                       stream,
-                                       n,
-                                       dest,
-                                       value);
+    uint32_t grid_size_y;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_grid_size_y(n, grid_size_y));
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        rocsparse::assign_device_kernel, dim3(1, grid_size_y), dim3(32), 0, stream, n, dest, value);
     return rocsparse_status_success;
 }
 
 template <typename T>
 rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_t stream)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(rocsparse::assign_kernel,
-                                       dim3(1, rocsparse::get_batch_grid_size(n)),
-                                       dim3(32),
-                                       0,
-                                       stream,
-                                       n,
-                                       dest,
-                                       value);
+    uint32_t grid_size_y;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_grid_size_y(n, grid_size_y));
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        rocsparse::assign_kernel, dim3(1, grid_size_y), dim3(32), 0, stream, n, dest, value);
     return rocsparse_status_success;
 }
 

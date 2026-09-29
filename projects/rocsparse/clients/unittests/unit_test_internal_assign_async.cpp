@@ -24,16 +24,16 @@
 
 //
 // Unit tests for rocSPARSE's internal batch-assign helpers (assign_async /
-// assign_device_async) and the shared grid-size clamp helpers they rely on
-// (get_grid_size / get_batch_grid_size / ceil_div in rocsparse_common.hpp).
+// assign_device_async) and the ceil_div helper in rocsparse_common.hpp. The
+// per-axis grid clamps themselves are covered by unit_test_internal_grid.cpp.
 //
 // FOCUS (AISPARSE-696/697): the assign kernels launch on grid.y and CLAMP that
-// extent to max_batch_grid_size (65535, the hardware grid.y/z limit). To stay
-// correct for batch counts ABOVE that clamp, the kernels grid-stride over the
-// batch index (batch_index += hipGridDim_y). This suite drives n = 70000 >
-// 65535 so the launch grid is clamped and the tail [65535, n) is reached ONLY
-// by the grid-stride loop: a regression in either the clamp or the stride
-// leaves entries past 65535 unwritten. `dest` holds n scalars, so the footprint
+// extent to the device grid.y limit (maxGridSize[1]). To stay correct for batch
+// counts ABOVE that clamp, the kernels grid-stride over the batch index
+// (batch_index += hipGridDim_y). This suite drives n = limit + 4465 so the
+// launch grid is clamped and the tail [limit, n) is reached ONLY by the
+// grid-stride loop: a regression in either the clamp or the stride leaves
+// entries past the limit unwritten. `dest` holds n scalars, so the footprint
 // is well under a megabyte and this runs on any GPU (including the 15 GB
 // gfx1201).
 //
@@ -55,10 +55,15 @@
 
 namespace
 {
-    // A batch count strictly larger than the grid.y clamp, so the launch grid is
-    // clamped to max_batch_grid_size and the tail is covered only by the kernel's
-    // grid-stride loop.
-    constexpr int64_t beyond_clamp = rocsparse::max_batch_grid_size + 4465; // 70000
+    // The grid.y limit assign_async clamps to.
+    int64_t max_grid_size_y()
+    {
+        int device = 0;
+        int limit  = 0;
+        EXPECT_EQ(hipGetDevice(&device), hipSuccess);
+        EXPECT_EQ(hipDeviceGetAttribute(&limit, hipDeviceAttributeMaxGridDimY, device), hipSuccess);
+        return limit;
+    }
 
     // Scan a host readback and report the first index whose value differs from
     // `expected`, or -1 if all match. Cheaper (and produces a single, precise
@@ -78,33 +83,8 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// Host-pure clamp / ceil helpers (rocsparse_common.hpp).
+// Host-pure ceil helper (rocsparse_common.hpp).
 // ---------------------------------------------------------------------------
-
-TEST(internal_assign_async, get_grid_size_clamps_to_axis_maximum)
-{
-    // At or below the limit: passed through unchanged.
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{0}, rocsparse::max_batch_grid_size), 0u);
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{1}, rocsparse::max_batch_grid_size), 1u);
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{65535}, rocsparse::max_batch_grid_size), 65535u);
-
-    // Above the limit: clamped down to the limit.
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{65536}, rocsparse::max_batch_grid_size), 65535u);
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{1} << 40, rocsparse::max_batch_grid_size), 65535u);
-
-    // The grid.x axis clamps at its own (much larger) maximum.
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{5}, rocsparse::max_grid_size_x), 5u);
-    EXPECT_EQ(rocsparse::get_grid_size(int64_t{1} << 40, rocsparse::max_grid_size_x),
-              static_cast<uint32_t>(rocsparse::max_grid_size_x));
-}
-
-TEST(internal_assign_async, get_batch_grid_size_clamps_at_65535)
-{
-    EXPECT_EQ(rocsparse::get_batch_grid_size(1), 1u);
-    EXPECT_EQ(rocsparse::get_batch_grid_size(65535), 65535u);
-    EXPECT_EQ(rocsparse::get_batch_grid_size(65536), 65535u);
-    EXPECT_EQ(rocsparse::get_batch_grid_size(int64_t{1} << 32), 65535u);
-}
 
 TEST(internal_assign_async, ceil_div_is_overflow_safe)
 {
@@ -128,8 +108,11 @@ TEST(internal_assign_async, ceil_div_is_overflow_safe)
 template <typename T>
 static void run_assign_async_beyond_clamp()
 {
-    const int64_t n = beyond_clamp;
-    ASSERT_GT(n, rocsparse::max_batch_grid_size);
+    // A batch count strictly larger than the grid.y clamp, so the launch grid is
+    // clamped and the tail is covered only by the kernel's grid-stride loop.
+    const int64_t max_y = max_grid_size_y();
+    ASSERT_GT(max_y, 0);
+    const int64_t n = max_y + 4465;
 
     // Pre-fill with a sentinel so an unwritten tail entry is caught.
     rocsparse_ut::device_vector<T> d(std::vector<T>(n, static_cast<T>(-1)));
@@ -144,7 +127,7 @@ static void run_assign_async_beyond_clamp()
     ASSERT_EQ(static_cast<int64_t>(got.size()), n);
     const int64_t bad = first_mismatch(got, value);
     EXPECT_EQ(bad, -1) << "entry not written by assign_async at index " << bad << " (n=" << n
-                       << ", grid.y clamp=" << rocsparse::max_batch_grid_size << ")";
+                       << ", grid.y clamp=" << max_y << ")";
 }
 
 TEST(internal_assign_async, assign_async_grid_stride_beyond_clamp_i32)
@@ -160,8 +143,11 @@ TEST(internal_assign_async, assign_async_grid_stride_beyond_clamp_i64)
 template <typename T>
 static void run_assign_device_async_beyond_clamp()
 {
-    const int64_t n = beyond_clamp;
-    ASSERT_GT(n, rocsparse::max_batch_grid_size);
+    // A batch count strictly larger than the grid.y clamp, so the launch grid is
+    // clamped and the tail is covered only by the kernel's grid-stride loop.
+    const int64_t max_y = max_grid_size_y();
+    ASSERT_GT(max_y, 0);
+    const int64_t n = max_y + 4465;
 
     rocsparse_ut::device_vector<T> d(std::vector<T>(n, static_cast<T>(-1)));
     rocsparse_ut::device_vector<T> d_value(std::vector<T>(1, static_cast<T>(7)));
@@ -176,7 +162,7 @@ static void run_assign_device_async_beyond_clamp()
     ASSERT_EQ(static_cast<int64_t>(got.size()), n);
     const int64_t bad = first_mismatch(got, static_cast<T>(7));
     EXPECT_EQ(bad, -1) << "entry not written by assign_device_async at index " << bad << " (n=" << n
-                       << ", grid.y clamp=" << rocsparse::max_batch_grid_size << ")";
+                       << ", grid.y clamp=" << max_y << ")";
 }
 
 TEST(internal_assign_async, assign_device_async_grid_stride_beyond_clamp_i32)

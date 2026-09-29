@@ -200,8 +200,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling unit-test branches that append after rocsparse_unit_test_main or in
   # the level-2 group. Exercises rocsparse::assign_async / assign_device_async
-  # (compiled in via rocsparse_assign_async.cpp below) and the get_grid_size /
-  # get_batch_grid_size / ceil_div helpers in rocsparse_common.hpp.
+  # (compiled in via rocsparse_assign_async.cpp below) and the ceil_div helper
+  # in rocsparse_common.hpp.
   unit_test_internal_assign_async.cpp
 )
 
