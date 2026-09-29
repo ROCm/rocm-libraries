@@ -3264,6 +3264,9 @@ rocke_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<st
     s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
     s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
+    s.transposed_qk = dict_bool(d, "transposed_qk", s.transposed_qk);
+    s.block_n = dict_int(d, "block_n", s.block_n);
+    s.num_waves = dict_int(d, "num_waves", s.num_waves);
     {
         std::string v;
         if(dict_str(d, "mask_mode", v))

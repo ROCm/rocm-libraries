@@ -863,6 +863,18 @@ static void _op_vector_concat(rocke_lower_t* L, const rocke_op_t* op)
     }
 }
 
+/* Python _op_vector_undef: a freeze-poison base for fully overwritten vectors. */
+static void _op_vector_undef(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* res = ll_result(op);
+    if(!rocke_ll_live(L) || !res)
+    {
+        return;
+    }
+    const char* dtype = rocke_ll_llvm_type(L, res->type);
+    rocke_ll_emitf(L, "  %s = freeze %s poison", res->name, dtype);
+}
+
 /* Python _op_vector_bitcast. */
 static void _op_vector_bitcast(rocke_lower_t* L, const rocke_op_t* op)
 {
@@ -2193,6 +2205,7 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_VECTOR_INSERT, _op_vector_insert);
     rocke_ll_set_handler(ROCKE_OP_VECTOR_PACK, _op_vector_pack);
     rocke_ll_set_handler(ROCKE_OP_VECTOR_CONCAT, _op_vector_concat);
+    rocke_ll_set_handler(ROCKE_OP_VECTOR_UNDEF, _op_vector_undef);
 
     /* tile.* -- barriers / scheduling */
     rocke_ll_set_handler(ROCKE_OP_TILE_SYNC, _op_tile_sync);

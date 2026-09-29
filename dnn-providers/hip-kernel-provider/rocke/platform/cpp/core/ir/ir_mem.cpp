@@ -944,6 +944,30 @@ rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke
     return rocke_i_op1(b, ROCKE_OP_VECTOR_CONCAT, ops, 2, vt, &attr, "vc");
 }
 
+/* ==================== undef (freeze-poison) vector base ================= */
+
+/* Only a base for vectors fully overwritten by subsequent inserts; never a
+ * zero substitute. Port of Python IRBuilder.undef_vec / the pinned PR9710
+ * vector.undef op (LLVM: ``freeze <nxtype> poison``). */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n)
+{
+    rocke_attr_map_t a;
+    const rocke_type_t* vt;
+    char* hint;
+    if(!rocke_i_live(b))
+        return NULL;
+    vt = rocke_vector_type(b, elem, n);
+    if(!vt)
+        return NULL;
+    hint = rocke_arena_printf(&b->arena, "udf%d", n);
+    if(!hint)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "OOM udf hint");
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "elem", elem->name);
+    rocke_attr_set_int(b, &a, "vec", (int64_t)n);
+    return rocke_i_op1(b, ROCKE_OP_VECTOR_UNDEF, NULL, 0, vt, &a, hint);
+}
+
 /* =================== vec bitcast / packed f32->fXX ===================== */
 
 rocke_value_t*

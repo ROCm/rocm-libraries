@@ -73,6 +73,15 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
     seqlen_k = int(req.seqlen_k)
     query_tail = layout != "dense" or bool(seqlen_q % 16)
     kv_tail = layout != "dense" or bool(seqlen_k % 16)
+    transposed = (
+        req.dtype.strip().lower() == "fp16" and layout == "dense"
+        and int(req.hdim_q) in (64, 128)
+        and mask_type in (AttentionMaskType.NO_MASK, AttentionMaskType.TOP_LEFT_CAUSAL)
+        and not query_tail and seqlen_k % 32 == 0
+        and not (req.use_fp8 or req.sliding_window or req.use_softcap
+                 or req.use_sinks or req.use_alibi or req.use_qq_bias)
+    )
+    wide = transposed and seqlen_q >= 512 and seqlen_q % 32 == 0 and seqlen_k % 64 == 0
     return WmmaFmhaFwdSpec(
         head_size=int(req.hdim_q),
         num_query_heads=int(req.nhead_q),
@@ -91,6 +100,7 @@ def _wmma_fwd_spec(req: OperatorRequest) -> WmmaFmhaFwdSpec:
         layout=layout,
         page_block_size=int(req.kv_block_size) if layout == "paged" else 0,
         kv_dtype="fp8e4m3" if bool(req.use_fp8) else "",
+        transposed_qk=transposed, block_n=64 if wide else 32, num_waves=2 if wide else 1,
     )
 
 

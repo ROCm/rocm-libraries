@@ -116,6 +116,9 @@ class WmmaFmhaFwdSpec:
     layout: str = "dense"  # "dense" | "ragged" | "paged"
     page_block_size: int = 0
     kv_dtype: str = ""  # "" -> Q dtype; "fp8e4m3" -> OCP E4M3FN bytes
+    transposed_qk: bool = False
+    block_n: int = 32
+    num_waves: int = 1
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16", "bf16"):
@@ -143,6 +146,20 @@ class WmmaFmhaFwdSpec:
                 raise ValueError("paged attention requires a positive power-of-two page size")
         elif self.page_block_size:
             raise ValueError("page_block_size is only valid for paged attention")
+        if self.transposed_qk:
+            if self.dtype not in ("fp16", "f16") or self.head_size not in (64, 128):
+                raise ValueError("transposed QK supports FP16 D64/D128")
+            if self.block_n not in (32, 64) or self.num_waves not in (1, 2):
+                raise ValueError("transposed QK requires block_n 32/64 and one or two waves")
+            if (
+                self.layout != "dense" or self.kv_dtype or self.causal_bottom_right
+                or self.query_tail or self.kv_tail or self.v_lds_stage
+                or self.sliding_window or self.use_softcap or self.use_sinks
+                or self.use_alibi or self.use_qq_bias
+            ):
+                raise ValueError("transposed QK requires aligned dense inputs without extra score features")
+        elif self.block_n != 32 or self.num_waves != 1:
+            raise ValueError("block_n and num_waves are transposed-QK options")
         if self.num_kv_heads and self.num_query_heads % self.num_kv_heads != 0:
             raise ValueError(
                 "num_query_heads must be a multiple of num_kv_heads for GQA "
@@ -157,15 +174,18 @@ class WmmaFmhaFwdSpec:
 
     @property
     def block_size(self) -> int:
-        # One wave per block; resolved from the contract at build time too.
-        return 32
+        return 32 * (self.num_waves if self.transposed_qk else 1)
+
+    @property
+    def q_rows_per_cta(self) -> int:
+        return _BLOCK_M * (self.num_waves if self.transposed_qk else 1)
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             self.name,
-            "wmma16x16x16",
+            "wmma_swapqk" if self.transposed_qk else "wmma16x16x16",
             f"H{self.head_size}",
             f"HQ{self.num_query_heads}",
             f"HK{self.kv_heads}",
@@ -176,6 +196,8 @@ class WmmaFmhaFwdSpec:
             self.layout if self.layout != "dense" else "",
             f"bs{self.page_block_size}" if self.layout == "paged" else "",
             f"kv{self.kv_dtype}" if self.kv_dtype else "",
+            f"bn{self.block_n}" if self.transposed_qk else "",
+            f"w{self.num_waves}" if self.transposed_qk else "",
             flags={
                 "qtail": self.query_tail or self.layout != "dense",
                 "kvtail": self.kv_tail or self.layout != "dense",
@@ -188,6 +210,9 @@ class WmmaFmhaFwdSpec:
 def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for a dtype-matched WMMA atom on a wave32 target."""
     from rocke.core.arch import ArchTarget
+
+    if spec.transposed_qk and arch != "gfx1151":
+        return False, "transposed QK requires gfx1151"
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -386,19 +411,12 @@ def _paged_rows(b, spec, params, batch, kv_head):
 def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelDef:
     """Build the gfx1151 WMMA FMHA forward ``KernelDef``.
 
-    Grid: ``(seqlen_q // 16, num_query_heads, batch)``. ``arch`` selects the
-    WMMA atom from the contract catalog; on a non-gfx11 arch the atom is absent
-    and the build is rejected by :func:`is_valid_spec` before any IR is emitted.
-
-    Folded into the unified forward: this is now a thin adapter over the single
-    common FMHA-forward inner body
-    (:func:`rocke.helpers.mfma_attention.mfma_attention_fwd_inner_body`), which
-    dispatches to the WMMA wave32 path on an RDNA target and the MFMA wave64
-    path on CDNA. The wave32 QK/PV matmuls, online-softmax reduction, and P
-    fragment re-layout are all driven off the ``wmma_f32_16x16x16_f16``
-    ``MmaOp`` layout maps inside that body -- there is no longer a second
-    hand-written WMMA attention loop. This adapter only supplies the gfx1151
-    kernel ABI / grid decode and the per-batch pointer arithmetic.
+    Grid: ``(ceil_div(seqlen_q, spec.q_rows_per_cta), num_query_heads, batch)``.
+    The default delegates to the feature-complete shared FMHA inner body.
+    ``transposed_qk`` selects the specialized gfx1151 transposed-QK helper for
+    aligned FP16 D64/D128 dense attention. Both helpers use the catalogued WMMA
+    lane layouts; this adapter supplies the ABI, grid decode, and per-batch
+    addressing. :func:`is_valid_spec` rejects unsupported targets before emission.
     """
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
@@ -411,7 +429,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     wave = target.wave_size  # 32 for WMMA
 
     b = IRBuilder(spec.kernel_name())
-    b.kernel.attrs["max_workgroup_size"] = wave
+    b.kernel.attrs["max_workgroup_size"] = wave * (spec.num_waves if spec.transposed_qk else 1)
     p = _declare_params(b, spec)
 
     c16 = b.const_i32(16)
@@ -435,7 +453,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     # matching the CDNA MFMA forward wrapper: the inner body multiplies the row
     # index by stride_{q,o}_token internally, so Q/O only need the row offset;
     # K/V take an additive element offset.
-    q_row0 = b.mul(q_tile, c16)  # first Q row of this tile
+    q_step = b.const_i32(spec.q_rows_per_cta) if spec.transposed_qk else c16
+    q_row0 = b.mul(q_tile, q_step)
     if spec.layout == "dense":
         batch_row_q = b.mul(batch, seqlen_q)  # batch shift in Q rows
         batch_off_k = b.mul(b.mul(batch, seqlen_k), p["stride_k_token"])
@@ -473,6 +492,24 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     k_row, v_row = (None, None)
     if spec.layout == "paged":
         k_row, v_row = _paged_rows(b, spec, p, batch, kv_head)
+
+    if spec.transposed_qk:
+        from rocke.helpers.wmma_swapqk import wmma_swapqk_fwd_inner_body
+
+        wmma_swapqk_fwd_inner_body(
+            b, Q=p["Q"], K=p["K"], V=p["V"], O=p["O"],
+            head_size=spec.head_size, seqlen_k=seqlen_k,
+            q_tile_base=q_global, q_pos_base=q_row0, head_idx=head, kv_head_idx=kv_head,
+            stride_q_token=p["stride_q_token"], stride_q_head=p["stride_q_head"],
+            stride_k_token=p["stride_k_token"], stride_k_head=p["stride_k_head"],
+            stride_v_token=p["stride_v_token"], stride_v_head=p["stride_v_head"],
+            stride_o_token=p["stride_o_token"], stride_o_head=p["stride_o_head"],
+            scale_log2=p["scale_log2"], k_token_offset_elems=batch_off_k,
+            v_token_offset_elems=batch_off_v, mask_mode=spec.mask_mode,
+            block_n=spec.block_n, n_waves=spec.num_waves, arch=arch,
+        )
+        b.ret()
+        return b.kernel
 
     mfma_attention_fwd_inner_body(
         b,
@@ -524,9 +561,10 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
 
 def wmma_fmha_fwd_grid(spec: WmmaFmhaFwdSpec, *, seqlen_q: int, batch: int):
     """Cover the maximum query length; packed layouts always bound partial tiles."""
-    if spec.layout == "dense" and not spec.query_tail and seqlen_q % _BLOCK_M != 0:
-        raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {_BLOCK_M}")
-    return ((seqlen_q + _BLOCK_M - 1) // _BLOCK_M, spec.num_query_heads, batch)
+    block_m = spec.q_rows_per_cta
+    if spec.layout == "dense" and not spec.query_tail and seqlen_q % block_m != 0:
+        raise ValueError(f"seqlen_q {seqlen_q} must be a multiple of {block_m}")
+    return ((seqlen_q + block_m - 1) // block_m, spec.num_query_heads, batch)
 
 
 def wmma_fmha_fwd_signature(spec: WmmaFmhaFwdSpec):

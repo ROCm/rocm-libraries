@@ -119,6 +119,34 @@ class TestWmmaFmhaFwdSpec(unittest.TestCase):
             with self.subTest(storage=storage), self.assertRaises(ValueError):
                 WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, kv_dtype=storage)
 
+    def test_transposed_qk_rejects_unimplemented_combinations(self):
+        base = dict(head_size=64, num_query_heads=4, transposed_qk=True)
+        for changes in (
+            {"dtype": "bf16"}, {"head_size": 256}, {"block_n": 16}, {"num_waves": 4},
+            {"layout": "ragged"}, {"kv_dtype": "fp8e4m3"}, {"query_tail": True},
+            {"kv_tail": True}, {"v_lds_stage": True}, {"use_sinks": True},
+            {"use_softcap": True}, {"use_alibi": True}, {"use_qq_bias": True},
+            {"mask_mode": "causal", "causal_bottom_right": True},
+            {"mask_mode": "causal", "sliding_window": 32},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                WmmaFmhaFwdSpec(**dict(base, **changes))
+
+    def test_transposed_query_grid_covers_whole_wave_groups(self):
+        spec = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4, transposed_qk=True, num_waves=2)
+        with self.assertRaises(ValueError):
+            wmma_fmha_fwd_grid(spec, seqlen_q=48, batch=2)
+        self.assertEqual(wmma_fmha_fwd_grid(spec, seqlen_q=64, batch=2), (2, 4, 2))
+
+    def test_transposed_geometry_does_not_alias_other_kernels(self):
+        base = WmmaFmhaFwdSpec(head_size=64, num_query_heads=4)
+        variants = [base] + [
+            replace(base, transposed_qk=True, block_n=block, num_waves=waves)
+            for block in (32, 64) for waves in (1, 2)
+        ]
+        for left, right in combinations(variants, 2):
+            self.assertNotEqual(left.kernel_name(), right.kernel_name())
+
 
 if __name__ == "__main__":
     unittest.main()

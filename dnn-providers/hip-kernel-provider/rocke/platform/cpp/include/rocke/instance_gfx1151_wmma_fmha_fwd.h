@@ -90,6 +90,9 @@ typedef struct rocke_wmma_fmha_fwd_spec
     const char* layout; /* "dense" default; "ragged" or "paged" use packed Q */
     int page_block_size; /* positive power of two for paged; zero otherwise */
     const char* kv_dtype; /* "" -> Q dtype; "fp8e4m3" -> OCP E4M3FN byte storage */
+    bool transposed_qk; /* FP16 D64/D128, aligned dense none/top-left causal */
+    int block_n; /* transposed-QK key tile: 32 or 64; default 32 */
+    int num_waves; /* transposed-QK waves per CTA: 1 or 2; default 1 */
 } rocke_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still

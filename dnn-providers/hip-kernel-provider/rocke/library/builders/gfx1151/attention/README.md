@@ -58,6 +58,35 @@ by `rocke_wmma_fmha_fwd_spec_default()`. Native callers must rebuild against
 the updated header and archive; the pybind spec adapter also carries the field.
 The parity emitters cover both dtypes, head sizes, masks, GQA, and V staging.
 
+### Aligned FP16 transposed-QK specialization
+
+Public dispatch selects `transposed_qk=True` for dense FP16 D64/D128 attention
+with no mask or top-left causal masking, query lengths divisible by 16, and
+KV lengths divisible by 32. Score features, bottom-right alignment, sequence
+tails, packed/paged layouts, BF16, FP8 KV, and D256 retain the shared WMMA path.
+
+The specialized helper computes `K @ Q.T`, reduces softmax over lane-local
+accumulator slots and a cross-half exchange, then computes `V @ P`. The
+probability transpose stays in registers; V remains ordinary row-major
+`[B,S,Hkv,D]`. No host/device transpose or preprocessing is required.
+The implementation specializes the transposed-QK design from
+[PR #9710](https://github.com/ROCm/rocm-libraries/pull/9710), not its optional
+pre-transposed-V or experimental scheduling variants.
+
+`block_n` accepts 32 or 64; `num_waves` accepts 1 or 2. Each wave writes
+16 query rows. Dispatch uses `(block_n=64, num_waves=2)` when the query length
+is at least 512 and divisible by 32 and the KV length is divisible by 64;
+otherwise it uses `(32,1)`. Direct spec callers must satisfy the selected
+query-group and KV-tile alignment. The grid helper and tensor binding reject
+partial groups/tiles rather than silently dropping them.
+
+The new variant has a distinct cache name and preserves the base tensor ABI.
+Its native spec fields and pybind mapping mirror Python; native consumers must
+rebuild against the updated header. Existing non-transposed specializations
+are unchanged. Numeric regressions cover both tile sizes, wave counts, masks,
+GQA, independent batch/head/column coordinates, and output guards.
+
+
 ### Bottom-right causal alignment
 
 With `mask_mode="causal"` and `causal_bottom_right=True`, the mask admits

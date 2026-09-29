@@ -27,6 +27,7 @@
 #include "rocke/helper_rocke.core.arch.h"
 #include "rocke/helper_rocke.helpers.mfma_attention.h"
 #include "rocke/helper_rocke.helpers.spec.h"
+#include "rocke/helper_rocke.helpers.wmma_swapqk.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -113,6 +114,9 @@ rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
     s.layout = "dense";
     s.page_block_size = 0;
     s.kv_dtype = "";
+    s.transposed_qk = false;
+    s.block_n = 32;
+    s.num_waves = 1;
     return s;
 }
 
@@ -128,8 +132,8 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
 {
     const char* name;
     const char* mask;
-    char h[32], hq[32], hk[32], window[32], page[32];
-    const char* parts[11];
+    char h[32], hq[32], hk[32], window[32], page[32], block_n[32], waves[32];
+    const char* parts[13];
     const char* dtype = wmma_dtype(spec);
 
     if(spec == NULL || out == NULL || dtype == NULL
@@ -148,7 +152,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     snprintf(hq, sizeof(hq), "HQ%d", spec->num_query_heads);
     snprintf(hk, sizeof(hk), "HK%d", wmma_kv_heads(spec));
 
-    parts[0] = "wmma16x16x16";
+    parts[0] = spec->transposed_qk ? "wmma_swapqk" : "wmma16x16x16";
     parts[1] = h;
     parts[2] = hq;
     parts[3] = hk;
@@ -172,6 +176,13 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
     }
     if(spec->kv_dtype[0] != '\0')
         parts[num_parts++] = "kvfp8e4m3";
+    if(spec->transposed_qk)
+    {
+        snprintf(block_n, sizeof(block_n), "bn%d", spec->block_n);
+        snprintf(waves, sizeof(waves), "w%d", spec->num_waves);
+        parts[num_parts++] = block_n;
+        parts[num_parts++] = waves;
+    }
     const char* flag_names[] = {"qtail", "kvtail", "softcap", "sinks", "alibi", "qqbias"};
     const int flag_on[] = {spec->query_tail || packed, spec->kv_tail || packed,
                           spec->use_softcap, spec->use_sinks, spec->use_alibi, spec->use_qq_bias};
@@ -241,6 +252,30 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(!wmma_valid_layout(spec))
     {
         wmma_set_reason(reason, reason_cap, "layout must be dense/ragged with page size zero, or paged with a positive power-of-two page size");
+        return false;
+    }
+    if(spec->transposed_qk)
+    {
+        if(strcmp(arch, "gfx1151") != 0 || strcmp(dtype, "f16") != 0
+           || (spec->head_size != 64 && spec->head_size != 128)
+           || (spec->block_n != 32 && spec->block_n != 64)
+           || (spec->num_waves != 1 && spec->num_waves != 2))
+        {
+            wmma_set_reason(reason, reason_cap, "transposed QK requires gfx1151 FP16 D64/D128, block_n 32/64 and one or two waves");
+            return false;
+        }
+        if(strcmp(spec->layout, "dense") != 0 || spec->kv_dtype[0] != '\0'
+           || spec->causal_bottom_right || spec->query_tail || spec->kv_tail
+           || spec->v_lds_stage || spec->sliding_window || spec->use_softcap
+           || spec->use_sinks || spec->use_alibi || spec->use_qq_bias)
+        {
+            wmma_set_reason(reason, reason_cap, "transposed QK requires aligned dense inputs without extra score features");
+            return false;
+        }
+    }
+    else if(spec->block_n != 32 || spec->num_waves != 1)
+    {
+        wmma_set_reason(reason, reason_cap, "block_n and num_waves are transposed-QK options");
         return false;
     }
 
@@ -532,8 +567,8 @@ static rocke_status_t
     }
     wave = target->wave_size; /* 32 for WMMA */
 
-    /* b.kernel.attrs["max_workgroup_size"] = wave */
-    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", wave);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size",
+                      wave * (spec->transposed_qk ? spec->num_waves : 1));
 
     /* _declare_params(b) */
     wmma_declare_params(b, spec);
@@ -561,7 +596,10 @@ static rocke_status_t
     seqlen_k = rocke_b_get_param(b, "seqlen_k");
 
     /* per-batch shifts (Python op order). */
-    q_row0 = rocke_b_mul(b, q_tile, c16); /* first Q row of this tile      */
+    rocke_value_t* q_step = spec->transposed_qk
+                               ? rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->num_waves)
+                               : c16;
+    q_row0 = rocke_b_mul(b, q_tile, q_step);
     const bool packed = strcmp(spec->layout, "dense") != 0;
     if(!packed)
     {
@@ -717,7 +755,10 @@ static rocke_status_t
         p.v_scale = rocke_b_get_param(b, "v_scale");
     }
 
-    (void)rocke_mfma_attention_fwd_inner_body(b, &p);
+    if(spec->transposed_qk)
+        (void)rocke_wmma_swapqk_fwd_inner_body(b, &p, spec->block_n, spec->num_waves);
+    else
+        (void)rocke_mfma_attention_fwd_inner_body(b, &p);
 
     /* b.ret() */
     rocke_b_ret(b);
@@ -775,12 +816,15 @@ rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
     {
         return ROCKE_ERR_VALUE;
     }
+    if(spec->transposed_qk && spec->num_waves != 1 && spec->num_waves != 2)
+        return ROCKE_ERR_VALUE;
+    int block_m = ROCKE_WMMA_FMHA_FWD_BLOCK_M * (spec->transposed_qk ? spec->num_waves : 1);
     if(strcmp(spec->layout, "dense") == 0 && !spec->query_tail
-       && seqlen_q % ROCKE_WMMA_FMHA_FWD_BLOCK_M != 0)
+       && seqlen_q % block_m != 0)
     {
         return ROCKE_ERR_VALUE;
     }
-    out[0] = (seqlen_q + ROCKE_WMMA_FMHA_FWD_BLOCK_M - 1) / ROCKE_WMMA_FMHA_FWD_BLOCK_M;
+    out[0] = (seqlen_q + block_m - 1) / block_m;
     out[1] = spec->num_query_heads;
     out[2] = batch;
     return ROCKE_OK;

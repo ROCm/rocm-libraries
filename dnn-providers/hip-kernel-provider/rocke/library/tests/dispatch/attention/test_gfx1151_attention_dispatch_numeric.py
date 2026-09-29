@@ -433,3 +433,29 @@ class TestMetadataSafety(unittest.TestCase):
         k = _fake_tensor((2, 32, 2, 64))
         with self.assertRaises(ValueError):
             self._bind({"q": q, "k": k, "v": k, "out": _fake_tensor((2, 32, 4, 64))})
+
+    def test_transposed_qk_rejects_partial_kv_tiles_before_launch(self):
+        from dispatch.attention.bindings import bind_gfx1151_attention_torch
+
+        q = _fake_tensor((2, 32, 4, 64))
+        k = _fake_tensor((2, 48, 2, 64))
+        with self.assertRaises(ValueError):
+            bind_gfx1151_attention_torch(
+                _dense_request(seqlen_k=48), _dense_spec(transposed_qk=True, block_n=64),
+                {"q": q, "k": k, "v": k, "out": q},
+            )
+
+
+@pytest.mark.gpu
+@_NEEDS_GPU
+def test_dispatch_aligned_gqa_on_nondefault_stream():
+    case = _case(
+        name="dispatch_aligned_gqa", group="dispatch", dtype="fp16", batch=2,
+        seqlen_q=32, seqlen_k=96, heads_q=6, heads_kv=2, head_dim=128,
+        mask="causal_topleft", seed=103,
+    )
+    stream = _create_stream()
+    try:
+        _launch_and_check(case, stream=stream)
+    finally:
+        _destroy_stream(stream)

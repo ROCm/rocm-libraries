@@ -417,6 +417,10 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
 
+    /* New opcodes append to preserve existing C API values. */
+    ROCKE_OP_VECTOR_UNDEF,
+    ROCKE_OP_TILE_BUFFER_LOAD_F16_D16,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -982,6 +986,10 @@ rocke_value_t* rocke_b_vec_pack(rocke_ir_builder_t* b,
                                 int num_components,
                                 const rocke_type_t* elem);
 rocke_value_t* rocke_b_vec_concat(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb);
+/* Freeze-poison base for a vector that will be fully overwritten by inserts
+ * (never a zero substitute). Port of Python IRBuilder.undef_vec / the pinned
+ * PR9710 vector.undef op. */
+rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem, int n);
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
@@ -1265,6 +1273,13 @@ rocke_value_t* rocke_b_buffer_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* rsrc,
                                        rocke_value_t* voffset,
                                        rocke_value_t* soffset);
+/* D16-form scalar half buffer load: raw.ptr.buffer.load.f16 returns `half`
+ * directly (no i16 bitcast). Port of Python IRBuilder.buffer_load_f16_d16 /
+ * the pinned PR9710 tile.buffer_load_f16_d16 op. */
+rocke_value_t* rocke_b_buffer_load_f16_d16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset);
 void rocke_b_buffer_store_vN_f16(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,

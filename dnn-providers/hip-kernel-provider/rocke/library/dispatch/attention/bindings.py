@@ -570,6 +570,11 @@ def _gfx1151_validate_and_collect(request, spec, tensors: Mapping[str, Any]) -> 
     layout = spec.layout
     if layout not in ("dense", "ragged", "paged"):
         raise ValueError(f"unsupported gfx1151 attention layout {layout!r}")
+    if spec.transposed_qk and (
+        int(request.seqlen_q) % spec.q_rows_per_cta
+        or int(request.seqlen_k) % spec.block_n
+    ):
+        raise ValueError("transposed QK requires complete query and KV tiles")
     required = ("q", "k", "v", "out")
     missing = [name for name in required if tensors.get(name) is None]
     if missing:

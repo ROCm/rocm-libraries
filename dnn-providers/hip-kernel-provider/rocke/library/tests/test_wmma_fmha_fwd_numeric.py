@@ -372,3 +372,81 @@ def test_compiled_wmma_preserves_declared_workgroup_limit():
         assert maximum.value == spec.block_size
     finally:
         module.unload()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(get_device_arch() != "gfx1151", reason="needs a gfx1151 GPU")
+@pytest.mark.parametrize(
+    "dimension,block_n,waves,mask,sq,sk,hq,hkv",
+    [
+        (64, 32, 1, "none", 16, 32, 8, 1),
+        (64, 64, 2, "causal", 64, 128, 4, 2),
+        (128, 32, 2, "none", 32, 64, 6, 2),
+        (128, 64, 1, "causal", 16, 64, 4, 4),
+    ],
+)
+def test_transposed_qk_preserves_output_coordinates_and_guards(dimension, block_n, waves, mask, sq, sk, hq, hkv):
+    from benchmarks.gfx1151.attention.benchmark_sdpa import DeviceBuffers
+    from benchmarks.gfx1151.attention.cases import CaseInputs
+    from kernels.gfx1151.wmma_fmha_fwd import (
+        WmmaFmhaFwdSpec, build_wmma_fmha_fwd, wmma_fmha_fwd_grid, wmma_fmha_fwd_signature,
+    )
+    from rocke.helpers import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.packing import pack_args
+
+    batch = 2
+    q = np.zeros((batch, sq, hq, dimension), np.float16)
+    k = np.zeros((batch, sk, hkv, dimension), np.float16)
+    columns = np.arange(dimension).astype(np.float32) / 4
+    v = (
+        np.arange(batch)[:, None, None, None] * 32
+        + np.arange(sk)[None, :, None, None]
+        + np.arange(hkv)[None, None, :, None] * 8
+        + columns[None, None, None, :]
+    ).astype(np.float16)
+    mean_key = np.full(sq, (sk - 1) / 2, np.float32) if mask == "none" else np.minimum(np.arange(sq), sk - 1) / 2
+    expected = (
+        np.arange(batch)[:, None, None, None] * 32
+        + mean_key[None, :, None, None]
+        + (np.arange(hq) // (hq // hkv))[None, None, :, None] * 8
+        + columns[None, None, None, :]
+    ).astype(np.float32)
+    rt = Runtime()
+    buffers = DeviceBuffers(rt, CaseInputs(q=q, k=k, v=v))
+    guard = 64
+    rt.free(buffers.ptrs.pop("rocke_out"))
+    output = np.full(q.size + 2 * guard, 37, np.float16)
+    output[guard:-guard] = np.nan
+    buffers.add("rocke_out", output)
+    module = None
+    try:
+        spec = WmmaFmhaFwdSpec(
+            head_size=dimension, num_query_heads=hq, num_kv_heads=hkv, mask_mode=mask,
+            transposed_qk=True, block_n=block_n, num_waves=waves,
+        )
+        artifact = compile_kernel(build_wmma_fmha_fwd(spec), arch="gfx1151", backend="python")
+        module = rt.load_module(artifact.hsaco)
+        values = dict(
+            Q=buffers.ptrs["q"], K=buffers.ptrs["k"], V=buffers.ptrs["v"],
+            O=buffers.ptrs["rocke_out"] + guard * 2,
+            scale_log2=math.log2(math.e) / math.sqrt(dimension), seqlen_q=sq, seqlen_k=sk,
+        )
+        for name, array in (("q", q), ("k", k), ("v", v), ("o", q)):
+            values[f"stride_{name}_token"] = array.strides[-3] // array.itemsize
+            values[f"stride_{name}_head"] = array.strides[-2] // array.itemsize
+        rt.launch(
+            module.get_function(artifact.kernel_name),
+            wmma_fmha_fwd_grid(spec, seqlen_q=sq, batch=batch), (spec.block_size, 1, 1),
+            pack_args(wmma_fmha_fwd_signature(spec), values),
+        )
+        rt.sync()
+        actual = buffers.read_output("rocke_out")
+        np.testing.assert_array_equal(actual[:guard], np.full(guard, 37, np.float32))
+        np.testing.assert_array_equal(actual[-guard:], np.full(guard, 37, np.float32))
+        np.testing.assert_allclose(actual[guard:-guard].reshape(q.shape), expected, rtol=0, atol=2e-2)
+    finally:
+        rt.sync()
+        if module is not None:
+            module.unload()
+        buffers.close()
