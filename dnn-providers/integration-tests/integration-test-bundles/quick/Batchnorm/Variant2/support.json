@@ -97,6 +97,7 @@
           "2_3_1_1_fp32_nchw",
           "2_3_1_1_fp32_nhwc",
           "2_3_1_bfp16_ncl",
+          "2_3_1_bfp16_ncl_cd34ad",
           "2_3_1_bfp16_nlc",
           "2_3_1_fp16_ncl",
           "2_3_1_fp16_nlc",
@@ -142,35 +143,6 @@
             "linux"
           ],
           "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "2_3_1_bfp16_ncl_cd34ad"
-        ],
-        "support": {
-          "gfx1030": [
-            "windows"
-          ],
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx90a": [
             "linux"
           ],
           "gfx950": [

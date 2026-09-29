@@ -76,6 +76,36 @@
           "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_71eb9a",
           "1_16_3_3_fp32_nhwc_dil1x1_postpad1x1_prepad1x1_8feba3",
           "1_16_3_3_fp32_nhwc_dil2x2_postpad2x2_prepad2x2",
+          "1d_filter1_bfp16_ncl_pad0_stride1",
+          "1d_filter1_bfp16_nlc_pad0_stride1",
+          "1d_filter1_fp16_ncl_pad0_stride1",
+          "1d_filter1_fp16_nlc_pad0_stride1",
+          "1d_filter1_fp32_ncl_pad0_stride1",
+          "1d_filter1_fp32_nlc_pad0_stride1",
+          "1d_filter3_bfp16_ncl_pad0_stride1",
+          "1d_filter3_bfp16_nlc_pad0_stride1",
+          "1d_filter3_fp16_ncl_pad0_stride1",
+          "1d_filter3_fp16_nlc_pad0_stride1",
+          "1d_filter3_fp32_ncl_pad0_stride1",
+          "1d_filter3_fp32_nlc_pad0_stride1",
+          "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_bfp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp16_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp16_nlc_pad1_stride1",
+          "1d_filter3_pad1_fp32_ncl_pad1_stride1",
+          "1d_filter3_pad1_fp32_nlc_pad1_stride1",
+          "1d_filter3_pad1_stride2_bfp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_bfp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp16_nlc_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
+          "1d_filter3_pad1_stride2_fp32_nlc_pad1_stride2",
+          "1d_grouped2_bfp16_ncl_pad1_stride1",
+          "1d_grouped2_bfp16_nlc_pad1_stride1",
+          "1d_grouped2_fp16_ncl_pad1_stride1",
+          "1d_grouped2_fp16_nlc_pad1_stride1",
+          "1d_grouped2_fp32_ncl_pad1_stride1",
+          "1d_grouped2_fp32_nlc_pad1_stride1",
           "2_8_3_3_3_bfp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
           "2_8_3_3_3_bfp16_ndhwc_dil1x1x1_postpad1x1x1_prepad1x1x1",
           "2_8_3_3_3_fp16_ncdhw_dil1x1x1_postpad1x1x1_prepad1x1x1",
@@ -134,64 +164,6 @@
             "linux"
           ],
           "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "1d_filter1_bfp16_ncl_pad0_stride1",
-          "1d_filter1_bfp16_nlc_pad0_stride1",
-          "1d_filter1_fp16_ncl_pad0_stride1",
-          "1d_filter1_fp16_nlc_pad0_stride1",
-          "1d_filter1_fp32_ncl_pad0_stride1",
-          "1d_filter1_fp32_nlc_pad0_stride1",
-          "1d_filter3_bfp16_ncl_pad0_stride1",
-          "1d_filter3_bfp16_nlc_pad0_stride1",
-          "1d_filter3_fp16_ncl_pad0_stride1",
-          "1d_filter3_fp16_nlc_pad0_stride1",
-          "1d_filter3_fp32_ncl_pad0_stride1",
-          "1d_filter3_fp32_nlc_pad0_stride1",
-          "1d_filter3_pad1_bfp16_ncl_pad1_stride1",
-          "1d_filter3_pad1_bfp16_nlc_pad1_stride1",
-          "1d_filter3_pad1_fp16_ncl_pad1_stride1",
-          "1d_filter3_pad1_fp16_nlc_pad1_stride1",
-          "1d_filter3_pad1_fp32_ncl_pad1_stride1",
-          "1d_filter3_pad1_fp32_nlc_pad1_stride1",
-          "1d_filter3_pad1_stride2_bfp16_ncl_pad1_stride2",
-          "1d_filter3_pad1_stride2_bfp16_nlc_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp16_ncl_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp16_nlc_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp32_ncl_pad1_stride2",
-          "1d_filter3_pad1_stride2_fp32_nlc_pad1_stride2",
-          "1d_grouped2_bfp16_ncl_pad1_stride1",
-          "1d_grouped2_bfp16_nlc_pad1_stride1",
-          "1d_grouped2_fp16_ncl_pad1_stride1",
-          "1d_grouped2_fp16_nlc_pad1_stride1",
-          "1d_grouped2_fp32_ncl_pad1_stride1",
-          "1d_grouped2_fp32_nlc_pad1_stride1"
-        ],
-        "support": {
-          "gfx1030": [
-            "windows"
-          ],
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx90a": [
             "linux"
           ],
           "gfx950": [

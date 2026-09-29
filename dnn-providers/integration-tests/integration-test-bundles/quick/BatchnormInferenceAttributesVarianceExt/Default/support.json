@@ -155,7 +155,8 @@
           "4_3_1_fp16_ncl",
           "4_3_1_fp16_nlc",
           "4_3_1_fp32_ncl",
-          "4_3_1_fp32_nlc"
+          "4_3_1_fp32_nlc",
+          "runtime_epsilon"
         ],
         "support": {
           "gfx1030": [
@@ -178,35 +179,6 @@
             "linux"
           ],
           "gfx942": [
-            "linux"
-          ],
-          "gfx950": [
-            "linux"
-          ]
-        }
-      },
-      {
-        "cases": [
-          "runtime_epsilon"
-        ],
-        "support": {
-          "gfx1030": [
-            "windows"
-          ],
-          "gfx1101": [
-            "linux"
-          ],
-          "gfx1150": [
-            "linux"
-          ],
-          "gfx1151": [
-            "linux",
-            "windows"
-          ],
-          "gfx1201": [
-            "linux"
-          ],
-          "gfx90a": [
             "linux"
           ],
           "gfx950": [
