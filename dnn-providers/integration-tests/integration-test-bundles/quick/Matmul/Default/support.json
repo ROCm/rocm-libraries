@@ -104,6 +104,9 @@
           "gfx1151": [
             "linux"
           ],
+          "gfx1200": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],

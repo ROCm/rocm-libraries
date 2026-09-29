@@ -11,6 +11,9 @@
         "linux",
         "windows"
       ],
+      "gfx1200": [
+        "linux"
+      ],
       "gfx90a": [
         "linux"
       ],
