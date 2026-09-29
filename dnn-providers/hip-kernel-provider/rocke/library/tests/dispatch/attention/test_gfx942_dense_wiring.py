@@ -246,6 +246,20 @@ class TestGfx942DensePersistent(unittest.TestCase):
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)
 
+    def test_large_causal_mha_stays_non_persistent_with_swizzled_head_first(self):
+        with _Gfx942Arch():
+            req = _req(
+                batch=16,
+                nhead_q=64,
+                nhead_k=64,
+                seqlen_q=4096,
+                seqlen_k=4096,
+                dense_persistent="auto",
+            )
+            spec = _dense_spec(req)
+            self.assertFalse(spec.persistent)
+            self.assertEqual(spec.resolved_nonpersist_decode, "hq_minor_swz")
+
     def test_explicit_persistent_on_is_accepted_and_builds_persistent(self):
         """Post-P4 the persistent variant ships, so an explicit 'on' is accepted
         and yields a genuinely persistent spec -- never silently downgraded to a

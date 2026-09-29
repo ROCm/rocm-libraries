@@ -1408,6 +1408,33 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertIn("bt_hkv_minor", names)
                 self.assertEqual(len(set(names.values())), len(names), names)
 
+    def test_nonpersist_auto_decode_by_shape(self):
+        """Non-persistent auto: Swizzled Head-first for large causal MHA,
+        bt_hkv_minor for other causal attention, qb_minor otherwise."""
+        from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+        from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
+
+        cases = [
+            # (Hq, Hkv, S, B, causal, extra) -> expected
+            ((64, 64, 8192, 4, True, {}), "hq_minor_swz"),  # 32 blocks, 8192 items
+            ((128, 128, 4096, 4, True, {}), "hq_minor_swz"),  # 16 blocks
+            ((64, 8, 8192, 4, True, {}), "bt_hkv_minor"),  # GQA
+            ((128, 128, 2048, 8, True, {}), "bt_hkv_minor"),  # only 8 blocks
+            ((32, 32, 8192, 4, True, {}), "bt_hkv_minor"),  # 4096 items
+            ((64, 64, 8192, 4, True, {"chiplet_num_xcds": 128}), "bt_hkv_minor"),
+            ((64, 64, 8192, 4, True, {"sliding_window": 512}), "qb_minor"),
+            ((64, 64, 8192, 4, False, {}), "qb_minor"),
+        ]
+        for Spec in (Gfx942AttentionDenseSpec, Gfx950AttentionDenseSpec):
+            for (hq, hkv, s, b, causal, extra), want in cases:
+                with self.subTest(spec=Spec.__name__, shape=(hq, hkv, s, b, causal),
+                                  extra=extra):
+                    spec = Spec(batch=b, seqlen_q=s, seqlen_kv=s,
+                                num_query_heads=hq, num_kv_heads=hkv,
+                                head_size=128, causal=causal, dtype="fp16",
+                                block_n=64, **extra)
+                    self.assertEqual(spec.resolved_nonpersist_decode, want)
+
     def test_nonpersist_decode_builds_names_and_rejects_on_both_arches(self):
         """Every nonpersist decode builds, fills the grid and gets its own name;
         an explicit value on the persistent grid, or an unknown one, is rejected."""
@@ -2990,6 +3017,33 @@ class TestAttentionDenseRuntimeShapeCollision(unittest.TestCase):
             "AttentionDenseSpec.runtime_param_fields so it splits the key again.",
         )
 
+    def test_shape_dependent_auto_order_splits_the_key(self):
+        """The auto non-persistent order reads batch/seqlen (hq_minor_swz for
+        large causal MHA), so runtime-shape specs that resolve to different
+        orders must not share a key; the same order still shares one kernel."""
+        from dataclasses import replace
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        base = AttentionDenseSpec(**{**self._BASE_KWARGS, "num_kv_heads": 32})
+        small = replace(base, batch=1, seqlen_q=512, seqlen_kv=512)
+        large = replace(base, batch=16, seqlen_q=4096, seqlen_kv=4096)
+        larger = replace(base, batch=32, seqlen_q=4096, seqlen_kv=4096)
+        self.assertTrue(small.runtime_shape and large.runtime_shape)
+        self.assertNotEqual(small.resolved_nonpersist_decode,
+                            large.resolved_nonpersist_decode)
+        self.assertEqual(large.resolved_nonpersist_decode,
+                         larger.resolved_nonpersist_decode)
+
+        def key(spec):
+            return attention_dense_cache_key(spec, arch="gfx950")
+
+        self.assertNotEqual(key(small), key(large))
+        self.assertEqual(key(large), key(larger))
+        self.assertEqual(large.kernel_name(), larger.kernel_name())
+        self.assertEqual(self._ir_sha(large), self._ir_sha(larger))
+
     def test_baked_shape_specs_split_both_key_and_ir(self):
         """Control: off the runtime path, each shape keeps its own key and IR.
 
@@ -3149,6 +3203,32 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     name,
                     f"runtime-shape gfx942 name still carries {tok!r}: {name}",
                 )
+
+    def test_shape_dependent_auto_order_splits_the_key(self):
+        """The auto non-persistent order reads batch/seqlen (hq_minor_swz for
+        large causal MHA), so runtime-shape specs that resolve to different
+        orders must not share a key; the same order still shares one kernel."""
+        from dataclasses import replace
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+
+        base = self._spec(**{**self._BASE_KWARGS, "num_kv_heads": 32})
+        small = replace(base, batch=1, seqlen_q=512, seqlen_kv=512)
+        large = replace(base, batch=16, seqlen_q=4096, seqlen_kv=4096)
+        larger = replace(base, batch=32, seqlen_q=4096, seqlen_kv=4096)
+        self.assertTrue(small.runtime_shape and large.runtime_shape)
+        self.assertNotEqual(small.resolved_nonpersist_decode,
+                            large.resolved_nonpersist_decode)
+        self.assertEqual(large.resolved_nonpersist_decode,
+                         larger.resolved_nonpersist_decode)
+
+        def key(spec):
+            return attention_dense_cache_key(spec, arch="gfx942")
+
+        self.assertNotEqual(key(small), key(large))
+        self.assertEqual(key(large), key(larger))
+        self.assertEqual(large.kernel_name(), larger.kernel_name())
+        self.assertEqual(self._ir_sha(large), self._ir_sha(larger))
 
     def test_grid_still_varies_per_shape_under_one_cache_key(self):
         """One binary, but a fresh launch grid for every shape.
@@ -3518,13 +3598,17 @@ class TestDenseSpecPreflight(unittest.TestCase):
         from kernels.common.attention_dense_spec import attention_dense_cache_key
         from kernels.gfx950.attention_dense import supports_attention_dense
 
-        small = self._spec(batch=1, num_query_heads=8, num_kv_heads=8)
+        # One pinned block order: auto would pick a different one per shape.
+        small = self._spec(
+            batch=1, num_query_heads=8, num_kv_heads=8, nonpersist_decode="bt_hkv_minor"
+        )
         huge = self._spec(
             batch=64,
             seqlen_q=16384,
             seqlen_kv=16384,
             num_query_heads=8,
             num_kv_heads=8,
+            nonpersist_decode="bt_hkv_minor",
         )
         self.assertTrue(small.runtime_shape and huge.runtime_shape)
         self.assertEqual(

@@ -20,6 +20,7 @@ from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
     NonpersistBtHkvMinor,
+    NonpersistHqMinorSwz,
     NonpersistQbMinor,
     PersistBtHkvMinor,
     PersistHkvMajor,
@@ -315,9 +316,17 @@ class AttentionDenseSpec:
         stays the best measured order without causal masking."""
         if self.nonpersist_decode != "auto":
             return self.nonpersist_decode
-        if self._aligned_causal:
-            return NonpersistBtHkvMinor.name
-        return NonpersistQbMinor.name
+        if not self._aligned_causal:
+            return NonpersistQbMinor.name
+        # Swizzled Head-first measured ahead of every other order, persistent
+        # or not, on causal MHA with enough query blocks per head and enough
+        # work per CU; it loses on GQA and on small problems.
+        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+        hq = self.num_query_heads
+        if (hq == self.num_kv_heads and hq % self.chiplet_num_xcds == 0
+                and nqb >= 16 and self.batch * hq * nqb >= 8192):
+            return NonpersistHqMinorSwz.name
+        return NonpersistBtHkvMinor.name
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -433,6 +442,11 @@ def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
         (f.name, getattr(spec, f.name))
         for f in _dataclass_fields(spec)
         if f.name not in skip
+    ) + (
+        # The auto block order may read shape fields the skip drops, so the
+        # order the kernel actually uses is part of the identity.
+        ("block_order", spec.resolved_persist_decode if spec.persistent
+         else spec.resolved_nonpersist_decode),
     )
     return (arch, type(spec), rest)
 

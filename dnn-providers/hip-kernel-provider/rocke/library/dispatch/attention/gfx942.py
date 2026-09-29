@@ -140,10 +140,11 @@ def _dense_spec(req: OperatorRequest):
     """Build the gfx942 ``AttentionDenseSpec`` for ``req`` at its best config.
 
     The gfx942 twin of :func:`dispatch.attention.gfx950._dense_spec`. Persistent
-    ("auto") turns on the grid-stride variant at large batch, and
-    non-tile-multiple self-attention lengths take the on-chip ragged path (no host
-    pad) -- but a different tuning, which is the whole reason the two are separate
-    functions rather than one with an arch branch:
+    ("auto") turns on the grid-stride variant at large batch, unless the
+    non-persistent auto order is Swizzled Head-first, and non-tile-multiple
+    self-attention lengths take the on-chip ragged path (no host pad) -- but a
+    different tuning, which is the whole reason the two are separate functions
+    rather than one with an arch branch:
 
     * ``num_persistent`` defaults to :data:`_GFX942_NUM_PERSISTENT` (304 CUs) rather
       than the shared 256; it sizes the persistent grid.
@@ -165,6 +166,7 @@ def _dense_spec(req: OperatorRequest):
     returns :class:`Gfx942AttentionDenseSpec` directly so unsupported gfx950 knobs
     cannot enter this path and no later promotion can change its meaning.
     """
+    from kernels.common.attention_dense_decode import NonpersistHqMinorSwz
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
@@ -203,7 +205,7 @@ def _dense_spec(req: OperatorRequest):
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
         )
-    return Gfx942AttentionDenseSpec(
+    spec = Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
         seqlen_kv=sk,
@@ -224,6 +226,13 @@ def _dense_spec(req: OperatorRequest):
             req, _tuned_waves_per_eu(head_size, dtype)
         ),
     )
+    if mode == "auto" and persistent:
+        # Stay on the non-persistent grid where its auto order is Swizzled
+        # Head-first: measured ahead of the persistent grid there.
+        grid_spec = replace(spec, persistent=False)
+        if grid_spec.resolved_nonpersist_decode == NonpersistHqMinorSwz.name:
+            return grid_spec
+    return spec
 
 
 def dense_spec_for_request(req: AttentionRequest):

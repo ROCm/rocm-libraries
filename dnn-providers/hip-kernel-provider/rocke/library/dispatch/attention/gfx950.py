@@ -144,9 +144,11 @@ def _auto_variant(req: AttentionRequest) -> Gfx950DenseVariant:
     """Historical serving/strata policy, expressed as a catalog entry.
 
     Tile is ``default`` unless pinned. Persist turns on once
-    ``nqb * Hq * B >= num_persistent``. Wide DMA follows persist + D128 +
-    causal + aligned + no sinks.
+    ``nqb * Hq * B >= num_persistent``, unless the non-persistent auto order is
+    Swizzled Head-first. Wide DMA follows persist + D128 + causal + aligned + no
+    sinks.
     """
+    from kernels.common.attention_dense_decode import NonpersistHqMinorSwz
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
     tile = _parse_tile(req.dense_tile)
@@ -178,6 +180,12 @@ def _auto_variant(req: AttentionRequest) -> Gfx950DenseVariant:
         persistent = False
     else:
         persistent = False if moving_bottom_right else work >= np
+        # Stay on the non-persistent grid where its auto order is Swizzled
+        # Head-first: measured ahead of the persistent grid there.
+        if persistent:
+            grid_spec = _dense_spec(req, _lookup_variant(tile, False, False))
+            if grid_spec.resolved_nonpersist_decode == NonpersistHqMinorSwz.name:
+                persistent = False
     wdma_mode = _parse_on_off_auto(req.dense_wide_lds_dma, "dense_wide_lds_dma")
     wdma_ok = _wide_dma_eligible(
         req, SimpleNamespace(persistent=persistent, ragged=ragged)
@@ -265,7 +273,7 @@ def _dense_spec(req: OperatorRequest, variant: Gfx950DenseVariant | None = None)
     """Build the launch-ready ``Gfx950AttentionDenseSpec`` for ``variant``.
 
     Tile, persist, and wide-DMA come from the frozen variant. ``persist_decode``
-    stays on the request (``auto`` selects GQA-local mappings inside the spec).
+    stays on the request (``auto`` resolves inside the spec).
     Non-tile-multiple self-attention lengths use the on-chip ragged path.
     ``variant=None`` keeps the one-argument call used by existing tests and
     selects the auto-policy variant.
