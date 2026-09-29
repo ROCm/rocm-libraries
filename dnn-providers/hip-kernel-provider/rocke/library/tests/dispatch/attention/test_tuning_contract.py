@@ -29,7 +29,9 @@ def _req(**kw) -> AttentionRequest:
 
 
 def _check(test, prefixes, requests, **kwargs):
-    for candidate in representative(ATTENTION_EXECUTION_REGISTRY.candidates(), prefixes):
+    for candidate in representative(
+        ATTENTION_EXECUTION_REGISTRY.candidates(), prefixes
+    ):
         with test.subTest(candidate=candidate.name):
             counts = assert_tuning_contract(candidate, requests, **kwargs)
             test.assertGreater(counts["replays"], 0)
@@ -57,8 +59,13 @@ class TestAttentionTuningContract(unittest.TestCase):
         _check(
             self,
             ["attention_gfx942_dense"],
-            [_req(arch="gfx942", dtype="fp16"), _req(arch="gfx942", hdim_q=64, hdim_v=64)],
-            other_requests=[_req(arch="gfx942", dtype="fp16", seqlen_q=4096, seqlen_k=4096)],
+            [
+                _req(arch="gfx942", dtype="fp16"),
+                _req(arch="gfx942", hdim_q=64, hdim_v=64),
+            ],
+            other_requests=[
+                _req(arch="gfx942", dtype="fp16", seqlen_q=4096, seqlen_k=4096)
+            ],
             refused_knobs=[{"lazy_rescale": False}],
         )
 

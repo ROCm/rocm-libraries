@@ -87,4 +87,6 @@ def knob_requirements(axes: Tuple[KnobAxis, ...]) -> Mapping[str, str]:
 
 def axis_knob_names(axes: Tuple[KnobAxis, ...]) -> frozenset:
     """Every kernel-spec field some choice on ``axes`` sets."""
-    return frozenset(name for axis in axes for choice in axis.choices for name, _ in choice)
+    return frozenset(
+        name for axis in axes for choice in axis.choices for name, _ in choice
+    )

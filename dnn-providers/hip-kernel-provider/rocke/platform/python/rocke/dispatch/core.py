@@ -1042,8 +1042,9 @@ class CandidateRegistry:
         spec_filter: Callable[[Any], bool] | None = None,
         sample: int = 0,
         seed: int = 0,
-        pin_request: Callable[[OperatorRequest, KernelCandidate, Any], OperatorRequest]
-        | None = None,
+        pin_request: (
+            Callable[[OperatorRequest, KernelCandidate, Any], OperatorRequest] | None
+        ) = None,
     ) -> Iterable[DispatchResult]:
         """One :class:`DispatchResult` per :meth:`iter_combos` entry.
 
@@ -1080,7 +1081,9 @@ class CandidateRegistry:
                 ),
             )
 
-    def dispatch_all(self, request: OperatorRequest, **kwargs) -> Tuple[DispatchResult, ...]:
+    def dispatch_all(
+        self, request: OperatorRequest, **kwargs
+    ) -> Tuple[DispatchResult, ...]:
         """Materialized :meth:`iter_dispatch_all`."""
         return tuple(self.iter_dispatch_all(request, **kwargs))
 
@@ -1103,7 +1106,9 @@ class CandidateRegistry:
             return ranked[0]
         spec_id = _request_selector(request, "spec_id")
         if spec_id != "auto":
-            named = [c for c in self.candidates() if normalize_selector(c.spec_id) == spec_id]
+            named = [
+                c for c in self.candidates() if normalize_selector(c.spec_id) == spec_id
+            ]
             refusals = {c.name: c.admits(request)[1] for c in named}
             raise PinRefused(request, spec_id, refusals)
         reasons = []

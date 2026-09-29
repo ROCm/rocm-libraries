@@ -195,9 +195,7 @@ def sweep(args) -> list[dict]:
                     _store_row(rows, rec, args)
                     print(f"SKIP {label} S={s}: no registered combo", flush=True)
                     continue
-                _sweep_one(
-                    req, result, index, shape, first_by_ir, rows, run_args, args
-                )
+                _sweep_one(req, result, index, shape, first_by_ir, rows, run_args, args)
                 torch.cuda.empty_cache()
         except Exception as exc:  # noqa: BLE001  # registry walk, not one config
             rec = dict(shape, status="error", reason=f"{type(exc).__name__}: {exc}")

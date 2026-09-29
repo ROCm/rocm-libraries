@@ -80,23 +80,31 @@ class TestCanonicalKnobs(unittest.TestCase):
                 )
                 self.assertEqual(by_knobs, built)
                 if in_production:
-                    self.assertEqual(attention_tuning_spec(req, spec_id, built.tuning_id), built)
+                    self.assertEqual(
+                        attention_tuning_spec(req, spec_id, built.tuning_id), built
+                    )
                 else:
-                    with self.assertRaisesRegex(PinRefused, "must be pinned with its tuning_knobs"):
+                    with self.assertRaisesRegex(
+                        PinRefused, "must be pinned with its tuning_knobs"
+                    ):
                         attention_tuning_spec(req, spec_id, built.tuning_id)
 
     def test_knobs_that_do_not_reproduce_the_id_are_refused(self):
         req = _req()
         built = tuning_spec_with_knobs(req, _DENSE, {"pv_priority": 2})
         with self.assertRaisesRegex(ValueError, "canonicalize to"):
-            attention_tuning_spec(req, _DENSE, built.tuning_id, knobs={"pv_priority": 3})
+            attention_tuning_spec(
+                req, _DENSE, built.tuning_id, knobs={"pv_priority": 3}
+            )
 
     def test_inert_unified_knobs_are_dropped(self):
         req = _req()
         default = attention_tuning_spec(req, _UNIFIED)
         # Softmax interleave is emitted only on the transposed body.
         self.assertEqual(
-            tuning_spec_with_knobs(req, _UNIFIED, {"use_softmax_mfma_interleave": True}),
+            tuning_spec_with_knobs(
+                req, _UNIFIED, {"use_softmax_mfma_interleave": True}
+            ),
             default,
         )
         # A gated sub-knob without its gate is never read.
@@ -116,13 +124,15 @@ class TestCanonicalKnobs(unittest.TestCase):
         grid = "gfx950_dense_grid_default"
         # The grid body never reads the persistent-only knobs.
         self.assertEqual(
-            tuning_spec_with_knobs(req, grid, {"lazy_rescale_threshold": 2.0,
-                                               "lazy_rescale": True}),
+            tuning_spec_with_knobs(
+                req, grid, {"lazy_rescale_threshold": 2.0, "lazy_rescale": True}
+            ),
             tuning_spec_with_knobs(req, grid, {"lazy_rescale_threshold": 2.0}),
         )
         self.assertEqual(
-            tuning_spec_with_knobs(req, _DENSE, {"lazy_rescale": False,
-                                                 "lazy_rescale_threshold": 2.0}),
+            tuning_spec_with_knobs(
+                req, _DENSE, {"lazy_rescale": False, "lazy_rescale_threshold": 2.0}
+            ),
             tuning_spec_with_knobs(req, _DENSE, {"lazy_rescale": False}),
         )
 
@@ -143,9 +153,7 @@ class TestCanonicalKnobs(unittest.TestCase):
             c
             for c in ATTENTION_EXECUTION_REGISTRY.candidates()
             if c.spec_id.startswith("gfx942_u2d_transposed_x8")
-            and c.admits(
-                replace(req, algorithm=c.algorithm, spec_id=c.spec_id)
-            )[0]
+            and c.admits(replace(req, algorithm=c.algorithm, spec_id=c.spec_id))[0]
         )
         with self.assertRaisesRegex(ValueError, "wrong output"):
             tuning_spec_with_knobs(req, tuning.spec_id, {"use_k_hbm_direct": True})
@@ -172,7 +180,10 @@ class TestProblemIndependentIdentity(unittest.TestCase):
         )
 
     def test_samplers_dedupe_by_tuning_id(self):
-        for prefix in ("attention_gfx950_dense_persist_default", "attention_" + _UNIFIED):
+        for prefix in (
+            "attention_gfx950_dense_persist_default",
+            "attention_" + _UNIFIED,
+        ):
             with self.subTest(prefix=prefix):
                 ids = [
                     spec.tuning_id
@@ -253,8 +264,11 @@ class TestStoredPinsAcrossReleases(unittest.TestCase):
                 "no registered candidate has spec_id",
             ),
             "unknown id": (
-                replace(_pin(_DENSE, stored), tuning_id="persist_default_wpe2@" + "0" * 16,
-                        tuning_knobs=()),
+                replace(
+                    _pin(_DENSE, stored),
+                    tuning_id="persist_default_wpe2@" + "0" * 16,
+                    tuning_knobs=(),
+                ),
                 "unknown tuning_id",
             ),
             "knobs do not reproduce the id": (
@@ -282,7 +296,9 @@ class TestStoredPinsAcrossReleases(unittest.TestCase):
         self.assertEqual(default.knobs, ())
         from dispatch.attention.dense_rules import DenseSpace
 
-        with mock.patch.object(DenseSpace, "find", side_effect=AssertionError("walked")):
+        with mock.patch.object(
+            DenseSpace, "find", side_effect=AssertionError("walked")
+        ):
             pinned = _pin(_DENSE, default, seqlen_q=2048, seqlen_k=2048)
             self.assertEqual(dispatch_attention(pinned).spec, default)
 
@@ -314,7 +330,10 @@ class TestRegistryAndSweepState(unittest.TestCase):
                 _req(), candidate_prefix=prefix, sweep_level=level, tuning_sample=4
             )
 
-        alone = {level: [s.tuning_id for _c, s in sweep(level)] for level in ("production", "full")}
+        alone = {
+            level: [s.tuning_id for _c, s in sweep(level)]
+            for level in ("production", "full")
+        }
         a, b = sweep("production"), sweep("full")
         mixed = {"production": [], "full": []}
         for (_ca, sa), (_cb, sb) in zip(a, b, strict=False):

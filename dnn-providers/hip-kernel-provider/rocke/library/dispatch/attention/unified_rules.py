@@ -223,8 +223,12 @@ class UnifiedSpace(KnobSpace):
 
     def build(self, base, knobs, waves_per_eu):
         if self.path == "3d":
-            return UnifiedKernels(*_explicit_3d_specs(base, self.variant, knobs, waves_per_eu))
-        return UnifiedKernels(_explicit_2d_spec(base, self.variant, knobs, waves_per_eu))
+            return UnifiedKernels(
+                *_explicit_3d_specs(base, self.variant, knobs, waves_per_eu)
+            )
+        return UnifiedKernels(
+            _explicit_2d_spec(base, self.variant, knobs, waves_per_eu)
+        )
 
     def field_value(self, kernel, name):
         return getattr(kernel.kernel_spec, name, MISSING)
@@ -234,7 +238,9 @@ class UnifiedSpace(KnobSpace):
         return {
             "codepath": dict(self.fixed(base)),
             "kernel": dict(_declared_defaults(type(kernel.kernel_spec))),
-            "reduce": None if reduce is None else dict(_declared_defaults(type(reduce))),
+            "reduce": (
+                None if reduce is None else dict(_declared_defaults(type(reduce)))
+            ),
         }
 
     def base_value(self, base, kernel, name):
@@ -298,7 +304,9 @@ def canonicalize_tuning_spec(
     return unified_space(variant).canonicalize(problem, knobs)
 
 
-def _explicit_configs(problem, variant: AttentionGeometryVariant) -> Iterable[AttentionTuningSpec]:
+def _explicit_configs(
+    problem, variant: AttentionGeometryVariant
+) -> Iterable[AttentionTuningSpec]:
     return unified_space(variant).stream(problem, "full")
 
 
