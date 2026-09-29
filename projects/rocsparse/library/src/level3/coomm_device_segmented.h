@@ -511,7 +511,8 @@ namespace rocsparse
                         = (tid + i < nblocks) ? row_block_red[tid + i + nblocks * batch] : -1;
                     shared_val[tid]
                         = (tid + i < nblocks)
-                              ? val_block_red[tid + i + nblocks * col + nblocks * n * batch]
+                              ? val_block_red[tid + i + static_cast<int64_t>(nblocks) * col
+                                              + static_cast<int64_t>(nblocks) * n * batch]
                               : static_cast<T>(0);
 
                     __syncthreads();
