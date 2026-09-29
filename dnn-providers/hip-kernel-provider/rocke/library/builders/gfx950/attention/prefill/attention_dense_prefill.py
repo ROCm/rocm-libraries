@@ -40,13 +40,14 @@ from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES  # noqa: E
 from kernels.gfx950.attention_dense import (  # noqa: E402
     GFX950_DENSE_LAYOUTS,
     Gfx950AttentionDenseSpec,
+    _has_shape_params,
     attention_dense_block,
     attention_dense_grid,
+    attention_dense_signature,
     build_attention_dense,
     supports_attention_dense,
 )
 from rocke.helpers.compile import compile_kernel  # noqa: E402
-from rocke.helpers.spec import SignatureBuilder  # noqa: E402
 from rocke.runtime import (  # noqa: E402
     KernelLauncher,
     LaunchConfig,
@@ -69,26 +70,11 @@ def _make_launcher(spec: Gfx950AttentionDenseSpec):
         backend="python",
         capture_ir_text=False,
     )
-    sb = (
-        SignatureBuilder()
-        .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
-        .ptr("o_ptr", spec.dtype)
-        .scalar("scale", "f32")
+    return KernelLauncher(
+        hsaco=art.hsaco,
+        kernel_name=art.kernel_name,
+        signature=attention_dense_signature(spec),
     )
-    if spec.runtime_shape:
-        sb = (
-            sb.scalar("batch", "i32")
-            .scalar("seqlen_q", "i32")
-            .scalar("seqlen_kv", "i32")
-        )
-    if spec.use_sinks:
-        sb = sb.ptr("sink_ptr", spec.dtype)
-    if spec.varlen:
-        sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
-    sig = sb.build()
-    return KernelLauncher(hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig)
 
 
 def _launch_config(spec: Gfx950AttentionDenseSpec, stream) -> LaunchConfig:
@@ -236,7 +222,7 @@ def run(
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
-    if spec.runtime_shape:
+    if _has_shape_params(spec):
         vals["batch"] = int(spec.batch)
         vals["seqlen_q"] = int(spec.seqlen_q)
         vals["seqlen_kv"] = int(spec.seqlen_kv)
