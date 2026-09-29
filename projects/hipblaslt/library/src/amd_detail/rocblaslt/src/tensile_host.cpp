@@ -36,6 +36,7 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
+#include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -1962,7 +1963,16 @@ namespace
         TensileLite::TensorDescriptor scaleD{"scaleD"};
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
 
-        // The ContractionProblemGemm
+        const TensileLite::TensorOps aOps
+            = prob.trans_a == HIPBLAS_OP_C
+                  ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                  : TensileLite::TensorOps{};
+        const TensileLite::TensorOps bOps
+            = prob.trans_b == HIPBLAS_OP_C
+                  ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                  : TensileLite::TensorOps{};
+
+        // Pass tensor operations at construction so the cached operation identifier includes them.
         TensileLite::ContractionProblemGemm tensileProblem{a,
                                                            b,
                                                            c,
@@ -1978,6 +1988,10 @@ namespace
                                                            batchIndex,
                                                            boundIndex,
                                                            value_category(beta),
+                                                           aOps,
+                                                           bOps,
+                                                           {},
+                                                           {},
                                                            prob.workspaceSize};
 
         tensileProblem.setComputeInputTypeA(
@@ -2117,6 +2131,17 @@ namespace
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
 
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+#endif
+
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
                                              ? TensileLite::ActivationType::Hipblaslt_all
@@ -2238,11 +2263,14 @@ namespace
                                    {prob.m, prob.n, prob.batch_count},
                                    {prob.row_stride_d, prob.col_stride_d, prob.batch_stride_d});
 
-        if(prob.trans_a == HIPBLAS_OP_C)
-            tensileProblem.setAOps({TensileLite::TensorOp::ComplexConjugate()});
-
-        if(prob.trans_b == HIPBLAS_OP_C)
-            tensileProblem.setBOps({TensileLite::TensorOp::ComplexConjugate()});
+        tensileProblem.setAOps(
+            prob.trans_a == HIPBLAS_OP_C
+                ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                : TensileLite::TensorOps{});
+        tensileProblem.setBOps(
+            prob.trans_b == HIPBLAS_OP_C
+                ? TensileLite::TensorOps{TensileLite::TensorOp::ComplexConjugate()}
+                : TensileLite::TensorOps{});
 
         double alpha = 0, beta = 0;
         assignAlphaBeta(compute_type, a_type, prob.alpha, prob.beta, &alpha, &beta);
@@ -2382,6 +2410,17 @@ namespace
         tensileProblem.setScaleB(compute_type, 1);
         tensileProblem.setScaleC(compute_type);
         tensileProblem.setScaleD(compute_type);
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            tensileProblem.setFusedGemmA2A(true);
+            tensileProblem.setFusedA2AExtent(fusedInfo.a2aExtent);
+            tensileProblem.setFusedA2AWorld(prob.fused_a2a_world);
+        }
+#endif
 
         // set Actvation
         tensileProblem.setActivationType(is_act_enabled(prob.epilogue)
@@ -2657,6 +2696,23 @@ namespace
             inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }
+
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        // Device-side fused-A2A operands.
+        RocblasltFusedEpilogueInfo fusedInfo;
+        if(rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, fusedInfo)
+           && fusedInfo.hasA2APrefix)
+        {
+            inputs.fusedA2ACounter = prob.Synchronizer;
+            inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
+                                                                      fusedInfo.a2aRecvPtrs,
+                                                                      prob.fused_a2a_world,
+                                                                      fusedInfo.commChannel,
+                                                                      fusedInfo.a2aSdmaQueues);
+            inputs.fusedA2AMyRank = prob.fused_a2a_rank;
+            inputs.fusedA2ADrain  = rocblaslt::fusedA2ADrainFor(fusedInfo.a2aCompletionMode);
+        }
+#endif
 
         return inputs;
     }
@@ -3159,27 +3215,6 @@ namespace
         return nullptr;
     }
 
-#if 0
-    /**************************************************************************
-    * We normally print error messages only once, to avoid excessive logging *
-    **************************************************************************/
-    void print_once(const std::ostream& msg)
-    {
-        if(rocblaslt_suppress_tensile_error_messages())
-            return;
-        static constexpr char varname[] = "ROCBLASLT_VERBOSE_TENSILE_ERROR";
-        static const char*    verbose   = getenv(varname);
-        if(!verbose)
-        {
-            static auto& once = std::cerr
-                                << msg
-                                << "\nThis message will be only be displayed once, unless the "
-                                << varname << " environment variable is set." << std::endl;
-        }
-        else
-            std::cerr << msg << std::endl;
-    }
-#endif
 } // namespace
 
 struct TensileDataGemm
@@ -3595,10 +3630,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
 
         if(!solution)
         {
-#if 0
-            std::ostream msg;
-            print_once(msg << "\nrocblaslt error: No Tensile solution found for " << prob);
-#endif
             status = rocblaslt_status_not_implemented;
         }
         else
@@ -3671,19 +3702,9 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3728,19 +3749,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -3825,19 +3836,9 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4098,19 +4099,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4264,19 +4255,9 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4327,19 +4308,9 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: "
-                       << "Is hostDeviceUserArgs not match the size of the problem type? " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: "
-                       << "Is hostDeviceUserArgs not match the size of the problem type? " << prob);
-#endif
     }
 
     return status;
@@ -4451,19 +4422,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -4514,19 +4475,9 @@ rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             h
     }
     catch(const std::exception& e)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but exception thrown for " << prob << e.what());
-#endif
     }
     catch(...)
     {
-#if 0
-        std::ostream msg;
-        print_once(msg << "\nrocblaslt error: " << (solution ? "" : "No ")
-                       << "Tensile solution found, but unknown exception thrown for " << prob);
-#endif
     }
 
     return status;
@@ -5275,7 +5226,14 @@ rocblaslt_status dispatchByComputeType(rocisa::DataType dt, F&& f)
         return f(static_cast<float*>(nullptr));
     case rocisa::DataType::Double:
         return f(static_cast<double*>(nullptr));
-    // Extend as needed:
+    case rocisa::DataType::Int32:
+        return f(static_cast<int32_t*>(nullptr));
+    case rocisa::DataType::ComplexFloat:
+        return f(static_cast<hipblaslt_complex_float*>(nullptr));
+    case rocisa::DataType::ComplexDouble:
+        return f(static_cast<hipblaslt_complex_double*>(nullptr));
+    case rocisa::DataType::Half:
+        return f(static_cast<hipblasLtHalf*>(nullptr));
     default:
         return rocblaslt_status_not_implemented;
     }

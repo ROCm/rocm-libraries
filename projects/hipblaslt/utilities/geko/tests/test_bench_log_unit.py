@@ -163,6 +163,72 @@ def test_verify_output_true_and_false_paths(monkeypatch: pytest.MonkeyPatch, tmp
     assert blog.verify_output(tmp_path / "lat.out", bench_file) is False
 
 
+def _probe_row(**overrides):
+    """Build a row shaped like raw hipblaslt-bench output (parse_benchmark_output)."""
+    row = {
+        "transA": "N",
+        "transB": "N",
+        "batch_count": 1,
+        "m": 16,
+        "n": 16,
+        "k": 16,
+        "a_type": "f16_r",
+        "b_type": "f16_r",
+        "c_type": "f16_r",
+        "d_type": "f16_r",
+        "compute_type": "f32_r",
+        "us": 1.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_realign_rows_reorders_to_match_original_order() -> None:
+    rows = [
+        _row(M=16, N=32, K=64, compute_type="c_f32_r"),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r"),
+    ]
+    # probe results arrive in the opposite order to rows (simulating a
+    # multi-device run where chunks complete out of dispatch order)
+    df = pd.DataFrame([
+        _probe_row(m=8, n=8, k=8, us=1.5),
+        _probe_row(m=16, n=32, k=64, us=2.5),
+    ])
+
+    out = blog.realign_rows(rows, df)
+    assert out["us"].tolist() == [2.5, 1.5]
+
+
+def test_realign_rows_disambiguates_using_extra_field() -> None:
+    rows = [
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=1.0),
+    ]
+    # same GEMM_LOG_FIELDS for both rows; only beta differs, and probe results
+    # are also scrambled relative to rows
+    df = pd.DataFrame([
+        _probe_row(m=8, n=8, k=8, beta=1.0, us=9.0),
+        _probe_row(m=8, n=8, k=8, beta=0.0, us=3.0),
+    ])
+
+    out = blog.realign_rows(rows, df)
+    assert out["us"].tolist() == [3.0, 9.0]
+
+
+def test_realign_rows_raises_for_irresolvable_duplicates() -> None:
+    rows = [
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0),
+        _row(M=8, N=8, K=8, compute_type="c_f32_r", beta=0.0),
+    ]
+    df = pd.DataFrame([
+        _probe_row(m=8, n=8, k=8, beta=0.0, us=3.0),
+        _probe_row(m=8, n=8, k=8, beta=0.0, us=4.0),
+    ])
+
+    with pytest.raises(ValueError, match="cannot be"):
+        blog.realign_rows(rows, df)
+
+
 def test_benchmark_forwards_bench_freq_and_device(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     log_file = tmp_path / "log.yaml"
     log_file.write_text("[]\n")
