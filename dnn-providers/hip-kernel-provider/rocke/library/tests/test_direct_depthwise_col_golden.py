@@ -4,7 +4,7 @@
 """Golden LLVM-IR stability test for the column-streamed depthwise conv kernel.
 
 ``build_direct_depthwise_col`` is covered by the Python/C++ byte-identity gate:
-``tests/parity/conv_direct_grouped_emit.{py,c}`` config indices 12-19 pin the
+``tests/parity/conv_direct_grouped_emit.{py,c}`` config indices 32-40 pin the
 two engines against each other across strides 1/2/3, all three dtypes and both
 tile-guard elision paths. This test is the *other* half and does a different
 job: byte-identity says the two engines agree, while these hashes say the
@@ -250,9 +250,9 @@ def _cases_gfx942() -> dict[str, Callable]:
         )
         cases[cid] = lambda spec=spec: build_direct_depthwise_col(spec, arch=_arch)
 
-    # stride=1 fp16 — exercises the gfx942 VGPR budget + codegen target
+    # stride=1 fp16 -- exercises the gfx942 VGPR budget + codegen target
     add("s1_k3_h8_bw4", N=2, H=8, W=8, groups=128, KH=3, KW=3, PAD=1)
-    # stride=2 bf16 with both tile guards live — exercises strided tap pruning on gfx942
+    # stride=2 bf16 with both tile guards live -- exercises strided tap pruning on gfx942
     add(
         "s2_bf16_tail",
         N=1,

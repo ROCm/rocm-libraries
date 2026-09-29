@@ -141,7 +141,7 @@ _SPATIAL_SHAPES: List[_Shape] = [
 ]
 
 
-# Shapes for DirectDepthwiseColSpec (cpg=kpg=1).  Geometry sweep, fp16 only —
+# Shapes for DirectDepthwiseColSpec (cpg=kpg=1).  Geometry sweep, fp16 only --
 # the dtype axis is swept separately by _COL_DTYPE_SHAPES so a dtype failure
 # does not masquerade as a stride or tail failure.
 #
@@ -151,12 +151,12 @@ _SPATIAL_SHAPES: List[_Shape] = [
 # rather than one that crashes, so the axes below are chosen to make each
 # static-pruning decision observable:
 #
-#   stride       1 / 2 / 3       — the pruning predicate itself
-#   Wo % block_w — the ``w_tile_exact`` tail guard on the W axis
-#   groups % block_ch — the ``guard_ch`` channel tail
-#   PAD=0, PAD>(KH-1)/2 — ``n_iters = (Ho-1)*stride + KH`` row coverage
-#   KH != KW, KW=31 — the KW-independence that is the kernel's whole point
-#   block_waves=2 — block_ch=128, the multi-wave channel mapping
+#   stride       1 / 2 / 3       -- the pruning predicate itself
+#   Wo % block_w -- the ``w_tile_exact`` tail guard on the W axis
+#   groups % block_ch -- the ``guard_ch`` channel tail
+#   PAD=0, PAD>(KH-1)/2 -- ``n_iters = (Ho-1)*stride + KH`` row coverage
+#   KH != KW, KW=31 -- the KW-independence that is the kernel's whole point
+#   block_waves=2 -- block_ch=128, the multi-wave channel mapping
 _COL_SHAPES: List[_Shape] = [
     # --- stride sweep, exact W tiling ---------------------------------------
     _Shape("col_s1_g64_bw1", N=2, H=14, W=14, groups=64, cpg=1),
@@ -165,7 +165,7 @@ _COL_SHAPES: List[_Shape] = [
     # --- W tail: Wo=14 is not a multiple of block_w=4 ------------------------
     _Shape("col_s1_wtail_bw4", N=2, H=14, W=14, groups=64, cpg=1, block_w=4),
     _Shape("col_s2_wtail_bw4", N=1, H=28, W=28, groups=64, cpg=1, stride=2, block_w=4),
-    # Wo=10, block_w=3 → tail of 1, with a 5x5 filter at stride 3 so the tap
+    # Wo=10, block_w=3 -> tail of 1, with a 5x5 filter at stride 3 so the tap
     # grid is ragged on both axes at once.
     _Shape(
         "col_s3_k5_bw3",
@@ -193,7 +193,7 @@ _COL_SHAPES: List[_Shape] = [
     ),
     # PAD=2 > (KH-1)/2=1: the padded input is taller than the input, which is
     # what motivated ``n_iters = (Ho-1)*stride + KH``.  Only reachable at
-    # stride>1 — at stride 1 this same overhang makes Ho > H, which the
+    # stride>1 -- at stride 1 this same overhang makes Ho > H, which the
     # validator rejects outright.
     _Shape("col_pad2_s2", N=1, H=12, W=12, groups=64, cpg=1, PAD=2, stride=2),
     # --- filter geometry -----------------------------------------------------
@@ -270,11 +270,13 @@ _COL_DTYPE_SHAPES: List[_Shape] = [
 ]
 
 
-# fp16 and bf16 round the *output* to 10/8 mantissa bits, so 5e-2 on the
-# ref_scale-normalised max-abs error is the meaningful bound there.  fp32 stores
-# the result exactly and the only divergence left is f32 reassociation, so 5e-2
-# would not be a check at all.
-_COL_TOL = {"fp16": _TOL, "bf16": _TOL, "fp32": 1e-4}
+# fp16 and bf16 round the *output* to 10/7 mantissa bits, so the meaningful
+# bound there is on the ref_scale-normalised max-abs error.  bf16 carries 3
+# fewer mantissa bits than fp16, so it gets the same looser bound the rest of
+# this suite already uses for it (_TOL_BF16) rather than borrowing fp16's.
+# fp32 stores the result exactly and the only divergence left is f32
+# reassociation, so 5e-2 would not be a check at all.
+_COL_TOL = {"fp16": _TOL, "bf16": _TOL_BF16, "fp32": 1e-4}
 
 
 # ---------------------------------------------------------------------------
@@ -812,7 +814,7 @@ def _run_depthwise_col_one(arch: str, shape: _Shape) -> Tuple[bool, str]:
     ok, reason = is_valid_depthwise_col_spec(spec, arch=arch)
     if not ok:
         # Every _COL_SHAPES entry is meant to be a supported configuration, so a
-        # rejection here is a bug in the shape table or the validator — not a
+        # rejection here is a bug in the shape table or the validator -- not a
         # reason to quietly skip.
         return False, f"invalid spec (shapes should be pre-validated): {reason}"
 
@@ -914,6 +916,24 @@ class TestDirectConvCorrectness(unittest.TestCase):
             with self.subTest(shape=s.id):
                 self._run_depthwise_spatial(s)
 
+    def _assert_ran(self, ran: int, what: str) -> None:
+        """A sweep whose every subTest skipped still reports *passed*.
+
+        ``_run_depthwise_col_one`` turns a rejected spec or a failed build into
+        a failure rather than a skip on purpose, so no skip is reachable inside
+        the col path today.  This backstop is what keeps that property true if
+        a skip is ever added, and it catches the other way a sweep can report a
+        green without testing anything: a shape table that has been emptied or
+        filtered down to nothing.
+        """
+        self.assertGreater(
+            ran,
+            0,
+            f"{what}: no config ran on {GPU_ARCH}, so the column-streamed "
+            f"depthwise path was never executed -- this is a false green, not "
+            f"a pass. Check the shape table and is_valid_depthwise_col_spec.",
+        )
+
     def _run_depthwise_col(self, shape: _Shape) -> None:
         passed, reason = _run_depthwise_col_one(GPU_ARCH, shape)
         if reason.startswith("skip"):
@@ -925,9 +945,12 @@ class TestDirectConvCorrectness(unittest.TestCase):
 
     def test_depthwise_col(self):
         """Geometry sweep at fp16: stride, W tail, channel tail, padding, filter."""
+        ran = 0
         for s in _COL_SHAPES:
             with self.subTest(shape=s.id):
                 self._run_depthwise_col(s)
+                ran += 1
+        self._assert_ran(ran, "test_depthwise_col")
 
     def test_depthwise_col_dtypes(self):
         """Element-type sweep, separate from the geometry sweep on purpose.
@@ -936,9 +959,12 @@ class TestDirectConvCorrectness(unittest.TestCase):
         stores are wrong" from "stride-3 tap pruning is wrong" instead of
         reporting one failing blob.
         """
+        ran = 0
         for s in _COL_DTYPE_SHAPES:
             with self.subTest(shape=s.id, dtype=s.dtype):
                 self._run_depthwise_col(s)
+                ran += 1
+        self._assert_ran(ran, "test_depthwise_col_dtypes")
 
 
 # ---------------------------------------------------------------------------

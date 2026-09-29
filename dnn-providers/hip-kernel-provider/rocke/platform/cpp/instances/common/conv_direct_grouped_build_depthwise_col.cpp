@@ -1,6 +1,6 @@
-/* SPDX-License-Identifier: MIT
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+/*
  * build_direct_depthwise_col -- column-streamed depthwise conv forward.
  *
  * Faithful C port of `build_direct_depthwise_col` in
@@ -346,7 +346,12 @@ rocke_kernel_def_t* rocke_dconv_dwcol_col_loop(rocke_dconv_dwcol_ctx_t* ctx)
 
     /* Python: acc_args = [(f"dw_acc_h{h}_w{w}", zero_f32) for h ... for w ...].
      * The band is Ho x BLOCK_W and KH reaches 31+ in the supported space, so
-     * these are alloca'd rather than fixed ctx arrays. */
+     * these are alloca'd rather than fixed ctx arrays.  num_iargs and KH are
+     * bounded rather than free: rocke_dconv_dwcol_prologue runs
+     * rocke_direct_depthwise_col_is_valid_spec before any of these allocas, and
+     * that gate rejects every spec whose Ho * block_w + KH exceeds
+     * min(max_live_f32, vgprs * 3 / 8) -- a few hundred f32 on any supported
+     * target -- so both counts stay well inside the stack frame. */
     {
         char(*name_store)[32] = (char(*)[32])alloca((size_t)num_iargs * 32 * sizeof(char));
         int idx = 0;

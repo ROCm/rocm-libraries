@@ -286,14 +286,18 @@ def test_preload_spec_accepted_for_ordinary_filter():
     assert ok and reason == "ok"
 
 
-def test_benchmark_no_longer_carries_the_tap_policy():
+def test_benchmark_defers_tap_policy_to_the_validator():
     """Register-pressure policy belongs to the validator, not the top layer.
 
-    ``benchmark_direct_conv.py`` used to gate the preload variant on its own
-    ``_DW_MAX_PRELOAD_TAPS`` copy before calling a validator that checked only
-    cpg/kpg. With the check moved down, the benchmark has one uniform
-    "ask the validator" path for all three depthwise variants -- this test is
-    what stops the constant from creeping back up a layer.
+    The tap ceiling is *newly added* to ``is_valid_depthwise_spec`` here; it was
+    never carried by the benchmark. What the two assertions below pin is that it
+    stays that way: the benchmark keeps one uniform "ask the validator" path for
+    all three depthwise variants, and never grows its own ``_DW_MAX_PRELOAD_TAPS``
+    copy that could drift from the real gate.
+
+    This is a layering guard, not the behavioural test for the ceiling -- that is
+    ``test_preload_spec_rejects_oversized_filter`` (225 taps, rejected) and
+    ``test_preload_spec_accepts_filter_at_the_ceiling`` (exactly 200, accepted).
     """
     src = (
         Path(__file__).resolve().parents[1]

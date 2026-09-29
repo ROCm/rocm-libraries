@@ -3157,7 +3157,7 @@ def cases():
             dtype="fp32",
         ),
     )
-    # gfx942 target — exercises the arch-specific VGPR budget path
+    # gfx942 target -- exercises the arch-specific VGPR budget path
     add(
         "conv_direct",
         "conv_direct/gfx942/dw_col_s1_fp16",

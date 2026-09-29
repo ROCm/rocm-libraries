@@ -5807,7 +5807,7 @@ def build_direct_depthwise(
 
 
 # ---------------------------------------------------------------------------
-# Depthwise column-streamed kernel — filter column on the outer (runtime) loop
+# Depthwise column-streamed kernel -- filter column on the outer (runtime) loop
 # so only one filter column is register-resident at a time.
 # ---------------------------------------------------------------------------
 
@@ -5820,17 +5820,17 @@ class DirectDepthwiseColSpec:
     differs, and with it the set of values that must stay live.
 
     ``DirectDepthwiseSpec`` puts the filter column ``s`` *inside* the H sweep, so
-    every one of the ``KH × KW`` weights is referenced on every H step and all of
+    every one of the ``KH x KW`` weights is referenced on every H step and all of
     them must be preloaded and held.  That is fine for small filters and
-    catastrophic for large ones: at ``31 × 31`` it is 961 live f32 per lane, far
+    catastrophic for large ones: at ``31 x 31`` it is 961 live f32 per lane, far
     past the VGPR file, so the kernel spills to scratch.
 
-    Here the order is ``s`` (runtime, outer) → ``y`` (unrolled, inner) → ``r``:
+    Here the order is ``s`` (runtime, outer) -> ``y`` (unrolled, inner) -> ``r``:
 
       - only column ``s`` of the filter is live, i.e. ``KH`` values, reloaded at
-        the top of each outer iteration (``KH × KW`` weight loads in total —
+        the top of each outer iteration (``KH x KW`` weight loads in total --
         exactly the count the preload variant issues once up front);
-      - the whole output-row band is carried instead, ``Ho × block_w``
+      - the whole output-row band is carried instead, ``Ho x block_w``
         accumulators, so no circular slot reuse and no per-row flush is needed;
       - live f32 per lane is therefore ``Ho * block_w + KH`` rather than
         ``KH * KW + KH * block_w``.
@@ -6026,7 +6026,7 @@ def is_valid_depthwise_col_spec(
         # Over-padded configs (PAD > (KH-1)/2) at stride=1 push Ho > H. They
         # are geometrically valid at stride > 1 but are rejected here because
         # the current builder does not need them. Remove this check if a
-        # use-case for full-padding at stride=1 arises (author: jakpiase).
+        # use-case for full-padding at stride=1 arises.
         return False, f"requires Ho <= H (got Ho={p.Ho}, H={p.H})"
     # At stride > 1 the Ho <= H check above stops constraining PAD, which leaves
     # PAD the one unbounded input to the *host* unroll count
@@ -6081,14 +6081,14 @@ def build_direct_depthwise_col(
 ) -> KernelDef:
     """Build the IR for the column-streamed depthwise convolution kernel.
 
-    Loop order is ``s`` (runtime scf.for over the ``KW`` filter columns) →
-    ``y`` (Python-unrolled over the ``(Ho - 1) * stride + KH`` input rows) →
-    ``r`` (Python-unrolled over the ``KH`` filter rows).  The ``Ho × block_w``
+    Loop order is ``s`` (runtime scf.for over the ``KW`` filter columns) ->
+    ``y`` (Python-unrolled over the ``(Ho - 1) * stride + KH`` input rows) ->
+    ``r`` (Python-unrolled over the ``KH`` filter rows).  The ``Ho x block_w``
     accumulator band is carried through the outer loop as iter_args and stored
     once, after it closes.
 
     See :class:`DirectDepthwiseColSpec` for why this order is the one that keeps
-    register pressure flat in ``KH × KW``.
+    register pressure flat in ``KH x KW``.
     """
     spec.validate()
     ok, why = is_valid_depthwise_col_spec(spec, arch=arch)

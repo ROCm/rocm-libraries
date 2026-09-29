@@ -1062,6 +1062,10 @@ static void op_tile_buffer_load_bf16(rocke_lower_t* L, const rocke_op_t* op)
  * use the i32 intrinsic.  Either way the result is bitcast to the elem type. */
 static void op_tile_buffer_load(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "tile.buffer_load: bad operand/result count");
+    }
     const rocke_value_t* rsrc = op->operands[0];
     const rocke_value_t* voffset = op->operands[1];
     const rocke_value_t* soffset = op->operands[2];
@@ -1081,9 +1085,14 @@ static void op_tile_buffer_load(rocke_lower_t* L, const rocke_op_t* op)
     {
         llvm_elem = "float";
     }
-    else
+    else if(strcmp(elem, "i32") == 0)
     {
         llvm_elem = "i32";
+    }
+    else
+    {
+        /* Python indexes _LLVM_ELEM and would raise KeyError on anything else. */
+        rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.buffer_load: unsupported element type '%s'", elem);
     }
     if(two_byte)
     {

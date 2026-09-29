@@ -685,7 +685,7 @@ typedef struct rocke_dconv_dwcol_ctx
     rocke_value_t* c0;
     rocke_value_t* c1; /* emitted SECOND, unlike the preload prologue */
     rocke_value_t* c_wave;
-    rocke_value_t* c_W; /* const_i32(Wo) — output width          */
+    rocke_value_t* c_W; /* const_i32(Wo) -- output width          */
     rocke_value_t* c_groups; /* const_i32(groups)                     */
     rocke_value_t* c_elem_bytes;
     rocke_value_t* oob_sentinel;
