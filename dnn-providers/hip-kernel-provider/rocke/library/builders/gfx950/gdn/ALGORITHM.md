@@ -393,6 +393,10 @@ authority and admits 54 GDN candidates for the default D128 shape. Production
 grid size, not GDN tile selection. A caller may pin an exact candidate with
 `nw<num_warps>_wtk<warp_threads_k>_bpv<blocks_per_v_dim>`.
 
+`gdn_decode_gfx950_dispatch_decisions.csv` records the concrete develop-versus-
+registry decision matrix across batch boundaries and GQA head geometries,
+including tiles, grids, and compile-cache keys.
+
 KDA remains keyed on `work = batch × num_v_heads`. Tensor-parallel sharding
 changes `num_v_heads` per rank, so two launches with the same batch can expose
 different amounts of GPU work:
