@@ -19,6 +19,8 @@ from rocke.helpers.spec import kernel_name_join
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
+    NonpersistBtHkvMinor,
+    NonpersistQbMinor,
     PersistBtHkvMinor,
     PersistHkvMajor,
     PersistQbMajor,
@@ -265,23 +267,48 @@ class AttentionDenseSpec:
         return self.num_query_heads // self.num_kv_heads
 
     @property
+    def _aligned_causal(self) -> bool:
+        """Causal attention on the plain dense layout: where the auto block
+        orders were measured."""
+        moving_diagonal = self.causal_bottom_right and self.seqlen_q != self.seqlen_kv
+        return (
+            self.causal
+            and not moving_diagonal
+            and not self.ragged
+            and not self.varlen
+            and not self.paged
+            and self.sliding_window == 0
+        )
+
+    @property
     def resolved_persist_decode(self) -> str:
-        """Resolve the common auto policy to hkv-major or qb-major."""
+        """Resolve the persistent auto policy."""
         if self.persist_decode != "auto":
             return self.persist_decode
+        if self._aligned_causal:
+            if self.interleave:
+                return PersistQbMajor.name  # the only decode interleave applies to
+            # Batch is the fastest digit of both and xcd = wi % 8, so below 8
+            # batches the second digit still picks the XCD: bt_hkv_minor then
+            # gives each XCD one kv head. From 8 on both place items alike, and
+            # qb_major measured ahead.
+            return PersistBtHkvMinor.name if self.batch < 8 else PersistQbMajor.name
         gqa = self.num_queries_per_kv
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
-            return "hkv_major"
-        return "qb_major"
+            return PersistHkvMajor.name
+        return PersistQbMajor.name
 
     @property
     def resolved_nonpersist_decode(self) -> str:
-        """Resolve the non-persistent auto policy."""
+        """Resolve the non-persistent auto policy. The existing qb_minor grid
+        stays the best measured order without causal masking."""
         if self.nonpersist_decode != "auto":
             return self.nonpersist_decode
-        return "qb_minor"
+        if self._aligned_causal:
+            return NonpersistBtHkvMinor.name
+        return NonpersistQbMinor.name
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:

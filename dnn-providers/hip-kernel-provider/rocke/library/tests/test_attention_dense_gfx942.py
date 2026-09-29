@@ -732,8 +732,8 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
         num_persistent=304,
         persist_decode="auto",
     )
-    assert spec.resolved_persist_decode == "hkv_major"
-    assert "hkvmaj" in spec.kernel_name()
+    assert spec.resolved_persist_decode == "bt_hkv_minor"
+    assert "bthkvmin" in spec.kernel_name()
     assert "gqapair" not in spec.kernel_name()
 
 
@@ -909,7 +909,7 @@ def test_supports_true_implies_build_succeeds(row):
 # launch geometry
 # --------------------------------------------------------------------------- #
 def test_grid_and_block_geometry():
-    s = _spec(seqlen_q=2048, num_query_heads=128, batch=1)
+    s = _spec(seqlen_q=2048, num_query_heads=128, batch=1, nonpersist_decode="qb_minor")
     assert attention_dense_grid(s) == (2048 // _BLOCK_M, 128, 1)
     assert attention_dense_block(s) == (s.num_waves * 64, 1, 1)
     assert attention_dense_block(s) == (_EXPECTED_WORKGROUP_SIZE, 1, 1)
@@ -918,7 +918,12 @@ def test_grid_and_block_geometry():
 def test_grid_covers_every_query_row_and_head():
     for sq, hq, batch in ((2048, 128, 1), (512, 16, 4), (4096, 40, 2)):
         s = _spec(
-            seqlen_q=sq, seqlen_kv=sq, num_query_heads=hq, num_kv_heads=8, batch=batch
+            seqlen_q=sq,
+            seqlen_kv=sq,
+            num_query_heads=hq,
+            num_kv_heads=8,
+            batch=batch,
+            nonpersist_decode="qb_minor",
         )
         nqb, ghq, gb = attention_dense_grid(s)
         assert (
@@ -1595,17 +1600,17 @@ def test_persistent_and_default_share_one_inner_body():
 
 
 def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
-    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent once the work
-    (nqb*Hq*B) fills the gfx942 persistent grid (num_persistent defaulted to 304), and
-    stays off for small Sq. Explicit on/off are honored; gfx950 keeps its 256 default
-    and is otherwise untouched."""
+    """P4 dispatch: ``dense_persistent='auto'`` resolves to persistent from 16
+    batches (num_persistent defaulted to 304), and stays off below that whatever
+    the Sq. Explicit on/off are honored; gfx950 keeps its 256 default and is
+    otherwise untouched."""
     from dispatch.attention import AttentionRequest
     from dispatch.attention.gfx942 import _dense_spec
     from dispatch.attention.gfx950 import _dense_spec as _dense_spec_gfx950
 
-    def _req(sq, arch, persist="auto"):
+    def _req(sq, arch, persist="auto", batch=1):
         return AttentionRequest(
-            batch=1,
+            batch=batch,
             nhead_q=16,
             nhead_k=4,
             seqlen_q=sq,
@@ -1621,9 +1626,9 @@ def test_dispatch_persistent_auto_turns_on_for_large_sq_only():
 
     # gfx942 num_persistent defaulted to the 304-CU part's CU count.
     assert _dense_spec(_req(8192, "gfx942")).num_persistent == 304
-    # auto: on for large Sq (nqb*Hq = 32*16 = 512 >= 304), off for small.
-    assert _dense_spec(_req(8192, "gfx942")).persistent is True
-    assert _dense_spec(_req(2048, "gfx942")).persistent is False  # 8*16 = 128 < 304
+    # auto: on from 16 batches, off below even at large Sq.
+    assert _dense_spec(_req(2048, "gfx942", batch=16)).persistent is True
+    assert _dense_spec(_req(8192, "gfx942")).persistent is False
     # explicit modes honored.
     assert _dense_spec(_req(8192, "gfx942", "off")).persistent is False
     assert _dense_spec(_req(256, "gfx942", "on")).persistent is True

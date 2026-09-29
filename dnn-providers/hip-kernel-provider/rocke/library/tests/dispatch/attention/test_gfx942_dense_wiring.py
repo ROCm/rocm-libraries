@@ -214,8 +214,9 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
     def test_equal_length_bottom_right_preserves_persistent_policy(self):
         common = dict(
-            seqlen_q=8192,
-            seqlen_k=8192,
+            batch=16,
+            seqlen_q=2048,
+            seqlen_k=2048,
             dense_persistent="auto",
         )
         mask_pairs = (
@@ -236,12 +237,11 @@ class TestGfx942BottomRightSafety(unittest.TestCase):
 
 
 class TestGfx942DensePersistent(unittest.TestCase):
-    def test_auto_persistent_turns_on_for_large_sq(self):
-        """Post-P4 (ledger row 16): 'auto' turns the persistent grid-stride variant
-        ON once there is enough work to fill the grid -- the large-Sq prefill
-        regime -- and the request is accepted."""
+    def test_auto_persistent_turns_on_for_large_batch(self):
+        """'auto' turns the persistent grid-stride variant ON from 16 batches,
+        and the request is accepted."""
         with _Gfx942Arch():
-            req = _req(seqlen_q=8192, seqlen_k=8192, dense_persistent="auto")
+            req = _req(batch=16, dense_persistent="auto")
             ok, why = _candidate().admits(req)
             self.assertTrue(ok, why)
             self.assertTrue(_dense_spec(req).persistent)

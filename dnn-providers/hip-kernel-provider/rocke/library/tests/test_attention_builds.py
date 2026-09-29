@@ -1432,7 +1432,9 @@ class TestAttentionHelpers(unittest.TestCase):
                     if impl.tag:
                         self.assertIn(impl.tag, names[decode])
                 self.assertEqual(len(set(names.values())), len(names))
-                self.assertEqual(Spec(**base).kernel_name(), names["qb_minor"])
+                auto = Spec(**base)
+                self.assertEqual(auto.kernel_name(),
+                                 names[auto.resolved_nonpersist_decode])
                 with self.assertRaisesRegex(ValueError, "nonpersist_decode"):
                     Spec(**base, nonpersist_decode="nope")
                 with self.assertRaisesRegex(ValueError, "non-persistent grid"):

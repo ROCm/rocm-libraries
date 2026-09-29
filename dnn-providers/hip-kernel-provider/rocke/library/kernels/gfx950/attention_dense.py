@@ -176,30 +176,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 )
 
     @property
-    def resolved_persist_decode(self) -> str:
-        if self.persist_decode != "auto":
-            return self.persist_decode
-        gqa = self.num_queries_per_kv
-        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
-        aligned_causal = (
-            self.persistent
-            and self.causal
-            and not self.ragged
-            and not self.varlen
-            and not self.paged
-            and self.sliding_window == 0
-        )
-        if aligned_causal and nqb % 2 == 0 and gqa % 2 == 0:
-            pair_np = nqb * self.num_kv_heads * self.batch
-            if self.num_persistent == pair_np:
-                return "gqa_pair"
-        if aligned_causal and nqb % 2 == 0 and gqa >= 2:
-            two_phase_np = nqb * self.num_kv_heads * self.batch * gqa // 2
-            if self.num_persistent == two_phase_np:
-                return "gqa_pair_2phase"
-        return super().resolved_persist_decode
-
-    @property
     def runtime_shape(self) -> bool:
         """Whether the body reads the problem shape *only* from its kernel params,
         baking it nowhere -- so ONE compiled kernel serves every shape and the three

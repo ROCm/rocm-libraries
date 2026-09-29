@@ -158,8 +158,9 @@ class PersistDecode:
 
 class PersistQbMajor(PersistDecode):
     """``wi = qb*(Hq*B) + hq*B + bt``: the query block is the slowest digit, so
-    grid-stride spreads cheap and expensive blocks over each CTA. ``interleave``
-    reverses the block on odd ``qb*Hq + hq``."""
+    grid-stride spreads cheap and expensive blocks over each CTA. Under causal
+    masking the blocks are folded; ``interleave`` instead reverses the block on
+    odd ``qb*Hq + hq`` (measured behind the fold, so auto never sets it)."""
 
     name = "qb_major"
 
@@ -173,6 +174,8 @@ class PersistQbMajor(PersistDecode):
         if spec.interleave and spec.causal and nqb > 1:
             odd = b.cmp_eq(b.mod(rem, b.const_i32(2)), b.const_i32(1))
             qb = b.select(odd, b.sub(b.const_i32(nqb - 1), qb0), qb0)
+        elif spec.causal:
+            qb = emit_fold(b, qb0, nqb)
         else:
             qb = qb0
         return Decoded(qb, hq, bt)
@@ -181,7 +184,7 @@ class PersistQbMajor(PersistDecode):
 class PersistHkvMajor(PersistDecode):
     """``wi = hkv*(NQB*gqa*B) + blk*(gqa*B) + hql*B + bt``, folded: each
     grid-stride phase stays within about one kv head, so its K/V stays in L2
-    across the GQA group."""
+    across the GQA group. Auto picks it only outside aligned causal attention."""
 
     name = "hkv_major"
     tag = "hkvmaj"
@@ -232,7 +235,8 @@ def _aligned_causal_error(spec, name: str):
 class PersistGqaPair(PersistDecode):
     """NP = NQB*Hkv*B CTAs; two neighbouring CTAs cover one (qb pair, hkv, bt)
     group, each half the local query heads at both complementary blocks, so the
-    two costs sum to a constant."""
+    two costs sum to a constant. Not auto-selected: behind the best order on
+    every shape auto used to pick it for."""
 
     name = "gqa_pair"
     tag = "gqapair"
@@ -273,7 +277,9 @@ class PersistGqaPair(PersistDecode):
 
 class PersistGqaPair2Phase(PersistDecode):
     """NP = W/2 CTAs; gqa neighbouring CTAs cover all local query heads of one
-    (qb pair, hkv, bt), and phase 0/1 selects the complementary blocks."""
+    (qb pair, hkv, bt), and phase 0/1 selects the complementary blocks. Not
+    auto-selected: behind the best order on every shape auto used to pick it
+    for."""
 
     name = "gqa_pair_2phase"
     tag = "gqapair2"

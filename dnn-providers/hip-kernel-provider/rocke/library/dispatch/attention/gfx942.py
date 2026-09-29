@@ -139,16 +139,14 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
 def _dense_spec(req: OperatorRequest):
     """Build the gfx942 ``AttentionDenseSpec`` for ``req`` at its best config.
 
-    The gfx942 twin of :func:`dispatch.attention.gfx950._dense_spec`. Same shape
-    logic -- persistent ("auto") turns on the grid-stride variant once there is
-    enough work to fill the persistent grid (``nqb*Hq*B >= num_persistent``, the
-    large-Sq prefill regime), and non-tile-multiple self-attention lengths take the
-    on-chip ragged path (no host pad) -- but a different tuning, which is the whole
-    reason the two are separate functions rather than one with an arch branch:
+    The gfx942 twin of :func:`dispatch.attention.gfx950._dense_spec`. Persistent
+    ("auto") turns on the grid-stride variant at large batch, and
+    non-tile-multiple self-attention lengths take the on-chip ragged path (no host
+    pad) -- but a different tuning, which is the whole reason the two are separate
+    functions rather than one with an arch branch:
 
     * ``num_persistent`` defaults to :data:`_GFX942_NUM_PERSISTENT` (304 CUs) rather
-      than the shared 256. It drives BOTH the auto persistent decision and the grid
-      size, so it is resolved before the mode branch.
+      than the shared 256; it sizes the persistent grid.
     * ``waves_per_eu`` comes from the kernel's own per-config policy
       (``_tuned_waves_per_eu``) rather than being pinned here. That is the general
       rule this factory follows, not a one-off: any value the kernel bakes into its
@@ -191,8 +189,6 @@ def _dense_spec(req: OperatorRequest):
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a 256/block_n multiple). Cross-attention ragged is left to the validator.
     ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
-    nqb = (sq + bm - 1) // bm
-    work = nqb * int(req.nhead_q) * int(req.batch)
     np = int(req.dense_num_persistent)
     if np == _SHARED_NUM_PERSISTENT_DEFAULT:
         np = _GFX942_NUM_PERSISTENT
@@ -202,7 +198,7 @@ def _dense_spec(req: OperatorRequest):
     elif mode == "off":
         persistent = False
     elif mode == "auto":
-        persistent = work >= np  # enough work to fill the persistent grid
+        persistent = int(req.batch) >= 16
     else:
         raise ValueError(
             f"dense_persistent must be 'auto'/'on'/'off', got {req.dense_persistent!r}"
@@ -260,8 +256,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     Carries the port's P1-P5 levers: the 32x32x8 atom with K-loop doubling,
     conflict-free V (D128 fp16), exp2_fast + fused softmax rescale, per-config
     waves-per-eu and the D64 K-bank-conflict pad, and the persistent grid-stride
-    variant (``dense_persistent='auto'`` turns it on once there is enough work to
-    fill the grid). Which config gets which lever, and why, is the table in
+    variant (``dense_persistent='auto'`` turns it on at large batch). Which config
+    gets which lever, and why, is the table in
     ``builders/gfx942/attention/prefill/README.md``.
 
     Scope is delegated entirely to ``supports_attention_dense``, which rejects every
