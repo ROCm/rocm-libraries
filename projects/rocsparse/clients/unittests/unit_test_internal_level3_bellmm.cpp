@@ -27,11 +27,12 @@
 // rocsparse_format_bell -> library/src/level3/rocsparse_bellmm_template_general.cpp).
 //
 // FOCUS (AISPARSE-667): the general bellmm kernel tiles the dense operand across
-// grid.y (one block per BLK_SIZE_Y-wide column panel). grid.y is limited to 65535
-// by hardware, so the launch is CLAMPED there and the kernel wrapper grid-strides
-// over the remaining column panels. This test drives a column count strictly
-// larger than 65535 * 32 (32 being the widest tile the launch can pick, so the
-// clamp engages on every architecture) and checks EVERY output column. A
+// grid.y (one block per BLK_SIZE_Y-wide column panel). The launch CLAMPS grid.y
+// with rocsparse::get_grid_size_y, i.e. to the handle's maxGridSize[1], and the
+// kernel wrapper grid-strides over the remaining column panels. This test reads
+// that limit back from the handle, drives a column count strictly larger than
+// limit * 32 (32 being the widest tile the launch can pick, so the clamp engages
+// on every architecture) and checks EVERY output column. A
 // regression in either the clamp or the panel stride is caught:
 //
 //   * clamp removed  -> the launch is rejected (hipErrorInvalidConfiguration) and
@@ -44,7 +45,9 @@
 //
 // The test is cheap on purpose: the defect lives on the COLUMN axis, so the
 // sparse operand is a single 2x2 identity block. B and C are therefore 2 x n
-// matrices, i.e. roughly 17 MB each in single precision -- this runs on any GPU
+// matrices, i.e. roughly 17 MB each in single precision for a grid.y limit of
+// 65535 (a device that reports more is capped to 65535 on the handle for the
+// duration of the test, see ScopedMaxGridSizeY) -- this runs on any GPU
 // (including the 15 GB gfx1201) and is permanently enabled, with no
 // device-memory guard that could silently drop it at instantiation.
 //
@@ -55,24 +58,25 @@
 
 #include "rocsparse.h"
 
+#include "rocsparse_grid.hpp"
+
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 
 using namespace rocsparse_ut;
 
 namespace
 {
-    // The launch clamps grid.y at this value through rocsparse::get_grid_size_y,
-    // which is internal to the library, hence the value is duplicated here.
-    constexpr int64_t bellmm_max_grid_y = 65535;
+    // Largest grid.y limit the test sizes itself for. A device that reports a
+    // larger maxGridSize[1] is capped to this on the handle, which keeps B and C
+    // small and every value of b_value below exact in single precision.
+    constexpr int max_tested_grid_y = 65535;
 
     // Widest square tile rocsparse::bellmm_general_tile_size can return, so
-    // `beyond_clamp` exceeds the clamp on wave32 (where the tile may shrink to 8
+    // `n` exceeds the clamp on wave32 (where the tile may shrink to 8
     // and the clamp is hit even earlier) as well as on wave64 (fixed 32).
     constexpr int64_t widest_tile = 32;
-
-    // One panel past the clamp on the widest tile: the tail columns are reachable
-    // only through the kernel's column-panel grid-stride loop.
-    constexpr int64_t beyond_clamp = bellmm_max_grid_y * widest_tile + widest_tile + 8; // 2097160
 
     // A 2x2 block row of A: one block column, block dimension 2.
     constexpr int64_t block_dim = 2;
@@ -112,6 +116,30 @@ namespace
         return -1;
     }
 
+    // Temporarily lower handle->properties.maxGridSize[1] to at most `limit`, and
+    // restore it on scope exit so the override cannot leak into the next test.
+    struct ScopedMaxGridSizeY
+    {
+        rocsparse_handle handle;
+        int              saved;
+
+        ScopedMaxGridSizeY(rocsparse_handle h, int limit)
+            : handle(h)
+            , saved(h->properties.maxGridSize[1])
+        {
+            handle->properties.maxGridSize[1] = std::min(saved, limit);
+        }
+
+        ~ScopedMaxGridSizeY()
+        {
+            handle->properties.maxGridSize[1] = saved;
+        }
+
+        ScopedMaxGridSizeY(const ScopedMaxGridSizeY&) = delete;
+
+        ScopedMaxGridSizeY& operator=(const ScopedMaxGridSizeY&) = delete;
+    };
+
     struct SpMatDescr
     {
         rocsparse_spmat_descr d = nullptr;
@@ -140,8 +168,17 @@ class BellMM : public HandleTest
 template <typename T>
 static void run_bellmm_beyond_grid_y_clamp(rocsparse_handle handle)
 {
-    const int64_t n = beyond_clamp;
-    ASSERT_GT(n, bellmm_max_grid_y * widest_tile);
+    const ScopedMaxGridSizeY cap(handle, max_tested_grid_y);
+
+    // The grid.y extent the launch clamps to, read through the same helper.
+    const int64_t grid_y_max
+        = rocsparse::get_grid_size_y(handle, std::numeric_limits<int64_t>::max());
+
+    // One panel past the clamp on the widest tile: the tail columns are reachable
+    // only through the kernel's column-panel grid-stride loop. For a grid.y limit
+    // of 65535 this is n = 2097160.
+    const int64_t n = grid_y_max * widest_tile + widest_tile + 8;
+    ASSERT_GT((n - 1) / widest_tile + 1, grid_y_max);
 
     // A: one 2x2 identity block, values in the row-major layout bellmm expects
     // (val[(block_row * block_dim + r) * bell_cols + ei * block_dim + c]).
@@ -245,7 +282,7 @@ static void run_bellmm_beyond_grid_y_clamp(rocsparse_handle handle)
                              &buffer_size,
                              dbuffer.ptr),
               rocsparse_status_success)
-        << "bellmm launch failed for n = " << n << " (grid.y clamp = " << bellmm_max_grid_y << ")";
+        << "bellmm launch failed for n = " << n << " (grid.y clamp = " << grid_y_max << ")";
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     // A = I, alpha = 1, beta = 0 => C == B exactly.
@@ -253,7 +290,7 @@ static void run_bellmm_beyond_grid_y_clamp(rocsparse_handle handle)
     const int64_t        bad = first_mismatch<T>(hC, m, m, n);
     EXPECT_EQ(bad, -1) << "C[" << (bad % m) << ", " << (bad / m) << "] = " << hC[bad]
                        << ", expected " << b_value<T>(bad % m, bad / m) << " (n = " << n
-                       << ", grid.y clamp = " << bellmm_max_grid_y
+                       << ", grid.y clamp = " << grid_y_max
                        << "; a column past the clamp is reached only by the kernel's "
                           "column-panel grid-stride loop)";
 }
