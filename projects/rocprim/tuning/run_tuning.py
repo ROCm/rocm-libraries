@@ -66,7 +66,16 @@ def import_module_from_file(file_path: str, module_name: str) -> Optional[Module
 
 def get_available_algorithms() -> List[str]:
     """Return list of supported tuning algorithms."""
-    return sorted([re.sub(r'^tuning_|\.py', '', os.path.basename(i)) for i in glob(f'{BASE_DIR}/tuner/tuning_*')])
+    exclude = {
+        'device_partition',
+        'device_select',
+    }
+    out = []
+    for f in glob(f'{BASE_DIR}/tuner/tuning_*'):
+        algo_name = re.sub(r'^tuning_|\.py', '', os.path.basename(f))
+        if algo_name not in exclude:
+            out.append(algo_name)
+    return sorted(out)
 
 def filter_algorithms(available_algos: List[str], pattern: str) -> List[str]:
     """Filter algorithms based on regex pattern."""
