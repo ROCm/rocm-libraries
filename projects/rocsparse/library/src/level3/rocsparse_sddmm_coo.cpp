@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_coo2dense.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_sddmm_coox_kernel.hpp"
 #include "rocsparse_sddmm_grid.hpp"
 
@@ -251,7 +252,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_coo, T, I, J, A, B, C>
 #define LAUNCH(K_)                                                                       \
     int64_t num_blocks_x                                                                 \
         = rocsparse::sddmm_grid_size_x(nnz, NB / K_, handle->properties.maxGridSize[0]); \
-    dim3 blocks(num_blocks_x, get_batch_grid_size(batch_count));                         \
+    dim3 blocks(num_blocks_x, get_grid_size_y(handle, batch_count));                     \
     dim3 threads(NB);                                                                    \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_coox_kernel<NB, K_, false, T>), \
                                        blocks,                                           \

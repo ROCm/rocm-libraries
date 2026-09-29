@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_csx2dense_impl.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_sddmm_csx_kernel.hpp"
 #include "rocsparse_sddmm_grid.hpp"
 
@@ -283,7 +284,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csc, T, I, J, A, B, C>
 #define LAUNCH_WAVEFRONT_PER_ROWCOL(BLOCKSIZE, WFSIZE, NTHREADS_PER_DOTPRODUCT)                 \
     dim3 blocks(                                                                                \
         rocsparse::sddmm_grid_size_x(n, BLOCKSIZE / WFSIZE, handle->properties.maxGridSize[0]), \
-        get_batch_grid_size(batch_count));                                                      \
+        get_grid_size_y(handle, batch_count));                                                  \
     dim3 threads(BLOCKSIZE);                                                                    \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_csx_kernel<BLOCKSIZE,                  \
                                                                     WFSIZE,                     \
