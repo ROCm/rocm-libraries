@@ -798,7 +798,7 @@ def plan_claims(cells: Sequence[Cell], root: Path, git: Git) -> Dict[Path, Chang
         missing = len(claims - current[path])
         if missing:
             raise SidecarError(
-                f"{path.relative_to(root)}: lacks {missing} of develop's claims;"
+                f"{path.relative_to(root).as_posix()}: lacks {missing} of develop's claims;"
                 " rebase onto develop"
             )
     plan = {}
@@ -932,7 +932,10 @@ def main(
                     file=sys.stderr,
                 )
                 return 1
-        print(f"{verb} {path.relative_to(root)} (+{change.added})", file=sys.stderr)
+        print(
+            f"{verb} {path.relative_to(root).as_posix()} (+{change.added})",
+            file=sys.stderr,
+        )
     added = sum(change.added for change in plan.values())
     print(f"{len(plan)} sidecars {verb}, +{added} claims", file=sys.stderr)
     return 0
