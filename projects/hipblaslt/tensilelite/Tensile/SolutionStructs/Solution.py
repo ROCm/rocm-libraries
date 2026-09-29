@@ -1229,7 +1229,7 @@ class Solution(collections.abc.Mapping):
               return
             # Lazy import for the same reason as validateSubtileGRKPartition:
             # Components/Subtile at module scope deadlocks the package load.
-            from Tensile.Components.Subtile.Kernel import abB4Tlu1Name
+            from ..Components.Subtile.Kernel import abB4Tlu1Name
             state[f"_ABTilePair{tc}"] = abB4Tlu1Name(stack)
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
