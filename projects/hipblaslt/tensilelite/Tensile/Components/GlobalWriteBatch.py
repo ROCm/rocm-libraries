@@ -2733,7 +2733,11 @@ class GlobalWriteBatchWriter:
               # both pairs' reads/MFMAs are issued before the deferred folded store; skipping
               # the woven store's lookahead only defers gap-fill MFMAs to the next
               # _weaveEmitReady/_weaveEmitAll (idempotent), never drops or double-issues them.
-              foldable    = (self.cvtVgprStruct.vgprStoreData >= 0)
+              # The guarded boundary path must not defer one pair and recover it
+              # through the runtime fallback. Keep folding on the guard-free
+              # interior path, where both source pairs are always consumed.
+              foldable    = (self.cvtVgprStruct.vgprStoreData >= 0
+                             and (guardMSgpr is None or self._fusedFullTileNoGuards()))
               pairIdx     = tt0 // 2
               prevSba0Idx = elementIdx - 3   # tt0-3 (batchA sba=0, m-lower)
               prevSba1Idx = elementIdx - 2   # tt0-2 (batchA sba=1)
