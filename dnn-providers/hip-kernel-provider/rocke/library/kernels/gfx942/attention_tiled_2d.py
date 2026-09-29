@@ -6377,8 +6377,14 @@ def build_gfx942_4warp_gqa(
         )
         # In-place rescale-then-accumulate (HD128_PIPE / D128 sliding-window path only):
         # fold acc *= alpha, then MFMA-accumulate PV directly into acc, dropping the separate
-        # `pv` accumulator (~64 VGPR) so the D128 kernel stays spill-free at the gfx942
-        # 256-VGPR cap. D256 / bs64 (non-HD128_PIPE) keep the original zero-init + fma path.
+        # `pv` accumulator (~64 VGPR) to cut register pressure at the gfx942 256-VGPR cap.
+        # This does NOT by itself keep the kernel spill-free: the exp2_fast swap above drops
+        # the range-reduction guard (and its scheduling barrier), which adds pressure.
+        # Whether the kernel actually spills is comgr-version-dependent -- older comgr (the
+        # ROCm 7.2 sweep toolchain) spills at the cap; the 7.13/7.14 comgr (llvm23) allocates
+        # the same IR spill-free. Perf-neutral either way: this path is memory-bound, so any
+        # spill hides under HBM latency (measured on gfx942). D256 / bs64 (non-HD128_PIPE)
+        # keep the original zero-init + fma path.
         if HD128_PIPE:
             acc_tgt = [
                 b.vec_pack(
