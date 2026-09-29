@@ -147,8 +147,8 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
     """Best-effort package metadata for diagnostics, not LLVM compatibility.
 
     Reads torch.version.hip for a torch-bundled library or .info/version near
-    the resolved COMGR path. Missing metadata remains unknown. Compiler
-    selection and validation use loaded_compiler_info instead.
+    the resolved COMGR path, with the historical /opt/rocm metadata fallback.
+    Compiler selection and validation use loaded_compiler_info instead.
     """
     path = resolved_lib_path()
     if not path:
@@ -198,7 +198,7 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
         # No obvious ``rocm`` root in the name -> the outermost match is the
         # install root (component subdirs are always deeper than it).
         return found[-1][1]
-    return None
+    return _read_rocm_version_file("/opt/rocm/.info/version")
 
 
 def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
@@ -349,20 +349,23 @@ def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
     not change the compiler that will consume it. Unknown compiler evidence
     or an unrecognised input layout leaves validation to COMGR.
     """
-    from ..core.lower_llvm import (
-        _datalayout_kind_for_flavor,
-        _datalayout_kind_from_ir,
-        _flavor_for_llvm,
-    )
+    try:
+        from ..core.lower_llvm import (
+            _datalayout_kind_for_flavor,
+            _datalayout_kind_from_ir,
+            _flavor_for_llvm,
+        )
 
-    ir_kind = _datalayout_kind_from_ir(ir_text)
-    if ir_kind is None:
+        ir_kind = _datalayout_kind_from_ir(ir_text)
+        if ir_kind is None:
+            return
+        info = loaded_compiler_info()
+        if info is None or info.llvm_version is None:
+            return
+        lib_flavor = _flavor_for_llvm(info.llvm_version[0])
+        lib_kind = _datalayout_kind_for_flavor(lib_flavor)
+    except Exception:  # noqa: BLE001 - leave unknown compatibility to COMGR
         return
-    info = loaded_compiler_info()
-    if info is None or info.llvm_version is None:
-        return
-    lib_flavor = _flavor_for_llvm(info.llvm_version[0])
-    lib_kind = _datalayout_kind_for_flavor(lib_flavor)
     if lib_kind is None or lib_kind is ir_kind:
         return
     raise ComgrError(

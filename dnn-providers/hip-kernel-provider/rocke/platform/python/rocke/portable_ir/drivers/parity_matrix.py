@@ -38,20 +38,23 @@ from rocke.portable_ir.src.recording_builder import record_kernel
 # from the one that produces the artifact. So: resolve from the installed comgr
 # when there is one, and fall back to the offline default when there is not,
 # which keeps the driver usable on a machine with no ROCm at all.
-_FALLBACK_FLAVOR = "llvm22"
+_FALLBACK_FLAVOR = "llvm20"
 FLAVOR = os.environ.get("ROCKE_LLVM_FLAVOR", "auto")
 ARCHES = os.environ.get("ARCHES", "gfx942,gfx950").split(",")
 
 
 def _auto_flavor() -> Tuple[str, str]:
     """-> (flavor, where it came from), the second for the log line."""
-    from rocke.core.lower_llvm import _flavor_for_llvm
-    from rocke.runtime.comgr import loaded_compiler_info
+    try:
+        from rocke.core.lower_llvm import _flavor_for_llvm
+        from rocke.runtime.comgr import loaded_compiler_info
 
-    info = loaded_compiler_info()
-    if info is not None and info.llvm_version is not None:
-        return _flavor_for_llvm(info.llvm_version[0]), info.describe()
-    reason = info.describe() if info is not None else "COMGR unavailable"
+        info = loaded_compiler_info()
+        if info is not None and info.llvm_version is not None:
+            return _flavor_for_llvm(info.llvm_version[0]), info.describe()
+        reason = info.describe() if info is not None else "COMGR unavailable"
+    except Exception:  # noqa: BLE001 - no comgr is a normal state here
+        reason = "compiler query unavailable"
     return _FALLBACK_FLAVOR, f"offline default; {reason}"
 
 

@@ -272,11 +272,14 @@ def _detect_llvm_flavor() -> str:
     env = os.environ.get("ROCKE_LLVM_FLAVOR", "").strip().lower()
     if env in LLVM_FLAVORS:
         return env
-    from ..runtime.comgr import loaded_compiler_info
+    try:
+        from ..runtime.comgr import loaded_compiler_info
 
-    info = loaded_compiler_info()
-    if info is not None and info.llvm_version is not None:
-        return _flavor_for_llvm(info.llvm_version[0])
+        info = loaded_compiler_info()
+        if info is not None and info.llvm_version is not None:
+            return _flavor_for_llvm(info.llvm_version[0])
+    except Exception:  # noqa: BLE001 - preserve best-effort automatic detection
+        pass
     return LLVM_FLAVOR_LLVM22
 
 
