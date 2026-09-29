@@ -162,8 +162,11 @@ int computeDsLoadWmmaWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& co
 //   If that attempt fails and the DS budget is still pending, the scan accepts
 //   a ready load in earlyDsLoads_ that
 //   does not overlap the active WMMA source. That pick uses wait 0, so it
-//   skips the cap and the throttle wait. A wait of 0 also sets dsWindowOk,
-//   which keeps VALU out of this pick.
+//   skips the cap and the throttle wait, and it can pass a later-priority
+//   load. Overlap groups are the exception: onInitRegion chains each
+//   overlapping barrier's own ds_loads by dsReadPriority, so a later load in
+//   that group is not ready yet. A wait of 0 also sets dsWindowOk, which
+//   keeps VALU out of this pick.
 //
 // Which loads are early. Before this function runs, onInitRegion marks a
 // barrier group's matched ds_reads early when dsLoadWmmaNeeded is greater

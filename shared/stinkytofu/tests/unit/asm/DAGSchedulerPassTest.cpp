@@ -2108,6 +2108,62 @@ TEST_F(DAGSchedulerPassTest, ShortSpanDsBatchBypassesCapWhileBudgetPending) {
     EXPECT_LT(positionOf(*body, earlyB), positionOf(*body, freeValu));
 }
 
+// Overlap locks each barrier group's ds_loads to the pre-scan dsReadPriority
+// order. `high` feeds an earlier WMMA than `low`, so it has the better
+// priority, but three WMMAs that already read its dest keep it unready while
+// `low` is free. Without the overlap chain the free load issues first.
+TEST_F(DAGSchedulerPassTest, OverlapDsLoadsIssueInDsReadPriorityOrder) {
+    auto schedule = [&](bool withOverlap) {
+        am.clear();
+        func = std::make_unique<Function>(withOverlap ? "overlap_ds_priority"
+                                                      : "no_overlap_ds_priority");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        // Ready immediately, and its consumer WMMA is later, so its
+        // dsReadPriority is worse than `high`.
+        StinkyInstruction* low =
+            createMovableDsLoad(/*destReg=*/8, /*addrReg=*/204, /*ldsToken=*/0);
+        // These read v[220:228) before `high` writes v[220:224). That both
+        // raises the after-barrier lastOverlap and holds `high` until a WMMA
+        // has issued. `low` has no such predecessor.
+        for (int i = 0; i < 3; ++i)
+            createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/100 + i * 16, /*src0Start=*/220);
+        StinkyInstruction* high =
+            createMovableDsLoad(/*destReg=*/220, /*addrReg=*/200, /*ldsToken=*/0);
+        createMovableWorkgroupBarrier(bb, /*ldsToken=*/0);
+        if (withOverlap) {
+            createMovableWorkgroupBarrier(bb, /*ldsToken=*/1);
+            // Two before-side loads make that group's WMMA window long enough
+            // to overlap the after group's interval. One load ends exactly
+            // where the after interval starts, which is not an overlap.
+            createMovableDsLoad(/*destReg=*/500, /*addrReg=*/208, /*ldsToken=*/1);
+            createMovableDsLoad(/*destReg=*/504, /*addrReg=*/212, /*ldsToken=*/1);
+        }
+        // Consumers. Earlier WMMA index => better (lower) dsReadPriority.
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/300, /*src0Start=*/220);
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/320, /*src0Start=*/8);
+        if (withOverlap) createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/148, /*src0Start=*/500);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/16, /*throttleLatency=*/64,
+                                  /*perCap=*/1, /*drainLatency=*/64,
+                                  /*transitionFactor=*/1.0, /*transitionEntries=*/0,
+                                  /*enableWmmaHideBudgetPrescan=*/true);
+        return std::pair{positionOf(*bb, high), positionOf(*bb, low)};
+    };
+
+    const auto [overlapHigh, overlapLow] = schedule(/*withOverlap=*/true);
+    EXPECT_LT(overlapHigh, overlapLow)
+        << "ds_loads tied to an overlapping barrier must issue in dsReadPriority "
+           "order, even when the worse-priority load is ready first";
+
+    const auto [plainHigh, plainLow] = schedule(/*withOverlap=*/false);
+    EXPECT_LT(plainLow, plainHigh)
+        << "without an overlap the ready lower-priority ds_load may still issue "
+           "before the higher-priority one";
+}
+
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_BudgetedDsBeatsRealStallWhenNoFreeWork) {
     BasicBlock* body = bb;
     body->addSuccessor(body);

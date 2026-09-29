@@ -44,6 +44,7 @@
 
 #include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
+#include "RegionDAG.hpp"
 #include "stinkytofu/analysis/asm/WmmaHideBudgetAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -2699,6 +2700,63 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
                            << " pendingBeforeThreshold=" << beforeGroup.pendingThreshold << "\n");
             }
         }
+
+        // When a barrier group overlaps another, issue that group's ds_loads in
+        // the pre-scan dsReadPriority order (lower number first). A later load
+        // stays unready until every earlier one has issued, so the early-batch
+        // bypass, the cap, and the throttle cannot skip ahead inside the group.
+        // Each group is chained on its own: a cross-group edge often fights the
+        // barrier data dependence and would only be dropped. These edges are
+        // issue order, not part of the Layer 2 safety contract, so a cycle drop
+        // does not unpublish the overlap.
+        auto dsReadPriorityOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            if (it == deps.dag.instToId.end()) return std::numeric_limits<unsigned>::max();
+            return deps.dag.nodes[it->second].dsReadPriority;
+        };
+        auto dagIdOf = [&](StinkyInstruction* inst) -> unsigned {
+            auto it = deps.dag.instToId.find(inst);
+            return it == deps.dag.instToId.end() ? std::numeric_limits<unsigned>::max()
+                                                 : it->second;
+        };
+        auto orderOverlapDsLoads = [&](const BarrierGroupThresholdSummary& group) {
+            const bool groupOverlaps = std::any_of(
+                group.barriers.begin(), group.barriers.end(), [&](StinkyInstruction* barrier) {
+                    return overlappingHideBudgetBarriers.contains(barrier);
+                });
+            if (!groupOverlaps) return;
+
+            std::vector<StinkyInstruction*> loads;
+            std::unordered_set<StinkyInstruction*> seen;
+            auto addLoad = [&](StinkyInstruction* inst) {
+                if (inst == nullptr || !isDSRead(*inst)) return;
+                if (seen.insert(inst).second) loads.push_back(inst);
+            };
+            for (StinkyInstruction* load : group.descendantLoads) addLoad(load);
+            for (StinkyInstruction* barrier : group.barriers) {
+                auto matched = barrierMatchedDsLoads_.find(barrier);
+                if (matched == barrierMatchedDsLoads_.end()) continue;
+                for (StinkyInstruction* load : matched->second) addLoad(load);
+            }
+            if (loads.size() < 2) return;
+
+            std::stable_sort(loads.begin(), loads.end(),
+                             [&](StinkyInstruction* a, StinkyInstruction* b) {
+                                 const unsigned priA = dsReadPriorityOf(a);
+                                 const unsigned priB = dsReadPriorityOf(b);
+                                 if (priA != priB) return priA < priB;
+                                 return dagIdOf(a) < dagIdOf(b);
+                             });
+            for (size_t i = 1; i < loads.size(); ++i) {
+                deps.requestedConstraints.emplace_back(loads[i - 1], loads[i]);
+                PASS_DEBUG(std::cerr << "[CDNA5 onInitRegion overlap ds priority] predecessor="
+                                     << loads[i - 1] << " pri=" << dsReadPriorityOf(loads[i - 1])
+                                     << " successor=" << loads[i]
+                                     << " pri=" << dsReadPriorityOf(loads[i]) << "\n");
+            }
+        };
+        for (const auto& group : exclusiveAfterGroups) orderOverlapDsLoads(group);
+        for (const auto& group : exclusiveBeforeGroups) orderOverlapDsLoads(group);
 
         for (auto& group : exclusiveAfterGroups) group.threshold = group.pendingThreshold;
         for (auto& group : exclusiveBeforeGroups) group.threshold = group.pendingThreshold;
