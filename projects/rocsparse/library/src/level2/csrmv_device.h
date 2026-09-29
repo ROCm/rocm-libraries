@@ -182,8 +182,8 @@ namespace rocsparse
 
         // The launch grid is clamped to the device's maximum grid size, so iterate with a
         // grid-stride loop to cover every element that needs scaling.
-        const J stride = (J)WG_SIZE * hipGridDim_x;
-        for(J gid = (J)hipBlockIdx_x * WG_SIZE + hipThreadIdx_x; gid < required_threads;
+        const int64_t stride = (int64_t)WG_SIZE * hipGridDim_x;
+        for(int64_t gid = (int64_t)hipBlockIdx_x * WG_SIZE + hipThreadIdx_x; gid < required_threads;
             gid += stride)
         {
             if(gid < first_row)
