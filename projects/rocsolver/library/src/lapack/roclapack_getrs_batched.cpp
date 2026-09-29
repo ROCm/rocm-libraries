@@ -44,14 +44,13 @@ rocblas_status rocsolver_getrs_batched_impl(rocblas_handle handle,
                                             const I batch_count_arg)
 try
 {
+    ROCSOLVER_ENTER_TOP("getrs_batched", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda,
+                        "--strideP", strideP, "--ldb", ldb, "--batch_count", batch_count_arg);
     {
         auto const A = A_arg;
         auto const ipiv = ipiv_arg;
         auto const B = B_arg;
         auto const batch_count = batch_count_arg;
-
-        ROCSOLVER_ENTER_TOP("getrs_batched", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda",
-                            lda, "--strideP", strideP, "--ldb", ldb, "--batch_count", batch_count);
 
         if(!handle)
             return rocblas_status_invalid_handle;

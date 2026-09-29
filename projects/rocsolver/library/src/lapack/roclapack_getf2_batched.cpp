@@ -43,15 +43,14 @@ rocblas_status rocsolver_getf2_batched_impl(rocblas_handle handle,
                                             const I batch_count_arg)
 try
 {
+    const char* name = (pivot ? "getf2_batched" : "getf2_npvt_batched");
+    ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda, "--strideP", strideP, "--batch_count",
+                        batch_count_arg);
     {
         auto const batch_count = batch_count_arg;
         auto const info = info_arg;
         auto const ipiv = ipiv_arg;
         auto const A = A_arg;
-
-        const char* name = (pivot ? "getf2_batched" : "getf2_npvt_batched");
-        ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda, "--strideP", strideP,
-                            "--batch_count", batch_count);
 
         using S = decltype(std::real(T{}));
 
