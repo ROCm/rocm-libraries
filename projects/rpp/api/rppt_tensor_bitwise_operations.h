@@ -45,9 +45,11 @@ extern "C" {
 /*! \brief Bitwise AND computation on HIP/HOST backend for a NCHW/NHWC layout tensor
  * \details This function computes bitwise AND of corresponding pixels for a batch of RGB(3 channel)
  * / greyscale(1 channel) images with an NHWC/NCHW tensor layout.<br> srcPtr depth ranges - Rpp8u (0
- * to 255). dstPtr depth ranges - Will be same depth as srcPtr. \image html img150x150.png Sample
- * Input1 \image html img150x150_2.png Sample Input2 \image html
- * bitwise_operations_bitwise_and_img150x150.png Sample Output \param [in] srcPtr1 source1 tensor in
+ * to 255). dstPtr depth ranges - Will be same depth as srcPtr.
+ * \image html img150x150.png "Sample Input1"
+ * \image html img150x150_2.png "Sample Input2"
+ * \image html bitwise_operations_bitwise_and_img150x150.png "Sample Output"
+ * \param [in] srcPtr1 source1 tensor in
  * HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor
  * in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcDescPtr source
  * tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0, dataType = U8, layout =
@@ -69,9 +71,11 @@ RppStatus rppt_bitwise_and(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
 /*! \brief Bitwise XOR computation on HIP/HOST backend for a NCHW/NHWC layout tensor
  * \details This function computes bitwise XOR of corresponding pixels for a batch of RGB(3 channel)
  * / greyscale(1 channel) images with an NHWC/NCHW tensor layout.<br> srcPtr depth ranges - Rpp8u (0
- * to 255). dstPtr depth ranges - Will be same depth as srcPtr. \image html img150x150.png Sample
- * Input1 \image html img150x150_2.png Sample Input2 \image html
- * bitwise_operations_bitwise_xor_img150x150.png Sample Output \param [in] srcPtr1 source1 tensor in
+ * to 255). dstPtr depth ranges - Will be same depth as srcPtr.
+ * \image html img150x150.png "Sample Input1"
+ * \image html img150x150_2.png "Sample Input2"
+ * \image html bitwise_operations_bitwise_xor_img150x150.png "Sample Output"
+ * \param [in] srcPtr1 source1 tensor in
  * HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor
  * in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcDescPtr source
  * tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0, dataType = U8, layout =
@@ -93,9 +97,11 @@ RppStatus rppt_bitwise_xor(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDe
 /*! \brief Bitwise OR computation on HIP/HOST backend for a NCHW/NHWC layout tensor
  * \details This function computes bitwise OR of corresponding pixels for a batch of RGB(3 channel)
  * / greyscale(1 channel) images with an NHWC/NCHW tensor layout.<br> srcPtr depth ranges - Rpp8u (0
- * to 255). dstPtr depth ranges - Will be same depth as srcPtr. \image html img150x150.png Sample
- * Input1 \image html img150x150_2.png Sample Input2 \image html
- * bitwise_operations_bitwise_or_img150x150.png Sample Output \param [in] srcPtr1 source1 tensor in
+ * to 255). dstPtr depth ranges - Will be same depth as srcPtr.
+ * \image html img150x150.png "Sample Input1"
+ * \image html img150x150_2.png "Sample Input2"
+ * \image html bitwise_operations_bitwise_or_img150x150.png "Sample Output"
+ * \param [in] srcPtr1 source1 tensor in
  * HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcPtr2 source2 tensor
  * in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in] srcDescPtr source
  * tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0, dataType = U8, layout =
@@ -117,8 +123,10 @@ RppStatus rppt_bitwise_or(RppPtr_t srcPtr1, RppPtr_t srcPtr2, RpptDescPtr srcDes
 /*! \brief Bitwise NOT computation on HIP/HOST backend for a NCHW/NHWC layout tensor
  * \details This function computes bitwise NOT of corresponding pixels for a batch of RGB(3 channel)
  * / greyscale(1 channel) images with an NHWC/NCHW tensor layout.<br> srcPtr depth ranges - Rpp8u (0
- * to 255). dstPtr depth ranges - Will be same depth as srcPtr. \image html img150x150.png Sample
- * Input \image html bitwise_operations_bitwise_not_img150x150.png Sample Output \param [in] srcPtr
+ * to 255). dstPtr depth ranges - Will be same depth as srcPtr.
+ * \image html img150x150.png "Sample Input"
+ * \image html bitwise_operations_bitwise_not_img150x150.png "Sample Output"
+ * \param [in] srcPtr
  * source tensor in HIP memory (for HIP backend) or HOST memory (for HOST backend) \param [in]
  * srcDescPtr source tensor descriptor (Restrictions - numDims = 4, offsetInBytes >= 0, dataType =
  * U8, layout = NCHW/NHWC, c = 1/3) \param [out] dstPtr destination tensor in HIP memory (for HIP

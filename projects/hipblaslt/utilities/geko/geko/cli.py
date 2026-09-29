@@ -24,7 +24,8 @@ from typing import List, Sequence
 import yaml
 
 from geko import logger, _set_log_level
-from geko.config_generator.load_input_config import load_prepared_config_from_yaml
+from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
+from geko.config_generator.constants import HARDWARE_MAP
 from geko.constants import SUPPORTED_ARCH
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
@@ -49,10 +50,12 @@ def _alloc_run_root() -> Path:
 def _rows_from_gemm_config_yaml(path: Path, arch: str | None) -> List[dict]:
     """Flatten GemmProblems from load_prepared_config_from_yaml to workload-log dicts."""
     prepared = load_prepared_config_from_yaml(config_path=path, arch=arch)
+    resolved_arch = prepared["ARCH"]
+    mx_scale = HARDWARE_MAP[resolved_arch]["mx_scale"] if resolved_arch in HARDWARE_MAP else 3
     problems: List[GemmConfig] = prepared["GemmProblems"]
     rows: List[dict] = []
     for gc in problems:
-        rows.extend(gc.workload_log_rows())
+        rows.extend(gc.workload_log_rows(mx_scale=mx_scale))
     return rows
 
 
@@ -84,12 +87,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     workload_src.add_argument(
         "--inline",
-        nargs=9,
-        metavar=("M", "N", "batch", "K", "DataType", "DestDataType", "ComputeDataType", "transA", "transB"),
+        nargs="+",
+        metavar="ARG",
         help=(
-            "Single GEMM: M N batch_count K, Tensile DataType / DestDataType / ComputeDataType "
-            "(e.g. B B S), transA and transB each N, T, or C (conjugate-transpose, complex only) "
-            "(e.g. --inline 1024 1024 1 1024 B B S N T)"
+            "Single GEMM: M N batch_count K DataType DestDataType ComputeDataType transA transB [MX]. "
+            "DataType/DestDataType/ComputeDataType are Tensile letters (e.g. B B S). "
+            "transA/transB: N, T, or C (conjugate-transpose, complex only). "
+            "Optional 10th arg 'MX' enables Microscaling mode (only for F8/F4); requires --arch. "
+            "Example: --inline 1024 1024 1 1024 F8 S S N T MX --arch gfx950"
         ),
     )
     parser.add_argument(
@@ -231,7 +236,7 @@ class CliArgs:
     search: bool
     workload: str | None
     gemm_config: str | None
-    inline: tuple[int, int, int, int, str, str, str, str, str] | None
+    inline: tuple[int, int, int, int, str, str, str, str, str, bool] | None
     arch: str | None
     hipblaslt: str | None
     verbose: int
@@ -269,9 +274,20 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         if not p.is_file():
             parser.error(f"--list file not found: {p} (example: {_SAMPLE_GEMM_LIST_YAML})")
 
-    inline: tuple[int, int, int, int, str, str, str, str, str] | None = None
+    inline: tuple[int, int, int, int, str, str, str, str, str, bool] | None = None
     if inline_raw is not None:
-        m_s, n_s, b_s, k_s, data_t, dest_t, comp_t, ta, tb = inline_raw
+        if len(inline_raw) not in (9, 10):
+            parser.error("--inline requires 9 args (M N batch K DataType DestDataType ComputeDataType transA transB) "
+                         "plus an optional 10th arg 'MX'")
+        m_s, n_s, b_s, k_s, data_t, dest_t, comp_t, ta, tb = inline_raw[:9]
+        inline_mx = False
+        if len(inline_raw) == 10:
+            mx_arg = str(inline_raw[9]).strip().upper()
+            if mx_arg != "MX":
+                parser.error(f"--inline: optional 10th argument must be 'MX', got '{inline_raw[9]}'")
+            inline_mx = True
+            if ns.arch is None:
+                parser.error("--arch is required when using --inline ... MX")
         try:
             m_i, n_i, b_i, k_i = int(m_s), int(n_s), int(b_s), int(k_s)
         except ValueError:
@@ -281,7 +297,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         if trans_a not in ("N", "T", "C") or trans_b not in ("N", "T", "C"):
             parser.error("--inline: transA and transB must each be N, T, or C")
         dt, dd, cd = str(data_t).strip(), str(dest_t).strip(), str(comp_t).strip()
-        inline = (m_i, n_i, b_i, k_i, dt, dd, cd, trans_a, trans_b)
+        inline = (m_i, n_i, b_i, k_i, dt, dd, cd, trans_a, trans_b, inline_mx)
 
     if ns.tune and ns.arch is None:
         parser.error("--arch is required with --tune")
@@ -353,10 +369,14 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
         with log_path.open("w") as f:
             yaml.safe_dump(rows, f, default_flow_style=None, sort_keys=False, width=5000)
     elif args.inline is not None:
-        m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b = args.inline
+        m, n, batch_count, k, data_t, dest_t, comp_t, trans_a, trans_b, inline_mx = args.inline
+        mx_scale = HARDWARE_MAP[args.arch]["mx_scale"] if args.arch and args.arch in HARDWARE_MAP else 3
         try:
             gtype = GemmType.from_tensile(trans_a, trans_b, data_t, dest_t, comp_t)
-            rows = GemmConfig(gtype, [[m, n, batch_count, k]]).workload_log_rows()
+            gconfig = GemmConfig(gtype, [[m, n, batch_count, k]], mx=inline_mx)
+            if args.arch is not None:
+                validate_mx_arch_support([gconfig], args.arch)
+            rows = gconfig.workload_log_rows(mx_scale=mx_scale)
         except ValueError as e:
             logger.error(str(e))
             return 1

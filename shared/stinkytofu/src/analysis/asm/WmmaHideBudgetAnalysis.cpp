@@ -38,10 +38,10 @@ namespace stinkytofu {
 namespace {
 
 int computeThrottleOnlyWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& config) {
-    if (dsLoadCount <= 0 || config.dsReadPerWmma <= 0) return 0;
+    if (dsLoadCount <= 0 || config.dsReadPerCap <= 0) return 0;
 
-    const int perWmma = config.dsReadPerWmma;
-    int windowsNeeded = (dsLoadCount + perWmma - 1) / perWmma;
+    const int perCap = config.dsReadPerCap;
+    int windowsNeeded = (dsLoadCount + perCap - 1) / perCap;
     if (config.dsReadQueueDepth <= 0 || dsLoadCount <= config.dsReadQueueDepth ||
         config.dsReadThrottleLatency <= 0 || config.wmmaLatency <= 0)
         return windowsNeeded;
@@ -57,7 +57,7 @@ int computeThrottleOnlyWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& 
     const float cyclesNeeded =
         cyclesPerDs * (transitionFactor * transitionCount + fullThrottleCount);
     const float baseWindows =
-        static_cast<float>(config.dsReadQueueDepth + perWmma - 1) / static_cast<float>(perWmma);
+        static_cast<float>(config.dsReadQueueDepth + perCap - 1) / static_cast<float>(perCap);
     const float latencyWindows = cyclesNeeded / static_cast<float>(config.wmmaLatency);
     return static_cast<int>(std::ceil(baseWindows + latencyWindows));
 }
@@ -67,14 +67,14 @@ int computeThrottleOnlyWindowsNeeded(int dsLoadCount, const DsLoadBudgetConfig& 
 std::vector<int> computeDsLoadWmmaWindowDistribution(int dsLoadCount,
                                                      const DsLoadBudgetConfig& config) {
     std::vector<int> distribution;
-    if (dsLoadCount <= 0 || config.dsReadPerWmma <= 0) return distribution;
+    if (dsLoadCount <= 0 || config.dsReadPerCap <= 0) return distribution;
 
-    const int perWmma = config.dsReadPerWmma;
+    const int perCap = config.dsReadPerCap;
     const int depth = std::max(0, config.dsReadQueueDepth);
     const int initialLoads = depth > 0 ? std::min(dsLoadCount, depth) : dsLoadCount;
     int remaining = dsLoadCount;
     for (int initialRemaining = initialLoads; initialRemaining > 0;) {
-        const int contribution = std::min(perWmma, initialRemaining);
+        const int contribution = std::min(perCap, initialRemaining);
         distribution.push_back(contribution);
         initialRemaining -= contribution;
         remaining -= contribution;
@@ -88,7 +88,7 @@ std::vector<int> computeDsLoadWmmaWindowDistribution(int dsLoadCount,
                          : static_cast<int>(distribution.size());
         target = std::max(0, target);
         while (target < static_cast<int>(distribution.size()) &&
-               distribution[static_cast<size_t>(target)] >= perWmma)
+               distribution[static_cast<size_t>(target)] >= perCap)
             ++target;
         if (target >= static_cast<int>(distribution.size()))
             distribution.resize(static_cast<size_t>(target) + 1, 0);
@@ -165,7 +165,7 @@ RegionHideBudget analyzeWmmaHideBudget(const dag::RegionDAG& regionDag,
     auto distributeByThrottle = [&](int begin, int end, int dsLoads) {
         const int span = end - begin;
         if (span <= 0 || dsLoads <= 0) return;
-        if (dsLoadConfig.dsReadPerWmma <= 0) {
+        if (dsLoadConfig.dsReadPerCap <= 0) {
             distributeEvenly(begin, end, dsLoads);
             return;
         }
