@@ -6,12 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-- Add provider-private Origami selection and JIT benchmark execution through the public API.
-
-- Add a public JIT request example with C/C++ GEMM execution and separate regression tests.
-
-* Added an opt-in experimental JIT API that requests kernel bundles from a configured backend. TensileLite is the first provider; GEMM request and algorithm adapters use existing hipBLASLt execution APIs.
-
+* Internal just-in-time (JIT) GEMM generation, built only when `HIPBLASLT_ENABLE_JIT` is `ON` (the default is `OFF`). TensileLite compiles an explicit recipe or the first Origami-ranked candidate it accepts, and the result runs through `hipblasLtMatmul` and `hipblaslt_ext::Gemm`. The JIT entry points are internal: their headers are not installed, and only the JIT tests and `hipblaslt-bench --jit-gemm` use them. JIT will be enabled for applications through the `HIPBLASLT_JIT` environment variable.
 * `FusedGemmA2A` TensileLite problem-type parameter (default `0`, off) that fuses an all-to-all redistribution into the GEMM store path using SDMA, avoiding a separate collective kernel and staging buffer; currently limited to gfx950 and bf16.
 * Tensor swizzling (pre-swizzled/pre-tiled A/B tensors) support for gfx11 (WMMA) architectures.
 * Batch-offset support for General Batched GEMM on gfx1250.

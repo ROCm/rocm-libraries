@@ -26,8 +26,8 @@ cmake -S projects/hipblaslt -B "$project_build" \
   -DHIPBLASLT_ENABLE_CLIENT=ON
 cmake --build "$project_build" --parallel 8 --target \
   _rocisa hipblaslt-bench hipblaslt-jit-direct-gemm-test hipblaslt-jit-generic-gemm-test \
-  hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-backend-test \
-  hipblaslt-jit-process-test hipblaslt-jit-artifacts-test
+  hipblaslt-jit-api-test hipblaslt-jit-generic-api-test hipblaslt-jit-mock-backend-test \
+  hipblaslt-jit-component-test hipblaslt-jit-process-test hipblaslt-jit-artifacts-test
 "$project_python" .github/scripts/test_hipblaslt_jit.py \
   --build "$project_build" --architecture gfx950 --output "$(mktemp -d)/jit-validation"
 ```
@@ -42,7 +42,7 @@ The default run tests the disabled configuration last. It reconfigures the same
 build directory with `HIPBLASLT_ENABLE_JIT=OFF`, rebuilds the disabled consumer
 and benchmark, and checks their rejection diagnostics. Restore `ON` and rebuild
 before continuing enabled development. To run a focused enabled check without
-reconfiguration, select cases explicitly, for example `--case alternate-backend`
+reconfiguration, select cases explicitly, for example `--case jit-component`
 or `--case bench`. `--case` can be repeated; this smoke run covers both entry
 points and the shared execution assertions:
 
@@ -53,7 +53,8 @@ points and the shared execution assertions:
 ```
 
 `--case helper-failures` and `--case bundle-failures` also build a valid split-K
-test bundle before damaging its artifacts.
+test bundle before damaging its artifacts, and `--case mock-backend` builds the
+same bundle to replay it.
 
 ## What each layer checks
 
@@ -61,7 +62,8 @@ test bundle before damaging its artifacts.
 | --- | --- |
 | `process-runner` | Shell-free process arguments, environment and working directory; output capture, failures and descriptor cleanup |
 | `artifact-loader` | Bounded envelope parsing, truncation and malformed fields, native Unicode paths, compressed library bytes and path containment |
-| `alternate-backend` | An independent HIP provider with no Tensile metadata, owned scalar values, C/C++ execution, helper preparation and bundle lifetime; a non-GEMM request passes through generic compilation |
+| `jit-component` | Jit over fake stages, without a GPU: count limiting, excluded kernels, prediction only for backends that consume it, the stage of each failure, publish and load ordering, scratch lifetime, concurrent generation, and the TensileLite default seeds |
+| `mock-backend` | The in-process mock backend replaying the `splitk-api` bundle through Jit: C/C++ numerics, owned scalar values, copied algorithms outliving their owners, name lookups, 65 streams, insufficient workspace, forged tokens and indices, the wrong device, NOT_SUPPORTED for a non-GEMM request or another ProblemType, generation and build faults, and bundle lifetime |
 | `direct-gemm` | Direct explicit-recipe TensileLite call followed by checked C and C++ GEMM execution |
 | `generic-gemm` | Backend/request/solution flow followed by checked C and C++ GEMM execution |
 | `generic-api` | Shared execution, ownership and failure assertions from the direct API test, selected through the generic interface |
@@ -113,16 +115,27 @@ tensile_source="$PWD/projects/hipblaslt/tensilelite"
 Use the compiler and architecture for the local device. The output path must
 not exist and its parent must exist. Generator diagnostics are retained in
 `<output>.log`, with process scratch files in `<output>.cwd` and generated files
-under `<output>/bundle`. With the generic provider's `Options::configPath`
-empty, TensileLite instead asks Origami for ranked candidates and compiles the
-first one its validators accept; the [benchmark guide](../../bench/README.jit.md)
-covers that selection and its limits.
+under `<output>/bundle`. With `Options::configPath` empty in
+`createBackend`, Jit instead asks the Origami predictor for ranked candidates
+and TensileLite compiles the first one its validators accept; the
+[benchmark guide](../../bench/README.jit.md) covers that selection and its
+limits.
+
+## Mock backend and Jit component tests
+
+`hipblaslt-jit-mock-backend-test` takes one argument, a bundle directory that
+`Tensile.SingleSolution` wrote; the driver passes `<output>/splitk-api/bundle`.
+It creates the mock backend with `jit::mock::createBackend` from
+`hipblaslt-jit-mock.hpp`, so generation runs no Python and no subprocess, and
+checks the same FP16 problem as the direct and generic tests.
+`hipblaslt-jit-component-test` takes one argument, a fresh directory that it
+uses as the scratch parent; it needs no GPU.
 
 ## Shared automation and remaining coverage
 
 The shared `hipblaslt-jit-gemm-ci.yml` workflow builds the JIT test binaries and
-the benchmark, then runs the driver: direct and generic GEMM tests,
-alternate-provider checks, and the prediction/benchmark layer. The workflow obtains native
+the benchmark, then runs the driver: direct and generic GEMM tests, the mock
+backend and Jit component checks, and the prediction/benchmark layer. The workflow obtains native
 runner labels from the shared GPU map for gfx90a, gfx942, gfx950 and gfx1250.
 Missing native runners fail setup instead of silently substituting another GPU.
 The SDK supplies build dependencies; project libraries are built from the source

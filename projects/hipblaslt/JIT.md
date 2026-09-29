@@ -47,14 +47,14 @@ interfaces used by tests; they are not part of the public API.
 
 ### Entry points
 
-Two internal JIT entry points exist. Both share one TensileLite
-provider implementation and one process-local algorithm registry, and both
+Two internal JIT entry points exist. Both generate through the Jit component
+with the TensileLite backend, share one process-local algorithm registry, and
 return an algorithm for the existing C/C++ GEMM execution APIs.
 
 | Entry point | Header | Behavior |
 | --- | --- | --- |
 | Direct TensileLite | `library/src/amd_detail/hipblaslt-jit-tensilelite.hpp` | `hipblaslt_ext::experimental::jit::tensilelite::getGemmAlgo` compiles one required, explicit YAML (YAML Ain't Markup Language) recipe and returns a `hipblasLtMatmulHeuristicResult_t`. The `hipblaslt-jit-direct-gemm-test` binary exercises it. See the [TensileLite backend guide](JIT_TENSILELITE.md). |
-| Generic request/backend/solution | `library/src/amd_detail/hipblaslt-jit.hpp` | `jit::tensilelite::createBackend` configures the provider. `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars, `jit::getJitAlgo` compiles on the selected device and returns an owned `Solution`, and `jit::getGemmAlgo` adapts it to the algorithm accepted by `hipblasLtMatmul` and `Gemm`. The `hipblaslt-jit-generic-gemm-test` binary exercises it. |
+| Generic request/backend/solution | `library/src/amd_detail/hipblaslt-jit.hpp` | `jit::tensilelite::createBackend` returns a `Backend` handle that owns a Jit configured with the TensileLite backend. `jit::makeGemmRequest` captures existing GEMM descriptors and host scalars, `jit::getJitAlgo` compiles on the selected device and returns an owned `Solution`, and `jit::getGemmAlgo` adapts it to the algorithm accepted by `hipblasLtMatmul` and `Gemm`. The `hipblaslt-jit-generic-gemm-test` binary exercises it. |
 
 Both headers are internal: they are not installed and `hipblaslt-ext.hpp` does
 not include them. The five functions keep
@@ -62,20 +62,20 @@ not include them. The five functions keep
 binaries and `hipblaslt-bench --jit-gemm`, which link against the shared
 library. No installed header declares them, and they are not a supported API.
 
-Python, compiler, recipe and output paths belong to the provider's
+Python, compiler, recipe and output paths belong to the TensileLite backend's
 `tensilelite::Options`. The application owns its buffers and workspace. The
 request owns descriptor values and host scalars; it does not take ownership of
 device pointers. Compilation and support checks finish before graphics
-processing unit (GPU) work is submitted. The provider boundary is for
-compiled-in implementations and does not establish a stable external plugin
+processing unit (GPU) work is submitted. The Jit interfaces are for
+compiled-in implementations and do not establish a stable external plugin
 application binary interface (ABI). GEMM is the implemented operation; an
-attention request adapter and provider remain future work.
+attention request adapter and backend remain future work.
 
 Internally, the GEMM request reuses `RocblasltContractionProblem` with owned
 scalar values. The generic `Solution` and private `CompiledSolution` retain
-backend, target, request, workspace and bundle lifetime around the existing GEMM
-support and execution machinery. A matmul algorithm is an adaptation token, not
-a general owning executable object.
+the Jit, device target, request, workspace and bundle lifetime around the
+existing GEMM support and execution machinery. A matmul algorithm is an
+adaptation token, not a general owning executable object.
 
 ### Components
 
@@ -83,11 +83,15 @@ a general owning executable object.
 | --- | --- |
 | One-solution builder | One recipe and target produce complete main/helper artifacts through `Tensile.SingleSolution` and the existing TensileLite generators, validators and compiler tools. |
 | Ranked recipe selector | Supplied candidates and problem facts produce one validated recipe or rejection reasons. `Tensile.JitGemm` calls the builder without running a model. |
-| C++ predictor | `hipblaslt-jit-tensilelite-predictor.cpp` enumerates synthetic candidates from the target's instruction, tile, depth and cache-hint catalog, ranks them with Origami, and emits the `origami.gemm.dp.v1` modeled contract (workgroup mapping, stagger and launch outputs) to `Tensile.JitGemm`. |
+| Jit | `hipblaslt-jit-component.{hpp,cpp}`. For one request and device target, `Jit::generate` runs the predictor when the backend consumes a prediction, asks the backend for solutions in a private scratch directory, builds each solution's code objects, checks support, and loads the supported ones as process-local bundles. With a solution store, it publishes them instead and loads them only when publishing fails; no store is configured yet. Each failure records its stage (configure, predict, generate, build, support, load or publish), and `getJitAlgo` reports the first one. The scratch directory is removed on success and kept after a failure that left files in it. |
+| TensileLite backend | `hipblaslt-jit-tensilelite.cpp`. It writes the `Tensile.JitGemm` request from the prediction, or passes an explicit recipe through, runs the generator, and returns the bundle's one-solution library entry and code objects. It loads nothing. |
+| Origami predictor | `hipblaslt-jit-origami-predictor.cpp` expands the tuning knowledge's candidate seeds across the target's matrix instructions, ranks them with Origami, and emits the `origami.gemm.dp.v1` modeled contract (workgroup mapping, stagger and launch outputs) that the TensileLite backend forwards to `Tensile.JitGemm`. Jit runs it only when no explicit recipe is configured. |
+| TensileLite defaults | `hipblaslt-jit-tensilelite-defaults.cpp` is the tuning knowledge: 11 tile shapes, two DepthU rules, and cache hints that are only the defaults on gfx90a and gfx1250. It supplies no values for unmodeled knobs, which keep Tensile's defaults. |
+| Builder and loader | `hipblaslt-jit-loader.cpp`. The prebuilt builder accepts the code objects the generator already built. The Tensile loader parses the entry, checks support and workspace with TensileLite's predicates, and loads the code objects into a `TensileBundle`. |
 | Direct entry point and test | An explicit recipe and GEMM descriptors produce a checked algorithm. `hipblaslt-jit-direct-gemm-test` exercises C/C++ execution independently of the generic entry point. |
-| Generic entry point and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect the provider to existing execution. `hipblaslt-jit-generic-gemm-test` covers this flow. |
+| Generic entry point and adapters | `makeGemmRequest`, `getJitAlgo` and `getGemmAlgo` connect Jit to existing execution. `hipblaslt-jit-generic-gemm-test` covers this flow. |
 | Benchmark | `hipblaslt-bench --jit-gemm` uses the generic TensileLite backend with prediction, completing selection and compilation before correctness checks and execution timing. It includes the internal headers until step 5 removes the option. See the [benchmark guide](clients/bench/README.jit.md). |
-| Independent test provider | The `alternate-backend` driver case in `clients/tests/jit` uses a HIP provider with no Tensile metadata. It demonstrates the generic seam; it is not a second production compiler. |
+| Mock backend | `hipblaslt-jit-mock-backend.cpp` replays one bundle that `Tensile.SingleSolution` wrote, without Python or a subprocess, for problems that the replayed solution's predicates accept. Its faults fail generation, truncate the main code object so the build fails, or abort the process. Tests reach it through `jit::mock::createBackend` in `hipblaslt-jit-mock.hpp`; it is not a production backend. |
 
 The host runs the Python generator as a child process: POSIX spawning on Linux
 and `CreateProcessW` on Windows. `Tensile.SingleSolution` assembles and links
@@ -98,8 +102,8 @@ loads the serialized library and every listed code object, checks support and
 workspace with TensileLite's predicates, and resolves every helper symbol before
 returning an algorithm.
 
-With the generic TensileLite provider, an empty `Options::configPath` requests
-provider-private Origami prediction. The selector validates ranked candidates
+With `createBackend`, an empty `Options::configPath` makes Jit run the Origami
+predictor before generation. The selector validates ranked candidates
 in order and compiles the first supported recipe. It does not benchmark
 candidates or invent a recipe when selection fails. The direct entry point always
 requires an explicit recipe.
@@ -129,7 +133,7 @@ though its fields originate in the caller's candidate catalog.
 | `streamk::select_reduction`, `select_grid_size` | Mode-dependent prediction APIs | Applicable when a caller enables Stream-K. The data-parallel domain has no reduction/grid tuning prediction to default. Adding Stream-K candidates requires preserving these outputs through Tensile's workspace and launch reconciliation. |
 | `streamk::select_hybrid_mode` | Static/dynamic schedule within StreamK=5 | Does not select Stream-K enablement. Inapplicable to the current data-parallel domain. |
 | `gemm::predict_workgroup_mapping` | Internal latency-estimation approximation | Alternative fast mapping estimate, not an additional kernel field. The generator receives the full `select_workgroup_mapping` result. |
-| Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The provider uses the full instruction catalog plus ranking, preserving the selected MI. |
+| Hardware `get_recommended_matrix_instruction` | Alternative throughput-based MI choice | The predictor uses the full instruction catalog plus ranking, preserving the selected MI. |
 | GEMM/Formocast performance and resource estimates | Scores/diagnostics | These APIs estimate latency/utilization/resource costs; they do not predict new vector widths, occupancy, or backend tuning settings. |
 
 Unpredicted inputs include wave topology, occupancy, Stream-K enablement and grid
@@ -179,7 +183,7 @@ or by default for eligible block-scaled problems), `getBestSolutions` and
 
 `HIPBLASLT_ENABLE_JIT` is disabled by default. A disabled build compiles and
 exports no JIT entry points. The enabled implementation requires the host library and ROCm. The TensileLite
-provider also requires its Python dependencies and the local rocisa extension.
+backend also requires its Python dependencies and the local rocisa extension.
 Additional Python import paths use the platform separator (`:` or `;`). From the
 repository root, with a Python environment that has the TensileLite
 dependencies:
@@ -230,7 +234,7 @@ An empty GEMM output (M=0 or N=0) returns `HIPBLAS_STATUS_NOT_SUPPORTED` from
 the request factory without compilation. K=0 can use a recipe that implements
 beta*C. TensileLite owns its datatype, instruction and scale-layout restrictions;
 output-amax currently requires one batch, GlobalSplitU=1 and StreamK=0. The
-library propagates provider support failures, including a mismatch between the
+library propagates support failures, including a mismatch between the
 supplied physical MX scale layout and the compiled solution. Generation never
 benchmarks recipes or substitutes another recipe when the supplied one fails.
 
@@ -470,7 +474,7 @@ each step advances.
 | Step | Status | Scope | Work area |
 | --- | --- | --- | --- |
 | 1. Demote the public API | Done | `hipblaslt-jit.hpp` and `hipblaslt-jit-tensilelite.hpp` are not installed and `hipblaslt-ext.hpp` does not include them; they are internal headers used by unit tests. The direct and generic GEMM test binaries under `clients/tests/jit` are run by the shared driver. `hipblaslt-bench --jit-gemm` uses the internal header until step 5. | Backend interface |
-| 2. Jit component and interfaces | Planned | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
+| 2. Jit component and interfaces | Done | Add Jit, the backend interface, the mock backend, and the Predictor and TuningKnowledge interfaces. Wrap the existing TensileLite provider and C++ predictor behind them; TuningKnowledge returns TensileLite defaults. | Backend interface; prediction; tuning blueprints |
 | 3. comgr code-object builder | Planned | Build code objects in hipBLASLt through comgr, adapted from rocRoller's `InProcessAssembler`. TensileLite emits only assembly, helper source and metadata. | Backend interface |
 | 4. JIT solution library | Planned | Per-`ProblemType` library under `HIPBLASLT_JIT_LIBRARY_PATH`, merged under a file lock with atomic rename, loaded as a second master library, with reserved solution indices. | JIT solution library (cache) |
 | 5. Heuristic integration | Planned | Add `HIPBLASLT_JIT` modes 0, 1 and 2 to `hipblasLtMatmulAlgoGetHeuristic` and `GemmInstance::algoGetHeuristic`, with the fallback order and failure rules above. Bake the tool-path defaults into the library, warn once when a JIT-off build sees `HIPBLASLT_JIT`, and remove `hipblaslt-bench --jit-gemm`. | JustInTime library type; backend interface |

@@ -7,7 +7,8 @@ components around this backend and the [roadmap](JIT.md#roadmap).
 
 TensileLite is the live JIT backend. This page describes its current direct
 entry point, which compiles one explicit YAML (YAML Ain't Markup Language)
-recipe, and its planned role behind the Jit backend interface.
+recipe, its role behind the Jit backend interface, and the changes planned for
+it.
 
 **Status:** the direct entry point below is internal.
 `hipblaslt-jit-tensilelite.hpp` is in `library/src/amd_detail/`; it is not
@@ -150,19 +151,30 @@ failure rather than an executable result. Empty output needs no GEMM algorithm
 and returns `HIPBLAS_STATUS_NOT_SUPPORTED`.
 
 The direct entry point always requires a recipe. Origami prediction is available
-through the generic TensileLite provider when `Options::configPath` is empty;
-see [Origami modeled inputs](JIT.md#origami-modeled-inputs).
+through `tensilelite::createBackend` when `Options::configPath` is empty; see
+[Origami modeled inputs](JIT.md#origami-modeled-inputs).
 
-## Planned backend role
+## Role behind Jit
+
+`TensileLiteBackend` implements the Jit backend interface. Both entry points
+create it through `tensilelite::createBackend`, which configures a Jit with the
+Origami predictor, the TensileLite defaults as tuning knowledge, the prebuilt
+builder and the Tensile loader. Without a recipe, the backend consumes the
+predictor's `origami.gemm.dp.v1` prediction and writes it as the
+`Tensile.JitGemm` request; with a recipe, Jit skips prediction and the backend
+passes the recipe to `Tensile.SingleSolution`. Knobs the model does not predict
+keep TensileLite defaults and derivation. The backend returns the bundle's
+one-solution library entry and code objects and loads nothing; the Tensile
+loader checks support and loads them.
+
+## Planned changes
 
 The rows below are planned; the code does not implement them yet. Each row names
 the roadmap step that changes it.
 
 | Concern | Current | Planned |
 | --- | --- | --- |
-| Entry point | Internal direct `tensilelite::getGemmAlgo`, and the generic provider created by `tensilelite::createBackend`, both used by tests and the benchmark. | An internal backend behind Jit, reached from the heuristic query. The headers remain for unit tests (step 2). |
-| Backend input | An explicit recipe, or problem facts plus Origami-ranked candidates in the generic provider. | Algorithm parameters (M, N, K, datatypes, scale types, layout, activation and the rest of the GEMM description) plus the gfx target, with ranked candidates from the Predictor (step 2). |
-| Unmodeled knobs | TensileLite defaults and derivation. | Supplied through TuningKnowledge, which initially returns the same TensileLite defaults (step 2). |
+| Entry point | Internal direct `tensilelite::getGemmAlgo` and `tensilelite::createBackend`, both used by tests and the benchmark. | Reached from the heuristic query. The headers remain for unit tests (step 5). |
 | Backend output | A complete bundle: `Tensile.SingleSolution` assembles, links and compiles code objects with the configured compiler and offload bundler. | Assembly, HIP helper source and metadata only. hipBLASLt builds raw, uncompressed code objects through AMD comgr (step 3). |
 | Persistence | Process-local; each program invocation compiles again. | Solutions are published into the per-`ProblemType` JIT solution library and reused across processes (step 4). |
 
