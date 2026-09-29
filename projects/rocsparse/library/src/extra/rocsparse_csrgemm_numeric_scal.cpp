@@ -23,13 +23,13 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_identity.hpp"
-#include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_csrgemm.hpp"
 
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm_numeric_scal.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -145,8 +145,8 @@ inline rocsparse_status rocsparse::csrgemm_numeric_scal_core(rocsparse_handle ha
 
         // Stream
 #define CSRGEMM_DIM 1024
-        dim3 csrgemm_numeric_blocks(
-            rocsparse::csrgemm_scal_copy_blocks<CSRGEMM_DIM>(handle, nnz_D));
+        dim3 csrgemm_numeric_blocks(rocsparse::get_grid_size_x(
+            handle, (static_cast<int64_t>(nnz_D) - 1) / CSRGEMM_DIM + 1, CSRGEMM_DIM));
         dim3 csrgemm_numeric_threads(CSRGEMM_DIM);
         // Scale the matrix
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(

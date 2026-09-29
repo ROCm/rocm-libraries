@@ -7,11 +7,13 @@ function(rocblas_target_configure_sanitizers rocblas_target visibility)
         ${visibility}
             -fsanitize=address
             -shared-libasan
+            -fno-offload-lto
     )
     target_link_options(${rocblas_target}
         ${visibility}
             -fsanitize=address
             -shared-libasan
+            -fno-offload-lto
             -fuse-ld=lld
     )
 endfunction()
