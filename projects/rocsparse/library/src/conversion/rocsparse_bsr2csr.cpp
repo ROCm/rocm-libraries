@@ -26,6 +26,7 @@
 #include "rocsparse_bsr2csr.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "bsr2csr_device.h"
@@ -52,19 +53,18 @@
 
 // A grid clamped below mb needs the kernel's grid stride; when mb fits the grid
 // the straight-line variant avoids the loop's per-iteration control (AISPARSE-703).
-#define launch_bsr2csr_block_per_row_2_7_kernel(block_size, bsr_block_dim)                  \
-    do                                                                                      \
-    {                                                                                       \
-        const J max_grid_x = static_cast<J>(handle->properties.maxGridSize[0]);             \
-        const J grid_x     = rocsparse::min(mb, max_grid_x);                                \
-        if(mb > max_grid_x)                                                                 \
-        {                                                                                   \
-            launch_bsr2csr_block_per_row_2_7_kernel_impl(block_size, bsr_block_dim, true);  \
-        }                                                                                   \
-        else                                                                                \
-        {                                                                                   \
-            launch_bsr2csr_block_per_row_2_7_kernel_impl(block_size, bsr_block_dim, false); \
-        }                                                                                   \
+#define launch_bsr2csr_block_per_row_2_7_kernel(block_size, bsr_block_dim)                   \
+    do                                                                                       \
+    {                                                                                        \
+        const J grid_x = static_cast<J>(rocsparse::get_grid_size_x(handle, mb, block_size)); \
+        if(grid_x < mb)                                                                      \
+        {                                                                                    \
+            launch_bsr2csr_block_per_row_2_7_kernel_impl(block_size, bsr_block_dim, true);   \
+        }                                                                                    \
+        else                                                                                 \
+        {                                                                                    \
+            launch_bsr2csr_block_per_row_2_7_kernel_impl(block_size, bsr_block_dim, false);  \
+        }                                                                                    \
     } while(0)
 
 #define launch_bsr2csr_block_per_row_8_32_kernel_impl(block_size, bsr_block_dim, grid_stride)   \
@@ -90,9 +90,8 @@
 #define launch_bsr2csr_block_per_row_8_32_kernel(block_size, bsr_block_dim)                  \
     do                                                                                       \
     {                                                                                        \
-        const J max_grid_x = static_cast<J>(handle->properties.maxGridSize[0]);              \
-        const J grid_x     = rocsparse::min(mb, max_grid_x);                                 \
-        if(mb > max_grid_x)                                                                  \
+        const J grid_x = static_cast<J>(rocsparse::get_grid_size_x(handle, mb, block_size)); \
+        if(grid_x < mb)                                                                      \
         {                                                                                    \
             launch_bsr2csr_block_per_row_8_32_kernel_impl(block_size, bsr_block_dim, true);  \
         }                                                                                    \
@@ -129,9 +128,8 @@
 #define launch_bsr2csr_block_per_row_33_256_kernel(block_size, bsr_block_dim, sub_block_dim) \
     do                                                                                       \
     {                                                                                        \
-        const J max_grid_x = static_cast<J>(handle->properties.maxGridSize[0]);              \
-        const J grid_x     = rocsparse::min(mb, max_grid_x);                                 \
-        if(mb > max_grid_x)                                                                  \
+        const J grid_x = static_cast<J>(rocsparse::get_grid_size_x(handle, mb, block_size)); \
+        if(grid_x < mb)                                                                      \
         {                                                                                    \
             launch_bsr2csr_block_per_row_33_256_kernel_impl(                                 \
                 block_size, bsr_block_dim, sub_block_dim, true);                             \
