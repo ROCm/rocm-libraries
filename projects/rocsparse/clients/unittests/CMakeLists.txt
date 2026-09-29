@@ -196,6 +196,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # with sibling unit-test branches that append after rocsparse_unit_test_main.
   # Drives public entry points, linking roc::rocsparse; no compile-in TUs.
   unit_test_host_level2.cpp
+  # --- AISPARSE-654: forced-clamp coverage of rocsparse::conjugate ------------
+  # Distinct anchor at the end of the device source list. Needs
+  # rocsparse_conjugate.cpp compiled in (see ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_common_conjugate.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -274,6 +278,9 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
+  # AISPARSE-654: rocsparse::conjugate is hidden in librocsparse; defining TU for
+  # unit_test_internal_common_conjugate.cpp.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_conjugate.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
