@@ -36,7 +36,9 @@ sys.path.insert(0, _RK + "/library")
 import torch  # noqa: E402
 
 from dispatch.attention import AttentionRequest, tuning_spec_with_knobs  # noqa: E402
-from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES  # noqa: E402
+from kernels.common.attention_dense_spec import (  # noqa: E402
+    DENSE_TILE_GEOMETRIES,
+)
 from kernels.gfx950.attention_dense import (  # noqa: E402
     GFX950_DENSE_LAYOUTS,
     Gfx950AttentionDenseSpec,
@@ -164,6 +166,7 @@ def make_spec_from_shape(shape: dict[str, Any]) -> Gfx950AttentionDenseSpec:
         "lazy_rescale": bool,
         "num_persistent": int,
         "persist_decode": str,
+        "nonpersist_decode": str,
     }
     knobs = {
         name: coerce(shape[name]) for name, coerce in coercers.items() if name in shape
@@ -183,7 +186,11 @@ def run_benchmark(
     ok = (not check) or (err < _TOL)
     return {
         "kernel_name": spec.kernel_name(),
-        "persist_decode": spec.resolved_persist_decode,
+        # Only the decode the body uses; the other one is None.
+        "persist_decode": spec.resolved_persist_decode if spec.persistent else None,
+        "nonpersist_decode": (
+            None if spec.persistent else spec.resolved_nonpersist_decode
+        ),
         "ms": ms,
         "tflops": tf,
         "max_abs": err,
@@ -354,6 +361,11 @@ def main():
         choices=sorted(Gfx950AttentionDenseSpec.supported_persist_decodes()),
     )
     ap.add_argument(
+        "--nonpersist-decode",
+        default="auto",
+        choices=sorted(Gfx950AttentionDenseSpec.supported_nonpersist_decodes()),
+    )
+    ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
     )
     ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
@@ -395,6 +407,7 @@ def main():
             "sliding_window": args.sw,
             "use_sinks": args.use_sinks,
             "persist_decode": args.persist_decode,
+            "nonpersist_decode": args.nonpersist_decode,
             "wide_lds_dma": args.wide_lds_dma,
         }
         spec = make_spec_from_shape(shape)
@@ -430,6 +443,7 @@ def main():
             sliding_window=args.sw,
             use_sinks=args.use_sinks,
             persist_decode=args.persist_decode,
+            nonpersist_decode=args.nonpersist_decode,
             wide_lds_dma=args.wide_lds_dma,
         )
         run(spec)

@@ -281,6 +281,31 @@ class TestGfx942DensePersistent(unittest.TestCase):
             self.assertTrue(_spec(req, persistent=True).persistent)
             self.assertFalse(_spec(_req(), persistent=False).persistent)
 
+    def test_nonpersist_decode_is_a_knob_of_the_grid(self):
+        """The non-persistent block order is a knob: kept on the grid unless it
+        restates auto, dropped on the persistent body, which never reads it."""
+        with _Gfx942Arch():
+            req = _req()
+            grid = _spec(req, persistent=False, nonpersist_decode="hq_minor_swz")
+            self.assertFalse(grid.persistent)
+            self.assertEqual(grid.resolved_nonpersist_decode, "hq_minor_swz")
+            self.assertIn("nphqminswz", grid.kernel_name())
+            auto = tuning_spec_with_knobs(req, _SPEC_ID, {"persistent": False})
+            restated = tuning_spec_with_knobs(
+                req,
+                _SPEC_ID,
+                {
+                    "persistent": False,
+                    "nonpersist_decode": auto.kernel_spec.resolved_nonpersist_decode,
+                },
+            )
+            self.assertEqual(restated, auto)
+            persistent = tuning_spec_with_knobs(
+                req, _SPEC_ID, {"persistent": True, "nonpersist_decode": "hq_minor_swz"}
+            )
+            self.assertNotIn("nonpersist_decode", dict(persistent.knobs))
+            self.assertEqual(persistent.kernel_spec.nonpersist_decode, "auto")
+
 
 class TestGfx942DenseWavesPerEu(unittest.TestCase):
     def test_shipped_policy_and_knob_override(self):
