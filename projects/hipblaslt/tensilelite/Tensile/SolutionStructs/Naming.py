@@ -25,6 +25,7 @@ from functools import lru_cache
 
 from Tensile.Common.Constants import MAX_FILENAME_LENGTH
 from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
+from Tensile.Common.Utilities import isMxf4SubtilePath
 
 from .Problem import ProblemType
 
@@ -175,6 +176,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
+
+  # PostLoopStoreInNll only ever applies on the MXF4 subtile path, where
+  # assignPostLoopStoreInNll auto-disables it for everything else. Naming it
+  # unconditionally would append PLSIN0 to every kernel in the library and change
+  # its name hash, so drop it where it cannot be set.
+  if not isMxf4SubtilePath(state):
+    requiredParametersTemp.discard("PostLoopStoreInNll")
 
   if ignoreInternalArgs:
     if state["GlobalSplitU"] > 0 or state["GlobalSplitU"] == -1:

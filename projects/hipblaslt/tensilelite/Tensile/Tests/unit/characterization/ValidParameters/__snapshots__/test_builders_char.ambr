@@ -1459,6 +1459,7 @@
     'NumLoadsCoalescedA',
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
+    'PostLoopStoreInNll',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
     'PrefetchGlobalRead',
@@ -2414,6 +2415,14 @@
         2,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'PostLoopStoreInNll': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'PrefetchAcrossPersistent': dict({
