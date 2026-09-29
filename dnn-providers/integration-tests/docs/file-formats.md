@@ -424,7 +424,7 @@ reason    = "ROCm/rocm-libraries#6979 - no engine has an applicable solution"
 |---|---|
 | `[meta]` | `version = 1` is required; a missing or unsupported version is a load error, not a silent ignore. |
 | `[[tolerance_overrides]]` | `filters`, `atol` and `rtol` are all required. **Later entries win** when several match. |
-| `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose` or `rms`; `rms_threshold` is required and positive for `rms`, forbidden for `allclose`. **Later entries win.** Allclose is the default everywhere; this table is the only thing that changes it, and is meant for outputs where per-element comparison is the wrong question (long reductions), not for buying slack. |
+| `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`; `rms_threshold` is required and positive for `rms`, forbidden for the other two. **Later entries win.** Allclose is the default everywhere; this table is the only thing that changes it, and is meant for outputs where per-element comparison is the wrong question, not for buying slack. See the validators below. |
 | `[[test_skips]]` | `filters` and `reason` are required. **The first matching entry wins** — the opposite order from the two tables above. `archs` is a substring match against the raw `gcnArchName` (so `gfx11` covers `gfx1100` and `gfx1151`); `platforms` is `linux` / `windows`. The skip message is `[arch <current gcnArchName>] <reason>`. |
 
 `filters` are globs matched against the full GTest name — the same string
@@ -433,7 +433,24 @@ alternatives and a leading `-` does not negate. Use one array element per
 pattern, and only `*` and `?` as wildcards: Linux matches with `fnmatch`
 (case-sensitive), Windows with `PathMatchSpecA` (case-insensitive).
 
-A `validator = "rms"` entry whose globs catch an integer output fails that
+The two non-default validators:
+
+- **`rms`** — compares the aggregate relative-RMS error against
+  `rms_threshold`. For long reductions (layernorm/RMSNorm backward
+  `dscale`/`dbias`), whose elements can cancel toward zero so per-element
+  relative error is unbounded.
+- **`allclose_matching_infinities`** — grades exactly as `allclose` at the same
+  atol/rtol, except that an element infinite with the *same sign* in both the
+  reference and the engine output compares equal (NaN, opposite-signed
+  infinities and finite-versus-infinite still fail). For outputs whose correct
+  value is infinite on both sides, such as the log-sum-exp of a fully masked
+  SDPA row. It is **host-only**: a tensor it selects fails with
+  `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison runs on
+  the device — under `auto`, every run where the GPU reference produced the
+  expected values. Run such a config with `--validator cpu`, or narrow the
+  `tensors` glob.
+
+Neither is defined for integer outputs: a glob that catches one fails that
 tensor with a message naming the glob; narrow it to float outputs.
 
 The TOML applies to bundle and C++ graph tests alike. It never applies to

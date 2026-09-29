@@ -264,8 +264,11 @@ The comparison runs where the expected values live: device-side for a GPU
 reference, host-side for a CPU reference or golden data. `--validator cpu|gpu`
 overrides that for the whole run; `gpu` then needs a device even for golden or
 CPU-reference comparisons. Only the pass/fail decision moves — failure reports
-are always built on the host. The retired `golden-check` mode is now the
-`hipdnn_golden_data_tests` binary.
+are always built on the host. A `[[validator_overrides]]` entry using
+`allclose_matching_infinities` has a host validator only, so a comparison that
+resolves to the device fails that tensor
+([details](file-formats.md#per-engine-test-config--configengine_nametoml)). The
+retired `golden-check` mode is now the `hipdnn_golden_data_tests` binary.
 
 A bundle's `enforcement_level` metadata can stop verification short on purpose:
 `applicability` passes once the engine accepts the graph, `buildable` once its

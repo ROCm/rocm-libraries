@@ -48,6 +48,8 @@ GEMM_FIELDS = (
     "c_type",
     "d_type",
     "compute_type",
+    "scaleA",
+    "scaleB",
 )
 
 GEMM_LOG_FIELDS = (
@@ -62,6 +64,8 @@ GEMM_LOG_FIELDS = (
     "c_type",
     "d_type",
     "compute_type",
+    "scaleA",
+    "scaleB",
 )
 GEMM_TYPE_FIELDS = (
     "transA",
@@ -160,4 +164,5 @@ SUPPORTED_ARCH: tuple[str, ...] = (
     "gfx942_38cu",
     "gfx942_20cu",
     "gfx942_228cu",
+    "gfx1250",
 )

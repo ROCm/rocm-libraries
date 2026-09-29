@@ -419,6 +419,11 @@ Edit the engine's `config/<ENGINE_NAME>.toml`
 - **Per-element comparison is the wrong question for an output** (long
   reductions whose elements cancel toward zero) → `[[validator_overrides]]`
   with `validator = "rms"` for those tensors only.
+- **An output is correctly infinite on both sides** (a fully masked SDPA row's
+  log-sum-exp) → `[[validator_overrides]]` with
+  `validator = "allclose_matching_infinities"` for those tensors only. It is
+  host-only: the comparison must run on the host (`--validator cpu` or
+  `HIPDNN_TEST_VALIDATOR=cpu`), or the tensor fails.
 
 Do not use a skip to hide a regression on a claimed cell unless you are also
 retracting the claim; the claim is there to make that regression visible.
