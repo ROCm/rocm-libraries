@@ -185,7 +185,7 @@ constexpr auto run_length_encode_config_picker()
         return reduce_by_key_config_params{
             {384, 7},
             block_load_method::block_load_transpose,
-            block_load_method::block_load_transpose,
+            block_load_method::block_load_direct,
             block_scan_algorithm::using_warp_scan
         };
     }
@@ -568,7 +568,7 @@ constexpr auto run_length_encode_config_picker()
         return reduce_by_key_config_params{
             {256, 15},
             block_load_method::block_load_transpose,
-            block_load_method::block_load_transpose,
+            block_load_method::block_load_direct,
             block_scan_algorithm::using_warp_scan
         };
     }
