@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from Tensile.Components.Subtile.SubtileTLUSwizzle import (
+from tensilelite.Components.Subtile.SubtileTLUSwizzle import (
     _buildColScatter,
     selectTLUColScatter,
     selectTLUSwizzle,
