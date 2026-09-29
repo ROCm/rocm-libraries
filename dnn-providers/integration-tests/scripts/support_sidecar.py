@@ -63,7 +63,11 @@ def load(path: Path) -> Set[Claim]:
     """The claims of a sidecar; none if it does not exist."""
     if not path.exists():
         return set()
-    text = path.read_bytes().decode("utf-8")
+    return parse(path, path.read_bytes().decode("utf-8"))
+
+
+def parse(path: Path, text: str) -> Set[Claim]:
+    """The claims of TEXT, the content of the sidecar at PATH."""
     try:
         claims = json.loads(text)["claims"]
         if _is_sweep(path):

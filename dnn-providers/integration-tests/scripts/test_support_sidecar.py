@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from support_sidecar import Claim, SidecarError, load, render, sidecar_path
+from support_sidecar import Claim, SidecarError, load, parse, render, sidecar_path
 
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "integration-test-bundles"
 
@@ -149,6 +149,16 @@ class TestFiles(unittest.TestCase):
         path = self._write("support.json", {"claims": {"E": [{"cases": ["a"]}]}})
         with self.assertRaises(SidecarError):
             load(path)
+
+    def test_parse_reads_text_of_a_sidecar_path(self):
+        text = _dump({"claims": {"E": {"gfx942": ["linux"]}}, "version": 1})
+        self.assertEqual(
+            parse(self.dir / "X.support.json", text),
+            {Claim("", "E", "gfx942", "linux")},
+        )
+        self.assertFalse((self.dir / "X.support.json").exists())
+        with self.assertRaises(SidecarError):
+            parse(self.dir / "support.json", text)
 
     def test_refuses_invalid_json(self):
         path = self.dir / "X.support.json"
