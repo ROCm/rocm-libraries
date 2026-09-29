@@ -3,7 +3,7 @@
 
 """Public package boundary for the ROCm-coupled TensileLite generator."""
 
-from importlib.metadata import version
+from _tensilelite_client_binding import current_installation
 
 from . import _runtime
 
@@ -12,7 +12,7 @@ from . import _runtime
 # files. It is intentionally independent from the ROCm-tagged wheel version.
 GENERATOR_VERSION = "5.0.0"
 
-__version__ = version("tensilelite")
+__version__ = current_installation().version
 
 __all__ = [
     "GENERATOR_VERSION",

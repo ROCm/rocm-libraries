@@ -5,7 +5,7 @@
 
 """Characterization tests for the ROCm-coupled package boundary."""
 
-from importlib.metadata import version
+from _tensilelite_client_binding import current_installation
 
 import pytest
 
@@ -15,7 +15,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_distribution_version():
-    assert tensilelite.__version__ == version("tensilelite")
+    assert tensilelite.__version__ == current_installation().version
     assert "+rocm" in tensilelite.__version__
 
 
