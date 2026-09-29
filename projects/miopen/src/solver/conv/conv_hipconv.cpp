@@ -42,9 +42,9 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
 
 // Translate a MIOpen problem into hipconv's parameter struct.
-static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
+static hipconv::ConvParams ToHipconvParams(const ProblemDescription& problem)
 {
-    hipconv::Conv2dParams par{};
+    hipconv::ConvParams par{};
 
     if(problem.IsDirectionForward())
         par.direction = hipconv::Direction::Fprop;
@@ -71,6 +71,20 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 
     par.p = ProblemInterpreter::GetOutputHeightHo(problem);
     par.q = ProblemInterpreter::GetOutputWidthWo(problem);
+    // Every output extent must be set: ConvParams leaves them at -1 for
+    // "unspecified", and ConvSize multiplies them into a size_t.
+    par.e = 1;
+
+    if(problem.Is3d())
+    {
+        par.dims       = 3;
+        par.d          = ProblemInterpreter::GetInputDepthDi(problem);
+        par.kd         = ProblemInterpreter::GetFilterDepthZ(problem);
+        par.pad_d      = ProblemInterpreter::GetInputLeftPadD(problem);
+        par.stride_d   = ProblemInterpreter::GetAdjustedConvolutionStrideD(problem);
+        par.dilation_d = ProblemInterpreter::GetAdjustedConvolutionDilationD(problem);
+        par.e          = ProblemInterpreter::GetOutputDepthDo(problem);
+    }
 
     if(problem.IsFp16())
     {
@@ -105,7 +119,11 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
     // TensorOrder::NCHW would instead match no kernel at all.
     par.order = hipconv::TensorOrder::NHWC;
 
-    return par;
+    // Fold to 2D once here, so every call site sees the same params.
+    //
+    // unfolded() does not read par.order, and folding depth into the batch is a
+    // reshape only when channels are last.
+    return par.order == hipconv::TensorOrder::NHWC ? par.unfolded() : par;
 }
 
 // ===================== NCHW staging =====================
@@ -251,21 +269,26 @@ GetWorkspaceLayout(const HipConvTransposePlan& plan, size_t cast_sz, size_t hipc
 // transposable) are only defined on problems that pass it.
 static bool IsSupportedProblem(const ProblemDescription& problem)
 {
-    if(!problem.Is2d())
+    if(!problem.Is2d() && !problem.Is3d())
         return false;
     // fp16, bf16, and tf32 (fp32 data with tf32 compute enabled).
     if(!problem.IsFp16() && !problem.IsBfp16() && !(problem.IsFp32() && problem.UseTF32()))
         return false;
+    // A non-packed tensor has no flat buffer, which neither hipconv nor the transposes
+    // can address.
+    if(problem.HasNonPackedTensors())
+        return false;
 
+    // NDHWC reaches hipconv directly, so 3D needs nothing of the transposes.
     if(problem.IsLayoutNHWC())
         return true;
     if(!problem.IsLayoutDefault())
         return false;
 
-    // NCHW goes through packed NHWC scratch: a non-packed tensor has no flat buffer to
-    // transpose, and the batched-transpose kernels cover only a fixed set of element
-    // types and 32-bit extents.
-    if(problem.HasNonPackedTensors())
+    // NCHW goes through packed NHWC scratch, and MakeTransposePlan() reads four extents
+    // positionally, so 3D would silently lose one. TransposeSolutionDefault2Ndhwc is
+    // what a 3D channels-first path would be built on.
+    if(!problem.Is2d())
         return false;
     return BatchedTransposeSolution::IsApplicable(problem.GetInDataType(),
                                                   problem.GetIn().GetLengths()) &&
@@ -277,7 +300,7 @@ static bool IsSupportedProblem(const ProblemDescription& problem)
 
 // Resolve the kernel handle a perf-config selected.
 static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
-                                               const hipconv::Conv2dParams& par,
+                                               const hipconv::ConvParams& par,
                                                const PerformanceConfigConvHipConv& config)
 {
     if(config.index < 0)

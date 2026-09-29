@@ -10,6 +10,7 @@ passes in this package.
 
 Modules:
 
+  - ``dtypes``     : target-independent dtype names and alias normalization.
   - ``ir``         : `IRBuilder`, `KernelDef`, `Value`, `Op`, `Region`,
                      plus type system (`F16`, `F32`, `I32`, `I64`,
                      `VectorType`, `PtrType`, `SmemType`).
@@ -44,6 +45,7 @@ from .codegen_policy import (
     apply_codegen_policy,
     codegen_policy_for_kernel,
 )
+from .dtypes import normalize_dtype
 from .ir import (
     BF16,
     F16,
@@ -93,6 +95,7 @@ from .passes import (
 from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
+    "normalize_dtype",
     "CodegenPolicy",
     "SchedulerStrategy",
     "apply_codegen_policy",
