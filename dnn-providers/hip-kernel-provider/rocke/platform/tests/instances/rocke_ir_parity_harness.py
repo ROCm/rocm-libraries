@@ -2604,6 +2604,12 @@ def cases():
             "fp8_d64_swa_w128_sq512",
             {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
         ),
+        # Opt-in two-phase async fp8 loader (staging slab + LDS->LDS dequant).
+        # One case locks its distinct emission through the golden + cpp gate.
+        (
+            "fp8_2ph_d64_causal_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "fp8_two_phase": True},
+        ),
         # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
         # shifted-diagonal routes, the sink composition, and the BM128 geometry.
         (
