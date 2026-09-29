@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -15,9 +16,11 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
@@ -61,6 +64,45 @@ struct ResolvedDispatch
 {
     DispatchDescriptor descriptor;
     const IKernelDispatchHandler<THandle>* handler = nullptr;
+};
+
+/// A completed metadata tuple reduced to its values, in the tuple's own (name-sorted)
+/// order. completeMetadata() has already proven every tuple of an engine carries exactly
+/// the KMD's field names, so for comparing two of them the names are redundant -- and
+/// comparing them was most of the cost of keying an ordered map on MetadataValues.
+using MetadataTupleValues = std::vector<MetadataValue>;
+
+struct MetadataTupleValuesHash
+{
+    size_t operator()(const MetadataTupleValues& values) const noexcept
+    {
+        size_t seed = values.size();
+        const auto combine = [&seed](size_t hash) {
+            seed ^= hash + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        };
+        for(const auto& value : values)
+        {
+            combine(value.index());
+            std::visit(
+                [&combine](const auto& held) {
+                    using Held = std::decay_t<decltype(held)>;
+                    if constexpr(std::is_same_v<Held, std::vector<int64_t>>)
+                    {
+                        combine(held.size());
+                        for(const auto element : held)
+                        {
+                            combine(std::hash<int64_t>{}(element));
+                        }
+                    }
+                    else
+                    {
+                        combine(std::hash<Held>{}(held));
+                    }
+                },
+                value);
+        }
+        return seed;
+    }
 };
 
 /// The engine's view of its own kernels: which apply to a graph, in what order, and
@@ -390,9 +432,18 @@ private:
         // Two kernels may share a tuple when no single device can see both -- that is
         // exactly the per-arch shard layout. Uniqueness is therefore per overlapping-arch
         // group, not per engine: the tuple is the catalog key, and a catalog is built for
-        // one device. Keyed by the tuple (an ordered map, so it already orders) rather
-        // than scanned, which would be quadratic.
-        std::map<MetadataValues, std::vector<std::vector<std::string>>> archesClaimingTuple;
+        // one device. Keyed by the tuple's values in a hash map rather than scanned, which
+        // would be quadratic.
+        size_t kernelCount = 0;
+        for(const auto& pack : _packs)
+        {
+            kernelCount += pack.kernels.size();
+        }
+        std::unordered_map<MetadataTupleValues,
+                           std::vector<std::vector<std::string>>,
+                           MetadataTupleValuesHash>
+            archesClaimingTuple;
+        archesClaimingTuple.reserve(kernelCount);
 
         _definitions.reserve(_packs.size());
         for(const auto& pack : _packs)
@@ -437,10 +488,16 @@ private:
                 // tuple under disjoint arch -- one implementation per capability -- while
                 // still catching two that a single device would see together.
                 std::vector<std::string> kernelArch = kernel.arch.empty() ? pack.arch : kernel.arch;
+                MetadataTupleValues tuple;
+                tuple.reserve(key.size());
+                for(const auto& entry : key)
+                {
+                    tuple.push_back(entry.second);
+                }
                 // try_emplace, not operator[], only because misc-const-correctness
                 // misreads the operator[] form here and demands a const map.
                 std::vector<std::vector<std::string>>& claimants
-                    = archesClaimingTuple.try_emplace(key).first->second;
+                    = archesClaimingTuple.try_emplace(std::move(tuple)).first->second;
                 for(const auto& claimed : claimants)
                 {
                     if(archOverlaps(claimed, kernelArch))

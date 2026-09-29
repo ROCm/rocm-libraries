@@ -1725,8 +1725,12 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
  * are deduplicated and sorted by id, so a DescriptorSet is a deterministic function of the
  * file contents rather than of hash-map or filesystem order. Container::copyEngineIds and
  * the container constructor both walk the resulting vector and must agree index for index.
+ *
+ * Takes @p catalog by value and moves each pack's kernels into its set rather than copying
+ * them: they are the bulk of a large tree, and a pack belongs to exactly one engine. Pass
+ * an rvalue; an lvalue caller pays for the copy it asked for.
  */
-inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog& catalog)
+inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalog)
 {
     std::vector<const CatalogEntry<EngineDescriptor>*> engineEntries;
     engineEntries.reserve(catalog.engines.size());
@@ -1829,8 +1833,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
 
         // The whole entry, not just its descriptor: the file a pack came from is what its
         // inline kernels resolve their relative paths against.
-        std::vector<const CatalogEntry<KernelDescriptorPack>*> packEntries;
-        for(const auto& [key, entry] : catalog.packs)
+        std::vector<CatalogEntry<KernelDescriptorPack>*> packEntries;
+        for(auto& [key, entry] : catalog.packs)
         {
             if(!entry.conflicted && entry.descriptor.engineId == engine.id)
             {
@@ -1851,7 +1855,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         std::map<DescriptorId, MatchDescriptor> matchers;
         std::map<DescriptorId, DispatchDescriptor> dispatches;
 
-        for(const auto* packEntry : packEntries)
+        for(auto* packEntry : packEntries)
         {
             // Failure granularity is the pack: a pack whose cross-references dangle or
             // whose kernels contradict the KMD is dropped while the engine keeps its other
@@ -1861,7 +1865,11 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             // wants only the colliding kernel dropped; the upgrade is making that
             // constructor log and drop rather than throw, in one place, so hand-built packs
             // get the same behavior.
+            // The kernels move; the rest of the pack is copied, because the orphan and
+            // unreferenced-kernel diagnostics below still read ids and arch from the catalog.
+            auto kernels = std::move(packEntry->descriptor.kernels);
             KernelDescriptorPack pack = packEntry->descriptor;
+            pack.kernels = std::move(kernels);
             // An inline kernel is defined by the pack's own file. Referenced kernels are
             // stamped with their own file below. treeRoot comes from the catalog entry
             // rather than the path, since only the loader knows which root it walked.
