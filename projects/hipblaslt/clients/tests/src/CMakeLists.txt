@@ -17,10 +17,12 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronizer_size_check_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/row_uniformity_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
 )
 
 if(NOT WIN32)
