@@ -37,6 +37,7 @@ from codegen_common import (
     TDM_PAD_REJECT_REASON,  # noqa: F401 (re-exported)
     TDM_PIPELINES,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
+    gfx1250_fp32_tile_reject_reason,
     gfx1250_pipeline_reject_reason,
 )
 
@@ -1871,7 +1872,15 @@ class UnifiedGemmCodegen:
         for tile, trait in itertools.product(tile_configs, trait_configs):
             # gfx1250 pipelines (non-MX comp_async / comp_tdm*) and the TDM
             # epilogue: exact-arch, variant and trait gate.
-            reason = self._gfx1250_pipeline_reject_reason(tile, trait, variant)
+            reason = self._gfx1250_pipeline_reject_reason(
+                tile, trait, variant
+            ) or gfx1250_fp32_tile_reject_reason(
+                self.gpu_target,
+                self.datatype,
+                tile.tile_m,
+                tile.tile_n,
+                tile.warp_m * tile.warp_n * tile.warp_k,
+            )
             if reason:
                 log.debug(f"Rejected {variant.value} {trait.pipeline}: {reason}")
                 continue

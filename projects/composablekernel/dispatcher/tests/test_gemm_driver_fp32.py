@@ -13,6 +13,7 @@ configs is an error, and GpuGemmRunner hands fp32 kernels fp32 host buffers
 No GPU needed. Run: python3 -m pytest -q tests/test_gemm_driver_fp32.py
 """
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +25,9 @@ DISPATCHER_DIR = Path(__file__).resolve().parent.parent
 GEMM_TE_DIR = DISPATCHER_DIR.parent / "tile_engine" / "ops" / "gemm"
 sys.path.insert(0, str(DISPATCHER_DIR / "python"))
 sys.path.insert(0, str(GEMM_TE_DIR))
+sys.path.insert(0, str(DISPATCHER_DIR / "codegen"))
 
+import codegen_common as cc  # noqa: E402
 import gemm_full_benchmark as drv  # noqa: E402
 from ctypes_utils import (  # noqa: E402
     KernelConfig,
@@ -88,7 +91,9 @@ def test_listed_warp_tiles_matches_validator():
     assert listed_warp_tiles("gfx950", "fp16")[0] == "fp16_fp16_fp32"
     assert listed_warp_tiles("gfx950", "int8")[0] == "int8_int8_int32"
     # Same key/table the validator reports when nothing is listed.
-    cfg = KernelConfig(dtype_a="fp32", dtype_b="fp32", dtype_c="fp32", gfx_arch="gfx1201")
+    cfg = KernelConfig(
+        dtype_a="fp32", dtype_b="fp32", dtype_c="fp32", gfx_arch="gfx1201"
+    )
     errs = validate_kernel_config(cfg).errors
     assert any("fp32_fp32_fp32 on gfx1201 in warp_tile_combos" in e for e in errs)
 
@@ -112,6 +117,63 @@ def test_gfx1250_fp32_ci_config_adds_a_tdm_kernel_and_keeps_the_gates():
     ]
     assert all(c.epilogue != "tdm" for c in cfgs if c.pipeline != "comp_tdm_v2")
     assert all(c.wave_m * c.wave_n * c.wave_k == 4 for c in cfgs)
+
+
+# ------------------------------------------------------ gfx1250 fp32 gates
+
+
+@pytest.mark.parametrize("layout", ["rcr", "rrr", "crr", "ccr"])
+@pytest.mark.parametrize("dtype", ["fp32", "fp16"])
+def test_gfx1250_fp32_tdm_is_rcr_only(layout, dtype):
+    reason = cc.gfx1250_pipeline_reject_reason(
+        "gfx1250",
+        "comp_tdm_v2",
+        "tdm",
+        "intrawave",
+        num_waves=4,
+        warp_tile_k=4,
+        dtype_a=dtype,
+        dtype_b=dtype,
+        layout=layout,
+    )
+    expect_reject = dtype == "fp32" and layout != "rcr"
+    assert (reason == cc.GFX1250_TDM_FP32_LAYOUT_REJECT_REASON) == expect_reject
+    assert expect_reject or reason == ""
+
+
+@pytest.mark.parametrize(
+    "arch, dtype, tile_m, tile_n, num_waves, rejected",
+    [
+        ("gfx1250", "fp32", 256, 256, 4, True),  # 512 acc/lane: spills
+        ("gfx1250", "fp32", 256, 128, 4, False),
+        ("gfx1250", "fp32", 128, 256, 4, False),
+        ("gfx1250", "fp32", 256, 256, 8, False),
+        ("gfx1250", "fp16", 256, 256, 4, False),
+        ("gfx950", "fp32", 256, 256, 4, False),
+    ],
+)
+def test_gfx1250_fp32_rejects_only_the_spilling_tile(
+    arch, dtype, tile_m, tile_n, num_waves, rejected
+):
+    reason = cc.gfx1250_fp32_tile_reject_reason(arch, dtype, tile_m, tile_n, num_waves)
+    assert bool(reason) == rejected
+
+
+def test_gfx1250_fp32_sweep_applies_both_gates(tmp_path):
+    cfg = json.loads(GFX1250_FP32_CI.read_text())
+    for dim in ("tile_m", "tile_n"):
+        cfg["tile_config"][dim] = {"min": 128, "max": 256, "step": 128}
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps(cfg))
+
+    def sweep(layout):
+        return expand_sweep(str(path), "gfx1250", dtype="fp32", layout=layout)
+
+    rcr, rrr = sweep("rcr"), sweep("rrr")
+    tiles = {(c.tile_m, c.tile_n) for c in rcr + rrr}
+    assert tiles == {(128, 128), (128, 256), (256, 128)}
+    assert any(c.pipeline == "comp_tdm_v2" for c in rcr)
+    assert rrr and not any(c.pipeline == "comp_tdm_v2" for c in rrr)
 
 
 # ------------------------------------------------------------ driver main()
@@ -197,5 +259,8 @@ def test_runner_host_buffers_match_kernel_dtype(dtype, np_in, np_out):
 def test_runner_rejects_unknown_dtype():
     r = _runner("gemm_xf32_rcr_compv3_cshuffle_intrawave")
     with pytest.raises(ValueError, match="unsupported A/B dtype 'xf32'"):
-        r.run(np.ones((4, 8), np.float32), np.ones((8, 4), np.float32),
-              GemmProblem(M=4, N=4, K=8))
+        r.run(
+            np.ones((4, 8), np.float32),
+            np.ones((8, 4), np.float32),
+            GemmProblem(M=4, N=4, K=8),
+        )

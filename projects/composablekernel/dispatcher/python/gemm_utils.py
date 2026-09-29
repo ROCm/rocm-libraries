@@ -2417,17 +2417,17 @@ _CODEGEN_DIR = Path(__file__).resolve().parent.parent / "codegen"
 
 
 @functools.lru_cache(maxsize=1)
-def _gfx1250_reject_reason_fn():
-    """codegen_common.gfx1250_pipeline_reject_reason, importable regardless of
-    whether a caller already put the codegen dir on ``sys.path``."""
+def _codegen_common():
+    """codegen_common (gfx1250 reject rules), importable regardless of whether
+    a caller already put the codegen dir on ``sys.path``."""
     import sys  # noqa: WPS433 (local: only needed for this lazy import)
 
     codegen_dir = str(_CODEGEN_DIR)
     if codegen_dir not in sys.path:
         sys.path.append(codegen_dir)
-    from codegen_common import gfx1250_pipeline_reject_reason  # noqa: WPS433
+    import codegen_common  # noqa: WPS433
 
-    return gfx1250_pipeline_reject_reason
+    return codegen_common
 
 
 def _gfx1250_pipeline_supported(
@@ -2455,7 +2455,7 @@ def _gfx1250_pipeline_supported(
     8-bit warp_tile_k rule; an empty dtype skips it."""
     if pipeline not in ("comp_async", "comp_tdm", "comp_tdm_v2") and epilogue != "tdm":
         return True
-    reason = _gfx1250_reject_reason_fn()(
+    reason = _codegen_common().gfx1250_pipeline_reject_reason(
         arch,
         pipeline,
         epilogue,
@@ -2722,6 +2722,10 @@ def expand_sweep(
             and pipe == "compv3"
             and sched == "intrawave"
             and wm * wn == 8
+        ):
+            continue
+        if _codegen_common().gfx1250_fp32_tile_reject_reason(
+            arch, dtype, tm, tn, wm * wn * wk
         ):
             continue
         if not _gfx1250_pipeline_supported(
