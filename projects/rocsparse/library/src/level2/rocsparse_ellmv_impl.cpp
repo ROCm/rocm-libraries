@@ -56,7 +56,13 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename T>
+    template <uint32_t BLOCKSIZE,
+              bool     GRID_STRIDE,
+              typename I,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void ellmvt_kernel(rocsparse_operation trans,
                        I                   m,
@@ -73,7 +79,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
-            rocsparse::ellmvt_device<BLOCKSIZE>(
+            rocsparse::ellmvt_device<BLOCKSIZE, GRID_STRIDE>(
                 trans, m, n, ell_width, alpha, ell_col_ind, ell_val, x, y, idx_base);
         }
     }
@@ -163,24 +169,37 @@ namespace rocsparse
             // Scale y with beta
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, n, beta_device_host, y));
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::ellmvt_kernel<ELLMVT_DIM>),
-                dim3(rocsparse::get_grid_size_x(
-                    handle, (static_cast<int64_t>(m) - 1) / ELLMVT_DIM + 1, ELLMVT_DIM)),
-                dim3(ELLMVT_DIM),
-                0,
-                stream,
-                trans,
-                m,
-                n,
-                ell_width,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                ell_col_ind,
-                ell_val,
-                x,
-                y,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+#define LAUNCH_ELLMVT(GRID_STRIDE)                                    \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                               \
+        (rocsparse::ellmvt_kernel<ELLMVT_DIM, GRID_STRIDE>),          \
+        dim3(grid_size),                                              \
+        dim3(ELLMVT_DIM),                                             \
+        0,                                                            \
+        stream,                                                       \
+        trans,                                                        \
+        m,                                                            \
+        n,                                                            \
+        ell_width,                                                    \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        ell_col_ind,                                                  \
+        ell_val,                                                      \
+        x,                                                            \
+        y,                                                            \
+        descr->base,                                                  \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
+
+            // Only a clamped grid needs the grid-stride loop.
+            const int64_t  num_blocks = (static_cast<int64_t>(m) - 1) / ELLMVT_DIM + 1;
+            const uint32_t grid_size  = rocsparse::get_grid_size_x(handle, num_blocks, ELLMVT_DIM);
+            if(grid_size < num_blocks)
+            {
+                LAUNCH_ELLMVT(true);
+            }
+            else
+            {
+                LAUNCH_ELLMVT(false);
+            }
+#undef LAUNCH_ELLMVT
 #undef ELLMVT_DIM
         }
 

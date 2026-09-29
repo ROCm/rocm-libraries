@@ -49,7 +49,7 @@ namespace rocsparse
         array[lid + ld * wid] = value;
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename A, typename T>
     ROCSPARSE_DEVICE_ILF void scale_device(I length, T scalar, A* __restrict__ array)
     {
         const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
@@ -65,6 +65,11 @@ namespace rocsparse
             else
             {
                 array[gid] *= scalar;
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }
@@ -157,7 +162,7 @@ namespace rocsparse
         rocsparse::valset_2d_device<BLOCKSIZE>(m, n, ld, value, array, order);
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename A, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void scale_kernel(I length,
                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
@@ -167,7 +172,7 @@ namespace rocsparse
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
         if(scalar != static_cast<T>(1))
         {
-            rocsparse::scale_device<BLOCKSIZE>(length, scalar, array);
+            rocsparse::scale_device<BLOCKSIZE, GRID_STRIDE>(length, scalar, array);
         }
     }
 
@@ -263,17 +268,30 @@ rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,
         }
         else if((on_host && *scalar_device_host != static_cast<T>(1)) || on_host == false)
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::scale_kernel<256>),
-                dim3(rocsparse::get_grid_size_x(
-                    handle, (static_cast<int64_t>(length) - 1) / 256 + 1, 256)),
-                dim3(256),
-                0,
-                handle->stream,
-                length,
-                ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host),
-                array,
-                on_host);
+#define LAUNCH_SCALE(GRID_STRIDE)                                                \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                          \
+        (rocsparse::scale_kernel<256, GRID_STRIDE>),                             \
+        dim3(grid_size),                                                         \
+        dim3(256),                                                               \
+        0,                                                                       \
+        handle->stream,                                                          \
+        length,                                                                  \
+        ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host), \
+        array,                                                                   \
+        on_host)
+
+            // Only a clamped grid needs the grid-stride loop.
+            const int64_t  num_blocks = (static_cast<int64_t>(length) - 1) / 256 + 1;
+            const uint32_t grid_size  = rocsparse::get_grid_size_x(handle, num_blocks, 256);
+            if(grid_size < num_blocks)
+            {
+                LAUNCH_SCALE(true);
+            }
+            else
+            {
+                LAUNCH_SCALE(false);
+            }
+#undef LAUNCH_SCALE
         }
     }
     return rocsparse_status_success;

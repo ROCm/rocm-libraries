@@ -76,7 +76,13 @@ namespace rocsparse
     }
 
     // ELL SpMV for general, (conjugate) transposed matrices
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename T>
+    template <uint32_t BLOCKSIZE,
+              bool     GRID_STRIDE,
+              typename I,
+              typename A,
+              typename X,
+              typename Y,
+              typename T>
     ROCSPARSE_DEVICE_ILF void ellmvt_device(rocsparse_operation  trans,
                                             I                    m,
                                             I                    n,
@@ -115,6 +121,11 @@ namespace rocsparse
                 {
                     break;
                 }
+            }
+
+            if constexpr(!GRID_STRIDE)
+            {
+                break;
             }
         }
     }

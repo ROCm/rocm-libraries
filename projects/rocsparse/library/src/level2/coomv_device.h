@@ -678,10 +678,12 @@ namespace rocsparse
         }
     }
 
-    // Each tile covers LOOPS * BLOCKSIZE entries. Blocks stride over the tiles,
-    // so a grid clamped below nnz / (LOOPS * BLOCKSIZE) still covers every entry.
+    // Each tile covers LOOPS * BLOCKSIZE entries. With GRID_STRIDE, blocks stride
+    // over the tiles, so a grid clamped below nnz / (LOOPS * BLOCKSIZE) still
+    // covers every entry. Without it, the grid must have one block per tile.
     template <uint32_t BLOCKSIZE,
               uint32_t LOOPS,
+              bool     GRID_STRIDE,
               typename I,
               typename A,
               typename X,
@@ -696,15 +698,23 @@ namespace rocsparse
                                                              Y* __restrict__ y,
                                                              rocsparse_index_base idx_base)
     {
-        const int64_t tile_size = static_cast<int64_t>(LOOPS) * BLOCKSIZE;
-
-        for(int64_t tile = hipBlockIdx_x; tile * tile_size < nnz; tile += hipGridDim_x)
+        if constexpr(!GRID_STRIDE)
         {
             rocsparse::coomvn_aos_atomic_loops_tile_device<BLOCKSIZE, LOOPS>(
-                tile, nnz, m, alpha, coo_ind, coo_val, x, y, idx_base);
+                hipBlockIdx_x, nnz, m, alpha, coo_ind, coo_val, x, y, idx_base);
+        }
+        else
+        {
+            const int64_t tile_size = static_cast<int64_t>(LOOPS) * BLOCKSIZE;
 
-            // The next tile overwrites the shared buffers this tile still reads.
-            __syncthreads();
+            for(int64_t tile = hipBlockIdx_x; tile * tile_size < nnz; tile += hipGridDim_x)
+            {
+                rocsparse::coomvn_aos_atomic_loops_tile_device<BLOCKSIZE, LOOPS>(
+                    tile, nnz, m, alpha, coo_ind, coo_val, x, y, idx_base);
+
+                // The next tile overwrites the shared buffers this tile still reads.
+                __syncthreads();
+            }
         }
     }
 
