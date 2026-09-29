@@ -6,9 +6,10 @@ gfx1250 ships in two steppings that report the same ISA but are separate compile
 targets. v0 is modelled as the architecture name ``gfx1250-strict``; v1 keeps the
 plain ``gfx1250`` name. Both canonicalize to ``IsaVersion(12,5,0)``, so the
 stepping is invisible below the build's capability map and has to be carried by
-name to reach the assembler as ``-mcpu=gfx1250-strict``. Getting that wrong is not
-cosmetic: the two targets emit different ELF machine codes (0xEB and 0x49) and
-their code objects will not load on each other's silicon.
+name. Transitionally it stops short of the toolchain: the stepping still names
+its directory, its files and its capability overrides, but assembles as
+``-mcpu=gfx1250`` so its bundle entry matches the name ROCr reports for an A0
+today. See ``toolchainTargetOf``.
 
 Because the two steppings are indistinguishable by ISA, the assembler-probed
 capability table cannot tell them apart. The v0 deltas are therefore *declared*
@@ -68,6 +69,8 @@ _CODEGEN_DIR = os.path.join(
 
 GFX1250 = "gfx1250"
 GFX1250_STRICT = "gfx1250-strict"
+# The revision alias: the stepping's kernels under the base architecture's name.
+GFX1250_V0 = "gfx1250v0"
 ISA_GFX1250 = IsaVersion(12, 5, 0)
 
 # The two capabilities v0 lacks. Absent from the probed table, so every consumer
@@ -114,7 +117,11 @@ def test_generated_source_is_guarded_on_both_steppings_macros():
     """Generated helper-kernel source is guarded on the macro clang predefines,
     which is named after the compiler target, not the ISA. Guarding on the
     ISA-derived ``__gfx1250__`` alone drops the code from every strict build."""
-    assert archMacroNames(ISA_GFX1250) == ["__gfx1250__", "__gfx1250_strict__"]
+    assert archMacroNames(ISA_GFX1250) == [
+        "__gfx1250__",
+        "__gfx1250_strict__",
+        "__gfx1250v0__",
+    ]
 
 
 @pytest.mark.parametrize("isa", [isa for isa in SUPPORTED_ISA if isa != ISA_GFX1250])
@@ -135,17 +142,17 @@ def test_all_covers_the_steppings_of_the_architectures_it_covers():
     """``all`` means every supported architecture, and a stepping is one. Leaving
     it out made the default build -- ``install.sh`` passes ``all`` -- ship no
     gfx1250-strict code objects at all, on a request that named everything."""
-    assert expandAllArchitectures(["all"]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures(["all"]) == SUPPORTED_GFX + [GFX1250_STRICT, GFX1250_V0]
 
 
 def test_a_stepping_named_beside_all_is_absorbed_rather_than_repeated():
     """It is covered now, so naming it too says nothing new; repeating it would
     hand the partitioner a duplicate and buy a third build run for it."""
-    assert expandAllArchitectures(["all", GFX1250_STRICT]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures(["all", GFX1250_STRICT]) == SUPPORTED_GFX + [GFX1250_STRICT, GFX1250_V0]
 
 
 def test_all_expansion_does_not_duplicate_covered_architectures():
-    assert expandAllArchitectures(["all", "gfx942"]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures(["all", "gfx942"]) == SUPPORTED_GFX + [GFX1250_STRICT, GFX1250_V0]
 
 
 def test_expansion_is_a_passthrough_without_the_all_keyword():
@@ -159,7 +166,7 @@ def test_only_steppings_of_covered_architectures_are_supported():
     from Tensile.Common.Architectures import supportedSteppings
 
     steppings = supportedSteppings()
-    assert steppings == [GFX1250_STRICT]
+    assert steppings == [GFX1250_STRICT, GFX1250_V0]
     assert all(steppingArchOf(s) in SUPPORTED_GFX for s in steppings)
 
 
@@ -169,7 +176,7 @@ def test_all_absorbs_qualified_specs_of_architectures_it_covers(spec):
     xnack spec names an architecture the expansion already covers, so keeping it
     would both change behavior for architectures unrelated to the stepping split
     and hand the predicate splitter a duplicate of that architecture."""
-    assert expandAllArchitectures(["all", spec]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures(["all", spec]) == SUPPORTED_GFX + [GFX1250_STRICT, GFX1250_V0]
 
 
 @pytest.mark.parametrize("padding", ["", " ", "\t"])
@@ -179,7 +186,7 @@ def test_all_tolerates_empty_entries(padding):
     discarded, empty entries included; keeping only genuinely uncoverable names
     must not turn that into a hard build failure, since the predicate splitter
     rejects any spec it cannot recognize."""
-    assert expandAllArchitectures(["all", padding]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures(["all", padding]) == SUPPORTED_GFX + [GFX1250_STRICT, GFX1250_V0]
 
 
 @pytest.mark.parametrize("padding", ["", " ", "\t"])
@@ -196,7 +203,7 @@ def test_all_is_recognized_despite_surrounding_whitespace(keyword):
     """Membership was tested on the raw entry while the filter compared the
     stripped one, so a padded keyword skipped expansion and was handed to the
     predicate splitter as an architecture named ``all``."""
-    assert expandAllArchitectures([keyword]) == SUPPORTED_GFX + [GFX1250_STRICT]
+    assert expandAllArchitectures([keyword]) == SUPPORTED_GFX + [GFX1250_STRICT, GFX1250_V0]
 
 
 # =========================================================================== #
@@ -1604,11 +1611,19 @@ def _logicFileName(architectureName, scheduleName, tag=""):
     return f"{scheduleName}_{architectureName}{tag}.yaml"
 
 
-def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
+def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=(), asGroupChild=False):
     """Drives ``TensileCreateLibrary.run()`` for one requested architecture with
     every expensive step stubbed. ``logicFiles`` writes minimal logic files
     (arch name, schedule name) into the logic dir; the real glob and filter run,
     so the selection observed is the production wiring's.
+
+    ``asGroupChild`` sets ``_GROUP_BUILD_ENV`` for the call, which is what a
+    fan-out's child runs with. Needed by the tests that observe what a *single*
+    architecture produces: naming ``gfx1250`` at the top level now fans out to
+    the stepping beside it, so ``run()`` records the groups and returns before
+    reaching the kernel writers, and the observation they want is never made.
+    The child is where that content is actually produced, so this asks the same
+    question one level down rather than asserting the pre-fan-out shape.
 
     A request covering two architectures that share an ISA takes the fan-out
     instead, which ``run()`` returns straight after: the groups are recorded and
@@ -1709,6 +1724,9 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
         lambda groups, _jobs: captured.__setitem__("groups", groups),
     )
 
+    if asGroupChild:
+        monkeypatch.setenv(RunModule._GROUP_BUILD_ENV, "1")
+
     try:
         RunModule.run()
     except _Stop:
@@ -1747,7 +1765,7 @@ def test_createlibrary_entry_point_leaves_gfx1250_capabilities_untouched(
 ):
     """The same route for a plain gfx1250 build must invent neither key, so this
     entry point is byte-identical to before the split as well."""
-    captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250)
+    captured = _run_createlibrary(monkeypatch, tmp_path, GFX1250, asGroupChild=True)
 
     info = captured["isaInfoMap"][ISA_GFX1250]
     assert CAP_MULTICAST not in info.archCaps
@@ -1791,7 +1809,11 @@ def test_gfx1250_build_selects_only_the_architectures_logic(
     in every gfx1250 library built after the stepping lands.
     """
     captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC]
+        monkeypatch,
+        tmp_path,
+        GFX1250,
+        logicFiles=[_ARCH_LOGIC, _STRICT_LOGIC],
+        asGroupChild=True,
     )
 
     assert captured["logicFiles"] == [_logicFileName(*_ARCH_LOGIC)]
@@ -1816,7 +1838,7 @@ def test_all_build_fans_out_to_cover_the_stepping(
     )
 
     groups = captured["groups"]
-    assert len(groups) == 2
+    assert len(groups) == 3
     assert GFX1250 in groups[0] and "gfx942" in groups[0]
     assert groups[1] == [GFX1250_STRICT]
 
@@ -2546,7 +2568,7 @@ def test_all_is_expanded_before_partitioning():
 
     groups = isaCollisionFreeGroups(["all", GFX1250_STRICT])
 
-    assert len(groups) == 2
+    assert len(groups) == 3
     assert GFX1250 in groups[0] and "gfx942" in groups[0]
     assert groups[1] == [GFX1250_STRICT]
 
@@ -3197,11 +3219,15 @@ def test_assembly_co_is_unchanged_for_ordinary_archs(tmp_path):
 
 
 # =========================================================================== #
-# Compiler target. A stepping shares its ISA with the architecture it steps, so
-# the target cannot be derived from the ISA a kernel canonicalizes to; the
-# requested name is carried down to -mcpu and to the bundle entry instead.
+# Compiler target. The stepping is its own target and is assembled as itself;
+# the revision alias is the one that moves, because it exists to be loadable
+# where the base architecture's name is reported.
 # =========================================================================== #
-def test_strict_is_assembled_for_its_own_target(monkeypatch):
+def test_each_gfx1250_name_is_assembled_for_its_own_target(monkeypatch):
+    """The stepping assembles as the stepping, so its objects carry the
+    stepping's ELF machine and load only where ROCr reports that name. The alias
+    assembles as gfx1250, which is what makes it loadable on an A0 the runtime
+    still calls gfx1250 -- see toolchainTargetOf."""
     from Tensile.Toolchain import Component as ComponentMod
 
     captured = []
@@ -3209,13 +3235,16 @@ def test_strict_is_assembled_for_its_own_target(monkeypatch):
     monkeypatch.setattr(ComponentMod, "_invoke", lambda args, desc: captured.append(args))
     assembler = ComponentMod.Assembler(Path("amdclang++"), 5)
     assembler(GFX1250_STRICT, 32, "k.s", "k.o")
+    assembler(GFX1250_V0, 32, "k.s", "k.o")
     assembler(GFX1250, 32, "k.s", "k.o")
 
-    strictArgs, baseArgs = captured
+    strictArgs, aliasArgs, baseArgs = captured
     assert f"-mcpu={GFX1250_STRICT}" in strictArgs, strictArgs
-    # -mcpu decides the ELF machine code, and it is the only thing that differs;
-    # the stepping keeps gfx1250's +real-true16.
-    assert [a.replace(GFX1250_STRICT, GFX1250) for a in strictArgs] == baseArgs
+    assert f"-mcpu={GFX1250}" in aliasArgs, aliasArgs
+    assert GFX1250_STRICT not in " ".join(aliasArgs), aliasArgs
+    # Nothing else moves: the alias keeps gfx1250's +real-true16, so its
+    # invocation is indistinguishable from the base architecture's.
+    assert aliasArgs == baseArgs
 
 
 def _compressTargetOf(tmp_path, isa, archNames=None):
@@ -3234,13 +3263,52 @@ def _compressTargetOf(tmp_path, isa, archNames=None):
 
 def test_assembly_bundle_is_tagged_with_the_target_it_was_built_for(tmp_path):
     """The runtime unbundles only the entry matching the agent it is loading onto,
-    so a strict bundle tagged gfx1250 yields no code object at all."""
+    so a strict bundle tagged gfx1250 yields no code object at all -- and a
+    revision-alias bundle tagged gfx1250-strict is equally unreachable on the A0
+    it exists to serve, which reports the base name.
+
+    One entry each: with no fallback, every subtree answers exactly one reported
+    name, so there is nothing for a second entry to catch.
+    """
     from Tensile.Common.Architectures import archNamesByIsa
 
     assert _compressTargetOf(
         tmp_path, ISA_GFX1250, archNames=archNamesByIsa([GFX1250_STRICT])
     ) == GFX1250_STRICT
+    assert _compressTargetOf(
+        tmp_path, ISA_GFX1250, archNames=archNamesByIsa([GFX1250_V0])
+    ) == GFX1250_V0
     assert _compressTargetOf(tmp_path, gfxToIsa("gfx942")) == "gfx942"
+
+
+def test_the_bundle_entry_is_the_name_the_object_was_built_as(monkeypatch):
+    """What the assembly step forwards is the architecture that was *asked* for;
+    the entry written into the bundle is the one it was *built* as. They differ
+    for the revision alias, and that difference is the whole reason it exists --
+    tagged gfx1250v0 it would be unloadable, because no agent reports that."""
+    from Tensile.Toolchain import Component as ComponentMod
+
+    captured = []
+    monkeypatch.setattr(ComponentMod, "_getVersion", lambda *a, **k: None)
+    monkeypatch.setattr(ComponentMod, "_invoke", lambda args, desc: captured.append(args))
+    bundler = ComponentMod.Bundler(Path("clang-offload-bundler"))
+
+    for requested in (GFX1250, GFX1250_STRICT, GFX1250_V0):
+        bundler.compress("k.co.raw", "k.co", requested)
+
+    # The first argument is the bundler Path, so stringify before matching.
+    entriesOf = lambda args: next(
+        a for a in map(str, args) if a.startswith("--targets=")
+    )
+    base, strict, alias = (entriesOf(a) for a in captured)
+
+    assert base.endswith(f"-unknown-{GFX1250}"), base
+    assert strict.endswith(f"-unknown-{GFX1250_STRICT}"), strict
+    # The alias is offered under the base architecture, not under its own name.
+    assert alias.endswith(f"-unknown-{GFX1250}"), alias
+    # One device entry each: no fallback means nothing needs a second.
+    for entry in (base, strict, alias):
+        assert entry.count("amdgcn") == 1, entry
 
 
 def _run_build_source(tmp_path, monkeypatch, bundlerTarget, cmdlineArchs):
@@ -3456,6 +3524,35 @@ def _rocmShimReporting(tmp_path, arch):
     return root
 
 
+def _kfdShimReporting(tmp_path, arch):
+    """A KFD topology root describing one GPU node that *is* ``arch``.
+
+    The tool shims above are not sufficient on their own any more. Detection
+    prefers the KFD topology precisely because no environment variable rewrites
+    it, so on real A0 silicon it answers gfx1250-strict no matter what the
+    shimmed tools say -- and a test naming gfx1250 then measures the host. This
+    writes the same `capability` bits the silicon would, so the case under test
+    is the case that runs.
+
+    Node 0 is a host processor (gfx_target_version 0), as on a real machine, so
+    the skip-the-CPU path stays exercised.
+    """
+    root = tmp_path / "kfd"
+    (root / "0").mkdir(parents=True, exist_ok=True)
+    (root / "0" / "properties").write_text("gfx_target_version 0\ncapability 0\n")
+
+    # Only a rev-0 part is renamed, so spell the revision the requested name
+    # implies: bits 25:22 zero for the stepping, one for the base architecture.
+    revision = 0 if arch.endswith("-strict") else 1
+    capability = 0xF807A280 | (revision << 22)
+
+    (root / "1").mkdir(parents=True, exist_ok=True)
+    (root / "1" / "properties").write_text(
+        "gfx_target_version 120500\ncapability %d\n" % capability
+    )
+    return root
+
+
 @pytest.mark.parametrize(
     "generator", ["AMaxGenerator.py", "SoftmaxGenerator.py", "LayerNormGenerator.py"]
 )
@@ -3467,6 +3564,8 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
     would build gfx1250 on either and hand the strict device code it rejects.
     The gfx1250 case is the regression fence: naming the architecture must not
     change what an ordinary architecture builds."""
+    from Tensile.GpuArch import _KFD_TOPOLOGY_ROOT_ENV
+
     script = _TENSILELITE / generator
     out = tmp_path / "kernel.s"
     env = dict(
@@ -3474,6 +3573,9 @@ def test_the_generators_build_for_the_architecture_the_device_reported(
         ROCM_PATH=str(_rocmShimReporting(tmp_path, reported)),
         PYTHONPATH=str(_TENSILELITE),
     )
+    # Both shims, or the topology of whatever box this runs on decides the
+    # answer and the gfx1250 case fails on A0 silicon.
+    env[_KFD_TOPOLOGY_ROOT_ENV] = str(_kfdShimReporting(tmp_path, reported))
 
     result = subprocess.run(
         [sys.executable, str(script), "--arch", "", "-o", str(out)],
@@ -3547,12 +3649,18 @@ def test_base_arch_name_strips_both_qualifier_and_predicate(bare, spec):
     assert baseArchName(spec) == bare
 
 
-@pytest.mark.parametrize("name", [n for n in _BARE_NAMES if n != "gfx1250-strict"])
-def test_only_the_stepping_reports_a_base_architecture(name):
+@pytest.mark.parametrize(
+    "name", [n for n in _BARE_NAMES if n not in (GFX1250_STRICT, GFX1250_V0)]
+)
+def test_only_the_steppings_report_a_base_architecture(name):
     """A name that merely looks like a stepping must not answer.
 
     If it did, the architecture it names would be built under another's
     capability overrides.
+
+    Both gfx1250 names are excluded because both genuinely are steppings of
+    gfx1250: the alias shares the stepping's ISA and its overrides, and is
+    derived the same way.
     """
     assert steppingArchOf(name) is None
 
