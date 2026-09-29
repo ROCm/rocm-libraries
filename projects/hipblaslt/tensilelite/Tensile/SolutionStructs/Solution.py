@@ -186,6 +186,16 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
       reject(state, printRejectionReason,
              "MXScaleFormat=NoSwizzle is not supported on gfx1250")
       return False
+    # gfx950 MX is forced onto UseSubtileImpl; until NoSwizzle GR/LR emit exists
+    # under that path, refuse explicit NoSwizzle so broken MXSFNS kernels are
+    # not generated or selected. Auto still resolves to HostPreSwizzle above.
+    # Cleared in Phase 1 once subtile NoSwizzle emit is validated.
+    useSubtile = bool(state.get("UseSubtileImpl", False))
+    if state["MXScaleFormat"] == "NoSwizzle" and (useSubtile or isGfx950):
+      reject(state, printRejectionReason,
+             "MXScaleFormat=NoSwizzle is not implemented on the gfx950/subtile "
+             "MX path (use HostPreSwizzle / BLK32, or wait for NoSwizzle emit)")
+      return False
 
   return True
 

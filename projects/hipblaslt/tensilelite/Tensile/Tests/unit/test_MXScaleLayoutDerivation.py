@@ -51,7 +51,8 @@ def _make_state(*,
                 tdmInst=0,
                 streamK=3,
                 mxBlockA=32,
-                mxBlockB=32):
+                mxBlockB=32,
+                useSubtileImpl=False):
     """Build the minimal state dict consumed by the derivation helper."""
     return {
         "ISA": isa,
@@ -59,6 +60,7 @@ def _make_state(*,
         "MXScaleFormat": mxScaleFormat,
         "TDMInst": tdmInst,
         "StreamK": streamK,
+        "UseSubtileImpl": useSubtileImpl,
         "ProblemType": {"MXBlockA": mxBlockA, "MXBlockB": mxBlockB},
         "NoReject": False,
     }
@@ -227,6 +229,14 @@ REJECT_CASES = [
         dict(),
         id="gfx1250_noswizzle_with_streamk",
     ),
+    # 10. Phase 0: NoSwizzle + gfx950 MX / UseSubtileImpl is rejected until
+    #     subtile NoSwizzle emit lands (Phase 1 clears this).
+    pytest.param(
+        dict(isa=ISA_GFX950, mxLoadInst="BufferLoad",
+             mxScaleFormat="NoSwizzle", tdmInst=0, streamK=0),
+        dict(),
+        id="gfx950_noswizzle_mx_rejected_phase0",
+    ),
 ]
 
 
@@ -258,11 +268,19 @@ class TestRejectComplements:
         assert _run(state) is True
 
     def test_noswizzle_on_non_gfx1250_passes(self):
-        # NoSwizzle is only banned on gfx1250; other archs are fine.
+        # NoSwizzle is banned on gfx1250 and (Phase 0) gfx950/subtile MX;
+        # non-MX or non-gfx950 arches remain fine.
         state = _make_state(isa=ISA_GFX942, mxLoadInst="BufferLoad",
                             mxScaleFormat="NoSwizzle", tdmInst=0, streamK=0,
                             mxBlockA=0, mxBlockB=0)
         assert _run(state) is True
+
+    def test_gfx950_noswizzle_with_subtile_rejected(self):
+        state = _make_state(isa=ISA_GFX950, mxLoadInst="BufferLoad",
+                            mxScaleFormat="NoSwizzle", tdmInst=0, streamK=0,
+                            useSubtileImpl=True)
+        assert _run(state) is False
+        assert state["Valid"] is False
 
 
 # ---------------------------------------------------------------------------
