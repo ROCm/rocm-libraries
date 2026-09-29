@@ -23,14 +23,16 @@
  * ************************************************************************ */
 
 //
-// Host unit tests for the contiguous chunk partition that the incomplete
-// factorizations use to recover the work above the grid.x clamp.
+// Unit tests for the contiguous chunk partition (rocsparse::grid_x_chunk in
+// rocsparse_grid.hpp) that the incomplete factorizations use to recover the
+// work above the grid.x clamp.
 //
-// These live in the host-only rocsparse-unit-test binary rather than in
-// rocsparse-unit-test-device, and they declare no memory requirement, so
-// nothing can drop them at instantiation time. The whole row count range the
-// clamp exists for is far past what any available device can hold, so the
-// properties the kernels depend on are checked here arithmetically instead:
+// rocsparse_grid.hpp pulls in the handle and HIP, so these build into
+// rocsparse-unit-test-device. They call grid_x_chunk on the host only and
+// declare no memory requirement, so nothing can drop them at instantiation
+// time. The whole row count range the clamp exists for is far past what any
+// available device can hold, so the properties the kernels depend on are
+// checked here arithmetically instead:
 //
 //   - the chunks are a partition: every item in [0, count) is owned by exactly
 //     one block;
@@ -39,7 +41,7 @@
 //   - at any unclamped extent the partition degenerates to one item per block,
 //     so the recovery loop is a no-op for every reachable problem size.
 //
-#include "rocsparse_grid_x.hpp"
+#include "rocsparse_grid.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>

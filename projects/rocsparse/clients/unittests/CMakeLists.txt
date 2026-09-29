@@ -48,7 +48,6 @@ set(ROCSPARSE_UNIT_TEST_SOURCES
   unit_test_indextype_utils.cpp
   unit_test_datatype_utils.cpp
   unit_test_csrmv_adaptive_analysis.cpp
-  unit_test_internal_grid_x.cpp
 )
 
 # Host-pure library translation units under test. These are compiled directly
@@ -149,6 +148,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_readfirstlane.cpp
   # Per-axis grid-size helpers in rocsparse_grid.hpp (append-only leaf)
   unit_test_internal_grid.cpp
+  # grid_x_chunk and the incomplete factorizations that walk it [AISPARSE-692-694]
+  unit_test_internal_grid_x.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
