@@ -571,11 +571,31 @@ pipeline {
             steps {
                 script {
                     loadCk()
-                    ck.runDispatcherTests(
-                        this.&rocmnode,
-                        params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean(),
-                        params.RUN_DISPATCHER_PERF_TESTS.toBoolean(),
-                        params.BUILD_COMPILER)
+                    // runDispatcherTests is defined in this branch's vars/ck.groovy.
+                    // With USE_CURRENT_BRANCH_FOR_CK_GROOVY off (the default) loadCk()
+                    // resolves to ck@develop instead, and any develop copy predating
+                    // this change has no such method. Left unguarded that throws
+                    // NoSuchMethodError and aborts the whole pipeline, taking stages
+                    // with nothing to do with the dispatcher (FMHA, Build CK, Process
+                    // results) down with it. Degrade to UNSTABLE so the rest of CI
+                    // still reports and the operator gets an actionable message.
+                    try {
+                        ck.runDispatcherTests(
+                            this.&rocmnode,
+                            params.RUN_DISPATCHER_CORRECTNESS_TESTS.toBoolean(),
+                            params.RUN_DISPATCHER_PERF_TESTS.toBoolean(),
+                            params.BUILD_COMPILER)
+                    } catch (NoSuchMethodError e) {
+                        // Only swallow the missing-DSL-method case; a NoSuchMethodError
+                        // raised from inside a working runDispatcherTests must still fail.
+                        if (!"${e.message}".contains("runDispatcherTests")) {
+                            throw e
+                        }
+                        echo "DISPATCHER tests SKIPPED: the loaded ck.groovy does not define " +
+                             "runDispatcherTests. Re-run with USE_CURRENT_BRANCH_FOR_CK_GROOVY=true " +
+                             "to load ck.groovy from this branch instead of develop."
+                        currentBuild.result = 'UNSTABLE'
+                    }
                 }
             }
         }

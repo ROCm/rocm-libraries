@@ -67,10 +67,18 @@ _CASES = [
     (dt, lay) for dt in (*_FLOAT_DTYPES, *_INT_DTYPES) for lay in _LAYOUTS
 ]
 
-# Padded default algorithm: pad_* all True so M/N need not divide the tile, which
-# is what lets the awkward shape below pass. K must still be a multiple of 8 for
-# the fp16/bf16 vectorized contiguous-reduction load, so every K here is divisible
-# by 8.
+# Padded default algorithm: pad_* all True so M/N/K need not divide the tile,
+# which is what lets the awkward shape below run.
+#
+# Padding only exempts the tile-divisibility checks in ck_tile's
+# IsSupportedArgument. The vector-load/store checks in the same function
+# (M % GetVectorSizeA, N % GetVectorSizeB, N % GetVectorSizeC) are NOT gated on
+# the pad_* flags -- a padded kernel still issues full-width vector accesses
+# along the contiguous dimension, so the extent of that dimension must divide the
+# vector width no matter how the tile is padded. With this 128x128x32 / 256-thread
+# shape the widest access is 16 elements (8-bit A/B operands: 16 bytes / 1 byte);
+# fp16/bf16 operands and every C tensor here are narrower. So M, N and K must all
+# stay multiples of 16 -- see _SHAPES below.
 _ALGO = dict(
     tile_m=128, tile_n=128, tile_k=32,
     wave_m=2, wave_n=2, wave_k=1,
@@ -80,11 +88,15 @@ _ALGO = dict(
 )
 
 # (name, M, N, K). 'awkward' deliberately uses M, N that do not divide the 128
-# tile to exercise padding; K stays divisible by 8.
+# tile to exercise padding, while still being multiples of the 16-element vector
+# width the kernel loads/stores with (272 = 16*17, 144 = 16*9; both leave a
+# remainder of 16 against the 128 tile). Picking M/N that miss the vector width
+# -- 257/129, say -- does not test padding, it just makes IsSupportedArgument
+# reject the kernel and the run come back STATUS_UNSUPPORTED.
 _SHAPES = [
     ("square", 512, 512, 512),
     ("rectangular", 1024, 512, 256),
-    ("awkward", 257, 129, 512),
+    ("awkward", 272, 144, 512),
 ]
 
 # Global-relative-error gates. fp16 measured ~3-4e-4 and bf16 ~8e-3 on gfx942.
@@ -239,6 +251,15 @@ class GemmBridgeParity(unittest.TestCase):
         self.assertEqual(runner.kernel_name, _config(dtype, layout, self.arch).name)
 
         result = runner.run(A, B, problem)
+        # Every shape in _SHAPES is chosen to satisfy the kernel's tile and vector
+        # constraints, so STATUS_UNSUPPORTED here is a real regression, not a case
+        # to skip -- call it out by name rather than leaving a bare status code.
+        if result.unsupported:
+            self.fail(
+                f"{dtype}/{layout} {shape[0]} ({M}x{N}x{K}): kernel rejected the "
+                f"arguments (STATUS_UNSUPPORTED). Check the tile/vector "
+                f"constraints documented above _SHAPES."
+            )
         self.assertTrue(
             result.success,
             f"{dtype}/{layout} {shape[0]} run failed (status {result.status})",
