@@ -192,6 +192,37 @@ def test_result_is_published_atomically_and_paths_survive_move(tmp_path, stub_bu
     assert result.manifestPath.read_bytes() == before
 
 
+def test_source_bundle_result_has_sources_and_no_loader(tmp_path, monkeypatch):
+    def build(configPath, staging, *args):
+        (staging / "sources").mkdir()
+        (staging / "sources" / "single.s").write_text(".amdhsa_kernel single\n")
+        (staging / "library").mkdir()
+        (staging / "library" / "TensileLibrary.dat.zlib").write_bytes(b"library")
+        return {
+            "schema_version": 3,
+            "mode": "source",
+            "architecture": {"requested": "gfx942", "resolved": "gfx942", "compiler_target": "gfx942"},
+            "main_kernel": {"name": "single"},
+            "sources": ["sources/single.s"],
+            "solution": {"index": 0, "name": "solution", "kernel_name": "single"},
+            "library": {
+                "format": "msgpack",
+                "path": "library/TensileLibrary.dat.zlib",
+                "logical_path": "library/TensileLibrary.dat",
+            },
+        }
+
+    monkeypatch.setattr(SS, "_build", build)
+    result = SS.generateAndBuildSingleSolution(
+        CONFIG, tmp_path / "output", architecture="gfx942", sourceOnly=True
+    )
+    assert result.codeObjectPaths == ()
+    assert result.mainCodeObjectPath is None
+    assert result.sourcePaths == (result.bundlePath / "sources" / "single.s",)
+    assert result.libraryPath.is_file()
+    assert not (result.bundlePath / "loader.bin").exists()
+
+
 @pytest.mark.parametrize("error", [RuntimeError("assembler failed"), SystemExit(-1)])
 def test_failed_request_never_publishes_and_does_not_exit_caller(tmp_path, monkeypatch, error):
     def fail(config, staging, *args):
@@ -416,3 +447,58 @@ SingleSolution.generateAndBuildSingleSolution(sys.argv[1], sys.argv[2], architec
     assert not list(bundle.rglob("ClientParameters.ini"))
     assert not list(bundle.rglob("cache.yaml"))
     assert not list(bundle.rglob("*.csv"))
+
+
+@pytest.mark.parametrize("recipe", ["plain", "splitk"])
+def test_source_only_build_emits_sources_and_entry_without_building(tmp_path, recipe):
+    """The compiler only probes capabilities; nothing is assembled, compiled, or bundled."""
+    compiler = shutil.which("amdclang++") or "/opt/rocm/bin/amdclang++"
+    if not Path(compiler).is_file():
+        pytest.skip("ROCm compiler is unavailable")
+    source = CONFIG if recipe == "plain" else CONFIG.with_name("single_solution_splitk.yaml")
+    output = tmp_path / "source output"
+    script = """
+import sys
+from Tensile import SingleSolution
+from Tensile.TensileCreateLibrary import Run
+from Tensile.Toolchain import Component
+def forbidden(*args, **kwargs):
+    raise AssertionError('a source-only build assembled, compiled or bundled')
+Component.Assembler.__call__ = forbidden
+Component.Compiler.__call__ = forbidden
+Component.Bundler.__init__ = forbidden
+Run.buildAssemblyCodeObjectFiles = forbidden
+Run.buildSourceCodeObjectFiles = forbidden
+SingleSolution.generateAndBuildSingleSolution(sys.argv[1], sys.argv[2], architecture='gfx942', cxxCompiler=sys.argv[3], offloadBundler='/nonexistent', sourceOnly=True)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(source), str(output), compiler],
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    bundle = output / "bundle"
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    assert manifest["schema_version"] == 3 and manifest["mode"] == "source"
+    assert "code_objects" not in manifest and "code_object" not in manifest["main_kernel"]
+    files = {path.relative_to(bundle).as_posix() for path in bundle.rglob("*") if path.is_file()}
+    assert files == {"manifest.json", manifest["library"]["path"], *manifest["sources"]}
+    main = bundle / manifest["sources"][0]
+    assert main.parent == bundle / "sources" and main.suffix == ".s"
+    assembly = main.read_text()
+    assert assembly.count(".amdhsa_kernel ") == 1
+    assert f".amdhsa_kernel {manifest['main_kernel']['name']}\n" in assembly
+    library = msgpack.unpackb(
+        zlib.decompress((bundle / manifest["library"]["path"]).read_bytes()), raw=False
+    )
+    assert len(library["solutions"]) == 1
+    entry = library["solutions"][0]
+    assert entry["kernelName"] == entry["customKernel"]["name"] == manifest["main_kernel"]["name"]
+    assert entry["customKernel"]["generated"] is True
+    helpers = {"sources/Kernels.cpp", "sources/Kernels.h"}
+    if recipe == "plain":
+        assert manifest["sources"] == [manifest["sources"][0]]
+    else:
+        assert helpers <= set(manifest["sources"])
+        assert (bundle / "sources/Kernels.cpp").read_text().count("__global__") > 0

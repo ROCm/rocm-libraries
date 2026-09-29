@@ -473,6 +473,7 @@ def main(argv=None):
     parser.add_argument("--code-object-version", dest="codeObjectVersion", choices=("4", "5", "6"), default="4")
     parser.add_argument("--library-format", dest="libraryFormat", choices=("msgpack", "yaml"), default="msgpack")
     parser.add_argument("--keep-build-tmp", dest="keepBuildTmp", action="store_true")
+    parser.add_argument("--source-only", dest="sourceOnly", action="store_true")
     try:
         result = generateAndBuildJitGemm(**vars(parser.parse_args(argv)))
     except (SS.SingleSolutionError, OSError, ValueError) as error:

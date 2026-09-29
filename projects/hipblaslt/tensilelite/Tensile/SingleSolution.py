@@ -4,9 +4,11 @@
 """Build one GEMM solution, including its helpers, without benchmarking.
 
 The callable returns a published bundle; ``python -m Tensile.SingleSolution`` is its
-CLI. The output directory must not exist. Calls in one interpreter must use one
-toolchain and must not overlap other Tensile generation: rocisa and the generator
-have process-global state. A fresh subprocess is recommended for each request.
+CLI. With ``sourceOnly`` (``--source-only``) the bundle holds the solution's
+sources and library entry instead of code objects. The output directory must not
+exist. Calls in one interpreter must use one toolchain and must not overlap other
+Tensile generation: rocisa and the generator have process-global state. A fresh
+subprocess is recommended for each request.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import itertools
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -47,14 +50,15 @@ class SingleSolutionBuildError(SingleSolutionError):
 class SingleSolutionBuildResult:
     bundlePath: Path
     manifestPath: Path
-    codeObjectPaths: tuple[Path, ...]
-    mainCodeObjectPath: Path
+    codeObjectPaths: tuple[Path, ...]  # empty for a source bundle
+    mainCodeObjectPath: Path | None  # None for a source bundle
     libraryPath: Path
     logicalLibraryPath: Path
     kernelName: str
     solutionName: str
     solutionIndex: int
     architecture: str
+    sourcePaths: tuple[Path, ...] = ()  # the main assembly first; empty for code objects
 
 
 _generationLock = threading.Lock()
@@ -288,6 +292,7 @@ def _build(
     codeObjectVersion,
     libraryFormat,
     keepBuildTmp,
+    sourceOnly=False,
     _selection=None,
 ):
     from Tensile import LibraryIO
@@ -305,7 +310,8 @@ def _build(
     from Tensile.SolutionLibrary import MasterSolutionLibrary
     from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
     from Tensile.TensileCreateLibrary.Run import writeSolutionsAndKernels
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
+    from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
+    from Tensile.Toolchain.Component import Assembler
     from Tensile.Toolchain.Source import makeSourceToolchain
     from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
     from Tensile.resources import copy_static_headers
@@ -326,10 +332,16 @@ def _build(
     try:
         restoreDefaultGlobalParameters()
         setVerbosity(globalsConfig.get("PrintLevel", 1))
-        compiler, bundler, _ = validateToolchain(
-            cxxCompiler, offloadBundler, ToolchainDefaults.HIP_CONFIG
-        )
-        toolchain = makeAssemblyToolchain(compiler, bundler, codeObjectVersion)
+        if sourceOnly:
+            # The compiler still probes assembler capabilities; nothing is built.
+            compiler, _ = validateToolchain(cxxCompiler, ToolchainDefaults.HIP_CONFIG)
+            bundler = None
+            toolchain = AssemblyToolchain(Assembler(compiler, codeObjectVersion), None, None)
+        else:
+            compiler, bundler, _ = validateToolchain(
+                cxxCompiler, offloadBundler, ToolchainDefaults.HIP_CONFIG
+            )
+            toolchain = makeAssemblyToolchain(compiler, bundler, codeObjectVersion)
         global _compilerIdentity
         identity = (str(Path(compiler).resolve()), tuple(toolchain.assembler.version))
         if _compilerIdentity is not None and _compilerIdentity != identity:
@@ -372,7 +384,10 @@ def _build(
         helperDescriptions = _helperDescriptions(helpers)
         sourceToolchain = None
         supportFiles = []
-        if helpers:
+        sources = staging / "sources"
+        if helpers and sourceOnly:
+            supportFiles = copy_static_headers(sources) + ["Kernels.cpp", "Kernels.h"]
+        elif helpers:
             supportFiles = copy_static_headers(staging) + ["Kernels.cpp", "Kernels.h"]
             sourceToolchain = makeSourceToolchain(compiler, bundler)
             sourceToolchain.compiler.default_args.append(
@@ -400,12 +415,30 @@ def _build(
             removeTemporaries=not keepBuildTmp,
             strict=True,
             assemblyTarget=compilerTarget,
+            sourcesOnly=sourceOnly,
         )
-        mainOutputs = [Path(path) for path in outputs if Path(path).suffix == ".co"]
-        if len(solutions) != 1 or len(mainOutputs) != 1:
-            raise SingleSolutionBuildError(
-                "Build did not produce exactly one solution and main code object"
-            )
+        if sourceOnly:
+            if len(solutions) != 1 or len(outputs) != 1:
+                raise SingleSolutionBuildError(
+                    "Generation did not produce exactly one solution and main kernel source"
+                )
+            sources.mkdir(exist_ok=True)
+            mainOutput = sources / Path(outputs[0]).name
+            shutil.copyfile(outputs[0], mainOutput)
+            for name in ("Kernels.cpp", "Kernels.h") if helpers else ():
+                (staging / name).replace(sources / name)
+            if not keepBuildTmp:
+                shutil.rmtree(staging / "build_tmp")
+            outputs = [mainOutput, *(sources / name for name in supportFiles)]
+            libraryBase = staging / "library" / "TensileLibrary"
+        else:
+            mainOutputs = [Path(path) for path in outputs if Path(path).suffix == ".co"]
+            if len(solutions) != 1 or len(mainOutputs) != 1:
+                raise SingleSolutionBuildError(
+                    "Build did not produce exactly one solution and main code object"
+                )
+            mainOutput = mainOutputs[0]
+            libraryBase = mainOutput.parent / "TensileLibrary"
         library = MasterSolutionLibrary.BenchmarkingLibrary(
             solutions,
             toolchain.assembler,
@@ -416,28 +449,40 @@ def _build(
         )
         library.applyNaming(debug.splitGSU)
         selected = next(iter(library.solutions.values()))
-        mainOutput = mainOutputs[0]
-        libraryBase = mainOutput.parent / "TensileLibrary"
         LibraryIO.write(str(libraryBase), state(library), libraryFormat)
         logical = libraryBase.with_suffix(".dat" if libraryFormat == "msgpack" else ".yaml")
         physical = Path(str(logical) + ".zlib") if libraryFormat == "msgpack" else logical
-        for artifact in [*map(Path, outputs), physical, *(staging / name for name in supportFiles)]:
+        supportPaths = [] if sourceOnly else [staging / name for name in supportFiles]
+        for artifact in [*map(Path, outputs), physical, *supportPaths]:
             if not artifact.is_file() or artifact.stat().st_size == 0:
                 raise SingleSolutionBuildError(f"Missing or empty output artifact: {artifact}")
-        manifest = {
-            "schema_version": 2,
-            "architecture": {
-                "requested": architecture,
-                "resolved": architecture,
-                "compiler_target": compilerTarget,
-            },
-            "main_kernel": {
-                "name": selected.kernelName,
-                "code_object": str(mainOutput.relative_to(staging)),
-            },
-            "code_objects": [str(Path(path).relative_to(staging)) for path in outputs],
-            "helpers": helperDescriptions,
-            "support_files": supportFiles,
+        target = {
+            "requested": architecture,
+            "resolved": architecture,
+            "compiler_target": compilerTarget,
+        }
+        mainKernel = {"name": selected.kernelName}
+        if sourceOnly:
+            # The sources and library entry are the build input; the rest is provenance.
+            manifest = {
+                "schema_version": 3,
+                "mode": "source",
+                "architecture": target,
+                "main_kernel": mainKernel,
+                "sources": [str(path.relative_to(staging)) for path in outputs],
+                "helpers": helperDescriptions,
+            }
+        else:
+            mainKernel["code_object"] = str(mainOutput.relative_to(staging))
+            manifest = {
+                "schema_version": 2,
+                "architecture": target,
+                "main_kernel": mainKernel,
+                "code_objects": [str(Path(path).relative_to(staging)) for path in outputs],
+                "helpers": helperDescriptions,
+                "support_files": supportFiles,
+            }
+        manifest |= {
             "solution": {
                 "index": selected.index,
                 "name": selected.name,
@@ -519,12 +564,13 @@ def generateAndBuildSingleSolution(
     codeObjectVersion: str = "4",
     libraryFormat: str = "msgpack",
     keepBuildTmp: bool = False,
+    sourceOnly: bool = False,
 ) -> SingleSolutionBuildResult:
     """Build one explicit YAML recipe; no parameter prediction or benchmarking."""
     return _generateAndBuild(
         configPath, outputPath, architecture=architecture, cxxCompiler=cxxCompiler,
         offloadBundler=offloadBundler, codeObjectVersion=codeObjectVersion,
-        libraryFormat=libraryFormat, keepBuildTmp=keepBuildTmp)
+        libraryFormat=libraryFormat, keepBuildTmp=keepBuildTmp, sourceOnly=sourceOnly)
 
 
 def _generateAndBuild(
@@ -537,6 +583,7 @@ def _generateAndBuild(
     codeObjectVersion: str = "4",
     libraryFormat: str = "msgpack",
     keepBuildTmp: bool = False,
+    sourceOnly: bool = False,
     _selection=None,
 ) -> SingleSolutionBuildResult:
     """Build one YAML-requested solution and publish ``outputPath/bundle`` atomically.
@@ -545,6 +592,8 @@ def _generateAndBuild(
     Failure leaves private staging for diagnosis but never publishes a bundle.
     Paths in the manifest are relative to the published bundle, while paths in
     the Python result are absolute. No benchmarking or GPU launch is performed.
+    With ``sourceOnly`` nothing is assembled, compiled, or bundled: the bundle
+    holds ``sources/`` and ``library/`` for the caller to build.
     """
     if not _generationLock.acquire(blocking=False):
         raise SingleSolutionError("Concurrent generation in one Python process is not supported")
@@ -563,25 +612,29 @@ def _generateAndBuild(
             codeObjectVersion,
             libraryFormat,
             keepBuildTmp,
+            sourceOnly,
             *(() if _selection is None else (_selection,)),
         )
         (staging / "manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
-        _writeLoaderEnvelope(staging / "loader.bin", manifest)
+        if not sourceOnly:
+            _writeLoaderEnvelope(staging / "loader.bin", manifest)
         bundle = outputPath / "bundle"
         staging.rename(bundle)
+        mainCodeObject = manifest["main_kernel"].get("code_object")
         return SingleSolutionBuildResult(
             bundle,
             bundle / "manifest.json",
-            tuple(bundle / path for path in manifest["code_objects"]),
-            bundle / manifest["main_kernel"]["code_object"],
+            tuple(bundle / path for path in manifest.get("code_objects", ())),
+            bundle / mainCodeObject if mainCodeObject else None,
             bundle / manifest["library"]["path"],
             bundle / manifest["library"]["logical_path"],
             manifest["main_kernel"]["name"],
             manifest["solution"]["name"],
             manifest["solution"]["index"],
             manifest["architecture"]["resolved"],
+            tuple(bundle / path for path in manifest.get("sources", ())),
         )
     except SingleSolutionError:
         raise
@@ -610,6 +663,7 @@ def main(argv=None):
         "--library-format", dest="libraryFormat", choices=("msgpack", "yaml"), default="msgpack"
     )
     parser.add_argument("--keep-build-tmp", dest="keepBuildTmp", action="store_true")
+    parser.add_argument("--source-only", dest="sourceOnly", action="store_true")
     args = parser.parse_args(argv)
     try:
         result = generateAndBuildSingleSolution(**vars(args))

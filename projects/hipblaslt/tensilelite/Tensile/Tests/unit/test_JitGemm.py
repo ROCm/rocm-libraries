@@ -248,6 +248,17 @@ def test_modeled_outputs_survive_real_generation(modeled_request, tmp_path):
     assert prediction["resolved_parameters"]["_staggerStrideShift"] == 1
 
 
+def test_source_only_generation_keeps_the_prediction(modeled_request, tmp_path):
+    manifest = compile_request(
+        modeled_request, tmp_path, "--source-only", "--offload-bundler", str(tmp_path / "missing"))
+    assert manifest["schema_version"] == 3 and manifest["mode"] == "source"
+    assert manifest["jit_prediction"]["candidate_id"] == 7
+    assert json.loads((tmp_path / "compiled.prediction.json").read_text()) == manifest["jit_prediction"]
+    bundle = tmp_path / "compiled" / "bundle"
+    assert Path(manifest["sources"][0]).suffix == ".s"
+    assert not list(bundle.rglob("*.co")) and not (bundle / "loader.bin").exists()
+
+
 def problem_rejection(derived, request, candidate=None):
     from Tensile.SolutionStructs.Validators.ProblemSizes import problemSizeRejection
 
@@ -803,7 +814,7 @@ def test_descriptor_mixed_physical_layouts_are_rejected(mx_layout_request):
         JG._implementationParameters(mx_layout_request)
 
 
-def compile_request(request, tmp_path):
+def compile_request(request, tmp_path, *arguments):
     compiler = shutil.which("amdclang++") or "/opt/rocm/bin/amdclang++"
     if not Path(compiler).is_file():
         pytest.skip("ROCm compiler is unavailable")
@@ -812,13 +823,14 @@ def compile_request(request, tmp_path):
     output = tmp_path / "compiled"
     completed = subprocess.run(
         [sys.executable, "-m", "Tensile.JitGemm", str(source), str(output),
-         "--architecture", request["architecture"], "--cxx-compiler", compiler],
+         "--architecture", request["architecture"], "--cxx-compiler", compiler, *arguments],
         capture_output=True, text=True, timeout=240, cwd=tmp_path)
     (tmp_path / "compiler.log").write_text(completed.stdout + completed.stderr)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     manifest = json.loads((output / "bundle/manifest.json").read_text())
     assert manifest["counts"]["solutions"] == manifest["counts"]["main_kernels"] == 1
-    assert all((output / "bundle" / name).is_file() for name in manifest["code_objects"])
+    artifacts = manifest.get("code_objects", []) + manifest.get("sources", [])
+    assert artifacts and all((output / "bundle" / name).is_file() for name in artifacts)
     return manifest
 
 

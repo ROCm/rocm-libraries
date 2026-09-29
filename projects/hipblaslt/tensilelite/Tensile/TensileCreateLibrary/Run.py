@@ -483,7 +483,11 @@ def writeSolutionsAndKernels(
     removeTemporaries: bool=True,
     strict: bool=False,
     assemblyTarget: Optional[str]=None,
+    sourcesOnly: bool=False,
 ):
+    """With sourcesOnly, write the assembly and helper sources without
+    assembling or building anything, and return the assembly paths in place of
+    the code objects."""
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
         printWarning("Python profiling is enabled. CpuThreads set to 0.")
@@ -497,8 +501,9 @@ def writeSolutionsAndKernels(
         # Builders fan out into <destRoot>/<base-arch>/ at the moment of write.
         # Pre-create the per-base subdirs so concurrent emit doesn't race mkdir.
         destRoot = ensurePath(libraryRoot(outputPath))
-        for base in _baseArchs(cmdlineArchs):
-            ensurePath(libraryDir(outputPath, base))
+        if not sourcesOnly:
+            for base in _baseArchs(cmdlineArchs):
+                ensurePath(libraryDir(outputPath, base))
         buildTmpPath = ensurePath(outputPath / "build_tmp" / outputPath.stem.upper())  #
         assemblyTmpPath = ensurePath(
             buildTmpPath / "assembly"
@@ -566,7 +571,7 @@ def writeSolutionsAndKernels(
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     with timing_context("python_kernel_write_assemble"):
         ret = ParallelMap2(
-            compose(assemble, unaryWriteAssembly),
+            unaryWriteAssembly if sourcesOnly else compose(assemble, unaryWriteAssembly),
             asmResults,
             "Writing assembly kernels",
             return_as="list",
@@ -574,8 +579,9 @@ def writeSolutionsAndKernels(
         )
 
     # Remove solutions whose kernels failed to assemble (no .o file produced)
-    failedBases = {k["BaseName"] for k in asmKernels
-                   if not k.duplicate and not (assemblyTmpPath / (k["BaseName"] + ".o")).exists()}
+    failedBases = set() if sourcesOnly else {
+        k["BaseName"] for k in asmKernels
+        if not k.duplicate and not (assemblyTmpPath / (k["BaseName"] + ".o")).exists()}
     if failedBases:
         solutions[:] = [s for s in solutions
                         if getKernelFileBase(splitGSU, s.getKernels()[0]) not in failedBases]
@@ -596,6 +602,9 @@ def writeSolutionsAndKernels(
         if globalParameters["CpuThreads"] != 0:
             with open("yappi_thread_stats.txt", "w") as f:
                 yappi.get_thread_stats().print_all(out=f)
+
+    if sourcesOnly:
+        return [path for path, *_ in ret], numKernels
 
     if not generateSourcesAndExit:
         with timing_context("python_kernel_build_co"):
