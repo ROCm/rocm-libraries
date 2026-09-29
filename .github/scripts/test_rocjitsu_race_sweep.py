@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import zlib
 
 import msgpack
+import yaml
 import rocjitsu_race_sweep as sweep
 import rocjitsu_sweep_plan as plan
 
@@ -87,7 +88,7 @@ def bench_log():
     lines = []
     for case in job()["cases"]:
         m, n, batch, k = case["shape"]
-        lines += ['[rocjitsu] Kernel dispatch: "kernel-7"'] * 2
+        lines += ['[rocjitsu] Kernel dispatch: "kernel-7" symbol="kernel-7"'] * 2
         lines += [
             "[0]:m,n,batch_count,k,norm_error,atol,rtol",
             f"    {m},{n},{batch},{k},0,0.00001,0.00001",
@@ -248,8 +249,12 @@ class SweepTests(unittest.TestCase):
             "library_dir": "unused",
             "artifact_fingerprint": "test",
             "planned_cases": 8,
+            "seed": "test",
+            "policy": plan.POLICY,
+            "preparation_seconds": 0,
         }
         for backend in ("tensile", "bench"):
+            manifest["backend"] = backend
             with tempfile.TemporaryDirectory() as tmp:
                 args = SimpleNamespace(
                     reports=Path(tmp) / "reports",
@@ -271,6 +276,43 @@ class SweepTests(unittest.TestCase):
                 self.assertEqual(summary["missing"], [])
                 self.assertEqual(summary["accounted_cases"], 8)
                 self.assertFalse(summary["passed"])
+                report = (args.reports / "summary.md").read_text()
+                self.assertIn("| 7 | FAIL | 0/4 | 0/", report)
+                self.assertIn("| 7 | NOT RUN |", report)
+                self.assertIn("Run status: FAIL.", report)
+
+    def test_report_distinguishes_numerical_pass_from_race_failure(self):
+        manifest = {
+            "backend": "tensile",
+            "seed": "a|b",
+            "policy": plan.POLICY,
+            "preparation_seconds": 0,
+            "artifact_fingerprint": "test",
+            "jobs": [job()],
+        }
+        result = sweep.classify_tensile(job(), success_log(), 0)
+        report = sweep.render_report(manifest, {"results": [result], "passed": True})
+        self.assertIn("| 7 | PASS | 4/4 | 4/4 |", report)
+        self.assertIn("a&#124;b", report)
+        result = sweep.classify_tensile(job(), success_log() + "RACE example\n", 0)
+        report = sweep.render_report(manifest, {"results": [result], "passed": False})
+        self.assertIn("| 7 | FAIL | 4/4 | 4/4 |", report)
+        self.assertIn("1 race reports", report)
+        self.assertNotIn("| PASS |", report)
+
+    def test_per_case_dispatch_proof_rejects_redistributed_or_wrong_symbols(self):
+        dispatch = sweep.target_dispatch_line(job()) + "\n"
+        for classify, text in [
+            (sweep.classify_tensile, success_log()),
+            (sweep.classify_bench, bench_log()),
+        ]:
+            # Same total launches but zero for the first case, extras for the next.
+            count = 2 if classify is sweep.classify_bench else 1
+            changed = text.replace(dispatch * count, "", 1)
+            changed = changed.replace(dispatch * count, dispatch * (2 * count), 1)
+            self.assertTrue(classify(job(), changed, 0)["failed"])
+            changed = text.replace('symbol="kernel-7"', 'symbol="wrong"', 1)
+            self.assertTrue(classify(job(), changed, 0)["failed"])
 
     def test_numerical_and_dispatch_evidence_required(self):
         for classify, text in [
@@ -462,6 +504,39 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                     )
                 self.assertIn("ARG: reports/sweep-tensile", result.stdout)
                 self.assertIn("ARG: reports/sweep-bench", result.stdout)
+
+    def test_ci_publishes_partial_and_missing_reports(self):
+        workflow = (
+            Path(__file__).parents[1]
+            / "workflows/therock-rocjitsu-race-check-linux.yml"
+        )
+        steps = yaml.safe_load(workflow.read_text())["jobs"][
+            "rocjitsu-race-check-linux"
+        ]["steps"]
+        publish = next(
+            s for s in steps if s["name"] == "Publish sampled solution results"
+        )
+        self.assertEqual(publish["if"], "${{ always() }}")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sweep-tensile").mkdir()
+            report = "| 7 | FAIL | 4/4 | 4/4 |\nRun incomplete.\n"
+            (root / "sweep-tensile/summary.md").write_text(report)
+            subprocess.run(
+                ["bash", "-euc", publish["run"]],
+                env={
+                    **os.environ,
+                    "RACE_REPORT_DIR": str(root),
+                    "GITHUB_STEP_SUMMARY": str(root / "job.md"),
+                },
+                check=True,
+                capture_output=True,
+                timeout=10,
+            )
+            text = (root / "job.md").read_text()
+            self.assertIn(report, text)
+            self.assertIn("bench sampled race sweep", text)
+            self.assertIn("No report", text)
 
 
 if __name__ == "__main__":
