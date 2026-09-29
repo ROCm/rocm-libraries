@@ -45,6 +45,7 @@ MIOPEN_DECLARE_ENV_VAR_STR(HOMEPATH, miopen::fs::temp_directory_path().string())
 MIOPEN_DECLARE_ENV_VAR_STR(HOMEDRIVE)
 #endif
 
+// Dummy change to exercise CI; do not merge.
 namespace miopen {
 
 #ifdef __linux__
