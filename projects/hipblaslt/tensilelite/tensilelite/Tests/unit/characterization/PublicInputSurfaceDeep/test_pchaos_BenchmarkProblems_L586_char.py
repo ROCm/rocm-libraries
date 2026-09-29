@@ -4,7 +4,7 @@
 ################################################################################
 
 """PublicInputSurfaceDeep characterization: ``if len(solutions) == 0`` at
-``Tensile/BenchmarkProblems.py:586`` inside ``_benchmarkProblemType``.
+``tensilelite/BenchmarkProblems.py:586`` inside ``_benchmarkProblemType``.
 
 Branch 6647a7e665fa02215a747c9a777102452ef22d02.
 

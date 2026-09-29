@@ -11,7 +11,7 @@ ComplexConjugateB=True through the config-driven emit harness and asserts:
      KernelWriterAssembly.py lines 9285-9355 (ccVgprs / VAddF32 / four-MFMA
      complex multiply-add arms).
 
-Target missing ranges in Tensile/KernelWriterAssembly.py:
+Target missing ranges in tensilelite/KernelWriterAssembly.py:
   - 9285-9355 : ComplexConjugate MAC arms — ccVgprs allocation, VAddF32
                 negation of Ar/Ai, four MFMA instructions for complex C += A*B.
                 Gate: ``kernel["ProblemType"]["DataType"].isComplex()``

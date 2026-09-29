@@ -608,7 +608,7 @@ def _build_prologue(sgprs, num_agprs, mt0, mt1, stride_d=None, use_input_buf=Tru
     # Set num_records = BufferOOB = 0x80000000.  The store path redirects OOB elements
     # to byte offset 0x80000000 via v_mov_b32 vN, BufferOOB.  With num_records=0x80000000,
     # any store at offset >= 0x80000000 is out-of-bounds and silently suppressed.
-    # This matches how real Tensile kernels set up the SRD post-loop.
+    # This matches how real TensileLite kernels set up the SRD post-loop.
     m.add(SMovB32(dst=sgpr(srd_d + 2), src="0x80000000", comment="SrdD num_records = BufferOOB (2GB)"))
     m.add(SMovB32(dst=sgpr(srd_d + 3), src="0x20000", comment="SrdD format word"))
 

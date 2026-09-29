@@ -5,7 +5,7 @@
 # P3 designed KernelWriter feature-breadth config for gfx942.
 #
 # Goal: exercise the uncovered ScheduleIterAlg 1 and ScheduleIterAlg 2 code
-# arms in Tensile/KernelWriter.py (_makeSubIterSchedule, lines 951-1125),
+# arms in tensilelite/KernelWriter.py (_makeSubIterSchedule, lines 951-1125),
 # plus the beta-only helper-kernel path triggered by GlobalSplitU > 1.
 #
 # Methodology-A missing ranges targeted in KernelWriter.py:

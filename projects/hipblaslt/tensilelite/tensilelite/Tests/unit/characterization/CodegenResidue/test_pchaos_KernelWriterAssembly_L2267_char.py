@@ -6,7 +6,7 @@
 Characterisation test — branch_id dc455979d10c6c2d59089c0b3a32c06fadb67ab9
 
 Predicate : self.states.archCaps["SgprPreloadPad"]   (int-as-bool)
-Site      : Tensile/KernelWriterAssembly.py:2267
+Site      : tensilelite/KernelWriterAssembly.py:2267
 Function  : defineAndResources
 Solver    : z3 4.16.0  — SAT  (solver-backed-under-assumptions)
 

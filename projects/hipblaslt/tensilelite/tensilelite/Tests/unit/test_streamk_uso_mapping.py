@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Independent oracle for the two Stream-K K-split work mappings.
 
-Pure Python: it imports nothing from Tensile and needs no GPU and no build. It
+Pure Python: it imports nothing from tensilelite and needs no GPU and no build. It
 re-derives both mappings from first principles so that a regression in the
 generator cannot also silently "fix" the expectation.
 

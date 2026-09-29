@@ -41,17 +41,18 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 import pytest
 
-from Tensile.Common.GlobalParameters import (
+
+from tensilelite.Common.GlobalParameters import (
     defaultBenchmarkCommonParameters,
     defaultInternalSupportParams,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     getAllCustomKernelNames,
     getCustomKernelContents,
     readCustomKernelConfig,
 )
-from Tensile.Components.TDMFuse import tdmWavePartition
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.TDMFuse import tdmWavePartition
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from rocisa.code import Module
 
 
