@@ -165,7 +165,12 @@ namespace rocsparse
         {
             J row = block_dim * bid + wid;
 
-            nnzb_per_row = 0;
+            // Only thread 0 reads nnzb_per_row after the last barrier of the previous
+            // iteration, so it must also be the only thread that resets it.
+            if(tid == 0)
+            {
+                nnzb_per_row = 0;
+            }
             __syncthreads();
 
             I row_begin = (row < m && wid < block_dim) ? csr_row_ptr[row] - csr_base : 0;
