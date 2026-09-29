@@ -20,6 +20,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "llvm_flavor.hpp"
+
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -238,8 +240,12 @@ std::string au_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k,
+                                                      resolve_python_llvm_flavor(),
+                                                      arch.empty() ? "gfx950" : arch.c_str(),
+                                                      &ll,
+                                                      err,
+                                                      sizeof err);
     rocke_ir_builder_free(&b);
     return take_ll(s2, ll, err, "rocke_engine.attention_unified_lower_llvm");
 }
@@ -306,7 +312,7 @@ std::string fmma_lower(const py::dict& d, const std::string& arch)
     if(!k)
         throw std::runtime_error("rocke_engine.fmha_mfma_lower_llvm build failed");
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
     return take_ll(s2, ll, nullptr, "rocke_engine.fmha_mfma_lower_llvm");
 }
 std::string fmma_serialize(const py::dict& d, const std::string& arch)
@@ -359,8 +365,12 @@ std::string fp8_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_fmha_fwd_fp8_lower_to_llvm(
-        &s, arch.empty() ? "gfx950" : arch.c_str(), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    rocke_status_t s2 = rocke_fmha_fwd_fp8_lower_to_llvm(&s,
+                                                         arch.empty() ? "gfx950" : arch.c_str(),
+                                                         resolve_python_llvm_flavor(),
+                                                         &ll,
+                                                         err,
+                                                         sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.fmha_fwd_fp8_lower_llvm");
 }
 std::string fp8_serialize(const py::dict& d, const std::string& arch)
@@ -421,8 +431,12 @@ std::string bwd_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k,
+                                                      resolve_python_llvm_flavor(),
+                                                      arch.empty() ? "gfx950" : arch.c_str(),
+                                                      &ll,
+                                                      err,
+                                                      sizeof err);
     rocke_fmha_kernel_builder_free(&kb);
     return take_ll(s2, ll, err, "rocke_engine.fmha_bwd_lower_llvm");
 }
@@ -480,8 +494,12 @@ std::string hg_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
-        k, ROCKE_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(k,
+                                                      resolve_python_llvm_flavor(),
+                                                      arch.empty() ? "gfx950" : arch.c_str(),
+                                                      &ll,
+                                                      err,
+                                                      sizeof err);
     rocke_fmha_kernel_builder_free(&kb);
     return take_ll(s2, ll, err, "rocke_engine.fmha_head_grouping_lower_llvm");
 }
@@ -606,8 +624,8 @@ std::string sparse_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2
-        = rocke_lower_kernel_to_llvm_ex(k, ROCKE_LLVM_FLAVOR_AUTO, arch_c, &ll, err, sizeof err);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch_c, &ll, err, sizeof err);
     std::string out;
     try
     {
@@ -724,8 +742,12 @@ std::string sage_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    rocke_status_t s2 = rocke_sage_attention_lower_to_llvm(
-        &s, arch.empty() ? "gfx950" : arch.c_str(), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    rocke_status_t s2 = rocke_sage_attention_lower_to_llvm(&s,
+                                                           arch.empty() ? "gfx950" : arch.c_str(),
+                                                           resolve_python_llvm_flavor(),
+                                                           &ll,
+                                                           err,
+                                                           sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.sage_attention_lower_llvm");
 }
 std::string sage_serialize(const py::dict& d, const std::string& arch)
@@ -828,7 +850,7 @@ std::string t942_lower(const py::dict& d, const std::string& arch)
         throw std::runtime_error(m);
     }
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
     rocke_ir_builder_free(&b);
     return take_ll(s2, ll, nullptr, "rocke_engine.gfx942_attention_tiled_2d_lower_llvm");
 }
@@ -884,7 +906,7 @@ std::string t950_lower(const py::dict& d, const std::string& arch)
         throw std::runtime_error(m);
     }
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
     rocke_ir_builder_free(&b);
     return take_ll(s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_2d_lower_llvm");
 }
@@ -979,7 +1001,7 @@ std::string fkv_lower(const py::dict& d, const std::string& arch)
         throw std::runtime_error(m);
     }
     char* ll = nullptr;
-    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
+    rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
     rocke_ir_builder_free(&b);
     return take_ll(
         s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_2d_fastkv_regp_lower_llvm");
@@ -1056,7 +1078,12 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
     rocke_status_t s2 = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
-        &s, arch.empty() ? "gfx942" : arch.c_str(), ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+        &s,
+        arch.empty() ? "gfx942" : arch.c_str(),
+        resolve_python_llvm_flavor(),
+        &ll,
+        err,
+        sizeof err);
     return take_ll(s2, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
@@ -1124,7 +1151,7 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
             throw std::runtime_error(m);
         }
         char* ll = nullptr;
-        rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
+        rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
         out += take_ll(s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_3d_lower_llvm");
         rocke_ir_builder_free(&b);
     }
@@ -1148,7 +1175,7 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
             throw std::runtime_error(m);
         }
         char* ll = nullptr;
-        rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, a, &ll);
+        rocke_status_t s2 = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), a, &ll);
         out += take_ll(s2, ll, nullptr, "rocke_engine.gfx950_attention_tiled_3d_lower_llvm");
         rocke_ir_builder_free(&b);
     }

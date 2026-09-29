@@ -16,6 +16,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "llvm_flavor.hpp"
+
 #include <cstdlib>
 #include <deque>
 #include <string>
@@ -148,7 +150,7 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, ROCKE_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
+        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
     rocke_ir_builder_free(&b);
     if(st != ROCKE_OK || !ll)
     {
