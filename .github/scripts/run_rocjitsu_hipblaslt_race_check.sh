@@ -532,7 +532,7 @@ for backend in tensile bench; do
   client="${TENSILELITE_CLIENT}"
   [[ "${backend}" == bench ]] && client="${HIPBLASLT_BENCH}"
   run_timed "${backend} sampled race sweep" \
-    python3 "${ROCM_PATH}/share/hipblaslt/rocjitsu/rocjitsu_race_sweep.py" \
+    python3 "${ROCM_PATH}/share/hipblaslt/tensilelite/rocjitsu/rocjitsu_race_sweep.py" \
       --backend "${backend}" --seed "${sweep_seed}" \
       --rocjitsu "${ROCJITSU_BIN}" --client "${client}" \
       --config "${ROCJITSU_CONFIG}" --target "${ROCJITSU_GPU_TARGET}" \
