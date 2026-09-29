@@ -18,10 +18,11 @@ def problemTypeOptions(problem):
     def add(key, field, default=None):
         value = get(field, default)
         if value is not None:
-            if hasattr(value, "toEnum"):
-                value = value.toEnum()
-            elif hasattr(value, "toName"):
+            # DataType also has toEnum(), but client options need its bare name.
+            if hasattr(value, "toName"):
                 value = value.toName()
+            elif hasattr(value, "toEnum"):
+                value = value.toEnum()
             options[key] = value
 
     add("problem-identifier", "operationIdentifier")
