@@ -261,6 +261,7 @@ class SweepTests(unittest.TestCase):
                     backend=backend,
                     workers=1,
                     timeout=1,
+                    suite_timeout=1500,
                     seed="test",
                 )
                 with (
@@ -280,6 +281,101 @@ class SweepTests(unittest.TestCase):
                 self.assertIn("| 7 | FAIL | 0/4 | 0/", report)
                 self.assertIn("| 7 | NOT RUN |", report)
                 self.assertIn("Run status: FAIL.", report)
+
+    def test_suite_budget_charges_preparation_and_preserves_accounting(self):
+        for backend in ("tensile", "bench"):
+            for phase in ("preparation", "process", "completed", "within_budget"):
+                with (
+                    self.subTest(backend=backend, phase=phase),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
+                    jobs = [
+                        job()
+                        for _ in range(2 if phase in ("preparation", "process") else 1)
+                    ]
+                    for n, j in enumerate(jobs):
+                        j.update(id=n, code_objects=[])
+                    manifest = {
+                        "jobs": jobs,
+                        "backend": backend,
+                        "library_dir": "unused",
+                        "artifact_fingerprint": "test",
+                        "planned_cases": 4 * len(jobs),
+                        "seed": "test",
+                        "policy": plan.POLICY,
+                        "preparation_seconds": 2,
+                    }
+                    args = SimpleNamespace(
+                        reports=Path(tmp) / "reports",
+                        backend=backend,
+                        workers=1,
+                        timeout=120,
+                        suite_timeout=5,
+                        seed="test",
+                        rocjitsu=Path("emulator"),
+                        client=Path("client"),
+                    )
+                    clock = [0]
+
+                    def prepare(_):
+                        clock[0] = 6 if phase == "preparation" else 2
+                        return manifest, Path("config")
+
+                    def execute(command, log, timeout, env):
+                        # Preparation leaves only three of the five seconds.
+                        self.assertEqual(timeout, 3)
+                        clock[0] = 4 if phase == "within_budget" else 5
+                        log.write_text(
+                            ""
+                            if phase == "process"
+                            else success_log() if backend == "tensile" else bench_log()
+                        )
+                        return 124 if phase == "process" else 0
+
+                    with (
+                        patch.object(
+                            sweep.time, "monotonic", side_effect=lambda: clock[0]
+                        ),
+                        patch.object(sweep, "prepare", side_effect=prepare),
+                        patch.object(sweep, "physical_cpus", return_value=[0]),
+                        patch.object(
+                            sweep, "execute_command", side_effect=execute
+                        ) as launch,
+                    ):
+                        self.assertEqual(sweep.run(args), int(phase != "within_budget"))
+                    self.assertEqual(launch.call_count, int(phase != "preparation"))
+                    summary = json.loads((args.reports / "summary.json").read_text())
+                    self.assertEqual(
+                        summary["accounted_cases"], manifest["planned_cases"]
+                    )
+                    self.assertEqual(summary["suite_timeout"], 5)
+                    self.assertEqual(summary["suite_seconds"], clock[0])
+                    settings = json.loads((args.reports / "settings.json").read_text())
+                    self.assertEqual(settings["suite_timeout"], 5)
+                    report = (args.reports / "summary.md").read_text()
+                    if phase == "within_budget":
+                        self.assertTrue(summary["passed"])
+                        self.assertIsNone(summary["stop"])
+                    else:
+                        self.assertFalse(summary["passed"])
+                        self.assertEqual(summary["stop"]["reason"], "suite-timeout")
+                        self.assertIn("Stopped: suite-timeout.", report)
+                    self.assertEqual(
+                        len(summary["unstarted_cases"]),
+                        8 if phase == "preparation" else 4 if phase == "process" else 0,
+                    )
+                    self.assertEqual(
+                        len(summary["missing"]), 4 if phase == "process" else 0
+                    )
+                    if phase == "process":
+                        self.assertIn(
+                            "Suite time budget exhausted",
+                            summary["results"][0]["errors"],
+                        )
+                    if phase in ("completed", "within_budget"):
+                        self.assertEqual(summary["counts"], {"PASSED": 4})
+                    else:
+                        self.assertIn("| 7 | NOT RUN |", report)
 
     def test_report_distinguishes_numerical_pass_from_race_failure(self):
         manifest = {
@@ -397,6 +493,33 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(result["unstarted"], [1])
         self.assertTrue(result["results"][0]["failed"])
 
+    def test_suite_expiry_stops_assignment_and_drains_four_workers(self):
+        clock = [0]
+        gate = threading.Barrier(4, action=lambda: clock.__setitem__(0, 5))
+
+        def execute(task, slot):
+            gate.wait(timeout=2)
+            return {"id": task["id"], "failed": False, "cases": []}
+
+        with patch.object(sweep.time, "monotonic", side_effect=lambda: clock[0]):
+            result = sweep.run_queue(
+                [{"id": i} for i in range(10)], 4, execute, lambda _: None, deadline=5
+            )
+        self.assertEqual(result["stop"]["reason"], "suite-timeout")
+        self.assertEqual(result["stop"]["in_flight"], 3)
+        self.assertEqual(result["unstarted"], list(range(4, 10)))
+        self.assertEqual([r["id"] for r in result["results"]], list(range(4)))
+        self.assertTrue(all(not r["failed"] for r in result["results"]))
+
+    def test_expired_command_budget_never_launches(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(sweep.subprocess, "Popen") as launch,
+        ):
+            result = sweep.execute_command(["unused"], Path(tmp) / "log", 0, {})
+            self.assertEqual(result, 124)
+            launch.assert_not_called()
+
     def test_timeout_kills_child_process(self):
         with tempfile.TemporaryDirectory() as tmp:
             childfile = Path(tmp) / "child"
@@ -498,6 +621,7 @@ python3() { printf 'ARG: %s\n' "$@"; if [[ "$3" == tensile ]]; then return "$TEN
                     ("--kernels", "100"),
                     ("--target", "gfx942"),
                     ("--seed", "pr-revision"),
+                    ("--suite-timeout", "1500"),
                 ]:
                     self.assertEqual(
                         result.stdout.count(f"ARG: {flag}\nARG: {value}\n"), 2

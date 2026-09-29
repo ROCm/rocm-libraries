@@ -116,6 +116,8 @@ def render_report(manifest, summary):
         ),
         "",
     ]
+    if summary.get("stop"):
+        lines += [f"Stopped: {cell(summary['stop']['reason'])}.", ""]
     return "\n".join(lines)
 
 
@@ -443,7 +445,10 @@ def classify_bench(job, text, returncode):
 
 
 def execute_command(command, log, timeout, env):
+    deadline = time.monotonic() + timeout
     with log.open("x", encoding="utf-8") as output:
+        if time.monotonic() >= deadline:
+            return 124
         process = subprocess.Popen(
             command,
             env=env,
@@ -452,7 +457,7 @@ def execute_command(command, log, timeout, env):
             start_new_session=True,
         )
         try:
-            return process.wait(timeout=timeout)
+            return process.wait(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
@@ -463,20 +468,35 @@ def execute_command(command, log, timeout, env):
             raise
 
 
-def run_queue(jobs, workers, execute, progress):
+def run_queue(jobs, workers, execute, progress, deadline=None):
     lock = threading.Lock()
     results = []
     next_job = 0
-    stopped = False
     active = 0
     maximum = 0
     stop_snapshot = None
 
+    def stop(reason, trigger_job=None):
+        nonlocal stop_snapshot
+        if stop_snapshot is None:
+            stop_snapshot = {
+                "reason": reason,
+                "trigger_job": trigger_job,
+                "assigned_jobs": next_job,
+                "in_flight": active,
+            }
+
+    def expired():
+        return deadline is not None and time.monotonic() >= deadline
+
     def worker(slot):
-        nonlocal next_job, stopped, active, maximum, stop_snapshot
+        nonlocal next_job, active, maximum
         while True:
             with lock:
-                if stopped or next_job == len(jobs):
+                if stop_snapshot is not None or next_job == len(jobs):
+                    return
+                if expired():
+                    stop("suite-timeout")
                     return
                 job = jobs[next_job]
                 next_job += 1
@@ -494,13 +514,10 @@ def run_queue(jobs, workers, execute, progress):
             with lock:
                 results.append(result)
                 active -= 1
-                if result["failed"] and not stopped:
-                    stopped = True
-                    stop_snapshot = {
-                        "trigger_job": job["id"],
-                        "assigned_jobs": next_job,
-                        "in_flight": active,
-                    }
+                if expired():
+                    stop("suite-timeout", job["id"])
+                elif result["failed"]:
+                    stop("job-failure", job["id"])
                 try:
                     progress(
                         {
@@ -514,13 +531,7 @@ def run_queue(jobs, workers, execute, progress):
                     result.setdefault("errors", []).append(
                         f"Cannot write progress: {error!r}"
                     )
-                    if not stopped:
-                        stopped = True
-                        stop_snapshot = {
-                            "trigger_job": job["id"],
-                            "assigned_jobs": next_job,
-                            "in_flight": active,
-                        }
+                    stop("progress-error", job["id"])
 
     threads = [threading.Thread(target=worker, args=(slot,)) for slot in range(workers)]
     for thread in threads:
@@ -555,6 +566,8 @@ def physical_cpus(count):
 
 
 def run(args):
+    suite_start = time.monotonic()
+    deadline = suite_start + args.suite_timeout
     args.reports.mkdir(parents=True, exist_ok=False)
     try:
         manifest, config = prepare(args)
@@ -581,6 +594,7 @@ def run(args):
             {
                 "cpus": cpus,
                 "timeout": args.timeout,
+                "suite_timeout": args.suite_timeout,
                 "backend": args.backend,
                 "library_dir": manifest["library_dir"],
                 "controlled_environment": {
@@ -649,7 +663,12 @@ def run(args):
             ]
             write_json(stem.with_suffix(".command.json"), command)
             begin = time.monotonic()
-            rc = execute_command(command, stem.with_suffix(".log"), args.timeout, env)
+            rc = execute_command(
+                command,
+                stem.with_suffix(".log"),
+                min(args.timeout, deadline - begin),
+                env,
+            )
             classifier = (
                 classify_tensile if args.backend == "tensile" else classify_bench
             )
@@ -658,6 +677,12 @@ def run(args):
                 stem.with_suffix(".log").read_text(encoding="utf-8", errors="replace"),
                 rc,
             )
+            if rc == 124:
+                result["errors"].append(
+                    "Suite time budget exhausted"
+                    if time.monotonic() >= deadline
+                    else "Process timeout"
+                )
             result.update(cpu=cpus[slot], seconds=time.monotonic() - begin)
             write_json(stem.with_suffix(".result.json"), result)
             return result
@@ -678,6 +703,7 @@ def run(args):
             args.workers,
             execute,
             progress,
+            deadline=deadline,
         )
         by_id = {j["id"]: j for j in manifest["jobs"]}
         counts = Counter()
@@ -711,6 +737,8 @@ def run(args):
             seed=args.seed,
             artifact_fingerprint=manifest["artifact_fingerprint"],
             seconds=time.monotonic() - start,
+            suite_seconds=time.monotonic() - suite_start,
+            suite_timeout=args.suite_timeout,
             planned_cases=manifest["planned_cases"],
             counts=dict(counts),
             missing=missing,
@@ -721,7 +749,8 @@ def run(args):
         )
         assert summary["accounted_cases"] == summary["planned_cases"]
         summary["passed"] = (
-            not unstarted
+            summary["stop"] is None
+            and not unstarted
             and not missing
             and all(not r["failed"] for r in summary["results"])
             and counts["PASSED"] == summary["planned_cases"]
@@ -762,14 +791,22 @@ def main():
         help="Recorded PR revision or explicit seed for reproducible sampling",
     )
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument(
+        "--suite-timeout",
+        type=float,
+        default=1500,
+        help="Per-backend time budget in seconds, including inventory preparation",
+    )
     args = parser.parse_args()
     if (
         not 1 <= args.workers <= 4
         or not 1 <= args.kernels <= 100
         or not 0 < args.timeout <= 120
+        or not 0 < args.suite_timeout <= 1500
     ):
         parser.error(
-            "Prototype limits: 1–4 workers, 1–100 kernels, timeout at most 120 seconds"
+            "Prototype limits: 1–4 workers, 1–100 kernels, process timeout at most "
+            "120 seconds, suite timeout at most 1500 seconds"
         )
     for key in ("rocjitsu", "client", "config", "library_dir", "reports"):
         setattr(args, key, getattr(args, key).resolve())
