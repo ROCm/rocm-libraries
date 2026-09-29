@@ -123,11 +123,21 @@ if(BUILD_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     # Some test will raise an unused-command-line-argument warning while building when they have no kernel code.
     # NOTE(hipccl3): switched from `set(CMAKE_CXX_FLAGS ...)` to
-    # add_compile_options() - same effective scope (this directory and
-    # everything add_subdirectory()'d after this point), but silences
-    # ROCMChecks' "set on a target where possible" warning. Matches hipCUB's
-    # own (pre-existing) pattern for the same flag.
-    add_compile_options("--offload-compress" "-Wno-unused-command-line-argument")
+    # add_compile_options() to silence ROCMChecks' "set on a target where
+    # possible" warning.
+    #
+    # The COMPILE_LANGUAGE:CXX guard is REQUIRED, not cosmetic: unlike
+    # CMAKE_CXX_FLAGS, a bare add_compile_options() applies to *every*
+    # language, including ASM. rocRAND is fetched further down via
+    # cmake/Dependencies.cmake and inherits these directory options, then
+    # compiles its .S files with the plain system ASM compiler, failing with
+    # "cc: error: unrecognized command-line option '--offload-compress'".
+    # The guard restores the original CXX-only scope. Matches hipCUB's own
+    # (pre-existing) pattern, which guards with COMPILE_LANGUAGE:HIP.
+    add_compile_options(
+      $<$<COMPILE_LANGUAGE:CXX>:--offload-compress>
+      $<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-command-line-argument>
+    )
   else()
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
@@ -287,10 +297,15 @@ endif()
 if(CODE_COVERAGE)
   # NOTE(hipccl3): switched from `set(CMAKE_CXX_FLAGS ...)` to
   # add_compile_options() for the same reason as the offload-compress flag
-  # above - silences ROCMChecks' "set on a target where possible" warning
-  # without changing scope (still applies to this directory and everything
-  # add_subdirectory()'d after this point, i.e. test/benchmark).
-  add_compile_options("-O0" "-fprofile-instr-generate" "-fcoverage-mapping")
+  # above - silences ROCMChecks' "set on a target where possible" warning.
+  # The COMPILE_LANGUAGE:CXX guard is required for the same reason too: a
+  # bare add_compile_options() would also apply these to ASM (and any other
+  # language) in fetched dependencies, which CMAKE_CXX_FLAGS never did.
+  add_compile_options(
+    $<$<COMPILE_LANGUAGE:CXX>:-O0>
+    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+  )
 endif()
 
 # Tests

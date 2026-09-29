@@ -115,12 +115,18 @@ if(BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     # NOTE(hipccl2): switched from `set(CMAKE_CXX_FLAGS ...)` to
-    # add_compile_options() - same effective scope (this directory and
-    # everything add_subdirectory()'d after this point; it never leaked into
-    # hipcub/rocthrust's sibling scope either way), but silences ROCMChecks'
-    # "set on a target where possible" warning. Matches hipCUB's own
-    # (pre-existing) pattern for the same flag.
-    add_compile_options("--offload-compress")
+    # add_compile_options() to silence ROCMChecks' "set on a target where
+    # possible" warning.
+    #
+    # The COMPILE_LANGUAGE:CXX guard is REQUIRED, not cosmetic: unlike
+    # CMAKE_CXX_FLAGS, a bare add_compile_options() applies to *every*
+    # language, including ASM. Dependencies pulled in later via FetchContent
+    # (rocRAND) inherit these directory options and compile .S files with the
+    # plain system ASM compiler, which fails with
+    # "cc: error: unrecognized command-line option '--offload-compress'".
+    # The guard restores the original CXX-only scope. Matches hipCUB's own
+    # (pre-existing) pattern, which guards with COMPILE_LANGUAGE:HIP.
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:--offload-compress>)
   else()
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
