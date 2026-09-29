@@ -120,4 +120,24 @@ if(HIPBLASLT_ENABLE_JIT AND HIPBLASLT_BUILD_TESTING)
     set_target_properties(hipblaslt-jit-mock-backend-test hipblaslt-jit-component-test
                           hipblaslt-jit-code-object-test hipblaslt-jit-generic-api-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+
+    # Compiles the JIT solution library directly; runs without a GPU.
+    if(NOT HIPBLASLT_ENABLE_YAML)
+        add_executable(hipblaslt-jit-library-test
+            "${PROJECT_SOURCE_DIR}/clients/tests/jit/jit_library_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-code-object.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-fs.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp")
+        target_include_directories(hipblaslt-jit-library-test PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt/src/include")
+        target_compile_definitions(hipblaslt-jit-library-test PRIVATE HIPBLASLT_JIT_LIBRARY_TESTING)
+        target_link_libraries(hipblaslt-jit-library-test PRIVATE
+            roc::hipblaslt roc::tensilelite-host ${hipblaslt_msgpack_target} ZLIB::ZLIB amd_comgr
+            hip::device Threads::Threads)
+        target_compile_features(hipblaslt-jit-library-test PRIVATE cxx_std_17)
+        set_target_properties(hipblaslt-jit-library-test PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+    endif()
 endif()

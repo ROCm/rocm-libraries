@@ -32,6 +32,9 @@ def main():
             "generic-gemm",
             "generic-api",
             "mock-backend",
+            "mock-backend-library",
+            "jit-library",
+            "jit-library-concurrency",
             "jit-component",
             "code-object",
             "code-object-gfx1250",
@@ -68,6 +71,7 @@ def main():
     empty = output / "empty-device-library"
     empty.mkdir()
     env["HIPBLASLT_TENSILE_LIBPATH"] = str(empty)
+    env["HIPBLASLT_JIT_LIBRARY_PATH"] = str(output / "jit-library-root")
     compiler = str(Path(env.get("ROCM_PATH", "/opt/rocm")) / "bin/amdclang++")
 
     # The SDK supplies dependencies; all project code must come from this checkout.
@@ -225,7 +229,15 @@ def main():
         )
         commands.append((name, command, streamk, 420))
 
-    replays = ("helper-failures", "bundle-failures", "mock-backend", "code-object")
+    replays = (
+        "helper-failures",
+        "bundle-failures",
+        "mock-backend",
+        "mock-backend-library",
+        "jit-library",
+        "jit-library-concurrency",
+        "code-object",
+    )
     if not args.case or any(case in args.case for case in ("splitk-api", *replays)):
         commands.append(
             (
@@ -292,6 +304,48 @@ def main():
                 ],
                 {},
                 120,
+            )
+        )
+        # Publishes in one process, then runs and looks up the index in a second
+        # process whose backend aborts if it generates.
+        commands.append(
+            (
+                "mock-backend-library",
+                [
+                    str(staging / "hipblaslt-jit-mock-backend-test"),
+                    str(output / "splitk-api/bundle"),
+                    "--library",
+                ],
+                {"HIPBLASLT_JIT_LIBRARY_PATH": str(output / "mock-backend-library")},
+                120,
+            )
+        )
+        commands.append(
+            (
+                "jit-library",
+                [
+                    str(staging / "hipblaslt-jit-library-test"),
+                    str(output / "splitk-api/bundle"),
+                    str(output / "jit-library"),
+                ],
+                {},
+                120,
+            )
+        )
+        commands.append(
+            (
+                "jit-library-concurrency",
+                [
+                    str(staging / "hipblaslt-jit-library-test"),
+                    str(output / "splitk-api/bundle"),
+                    str(output / "jit-library-concurrency"),
+                    "--writers",
+                    "8",
+                    "--per-writer",
+                    "4",
+                ],
+                {},
+                300,
             )
         )
         commands.append(
