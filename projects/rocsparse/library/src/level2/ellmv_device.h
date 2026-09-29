@@ -50,7 +50,7 @@ namespace rocsparse
             for(I p = 0; p < ell_width; ++p)
             {
 
-                const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
+                const int64_t idx = ELL_IND(ai, static_cast<int64_t>(p), m, ell_width);
                 const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
                 if(col >= 0 && col < n)
                 {
@@ -97,7 +97,7 @@ namespace rocsparse
 
             for(I p = 0; p < ell_width; ++p)
             {
-                const int64_t idx = ELL_IND(ai, (int64_t)p, m, ell_width);
+                const int64_t idx = ELL_IND(ai, static_cast<int64_t>(p), m, ell_width);
                 const I       col = rocsparse::nontemporal_load(ell_col_ind + idx) - idx_base;
 
                 if(col >= 0 && col < n)
