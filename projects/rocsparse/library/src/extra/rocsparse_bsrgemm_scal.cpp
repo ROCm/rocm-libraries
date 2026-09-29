@@ -122,7 +122,8 @@ rocsparse_status rocsparse::bsrgemm_scal_core(rocsparse_handle          handle,
         = static_cast<int64_t>(block_dim) * block_dim * static_cast<int64_t>(nnzb_D);
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
         (rocsparse::bsrgemm_copy_scale<BSRGEMM_DIM>),
-        rocsparse::csrgemm_scal_copy_blocks<BSRGEMM_DIM>(handle, bsrgemm_scal_nnz),
+        dim3(rocsparse::get_grid_size_x(
+            handle, (bsrgemm_scal_nnz - 1) / BSRGEMM_DIM + 1, BSRGEMM_DIM)),
         dim3(BSRGEMM_DIM),
         0,
         stream,
