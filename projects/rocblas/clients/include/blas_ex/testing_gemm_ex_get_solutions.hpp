@@ -25,60 +25,6 @@
 #define ROCBLAS_BETA_FEATURES_API
 #include "testing_common.hpp"
 
-// Largest absolute element value an initialization pattern can produce for type T.
-// The client initializers fill from fixed, known ranges, so the bound is a constant
-// per (init, type) pair. Complex entries take both components from the same range,
-// so the magnitude bound is sqrt(2) * component bound.
-//
-// Ranges mirror the generators rocblas_init_matrix (clients/include/rocblas_init.hpp)
-// dispatches to per rocblas_initialization: random_generator (rand_int),
-// random_hpl_generator (hpl) and random_zero_one_generator (rand_int_zero_one) in
-// clients/include/rocblas_random.hpp; trig_float's sin/cos are applied in
-// rocblas_init.hpp directly. Keep this in sync if those ranges change.
-template <typename T>
-double init_abs_bound(rocblas_initialization init)
-{
-    double comp; // bound on a single (real) component
-    switch(init)
-    {
-    case rocblas_initialization::rand_int:
-        // float/double: [1,10]; half/bfloat16: [-2,2]; int8: [1,3]
-        if(std::is_same_v<T, rocblas_half> || std::is_same_v<T, rocblas_bfloat16>)
-            comp = 2.0;
-        else if(std::is_same_v<T, int8_t>)
-            comp = 3.0;
-        else
-            comp = 10.0;
-        break;
-    case rocblas_initialization::hpl:
-        comp = 0.5; // [-0.5, 0.5]
-        break;
-    case rocblas_initialization::trig_float:
-    case rocblas_initialization::rand_int_zero_one:
-        comp = 1.0; // sin/cos in [-1,1]; zero_one in [0,1]
-        break;
-    case rocblas_initialization::zero:
-        comp = 0.0;
-        break;
-    default:
-        // denorm and any future pattern: fall back to a safe unit bound.
-        comp = 1.0;
-        break;
-    }
-    return rocblas_is_complex<T> ? comp * 1.4142135623730951 : comp;
-}
-
-// Analytical bound on |D|_max for D = alpha*op(A)*op(B) + beta*C, derived from the
-// init ranges of A, B and C -- O(1), never touches the matrices or their padding.
-template <typename Ti, typename To, typename Tc>
-double gemm_result_abs_bound(rocblas_initialization init, int64_t K, Tc alpha, Tc beta)
-{
-    const double a = init_abs_bound<Ti>(init);
-    const double b = init_abs_bound<Ti>(init);
-    const double c = init_abs_bound<To>(init);
-    return double(rocblas_abs(alpha)) * double(K) * a * b + double(rocblas_abs(beta)) * c;
-}
-
 template <typename Ti, typename To, typename Tc>
 void testing_gemm_ex_get_solutions(const Arguments& arg)
 {
