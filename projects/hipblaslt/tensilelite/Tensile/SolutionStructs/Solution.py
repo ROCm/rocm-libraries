@@ -80,6 +80,8 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
+from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
+                                 validateSubtileGRKPartition)
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -180,11 +182,66 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
              "MXLoadInst=TDM currently always produces MXScaleFormat=InMemorySwizzle "
              "(got %s)" % state["MXScaleFormat"])
       return False
+    # The subtile scale path derives its group span from the swizzled layout --
+    # KernelWriter computes roundUp(ceil(K/mxBlock), 8) * 32, which is the host
+    # pre-swizzle padding and grouping, not anything the canonical layout has.
+    # Measured on gfx950, NoSwizzle under UseSubtileImpl faults or returns NaN on
+    # all four layouts, and nothing selects it there (Auto gives HostPreSwizzle),
+    # so refuse it rather than emit a kernel that reads the wrong scales.
+    if state["MXScaleFormat"] == "NoSwizzle" and state.get("UseSubtileImpl", False):
+      reject(state, printRejectionReason,
+             "MXScaleFormat=NoSwizzle is not implemented for UseSubtileImpl=1 "
+             "(the subtile scale group span assumes the swizzled layout)")
+      return False
+
     # gfx1250 MX scales require a swizzled format (InMemorySwizzle via TDM).
     # NoSwizzle is not supported on this arch.
     if state["ISA"] == (12, 5, 0) and state["MXScaleFormat"] == "NoSwizzle":
       reject(state, printRejectionReason,
              "MXScaleFormat=NoSwizzle is not supported on gfx1250")
+      return False
+
+  return True
+
+
+def _validateMXLocalReadWidth(state, asmCaps, printRejectionReason):
+  """Reject invalid MX scale units and undersized M-major local reads.
+
+  The WMMA_V3 in-memory-swizzle path reads one byte per MX scale. Every MX
+  local-read layout requires a positive ``MatrixInstK // MXBlock`` scale unit.
+  For an M-major LDS layout, one local read spans ``VectorWidth`` scale bytes;
+  a narrower read makes ``LocalReadMFMA.localReadMX`` compute zero tiles per
+  read.
+  """
+  if not asmCaps.get("HasWMMA_V3", False) \
+      or state["MXScaleFormat"] != "InMemorySwizzle":
+    return True
+
+  for tc in ("A", "B"):
+    mxBlock = state["ProblemType"][f"MXBlock{tc}"]
+    if not mxBlock:
+      continue
+
+    mxUnit = state["MatrixInstK"] // mxBlock
+    if mxUnit <= 0:
+      reject(
+          state,
+          printRejectionReason,
+          f"MX-scale local read for {tc} requires "
+          f"MatrixInstK >= MXBlock{tc} ({state['MatrixInstK']} < {mxBlock})")
+      return False
+
+    if state[f"UnrollMajorLDS{tc}"]:
+      continue
+
+    vectorWidth = state[f"VectorWidth{tc}"]
+    if vectorWidth < mxUnit:
+      reject(
+          state,
+          printRejectionReason,
+          f"M-major MX-scale local read for {tc} requires "
+          f"VectorWidth{tc} >= MatrixInstK // MXBlock{tc} ({mxUnit}), "
+          f"got {vectorWidth}")
       return False
 
   return True
@@ -215,45 +272,6 @@ def _disableUnsupportedRuntimeStaggerU(state):
   # when SupportCustomStaggerU is set, so the whole path has to go.
   if state.get("ReuseAcrossPersistent", 0):
     _disableRuntimeStaggerU(state)
-
-
-def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
-  # TODO: TEMPORARY FIX. Encodes the trigger for the subtile global-read
-  # cooperative-group + K-partition LDS bug (see fix_subtile_gr_missing_k_partition):
-  # when one buffer_load covers multiple consecutive M-subtiles (loadRatioGR > 1)
-  # and the per-wave M-subtile count (localSubtileGrid[0]) is not a multiple of
-  # loadRatioGR, the last partial M-group writes a "ghost" slot that overlaps the
-  # next K-partition's data, and the K>=1 representative subtile can be silently
-  # dropped. This only manifests when there is more than one K-partition
-  # (localSubtileGrid[1] > 1). Remove once the emit-side fix lands.
-  return (loadRatioGR > 1
-          and localSubtileGrid[1] > 1
-          and localSubtileGrid[0] % int(loadRatioGR) != 0)
-
-
-def _validateSubtileGRKPartition(state, printRejectionReason):
-  # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
-  # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
-  # fix_subtile_gr_missing_k_partition is merged.
-  if not state["UseSubtileImpl"]:
-    return True
-  if tuple(state["ISA"]) != (9, 5, 0):
-    return True
-  # Lazy import: Components/Subtile pulls the Components package and would
-  # deadlock at module-load time if imported from Solution.py's top level.
-  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
-  for tc in ("A", "B"):
-    tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
-    loadRatioGR = tileInfo.loadRatioGR
-    localSubtileGrid = tileInfo.localSubtileGrid
-    if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
-      reject(state, printRejectionReason,
-             "UseSubtileImpl=1 hits the subtile GR K-partition bug on tensor %s: "
-             "loadRatioGR=%s with localSubtileGrid=%s (M-subtile count %d is not a "
-             "multiple of loadRatioGR and there is more than one K-partition)"
-             % (tc, loadRatioGR, localSubtileGrid, localSubtileGrid[0]))
-      return False
-  return True
 
 
 def _supportStreamKPerTileExtraIters(state):
@@ -1146,23 +1164,73 @@ class Solution(collections.abc.Mapping):
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
 
-      # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is the
-      # number of K-subtiles per depth-U iteration: 1 for fp8 (AB_B8, subtileShape K=1),
-      # 2 for fp4/bf16 (AB_B4/AB_B16, subtileShape K=2).
-      dtype_a = state["ProblemType"]["DataTypeA"]
-      numSubIterK = 1 if dtype_a.is8bitFloat() else 2
+      # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is
+      # the subtileShape K of the geometry picked below.
+      #
+      # DepthU is shared, so it has to satisfy whichever operand asks for more.
+      # NN and TT mix layouts, so answering for A alone under-sizes the unit on
+      # NN, where A is TLU=1 and asks for 1 while the row-major B still needs 2.
+      def subIterKFor(tc):
+        if state["ProblemType"][f"MXBlock{tc}"]:
+          return 2  # a scale local read covers 2 scale MMA tiles in K
+        if state["ProblemType"][f"TLU{tc}"]:
+          return 1  # one MFMA-K per DU iteration
+        return 1 if state["ProblemType"][f"DataType{tc}"].is8bitFloat() else 2
+      numSubIterK = max(subIterKFor('A'), subIterKFor('B'))
       duUnit = numSubIterK * state["MatrixInstK"] * state["LocalSplitU"]
       if state["DepthU"] == -1:
         state["DepthU"] = duUnit
       if state["DepthU"] % duUnit != 0:
         reject(state, printRejectionReason, f"UseSubtileImpl=1 support only DepthU multiple of {numSubIterK} * MatrixInstK * LocalSplitU")
 
+      # The scale GR thread split (_graTileAssignmentScaleSwizzledCommon) divides
+      # Serial by numThreadsPerGroup with a shift and a mask, so that count has to
+      # be a power of two.  Its other factors are powers of two only when an
+      # operand is free-dim contiguous, which is where a non-power-of-two DepthU
+      # carries through to the count; TN keeps a power-of-two count at DepthU 768.
+      isTLU1 = state["ProblemType"]["TLUA"] or state["ProblemType"]["TLUB"]
+      if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) \
+          and isTLU1 and state["DepthU"] & (state["DepthU"] - 1) != 0:
+        reject(state, printRejectionReason,
+               "UseSubtileImpl=1 MX TLU=1 requires a power-of-two DepthU")
+
       for tc in ('A', 'B'):
         dtype = state["ProblemType"][f"DataType{tc}"]
-        tlu = state["ProblemType"].get(f"TLU{tc}", False)
+        tlu = state["ProblemType"][f"TLU{tc}"]
         if tlu:
           if dtype.isBFloat16() or dtype.isHalf():
-            state[f"_ABTilePair{tc}"] = "AB_B16_TLU1"
+            # AB_B16_TLU1 exists but nothing gives the free dim the element
+            # multiple its 16B chunk needs, the way the fp4 branch below does.
+            # Without a reject here these solutions clear validation and then
+            # assert in kernelBodySubtile instead of failing cleanly.
+            reject(state, printRejectionReason,
+                   f"UseSubtileImpl=1 TLU=1 is not implemented for dtype {dtype}")
+            return
+          elif dtype.isFloat4():
+            # Two fp4 share a byte, so an odd free-dim extent leaves the K
+            # stride on a half byte and the elements-to-bytes shift truncates
+            # it; every K step then drifts, silently.  Only the contiguous
+            # operand is affected, so this must not become unconditional.
+            #
+            # 32 rather than the 2 that stride correctness alone needs: it is one
+            # 16B load, so the last workgroup's numToEnd is already load-aligned
+            # and computeLoadSrd can drop the round-up that guards DTL against a
+            # partial load (see the unit-stride K-window branch there).
+            key = "AssertFree0ElementMultiple" if tc == 'A' else "AssertFree1ElementMultiple"
+            state[key] = max(state[key], 32)
+            # fp4 only: 6-bit shares this geometry's 0.5 bpe but neither
+            # bank-conflict layout covers it, so it falls to the reject below.
+            mtFree = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+            mtTiles = mtFree // state["MatrixInstM"]
+            stack = subtileStackForTLU1(state, tc, mtTiles)
+            stackReason = subtileTLU1StackReason(state, tc, mtTiles, stack)
+            if stackReason:
+              reject(state, printRejectionReason, stackReason)
+              return
+            # Lazy import for the same reason as validateSubtileGRKPartition:
+            # Components/Subtile at module scope deadlocks the package load.
+            from Tensile.Components.Subtile.Kernel import abB4Tlu1Name
+            state[f"_ABTilePair{tc}"] = abB4Tlu1Name(stack)
           else:
             reject(state, printRejectionReason, f"No TLU=1 subtile geometry for dtype {dtype}")
             return
@@ -1790,16 +1858,48 @@ class Solution(collections.abc.Mapping):
     return divisorName
 
   @staticmethod
-  def _assignCustomKernelParameters(state):
+  def _assignCustomKernelParameters(state: dict) -> None:
     """Minimal parameter setup for handwritten custom kernels.
 
     These kernels carry their own argument layout and don't go through the
     full assignDerivedParameters validation (which would reject them for
-    missing MatrixInstruction, etc.)."""
+    missing MatrixInstruction, etc.).
+
+    Args:
+      state: Solution state carrying a "CustomKernel" block. Mutated in place.
+
+    Returns:
+      None.
+
+    Raises:
+      RuntimeError: If a macrotile component is supplied by neither the
+        CustomKernel block nor the consuming logic file.
+    """
     ck = state["CustomKernel"]
-    state["MacroTile0"] = ck["macrotile"][0]
-    state["MacroTile1"] = ck["macrotile"][1]
-    state["DepthU"]     = ck["macrotile"][2]
+
+    # CustomKernels.py derives the macrotile from MatrixInstruction / MIWaveTile
+    # in custom.config, then from an MTxxx token in the kernel name. Any kernel
+    # that has neither infers 0 and must not overwrite
+    # the tile the consuming logic file already states. MacroTile0 == 0 reaches
+    # ContractionProblemGemm::getNumTiles() as an integer divide by zero, so
+    # dense enumeration (--algo_method 1) dies with SIGFPE as soon as that
+    # solution is costed. Kernels that already encode MT in the name
+    # or declare MI in custom.config are unchanged.
+    macrotile = list(ck.get("macrotile") or [])
+    macrotile += [0] * (3 - len(macrotile))
+    for i, key in enumerate(("MacroTile0", "MacroTile1", "DepthU")):
+      value = macrotile[i] if macrotile[i] > 0 else state.get(key, 0)
+      if not isinstance(value, int) or value <= 0:
+        raise RuntimeError(
+          f"Custom kernel '{ck.get('name', '?')}' has no usable {key}: it is absent "
+          f"from the kernel's custom.config, the kernel name encodes no MTxxx token, "
+          f"and the consuming logic file does not supply one.")
+      macrotile[i] = value
+      state[key]   = value
+    # Keep the block the C++ runtime deserializes in step with the solution:
+    # ContractionSolution reads customKernel.macrotile directly for custom-kernel
+    # tile and workspace sizing.
+    ck["macrotile"] = macrotile
 
     # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
     # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
@@ -2747,6 +2847,10 @@ class Solution(collections.abc.Mapping):
         return False
 
       if numBytes == 0.5:
+        # False on gfx950: the probe assembles ds_load_tr4_b64, the gfx1250
+        # spelling; gfx9 calls it ds_read_b64_tr_b4.  Harmless today (the
+        # subtile path emits it directly), but fixing the probe would flip this
+        # true and reach LDS padding off the subtile path -- own change.
         return asmCaps["HasLDSTrB64B4"]
       elif numBytes == 0.75:
         return asmCaps["HasLDSTrB96B6"]
@@ -3673,7 +3777,7 @@ class Solution(collections.abc.Mapping):
 
       # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
       # which TileInfo reads and which are only set by this point.
-      if not _validateSubtileGRKPartition(state, printRejectionReason):
+      if not validateSubtileGRKPartition(state, printRejectionReason):
         return
 
       # fp6 doesn't support LDS padding yet.
@@ -3690,7 +3794,7 @@ class Solution(collections.abc.Mapping):
 
       iterModeMask = state["TDMIterateMode"]
       autoTdmIterateMode = iterModeMask == -1
-      if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
+      if state["TDMInst"] and state["EnableMatrixInstruction"]:
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
           state.pop("_TDMIterateModeA", None)
@@ -4465,6 +4569,10 @@ class Solution(collections.abc.Mapping):
         calLRVWFor950MX()
       else:
         calLRVW()
+
+      if not _validateMXLocalReadWidth(
+          state, isaInfoMap[isa].asmCaps, printRejectionReason):
+        return
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
@@ -6304,12 +6412,14 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "reject to reduce number of kernels")
 
     # GuaranteeNoPartial
-    if state["ProblemType"]["TLUA"]:
+    # UseSubtileImpl does its own edge masking (see Components/Subtile), so mark
+    # loads non-partial to skip the classic graShift path.
+    if state["ProblemType"]["TLUA"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
       state["GuaranteeNoPartialA"] = True
 
-    if state["ProblemType"]["TLUB"]:
+    if state["ProblemType"]["TLUB"] and not state["UseSubtileImpl"]:
       state["GuaranteeNoPartialB"] = state["AssertFree1ElementMultiple"]%state["GlobalReadVectorWidthB"]==0
     else:
       state["GuaranteeNoPartialB"] = True
