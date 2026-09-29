@@ -94,11 +94,11 @@ def test_sys_argv_is_restored_when_a_wrapped_handler_raises(monkeypatch):
     assert sys.argv is original_argv
 
 
-def test_version_uses_the_package_version(monkeypatch, capsys):
-    monkeypatch.setattr(tensilelite, "__version__", "1.2.3+rocm4.5.6")
+def test_version_uses_the_generator_compatibility_version(monkeypatch, capsys):
+    monkeypatch.setattr(tensilelite, "GENERATOR_VERSION", "1.2.3")
 
     assert cli.main(["--version"]) == 0
-    assert capsys.readouterr().out == "1.2.3+rocm4.5.6\n"
+    assert capsys.readouterr().out == "1.2.3\n"
 
 
 def test_version_rejects_additional_arguments():

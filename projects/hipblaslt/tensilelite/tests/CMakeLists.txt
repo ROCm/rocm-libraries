@@ -187,6 +187,16 @@ endif()
 
 enable_testing()
 
+if(TARGET tensilelite-client)
+    add_test(
+        NAME TensileLiteClient.version
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLIENT=$<TARGET_FILE:tensilelite-client>"
+            "-DEXPECTED_VERSION=${TENSILELITE_DISTRIBUTION_VERSION}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/check_client_version.cmake"
+    )
+endif()
+
 #################################################
 #        Tests for cpu-gemm-driver              #
 #################################################

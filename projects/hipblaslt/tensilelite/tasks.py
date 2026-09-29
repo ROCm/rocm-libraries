@@ -257,6 +257,7 @@ def build_client(
         if rocm_path:
             cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
             cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
+            cmake_cmd.append(f"-DROCM_PATH={rocm_path}")
         if shutil.which("ccache"):
             cmake_cmd.append("-DCMAKE_C_COMPILER_LAUNCHER=ccache")
             cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
