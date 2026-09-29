@@ -105,7 +105,8 @@ namespace rocsparse
             I nblocks = (nnz - 1) / NNZ_PER_BLOCK + 1;
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_nnz_split_compute_row_limits<256, NNZ_PER_BLOCK>),
-                dim3(rocsparse::get_grid_size_x(handle, (int64_t(nblocks) - 1) / 256 + 1, 256)),
+                dim3(rocsparse::get_grid_size_x(
+                    handle, (static_cast<int64_t>(nblocks) - 1) / 256 + 1, 256)),
                 dim3(256),
                 0,
                 handle->stream,
@@ -444,8 +445,8 @@ namespace rocsparse
         // One block per nnz block, the same count the nn path calls nblocks, clamped
         // against the hardware grid.x maximum; the kernels grid-stride over the full
         // count (AISPARSE-672).
-        const uint32_t grid_x
-            = rocsparse::get_grid_size_x(handle, (int64_t(nnz) - 1) / BLOCKSIZE + 1, BLOCKSIZE);
+        const uint32_t grid_x = rocsparse::get_grid_size_x(
+            handle, (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1, BLOCKSIZE);
 
         J main      = 0;
         J remainder = n;

@@ -42,6 +42,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void csrmmnn_nnz_split_main_device(bool    conj_A,
                                                             bool    conj_B,
                                                             int64_t bid,
+                                                            int64_t nblocks,
                                                             J       ncol,
                                                             J       M,
                                                             J       N,
@@ -72,12 +73,12 @@ namespace rocsparse
         const int lid = tid & (WF_SIZE - 1);
         const int wid = tid / WF_SIZE;
 
-        // bid is the nnz block this call operates on, supplied by the __global__
-        // wrapper which grid-strides over the full 64-bit nblocks because grid.x is
-        // clamped at the launch site (AISPARSE-672). nblocks is also the row stride
-        // of the block reduction buffers; it used to be read off hipGridDim_x, which
-        // is only equal to nblocks while the grid is unclamped.
-        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
+        // bid is the nnz block this call operates on and nblocks the logical nnz block
+        // count, both supplied by the __global__ wrapper, which grid-strides over the
+        // full 64-bit nblocks because grid.x is clamped at the launch site
+        // (AISPARSE-672). nblocks is also the row stride of the block reduction
+        // buffers; it used to be read off hipGridDim_x, which is only equal to
+        // nblocks while the grid is unclamped.
 
         __shared__ J shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
@@ -198,6 +199,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void csrmmnn_nnz_split_remainder_device(bool    conj_A,
                                                                  bool    conj_B,
                                                                  int64_t bid,
+                                                                 int64_t nblocks,
                                                                  J       offset,
                                                                  J       M,
                                                                  J       N,
@@ -229,7 +231,6 @@ namespace rocsparse
         const int wid = tid / WF_SIZE;
 
         // bid and nblocks as in csrmmnn_nnz_split_main_device (AISPARSE-672).
-        const int64_t nblocks = (static_cast<int64_t>(nnz) - 1) / BLOCKSIZE + 1;
 
         __shared__ J shared_row[BLOCKSIZE];
         __shared__ T shared_val[BLOCKSIZE * WF_SIZE];
