@@ -117,6 +117,7 @@
 
 #include "check_matrix_csr_device.h"
 #include "rocsparse.h"
+#include "unit_test_grid_clamp.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -145,9 +146,9 @@ class CheckMatrixCsrLargeGrid : public HandleTest
 };
 
 // A 2^30-row CSR matrix whose single nonzero sits in the LAST row. The row
-// pointer array is valid throughout (so check_row_ptr_array, which has always
-// used a correct grid, passes and the routine proceeds to the real validation
-// kernel); the column index of that one nonzero is what the test flips.
+// pointer array is valid throughout (so check_row_ptr_array passes and the
+// routine proceeds to the real validation kernel); the column index of that one
+// nonzero is what the test flips.
 //
 // Assertion (b) is the load-bearing one: before AISPARSE-698 the validator
 // returned rocsparse_status_success / rocsparse_data_status_success here,
@@ -425,3 +426,151 @@ TEST(CheckMatrixCsrGridStride, undersized_grid_still_covers_every_row_wf256)
 {
     expect_undersized_grid_covers_last_row<256>();
 }
+
+// ===========================================================================
+// Forced clamp: the whole validator with maxGridSize[0] shrunk.
+// ===========================================================================
+//
+// check_row_ptr_array and, for unsorted input, shift_offsets_kernel are clamped
+// with get_grid_size_x and grid-stride like the main validation kernel. With
+// maxGridSize[0] at 1, 3 or 7 a 4096-row matrix needs several sweeps of every
+// kernel: check_row_ptr_array covers at most 7 * 256 rows per sweep and
+// shift_offsets_kernel 7 * 512 offsets.
+//
+// Row i holds columns {i, i + 1} (n = m + 1), ascending for sorted storage and
+// descending for unsorted storage, so avg_row_nnz = 2 dispatches wf_size 4.
+namespace
+{
+    constexpr int32_t clamp_m   = 4096;
+    constexpr int32_t clamp_n   = clamp_m + 1;
+    constexpr int32_t clamp_nnz = 2 * clamp_m;
+
+    // Row whose offsets are corrupted. It sits in logical block 15 of the
+    // 256-thread check_row_ptr_array grid, so only a later sweep reaches it.
+    constexpr int32_t bad_row = clamp_m - 16;
+
+    enum class clamp_case
+    {
+        valid,
+        bad_row_ptr, // row_ptr[bad_row + 1] < row_ptr[bad_row]
+        // Row m - 2 keeps one entry and the last row holds three, {m-1, m, m-1}.
+        // The duplicate is adjacent only once the columns are sorted, so an
+        // unsorted matrix is flagged only if shift_offsets_kernel wrote the
+        // last row's offsets.
+        split_duplicate_last_row
+    };
+
+    rocsparse_data_status
+        run_clamped(rocsparse_handle handle, rocsparse_storage_mode storage, clamp_case c)
+    {
+        std::vector<int32_t> h_row_ptr(clamp_m + 1);
+        std::vector<int32_t> h_col_ind(clamp_nnz);
+        for(int32_t i = 0; i <= clamp_m; ++i)
+        {
+            h_row_ptr[i] = 2 * i;
+        }
+        for(int32_t i = 0; i < clamp_m; ++i)
+        {
+            const bool ascending = (storage == rocsparse_storage_mode_sorted);
+            h_col_ind[2 * i]     = ascending ? i : i + 1;
+            h_col_ind[2 * i + 1] = ascending ? i + 1 : i;
+        }
+        if(c == clamp_case::bad_row_ptr)
+        {
+            h_row_ptr[bad_row + 1] = h_row_ptr[bad_row] - 1;
+        }
+        if(c == clamp_case::split_duplicate_last_row)
+        {
+            h_row_ptr[clamp_m - 1]   = clamp_nnz - 3;
+            h_col_ind[clamp_nnz - 4] = clamp_m - 2;
+            h_col_ind[clamp_nnz - 3] = clamp_m - 1;
+            h_col_ind[clamp_nnz - 2] = clamp_m;
+            h_col_ind[clamp_nnz - 1] = clamp_m - 1;
+        }
+        const std::vector<float> h_val(clamp_nnz, 1.0f);
+
+        device_vector<int32_t> d_row_ptr{h_row_ptr};
+        device_vector<int32_t> d_col_ind{h_col_ind};
+        device_vector<float>   d_val{h_val};
+        EXPECT_TRUE(d_row_ptr.ptr && d_col_ind.ptr && d_val.ptr);
+
+        size_t buffer_size = 0;
+        EXPECT_EQ(rocsparse_scheck_matrix_csr_buffer_size(handle,
+                                                          clamp_m,
+                                                          clamp_n,
+                                                          clamp_nnz,
+                                                          d_val.ptr,
+                                                          d_row_ptr.ptr,
+                                                          d_col_ind.ptr,
+                                                          BASE,
+                                                          GENERAL,
+                                                          LOWER,
+                                                          storage,
+                                                          &buffer_size),
+                  rocsparse_status_success);
+
+        // Zeroed so that offsets shift_offsets_kernel fails to write are
+        // deterministic rather than whatever the allocation held.
+        device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
+        EXPECT_TRUE(tmp.ptr);
+        EXPECT_EQ(hipMemset(tmp.ptr, 0, buffer_size), hipSuccess);
+
+        (void)hipGetLastError();
+
+        rocsparse_data_status status = rocsparse_data_status_inf;
+        EXPECT_EQ(rocsparse_scheck_matrix_csr(handle,
+                                              clamp_m,
+                                              clamp_n,
+                                              clamp_nnz,
+                                              d_val.ptr,
+                                              d_row_ptr.ptr,
+                                              d_col_ind.ptr,
+                                              BASE,
+                                              GENERAL,
+                                              LOWER,
+                                              storage,
+                                              &status,
+                                              tmp.ptr),
+                  rocsparse_status_success);
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        return status;
+    }
+}
+
+class CheckMatrixCsrForcedClamp : public HandleTest, public ::testing::WithParamInterface<int>
+{
+};
+
+TEST_P(CheckMatrixCsrForcedClamp, valid_matrix_passes)
+{
+    const ScopedMaxGridSizeX clamp(handle, GetParam());
+    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_sorted, clamp_case::valid),
+              rocsparse_data_status_success);
+    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::valid),
+              rocsparse_data_status_success);
+}
+
+// check_row_ptr_array returns before the sort and the main kernel run. If it
+// missed the bad row, the main kernel would see the overlapping row after it and
+// could report a duplicate instead.
+TEST_P(CheckMatrixCsrForcedClamp, bad_row_ptr_in_later_block_is_detected)
+{
+    const ScopedMaxGridSizeX clamp(handle, GetParam());
+    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_sorted, clamp_case::bad_row_ptr),
+              rocsparse_data_status_invalid_offset_ptr);
+    EXPECT_EQ(run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::bad_row_ptr),
+              rocsparse_data_status_invalid_offset_ptr);
+}
+
+TEST_P(CheckMatrixCsrForcedClamp, unsorted_duplicate_in_last_row_is_detected)
+{
+    const ScopedMaxGridSizeX clamp(handle, GetParam());
+    EXPECT_EQ(
+        run_clamped(handle, rocsparse_storage_mode_unsorted, clamp_case::split_duplicate_last_row),
+        rocsparse_data_status_duplicate_entry)
+        << "shift_offsets_kernel must cover all " << (clamp_m + 1) << " offsets";
+}
+
+INSTANTIATE_TEST_SUITE_P(CheckMatrixCsrForcedClamp,
+                         CheckMatrixCsrForcedClamp,
+                         ::testing::Values(1, 3, 7));

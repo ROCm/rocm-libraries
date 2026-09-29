@@ -37,30 +37,30 @@ namespace rocsparse
         }
     }
 
-    // Shift CSR offsets
+    // Shift CSR offsets. The launch clamps grid.x with get_grid_size_x, so the
+    // kernel grid-strides; the index is int64_t because it runs one stride past
+    // size before the loop exits.
     template <uint32_t BLOCKSIZE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void shift_offsets_kernel(J size, const I* __restrict__ in, I* __restrict__ out)
     {
-        const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= size)
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            gid < size;
+            gid += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
-            return;
+            out[gid] = in[gid] - in[0];
         }
-
-        out[gid] = in[gid] - in[0];
     }
 
+    // Grid-strides for the same reason as shift_offsets_kernel.
     template <uint32_t BLOCKSIZE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void check_row_ptr_array(J m,
                              const I* __restrict__ csr_row_ptr,
                              rocsparse_data_status* data_status)
     {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid < m)
+        for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x; gid < m;
+            gid += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
         {
             const I start = csr_row_ptr[gid] - csr_row_ptr[0];
             const I end   = csr_row_ptr[gid + 1] - csr_row_ptr[0];
