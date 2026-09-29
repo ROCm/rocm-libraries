@@ -28,8 +28,6 @@
 
 #include <tensilelitehost/export.h>
 
-#define TENSILE_USE_FP4
-
 #ifdef _WIN32
 
 namespace TensileLite

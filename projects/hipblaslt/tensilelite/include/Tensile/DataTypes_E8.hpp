@@ -28,8 +28,6 @@
 
 #include <tensilelitehost/export.h>
 
-#define TENSILE_USE_MX_SCALE
-
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__

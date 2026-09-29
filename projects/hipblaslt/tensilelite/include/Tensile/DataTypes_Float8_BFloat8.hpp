@@ -30,8 +30,6 @@
 
 #include <hip/hip_runtime.h>
 
-#define TENSILE_USE_FP8_BF8
-
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__

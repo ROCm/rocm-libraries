@@ -28,8 +28,6 @@
 
 #include <tensilelitehost/export.h>
 
-#define TENSILE_USE_BF6
-
 #ifdef _WIN32
 
 #include <cstdint>
